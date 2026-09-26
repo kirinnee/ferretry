@@ -211,7 +211,7 @@ import type { ScopeNavigation } from '../src/hooks/use-project-scope.ts';
 import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
 import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
 import type { PickerAccount, PickerAccountHealth } from '../src/lib/account-picker-catalog.ts';
-import type { DaemonAccountPickerSlice } from '../src/lib/account-picker-store.ts';
+import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/lib/account-picker-store.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
@@ -3917,6 +3917,52 @@ const pickerAccountSource = (slice: DaemonAccountPickerSlice) =>
     ),
   );
 
+/**
+ * The fleet a first run creates: the terminal account published FIRST, then the
+ * one that can run sessions. The New session form must offer only the second, and
+ * fill it in.
+ */
+const HARNESS_FIRST_RUN_ACCOUNTS = [
+  {
+    id: 'bbbbbbbb-1111-4111-8111-111111111111',
+    kind: 'claude',
+    mode: 'interactive',
+    wrapper: 'claude-default',
+    home: '/home/pilot/.ferretry/fleet/homes/claude-default',
+    displayName: 'Claude (default)',
+    defaultModel: 'claude-opus-5',
+    models: [{ id: 'claude-opus-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: 'bbbbbbbb-2222-4222-8222-222222222222',
+    kind: 'claude',
+    mode: 'auto',
+    wrapper: 'claude-auto-default',
+    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-default',
+    displayName: 'Claude (default, auto)',
+    defaultModel: 'claude-opus-5',
+    models: [{ id: 'claude-opus-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  ...HARNESS_PICKER_ACCOUNTS,
+] satisfies readonly PickerAccount[];
+
+/** A roster store over a fixed answer: the harness reaches no daemon. */
+const harnessRosterStore = (accounts: readonly PickerAccount[]): DaemonAccountPickerStore =>
+  new DaemonAccountPickerStore({
+    catalog: async () => ({ accounts }),
+    health: async () => ({ health: new Map(), error: null }),
+    checkHealth: async () => ({ health: new Map(), error: null }),
+  });
+
+const HARNESS_FIRST_RUN_ROSTER = harnessRosterStore(HARNESS_FIRST_RUN_ACCOUNTS);
+
+/** A host whose only account is the terminal one: nothing here can run a session. */
+const HARNESS_TERMINAL_ONLY_ROSTER = harnessRosterStore(HARNESS_FIRST_RUN_ACCOUNTS.slice(0, 1));
+
 /** Two registered folders, and folders a session has used that no registry names. */
 const HARNESS_PICKER_REGISTRY: readonly FleetProject[] = [
   { name: 'ferretry', path: '/home/pilot/work/ferretry', id: 'p-1', source: 'clone' },
@@ -6744,6 +6790,35 @@ function Shell() {
               status: 'error',
               error: 'this daemon refused the account roster: fleet_manifest_invalid',
             })}
+          />
+        </section>
+      ),
+    },
+    {
+      // The first-run fleet: the terminal account is published first and must not
+      // be offered; the account that can run sessions is filled in.
+      label: 'New session — accounts that can run a session',
+      render: () => (
+        <section aria-label="New session account picker" id="harness-new-session-accounts">
+          <NewSessionPage
+            accounts={HARNESS_FIRST_RUN_ROSTER}
+            connection={daemon}
+            onNavigate={() => {}}
+            startSession={async () => ({ config: { id: 'harness-created-session' } })}
+          />
+        </section>
+      ),
+    },
+    {
+      // Only the terminal account: one sentence and a way to add one, not an empty list.
+      label: 'New session — no account can run a session',
+      render: () => (
+        <section aria-label="New session with no runnable account" id="harness-new-session-no-accounts">
+          <NewSessionPage
+            accounts={HARNESS_TERMINAL_ONLY_ROSTER}
+            connection={daemon}
+            onNavigate={() => {}}
+            startSession={async () => ({ config: { id: 'harness-created-session' } })}
           />
         </section>
       ),

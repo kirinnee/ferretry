@@ -187,6 +187,23 @@ const warehouse: PickerAccount = {
   unavailableReason: null,
 };
 
+/**
+ * The fleet's terminal account: the one a person runs by hand. Published with
+ * `mode: 'interactive'`, and the daemon refuses to run a session on it.
+ */
+const terminal: PickerAccount = {
+  id: '77777777-7777-4777-8777-777777777777',
+  kind: 'claude',
+  mode: 'interactive',
+  wrapper: 'claude-default',
+  home: '/homes/claude-default',
+  displayName: 'Claude (default)',
+  defaultModel: 'claude-opus-5',
+  models: [{ id: 'claude-opus-5', available: true }],
+  available: true,
+  unavailableReason: null,
+};
+
 /** One `/v1/projects` row, as the daemon publishes it. */
 const projectRow = (id: string, name: string, path: string) => ({
   id,
@@ -410,6 +427,11 @@ const panelState = (): string | null =>
 
 const panelText = (): string => root().querySelector('[data-picker-state]')?.textContent ?? '';
 
+const NO_ACCOUNTS_SENTENCE = 'No account on this daemon can run sessions yet. Add one in Settings, under Fleet.';
+
+const noAccountsText = (): string =>
+  must(root().querySelector('[data-new-session-no-accounts] p'), 'the no-accounts sentence').textContent ?? '';
+
 const typeInto = (element: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> =>
   interact(() => {
     const prototype =
@@ -439,6 +461,13 @@ const press = (element: Element): Promise<void> =>
   interact(() => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
+
+/**
+ * Empties the Account box. The form pre-fills the first usable account, and the
+ * typed value is also the list's query, so a test that wants the WHOLE roster in
+ * view clears it first — exactly as a reader would.
+ */
+const clearAccount = (): Promise<void> => typeInto(box('fy-new-session-agent'), '');
 
 /** Presses Create and lets the start promise and the navigation settle. */
 const create = async (): Promise<void> => {
@@ -549,7 +578,9 @@ describe('NewSessionPage with the daemon pickers', () => {
     const { props } = wire();
     await show(props);
 
+    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
     await openList('fy-new-session-agent');
+    await clearAccount();
     expect(rows()).toHaveLength(2);
 
     await typeInto(box('fy-new-session-agent'), 'atel');
@@ -587,12 +618,14 @@ describe('NewSessionPage with the daemon pickers', () => {
   });
 
   it('says a positively empty roster and an empty folder list are empty, in their own words', async () => {
-    const { props } = wire({ accounts: [], registered: [], sessions: [] });
+    const { props, recorder } = wire({ accounts: [], registered: [], sessions: [] });
     await show(props);
 
-    await openList('fy-new-session-agent');
-    expect(panelState()).toBe('empty');
-    expect(panelText()).toContain('publishes no accounts');
+    // No list to open: the Account box's place says why and where to go instead.
+    expect(root().querySelector('#fy-new-session-agent') === null).toBeTrue();
+    expect(noAccountsText()).toBe(NO_ACCOUNTS_SENTENCE);
+    await press(namedButton('Open Settings'));
+    expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings']);
 
     await openList('fy-new-session-cwd');
     expect(panelState()).toBe('empty');
@@ -604,6 +637,7 @@ describe('NewSessionPage with the daemon pickers', () => {
     await show(props);
 
     await openList('fy-new-session-agent');
+    await clearAccount();
     expect(rowText(0)).toContain('5h 37%');
     expect(rowText(1)).toContain('quota —');
     expect(root().querySelector('[data-picker-advisory]')).toBeNull();
@@ -627,6 +661,7 @@ describe('NewSessionPage with the daemon pickers', () => {
     await show(props);
 
     await openList('fy-new-session-agent');
+    await clearAccount();
     expect(rows()).toHaveLength(2);
     expect(rowText(0)).toContain('quota —');
     // No feed was asked for, so nothing is claimed about quota either way.
@@ -687,6 +722,7 @@ describe('NewSessionPage with the daemon pickers', () => {
 
     expect(recorder.probes).toBe(1);
     await openList('fy-new-session-agent');
+    await clearAccount();
     expect(rowText(0)).toContain('healthy');
     // The account the collection did not cover stays uncovered rather than inheriting a verdict.
     expect(rowText(1)).toContain('never checked');
@@ -701,6 +737,7 @@ describe('NewSessionPage with the daemon pickers', () => {
 
     await mounted.render(<NewSessionPage {...props} connection={workstation} />);
     await openList('fy-new-session-agent');
+    await clearAccount();
     const accountRows = rows().map(row => row.textContent ?? '');
     expect(accountRows.join(' ')).not.toContain('Studio Claude');
     expect(accountRows.join(' ')).toContain('Warehouse Claude');
@@ -800,5 +837,58 @@ describe('NewSessionPage with the daemon pickers', () => {
 
     expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
     expect(root().querySelector('#fy-new-session-model-options')).toBeNull();
+  });
+
+  it('never offers the terminal account, and pre-fills the first account that can run a session', async () => {
+    // The default fleet's shape: the terminal account is published FIRST, so it
+    // used to be both the top row and the most likely first choice — and the
+    // daemon refuses a session on it in either mode.
+    const { props, recorder } = wire({ accounts: [terminal, studio, atelier] });
+    await show(props);
+
+    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
+    // The pre-fill counts as a choice, so the model box suggests that account's models.
+    expect(
+      [...root().querySelectorAll('#fy-new-session-model-options option')].map(option => option.getAttribute('value')),
+    ).toEqual(['claude-opus-5']);
+
+    await openList('fy-new-session-agent');
+    await clearAccount();
+    const offered = rows().map(row => row.textContent ?? '');
+    expect(offered).toHaveLength(2);
+    expect(offered.join(' ')).not.toContain('Claude (default)');
+    expect(offered.join(' ')).not.toContain('claude-default');
+
+    // Cleared is an answer: the pre-fill never comes back over it.
+    expect(box('fy-new-session-agent').value).toBe('');
+    await typeInto(box('fy-new-session-agent'), 'codex-auto-atelier');
+    await closeLists();
+    await typeInto(promptBox(), 'Run on the codex account');
+    await create();
+    expect(recorder.starts.at(0)?.request.agent).toBe('codex-auto-atelier');
+  });
+
+  it('pre-fills past an account the daemon says is unavailable', async () => {
+    const down: PickerAccount = { ...studio, available: false, unavailableReason: 'wrapper missing on this host' };
+    const { props } = wire({ accounts: [terminal, down, atelier] });
+    await show(props);
+
+    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
+  });
+
+  it('says in one sentence that no account can run a session when the only one is the terminal account', async () => {
+    const { props, recorder } = wire({ accounts: [terminal] });
+    await show(props);
+
+    // Not an empty dropdown: the box is replaced by the sentence and a way forward.
+    expect(root().querySelector('#fy-new-session-agent') === null).toBeTrue();
+    expect(root().querySelectorAll('[role="combobox"]')).toHaveLength(1); // the Project box only
+    expect(noAccountsText()).toBe(NO_ACCOUNTS_SENTENCE);
+    expect(noAccountsText()).not.toMatch(/lane|wrapper|interactive/iu);
+    expect(namedButton('Create session').disabled).toBeTrue();
+
+    await press(namedButton('Open Settings'));
+    expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings']);
+    expect(recorder.starts).toEqual([]);
   });
 });

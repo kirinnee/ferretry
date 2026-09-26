@@ -16,7 +16,7 @@ import {
   submitNewSession,
   type NewSessionDraft,
 } from '../lib/pages/new-session.ts';
-import { daemonSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts';
+import { daemonSessionPath, daemonSessionsPath, daemonSettingsPath } from '../lib/pages/routes.ts';
 import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { cn } from '../lib/class-names.ts';
@@ -168,6 +168,7 @@ export function NewSessionPage({
   const canSubmit = canSubmitNewSession(draft, connection, submitting);
   const sessionsPath = daemonSessionsPath(connection.daemonId);
   const models = modelSuggestions(chosenAccount, connection, draft.agent);
+  const noAccounts = <NoSessionAccounts onOpenSettings={() => onNavigate(daemonSettingsPath(connection.daemonId))} />;
 
   const submit = async (): Promise<void> => {
     if (!canSubmit) return;
@@ -201,11 +202,7 @@ export function NewSessionPage({
 
       <Card>
         <PanelBody className="space-y-5">
-          <SessionField
-            hint="the wrapper or account that will run this session"
-            inputId={fieldId('agent')}
-            label="Account"
-          >
+          <SessionField hint="the account that will run this session" inputId={fieldId('agent')} label="Account">
             {accounts === undefined ? (
               <input
                 className="kt-input w-full font-mono"
@@ -218,6 +215,7 @@ export function NewSessionPage({
               <AccountRosterField
                 connection={connection}
                 onAccountChosen={account => setChosenAccount({ account, connection })}
+                noAccounts={noAccounts}
                 onValueChange={value => update('agent', value)}
                 store={accounts}
                 usage={NO_USAGE_ROWS}
@@ -227,6 +225,7 @@ export function NewSessionPage({
             ) : (
               <QuotaAccountField
                 connection={connection}
+                noAccounts={noAccounts}
                 onAccountChosen={account => setChosenAccount({ account, connection })}
                 onValueChange={value => update('agent', value)}
                 store={accounts}
@@ -365,10 +364,18 @@ interface AccountRosterFieldProps extends ConnectedFieldProps {
   readonly usageError: string | null;
   /** A CHOSEN row, so the model box can suggest. It never writes a model. */
   readonly onAccountChosen: (account: AccountPickerOption) => void;
+  /** What the form says instead of an empty list. */
+  readonly noAccounts: ReactNode;
 }
 
 /**
  * The Account box, with the health check offered and never taken.
+ *
+ * It offers ONLY the accounts that can run a session. A fleet's terminal account
+ * — the one a person runs by hand — is published too, often first, and the
+ * daemon refuses to start a session on it in either mode; offering it would make
+ * the most likely first choice a refusal. The first usable account is filled in
+ * so a first-time reader starts on something that works.
  *
  * `offerHealthCheck` puts a button on this surface because choosing an account is
  * exactly when evidence about it is worth paying for — and it stays a button:
@@ -382,9 +389,12 @@ function AccountRosterField({ store, usage, usageError, ...field }: AccountRoste
       id={fieldId('agent')}
       label="Account"
       offerHealthCheck={true}
+      noAccounts={field.noAccounts}
       onAccountChosen={field.onAccountChosen}
       onValueChange={field.onValueChange}
       placeholder="claude-auto-loge"
+      preselect={true}
+      sessionCapableOnly={true}
       store={store}
       usage={usage}
       usageError={usageError}
@@ -410,6 +420,29 @@ function QuotaAccountField({ usage, ...field }: QuotaAccountFieldProps) {
   const slice = useUsage(usage, field.connection);
   return (
     <AccountRosterField {...field} usage={slice.feed?.accounts ?? NO_USAGE_ROWS} usageError={quotaAdvisory(slice)} />
+  );
+}
+
+/**
+ * The Account box's place when the daemon has NO account that can run a session.
+ *
+ * One sentence and one way forward, rather than an empty list: a new host whose
+ * only account is the terminal one would otherwise offer nothing and say nothing
+ * about why. Accounts are added in the daemon's Settings, on the Fleet panel.
+ */
+function NoSessionAccounts({ onOpenSettings }: { readonly onOpenSettings: () => void }) {
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 px-control-x py-row-y"
+      data-new-session-no-accounts=""
+    >
+      <p className="m-0 min-w-0 flex-1 text-ui leading-base text-fg-soft">
+        No account on this daemon can run sessions yet. Add one in Settings, under Fleet.
+      </p>
+      <Button onClick={onOpenSettings} type="button">
+        Open Settings
+      </Button>
+    </div>
   );
 }
 
