@@ -16,31 +16,12 @@ import type {
 } from '../../../lib/session/reap.ts';
 import type { ExactTerminalReaper, RegisteredPaneObserver } from '../../../lib/session/reap-service.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
+import { type ProcessIncarnation, processIncarnationFor } from './process-incarnation.ts';
 
 function fields(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : undefined;
-}
-
-function startTicks(text: string): number | undefined {
-  const close = text.lastIndexOf(')');
-  if (close < 1) return undefined;
-  const fields = text
-    .slice(close + 1)
-    .trim()
-    .split(/\s+/u);
-  if (fields.length < 20) return undefined;
-  const value = Number(fields[19]);
-  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
-}
-
-async function processStartTicks(pid: number): Promise<number | undefined> {
-  try {
-    return startTicks(await Bun.file(`/proc/${pid}/stat`).text());
-  } catch {
-    return undefined;
-  }
 }
 
 function durableRegistration(text: string, daemonId: string, sessionId: string): RegisteredTerminalPane | undefined {
@@ -83,6 +64,7 @@ export class DurableTerminalPaneRegistrar {
     private readonly tmux: TmuxController,
     private readonly files: FileSystemPort,
     private readonly paths: FoundationPaths,
+    private readonly incarnation: ProcessIncarnation = processIncarnationFor(),
   ) {}
 
   async register(record: SessionLifecycleRecord): Promise<void> {
@@ -93,7 +75,7 @@ export class DurableTerminalPaneRegistrar {
   async registerSession(sessionId: SessionId, tmuxSession: string): Promise<void> {
     const identity = await this.tmux.paneIdentity(tmuxSession);
     if (identity === undefined) throw new Error('tmux did not prove the launched pane identity');
-    const ticks = await processStartTicks(identity.pid);
+    const ticks = await this.incarnation.startOf(identity.pid);
     if (ticks === undefined) throw new Error('the launched pane process has no stable incarnation identity');
     const registration: RegisteredTerminalPane = {
       daemonId: this.daemonId,
@@ -192,11 +174,14 @@ export class DurableTerminalPaneStore {
 }
 
 export class ExactTmuxPaneReaper implements RegisteredPaneObserver, ExactTerminalReaper {
-  constructor(private readonly tmux: TmuxController) {}
+  constructor(
+    private readonly tmux: TmuxController,
+    private readonly incarnation: ProcessIncarnation = processIncarnationFor(),
+  ) {}
   async observe(registration: RegisteredTerminalPane): Promise<ObservedTerminalPane | undefined> {
     const identity = await this.tmux.paneIdentity(registration.tmuxSession);
     if (identity === undefined) return undefined;
-    const ticks = await processStartTicks(identity.pid);
+    const ticks = await this.incarnation.startOf(identity.pid);
     return ticks === undefined
       ? undefined
       : { tmuxSession: registration.tmuxSession, paneId: identity.paneId, pid: identity.pid, processStartTicks: ticks };
