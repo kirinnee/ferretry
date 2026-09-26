@@ -1,4 +1,6 @@
 import { basename } from 'node:path';
+import { HARNESS_LABEL } from '@ferretry/fleet';
+import type { CoreAccount } from '../../core/inventory.ts';
 import { formatSessionTitle } from '../../names/policy.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';
 import { sessionTarget } from '../../tmux/address.ts';
@@ -45,6 +47,41 @@ export function authorizeSessionCommand(
     throw new Error(`agent is not a fleet auto wrapper: ${agent}`);
   if (command[0] !== agent) throw new Error(`command must start with the agent wrapper: ${agent}`);
   return command;
+}
+
+/**
+ * Why a published account cannot run a session, in words that name the ones that can — or
+ * `undefined` when it can.
+ *
+ * The rule is {@link authorizeSessionCommand}'s own pattern, not a second opinion about which
+ * accounts are runnable: an account this refuses is exactly one the launch would refuse, and every
+ * account it names is one the launch would accept. Asking here, where the published accounts are in
+ * hand, is the point — the launch sees only a path and can only say the path is wrong.
+ *
+ * IT NAMES, IT NEVER SUBSTITUTES. An account and the auto account beside it usually share one
+ * sign-in, but nothing published says so: which accounts share a login is declared in the fleet
+ * configuration, which a start deliberately does not read. Quietly running the session on "the auto
+ * account of the same harness" would, on a host with two logins, run it on somebody else's. So the
+ * caller is told which accounts can run it and chooses; accounts of the requested harness come first
+ * because that is the likely intent, and an account declared unavailable is never offered.
+ */
+export function unrunnableAccountRefusal(
+  requested: CoreAccount,
+  published: readonly CoreAccount[],
+  settings: SessionLifecycleSettings,
+  clientName: string,
+): string | undefined {
+  const runnable = (account: CoreAccount): boolean => settings.agentWrapperPattern.test(account.agent);
+  if (runnable(requested)) return undefined;
+  const candidates = published.filter(account => account.available && runnable(account));
+  const sameHarness = candidates.filter(account => account.kind === requested.kind);
+  const offered = (sameHarness.length > 0 ? sameHarness : candidates).map(account => account.agent);
+  const refused = `${requested.agent} is for using ${HARNESS_LABEL[requested.kind]} yourself in a terminal, so ${clientName} cannot start sessions on it, in either --mode`;
+  const [first] = offered;
+  if (first === undefined)
+    return `${refused}, and no account on this host can run sessions yet. Add an auto account to the fleet configuration and run \`${clientName} fleet apply\`; \`${clientName} fleet ls\` marks those accounts "auto".`;
+  const choice = offered.length === 1 ? first : `one of ${offered.join(', ')}`;
+  return `${refused}. Start it on ${choice} instead: \`${clientName} start --agent ${first} "your task"\`. \`${clientName} fleet ls\` marks the accounts that can run sessions "auto".`;
 }
 
 /** The turn-one document an agent reads. */

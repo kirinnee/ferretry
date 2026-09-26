@@ -62,9 +62,14 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
 
   program
     .command('start')
-    .description('start a session on a fleet agent')
+    .description('start a session on one of your fleet accounts marked "auto" in `fy fleet ls`')
     .argument('[prompt...]', 'the task prompt; required for --mode auto')
-    .requiredOption('-a, --agent <agent>', 'the fleet agent (account wrapper) to run')
+    .requiredOption(
+      '-a, --agent <agent>',
+      'the account to run the session on — one `fy fleet ls` marks "auto", such as claude-auto-default. ' +
+        'An account without "auto" (such as claude-default) is for using the tool yourself in a terminal ' +
+        'and cannot run sessions, in either --mode',
+    )
     .addOption(
       new Option('--mode <mode>', 'auto for an autonomous teammate, interactive for a human terminal')
         .choices(['auto', 'interactive'])
