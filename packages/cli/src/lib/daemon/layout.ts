@@ -1,4 +1,5 @@
 import { basename, dirname, isAbsolute, join, normalize, parse } from 'node:path';
+import { type CallerLocale, daemonLocale } from './locale.ts';
 
 /** The service managers this CLI knows how to drive, plus the no-manager fallback. */
 export type DaemonManagerKind = 'systemd' | 'launchd' | 'direct';
@@ -32,6 +33,8 @@ export interface DaemonEnvironmentInput {
   readonly product: string;
   /** `PATH` to hand the supervised daemon — a service manager starts it with almost none. */
   readonly searchPath: string;
+  /** The caller's locale variables; absent means none were set. */
+  readonly locale?: CallerLocale | undefined;
 }
 
 /** Every path, label and domain target the daemon-control commands address. */
@@ -78,6 +81,8 @@ export interface DaemonLayout {
    */
   readonly legacySnapshotRoot: string;
   readonly searchPath: string;
+  /** The locale variables the daemon runs under, from {@link daemonLocale} — always UTF-8. */
+  readonly locale: Readonly<Record<string, string>>;
   /** `fyd.service` — the unit name every `systemctl --user` verb takes. */
   readonly systemdUnitName: string;
   readonly systemdUnitFile: string;
@@ -250,6 +255,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     logFile: join(logDirectory, `${daemonName}.log`),
     legacySnapshotRoot,
     searchPath: input.searchPath,
+    locale: daemonLocale(input.platform, input.locale ?? {}),
     systemdUnitName,
     systemdUnitFile,
     launchdLabel,

@@ -14,7 +14,11 @@ export class BunTmuxProcess implements TmuxCommandPort {
   async execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult> {
     if (arguments_.length === 0 || arguments_[0]?.startsWith('-'))
       throw new Error('tmux command must begin with a command name, not a server option');
-    const command = [this.executable, '-S', this.socketPath, ...arguments_];
+    // `-u` makes tmux print UTF-8 whatever this process's locale says. Without it a daemon started
+    // with no UTF-8 locale — which is every daemon a service manager or `fy daemon start` launches
+    // unless told otherwise — gets every tab and non-ASCII byte in a format's output back as `_`, so
+    // a tab-separated answer arrives as one field and every session launch failed on it.
+    const command = [this.executable, '-u', '-S', this.socketPath, ...arguments_];
     if (stdin === undefined)
       return await collect(Bun.spawn(command, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }));
     // A payload is written to the child rather than passed as an argument: argv is world-readable

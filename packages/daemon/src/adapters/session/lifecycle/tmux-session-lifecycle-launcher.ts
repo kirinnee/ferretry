@@ -28,6 +28,10 @@ export interface AgentLaunchWrapper {
   command(sessionId: string, command: readonly string[]): Promise<readonly string[]>;
 }
 
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** A session with no stored environment launches with none, which is the pre-credential behaviour. */
 const NO_ENVIRONMENT: SessionEnvironmentStore = {
   write: async () => undefined,
@@ -98,7 +102,35 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
       command: [program, ...arguments_],
       env,
     });
-    await this.registrar?.register(record);
+    await this.register(record);
+  }
+
+  /**
+   * Record the new pane's identity, or do not leave the pane running.
+   *
+   * The pane already exists here, so a registration that fails would otherwise leave an agent
+   * running that no durable record names: the lifecycle sees a live pane and records the failure
+   * without retrying, the reap never sweeps it because it reads only registrations, and it survives
+   * `fy daemon stop` because the multiplexer server outlives the daemon on purpose. Killing it makes
+   * the failure what it looks like — nothing running — and lets the launch retry cleanly.
+   */
+  private async register(record: SessionLifecycleRecord): Promise<void> {
+    if (this.registrar === undefined) return;
+    try {
+      await this.registrar.register(record);
+    } catch (error) {
+      try {
+        await this.tmux.stop(record.config.tmuxSession);
+      } catch (stopError) {
+        throw new Error(
+          `${message(error)}; the unregistered pane could not be stopped either (${message(stopError)})`,
+          {
+            cause: error,
+          },
+        );
+      }
+      throw error;
+    }
   }
 
   /** The startup-only wait; interactive runtime controls keep refusing a pane that is not idle. */

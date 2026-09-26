@@ -509,6 +509,53 @@ describe('TmuxSessionLifecycleLauncher', () => {
     should(port.commands()).not.containEql('send-keys');
   });
 
+  it('should kill the pane it launched when that pane cannot be registered', async () => {
+    // Arrange — the pane exists by the time registration runs. Left alive, it is an agent no record
+    // names: the lifecycle sees a live pane and records the failure without retrying, the reap reads
+    // only registrations, and it outlives `fy daemon stop`.
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxSessionLifecycleLauncher(
+      controller,
+      new TmuxPaneDelivery(controller, async () => undefined),
+      undefined,
+      {
+        register: async () => {
+          throw new Error('tmux did not prove the launched pane identity');
+        },
+      },
+    );
+
+    // Act + Assert
+    await should(subject.launch(record('unregistered-session'))).be.rejectedWith(
+      'tmux did not prove the launched pane identity',
+    );
+    should(port.commands()).containEql('kill-session');
+    should(port.alive).be.false();
+  });
+
+  it('should say so when the pane it could not register cannot be killed either', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    port.failures.set('kill-session', 'server exited unexpectedly');
+    const controller = new TmuxController(port);
+    const subject = new TmuxSessionLifecycleLauncher(
+      controller,
+      new TmuxPaneDelivery(controller, async () => undefined),
+      undefined,
+      {
+        register: async () => {
+          throw new Error('tmux did not prove the launched pane identity');
+        },
+      },
+    );
+
+    // Act + Assert — both failures are named, so nobody believes the pane is gone.
+    await should(subject.launch(record('stuck-session'))).be.rejectedWith(
+      'tmux did not prove the launched pane identity; the unregistered pane could not be stopped either (server exited unexpectedly)',
+    );
+  });
+
   it('should wait for a ready prompt before typing the first turn into the pane', async () => {
     // Arrange — the harness is still drawing itself for the first two `state` polls.
     const server = new FakeTmuxServer();

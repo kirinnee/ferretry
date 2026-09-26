@@ -15,7 +15,7 @@ import {
   sendLiteralArguments,
 } from './commands.ts';
 import type { PaneState, TmuxCommandPort, TmuxLaunch } from './contracts.ts';
-import { parsePaneMetadata, promptIsReady } from './pane.ts';
+import { type PaneIdentity, parsePaneIdentity, parsePaneMetadata, promptIsReady } from './pane.ts';
 
 /** Orchestrates only validated tmux commands; spawning remains in an injected adapter. */
 export class TmuxController {
@@ -57,12 +57,9 @@ export class TmuxController {
     };
   }
 
-  async paneIdentity(session: string): Promise<{ readonly paneId: string; readonly pid: number } | undefined> {
+  async paneIdentity(session: string): Promise<PaneIdentity | undefined> {
     const result = await this.commands.execute(paneIdentityArguments(session));
-    if (result.code !== 0) return undefined;
-    const [paneId = '', rawPid = ''] = result.stdout.trim().split('\t');
-    const pid = Number(rawPid);
-    return /^%(?:0|[1-9][0-9]*)$/u.test(paneId) && Number.isSafeInteger(pid) && pid > 1 ? { paneId, pid } : undefined;
+    return result.code === 0 ? parsePaneIdentity(result.stdout) : undefined;
   }
 
   async killPaneExact(paneId: string): Promise<void> {
