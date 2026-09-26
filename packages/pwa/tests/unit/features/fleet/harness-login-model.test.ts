@@ -114,7 +114,7 @@ describe('credentialStateCopy', () => {
   it('does not call a refreshable credential expired, because it renews itself', () => {
     const copy = credentialStateCopy({ state: 'refreshable', expiresAt: LATER }, NOW);
 
-    expect(copy).toBe('Signed in · renews itself on next use, if the provider still accepts it');
+    expect(copy).toBe('Ready · renews itself the first time it’s used, if the provider still accepts it');
     expect(copy).not.toContain('expired');
     // And it does not PROMISE the renewal: a rotation the provider refuses makes the harness zero its own
     // credential, so this state can legitimately become `missing` with nobody having touched the account.

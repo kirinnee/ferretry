@@ -3,7 +3,6 @@ import type {
   CredentialState,
   DisplacedState,
   FleetAccountHealth,
-  FleetAccountSeedProvenance,
   FleetApplyCommittedState,
   FleetApplyFailure,
   FleetApplyPreview,
@@ -11,6 +10,7 @@ import type {
   FleetHealthReason,
   FleetHealthSnapshot,
   FleetHealthVerdict,
+  FleetIdentity,
   FleetIdentityStatus,
   FleetLoginResult,
   FleetManifest,
@@ -527,6 +527,32 @@ const HEALTH_VERDICT_LABEL: Readonly<Record<FleetHealthVerdict, string>> = {
 };
 
 /**
+ * What a row SAYS it is: the published verdict, plus one standing the wire does not have.
+ *
+ * `ready` IS NOT A FIFTH VERDICT AND NOT A QUIET `HEALTHY`. The daemon publishes a credential whose
+ * access token aged out beside a refresh token as `unknown/oauth_refreshable`, and that is the honest
+ * verdict: nothing has proved the provider still accepts it. But it is also exactly what a first run
+ * hands every new account — the host's own login is copied, and the copied access token is nearly
+ * always already past its short life — so printing it as `? UNKNOWN` with a command beside it told
+ * every new user their fleet was broken and to sign in four times over a login that was fine. The
+ * harness renews such a token by itself the first time the account is used; there is nothing to do.
+ *
+ * So the verdict stays `unknown` on the wire, in `--json` and in every decision, and only the words
+ * change: its own label, its own glyph, and its own count in the header. It is NOT counted as
+ * healthy, and it is not painted as a problem.
+ */
+type HealthStanding = FleetHealthVerdict | 'ready';
+
+function healthStanding(health: FleetAccountHealth): HealthStanding {
+  return health.verdict === 'unknown' && health.reason === 'oauth_refreshable' ? 'ready' : health.verdict;
+}
+
+const HEALTH_STANDING_LABEL: Readonly<Record<HealthStanding, string>> = {
+  ...HEALTH_VERDICT_LABEL,
+  ready: 'READY',
+};
+
+/**
  * Why, in ONE clause. Every reason has one: a bare verdict with no reason is not actionable.
  *
  * One clause, not three. `codex_liveness_unproven` used to say "Codex has no free way to prove a
@@ -539,8 +565,11 @@ const HEALTH_VERDICT_LABEL: Readonly<Record<FleetHealthVerdict, string>> = {
  * sentence is a hundred. The browser keeps it whole in `account-health-view.ts`, where nothing is
  * competing for the width. All three meanings survive the trim — refused, cause unattributed, and NO
  * instruction to sign in — and the last of those is also carried structurally, because the row is
- * muted and `HEALTH_REMEDY` holds `undefined` against this exact reason. Not because its verdict is
- * `unknown`: `oauth_refreshable` is `unknown` too and does print a command.
+ * muted and `HEALTH_REMEDY` holds `undefined` against this exact reason.
+ *
+ * `oauth_refreshable` is written to follow its own `READY` label, so it says what happens rather than
+ * what is wrong. "signed in, but this copy needs refreshing" was true and read as a chore; nobody has
+ * to do the refreshing. The browser says the same thing in the same words.
  */
 const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   provider_accepted: 'the provider accepted this credential',
@@ -552,7 +581,7 @@ const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   static_credential_rejected: 'the provider rejected the configured credential',
   never_checked: 'no check has run for this account',
   credential_unreadable: 'the credential could not be read',
-  oauth_refreshable: 'signed in, but this copy needs refreshing',
+  oauth_refreshable: "renews itself the first time it's used",
   oauth_rejection_unconfirmed: 'the check was refused — possibly this client, not the login',
   codex_liveness_unproven: 'Codex offers no free check',
   check_timeout: 'the check timed out',
@@ -564,22 +593,22 @@ const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
 };
 
 /**
- * Worst first, and every verdict appears exactly once.
+ * Worst first, and every standing appears exactly once.
  *
  * Rows used to come out in manifest order, so an account a person must act on sat between two that
  * need nothing and the report had to be read end to end before anything could be triaged. This is
  * also the order the summary counts in, so the header and the rows tell the same story top to bottom.
  *
  * The two actionable verdicts lead, `needs_relogin` first because it is the one of the two with a
- * command beside it. `unknown` sits BELOW both and above `healthy`: it is not a fault, and putting it
- * among the faults is what made the old header undercount. Some `unknown` rows do carry a command —
- * a credential that can renew itself is not a fault either, and one command clears it — so a reader
- * who has acted on the faults above still finds work here.
+ * command beside it. `unknown` sits BELOW both: it is not a fault, and putting it among the faults is
+ * what made the old header undercount. `ready` sits below `unknown` and above `healthy`, because it
+ * needs nothing done and still has not been proved.
  */
-const HEALTH_VERDICT_ORDER: readonly FleetHealthVerdict[] = [
+const HEALTH_STANDING_ORDER: readonly HealthStanding[] = [
   'needs_relogin',
   'needs_credentials',
   'unknown',
+  'ready',
   'healthy',
 ];
 
@@ -589,41 +618,48 @@ const HEALTH_VERDICT_ORDER: readonly FleetHealthVerdict[] = [
  * Colour carries severity here, and colour alone would be the only channel — which is exactly what a
  * redirect, a `NO_COLOR` terminal or a reader who cannot separate red from grey would silently lose.
  * The glyph says the same thing in the same column on every row, with or without paint.
+ *
+ * `ready` is an open circle rather than a tick: nothing is wrong, and nothing has been confirmed.
  */
-const HEALTH_GLYPH: Readonly<Record<FleetHealthVerdict, string>> = {
+const HEALTH_GLYPH: Readonly<Record<HealthStanding, string>> = {
   needs_relogin: '✗',
   needs_credentials: '✗',
   unknown: '?',
+  ready: '○',
   healthy: '✓',
 };
 
 /**
- * Each verdict's share of the fleet, in words.
+ * Each standing's share of the fleet, in words.
  *
  * EVERY ACCOUNT IS COUNTED. The header used to name only the two actionable verdicts, so "4 accounts,
  * 2 need sign-in" said nothing about the other two and read as a promise that they were fine. They
  * were `UNKNOWN`.
  */
-const HEALTH_COUNT_LABEL: Readonly<Record<FleetHealthVerdict, (count: number) => string>> = {
+const HEALTH_COUNT_LABEL: Readonly<Record<HealthStanding, (count: number) => string>> = {
   needs_relogin: count => `${count} need${count === 1 ? 's' : ''} sign-in`,
   needs_credentials: count => `${count} need${count === 1 ? 's' : ''} a credential`,
   unknown: count => `${count} unknown`,
+  ready: count => `${count} ready`,
   healthy: count => `${count} healthy`,
 };
 
 /**
- * Which ink a verdict is written in.
+ * Which ink a standing is written in.
  *
  * `UNKNOWN` IS MUTED AND DELIBERATELY NOT A WARNING COLOUR. It is the honest published answer for a
  * Codex account rather than a problem, and a fleet whose every Codex row glowed amber would teach its
- * owner to look past amber — which is the one place a real warning has to work.
+ * owner to look past amber — which is the one place a real warning has to work. `READY` shares the
+ * good ink with `HEALTHY`: it is the state a first run is supposed to leave, and the glyph and the
+ * label are what keep the two apart.
  */
-function healthInk(verdict: FleetHealthVerdict, palette: FleetPalette): FleetInk {
-  switch (verdict) {
+function healthInk(standing: HealthStanding, palette: FleetPalette): FleetInk {
+  switch (standing) {
     case 'needs_relogin':
     case 'needs_credentials':
       return palette.danger;
     case 'healthy':
+    case 'ready':
       return palette.good;
     default:
       return palette.muted;
@@ -641,28 +677,27 @@ export function renderRelativeInstant(instant: number, now: number): string {
 }
 
 /**
- * The states a person can actually do something about, and the id the remedy needs.
+ * The states a person can actually do something about, as what the command DOES.
  *
- * THE ID IS NOT DECORATION HERE, which is why a health row carries BOTH halves while a usage row
- * carries only the name. `fy fleet login <accountId>` matches on exactly that id — see
- * `selectIdentities` — so a row that named the account and nothing else would be readable and
- * unactionable, the opposite of the failure naming it fixed.
+ * THE ID IS NOT DECORATION, which is why a health row carries BOTH halves while a usage row carries
+ * only the name. `fy fleet login <accountId>` matches on exactly that id — see `selectIdentities` —
+ * so a row that named the account and nothing else would be readable and unactionable. But a bare
+ * `fy fleet login 0f5f5a06-…` under a name is an opaque string somebody is asked to run on trust, so
+ * the line says what running it does first: `sign in again: fy fleet login <id>`.
  *
- * KEYED ON THE REASON, AND IT USED TO BE KEYED ON THE VERDICT. That is the defect this table was
- * reported for. `oauth_refreshable` is a REASON whose verdict is `unknown`, so a verdict-keyed table
- * could not reach it however it was written: the row said "signed in, but this copy needs refreshing"
- * with nothing beside it, while `fy fleet login <accountId>` renewed exactly that account the whole
- * time — it renews before anything else and a renewal that succeeds settles the pass with no browser
- * at all. The row also prints the account's NAME, so the id the command needs was not on screen
- * either; somebody had to be told both.
+ * KEYED ON THE REASON, not the verdict, so `unknown` rows can differ — and exhaustive, so a reason
+ * added tomorrow is a compile error here instead of a row that silently offers the wrong thing.
+ * `undefined` is the honest entry and most reasons take it: there is no command that repairs a
+ * timeout, a provider outage, or a Codex account that cannot be proved either way.
  *
- * Exhaustive over every reason rather than partial, so a reason added tomorrow is a compile error
- * here instead of a row that silently stops offering the command it should have. `undefined` is the
- * honest entry and most reasons take it: there is no command that repairs a timeout, a provider
- * outage, or a Codex account that cannot be proved either way.
+ * Three `undefined`s are load-bearing rather than incidental:
  *
- * Two `undefined`s are load-bearing rather than incidental:
- *
+ * - `oauth_refreshable` — IT USED TO PRINT `fy fleet login <id>`, and that is the first-run defect.
+ *   Seeding copies the host's own login, whose access token is nearly always already expired, so
+ *   every new user saw one command per account and read it as "go and sign in four times". The
+ *   harness renews that token by itself the first time the account is used, so the row has nothing to
+ *   offer — and a command that renews early is also the one that spends a copied refresh token
+ *   (see `docs/design/credential-seeding.md`), so offering it was not free either.
  * - `oauth_rejection_unconfirmed` — a bare `401` cannot say whether the provider refused the LOGIN or
  *   this client. Printing a sign-in for it spends a browser approval and fixes nothing, which is the
  *   worst outcome available here. See `docs/fleet-health.md`.
@@ -670,22 +705,21 @@ export function renderRelativeInstant(instant: number, now: number): string {
  *   authenticates from an environment variable or a token file. The harness reads that value and
  *   never consults its own credential store.
  *
- * `stale` also takes `undefined`, which preserves exactly what the verdict-keyed table did: a
- * conclusion too old to trust publishes `unknown`, and a remedy for a verdict nothing currently
- * stands behind would be a command printed on the strength of an expired claim.
+ * `stale` also takes `undefined`: a conclusion too old to trust publishes `unknown`, and a remedy for
+ * a verdict nothing currently stands behind would be a command printed on the strength of an expired
+ * claim.
  */
-const HEALTH_REMEDY: Readonly<Record<FleetHealthReason, ((accountId: string) => string) | undefined>> = {
+const HEALTH_REMEDY: Readonly<Record<FleetHealthReason, string | undefined>> = {
   provider_accepted: undefined,
   usage_scope_unavailable: undefined,
-  oauth_credential_missing: accountId => `fy fleet login ${accountId}`,
-  oauth_access_expired: accountId => `fy fleet login ${accountId}`,
-  oauth_token_rejected: accountId => `fy fleet login ${accountId}`,
+  oauth_credential_missing: 'sign in',
+  oauth_access_expired: 'sign in again',
+  oauth_token_rejected: 'sign in again',
   static_credential_missing: undefined,
   static_credential_rejected: undefined,
   never_checked: undefined,
   credential_unreadable: undefined,
-  // Renews without a browser and without asking anybody. This is the entry the table was missing.
-  oauth_refreshable: accountId => `fy fleet login ${accountId}`,
+  oauth_refreshable: undefined,
   oauth_rejection_unconfirmed: undefined,
   codex_liveness_unproven: undefined,
   check_timeout: undefined,
@@ -739,22 +773,50 @@ function seedDateLabel(instant: number): string {
 }
 
 /**
- * WHAT RENEWING A SEEDED COPY MAY COST THE INSTALL IT WAS TAKEN FROM.
+ * WHAT RENEWING A SEEDED COPY MAY COST — THE INSTALL IT WAS TAKEN FROM, OR THE COPY ITSELF.
+ *
+ * BOTH DIRECTIONS, because the row above now says `READY — renews itself the first time it's used`,
+ * and that is true only while this copy's refresh token is still live. If the install it was taken
+ * from renews first, a rotating provider has spent the token this copy holds, and it still READS as
+ * renewable: classification is by presence. Saying only "renewing this may sign that install out"
+ * left the reverse unsaid on exactly the row that promises renewal.
+ *
+ * This is the CLAUDE sentence only. A single-use (Codex) copy says its consequence in one plain line of
+ * its own instead — see {@link seedSignOutLine}.
  *
  * ## THE CONDITIONAL IS NOT HEDGING AND MUST NOT BE COPY-EDITED AWAY
  *
  * Nothing in this repository proves that CLAUDE's refresh tokens rotate. Single-use rotation is
  * established for Codex only. So the Claude sentence says "if Claude rotates refresh tokens … may",
- * and flattening it into "renewing this will sign that install out" would be asserting a measurement
+ * and flattening it into "whichever renews first will sign the other out" would be asserting a measurement
  * nobody has taken, on somebody's own login, in a report they are reading to decide what to do.
  *
  * Which sentence applies is NOT decided here: `rotation` arrives on the row from `@ferretry/fleet`,
  * which owns that claim once for both surfaces. This file owns only the words.
  */
-function seedRotationClause(provenance: FleetAccountSeedProvenance, label: string): string {
-  return provenance.rotation === 'single_use'
-    ? `${label} refresh tokens are single-use, so renewing it — or running an agent on it — signs that install out.`
-    : `If ${label} rotates refresh tokens, renewing it — or running an agent on it — may sign that install out.`;
+function seedRotationClause(label: string): string {
+  return `If ${label} rotates refresh tokens, whichever renews first — this copy, by running an agent, or that install — may sign the other out.`;
+}
+
+/**
+ * THE ONE PLAIN LINE A SINGLE-USE COPY GETS, where rotation is PROVEN.
+ *
+ * For Codex the consequence is not a possibility to weigh, it is what the first use does: the copy
+ * renews, the provider spends the refresh token the person's own `codex` is still holding, and their
+ * own CLI on this machine is signed out. A row that said `READY` and nothing else about that was a
+ * surprise waiting to happen, so it gets one short line, on its own, above the longer provenance
+ * sentence — plain enough to be read by somebody who reads nothing else on the row.
+ *
+ * NOTHING LIKE IT IS SAID FOR CLAUDE, whose rotation is unproven; its conditional stays in the
+ * provenance sentence. `rotation` decides, never the harness name. See
+ * `docs/design/credential-seeding.md`.
+ */
+function seedSignOutLine(health: FleetAccountHealth): string | undefined {
+  const provenance = health.seedProvenance;
+  if (provenance === undefined || provenance.state === 'own_login' || provenance.rotation !== 'single_use') {
+    return undefined;
+  }
+  return `first use signs your own ${harnessLabel(health.kind)} out on this machine — sign it back in once`;
 }
 
 /**
@@ -780,7 +842,8 @@ function seedProvenanceSentence(health: FleetAccountHealth): string | undefined 
     provenance.state === 'seeded_copy'
       ? `seeded copy: this credential is still the copy taken from this host's own ${label} install (${provenance.donorHome}) on ${when}.`
       : `seeded copy, unconfirmed: this home's credential could not be read, so this cannot tell whether it is still the copy taken from this host's own ${label} install (${provenance.donorHome}) on ${when}; it is reported as if it were.`;
-  return `${subject} ${seedRotationClause(provenance, label)}`;
+  // A single-use copy says its consequence on its own line (`seedSignOutLine`), not buried here.
+  return provenance.rotation === 'single_use' ? subject : `${subject} ${seedRotationClause(label)}`;
 }
 
 /** When the check ran, in the words the header and a row both use so they cannot disagree. */
@@ -812,6 +875,10 @@ const HEALTH_SELF_EVIDENT_INCONCLUSIVE: ReadonlySet<FleetHealthReason> = new Set
   'never_checked',
   // "the check was refused, and this cannot say what it refused" IS the inconclusive result.
   'oauth_rejection_unconfirmed',
+  // An access token that has aged out is exactly the thing the free check cannot use, so a check
+  // against it is inconclusive by construction. "renews itself the first time it's used" already
+  // says nothing has confirmed it, and "last check inconclusive" beside it read as a second fault.
+  'oauth_refreshable',
 ]);
 
 /**
@@ -833,6 +900,71 @@ function healthReasonTail(health: FleetAccountHealth, sharedCheck: string | unde
   return clauses.join(' · ');
 }
 
+/**
+ * Which provider login each account signs in with, keyed by account id.
+ *
+ * The same grouping `fy fleet login` acts on — naming one account there selects its whole login — so
+ * the health report can show a login once instead of once per account. The default fleet gives each
+ * harness two accounts on one login, and four rows of one fact read as four problems.
+ */
+export type FleetAccountLogins = ReadonlyMap<string, string>;
+
+/** The one join from the identities `fy fleet login` uses to the lookup a health report groups by. */
+export function fleetAccountLogins(identities: readonly FleetIdentity[]): FleetAccountLogins {
+  return new Map(identities.flatMap(identity => identity.members.map(member => [member.accountId, identity.key])));
+}
+
+/**
+ * Accounts that are one row: the same login, AND everything the row would say about them is identical.
+ *
+ * SAME WORDS, NOT SAME VERDICT. Two accounts on one login can still disagree — one home was re-signed
+ * and the other was not — and merging those would report something about one account that is only
+ * true of the other. So the key is the login plus the exact rendered standing, reason tail and
+ * provenance sentence; anything that differs keeps its own row. An account with no known login is
+ * never merged with anything.
+ */
+interface HealthRowGroup {
+  readonly lead: FleetAccountHealth;
+  readonly members: FleetAccountHealth[];
+}
+
+function groupHealthRows(
+  ordered: readonly FleetAccountHealth[],
+  logins: FleetAccountLogins,
+  sharedCheck: string | undefined,
+  now: number,
+): readonly HealthRowGroup[] {
+  const groups: HealthRowGroup[] = [];
+  const byKey = new Map<string, HealthRowGroup>();
+  for (const account of ordered) {
+    const login = logins.get(account.accountId);
+    const key =
+      login === undefined
+        ? undefined
+        : [
+            login,
+            healthStanding(account),
+            healthReasonTail(account, sharedCheck, now),
+            seedProvenanceSentence(account) ?? '',
+          ].join('\n');
+    const existing = key === undefined ? undefined : byKey.get(key);
+    if (existing !== undefined) {
+      existing.members.push(account);
+      continue;
+    }
+    const group = { lead: account, members: [account] };
+    groups.push(group);
+    if (key !== undefined) byKey.set(key, group);
+  }
+  return groups;
+}
+
+/** "A", "A and B", "A, B and C" — the names a merged row also speaks for. */
+function nameList(subjects: readonly string[]): string {
+  if (subjects.length <= 1) return subjects[0] ?? '';
+  return `${subjects.slice(0, -1).join(', ')} and ${subjects[subjects.length - 1] ?? ''}`;
+}
+
 /** The two padded columns, measured once over the whole report so every row lines up under the last. */
 interface HealthColumns {
   readonly name: number;
@@ -843,7 +975,7 @@ function healthColumns(accounts: readonly FleetAccountHealth[], names: FleetAcco
   const widths = accounts.map(account => accountSubject(account.accountId, names).length);
   return {
     name: Math.min(Math.max(...widths), HEALTH_NAME_COLUMN_CAP),
-    verdict: Math.max(...accounts.map(account => HEALTH_VERDICT_LABEL[account.verdict].length)),
+    verdict: Math.max(...accounts.map(account => HEALTH_STANDING_LABEL[healthStanding(account)].length)),
   };
 }
 
@@ -853,7 +985,7 @@ function padding(text: string, column: number): string {
 }
 
 /**
- * One account, as the lines it occupies.
+ * One row — one account, or several on one login saying the same thing — as the lines it occupies.
  *
  * A LIST OF LINES RATHER THAN A STRING WITH NEWLINES IN IT, because every one of them needs its own
  * indent: a reason that overflows an 80-column terminal used to be wrapped by the terminal itself,
@@ -861,7 +993,7 @@ function padding(text: string, column: number): string {
  * read as the next account. The structure survived only on a wide screen.
  */
 function healthRowLines(
-  health: FleetAccountHealth,
+  group: HealthRowGroup,
   names: FleetAccountNames,
   columns: HealthColumns,
   presentation: FleetPresentation,
@@ -869,10 +1001,12 @@ function healthRowLines(
   now: number,
 ): readonly string[] {
   const { palette, width } = presentation;
-  const ink = healthInk(health.verdict, palette);
+  const health = group.lead;
+  const standing = healthStanding(health);
+  const ink = healthInk(standing, palette);
   const subject = accountSubject(health.accountId, names);
-  const label = HEALTH_VERDICT_LABEL[health.verdict];
-  const head = `${HEALTH_ROW_INDENT}${ink(HEALTH_GLYPH[health.verdict])} ${subject}${padding(subject, columns.name)}${HEALTH_GUTTER}${ink(label)}${padding(label, columns.verdict)}${HEALTH_GUTTER}`;
+  const label = HEALTH_STANDING_LABEL[standing];
+  const head = `${HEALTH_ROW_INDENT}${ink(HEALTH_GLYPH[standing])} ${subject}${padding(subject, columns.name)}${HEALTH_GUTTER}${ink(label)}${padding(label, columns.verdict)}${HEALTH_GUTTER}`;
   const headWidth =
     HEALTH_ROW_INDENT.length +
     2 +
@@ -881,6 +1015,8 @@ function healthRowLines(
     Math.max(label.length, columns.verdict) +
     HEALTH_GUTTER.length;
   const wrapped = width - HEALTH_WRAP_INDENT.length;
+  const continuation = (text: string): readonly string[] =>
+    softWrap(text, wrapped, wrapped).map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`);
   const tail = healthReasonTail(health, sharedCheck, now);
   const inline = width - headWidth >= HEALTH_MINIMUM_REASON_COLUMN;
   const segments = softWrap(tail, inline ? width - headWidth : wrapped, wrapped);
@@ -890,39 +1026,53 @@ function healthRowLines(
         ...segments.slice(1).map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`),
       ]
     : [head.trimEnd(), ...segments.map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`)];
+  // WHO ELSE THIS ROW SPEAKS FOR, when it speaks for more than one account. Said in words, because a
+  // merged row that only named its first account would read as the others having gone missing.
+  const others = group.members.slice(1).map(member => accountSubject(member.accountId, names));
+  const covered =
+    others.length === 0 ? lines : [...lines, ...continuation(`this login also covers ${nameList(others)}`)];
   // WHERE THE CREDENTIAL CAME FROM, when a first run recorded it. Below the verdict because it is not
   // one — it changes no decision and never contradicts the row above it — and above the command
   // because it is what somebody needs to have read BEFORE running one on a credential their own
   // install is holding. Muted, like every other secondary clause: this is a disclosure, not a fault.
   const provenance = seedProvenanceSentence(health);
-  const disclosed =
-    provenance === undefined
-      ? lines
-      : [
-          ...lines,
-          ...softWrap(provenance, wrapped, wrapped).map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`),
-        ];
-  // The exact command, on its own line, for every state a person can act on. A row with no way to
-  // act on it is the state this whole feature exists to stop producing — and the id the command needs
-  // is not something a reader could have derived from the name above it. NEVER WRAPPED: this line
-  // exists to be selected, and a break inside the id produces something that looks copyable.
-  const remedy = HEALTH_REMEDY[health.reason]?.(health.accountId);
-  return remedy === undefined ? disclosed : [...disclosed, `${HEALTH_REMEDY_INDENT}${palette.command(remedy)}`];
+  const signOut = seedSignOutLine(health);
+  const warned = signOut === undefined ? covered : [...covered, ...continuation(signOut)];
+  const disclosed = provenance === undefined ? warned : [...warned, ...continuation(provenance)];
+  // The exact command, on its own line, for every state a person can act on, led by what it does. ONE
+  // command per row even when the row covers several accounts: naming any one of them signs the whole
+  // login in. NEVER WRAPPED: this line exists to be selected, and a break inside the id produces
+  // something that looks copyable.
+  const remedy = HEALTH_REMEDY[health.reason];
+  return remedy === undefined
+    ? disclosed
+    : [
+        ...disclosed,
+        `${HEALTH_REMEDY_INDENT}${palette.muted(`${remedy}:`)} ${palette.command(`fy fleet login ${health.accountId}`)}`,
+      ];
 }
 
 /** The summary, as fragments that keep their own colour so packing them cannot lose the paint. */
 function healthHeaderFragments(
   accounts: readonly FleetAccountHealth[],
+  logins: FleetAccountLogins,
   palette: FleetPalette,
   sharedCheck: string | undefined,
 ): readonly PaintedFragment[] {
-  const total = plural(accounts.length, 'account');
+  // How many logins the accounts sit on, said only when it is FEWER than the accounts — which is the
+  // one case where it changes what somebody would have to do. "4 accounts on 4 logins" is noise.
+  const loginCount = new Set(accounts.map(account => logins.get(account.accountId) ?? `account:${account.accountId}`))
+    .size;
+  const total =
+    loginCount < accounts.length
+      ? `${plural(accounts.length, 'account')} on ${plural(loginCount, 'login')}`
+      : plural(accounts.length, 'account');
   const fragments: PaintedFragment[] = [{ plain: total, painted: total }];
-  for (const verdict of HEALTH_VERDICT_ORDER) {
-    const count = accounts.filter(account => account.verdict === verdict).length;
+  for (const standing of HEALTH_STANDING_ORDER) {
+    const count = accounts.filter(account => healthStanding(account) === standing).length;
     if (count === 0) continue;
-    const text = HEALTH_COUNT_LABEL[verdict](count);
-    fragments.push({ plain: text, painted: healthInk(verdict, palette)(text) });
+    const text = HEALTH_COUNT_LABEL[standing](count);
+    fragments.push({ plain: text, painted: healthInk(standing, palette)(text) });
   }
   if (sharedCheck !== undefined) fragments.push({ plain: sharedCheck, painted: palette.muted(sharedCheck) });
   return fragments;
@@ -934,29 +1084,38 @@ function healthHeaderFragments(
  * COLOUR IS THE SECOND CHANNEL AND NEVER THE ONLY ONE. It arrives as a palette rather than being
  * decided here, so a pipe, a redirect and `NO_COLOR` all get the identity palette — and the glyph
  * column, the verdict column and the worst-first order carry the same information without it.
+ *
+ * `logins` is optional so a caller that cannot say which accounts share a login still gets a true
+ * report: every account on its own row, exactly as before grouping existed.
  */
 export function renderHealth(
   snapshot: FleetHealthSnapshot,
   names: FleetAccountNames,
   presentation: FleetPresentation,
+  logins: FleetAccountLogins = new Map(),
 ): string {
   if (snapshot.accounts.length === 0) return 'No accounts to report health for.';
   const { palette, width } = presentation;
   const sharedCheck = sharedHealthCheck(snapshot.accounts, snapshot.at);
   const header = packFragments(
-    healthHeaderFragments(snapshot.accounts, palette, sharedCheck),
+    healthHeaderFragments(snapshot.accounts, logins, palette, sharedCheck),
     ' · ',
     width,
     width - HEALTH_ROW_INDENT.length,
   );
-  const columns = healthColumns(snapshot.accounts, names);
   const ordered = [...snapshot.accounts].sort(
-    (left, right) => HEALTH_VERDICT_ORDER.indexOf(left.verdict) - HEALTH_VERDICT_ORDER.indexOf(right.verdict),
+    (left, right) =>
+      HEALTH_STANDING_ORDER.indexOf(healthStanding(left)) - HEALTH_STANDING_ORDER.indexOf(healthStanding(right)),
+  );
+  const groups = groupHealthRows(ordered, logins, sharedCheck, snapshot.at);
+  const columns = healthColumns(
+    groups.map(group => group.lead),
+    names,
   );
   return [
     ...header.map((line, index) => (index === 0 ? line : `${HEALTH_ROW_INDENT}${line}`)),
     '',
-    ...ordered.flatMap(account => healthRowLines(account, names, columns, presentation, sharedCheck, snapshot.at)),
+    ...groups.flatMap(group => healthRowLines(group, names, columns, presentation, sharedCheck, snapshot.at)),
     '',
     ...softWrap(HEALTH_DISCLOSURE, width - HEALTH_ROW_INDENT.length, width - HEALTH_ROW_INDENT.length).map(
       line => `${HEALTH_ROW_INDENT}${palette.muted(line)}`,
@@ -1055,9 +1214,18 @@ export function renderLoginResults(results: readonly FleetLoginResult[]): string
   return [header, ...results.map(renderLoginRow)].join('\n');
 }
 
+/**
+ * What one home holds, in the words `fy fleet health` and the browser's Accounts page also use.
+ *
+ * `refreshable` IS NOT "expired, renewable" any more. That led with a problem and then took it back,
+ * on the state every first run leaves behind: the copied access token has aged out and its refresh
+ * token is still good, so the harness renews it the first time the account is used and nobody has to
+ * do anything. Three surfaces describing one home in three phrasings is how somebody decides two of
+ * them must be wrong.
+ */
 const CREDENTIAL_MARK: Readonly<Record<CredentialState, string>> = {
   valid: 'valid',
-  refreshable: 'expired, renewable',
+  refreshable: "ready, renews itself the first time it's used",
   missing: 'none',
   unreadable: 'UNREADABLE',
 };
@@ -1070,7 +1238,7 @@ function verdictLine(status: FleetIdentityStatus): string {
     case 'complete':
       return 'every home has a usable credential';
     case 'sync':
-      return `${plural(status.targets.length, 'home')} would be copied from ${status.verdict.donor.accountId}`;
+      return `${plural(status.targets.length, 'home')} would be copied from ${status.verdict.donor.displayName}`;
     case 'indeterminate':
       return `UNKNOWN — ${status.verdict.reason}`;
     default:
@@ -1083,6 +1251,10 @@ function verdictLine(status: FleetIdentityStatus): string {
  *
  * Grouped by identity rather than listed by account, because the credential belongs to the identity —
  * a flat per-account list is what made the old report look like thirty separate logins.
+ *
+ * Each home is named by the name `fy fleet health` prints for it, never by its id: an id is what a
+ * machine joins on, and a column of them told a person nothing about which account was which. The
+ * ids are still in `--json`.
  */
 export function renderIdentityStatus(statuses: readonly FleetIdentityStatus[]): string {
   if (statuses.length === 0) return 'No identities on this host.';
@@ -1093,10 +1265,10 @@ export function renderIdentityStatus(statuses: readonly FleetIdentityStatus[]): 
       lines.push(`${INDENT}(the configuration no longer declares this account, so it shares with nothing)`);
     }
     for (const member of status.members) {
-      lines.push(`${INDENT}${member.member.accountId}  ${CREDENTIAL_MARK[member.reading.state]}`);
+      lines.push(`${INDENT}${member.member.displayName}  ${CREDENTIAL_MARK[member.reading.state]}`);
     }
     for (const member of status.unavailable) {
-      lines.push(`${INDENT}${member.accountId}  unavailable, not read`);
+      lines.push(`${INDENT}${member.displayName}  unavailable, not read`);
     }
   }
   return lines.join('\n');
