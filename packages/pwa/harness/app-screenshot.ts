@@ -119,11 +119,16 @@ const SETUP_TARGET = setupStep('target');
 const SETUP_DOER = setupStep('doer');
 
 /**
- * The pairing arrival used for the Done capture. A fabricated single-use code
+ * The pairing arrival used for the Done capture: a FIXED FAKE code and daemon id
  * against a `.test` host that cannot resolve — the reserved TLD is the point,
- * since nothing here may address a real daemon.
+ * since nothing here may address a real daemon. Both values must still satisfy
+ * the protocol's own schemas (`PAIRING_CODE_PATTERN`, `DaemonIdSchema`): an
+ * arrival that does not parse never shows "Pair this device?", so the Done
+ * capture would time out waiting for a screen that was refused before it drew.
  */
-const PAIRING_ARRIVAL = '/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=single-use;fp=daemon-a';
+const PAIRING_FAKE_CODE = '7F3K-Q2ND';
+const PAIRING_FAKE_DAEMON_ID = `fy_daemon_${'Hh'.repeat(21)}A`;
+const PAIRING_ARRIVAL = `/pair#v1;url=${encodeURIComponent('https://daemon.example.test')};code=${PAIRING_FAKE_CODE};fp=${PAIRING_FAKE_DAEMON_ID}`;
 
 function fail(message: string): never {
   throw new Error(`❌ ${message}`);
@@ -267,6 +272,14 @@ const VISUAL_VIEWPORT_SCRIPT = `
   })();
 `;
 
+/** Shaped as `PairingResponseSchema` requires, so the app accepts it as a real redemption would be. */
+const PAIR_FAKE_RESPONSE = {
+  deviceToken: `fy_device_${'Tt'.repeat(21)}A`,
+  daemonId: PAIRING_FAKE_DAEMON_ID,
+  daemonName: 'workstation',
+  capabilities: [],
+};
+
 /**
  * Answers `/v1/pair` in the page, without a request leaving it.
  *
@@ -283,7 +296,7 @@ const PAIR_RESPONSE_SCRIPT = `
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith('/v1/pair')) {
         return Promise.resolve(
-          new Response(JSON.stringify({ daemonId: 'daemon-a', deviceToken: 'screenshot-token' }), {
+          new Response(JSON.stringify(${JSON.stringify(PAIR_FAKE_RESPONSE)}), {
             status: 200,
             headers: { 'content-type': 'application/json' },
           }),

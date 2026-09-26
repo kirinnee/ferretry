@@ -865,7 +865,23 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * rather than that the one an operator was actually shown is the one that works. It also
          * keeps the host-rendered screen on the critical path — which is where a fragment reader that
          * spelled its own version was caught, in a build where every other half was already correct.
+         *
+         * A device cannot exist on a machine with no operator password — the mint refuses, and that
+         * rule is proved where it lives. So the journey sets one first, through the host's own
+         * always-permitted path, exactly as a person would before adding a phone.
          */
+        const hostToken = (await readFile(join(environment.paths.fyHome, 'api-token'), 'utf8')).trim();
+        const passwordSet = await fetch(environment.httpUrl('/v1/grants/password'), {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${hostToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: 'correct horse battery' }),
+        });
+        if (!passwordSet.ok) {
+          ledger.fail(
+            'pairing-link-minted',
+            `setting the operator password answered ${String(passwordSet.status)}, so no device can be paired`,
+          );
+        }
         const minted = await environment.runFy(['pair', '--no-wait'], { FY_URL: environment.httpUrl() });
         const link = PAIRING_LINK.exec(`${minted.out}\n${minted.err}`)?.[0];
         if (link === undefined) {
