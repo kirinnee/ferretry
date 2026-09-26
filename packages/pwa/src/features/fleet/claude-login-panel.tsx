@@ -36,7 +36,7 @@
 
 import { CheckCircle2, KeyRound, Link2, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import type { ClaudeLoginFlow, FleetLoginAccountOutcome } from '@ferretry/protocol';
+import type { ClaudeLoginFlow, FleetLoginAccountOutcome, HarnessLoginLastCode } from '@ferretry/protocol';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
@@ -69,6 +69,30 @@ const syncedCount = (accounts: readonly FleetLoginAccountOutcome[]): number =>
 
 const failed = (accounts: readonly FleetLoginAccountOutcome[]): readonly FleetLoginAccountOutcome[] =>
   accounts.filter(account => account.status === 'failed' || account.status === 'indeterminate');
+
+/**
+ * What to say when a sign-in ended because of its code, in place of the host command every other failure
+ * names: somebody holding a browser needs a fresh link and code, not a terminal.
+ */
+const codeEnding = (
+  lastCode: HarnessLoginLastCode | undefined,
+): { readonly sentence: string; readonly next: string; readonly action: string } | null => {
+  if (lastCode === 'rejected') {
+    return {
+      sentence: 'Claude didn’t accept that code.',
+      next: 'Try again to get a fresh link, then paste the whole code Claude shows you.',
+      action: 'Try again',
+    };
+  }
+  if (lastCode === 'expired') {
+    return {
+      sentence: 'That sign-in link expired before a code was accepted.',
+      next: 'Get a new link and sign in again.',
+      action: 'Get a new link',
+    };
+  }
+  return null;
+};
 
 export function ClaudeLoginPanel({
   accountLabel,
@@ -163,6 +187,19 @@ export function ClaudeLoginPanel({
                 <CopyButton text={flow.verificationUrl} label="Copy the Claude sign-in link" write={copy} />
               </div>
             </div>
+            {flow.lastCode === 'rejected' ? (
+              <p
+                role="alert"
+                data-claude-login-rejected=""
+                className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+              >
+                <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>
+                  <strong className="font-semibold">Claude didn’t accept that code.</strong> Copy the whole code from
+                  the Claude page — every character — and paste it again below.
+                </span>
+              </p>
+            ) : null}
             <form className="space-y-2" onSubmit={submit}>
               <label htmlFor={`claude-login-code-${identity}`} className="block text-ui font-semibold text-fg">
                 2 · Paste the code Claude showed you
@@ -239,12 +276,12 @@ export function ClaudeLoginPanel({
           >
             <p className="m-0 flex items-start gap-2">
               <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
-              {flow.reason}
+              {codeEnding(flow.lastCode)?.sentence ?? flow.reason}
             </p>
-            <p className="m-0 text-meta leading-base">{flow.remedy}</p>
+            <p className="m-0 text-meta leading-base">{codeEnding(flow.lastCode)?.next ?? flow.remedy}</p>
             <Button type="button" variant="outline" onClick={onStart} disabled={busy}>
               <Link2 size={16} aria-hidden="true" />
-              Start a new sign-in
+              {codeEnding(flow.lastCode)?.action ?? 'Start a new sign-in'}
             </Button>
           </div>
         ) : null}

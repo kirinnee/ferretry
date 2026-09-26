@@ -125,6 +125,7 @@ const schemaCases: SchemaCase[] = [
     schema: harnessLogin.FleetLoginAccountOutcomeSchema,
     value: { accountId: ACCOUNT_ID, status: 'logged-in' },
   },
+  { name: 'last code', schema: harnessLogin.HarnessLoginLastCodeSchema, value: 'rejected' },
   { name: 'claude flow', schema: harnessLogin.ClaudeLoginFlowSchema, value: claudeAwaiting },
   { name: 'codex flow', schema: harnessLogin.CodexLoginFlowSchema, value: codexAwaiting },
   { name: 'harness flow', schema: harnessLogin.HarnessLoginFlowSchema, value: codexAwaiting },
@@ -147,6 +148,41 @@ const schemaCases: SchemaCase[] = [
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
 
 describe('harness-login schemas', () => {
+  it('should carry a refused or expired code as a recognised value, and nothing else', () => {
+    // The fix for §6: a refused code needs a state of its own, and never the child's text.
+    assertRoundTrips([
+      {
+        name: 'claude refused, waiting',
+        schema: harnessLogin.ClaudeLoginFlowSchema,
+        value: { ...claudeAwaiting, lastCode: 'rejected' },
+      },
+      {
+        name: 'claude refused, ended',
+        schema: harnessLogin.ClaudeLoginFlowSchema,
+        value: { ...claudeFailed, lastCode: 'rejected' },
+      },
+      {
+        name: 'codex expired',
+        schema: harnessLogin.CodexLoginFlowSchema,
+        value: { ...claudeFailed, harness: 'codex', identity: 'codex:kirin', lastCode: 'expired' },
+      },
+    ]);
+    assertRejects([
+      rejects('a waiting flow cannot have expired', harnessLogin.ClaudeLoginFlowSchema, {
+        ...claudeAwaiting,
+        lastCode: 'expired',
+      }),
+      rejects('child text in place of a value', harnessLogin.ClaudeLoginFlowSchema, {
+        ...claudeAwaiting,
+        lastCode: 'Invalid code. Please make sure the full code was copied.',
+      }),
+      rejects('a code value on a device flow in progress', harnessLogin.CodexLoginFlowSchema, {
+        ...codexAwaiting,
+        lastCode: 'expired',
+      }),
+    ]);
+  });
+
   it('should round-trip every public schema', () => {
     assertRoundTrips(schemaCases);
     assertCoversEverySchema(harnessLogin, schemaCases);

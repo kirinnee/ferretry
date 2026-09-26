@@ -13,6 +13,7 @@ import {
   CODEX_LOGIN_START,
   CODEX_VERIFICATION_HOSTS,
   type CodexLoginStage,
+  codexEnding,
   codexProjection,
   decideCodexSubmit,
   observeCodexLine,
@@ -300,5 +301,82 @@ describe('codexProjection', () => {
     const stages: CodexLoginStage[] = [CODEX_LOGIN_START, awaiting, complete, failed];
 
     for (const stage of stages) should(codexProjection(BASE, stage)).not.have.property('state', 'awaiting-code');
+  });
+});
+
+/**
+ * What codex-cli 0.156.1 prints when it stops polling a device grant nobody approved — the prefix and
+ * the message are both strings in the installed binary.
+ */
+const TIMED_OUT_LINE = `Error logging in with device code: ${ESC}[31mdevice auth timed out after 15 minutes${ESC}[0m`;
+
+describe('a one-time code nobody approved', () => {
+  it('should hold that Codex stopped waiting, without publishing it', () => {
+    // Act
+    const actual = observeCodexLine(awaiting, TIMED_OUT_LINE);
+
+    // Assert
+    should(actual).deepEqual({ ...awaiting, timedOut: true });
+    should(codexProjection(BASE, actual)).deepEqual(codexProjection(BASE, awaiting));
+  });
+
+  it('should not read any other device failure as an expiry, because a status code says nothing of why', () => {
+    // Act
+    const actual = observeCodexLine(awaiting, 'Error logging in with device code: device auth failed with status 500');
+
+    // Assert
+    should(actual).equal(awaiting);
+  });
+
+  it('should end as an expired code — never a rejected one — when Codex exits after timing out', () => {
+    // Act
+    const actual = codexEnding(observeCodexLine(awaiting, TIMED_OUT_LINE), { exit: 1 });
+
+    // Assert
+    should(actual).deepEqual({
+      stage: 'failed',
+      reason: 'the one-time code expired before it was approved',
+      remedy: 'Start a new sign-in to get a new code, then enter it on the provider’s page.',
+      lastCode: 'expired',
+    });
+  });
+
+  it('should end as an expired code when the window closes on a code a person holds', () => {
+    // Act
+    const actual = codexEnding(awaiting, 'window');
+
+    // Assert
+    should(actual).have.property('lastCode', 'expired');
+  });
+
+  it('should leave an ordinary exit, and every other stage, to the ordinary ending', () => {
+    // Act
+    const actual = [
+      codexEnding(awaiting, { exit: 1 }),
+      codexEnding({ ...awaiting, timedOut: true }, { exit: 0 }),
+      ...[CODEX_LOGIN_START, complete, failed].flatMap(stage => [
+        codexEnding(stage, 'window'),
+        codexEnding(stage, { exit: 1 }),
+      ]),
+    ];
+
+    // Assert
+    should(actual.every(ending => ending === undefined)).be.true();
+  });
+
+  it('should carry the expiry onto the wire as the one recognised value', () => {
+    // Act
+    const ending = codexEnding(awaiting, 'window');
+    const actual = ending === undefined ? undefined : codexProjection(BASE, ending);
+
+    // Assert
+    should(actual).deepEqual({
+      harness: 'codex',
+      ...BASE,
+      state: 'failed',
+      reason: 'the one-time code expired before it was approved',
+      remedy: 'Start a new sign-in to get a new code, then enter it on the provider’s page.',
+      lastCode: 'expired',
+    });
   });
 });

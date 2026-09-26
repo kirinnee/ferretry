@@ -38,7 +38,7 @@
  *
  * A stage in, a stage out. The child, the clock and the deadline belong to the service.
  */
-import type { CodexLoginFlow, FleetLoginAccountOutcome } from '@ferretry/protocol';
+import type { CodexLoginFlow, FleetLoginAccountOutcome, HarnessLoginLastCode } from '@ferretry/protocol';
 import { HarnessLoginUserCodeSchema, HarnessLoginVerificationUrlSchema } from '@ferretry/protocol';
 import { stripTerminalEscapes, verificationUrlIn } from './output.ts';
 import type { HarnessLoginFlowBase, HarnessLoginSubmitDecision } from './ports.ts';
@@ -67,9 +67,23 @@ export type CodexLoginStage =
       readonly verificationUrl?: string;
       readonly userCode?: string;
     }
-  | { readonly stage: 'awaiting-approval'; readonly verificationUrl: string; readonly userCode: string }
+  | {
+      readonly stage: 'awaiting-approval';
+      readonly verificationUrl: string;
+      readonly userCode: string;
+      /** Codex said it stopped waiting for this code. Never published: the exit that follows is. */
+      readonly timedOut?: true;
+    }
   | { readonly stage: 'complete'; readonly accounts: readonly FleetLoginAccountOutcome[] }
-  | { readonly stage: 'failed'; readonly reason: string; readonly remedy: string };
+  | CodexLoginFailure;
+
+/** How a Codex login ended badly. `lastCode` is set only when the one-time code is why. */
+export interface CodexLoginFailure {
+  readonly stage: 'failed';
+  readonly reason: string;
+  readonly remedy: string;
+  readonly lastCode?: HarnessLoginLastCode;
+}
 
 /** Where every Codex login starts: running, with neither value yet. */
 export const CODEX_LOGIN_START: CodexLoginStage = { stage: 'collecting' };
@@ -87,13 +101,28 @@ function userCodeIn(line: string): string | undefined {
 }
 
 /**
+ * What Codex prints when it gives up polling for a device grant nobody approved.
+ *
+ * Quoted from the installed CLI (codex-cli 0.156.1: `device auth timed out after 15 minutes`, printed
+ * after `Error logging in with device code: `). Matched as a substring because it follows that prefix;
+ * nothing else Codex prints contains it. Its other device failure, `device auth failed with status …`,
+ * is deliberately NOT recognised: a status code is not evidence of why, and the ordinary ending already
+ * says the sign-in failed.
+ */
+const CODEX_TIMED_OUT = 'device auth timed out';
+
+/**
  * The stage one raw output line moves this flow to.
  *
  * Both values are validated through the SHARED wire schemas before they are held, and a line that
  * yields neither leaves the stage untouched and is dropped. Once a stage has published, later output is
- * the child's own polling chatter and cannot move it.
+ * the child's own polling chatter and cannot move it — except Codex saying it stopped waiting, which
+ * is held (not published) so the exit that follows can say the code expired rather than just "failed".
  */
 export function observeCodexLine(stage: CodexLoginStage, rawLine: string): CodexLoginStage {
+  if (stage.stage === 'awaiting-approval') {
+    return stripTerminalEscapes(rawLine).includes(CODEX_TIMED_OUT) ? { ...stage, timedOut: true } : stage;
+  }
   if (stage.stage !== 'collecting') return stage;
   const line = stripTerminalEscapes(rawLine);
 
@@ -135,6 +164,27 @@ export function decideCodexSubmit(stage: CodexLoginStage): HarnessLoginSubmitDec
   };
 }
 
+/**
+ * How this login ends when the one-time code is why, or nothing when the ordinary ending applies.
+ *
+ * `expired`, never `rejected`: a device grant takes no code back, so nothing was refused — the code was
+ * simply no longer being waited for, because the daemon's window closed or Codex itself gave up. Either
+ * way the next action is the same one: a new sign-in, which prints a new code.
+ */
+export function codexEnding(
+  stage: CodexLoginStage,
+  cause: 'window' | { readonly exit: number },
+): CodexLoginFailure | undefined {
+  if (stage.stage !== 'awaiting-approval') return undefined;
+  if (cause !== 'window' && (cause.exit === 0 || stage.timedOut !== true)) return undefined;
+  return {
+    stage: 'failed',
+    reason: 'the one-time code expired before it was approved',
+    remedy: 'Start a new sign-in to get a new code, then enter it on the provider’s page.',
+    lastCode: 'expired',
+  };
+}
+
 /** The wire projection for this stage, in Codex's own state names. */
 export function codexProjection(base: HarnessLoginFlowBase, stage: CodexLoginStage): CodexLoginFlow {
   if (stage.stage === 'awaiting-approval') {
@@ -150,7 +200,14 @@ export function codexProjection(base: HarnessLoginFlowBase, stage: CodexLoginSta
     return { harness: 'codex', ...base, state: 'complete', accounts: stage.accounts };
   }
   if (stage.stage === 'failed') {
-    return { harness: 'codex', ...base, state: 'failed', reason: stage.reason, remedy: stage.remedy };
+    return {
+      harness: 'codex',
+      ...base,
+      state: 'failed',
+      reason: stage.reason,
+      remedy: stage.remedy,
+      ...(stage.lastCode === undefined ? {} : { lastCode: stage.lastCode }),
+    };
   }
   // `collecting` is reported as `starting`: the wire's word for "running, nothing to act on yet". A
   // partially-collected device grant is exactly that, and giving it a state of its own would put a

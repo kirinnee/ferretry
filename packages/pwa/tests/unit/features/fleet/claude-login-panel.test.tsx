@@ -8,9 +8,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
+import type { ClaudeLoginFlow } from '@ferretry/protocol';
 import { ClaudeLoginPanel } from '../../../../src/features/fleet/claude-login-panel.tsx';
 import { render, run } from '../../../support/react.ts';
 import { CLAUDE_URL, claudeFlow } from './harness-login-support.ts';
+
+type FailedClaudeFlow = Extract<ClaudeLoginFlow, { state: 'failed' }>;
 
 /** A failed render must not leak its mount, or the next test in this file renders into it. */
 let mounted: ReactTestRenderer | null = null;
@@ -216,3 +219,48 @@ const panelWith = (overrides: Partial<Parameters<typeof ClaudeLoginPanel>[0]>) =
     {...overrides}
   />
 );
+
+describe('ClaudeLoginPanel when Claude does not take a code', () => {
+  const awaitingRejected = { ...claudeFlow('awaiting-code'), lastCode: 'rejected' } as const;
+
+  it('says the last code was refused, instead of showing the same form as if nothing happened', () => {
+    const view = mount({ flow: awaitingRejected });
+
+    const alert = view.root.findByProps({ 'data-claude-login-rejected': '' });
+    expect(alert.props.role).toBe('alert');
+    expect(texts(view)).toContain('Claude didn’t accept that code.');
+    expect(texts(view)).toContain('paste it again below');
+    // The obvious next action is the field that is still there.
+    expect(view.root.findAllByType('textarea')).toHaveLength(1);
+  });
+
+  it('says nothing about a refusal while no code has been refused', () => {
+    const view = mount({ flow: claudeFlow('awaiting-code') });
+
+    expect(view.root.findAllByProps({ 'data-claude-login-rejected': '' })).toHaveLength(0);
+    expect(texts(view)).not.toContain('didn’t accept');
+  });
+
+  it('offers a fresh try — not the host command — when the sign-in ended on a refused code', () => {
+    let starts = 0;
+    const view = mount({
+      flow: { ...(claudeFlow('failed') as FailedClaudeFlow), lastCode: 'rejected' },
+      onStart: () => (starts += 1),
+    });
+
+    expect(texts(view)).toContain('Claude didn’t accept that code.');
+    expect(texts(view)).toContain('paste the whole code Claude shows you');
+    expect(texts(view)).not.toContain('fy fleet login');
+    expect(texts(view)).toContain('Try again');
+    run(() => view.root.findAllByType('button').at(-1)?.props.onClick());
+    expect(starts).toBe(1);
+  });
+
+  it('offers a new link when the sign-in link expired', () => {
+    const view = mount({ flow: { ...(claudeFlow('failed') as FailedClaudeFlow), lastCode: 'expired' } });
+
+    expect(texts(view)).toContain('That sign-in link expired before a code was accepted.');
+    expect(texts(view)).toContain('Get a new link');
+    expect(texts(view)).not.toContain('fy fleet login');
+  });
+});
