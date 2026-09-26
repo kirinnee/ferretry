@@ -435,7 +435,7 @@ describe('direct supervisor', () => {
     await should(supervisor.uninstall()).be.rejectedWith(/systemd user services on Linux/u);
   });
 
-  it('should launch the daemon detached with only FY_HOME, PATH and a UTF-8 locale in its environment', async () => {
+  it('should launch the daemon detached with only FY_HOME, HOME, PATH and a UTF-8 locale in its environment', async () => {
     // Arrange
     const { supervisor, processes, files } = direct();
 
@@ -449,6 +449,7 @@ describe('direct supervisor', () => {
     should(processes.launched[0]?.argv).not.deepEqual([retiredPointer]);
     should(processes.launched[0]?.environment).deepEqual({
       FY_HOME: linux.stateHome,
+      HOME: linux.homeDirectory,
       PATH: linux.searchPath,
       LANG: 'C.UTF-8',
     });

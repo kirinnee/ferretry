@@ -1,7 +1,7 @@
 import type { Stats } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveUserHome } from '@ferretry/fleet/adapters';
 import type {
   HarnessDocumentRead,
   HarnessHomeDocuments,
@@ -58,7 +58,7 @@ export class NodeHarnessHomeDocuments implements HarnessHomeDocuments {
  * the same two homes for the history importer: a test drives fixture directories and never a real
  * home, and the discovery module itself has no opinion about where anybody keeps their files.
  */
-export function harnessHomeLayouts(home: string = homedir()): readonly HarnessHomeLayout[] {
+export function harnessHomeLayouts(home: string = resolveUserHome()): readonly HarnessHomeLayout[] {
   return [
     {
       kind: 'claude',

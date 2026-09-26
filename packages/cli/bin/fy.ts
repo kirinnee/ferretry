@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import {
   buildFleetHealthCollector,
   buildFleetIdentities,
@@ -28,6 +27,7 @@ import {
   ProcessFleetLoginPort,
   ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
+  resolveUserHome,
   SpawnCredentialCommand,
   StoreCredentialClassifier,
   seedProvenancePath,
@@ -230,7 +230,7 @@ export function buildWorld(): CliWorld {
     prompt: new InquirerPrompt(),
     interactive: io.interactive(),
     cwd: process.cwd(),
-    homeDirectory: homedir(),
+    homeDirectory: resolveUserHome(),
     environment: process.env,
     stdout: {
       terminal: Boolean(process.stdout.isTTY),
@@ -452,7 +452,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
   const daemonName = `${BINARY_NAME}d`;
   const layout: DaemonLayout = resolveDaemonLayout({
     platform: process.platform,
-    homeDirectory: homedir(),
+    homeDirectory: resolveUserHome(environment),
     stateHome: environment.FY_HOME,
     configHome: environment.XDG_CONFIG_HOME,
     stateDirectory: environment.XDG_STATE_HOME,
@@ -701,7 +701,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
 function buildFleetController(world: CliWorld, client: SharedDaemonClient): FleetController {
   const layout = resolveFleetLayout({
     stateHome: world.environment.FY_HOME,
-    userHome: homedir(),
+    userHome: resolveUserHome(world.environment),
     product: PRODUCT_NAME,
   });
   // THE REPORTED BUG. Both writers below create state inside the daemon's home — `init` writes

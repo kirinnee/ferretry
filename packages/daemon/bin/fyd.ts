@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
 import { accessSync, constants as fsConstants, existsSync, statSync, writeSync } from 'node:fs';
-import { homedir, hostname } from 'node:os';
+import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   type Advertisement,
@@ -571,6 +571,7 @@ import {
   PlatformFleetCredentialStore,
   ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
+  resolveUserHome,
   SpawnCredentialCommand,
   spawnFleetTokenRefreshProcess,
 } from '@ferretry/fleet/adapters';
@@ -1364,7 +1365,7 @@ function harnessDeclarations(config: DaemonConfig): HarnessDiscoveryPolicy {
   return harnessDiscoveryPolicy({
     document: config.harness,
     environment: name => process.env[name],
-    homeDirectory: homedir(),
+    homeDirectory: resolveUserHome(),
   });
 }
 
@@ -4281,13 +4282,13 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
 /**
  * The one fact about this machine a test must be able to replace.
  *
- * `homedir()` is not overridable by any environment this runtime honours — Bun resolves it from the
- * passwd entry and ignores `HOME` — so a test that drives this composition root reaches the developer's
- * real `~/.claude` and `~/.codex` whatever it does to the environment first. That was harmless while
- * nothing read them. It stopped being harmless when a first run started COPYING a credential out of
- * them: an integration boot would read the credential of whoever ran the suite and write it into a
- * throwaway directory under the temporary directory. So the seam is here, it is one field wide, and
- * production never passes it.
+ * Bun's `homedir()` reads `HOME` only as the process was STARTED with it — a later assignment to
+ * `process.env.HOME` is invisible to it — and the user database when it was absent. So a test that
+ * drives this composition root in-process reaches the developer's real `~/.claude` and `~/.codex`
+ * whatever it does to the environment first, and a first run COPIES a credential out of what it finds
+ * there. A real process resolves its home once through `resolveUserHome`, and that one value serves
+ * the state home, the harness homes and the history importer alike; the seam replaces it for a test.
+ * It is one field wide, and production never passes it.
  */
 export interface WorldSeams {
   /** This machine's user home. Both harness home directories are derived from it. */
@@ -4296,14 +4297,14 @@ export interface WorldSeams {
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {}): DaemonWorld {
-  const userHome = seams.userHome ?? homedir();
+  const userHome = seams.userHome ?? resolveUserHome();
   // Pairing opens before any subsystem. Keep its validated daemon identity in
   // this composition root so the attachment store can key state by daemon
   // without widening the public pairing route interface.
   let attachmentDaemonId: string | undefined;
   const clock = new SystemClock();
   const millisecondClock = { now: () => Date.now() };
-  const environment = new RuntimeEnvironment();
+  const environment = new RuntimeEnvironment(process.env, () => userHome);
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
   const messageTokenKey = sessionMessageTokenKeyFile(paths.state);
   /**
@@ -4753,7 +4754,7 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
    * has no mutation method and it is deliberately not backed by the session store: a foreign JSONL
    * has neither a Ferretry journal nor a live pane and must never be presented as resumable.
    */
-  const foreignHistory = new ForeignHistoryImporter(new NodeForeignHistoryFiles(), foreignHistoryRoots(), {
+  const foreignHistory = new ForeignHistoryImporter(new NodeForeignHistoryFiles(), foreignHistoryRoots(userHome), {
     claude: claudeTranscriptParser,
     codex: codexTranscriptParser,
   });
@@ -6335,7 +6336,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings);
-  const skills = new NodeCatalog({ home: homedir() });
+  const skills = new NodeCatalog({ home: resolveUserHome() });
   const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
   const catalogs = {
     projects: () => projects.projects(),
