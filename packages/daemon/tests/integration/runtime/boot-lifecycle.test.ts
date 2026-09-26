@@ -82,7 +82,7 @@ import {
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { healthViewFixture } from '../../fixtures/health-view.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
  * The daemon's boot lifecycle, driven through the real composition root.
@@ -154,7 +154,7 @@ function hostWithoutHarnesses(executables: ExecutableResolverPort): ExecutableRe
   };
 }
 
-function buildIntegrationWorld(seams: WorldSeams = {}): DaemonWorld {
+function buildIntegrationWorld(seams: WorldSeams = { userHome: ABSENT_USER_HOME }): DaemonWorld {
   const world = buildWorld({}, seams);
   return {
     ...world,
@@ -834,7 +834,7 @@ describe('daemon boot lifecycle', () => {
       ].join('\n')}\n`,
     );
     process.env.FY_HOME = home;
-    const seeded = await buildWorld().storage.open();
+    const seeded = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
     const id = parseSessionId(SESSION_ID);
     const config = SessionConfigSchema.parse(await seeded.storage.readConfig(id));
     await seeded.storage.writeConfig(id, {
@@ -1712,7 +1712,7 @@ describe('daemon boot lifecycle', () => {
     // and the child still needs its first relaunch stamp. Written through storage so both ids are in
     // the authoritative index before the daemon opens it.
     process.env.FY_HOME = home;
-    const seeded = await buildWorld().storage.open();
+    const seeded = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
     const parentConfig = SessionConfigSchema.parse(await seeded.storage.readConfig(parseSessionId(parentId)));
     const childConfig = SessionConfigSchema.parse(await seeded.storage.readConfig(parseSessionId(legacyChildId)));
     await seeded.storage.writeConfig(parseSessionId(parentId), { ...parentConfig, label: 'fleet-warden' });

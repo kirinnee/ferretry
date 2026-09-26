@@ -33,6 +33,8 @@
  * nothing the journey later asserts on.
  */
 
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SessionConfigSchema, SessionStateSchema } from '../../../packages/protocol/src/lib/index.ts';
 import { buildWorld } from '../../../packages/daemon/bin/fyd.ts';
 import { parseSessionId } from '../../../packages/daemon/src/lib/session-id.ts';
@@ -53,14 +55,17 @@ export interface SeededSession {
 /**
  * Write one running session into `home`, through the daemon's own storage.
  *
- * `FY_HOME` is set on this process because `buildWorld()` resolves the state home from the
+ * `FY_HOME` is set on this process because `buildWorld` resolves the state home from the
  * environment, and restored afterwards so nothing else in the suite inherits it.
  */
 export async function seedRunningSession(home: string, at = new Date().toISOString()): Promise<SeededSession> {
   const previous = process.env.FY_HOME;
   process.env.FY_HOME = home;
   try {
-    const opened = await buildWorld().storage.open();
+    const opened = await buildWorld(
+      {},
+      { userHome: join(tmpdir(), `fy-absent-user-home-${crypto.randomUUID()}`) },
+    ).storage.open();
     const id = parseSessionId(SEEDED_SESSION_ID);
     await opened.storage.writeConfig(
       id,

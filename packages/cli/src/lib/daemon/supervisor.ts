@@ -87,6 +87,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
       renderSystemdUnit({
         daemonBinary: executable,
         stateHome: this.layout.stateHome,
+        userHome: this.layout.homeDirectory,
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
         locale: this.layout.locale,
@@ -183,6 +184,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
         label: this.layout.launchdLabel,
         daemonBinary: executable,
         stateHome: this.layout.stateHome,
+        userHome: this.layout.homeDirectory,
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
         locale: this.layout.locale,
@@ -259,7 +261,14 @@ export class DirectSupervisor implements IDaemonSupervisor {
     await claimThenCreateLogDirectory(this.claims, this.files, this.layout);
     return await this.processes.spawnDetached({
       argv: [executable],
-      environment: { FY_HOME: this.layout.stateHome, PATH: this.layout.searchPath, ...this.layout.locale },
+      // `HOME` is the home this CLI resolved, so the daemon looks for harness logins where `fy` does
+      // rather than in whichever home the user database names.
+      environment: {
+        FY_HOME: this.layout.stateHome,
+        HOME: this.layout.homeDirectory,
+        PATH: this.layout.searchPath,
+        ...this.layout.locale,
+      },
       logFile: this.layout.logFile,
     });
   }

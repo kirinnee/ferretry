@@ -93,6 +93,12 @@ export interface ServiceDefinitionSpec {
   readonly daemonBinary: string;
   /** The state home to hand it as `FY_HOME`. */
   readonly stateHome: string;
+  /**
+   * The user home to hand it as `HOME` — the one the installing CLI resolved. Both service managers
+   * would supply the user database's home themselves, which is a different directory whenever `fy`
+   * ran under another `HOME`, and the daemon looks for harness logins under whichever it is given.
+   */
+  readonly userHome: string;
   /** Where its stdout and stderr are appended. */
   readonly logFile: string;
   /** The `PATH` it inherits; a service manager provides almost none. */
@@ -144,6 +150,7 @@ RestartPreventExitStatus=${String(EXIT_ALREADY_RUNNING)} ${String(EXIT_ADDRESS_C
 # restart. Signal only the daemon; panes survive and boot recovery re-adopts them.
 KillMode=process
 Environment=${systemdQuote(`FY_HOME=${spec.stateHome}`)}
+Environment=${systemdQuote(`HOME=${spec.userHome}`)}
 Environment=${systemdQuote(`PATH=${spec.searchPath}`)}
 ${systemdEnvironment(spec.locale)}StandardOutput=append:${logSpecifier}
 StandardError=append:${logSpecifier}
@@ -180,7 +187,7 @@ export function renderLaunchAgentPlist(spec: LaunchAgentSpec): string {
 <key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>${log}</string>
 <key>StandardErrorPath</key><string>${log}</string>
-<key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>${xmlText(spec.stateHome, 'the state home')}</string><key>PATH</key><string>${xmlText(spec.searchPath, 'PATH')}</string>${plistEnvironment(spec.locale)}</dict>
+<key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>${xmlText(spec.stateHome, 'the state home')}</string><key>HOME</key><string>${xmlText(spec.userHome, 'the user home')}</string><key>PATH</key><string>${xmlText(spec.searchPath, 'PATH')}</string>${plistEnvironment(spec.locale)}</dict>
 </dict></plist>
 `;
 }

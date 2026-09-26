@@ -1,4 +1,3 @@
-import { homedir } from 'node:os';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
 import type { EnvironmentPort, StateHomeInput } from '../../lib/index.ts';
 
@@ -19,8 +18,8 @@ const compiledRelayDirectory = (): string => HOSTED_RELAY_DIRECTORY_ORIGIN;
 
 export class RuntimeEnvironment implements EnvironmentPort {
   constructor(
-    private readonly values: Readonly<Record<string, string | undefined>> = process.env,
-    private readonly userHome: () => string = homedir,
+    private readonly values: Readonly<Record<string, string | undefined>>,
+    private readonly userHome: () => string,
   ) {}
 
   stateHomeInput(): StateHomeInput {

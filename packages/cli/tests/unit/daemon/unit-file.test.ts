@@ -13,6 +13,7 @@ import {
 const spec = {
   daemonBinary: '/opt/fy/bin/fyd',
   stateHome: '/tmp/fy-home/.ferretry',
+  userHome: '/tmp/fy-home',
   logFile: '/tmp/fy-home/.ferretry/logs/fyd.log',
   searchPath: '/usr/bin:/bin',
   locale: { LANG: 'C.UTF-8' },
@@ -95,13 +96,14 @@ describe('systemd unit rendering', () => {
     should(actual).match(/^StandardError=append:\/tmp\/fy-home\/\.ferretry\/logs\/fyd\.log$/mu);
   });
 
-  it('should quote the executable and both environment assignments', () => {
+  it('should quote the executable and every environment assignment', () => {
     // Act
     const actual = renderSystemdUnit(spec);
 
     // Assert
     should(actual).match(/^ExecStart="\/opt\/fy\/bin\/fyd"$/mu);
     should(actual).match(/^Environment="FY_HOME=\/tmp\/fy-home\/\.ferretry"$/mu);
+    should(actual).match(/^Environment="HOME=\/tmp\/fy-home"$/mu);
     should(actual).match(/^Environment="PATH=\/usr\/bin:\/bin"$/mu);
   });
 
@@ -191,12 +193,13 @@ describe('launch agent rendering', () => {
     should(actual).containEql('<key>ThrottleInterval</key><integer>10</integer>');
   });
 
-  it('should pass the state home and PATH as environment variables', () => {
+  it('should pass the state home, the user home and PATH as environment variables', () => {
     // Act
     const actual = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });
 
     // Assert
     should(actual).containEql('<key>FY_HOME</key><string>/tmp/fy-home/.ferretry</string>');
+    should(actual).containEql('<key>HOME</key><string>/tmp/fy-home</string>');
     should(actual).containEql('<key>PATH</key><string>/usr/bin:/bin</string>');
   });
 

@@ -5,7 +5,7 @@ import { SessionConfigSchema, SessionStateSchema, SessionViewSchema } from '@fer
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import { createSessionPaths, firstWriteReleasedAnswerAttention, parseSessionId } from '../../../src/lib/index.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
  * The whole answer, over the daemon the product actually ships.
@@ -290,7 +290,7 @@ async function seed(
   command: readonly string[] = ['/usr/bin/env', 'claude'],
 ): Promise<string> {
   process.env.FY_HOME = home;
-  const opened = await buildWorld().storage.open();
+  const opened = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
   const id = parseSessionId(SESSION_ID);
   const at = '2026-08-06T09:00:00.000Z';
   await opened.storage.writeConfig(
@@ -365,7 +365,7 @@ async function boot(home: string, port: number): Promise<Daemon> {
   process.env.FY_HOME = home;
   const shutdownSignal = Promise.withResolvers<void>();
   const world: DaemonWorld = {
-    ...buildWorld(),
+    ...buildWorld({}, { userHome: ABSENT_USER_HOME }),
     untilShutdown: async () => await shutdownSignal.promise,
   };
   const cleanups: Array<() => void | Promise<void>> = [];
@@ -393,7 +393,7 @@ async function shutdown(daemon: Daemon): Promise<void> {
 /** Mutates a seeded state through production storage while no daemon owns that state home. */
 async function patchStateOffline(home: string, patch: Readonly<Record<string, unknown>>): Promise<void> {
   process.env.FY_HOME = home;
-  const opened = await buildWorld().storage.open();
+  const opened = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
   try {
     await opened.storage.updateState(
       parseSessionId(SESSION_ID),
@@ -1084,7 +1084,7 @@ describe('the structured answer journey', () => {
     // supposed to be refused, so doing it that way would prove nothing about a real restart.
     await shutdown(daemon);
     process.env.FY_HOME = home;
-    const offline = await buildWorld().storage.open();
+    const offline = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
     await offline.storage.updateState(parseSessionId(SESSION_ID), current => ({
       ...(current as Record<string, unknown>),
       needsHumanKind: 'structured-answer-released-unconfirmed',

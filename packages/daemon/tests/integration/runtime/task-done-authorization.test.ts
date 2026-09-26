@@ -12,7 +12,7 @@ import {
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../src/lib/index.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
  * Completing shared live work, driven end to end through the production composition root.
@@ -96,7 +96,7 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
  */
 async function seedHome(home: string, port: number): Promise<void> {
   process.env.FY_HOME = home;
-  const opened = await buildWorld().storage.open();
+  const opened = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
   await opened.storage.close();
   await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
 }
@@ -137,7 +137,7 @@ async function seedFleet(home: string): Promise<void> {
 
 async function worldAt(home: string, port: number, untilShutdown: () => Promise<void>): Promise<DaemonWorld> {
   await seedHome(home, port);
-  return { ...buildWorld(), untilShutdown };
+  return { ...buildWorld({}, { userHome: ABSENT_USER_HOME }), untilShutdown };
 }
 
 /**

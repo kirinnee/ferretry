@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
 import { accessSync, constants as fsConstants, existsSync, statSync, writeSync } from 'node:fs';
-import { homedir, hostname } from 'node:os';
-import { dirname, join } from 'node:path';
+import { hostname } from 'node:os';
+import { dirname, isAbsolute, join } from 'node:path';
 import {
   type Advertisement,
   type DaemonCarrier,
@@ -571,6 +571,7 @@ import {
   PlatformFleetCredentialStore,
   ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
+  resolveUserHome,
   SpawnCredentialCommand,
   spawnFleetTokenRefreshProcess,
 } from '@ferretry/fleet/adapters';
@@ -635,6 +636,8 @@ export interface WorktreeComposition {
  */
 export interface DaemonWorld {
   readonly role: typeof packageRole;
+  /** This machine's user home, exactly as {@link WorldSeams} named it. Every harness path derives from it. */
+  readonly userHome: string;
   readonly storage: DaemonStorageFactory;
   /**
    * The analytics materialization this daemon ingests into.
@@ -1360,11 +1363,11 @@ async function readHarnesses(
  * installed right now is asked at the moment of the lookup, so a harness installed after this daemon
  * came up is still found.
  */
-function harnessDeclarations(config: DaemonConfig): HarnessDiscoveryPolicy {
+function harnessDeclarations(config: DaemonConfig, userHome: string): HarnessDiscoveryPolicy {
   return harnessDiscoveryPolicy({
     document: config.harness,
     environment: name => process.env[name],
-    homeDirectory: homedir(),
+    homeDirectory: userHome,
   });
 }
 
@@ -4279,31 +4282,38 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
 }
 
 /**
- * The one fact about this machine a test must be able to replace.
+ * The one fact about this machine every caller must NAME.
  *
- * `homedir()` is not overridable by any environment this runtime honours — Bun resolves it from the
- * passwd entry and ignores `HOME` — so a test that drives this composition root reaches the developer's
- * real `~/.claude` and `~/.codex` whatever it does to the environment first. That was harmless while
- * nothing read them. It stopped being harmless when a first run started COPYING a credential out of
- * them: an integration boot would read the credential of whoever ran the suite and write it into a
- * throwaway directory under the temporary directory. So the seam is here, it is one field wide, and
- * production never passes it.
+ * Bun's `homedir()` reads `HOME` only as the process was STARTED with it — a later assignment to
+ * `process.env.HOME` is invisible to it — and the user database when it was absent. So a test that
+ * drives this composition root in-process reaches the developer's real `~/.claude` and `~/.codex`
+ * whatever it does to the environment first, and a first run COPIES a credential out of what it finds
+ * there. A real process resolves its home once through `resolveUserHome`, and that one value serves
+ * the state home, the harness homes, the history importer and the skills catalog alike.
+ *
+ * IT IS REQUIRED, and that is the guard. It used to be optional with `homedir()` behind it, and five
+ * integration suites built a world without it, so every one of their boots searched the developer's
+ * own `~/.claude` and `~/.codex` for a login to copy. A required field turns the next such call into
+ * a type error in the gate rather than a line in a log nobody reads, and the check below refuses a
+ * cast. The daemon's own entry point passes `resolveUserHome()`; a test passes a temporary directory.
  */
 export interface WorldSeams {
-  /** This machine's user home. Both harness home directories are derived from it. */
-  readonly userHome?: string;
+  /** This machine's user home, absolute. Both harness home directories are derived from it. */
+  readonly userHome: string;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
-export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {}): DaemonWorld {
-  const userHome = seams.userHome ?? homedir();
+export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWorld {
+  const userHome = seams.userHome;
+  if (typeof userHome !== 'string' || !isAbsolute(userHome))
+    throw new Error(`buildWorld needs an absolute user home, and was given ${String(userHome)}`);
   // Pairing opens before any subsystem. Keep its validated daemon identity in
   // this composition root so the attachment store can key state by daemon
   // without widening the public pairing route interface.
   let attachmentDaemonId: string | undefined;
   const clock = new SystemClock();
   const millisecondClock = { now: () => Date.now() };
-  const environment = new RuntimeEnvironment();
+  const environment = new RuntimeEnvironment(process.env, () => userHome);
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
   const messageTokenKey = sessionMessageTokenKeyFile(paths.state);
   /**
@@ -4753,7 +4763,7 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
    * has no mutation method and it is deliberately not backed by the session store: a foreign JSONL
    * has neither a Ferretry journal nor a live pane and must never be presented as resumable.
    */
-  const foreignHistory = new ForeignHistoryImporter(new NodeForeignHistoryFiles(), foreignHistoryRoots(), {
+  const foreignHistory = new ForeignHistoryImporter(new NodeForeignHistoryFiles(), foreignHistoryRoots(userHome), {
     claude: claudeTranscriptParser,
     codex: codexTranscriptParser,
   });
@@ -5054,6 +5064,7 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
   };
   return {
     role: packageRole,
+    userHome,
     storage: new DaemonStorageFactory(
       environment,
       new StateFileSystemFactory(),
@@ -6227,7 +6238,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const config = decided.config;
   // Read ONCE for this boot and handed to every surface that reports a harness, so the milestone
   // below and the doctor route this daemon serves cannot disagree about which `claude` is here.
-  const harnessDiscovery = harnessDeclarations(config);
+  const harnessDiscovery = harnessDeclarations(config, world.userHome);
   for (const key of supersededCarrierKeys({ rawDocument: peeked.document ?? {}, carriers: config.carriers })) {
     world.notices.state(
       `the legacy "${key}" key in ${world.config.path} is superseded by its explicit carriers entry and has no effect`,
@@ -6335,7 +6346,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings);
-  const skills = new NodeCatalog({ home: homedir() });
+  const skills = new NodeCatalog({ home: world.userHome });
   const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
   const catalogs = {
     projects: () => projects.projects(),
@@ -6898,7 +6909,7 @@ export async function checkConfiguration(
   const harnesses = await readHarnesses(
     world.harnesses.accounts,
     world.harnesses.executables,
-    harnessDeclarations(config),
+    harnessDeclarations(config, world.userHome),
   );
   for (const line of renderHarnessPreflight(harnesses, CLIENT_NAME)) say(line);
   const directorySyscalls = (() => {
@@ -7048,7 +7059,7 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
   // when that failed, the only thing this daemon had ever written was nothing at all.
   const notices = bootJournal(answer.overrides.logLevel);
   try {
-    const world = { ...buildWorld(answer.overrides), notices };
+    const world = { ...buildWorld(answer.overrides, { userHome: resolveUserHome() }), notices };
     // The two queries answer from the same world the boot would have used, so what they report is
     // what would actually happen — and neither of them opens storage, so neither creates anything.
     if (answer.kind === 'print-config') return await printConfiguration(world);
