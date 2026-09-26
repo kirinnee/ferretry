@@ -60,10 +60,9 @@ import type { ClipboardWriter } from './copy-button.tsx';
 import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
-import { OnboardingConnectionChooser } from './onboarding-connection-chooser.tsx';
+import { OnboardingConnectionNote } from './onboarding-connection-note.tsx';
 import { OnboardingDoerChooser } from './onboarding-doer-chooser.tsx';
 import {
-  type ConnectionMethodId,
   handoffTarget,
   type InstallChannelId,
   isLastOnboardingStep,
@@ -77,7 +76,6 @@ import {
   onboardingStepCount,
   onboardingStepIndex,
   pairingOnboardingStep,
-  pathConnection,
   previousOnboardingStep,
   questionBehindDoer,
   questionBehindRoute,
@@ -96,10 +94,6 @@ import {
   InstallStage,
   LocalStage,
   PairStage,
-  RelayAllowStage,
-  RelayDeployStage,
-  RelayFingerprintStage,
-  RelaySourceStage,
   ScanStage,
 } from './onboarding-stages.tsx';
 import { OnboardingTargetChooser } from './onboarding-target-chooser.tsx';
@@ -309,9 +303,6 @@ export function OnboardingPage({
           onGoTo={step => {
             progress.goTo(step);
           }}
-          onChooseConnection={connection => {
-            progress.chooseConnection(connection);
-          }}
           onChooseRoute={route => {
             progress.choose(route);
           }}
@@ -345,7 +336,6 @@ interface RouteFlowProps {
   readonly href: string;
   readonly share: SetupSharePort | undefined;
   readonly onGoTo: (step: OnboardingStepId) => void;
-  readonly onChooseConnection: (connection: ConnectionMethodId) => void;
   /** Switch to a different ENTRY without going back through the question. */
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
   /** Change who installs it, from a step rather than from the question. */
@@ -377,7 +367,6 @@ function RouteFlow({
   href,
   share,
   onGoTo,
-  onChooseConnection,
   onChooseRoute,
   onChooseDoer,
   onChooseTarget,
@@ -459,7 +448,6 @@ function RouteFlow({
           fallback={fallback}
           onOpenFleet={onOpenFleet}
           onGoTo={onGoTo}
-          onChooseConnection={onChooseConnection}
           onChooseRoute={onChooseRoute}
           onChooseDoer={onChooseDoer}
           onChooseTarget={onChooseTarget}
@@ -502,22 +490,18 @@ function RouteFlow({
               the LAST step of a route it would advance to itself, which reads as a
               page that is stuck.
             */}
-            {at.current !== 'scan' &&
-              at.current !== 'agent-pair' &&
-              at.current !== 'connect' &&
-              at.current !== 'local' &&
-              !last && (
-                <button
-                  type="button"
-                  className="kt-btn ml-auto min-h-[44px] flex-1"
-                  data-variant="primary"
-                  onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
-                  data-onboarding-next=""
-                >
-                  Next
-                  <ArrowRight size={16} aria-hidden="true" />
-                </button>
-              )}
+            {at.current !== 'scan' && at.current !== 'agent-pair' && at.current !== 'local' && !last && (
+              <button
+                type="button"
+                className="kt-btn ml-auto min-h-[44px] flex-1"
+                data-variant="primary"
+                onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
+                data-onboarding-next=""
+              >
+                Next
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -537,7 +521,6 @@ interface StageProps {
   readonly fallback: HostedRelayFallback;
   readonly onOpenFleet: () => void;
   readonly onGoTo: (step: OnboardingStepId) => void;
-  readonly onChooseConnection: (connection: ConnectionMethodId) => void;
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
   readonly onChooseDoer: (doer: OnboardingDoerId) => void;
   readonly onChooseTarget: (target: SetupTargetId) => void;
@@ -570,7 +553,6 @@ function Stage({
   fallback,
   onOpenFleet,
   onGoTo,
-  onChooseConnection,
   onChooseRoute,
   onChooseDoer,
   onChooseTarget,
@@ -611,17 +593,18 @@ function Stage({
     case 'agents':
       return <AgentsStage write={write} />;
     case 'daemon':
-      return <DaemonStage write={write} />;
-    case 'connect':
-      return <OnboardingConnectionChooser onChoose={onChooseConnection} fallback={fallback} />;
-    case 'relay-fingerprint':
-      return <RelayFingerprintStage write={write} />;
-    case 'relay-source':
-      return <RelaySourceStage write={write} />;
-    case 'relay-allow':
-      return <RelayAllowStage />;
-    case 'relay-deploy':
-      return <RelayDeployStage write={write} />;
+      /*
+        THE CARRIER IS SAID HERE, NOT ASKED. This is the step where the daemon
+        other devices will reach comes up, so it is where the reader learns how
+        they will reach it — direct first, the hosted relay when direct fails —
+        with no question attached, because there is nothing to decide.
+      */
+      return (
+        <>
+          <DaemonStage write={write} />
+          <OnboardingConnectionNote fallback={fallback} />
+        </>
+      );
     case 'local':
       return <LocalStage write={write} pairing={pairing} />;
     case 'elsewhere':
@@ -638,17 +621,16 @@ function Stage({
           fleetReady={fleetReady}
           /*
             THE CARRIER IN USE, DERIVED RATHER THAN ASSERTED. A host may still
-            override it; nobody has to invent one. The default names the carrier
-            the app actually dials and, for a reader who chose a relay, says
-            plainly that their choice is not yet what carries the connection.
+            override it; nobody has to invent one. The default states the order
+            the app dials in and where the measured answer lives.
           */
-          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus(pathConnection(path))) : null}
+          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus()) : null}
           /*
             AND WHAT THE FALLBACK WOULD SEE. The carrier in use is only half the
-            disclosure; the other half is about a third party the reader chose
-            screens ago and has not been reminded of since.
+            disclosure; the other half is about the third party that carries the
+            connection whenever direct cannot.
           */
-          fallbackDisclosure={fleetReady ? carrierDisclosure(pathConnection(path)) : null}
+          fallbackDisclosure={fleetReady ? carrierDisclosure() : null}
           onOpenFleet={onOpenFleet}
           /*
             THE PAIRING STEP OF THIS JOURNEY, WHICHEVER ONE THAT IS. It used to be
@@ -677,11 +659,6 @@ const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   install: 'This page cannot see your terminal. Continue when the install finishes.',
   agents: 'This page cannot see which of them you have, or whether you are signed in. Continue once one runs.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
-  connect: 'Choose the route that matches this machine. Direct is still preferred whenever it is reachable.',
-  'relay-fingerprint': 'This page cannot see your terminal. Continue once you have copied the fingerprint.',
-  'relay-source': 'This page cannot see your terminal. Continue once the checkout is ready.',
-  'relay-allow': 'This page cannot read your configuration. Continue once the fingerprint is listed.',
-  'relay-deploy': 'This page cannot see the deployment. Continue once it finishes.',
   local: 'This step finishes itself when the daemon answers. Nothing here is waiting on a scan.',
   elsewhere: 'Nothing here waits on that computer. Continue when its daemon is running.',
   handoff: 'Optional, and nothing waits on it. Skip it and add a device whenever you like.',

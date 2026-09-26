@@ -35,9 +35,7 @@
 import qrcode from 'qrcode-generator';
 import type { DeviceKind } from './device-kind.ts';
 import {
-  type ConnectionMethodId,
   firstOnboardingStep,
-  isConnectionMethodId,
   isDaemonRouteId,
   isOnboardingDoerId,
   isOnboardingRouteId,
@@ -79,11 +77,10 @@ export interface SetupHandoff {
   readonly target?: SetupTargetId | undefined;
   /** Who installs it. Only the daemon subflow has one. */
   readonly doer?: OnboardingDoerId | undefined;
-  readonly connection?: ConnectionMethodId | undefined;
 }
 
 /** The keys a payload may carry, so an unknown one is refused rather than ignored. */
-const FIELDS = ['route', 'step', 'target', 'doer', 'connection'] as const;
+const FIELDS = ['route', 'step', 'target', 'doer'] as const;
 
 /**
  * The payload, as it appears after the `=`.
@@ -102,7 +99,6 @@ export const encodeSetupHandoff = (handoff: SetupHandoff): string =>
     ...(handoff.target === undefined ? [] : [`target=${handoff.target}`]),
     ...(handoff.doer === undefined ? [] : [`doer=${handoff.doer}`]),
     `step=${handoff.step}`,
-    ...(handoff.connection === undefined ? [] : [`connection=${handoff.connection}`]),
   ].join(';');
 
 /** The named fields of a payload, or nothing if any token is not exactly one field. */
@@ -128,9 +124,8 @@ const payloadFields = (raw: string): Map<string, string> | undefined => {
  * reader somewhere nobody chose. The entry chooser is always a correct answer here.
  *
  * A FIELD THAT COULD NOT MATTER IS A REFUSAL, not something to drop quietly. The
- * pairing entry has no target, no doer and no carrier, and a daemon living on
- * another machine has no carrier to choose here either — so a payload carrying one
- * of those was not produced by this page, and the honest reading of a payload
+ * pairing entry has no target and no doer — so a payload carrying one of those
+ * was not produced by this page, and the honest reading of a payload
  * nobody here wrote is that it is not a hand-off.
  */
 export const parseSetupHandoff = (raw: string | null | undefined): SetupHandoff | undefined => {
@@ -142,16 +137,13 @@ export const parseSetupHandoff = (raw: string | null | undefined): SetupHandoff 
   if (!isOnboardingRouteId(route) || !isOnboardingStepId(step)) return undefined;
   const target = fields.get('target');
   const doer = fields.get('doer');
-  const connection = fields.get('connection');
   if (target !== undefined && (!isSetupTargetId(target) || !isDaemonRouteId(route))) return undefined;
   if (doer !== undefined && (!isOnboardingDoerId(doer) || !isDaemonRouteId(route))) return undefined;
-  if (connection !== undefined && (!isConnectionMethodId(connection) || target !== 'this')) return undefined;
   return {
     route,
     step,
     ...(target === undefined ? {} : { target }),
     ...(doer === undefined ? {} : { doer }),
-    ...(connection === undefined ? {} : { connection }),
   };
 };
 
@@ -237,16 +229,7 @@ export const landSetupHandoff = (handoff: SetupHandoff, device: DeviceKind): Set
   const target = handoff.target !== undefined && isTargetPossible(handoff.target, device) ? handoff.target : presumed;
   if (target === undefined) return { kind: 'ask', question: 'target', route };
   if (handoff.doer === undefined) return { kind: 'ask', question: 'doer', route, target };
-  return walkFrom(
-    {
-      route,
-      target,
-      doer: handoff.doer,
-      ...(handoff.connection === undefined || target !== 'this' ? {} : { connection: handoff.connection }),
-    },
-    device,
-    handoff.step,
-  );
+  return walkFrom({ route, target, doer: handoff.doer }, device, handoff.step);
 };
 
 /**

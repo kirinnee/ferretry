@@ -34,15 +34,6 @@ describe('the hand-off payload', () => {
     expect(encodeSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'install' })).toBe(
       'v2;route=first-time;target=this;doer=self;step=install',
     );
-    expect(
-      encodeSetupHandoff({
-        route: 'first-time',
-        target: 'this',
-        doer: 'self',
-        step: 'relay-source',
-        connection: 'own-relay',
-      }),
-    ).toBe('v2;route=first-time;target=this;doer=self;step=relay-source;connection=own-relay');
   });
 
   it('round-trips exactly what it was given', () => {
@@ -50,7 +41,7 @@ describe('the hand-off payload', () => {
       { route: 'add-client', step: 'pair' },
       { route: 'add-daemon', target: 'this', doer: 'self', step: 'install' },
       { route: 'first-time', target: 'other', doer: 'agent', step: 'brief' },
-      { route: 'first-time', target: 'this', doer: 'self', step: 'relay-allow', connection: 'own-relay' },
+      { route: 'first-time', target: 'this', doer: 'self', step: 'daemon' },
     ] as const) {
       expect(parseSetupHandoff(encodeSetupHandoff(handoff))).toEqual(handoff);
     }
@@ -75,14 +66,14 @@ describe('the hand-off payload', () => {
       'v2;route=first-time',
       'v2;route=first-time;target=cloud;doer=self;step=install',
       'v2;route=first-time;target=this;doer=nobody;step=install',
-      'v2;route=first-time;target=this;doer=self;step=install;connection=tunnel',
       // Fields that could not matter on the journey they are attached to, which
       // means this payload was not produced by this page.
       'v2;route=add-client;target=this;step=pair',
       'v2;route=add-client;doer=self;step=pair',
-      'v2;route=add-client;step=pair;connection=direct',
-      'v2;route=first-time;target=other;doer=self;step=elsewhere;connection=direct',
-      // Unknown keys, bare tokens and duplicates.
+      // Unknown keys, bare tokens and duplicates. `connection` is unknown now: the
+      // carrier chooser that wrote it is gone, and no link this page makes names one.
+      'v2;route=first-time;target=this;doer=self;step=local;connection=direct',
+      'v2;route=first-time;target=this;doer=self;step=relay-source;connection=own-relay',
       'v2;route=first-time;target=this;doer=self;step=install;theme=dark',
       'v2;route=first-time;install',
       'v2;route=first-time;route=add-client;step=pair',
@@ -174,28 +165,11 @@ describe('landing a hand-off', () => {
     });
   });
 
-  it('carries a connection answer into the journey it lands on, and only where it fits', () => {
-    expect(
-      landSetupHandoff(
-        { route: 'first-time', target: 'this', doer: 'self', step: 'relay-deploy', connection: 'own-relay' },
-        'desktop',
-      ),
-    ).toEqual({
+  it('lands a same-machine journey on its daemon step with no carrier question after it', () => {
+    expect(landSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'daemon' }, 'desktop')).toEqual({
       kind: 'walk',
-      journey: { route: 'first-time', target: 'this', doer: 'self', connection: 'own-relay' },
-      step: 'relay-deploy',
-    });
-    // The same payload read on a phone: the target it proposed is impossible, so
-    // the carrier answer it depended on goes with it.
-    expect(
-      landSetupHandoff(
-        { route: 'first-time', target: 'this', doer: 'self', step: 'relay-deploy', connection: 'own-relay' },
-        'mobile',
-      ),
-    ).toEqual({
-      kind: 'walk',
-      journey: { route: 'first-time', target: 'other', doer: 'self' },
-      step: 'elsewhere',
+      journey: { route: 'first-time', target: 'this', doer: 'self' },
+      step: 'daemon',
     });
   });
 });

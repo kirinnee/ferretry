@@ -36,8 +36,8 @@ import {
   type WardenVerdictsView,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
-// `chooseConnection` is aliased because this file already owns that name for the onboarding
-// chooser's helper below, and the two have nothing to do with each other.
+// `chooseConnection` is aliased so the relay's carrier choice reads as what it is here: a
+// measurement a live session makes, not a question onboarding asks (it asks none).
 import { carrierProbe, chooseConnection as chooseCarrier, type ConnectionChoice } from '@ferretry/relay';
 import { type ReactElement, StrictMode } from 'react';
 
@@ -719,27 +719,7 @@ const advanceStep = async (container: HTMLElement): Promise<void> => {
   );
 };
 
-/** Answers the second chooser, which is what moves the reader off `connect`. */
-const chooseConnection = async (container: HTMLElement, connection: string): Promise<void> => {
-  await interact(() =>
-    must(
-      container.querySelector<HTMLButtonElement>(`button[data-onboarding-connection="${connection}"]`),
-      `the ${connection} answer`,
-    ).click(),
-  );
-};
-
-/**
- * Walks the LONG route to the browser's half of pairing: the question, install,
- * daemon, the carrier choice, then `fy pair` on the computer. Deliberately not
- * the two-tap "I have a link" answer — these tests are about the pairing surface
- * behaving the same at the end of the full journey as it does in the picker.
- *
- * Two of these hops are not a `Next`. The carrier question is answered by
- * picking a carrier, and the stage that answer opens is what the reader has to
- * pass through before the scan surface exists; walking it here is what keeps
- * these tests on the REAL long route rather than on a shortcut into `scan`.
- */
+/** Walks the pairing entry to the browser's half of pairing: `fy pair` elsewhere, then the scan. */
 const advanceToPairing = async (container: HTMLElement): Promise<void> => {
   await chooseRoute(container, 'add-client');
   /* pair → scan */
@@ -755,15 +735,13 @@ const advanceToPairing = async (container: HTMLElement): Promise<void> => {
 const advanceToLocalPairing = async (container: HTMLElement): Promise<void> => {
   await chooseRoute(container, 'first-time');
   /*
-   * install → agents → daemon → connect. The agents step is not decoration on the
+   * install → agents → daemon → local. The agents step is not decoration on the
    * way past: Ferretry runs Claude Code and Codex and is neither of them, so a
    * daemon standing up with both missing serves perfectly and runs nothing.
    */
   await advanceStep(container);
   await advanceStep(container);
   await advanceStep(container);
-  /* connect → local, by answering rather than by advancing */
-  await chooseConnection(container, 'default-relay');
 };
 
 /** Drives a browser history navigation the way the back button does. */

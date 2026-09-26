@@ -505,7 +505,7 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<entry|target|doer|install|agents|daemon|connect|reach-*|pair|brief*|agent-pair*|elsewhere|\n' +
+          '    setup-<entry|target|doer|install|agents|daemon|reach-*|pair|brief*|agent-pair*|elsewhere|\n' +
           '    scan|done>-\n' +
           '    <mobile|desktop>\n' +
           '    and setup-scan-keyboard-mobile\n' +
@@ -537,18 +537,18 @@ try {
        * could no longer disagree with the code.
        */
       /*
-       * A CONNECTION IS ANSWERED, NOT ADVANCED PAST. The carrier step is a chooser
-       * of its own since the pairing/connection split, so a journey that has to
-       * get beyond it names the row it presses. Walking it any other way stops on
-       * that screen and every later capture times out — which is exactly how this
-       * driver reported the split when it landed.
+       * THERE IS NO CARRIER STEP TO ANSWER. Direct is tried first and the hosted
+       * relay is the automatic fallback, so `daemon` advances straight to
+       * `local`. A journey that still named a carrier row would time out on a
+       * button that no longer exists — which is how this driver would report the
+       * chooser coming back.
        */
       /*
        * A JOURNEY THAT ONLY A COMPUTER CAN WALK SAYS SO, and is skipped LOUDLY on
        * the phone pass rather than driven until it times out.
        *
        * This is the whole point of the unit rather than a harness convenience: a
-       * phone cannot host a daemon, so `install`, `daemon`, `connect`, `local` and
+       * phone cannot host a daemon, so `install`, `daemon`, `local` and
        * the offer to add a phone do not exist on one. Before the phone captures had
        * a phone user agent they all "worked" at 390px, which is exactly the lie
        * those images were telling. Narrow-width readings of those stages are still
@@ -564,7 +564,6 @@ try {
          */
         { name: 'agents', on: 'desktop', route: 'first-time', doer: 'self', advances: 1, screen: 'agents' },
         { name: 'daemon', on: 'desktop', route: 'first-time', doer: 'self', advances: 2, screen: 'daemon' },
-        { name: 'connect', on: 'desktop', route: 'first-time', doer: 'self', advances: 3, screen: 'connect' },
         /*
          * `pair` — run `fy pair` somewhere else — belongs to the pairing entry. It
          * was pointed at first-time with a carrier answer, which since the
@@ -572,15 +571,7 @@ try {
          * step that journey does not have.
          */
         { name: 'pair', on: 'both', route: 'add-client', advances: 0, screen: 'pair' },
-        {
-          name: 'local',
-          on: 'desktop',
-          route: 'first-time',
-          doer: 'self',
-          advances: 3,
-          screen: 'local',
-          connection: 'direct',
-        },
+        { name: 'local', on: 'desktop', route: 'first-time', doer: 'self', advances: 3, screen: 'local' },
         /* An agent on this machine: the prompt, then a pairing that may already be done. */
         { name: 'brief', on: 'desktop', route: 'first-time', doer: 'agent', advances: 0, screen: 'brief' },
         { name: 'agent-pair', on: 'desktop', route: 'first-time', doer: 'agent', advances: 1, screen: 'agent-pair' },
@@ -653,10 +644,6 @@ try {
         }
         for (let advance = 0; advance < journey.advances; advance += 1) {
           await page.locator('[data-onboarding-next]').first().click();
-        }
-        const connection = 'connection' in journey ? journey.connection : undefined;
-        if (connection !== undefined) {
-          await page.locator(`[data-onboarding-connection="${connection}"]`).click();
         }
         await page.locator(setupStep(journey.screen)).waitFor({ state: 'visible' });
       };
@@ -762,9 +749,9 @@ try {
       }
 
       /*
-       * 2b. THE CARRIER STEP'S THREE ANSWERS.
+       * 2b. THE HOSTED RELAY'S THREE ANSWERS, ON THE DAEMON STEP.
        *
-       * The recommended row reports a runtime fact — whether Ferretry's default
+       * The connection note reports a runtime fact — whether Ferretry's hosted
        * relay is advertising itself — so the three frames that matter are the
        * three answers, and they must not look alike. Two are driven by fulfilling
        * the real request the shipped code makes against the build's own directory
@@ -772,9 +759,9 @@ try {
        * off-origin abort makes it fail exactly as an unreachable directory would.
        * Nothing is faked into the component.
        *
-       * ON A COMPUTER ONLY, because the question belongs to the machine that is
+       * ON A COMPUTER ONLY, because the note belongs to the machine that is
        * standing the daemon up and no phone ever is one. The narrow reading of this
-       * chooser still matters — a 390px window on a computer reaches it — and that
+       * note still matters — a 390px window on a computer reaches it — and that
        * is what the gallery in `harness/screenshot.ts` captures.
        */
       const RELAY_ANSWERS = [
@@ -795,11 +782,11 @@ try {
                 });
               });
             }
-            await toStep(page, journey('connect'));
+            await toStep(page, journey('daemon'));
             // The readout arrives after first paint, so wait for the state the
             // shipped parser resolved rather than for a timeout.
             await page
-              .locator(`[data-onboarding-connection-chooser][data-onboarding-fallback="${answer.name}"]`)
+              .locator(`[data-onboarding-connection-note][data-onboarding-fallback="${answer.name}"]`)
               .waitFor({ state: 'visible' });
             await shot(page, `setup-reach-${answer.name}-${viewport.name}`);
           });

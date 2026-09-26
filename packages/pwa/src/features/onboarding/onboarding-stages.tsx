@@ -45,7 +45,6 @@ import {
   installChannel,
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
-  PAIR_PRINT_COMMAND,
   type SetupTargetId,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
@@ -280,63 +279,6 @@ export function DaemonStage({ write }: { readonly write: ClipboardWriter }) {
           Installs the user service and starts the daemon under it.
         </p>
       </Aside>
-    </div>
-  );
-}
-
-/** The detailed self-host path mirrors the relay runbook one operation at a time. */
-export function RelayFingerprintStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      <CommandBlock command={PAIR_PRINT_COMMAND} copyLabel="Copy fingerprint command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        Copy the <code className="font-mono text-syn-string">fy_daemon_…</code> fingerprint it prints. You will allow it
-        at your relay next; make a fresh pairing code later.
-      </p>
-    </div>
-  );
-}
-
-export function RelaySourceStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      <CommandBlock
-        command="git clone https://github.com/kirinnee/ferretry"
-        copyLabel="Copy clone command"
-        write={write}
-      />
-      <p className="m-0 text-meta leading-base text-muted">
-        Run the remaining relay commands from that checkout, using your own Cloudflare account.
-      </p>
-    </div>
-  );
-}
-
-export function RelayAllowStage() {
-  return (
-    <div className={STAGE}>
-      <p className="m-0 text-meta leading-base text-muted">
-        In <code className="font-mono text-syn-string">packages/relay/wrangler.jsonc</code>, set{' '}
-        <code className="font-mono text-syn-string">vars.RELAY_DAEMON_IDS</code> to the fingerprint you copied. An empty
-        list serves nobody.
-      </p>
-      <Aside summary="Why this is required">
-        <p className="m-0 text-meta leading-base text-muted">
-          Your relay cannot read what it carries, so the fingerprint list is its access control. Read the relay protocol
-          runbook before making the deployment public.
-        </p>
-      </Aside>
-    </div>
-  );
-}
-
-export function RelayDeployStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      <CommandBlock command="task relay:deploy" copyLabel="Copy deploy command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        This deploys a Worker and Durable Object to your account. Continue when the deploy has finished.
-      </p>
     </div>
   );
 }
@@ -651,12 +593,10 @@ export interface DoneStageProps {
   readonly fleetReady: boolean;
   readonly connectionStatus: string | null;
   /**
-   * What the carrier the reader CHOSE would be able to see.
+   * What the hosted relay would be able to see, if it ever carried this connection.
    *
-   * Absent for a direct connection, which has no third party in it. Restated
-   * here rather than left behind on the chooser because that choice was made
-   * several screens — and possibly several days — before anything was connected,
-   * and this is the screen where the connection becomes real.
+   * Restated here, where the connection becomes real, because the daemon step
+   * that first said it may be several screens — and possibly several days — back.
    */
   readonly fallbackDisclosure?: CarrierDisclosure | null;
   readonly onOpenFleet: () => void;

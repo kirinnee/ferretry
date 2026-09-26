@@ -23,20 +23,16 @@ import {
   AGENT_HARNESSES,
   agentHarness,
   agentSetupPrompt,
-  CONNECTION_METHODS,
-  connectionMethod,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
   DAEMON_STATUS_COMMAND,
-  DEFAULT_CONNECTION_METHOD,
   detectInstallChannel,
   firstOnboardingStep,
   furthestOnboardingStep,
   handoffTarget,
   INSTALL_CHANNELS,
   installChannel,
-  isConnectionMethodId,
   isDaemonRouteId,
   isLastOnboardingStep,
   isOnboardingDoerId,
@@ -60,8 +56,6 @@ import {
   pairingOnboardingStep,
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
-  PAIR_PRINT_COMMAND,
-  pathConnection,
   presumedTarget,
   previousOnboardingStep,
   questionBehindDoer,
@@ -78,12 +72,11 @@ const repoFile = async (path: string): Promise<string> =>
 const installationDoc = await repoFile('INSTALLATION.md');
 
 /** A daemon standing up on the machine reading the page, installed by hand. */
-const here = (route: 'first-time' | 'add-daemon' = 'first-time', connection?: 'own-relay'): OnboardingPath => ({
+const here = (route: 'first-time' | 'add-daemon' = 'first-time'): OnboardingPath => ({
   route,
   target: 'this',
   doer: 'self',
   device: 'desktop',
-  ...(connection === undefined ? {} : { connection }),
 });
 
 /** The same by hand, but the daemon lives somewhere the reader has to walk to. */
@@ -201,7 +194,7 @@ describe('the agents Ferretry runs', () => {
     // Not a fourth question — there is nothing here to decide — and not after the
     // daemon, which would tell the reader something was missing at the one moment
     // they were being congratulated for starting it.
-    for (const path of [here(), here('add-daemon'), here('first-time', 'own-relay')]) {
+    for (const path of [here(), here('add-daemon')]) {
       expect(onboardingRouteSteps(path)).toContain('agents');
       expect(onboardingStepIndex(path, 'agents')).toBeLessThan(onboardingStepIndex(path, 'daemon'));
       expect(onboardingStepIndex(path, 'install')).toBeLessThan(onboardingStepIndex(path, 'agents'));
@@ -271,24 +264,9 @@ describe('the entry question', () => {
 describe('the steps each set of answers walks', () => {
   it('collapses pairing when the daemon is on the machine reading the page', () => {
     // No `pair`, no `scan`: this browser IS a client of that daemon already.
-    expect(onboardingRouteSteps(here('add-daemon'))).toEqual([
-      'install',
-      'agents',
-      'daemon',
-      'connect',
-      'local',
-      'done',
-    ]);
+    expect(onboardingRouteSteps(here('add-daemon'))).toEqual(['install', 'agents', 'daemon', 'local', 'done']);
     expect(onboardingRouteSteps(here('add-daemon'))).not.toContain('scan');
-    expect(onboardingRouteSteps(here())).toEqual([
-      'install',
-      'agents',
-      'daemon',
-      'connect',
-      'local',
-      'handoff',
-      'done',
-    ]);
+    expect(onboardingRouteSteps(here())).toEqual(['install', 'agents', 'daemon', 'local', 'handoff', 'done']);
   });
 
   it('offers the phone afterwards only when the reader is standing at the daemon', () => {
@@ -335,28 +313,30 @@ describe('the steps each set of answers walks', () => {
     }
   });
 
-  it('shows the self-host detour on the track rather than hiding it', () => {
-    expect(onboardingRouteSteps(here('first-time', 'own-relay'))).toEqual([
-      'install',
-      'agents',
-      'daemon',
-      'connect',
-      'relay-fingerprint',
-      'relay-source',
-      'relay-allow',
-      'relay-deploy',
-      'local',
-      'handoff',
-      'done',
-    ]);
-    expect(onboardingStepCount(here('first-time', 'own-relay'))).toBeGreaterThan(onboardingStepCount(here()));
-  });
-
-  it('reports a carrier answer only for a journey that has one', () => {
-    expect(pathConnection(here('first-time', 'own-relay'))).toBe('own-relay');
-    expect(pathConnection(here())).toBeUndefined();
-    // The pairing entry is never asked, so it cannot report one either.
-    expect(pathConnection(client())).toBeUndefined();
+  it('never asks a stranger how other devices will reach the daemon', () => {
+    // Direct is tried first and the hosted relay is the automatic fallback, so
+    // there is no carrier question and no self-hosting detour on ANY journey —
+    // the daemon step leads straight to pairing. Running your own relay is an
+    // expert runbook outside first run, not a step.
+    const everyJourney: readonly OnboardingPath[] = [
+      here(),
+      here('add-daemon'),
+      away('desktop'),
+      away('mobile'),
+      byAgent('this'),
+      byAgent('other', 'mobile'),
+      client('desktop'),
+      client('mobile'),
+    ];
+    for (const path of everyJourney) {
+      for (const gone of ['connect', 'relay-fingerprint', 'relay-source', 'relay-allow', 'relay-deploy']) {
+        expect(onboardingRouteSteps(path)).not.toContain(gone as never);
+      }
+    }
+    expect(nextOnboardingStep(here(), 'daemon')).toBe('local');
+    for (const gone of ['connect', 'relay-fingerprint', 'relay-source', 'relay-allow', 'relay-deploy']) {
+      expect(isOnboardingStepId(gone)).toBe(false);
+    }
   });
 
   it('opens every journey on its own first step', () => {
@@ -368,15 +348,14 @@ describe('the steps each set of answers walks', () => {
   });
 
   it('knows which steps belong to which journey', () => {
-    expect(isStepOfRoute(here(), 'connect')).toBe(true);
-    // `connect` is a daemon-side decision; a client never chooses a carrier, and
-    // neither does a reader whose daemon is on another machine.
-    expect(isStepOfRoute(client(), 'connect')).toBe(false);
-    expect(isStepOfRoute(away(), 'connect')).toBe(false);
+    expect(isStepOfRoute(here(), 'local')).toBe(true);
+    // `local` is the same-machine collapse; neither a client nor a reader whose
+    // daemon is on another machine walks it.
+    expect(isStepOfRoute(client(), 'local')).toBe(false);
+    expect(isStepOfRoute(away(), 'local')).toBe(false);
     expect(isStepOfRoute(here(), 'install')).toBe(true);
     expect(isStepOfRoute(away('desktop'), 'install')).toBe(false);
-    expect(onboardingStepIndex(here(), 'local')).toBe(4);
-    expect(onboardingStepIndex(here('first-time', 'own-relay'), 'relay-deploy')).toBe(7);
+    expect(onboardingStepIndex(here(), 'local')).toBe(3);
     expect(onboardingStepIndex(client(), 'install')).toBe(-1);
   });
 
@@ -384,12 +363,10 @@ describe('the steps each set of answers walks', () => {
     expect(nextOnboardingStep(here(), 'install')).toBe('agents');
     expect(nextOnboardingStep(here(), 'agents')).toBe('daemon');
     expect(nextOnboardingStep(here(), 'local')).toBe('handoff');
-    expect(nextOnboardingStep(here('first-time', 'own-relay'), 'connect')).toBe('relay-fingerprint');
     expect(nextOnboardingStep(client(), 'done')).toBe('done');
     expect(nextOnboardingStep(away(), 'elsewhere')).toBe('scan');
-    expect(previousOnboardingStep(here(), 'local')).toBe('connect');
+    expect(previousOnboardingStep(here(), 'local')).toBe('daemon');
     expect(previousOnboardingStep(here(), 'daemon')).toBe('agents');
-    expect(previousOnboardingStep(here('first-time', 'own-relay'), 'local')).toBe('relay-deploy');
     expect(previousOnboardingStep(client(), 'pair')).toBe('pair');
     expect(furthestOnboardingStep(here(), 'daemon', 'local')).toBe('local');
     expect(furthestOnboardingStep(here(), 'done', 'install')).toBe('done');
@@ -423,7 +400,7 @@ describe('the steps each set of answers walks', () => {
   });
 
   it('names every step it can put on the glass, and nothing else', () => {
-    expect(onboardingStep('connect').title).toBe('Choose a connection');
+    expect(onboardingStep('daemon').title).toBe('Start the daemon');
     expect(onboardingStep('local').summary).toContain('nothing to scan');
     expect(onboardingStep('elsewhere').title).toBe('Open Ferretry on that computer');
     expect(onboardingStep('handoff').short).toBe('Phone');
@@ -546,7 +523,6 @@ describe('install channels', () => {
     expect(DAEMON_STATUS_COMMAND).toBe('fy daemon status');
     expect(PAIR_COMMAND).toBe('fy pair');
     expect(PAIR_OPEN_COMMAND).toBe('fy pair --open');
-    expect(PAIR_PRINT_COMMAND).toBe('fy pair --no-wait');
     expect(DAEMON_SERVING_OUTPUT).toBe('fyd is serving');
   });
 
@@ -562,37 +538,6 @@ describe('install channels', () => {
     expect(detectInstallChannel('Mozilla/5.0 (Linux; Android 14; Pixel 8)')).toBe('curl');
     expect(detectInstallChannel('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe('curl');
     expect(detectInstallChannel(undefined)).toBe('curl');
-  });
-});
-
-describe('the connection chooser', () => {
-  it('offers the three routes, with the default relay leading', () => {
-    expect(CONNECTION_METHODS.map(method => method.id)).toEqual(['default-relay', 'own-relay', 'direct']);
-    for (const method of CONNECTION_METHODS) {
-      expect(connectionMethod(method.id)).toBe(method);
-      expect(method.answer.length).toBeGreaterThan(0);
-    }
-    expect(DEFAULT_CONNECTION_METHOD).toBe('default-relay');
-    expect(connectionMethod('default-relay').recommended).toBe(true);
-  });
-
-  it('keeps direct explicit without making it a preference setting', () => {
-    const direct = connectionMethod('direct');
-    expect(direct.title).toBe('Direct connection');
-    expect(direct.answer).toContain('VPN');
-  });
-
-  it('makes self-hosting a longer route, not a hidden paragraph', () => {
-    const own = connectionMethod('own-relay');
-    expect(own.title).toContain('own relay');
-    expect(onboardingStepCount(here('first-time', 'own-relay'))).toBeGreaterThan(onboardingStepCount(here()));
-    expect(PAIR_PRINT_COMMAND).toBe('fy pair --no-wait');
-  });
-
-  it('accepts only the three connection ids back from storage', () => {
-    expect(isConnectionMethodId('own-relay')).toBe(true);
-    expect(isConnectionMethodId('tunnel')).toBe(false);
-    expect(isConnectionMethodId(null)).toBe(false);
   });
 });
 

@@ -244,7 +244,6 @@ const SECTIONS = [
   // Codex and is neither, so a daemon with both missing starts and can do nothing.
   'harness-onboarding-agents',
   'harness-onboarding-daemon',
-  'harness-onboarding-connect',
   // The same-machine collapse, and the one screen that stands in for the whole
   // "another computer, by hand" branch — the same on a phone and on a computer.
   'harness-onboarding-local',

@@ -251,11 +251,6 @@ export type OnboardingStepId =
   | 'install'
   | 'agents'
   | 'daemon'
-  | 'connect'
-  | 'relay-fingerprint'
-  | 'relay-source'
-  | 'relay-allow'
-  | 'relay-deploy'
   | 'local'
   | 'elsewhere'
   | 'handoff'
@@ -319,36 +314,6 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     short: 'Daemon',
     summary: 'Leave it running. It does the work.',
   }),
-  connect: Object.freeze({
-    id: 'connect' as const,
-    title: 'Choose a connection',
-    short: 'Connect',
-    summary: 'Choose how other devices will reach this machine.',
-  }),
-  'relay-fingerprint': Object.freeze({
-    id: 'relay-fingerprint' as const,
-    title: 'Get its fingerprint',
-    short: 'Fingerprint',
-    summary: 'Print the daemon identity your relay will allow.',
-  }),
-  'relay-source': Object.freeze({
-    id: 'relay-source' as const,
-    title: 'Get relay source',
-    short: 'Source',
-    summary: 'Get the deployment source.',
-  }),
-  'relay-allow': Object.freeze({
-    id: 'relay-allow' as const,
-    title: 'Allow your daemon',
-    short: 'Allow',
-    summary: 'Add that fingerprint to your relay configuration.',
-  }),
-  'relay-deploy': Object.freeze({
-    id: 'relay-deploy' as const,
-    title: 'Deploy your relay',
-    short: 'Deploy',
-    summary: 'Deploy the Cloudflare Worker from your account.',
-  }),
   local: Object.freeze({
     id: 'local' as const,
     title: 'Open it from your terminal',
@@ -402,54 +367,13 @@ export const onboardingStep = (id: OnboardingStepId): OnboardingStep => STEPS[id
 export const isOnboardingStepId = (value: unknown): value is OnboardingStepId =>
   typeof value === 'string' && Object.hasOwn(STEPS, value);
 
-export type ConnectionMethodId = 'default-relay' | 'own-relay' | 'direct';
-
-export interface ConnectionMethod {
-  readonly id: ConnectionMethodId;
-  readonly title: string;
-  readonly answer: string;
-  readonly recommended?: true;
-}
-
-const CONNECTIONS: Readonly<Record<ConnectionMethodId, ConnectionMethod>> = Object.freeze({
-  'default-relay': Object.freeze({
-    id: 'default-relay' as const,
-    title: 'Use the default relay',
-    answer: 'Recommended. Works from anywhere, with nothing for you to deploy.',
-    recommended: true as const,
-  }),
-  'own-relay': Object.freeze({
-    id: 'own-relay' as const,
-    title: 'Set up my own relay',
-    answer: 'Deploy a Cloudflare relay in your own account, step by step.',
-  }),
-  direct: Object.freeze({
-    id: 'direct' as const,
-    title: 'Direct connection',
-    answer: 'Use the same network, a VPN, or any daemon host this browser can reach.',
-  }),
-});
-
-export const CONNECTION_METHODS: readonly ConnectionMethod[] = Object.freeze([
-  CONNECTIONS['default-relay'],
-  CONNECTIONS['own-relay'],
-  CONNECTIONS.direct,
-]);
-
-export const DEFAULT_CONNECTION_METHOD: ConnectionMethodId = 'default-relay';
-
-export const connectionMethod = (id: ConnectionMethodId): ConnectionMethod => CONNECTIONS[id];
-
-export const isConnectionMethodId = (value: unknown): value is ConnectionMethodId =>
-  typeof value === 'string' && Object.hasOwn(CONNECTIONS, value);
-
 /**
  * EVERY DECISION THAT DECIDES A LIST OF STEPS, as a closed union.
  *
  * A UNION RATHER THAN OPTIONAL FIELDS, because the pairing entry genuinely has no
  * target and no doer while the daemon subflow cannot proceed without both. A
- * single record with three optional fields is a record with states that must
- * never happen — `add-client` carrying a connection answer, `first-time` walking
+ * single record with optional fields is a record with states that must never
+ * happen — `add-client` carrying a doer, `first-time` walking
  * an install step with nobody assigned to run it — and every reader of it would
  * have to decide what those mean. This shape cannot hold them, so nothing
  * downstream has to defend against them.
@@ -460,8 +384,6 @@ export type OnboardingJourney =
       readonly route: OnboardingDaemonRouteId;
       readonly target: SetupTargetId;
       readonly doer: OnboardingDoerId;
-      /** The connection chooser's answer. Only a daemon standing up HERE is asked it. */
-      readonly connection?: ConnectionMethodId | undefined;
     };
 
 /**
@@ -473,10 +395,6 @@ export type OnboardingJourney =
  * answer for the wrong kind of machine.
  */
 export type OnboardingPath = OnboardingJourney & { readonly device: DeviceKind };
-
-/** The carrier answer, when this journey is one that has one. */
-export const pathConnection = (path: OnboardingJourney): ConnectionMethodId | undefined =>
-  path.route === 'add-client' ? undefined : path.connection;
 
 /** What the step header calls this journey. */
 export const journeyLabel = (path: OnboardingJourney): string => JOURNEY[path.route];
@@ -509,14 +427,6 @@ export const presumedTarget = (route: OnboardingDaemonRouteId, device: DeviceKin
   return basis === 'assumed' ? 'this' : undefined;
 };
 
-/** The four extra stages a self-hosted relay costs, inserted where the choice was made. */
-const OWN_RELAY_STEPS: readonly OnboardingStepId[] = Object.freeze([
-  'relay-fingerprint',
-  'relay-source',
-  'relay-allow',
-  'relay-deploy',
-]);
-
 /**
  * Standing up a daemon ON THIS MACHINE, and the collapse that makes it short.
  *
@@ -526,22 +436,26 @@ const OWN_RELAY_STEPS: readonly OnboardingStepId[] = Object.freeze([
  * on the same machine opens this app already paired. Making somebody photograph
  * their own screen is the single most common first-run indignity, and it exists
  * only because the old arc could not tell the two machines apart.
+ *
+ * THERE IS NO CARRIER QUESTION IN IT. Direct is attempted first and Ferretry's
+ * hosted relay is the automatic fallback (`docs/relay-protocol.md` §13), so a
+ * stranger is never asked to pick between direct, the hosted relay and a relay
+ * of their own — a question they cannot answer and did not need to. Running
+ * your own relay is an expert path with its own runbook,
+ * `docs/cloudflare-relay-self-hosting.md`, and never a step here.
  */
-const daemonSteps = (connection: ConnectionMethodId | undefined): readonly OnboardingStepId[] =>
-  Object.freeze([
-    'install',
-    /*
-     * BEFORE the daemon starts, so its own boot preflight reports the harness the
-     * reader just installed rather than a gap they have to come back for. A daemon
-     * that came up first would have told them something was missing at the one
-     * moment they were being congratulated for starting it.
-     */
-    'agents',
-    'daemon',
-    'connect',
-    ...(connection === 'own-relay' ? OWN_RELAY_STEPS : []),
-    'local',
-  ] as OnboardingStepId[]);
+const DAEMON_STEPS: readonly OnboardingStepId[] = Object.freeze([
+  'install',
+  /*
+   * BEFORE the daemon starts, so its own boot preflight reports the harness the
+   * reader just installed rather than a gap they have to come back for. A daemon
+   * that came up first would have told them something was missing at the one
+   * moment they were being congratulated for starting it.
+   */
+  'agents',
+  'daemon',
+  'local',
+] as OnboardingStepId[]);
 
 /**
  * The steps this journey walks.
@@ -562,7 +476,7 @@ export const onboardingRouteSteps = (path: OnboardingPath): readonly OnboardingS
   if (path.doer === 'agent') return Object.freeze(['brief', 'agent-pair', 'done'] as OnboardingStepId[]);
   if (path.target === 'other') return Object.freeze(['elsewhere', 'scan', 'done'] as OnboardingStepId[]);
   return Object.freeze([
-    ...daemonSteps(path.connection),
+    ...DAEMON_STEPS,
     ...(path.route === 'first-time' ? (['handoff'] as OnboardingStepId[]) : []),
     'done',
   ] as OnboardingStepId[]);
@@ -879,8 +793,6 @@ export const DAEMON_INSTALL_COMMAND = 'fy daemon install';
 export const DAEMON_STATUS_COMMAND = 'fy daemon status';
 /** Mints the single-use code this browser redeems. */
 export const PAIR_COMMAND = 'fy pair';
-/** Prints the code and this daemon's fingerprint without staying to watch for the scan. */
-export const PAIR_PRINT_COMMAND = 'fy pair --no-wait';
 /**
  * Pairs the browser ON THIS MACHINE, with nothing to scan.
  *
