@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { FleetManifestSummary } from '@ferretry/protocol';
 
 import {
+  accountLabel,
   type AccountUsageRow,
   accountPickerOptions,
   accountQuotaSummary,
@@ -326,5 +327,21 @@ describe('projectPickerOptions', () => {
     expect(catalog.registered?.[0]?.searchText).toContain('/work/repo');
     expect(catalog.recent?.[0]?.searchText).toContain('recent');
     expect(catalog.recent?.[0]?.searchText).toContain('/work/elsewhere');
+  });
+});
+
+describe('accountLabel', () => {
+  it('leads with the fleet’s name and keeps the wrapper id as the second fact', () => {
+    expect(accountLabel({ displayName: 'Claude (default, auto)', wrapper: 'claude-auto-default' })).toEqual({
+      name: 'Claude (default, auto)',
+      id: 'claude-auto-default',
+    });
+  });
+
+  it('drops the id when the manifest published it as the name', () => {
+    expect(accountLabel({ displayName: 'claude-auto-bare', wrapper: 'claude-auto-bare' })).toEqual({
+      name: 'claude-auto-bare',
+      id: null,
+    });
   });
 });
