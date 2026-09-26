@@ -10,8 +10,10 @@ import {
   type SelfRestartHandler,
   type SelfRestartStamp,
   type SelfRestartStampStore,
+  type SessionExitObservation,
   type SessionHealthEvent,
   type SessionHealthPorts,
+  type ExitedSessionTransition,
 } from '../../../../src/lib/session/health/index.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
@@ -50,6 +52,10 @@ class Harness {
   rearms = 0;
   restarts = 0;
   elapsed = 1_000_000;
+  exitObservations: readonly SessionExitObservation[] | Error = [];
+  readonly settled: { readonly id: string; readonly transition: ExitedSessionTransition }[] = [];
+  /** Sessions whose settle answers false (moved since), or throws when mapped to an Error. */
+  readonly settleRefusals = new Map<string, false | Error>();
 
   constructor(
     private readonly snapshots: DaemonHealthSnapshot,
@@ -81,6 +87,19 @@ class Harness {
     return {
       inventory: { observe: async () => this.snapshots },
       consistency: this.consistency,
+      exits: {
+        observe: async () => {
+          if (this.exitObservations instanceof Error) throw this.exitObservations;
+          return this.exitObservations;
+        },
+        settle: async (observation, transition) => {
+          const refusal = this.settleRefusals.get(observation.id);
+          if (refusal instanceof Error) throw refusal;
+          if (refusal === false) return false;
+          this.settled.push({ id: observation.id, transition });
+          return true;
+        },
+      },
       repair: {
         startMonitor: async id => {
           if (this.failures.has(id)) throw new Error(`tmux refused ${id}`);
@@ -291,5 +310,85 @@ describe('session health service', () => {
 
     // Assert
     should(actual.wardenRearmed).be.true();
+  });
+
+  describe('when the agent of a running session has exited', () => {
+    const registration = {
+      daemonId: 'daemon',
+      sessionId: 'exited',
+      tmuxSession: 'fy-exited',
+      paneId: '%3',
+      pid: 4242,
+      processStartTicks: 99,
+    };
+    const exitedWith = (id: string, exitStatus: number | undefined, status = 'running'): SessionExitObservation => ({
+      id,
+      status,
+      registration: { ...registration, sessionId: id },
+      exit: { kind: 'exited', exitStatus },
+    });
+
+    it('should move it to a terminal status within the same tick', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      harness.exitObservations = [exitedWith('exited', 3)];
+
+      // Act
+      const actual = await harness.service().selfCheck();
+
+      // Assert
+      should(actual.exited).deepEqual(['exited']);
+      should(harness.settled).deepEqual([
+        {
+          id: 'exited',
+          transition: {
+            status: 'failed',
+            health: 'crashed',
+            reason: 'the agent exited on its own (exit status 3)',
+            exitCode: 3,
+          },
+        },
+      ]);
+    });
+
+    it('should leave a session whose status stopped claiming a live agent alone', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      harness.exitObservations = [exitedWith('stopped-meanwhile', 0, 'stopped')];
+
+      // Act
+      const actual = await harness.service().selfCheck();
+
+      // Assert
+      should(actual.exited).deepEqual([]);
+      should(harness.settled).deepEqual([]);
+    });
+
+    it('should keep settling the rest when one settle refuses or throws', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      harness.exitObservations = [exitedWith('moved', 1), exitedWith('broken', 1), exitedWith('exited', 0)];
+      harness.settleRefusals.set('moved', false);
+      harness.settleRefusals.set('broken', new Error('state is unwritable'));
+
+      // Act
+      const actual = await harness.service().selfCheck();
+
+      // Assert
+      should(actual.exited).deepEqual(['exited']);
+    });
+
+    it('should finish the self-check when the exit observation itself fails', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      harness.exitObservations = new Error('tmux is not installed');
+
+      // Act
+      const actual = await harness.service().selfCheck();
+
+      // Assert
+      should(actual.exited).deepEqual([]);
+      should(actual.escalated).be.false();
+    });
   });
 });

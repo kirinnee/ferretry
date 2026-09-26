@@ -167,6 +167,7 @@ import {
 import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
+  TmuxSessionExitObserver,
   ExactTmuxPaneReaper,
   FileSessionEnvironmentStore,
   FileSessionTaskStore,
@@ -4986,7 +4987,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * the SAME tmux server. Two controllers over the same socket would work; one is what makes it
    * impossible for a future edit to point delivery at a different pane than the launch created.
    */
-  const launchTmux = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
+  const launchTmuxCommands = new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'));
+  const launchTmux = new TmuxController(launchTmuxCommands);
   /**
    * The per-harness workarounds, held as a local because TWO things read them: the world publishes
    * it, and the runtime-control subsystem below plans every switch through it. A second construction
@@ -5181,6 +5183,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           }),
           consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings),
           repair: new UnmountedSupervisionRepair(),
+          // The same private server, registration ledger and launch gate the lifecycle and the revive
+          // use, so an exit is only ever proven against a pane this daemon registered and never while
+          // one of its own launches is replacing it.
+          exits: new TmuxSessionExitObserver(
+            paths.home,
+            storage,
+            new DurableTerminalPaneStore(storage, stateFiles, paths),
+            launchTmuxCommands,
+            launchGate,
+            clock,
+          ),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
           clock,
           wallClock: { nowMs: () => Date.now() },

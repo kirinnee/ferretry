@@ -1,4 +1,5 @@
 import type { ClockPort } from '../../ports.ts';
+import { type ExitedSessionTransition, exitedSessionTransition, type SessionExitObservation } from './exit.ts';
 import { emptyIncoherenceLedger, recordIncoherencePass } from './incoherence.ts';
 import { buildDaemonHealthReport, type DaemonHealthReport } from './report.ts';
 import { SelfRestartCoordinator } from './self-restart.ts';
@@ -45,6 +46,22 @@ export interface SessionHealthRepairPort {
   rearmWarden(): Promise<void>;
 }
 
+/**
+ * Proving which sessions' registered panes no longer hold a running agent, and recording it.
+ *
+ * Read-only against tmux: an implementation lists nothing but registered panes, and neither half
+ * may kill or launch anything — the whole pass must be free to run on a timer.
+ */
+export interface SessionExitPort {
+  /** Sessions whose status claims a live agent while their registered pane is proven dead or gone. */
+  observe(): Promise<readonly SessionExitObservation[]>;
+  /**
+   * Records the transition, but only if the session still reads as it was observed. Resolves false
+   * when anything moved in between — a resume that relaunched it wins, and is left alone.
+   */
+  settle(observation: SessionExitObservation, transition: ExitedSessionTransition): Promise<boolean>;
+}
+
 export interface SessionHealthEventSink {
   emit(event: SessionHealthEvent): Promise<void>;
 }
@@ -53,6 +70,7 @@ export interface SessionHealthPorts {
   readonly inventory: SessionHealthInventory;
   readonly consistency: ConsistencyPassPort;
   readonly repair: SessionHealthRepairPort;
+  readonly exits: SessionExitPort;
   readonly events: SessionHealthEventSink;
   readonly clock: ClockPort;
   /** Wall milliseconds, for ageing durable timestamps only. */
@@ -72,6 +90,8 @@ export interface SelfCheckOutcome {
   readonly failures: ReadonlyMap<string, string>;
   readonly wardenRearmed: boolean;
   readonly escalated: boolean;
+  /** Sessions this check moved out of a running status because their agent had exited. */
+  readonly exited: readonly string[];
 }
 
 function message(error: unknown): string {
@@ -117,6 +137,9 @@ export class SessionHealthService {
     // The consistency pass runs before repair: starting a monitor for a session the index does not
     // know about would write its observations into a row that is about to be replaced.
     const escalated = await this.reconcile(planned.plan.deepPass, nowMs);
+    // After the consistency pass for the same reason repair is: a row about to be replaced is not
+    // one to write a terminal status into.
+    const exited = await this.settleExits();
     const repaired: string[] = [];
     const failures = new Map<string, string>();
     for (const id of planned.plan.startMonitors) {
@@ -134,6 +157,7 @@ export class SessionHealthService {
       failures: failures as ReadonlyMap<string, string>,
       wardenRearmed,
       escalated,
+      exited,
     };
   }
 
@@ -169,6 +193,24 @@ export class SessionHealthService {
     });
     if (restart.event) await this.emit(restart.event);
     return restart.outcome === 'restarting';
+  }
+
+  /**
+   * Moves every session whose agent has exited out of its running status.
+   *
+   * Each session settles inside its own boundary, like each repair: one unwritable record must not
+   * leave every other exited session reading `running`. A pass that could not observe at all is
+   * simply retried by the next tick, which is at most one interval away.
+   */
+  private async settleExits(): Promise<readonly string[]> {
+    const observed = await this.ports.exits.observe().catch(() => [] as readonly SessionExitObservation[]);
+    const exited: string[] = [];
+    for (const observation of observed) {
+      const transition = exitedSessionTransition(observation);
+      if (transition === undefined) continue;
+      if (await this.ports.exits.settle(observation, transition).catch(() => false)) exited.push(observation.id);
+    }
+    return exited;
   }
 
   private async rearmWarden(): Promise<boolean> {

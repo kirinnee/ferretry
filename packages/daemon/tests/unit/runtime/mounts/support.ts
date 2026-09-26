@@ -950,6 +950,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
   let elapsedMs = 0;
   const service = new SessionHealthService(
     {
+      exits: { observe: async () => [], settle: async () => false },
       inventory: {
         observe: async () => ({
           sessions: world.sessions ?? [],

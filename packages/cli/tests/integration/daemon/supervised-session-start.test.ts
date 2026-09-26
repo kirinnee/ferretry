@@ -80,8 +80,21 @@ async function executable(path: string, lines: readonly string[]): Promise<void>
   await chmod(path, 0o755);
 }
 
+/** What the harness does once its prompt has been answered with `go`, and how often the daemon checks. */
+interface Journey {
+  readonly afterPrompt: readonly Readonly<Record<string, unknown>>[];
+  readonly healthIntervalSeconds?: number;
+}
+
+/** A harness that sits at its prompt for the whole test, as the original journey needs. */
+const STAYS_AT_PROMPT: Journey = { afterPrompt: [] };
+
 /** The daemon's whole world: a private bin directory, a launcher for `fyd`, and a fake account. */
-async function arrange(root: string, port: number): Promise<{ bin: string; stateHome: string; fyd: string }> {
+async function arrange(
+  root: string,
+  port: number,
+  journey: Journey = STAYS_AT_PROMPT,
+): Promise<{ bin: string; stateHome: string; fyd: string }> {
   if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
   const bin = join(root, 'bin');
   const stateHome = join(root, 'state');
@@ -106,7 +119,12 @@ async function arrange(root: string, port: number): Promise<{ bin: string; state
   await opened.storage.close();
   await writeFile(
     join(stateHome, 'config', 'daemon.json'),
-    JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'https://off.example', enabled: false } }),
+    JSON.stringify({
+      host: '127.0.0.1',
+      port,
+      relay: { url: 'https://off.example', enabled: false },
+      ...(journey.healthIntervalSeconds === undefined ? {} : { healthIntervalSeconds: journey.healthIntervalSeconds }),
+    }),
     { mode: 0o600 },
   );
 
@@ -120,7 +138,8 @@ async function arrange(root: string, port: number): Promise<{ bin: string; state
       version: 1,
       steps: [
         { type: 'say', text: 'probe ready' },
-        { type: 'ask', text: '>\u001b[1A', expect: '__never__' },
+        { type: 'ask', text: '>\u001b[1A', expect: journey.afterPrompt.length === 0 ? '__never__' : 'go' },
+        ...journey.afterPrompt,
       ],
     }),
   );
@@ -168,57 +187,130 @@ async function waitForHealth(port: number, logFile: string): Promise<void> {
   throw new Error(`the daemon never answered its health probe:\n${log}`);
 }
 
+interface BootedDaemon {
+  readonly root: string;
+  readonly port: number;
+  readonly stateHome: string;
+  readonly token: string;
+  readonly logFile: string;
+}
+
+/** A real `fyd` launched by the CLI's real supervisor, as `fy daemon start` would. */
+async function boot(journey?: Journey): Promise<BootedDaemon> {
+  const root = await mkdtemp(join(tmpdir(), 'fy-sup-'));
+  roots.add(root);
+  const port = await freeLoopbackPort();
+  const { bin, stateHome, fyd } = await arrange(root, port, journey);
+  const searchPath = `${bin}:/usr/bin:/bin`;
+  // Fail closed rather than let the daemon find a real harness and copy this machine's login.
+  should(Bun.which('claude', { PATH: searchPath })).equal(null);
+  should(Bun.which('codex', { PATH: searchPath })).equal(null);
+  sockets.add(join(stateHome, 'tmux.sock'));
+  const layout = resolveDaemonLayout({
+    platform: process.platform,
+    homeDirectory: root,
+    stateHome,
+    configHome: join(root, 'config-home'),
+    stateDirectory: join(root, 'cli-state'),
+    userId: 1000,
+    daemonName: 'fyd',
+    product: 'ferretry',
+    searchPath,
+    // No locale at all: what a service manager, cron or a bare `env -i` gives the CLI.
+  });
+  const supervisor = new DirectSupervisor(
+    layout,
+    new BunDaemonProcess(),
+    new FileServiceStore(),
+    new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
+  );
+  const handle = await supervisor.start(fyd);
+  if (handle.pid !== undefined) daemons.add(handle.pid);
+  await waitForHealth(port, layout.logFile);
+  const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();
+  return { root, port, stateHome, token, logFile: layout.logFile };
+}
+
+function headers(daemon: BootedDaemon, requestId: string): Record<string, string> {
+  return {
+    authorization: `Bearer ${daemon.token}`,
+    'content-type': 'application/json',
+    'x-ferretry-client': 'cli',
+    'x-fy-request-id': requestId,
+  };
+}
+
+async function startSession(daemon: BootedDaemon): Promise<Response> {
+  return await fetch(`http://127.0.0.1:${daemon.port}/v1/sessions`, {
+    method: 'POST',
+    headers: headers(daemon, 'req-supervised-1'),
+    body: JSON.stringify({ agent: WRAPPER, mode: 'interactive', name: 'Probe', cwd: daemon.root }),
+  });
+}
+
+/** The daemon log, attached to an assertion so a failure names its cause rather than only its status. */
+async function logOf(daemon: BootedDaemon): Promise<string> {
+  const log = await readFile(daemon.logFile, 'utf8').catch(() => '');
+  return `--- ${dirname(daemon.logFile)}/fyd.log ---\n${log}`;
+}
+
 describe('a session on a daemon `fy daemon start` launched', () => {
   it('should reach running, although the supervisor hands the daemon almost no environment', async () => {
     // Arrange
-    const root = await mkdtemp(join(tmpdir(), 'fy-sup-'));
-    roots.add(root);
-    const port = await freeLoopbackPort();
-    const { bin, stateHome, fyd } = await arrange(root, port);
-    const searchPath = `${bin}:/usr/bin:/bin`;
-    // Fail closed rather than let the daemon find a real harness and copy this machine's login.
-    should(Bun.which('claude', { PATH: searchPath })).equal(null);
-    should(Bun.which('codex', { PATH: searchPath })).equal(null);
-    sockets.add(join(stateHome, 'tmux.sock'));
-    const layout = resolveDaemonLayout({
-      platform: process.platform,
-      homeDirectory: root,
-      stateHome,
-      configHome: join(root, 'config-home'),
-      stateDirectory: join(root, 'cli-state'),
-      userId: 1000,
-      daemonName: 'fyd',
-      product: 'ferretry',
-      searchPath,
-      // No locale at all: what a service manager, cron or a bare `env -i` gives the CLI.
-    });
-    const supervisor = new DirectSupervisor(
-      layout,
-      new BunDaemonProcess(),
-      new FileServiceStore(),
-      new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
-    );
-    const handle = await supervisor.start(fyd);
-    if (handle.pid !== undefined) daemons.add(handle.pid);
-    await waitForHealth(port, layout.logFile);
-    const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();
+    const daemon = await boot();
 
     // Act
-    const response = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        'x-ferretry-client': 'cli',
-        'x-fy-request-id': 'req-supervised-1',
-      },
-      body: JSON.stringify({ agent: WRAPPER, mode: 'interactive', name: 'Probe', cwd: root }),
-    });
+    const response = await startSession(daemon);
     const body = await response.text();
 
-    // Assert — the log is attached so a failure names its cause rather than only its status.
-    const log = await readFile(layout.logFile, 'utf8').catch(() => '');
-    should(response.status).equal(201, `${body}\n--- ${dirname(layout.logFile)}/fyd.log ---\n${log}`);
+    // Assert
+    should(response.status).equal(201, `${body}\n${await logOf(daemon)}`);
     should(JSON.parse(body)).match({ state: { status: 'running' } });
+  }, 60_000);
+
+  it('should stop reading running within one health interval once its harness exits', async () => {
+    // Arrange — a one-second interval stands in for the thirty-second default; the rule under test
+    // is "within one interval", and the daemon reads the operator's number rather than a constant.
+    const daemon = await boot({ afterPrompt: [{ type: 'exit', code: 3 }], healthIntervalSeconds: 1 });
+    const response = await startSession(daemon);
+    const body = await response.text();
+    should(response.status).equal(201, `${body}\n${await logOf(daemon)}`);
+    const started = JSON.parse(body) as { config: { id: string } };
+    const read = async (): Promise<{ state: Record<string, unknown> }> =>
+      (await (
+        await fetch(`http://127.0.0.1:${daemon.port}/v1/sessions/${encodeURIComponent(started.config.id)}`, {
+          headers: headers(daemon, 'req-supervised-read'),
+        })
+      ).json()) as { state: Record<string, unknown> };
+
+    // Act — answer the prompt, so the harness runs to its scripted exit exactly as a finished agent would.
+    if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
+    const socket = join(daemon.stateHome, 'tmux.sock');
+    // The wire carries no terminal name, and this private server holds exactly the one session.
+    const listed = Bun.spawn([TMUX, '-S', socket, 'list-sessions', '-F', '#{session_name}']);
+    const [terminal] = (await new Response(listed.stdout).text()).split('\n').filter(Boolean);
+    if (terminal === undefined) throw new Error(`the daemon's tmux server has no session\n${await logOf(daemon)}`);
+    await Bun.spawn([TMUX, '-S', socket, 'send-keys', '-t', terminal, '-l', 'go']).exited;
+    await Bun.spawn([TMUX, '-S', socket, 'send-keys', '-t', terminal, 'Enter']).exited;
+    const exitedAt = Date.now();
+    let actual = await read();
+    // Generous for a loaded CI host: a dead pane whose exit status tmux has not recorded yet is left
+    // running for the next tick, so the settle may take a few intervals. The old behaviour never left
+    // `running` at all, so any deadline separates the two.
+    while (actual.state.status === 'running' && Date.now() - exitedAt < 20_000) {
+      await Bun.sleep(100);
+      actual = await read();
+    }
+
+    // Assert
+    should(actual.state).match(
+      {
+        status: 'failed',
+        health: 'crashed',
+        reason: 'the agent exited on its own (exit status 3)',
+        exitCode: 3,
+      },
+      `${JSON.stringify(actual.state)}\n${await logOf(daemon)}`,
+    );
   }, 60_000);
 });
