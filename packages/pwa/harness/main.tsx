@@ -3987,6 +3987,22 @@ const HARNESS_PICKER_SESSIONS: readonly SessionView[] = [
   harnessPickerSession('picker-c', '/home/pilot/work/nitroso', '2026-07-31T10:05:00.000Z'),
 ];
 
+/**
+ * The folders the New session cards offer, from the same registry and sessions
+ * as the picker cards. The app hands the form both stores, so a capture without
+ * them showed a bare path box that a phone reader never actually sees.
+ */
+const HARNESS_NEW_SESSION_PROJECTS = new DaemonProjectsStore({
+  projects: async () => HARNESS_PICKER_REGISTRY,
+} satisfies DaemonProjectsPort);
+
+const HARNESS_NEW_SESSION_FLEET = new DaemonFleetStore({
+  list: async () => HARNESS_PICKER_SESSIONS,
+  get: async () => {
+    throw new Error('the harness never reads a single session');
+  },
+} satisfies DaemonFleetPort);
+
 const HARNESS_PICKER_PROJECT_SOURCE = projectFieldSource(
   { projects: HARNESS_PICKER_REGISTRY, status: 'ready', error: null },
   {
@@ -6803,7 +6819,9 @@ function Shell() {
           <NewSessionPage
             accounts={HARNESS_FIRST_RUN_ROSTER}
             connection={daemon}
+            fleet={HARNESS_NEW_SESSION_FLEET}
             onNavigate={() => {}}
+            projects={HARNESS_NEW_SESSION_PROJECTS}
             startSession={async () => ({ config: { id: 'harness-created-session' } })}
           />
         </section>
@@ -6817,7 +6835,9 @@ function Shell() {
           <NewSessionPage
             accounts={HARNESS_TERMINAL_ONLY_ROSTER}
             connection={daemon}
+            fleet={HARNESS_NEW_SESSION_FLEET}
             onNavigate={() => {}}
+            projects={HARNESS_NEW_SESSION_PROJECTS}
             startSession={async () => ({ config: { id: 'harness-created-session' } })}
           />
         </section>

@@ -73,6 +73,17 @@ type TextDraftField = Exclude<keyof NewSessionDraft, 'mode'>;
 
 const fieldId = (field: TextDraftField): string => `fy-new-session-${field}`;
 
+/** The sentence saying why Create is unavailable, and the button's description. */
+const CREATE_BLOCKER_ID = 'fy-new-session-create-blocker';
+
+/**
+ * What the Project box says while empty. Both spellings of the box — the picker
+ * and the plain fallback — accept a typed path, so both say so; the picker's
+ * list is the easy way on a phone, and typing is always the way out.
+ */
+const TYPED_PATH_PLACEHOLDER = 'Full path, e.g. /home/you/my-project';
+const PICKED_PATH_PLACEHOLDER = 'Choose a folder, or type its full path';
+
 /** The model box's suggestion list, referenced by the input's own `list`. */
 const MODEL_LIST_ID = 'fy-new-session-model-options';
 
@@ -111,14 +122,61 @@ interface ChosenAccount {
  * Unavailable models are left out for a third reason: the manifest has already
  * said they cannot serve.
  */
-const modelSuggestions = (
+const chosenForDraft = (
   chosen: ChosenAccount | null,
   connection: DaemonConnection,
   agent: string,
-): readonly string[] =>
+): AccountPickerOption | null =>
   chosen === null || !sameDaemonConnection(chosen.connection, connection) || chosen.account.wrapper !== agent.trim()
-    ? []
-    : chosen.account.models.filter(model => model.available).map(model => model.id);
+    ? null
+    : chosen.account;
+
+const modelSuggestions = (account: AccountPickerOption | null): readonly string[] =>
+  account === null ? [] : account.models.filter(model => model.available).map(model => model.id);
+
+/**
+ * The model box's placeholder, from the SAME chosen account and under the same
+ * two fences as the suggestions — or nothing at all.
+ *
+ * It used to be a fixed `e.g. gpt-5.6-sol`, which on a Claude account named a
+ * model that account cannot run. A placeholder is not a value, so naming the
+ * account's own default here pins nothing; it tells a reader what a blank box
+ * will get them. No chosen account, or one that declares no default, gets an
+ * empty placeholder rather than a guess.
+ */
+const modelPlaceholder = (account: AccountPickerOption | null): string =>
+  account?.defaultModel ? `default: ${account.defaultModel}` : '';
+
+/**
+ * What each mode MEANS to the person starting it, one short line each.
+ *
+ * The legend used to read "kteam turn handling" — the name of the internal tool
+ * this product replaced, and a description of the mechanism rather than of what
+ * the reader gets. Both lines are shown, because the reader needs the difference
+ * BEFORE choosing, not after.
+ */
+const MODE_MEANING: Readonly<Record<NewSessionDraft['mode'], string>> = {
+  auto: 'the agent works through your request on its own',
+  interactive: 'opens a live terminal you type into, like a chat',
+};
+
+/**
+ * Why `Create session` cannot be pressed yet, in the reader's words — or `null`
+ * when it can.
+ *
+ * `canSubmitNewSession` owns the decision; this only names it, and checks the
+ * same facts in the same order so the sentence can never describe a different
+ * blocker from the one actually holding the button. A disabled button with no
+ * reason is the defect this exists for: on a host with no runnable account the
+ * button looked pressable and said nothing.
+ */
+const createBlocker = (draft: NewSessionDraft, submitting: boolean, noRunnableAccount: boolean): string | null => {
+  if (submitting) return null;
+  if (draft.agent.trim() === '') {
+    return noRunnableAccount ? 'No account can run a session yet — add one first.' : 'Choose an account first.';
+  }
+  return draft.mode === 'auto' && draft.prompt.trim() === '' ? 'Say what you want the agent to do first.' : null;
+};
 
 /**
  * Why the cached quota feed cannot be trusted, whenever it cannot be.
@@ -163,12 +221,20 @@ export function NewSessionPage({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chosenAccount, setChosenAccount] = useState<ChosenAccount | null>(null);
+  const [noRunnableAccount, setNoRunnableAccount] = useState(false);
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
   const canSubmit = canSubmitNewSession(draft, connection, submitting);
   const sessionsPath = daemonSessionsPath(connection.daemonId);
-  const models = modelSuggestions(chosenAccount, connection, draft.agent);
-  const noAccounts = <NoSessionAccounts onOpenSettings={() => onNavigate(daemonSettingsPath(connection.daemonId))} />;
+  const chosen = chosenForDraft(chosenAccount, connection, draft.agent);
+  const models = modelSuggestions(chosen);
+  const blocker = createBlocker(draft, submitting, noRunnableAccount);
+  const noAccounts = (
+    <NoSessionAccounts
+      onOpenSettings={() => onNavigate(daemonSettingsPath(connection.daemonId))}
+      onShown={setNoRunnableAccount}
+    />
+  );
 
   const submit = async (): Promise<void> => {
     if (!canSubmit) return;
@@ -208,7 +274,7 @@ export function NewSessionPage({
                 className="kt-input w-full font-mono"
                 id={fieldId('agent')}
                 onChange={event => update('agent', event.target.value)}
-                placeholder="claude-auto-loge"
+                placeholder="e.g. claude-auto-default"
                 value={draft.agent}
               />
             ) : usage === undefined ? (
@@ -235,13 +301,13 @@ export function NewSessionPage({
             )}
           </SessionField>
 
-          <SessionField hint="working directory for the session" inputId={fieldId('cwd')} label="Project">
+          <SessionField hint="the folder the agent works in" inputId={fieldId('cwd')} label="Project">
             {projects === undefined || fleet === undefined ? (
               <input
                 className="kt-input w-full font-mono"
                 id={fieldId('cwd')}
                 onChange={event => update('cwd', event.target.value)}
-                placeholder="/absolute/path/to/project"
+                placeholder={TYPED_PATH_PLACEHOLDER}
                 value={draft.cwd}
               />
             ) : (
@@ -269,7 +335,7 @@ export function NewSessionPage({
                 id={fieldId('model')}
                 list={models.length === 0 ? undefined : MODEL_LIST_ID}
                 onChange={event => update('model', event.target.value)}
-                placeholder="e.g. gpt-5.6-sol"
+                placeholder={modelPlaceholder(chosen)}
                 value={draft.model}
               />
             </SessionField>
@@ -277,7 +343,7 @@ export function NewSessionPage({
             <fieldset>
               <legend className="mb-1.5 flex items-baseline gap-2">
                 <span className="text-ui font-semibold text-fg">Mode</span>
-                <span className="text-meta text-faint">kteam turn handling</span>
+                <span className="text-meta text-faint">how the agent runs</span>
               </legend>
               <div
                 aria-label="Session mode"
@@ -299,6 +365,17 @@ export function NewSessionPage({
                   </button>
                 ))}
               </div>
+              <dl
+                className="m-0 mt-1.5 grid gap-0.5 text-meta leading-base text-muted"
+                data-new-session-mode-meaning=""
+              >
+                {(['auto', 'interactive'] as const).map(mode => (
+                  <div key={mode}>
+                    <dt className="inline font-medium text-fg-soft">{mode}</dt>{' '}
+                    <dd className="m-0 inline">— {MODE_MEANING[mode]}</dd>
+                  </div>
+                ))}
+              </dl>
             </fieldset>
           </div>
 
@@ -307,14 +384,14 @@ export function NewSessionPage({
               className="kt-input w-full"
               id={fieldId('label')}
               onChange={event => update('label', event.target.value)}
-              placeholder="e.g. kteam-ui"
+              placeholder="e.g. website-redesign"
               value={draft.label}
             />
           </SessionField>
 
           <SessionField
             hint={
-              draft.mode === 'interactive' ? 'leave empty to open the TUI at its prompt' : 'the task for this teammate'
+              draft.mode === 'interactive' ? 'leave empty to start with a blank chat' : 'what you want the agent to do'
             }
             inputId={fieldId('prompt')}
             label={draft.mode === 'interactive' ? 'Opening message (optional)' : 'Opening prompt'}
@@ -322,7 +399,9 @@ export function NewSessionPage({
             <Textarea
               id={fieldId('prompt')}
               onChange={event => update('prompt', event.target.value)}
-              placeholder={draft.mode === 'interactive' ? '(optional) first message…' : 'Describe the task…'}
+              placeholder={
+                draft.mode === 'interactive' ? '(optional) first message…' : 'Describe what you want the agent to do…'
+              }
               rows={6}
               value={draft.prompt}
             />
@@ -337,11 +416,30 @@ export function NewSessionPage({
             </div>
           ) : null}
 
-          <div className="flex items-center justify-end gap-sm">
+          <div className="flex flex-wrap items-center justify-end gap-sm">
+            {/* The reason sits beside the button it explains and is the button's
+                description, so a screen reader hears why it is unavailable. A
+                disabled primary still reads as a filled accent button at 55%
+                opacity — which is how it looked pressable — so until it can be
+                pressed it wears the outline look instead. */}
+            {blocker === null ? null : (
+              <p
+                className="m-0 min-w-0 basis-full text-right text-meta leading-base text-muted sm:basis-0 sm:flex-1"
+                id={CREATE_BLOCKER_ID}
+              >
+                {blocker}
+              </p>
+            )}
             <Button onClick={() => onNavigate(sessionsPath)} type="button" variant="ghost">
               Cancel
             </Button>
-            <Button disabled={!canSubmit} onClick={() => void submit()} type="button" variant="primary">
+            <Button
+              aria-describedby={blocker === null ? undefined : CREATE_BLOCKER_ID}
+              disabled={!canSubmit}
+              onClick={() => void submit()}
+              type="button"
+              variant={canSubmit || submitting ? 'primary' : 'outline'}
+            >
               {submitting ? 'Creating…' : 'Create session'}
             </Button>
           </div>
@@ -369,7 +467,7 @@ interface AccountRosterFieldProps extends ConnectedFieldProps {
 }
 
 /**
- * The Account box, with the health check offered and never taken.
+ * The Account box, naming the chosen account by the name its fleet gave it.
  *
  * It offers ONLY the accounts that can run a session. A fleet's terminal account
  * — the one a person runs by hand — is published too, often first, and the
@@ -377,10 +475,17 @@ interface AccountRosterFieldProps extends ConnectedFieldProps {
  * the most likely first choice a refusal. The first usable account is filled in
  * so a first-time reader starts on something that works.
  *
- * `offerHealthCheck` puts a button on this surface because choosing an account is
- * exactly when evidence about it is worth paying for — and it stays a button:
- * mounting this field starts no probe, and neither does opening or filtering the
- * list. The roster's own manifest read is the only thing hydration causes.
+ * The box's text is the wrapper id, because that is what the daemon is sent, so
+ * `describeChoice` puts the account's display name — "Claude (default, auto)",
+ * as `fy fleet ls` prints it — right under it.
+ *
+ * NO "CHECK NOW" HERE. Every row already carries the host's stored health verdict
+ * and when it was established, so the re-check button added nothing a person
+ * needs to START a session, and on a phone it pushed the rest of the form a
+ * screen down with "0 accounts checked" — noise at exactly the first moment. The
+ * control stays on the migrate sheet, where re-proving the target is the job.
+ * Mounting this field starts no check of either kind beyond the
+ * free stored-snapshot read the roster store makes on its own.
  */
 function AccountRosterField({ store, usage, usageError, ...field }: AccountRosterFieldProps) {
   return (
@@ -388,11 +493,11 @@ function AccountRosterField({ store, usage, usageError, ...field }: AccountRoste
       connection={field.connection}
       id={fieldId('agent')}
       label="Account"
-      offerHealthCheck={true}
+      describeChoice={true}
       noAccounts={field.noAccounts}
       onAccountChosen={field.onAccountChosen}
       onValueChange={field.onValueChange}
-      placeholder="claude-auto-loge"
+      placeholder="e.g. claude-auto-default"
       preselect={true}
       sessionCapableOnly={true}
       store={store}
@@ -430,7 +535,18 @@ function QuotaAccountField({ usage, ...field }: QuotaAccountFieldProps) {
  * only account is the terminal one would otherwise offer nothing and say nothing
  * about why. Accounts are added in the daemon's Settings, on the Fleet panel.
  */
-function NoSessionAccounts({ onOpenSettings }: { readonly onOpenSettings: () => void }) {
+function NoSessionAccounts({
+  onOpenSettings,
+  onShown,
+}: {
+  readonly onOpenSettings: () => void;
+  /** Told while this notice is on screen, so Create can say why it is unavailable. */
+  readonly onShown: (shown: boolean) => void;
+}) {
+  useEffect(() => {
+    onShown(true);
+    return () => onShown(false);
+  }, [onShown]);
   return (
     <div
       className="flex flex-wrap items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 px-control-x py-row-y"
@@ -482,7 +598,7 @@ function ProjectCatalogField({ projects, fleet, connection, value, onValueChange
       id={fieldId('cwd')}
       label="Project"
       onValueChange={onValueChange}
-      placeholder="/absolute/path/to/project"
+      placeholder={PICKED_PATH_PLACEHOLDER}
       projects={registry}
       value={value}
     />
