@@ -52,7 +52,10 @@ interface FirstPasswordDeps {
  * daemon at boot — strictly worse than the problem being solved. So:
  *
  * - **Nothing is asked unless this invocation is interactive.** Both ends of the terminal, checked
- *   through the same port every other CLI prompt uses.
+ *   through the same port every other CLI prompt uses. A start with nobody at the terminal — a script,
+ *   or a wrapper that is not a real terminal — still gets ONE line naming the command, because the
+ *   daemon's own explanation only ever reaches its log file and a person reading this output would
+ *   otherwise learn nothing until pairing refused.
  * - **Every failure here is a WARNING.** The daemon is already serving by the time this runs; turning
  *   "you did not want to set a password" or "the daemon did not answer" into a failed `start` would
  *   report a daemon that is up as a daemon that is down.
@@ -69,8 +72,8 @@ export class FirstPasswordOffer {
   constructor(private readonly deps: FirstPasswordDeps) {}
 
   async offer(): Promise<void> {
-    if (!this.deps.interactive()) return;
     if (!(await this.#missing())) return;
+    if (!this.deps.interactive()) return this.deps.out.warn(this.#unattended());
     this.deps.out.warn(this.#explanation());
     const candidate = await this.deps.prompt.askSecret('Operator password (Enter to skip): ');
     if (candidate.trim() === '') return this.deps.out.warn(this.#skipped());
@@ -116,6 +119,11 @@ export class FirstPasswordOffer {
   /** Why the question is being asked, before it is asked. Never after the answer. */
   #explanation(): string {
     return `this machine has no operator password, so it cannot pair a device yet. A paired device can change the settings of whatever is already switched on here — including the agent fleet, which writes runnable files into your accounts — and the password is what stands in front of that. It is not your computer's login. Using Ferretry on this machine needs no password at all.`;
+  }
+
+  /** The whole offer, as one line, for a start nobody can answer a question from. */
+  #unattended(): string {
+    return `this machine has no operator password, so it cannot pair a phone or another device yet. Set one with \`${this.#name} daemon password set\`.`;
   }
 
   #skipped(): string {

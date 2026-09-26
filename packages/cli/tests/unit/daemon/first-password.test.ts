@@ -70,10 +70,10 @@ function subject(options: {
 }
 
 describe('the first operator password offer', () => {
-  it('should ask NOTHING on a non-interactive start, which is how a service manager reaches it', async () => {
-    // THE ONE PROPERTY THAT CANNOT REGRESS. A prompt here hangs a unit start, and a hung unit start
-    // means the machine stops running the daemon at login — worse than the requirement it serves. It
-    // does not even ask the daemon whether a password exists: there is nobody to tell.
+  it('should ask NOTHING on a non-interactive start, and say the remedy in one line instead', async () => {
+    // THE ONE PROPERTY THAT CANNOT REGRESS is the question: a prompt with nobody at the terminal hangs
+    // the start. But silence is wrong too — the daemon's own explanation only reaches its log file, so
+    // a scripted first run learned nothing until pairing refused. One line, naming the command.
     // Arrange
     const { offer, gateway, prompt, out } = subject({ interactive: false });
 
@@ -82,8 +82,38 @@ describe('the first operator password offer', () => {
 
     // Assert
     should(prompt.asked).be.empty();
-    should(gateway.reads).equal(0);
+    should(gateway.reads).equal(1);
+    should(gateway.stored).be.empty();
+    should(out.lines).have.length(1);
+    should(out.lines[0]).match(/^warn: this machine has no operator password, so it cannot pair a phone/u);
+    should(out.lines[0]).match(/Set one with `fy daemon password set`\.$/u);
+  });
+
+  it('should stay silent on a non-interactive start when this machine already has a password', async () => {
+    // Arrange
+    const { offer, prompt, out } = subject({ interactive: false, present: true });
+
+    // Act
+    await offer.offer();
+
+    // Assert
+    should(prompt.asked).be.empty();
     should(out.lines).be.empty();
+  });
+
+  it('should print only the unanswered-read warning on a non-interactive start the daemon cannot answer', async () => {
+    // Still exactly one line, and still no question: the warning already names the command.
+    // Arrange
+    const { offer, prompt, out } = subject({ interactive: false, readFailure: new Error('fyd did not answer') });
+
+    // Act
+    await offer.offer();
+
+    // Assert
+    should(prompt.asked).be.empty();
+    should(out.lines).have.length(1);
+    should(out.lines[0]).match(/^warn: fy could not ask the daemon/u);
+    should(out.lines[0]).match(/fy daemon password set/u);
   });
 
   it('should say nothing at all when this machine already has a password', async () => {
