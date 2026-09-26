@@ -23,6 +23,8 @@ interface Harness {
   readonly api: RecordingApi;
   readonly io: CapturedIo;
   readonly files: FakeFiles;
+  /** What commander itself printed, such as `--help`. */
+  readonly printed: string[];
 }
 
 function harness(
@@ -45,7 +47,8 @@ function harness(
   });
   const { io, presenter } = capturedPresenter();
   const program = new Command().exitOverride();
-  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  const printed: string[] = [];
+  program.configureOutput({ writeOut: text => printed.push(text), writeErr: () => {} });
   registerSessionCommands(program, {
     presenter,
     start: new StartSessionController(api, files, presenter, environment),
@@ -62,6 +65,7 @@ function harness(
     api,
     io,
     files,
+    printed,
     run: async (argv: readonly string[]) => {
       await program.parseAsync(['node', 'fy', ...argv]);
     },
@@ -190,6 +194,23 @@ describe('registerSessionCommands · start', () => {
 
     // Assert
     should(failure).be.instanceof(CommanderError);
+    should(subject.api.calls).be.empty();
+  });
+
+  it('should say in its help which accounts can run a session, and that the terminal one cannot', async () => {
+    // Arrange — `fy fleet ls` lists the terminal account first, so the help is where a first guess lands.
+    const subject = harness();
+
+    // Act
+    const failure = await subject.run(['start', '--help']).catch(error => error);
+    const help = subject.printed.join('').replace(/\s+/gu, ' ');
+
+    // Assert
+    should(failure).be.instanceof(CommanderError);
+    should(help).containEql('one `fy fleet ls` marks "auto", such as claude-auto-default');
+    should(help).containEql(
+      '(such as claude-default) is for using the tool yourself in a terminal and cannot run sessions, in either --mode',
+    );
     should(subject.api.calls).be.empty();
   });
 

@@ -1587,6 +1587,93 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * The first start a stranger types: the account `fy fleet ls` lists FIRST, which is the one for
+   * using the harness in a terminal and not one this daemon may launch.
+   *
+   * WHY THIS TIER. The refusal is decided in `bin/fyd.ts`, excluded from both ledgers, so only the
+   * assembled daemon can prove it answers with the account that WOULD work rather than the bare path
+   * the launch's own authorization can see. Both modes are asked, because the first-run audit tried
+   * `--mode interactive` next and got the same unexplained refusal.
+   */
+  it('should refuse the terminal account by naming the auto account that can run the session', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-session-terminal-account');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+    };
+    const executable = await seedFleet(home);
+    // The default fleet's shape: the terminal account listed first, its auto account beside it. Its
+    // wrapper is real and runnable, so nothing but the account itself can be why it is refused.
+    const terminal = join(home, 'bin', 'claude-default');
+    await writeFile(terminal, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const account = (id: string, wrapper: string, mode: 'auto' | 'interactive') => ({
+      id,
+      kind: 'claude',
+      mode,
+      wrapper,
+      home: join(home, 'homes', basename(wrapper)),
+      displayName: basename(wrapper),
+      defaultModel: 'claude-opus-5',
+      models: [{ id: 'claude-opus-5', available: true }],
+      available: true,
+      unavailableReason: null,
+    });
+    await publishManifest(home, [
+      account('00000000-0000-4000-8000-00000000d0a1', terminal, 'interactive'),
+      account(BOOT_ACCOUNT, executable, 'auto'),
+    ]);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startCall = async (requestId: string, mode: 'auto' | 'interactive'): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': requestId },
+        body: JSON.stringify({ agent: 'claude-default', mode, prompt: 'hello', cwd: home }),
+      });
+
+    // Act
+    const asAuto = await startCall('req-terminal-1', 'auto');
+    const asAutoBody = (await asAuto.json()) as { readonly code: string; readonly error: string };
+    const asInteractive = await startCall('req-terminal-2', 'interactive');
+    const asInteractiveBody = (await asInteractive.json()) as { readonly code: string; readonly error: string };
+    const listed = SessionListSchema.parse(await (await fetch(sessions, { headers })).json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    for (const [response, body] of [
+      [asAuto, asAutoBody],
+      [asInteractive, asInteractiveBody],
+    ] as const) {
+      should(response.status).equal(400);
+      should(body.code).equal('invalid_request');
+      // The account that works, and the command that uses it — not the path the launch would name.
+      should(body.error).match(/Start it on claude-auto-boot instead: `fy start --agent claude-auto-boot/u);
+      should(body.error).not.match(/not a fleet auto wrapper/u);
+    }
+    // Refused before anything was written or launched, so a corrected retry starts clean.
+    should(launcher.launched).have.length(0);
+    should(listed).have.length(0);
+  });
+
+  /**
    * Spawn ancestry cannot come from the mounted fleet list, even though both project the same four
    * configuration fields. That list deliberately omits an unusable session so one damaged record
    * does not take `fy ps` down; lineage needs the opposite answer, because omitting a damaged parent

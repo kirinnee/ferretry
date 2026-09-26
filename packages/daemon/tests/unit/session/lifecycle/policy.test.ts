@@ -15,7 +15,9 @@ import {
   transitionSessionRecord,
   type CreateSessionLifecycleRequest,
   type SessionRecordContext,
+  unrunnableAccountRefusal,
 } from '../../../../src/lib/session/lifecycle/index.ts';
+import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
 
 const NOW = '2026-07-31T10:00:00.000Z';
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
@@ -327,5 +329,83 @@ describe('session lifecycle policy', () => {
     should(contradicted).deepEqual({ FY_SESSION_ID: 'session-1' });
     // The name is a wire contract with the CLI, not a local choice, so it is pinned here too.
     should(SESSION_ID_VARIABLE).equal('FY_SESSION_ID');
+  });
+
+  describe('unrunnableAccountRefusal', () => {
+    /** One published account; the wrapper path is what the manifest carries, the agent its name. */
+    function account(agent: string, patch: Partial<CoreAccount> = {}): CoreAccount {
+      return {
+        secretEnv: {},
+        id: `id-${agent}`,
+        agent,
+        wrapper: `/state/fleet/bin/${agent}`,
+        home: `/state/fleet/homes/${agent}`,
+        kind: 'claude',
+        mode: agent.includes('-auto-') ? 'auto' : 'interactive',
+        displayName: agent,
+        defaultModel: null,
+        models: [],
+        available: true,
+        unavailableReason: null,
+        ...patch,
+      };
+    }
+    const interactive = account('claude-default');
+    const auto = account('claude-auto-default');
+
+    it('should say nothing about an account a launch would accept', () => {
+      // Act
+      const refusal = unrunnableAccountRefusal(auto, [interactive, auto], SETTINGS, 'fy');
+
+      // Assert
+      should(refusal).be.undefined();
+    });
+
+    it('should name the auto account, with the command to run, when the terminal account is asked for', () => {
+      // Act — the exact first-run fleet: `fy fleet ls` lists `claude-default` first.
+      const refusal = unrunnableAccountRefusal(interactive, [interactive, auto], SETTINGS, 'fy');
+
+      // Assert
+      should(refusal).equal(
+        'claude-default is for using Claude yourself in a terminal, so fy cannot start sessions on it, in ' +
+          'either --mode. Start it on claude-auto-default instead: `fy start --agent claude-auto-default ' +
+          '"your task"`. `fy fleet ls` marks the accounts that can run sessions "auto".',
+      );
+    });
+
+    it('should never offer an account the launch would refuse or that is declared down', () => {
+      // Arrange
+      const down = account('claude-auto-down', { available: false, unavailableReason: 'quota' });
+      const codex = account('codex-auto-default', { kind: 'codex' });
+      const other = account('claude-auto-work');
+
+      // Act
+      const sameHarnessFirst = unrunnableAccountRefusal(
+        interactive,
+        [interactive, down, codex, auto, other],
+        SETTINGS,
+        'fy',
+      );
+      const otherHarness = unrunnableAccountRefusal(interactive, [interactive, down, codex], SETTINGS, 'fy');
+
+      // Assert — every account named is one `authorizeSessionCommand` accepts.
+      should(sameHarnessFirst).match(/Start it on one of claude-auto-default, claude-auto-work instead/u);
+      should(sameHarnessFirst).not.match(/down|codex/u);
+      should(otherHarness).match(/Start it on codex-auto-default instead/u);
+      for (const offered of [auto, other, codex])
+        should(authorizeSessionCommand(offered.wrapper, [offered.wrapper], SETTINGS)).deepEqual([offered.wrapper]);
+    });
+
+    it('should say how to get a runnable account when the host has none', () => {
+      // Act
+      const refusal = unrunnableAccountRefusal(interactive, [interactive], SETTINGS, 'fy');
+
+      // Assert
+      should(refusal).equal(
+        'claude-default is for using Claude yourself in a terminal, so fy cannot start sessions on it, in ' +
+          'either --mode, and no account on this host can run sessions yet. Add an auto account to the fleet ' +
+          'configuration and run `fy fleet apply`; `fy fleet ls` marks those accounts "auto".',
+      );
+    });
   });
 });

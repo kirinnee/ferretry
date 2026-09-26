@@ -543,6 +543,7 @@ import {
   UnknownPeerRefused,
   type UsageFeedPort,
   unreadableManifestPreflight,
+  unrunnableAccountRefusal,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
@@ -1396,6 +1397,11 @@ async function resolveStartAccount(
       'unknown_agent',
       `no account in the fleet manifest is published as ${JSON.stringify(requested)}`,
     );
+  // Refused HERE, where the published accounts are in hand, rather than left to the launch: the
+  // launch's own authorization sees only a path, so it can say the path is wrong but not which
+  // account would have worked — and the account `fy fleet ls` lists first is one it refuses.
+  const unrunnable = unrunnableAccountRefusal(account, published, defaultSessionLifecycleSettings, CLIENT_NAME);
+  if (unrunnable !== undefined) throw new SessionControlError('invalid', unrunnable);
   const launchability = accountLaunchability(account, executables);
   // Both halves are `unavailable` to a caller: the account exists and cannot serve. Which half is
   // the operator's business, and it is the reason the rule reports the two separately.
