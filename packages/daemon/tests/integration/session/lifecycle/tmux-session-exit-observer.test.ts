@@ -205,34 +205,6 @@ async function exitHarness(subject: ExitFixture): Promise<void> {
   await until(async () => (await subject.controller.state(subject.tmuxSession)).dead, 'the pane to die');
 }
 
-/** What the host says about a harness tmux has not reaped, so a CI failure explains itself. */
-async function diagnose(subject: ExitFixture, pid: number): Promise<string> {
-  const read = async (path: string): Promise<string> =>
-    await Bun.file(path)
-      .text()
-      .catch(() => '(unreadable)');
-  const socket = join(subject.home, 'tmux.sock');
-  const ask = async (format: string): Promise<string> =>
-    (
-      await new Response(
-        Bun.spawn([subject.tmuxExecutable, '-S', socket, 'display-message', '-p', '-t', subject.tmuxSession, format])
-          .stdout,
-      ).text()
-    ).trim();
-  const server = await ask('#{pid}');
-  const signals = (text: string): string =>
-    text
-      .split('\n')
-      .filter(line => /^(State|PPid|Sig(Blk|Ign|Cgt))/.test(line))
-      .join(' ');
-  return [
-    `pane: ${await ask('#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}')}`,
-    `harness ${pid}: ${signals(await read(`/proc/${pid}/status`))}`,
-    `tmux server ${server}: ${signals(await read(`/proc/${server}/status`))}`,
-    `test runner: ${signals(await read('/proc/self/status'))}`,
-  ].join('\n');
-}
-
 /** Whether a pid no longer names any process, zombie included — so tmux has reaped it. */
 function reaped(pid: number): boolean {
   try {
@@ -247,21 +219,18 @@ function reaped(pid: number): boolean {
  * Ticks the self-check until it settles something, the way the daemon's timer would.
  *
  * Deliberately NOT one tick after the pane died: tmux marks a pane dead when its terminal closes and
- * records how it ended only after it reaps the child, and on a loaded host a tick can land between.
- * The observer leaves such a pane running for the next tick, so the test ticks too — and first waits
- * for the harness to be reaped, so the exit it asserts on is one tmux has certainly recorded.
+ * records how it ended only after it reaps the child, and a tick can land between — or tmux can have
+ * lost the child's SIGCHLD, which leaves it a zombie until something makes the server reap. The first
+ * tick that finds no status asks tmux to reap, so the test then waits for exactly that and ticks
+ * again, and the exit it asserts on is one tmux has certainly recorded.
  */
 async function tickUntilSettled(subject: ExitFixture, service: SessionHealthService) {
   const registration = await subject.store.registration(DAEMON, subject.id);
   if (registration === undefined) throw new Error('the pane registration is missing');
-  await until(async () => reaped(registration.pid), 'tmux to reap the harness').catch(async error => {
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\n${await diagnose(subject, registration.pid)}`,
-    );
-  });
   let outcome = await service.selfCheck();
+  if (outcome.exited.length > 0) return outcome;
+  await until(async () => reaped(registration.pid), 'tmux to reap the harness after the nudge');
   await until(async () => {
-    if (outcome.exited.length > 0) return true;
     outcome = await service.selfCheck();
     return outcome.exited.length > 0;
   }, 'a self-check to settle the exited session');
@@ -447,6 +416,32 @@ describe('tmux session exit observer', () => {
     // Assert
     should(first).deepEqual([]);
     should(second.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 7, signal: undefined }]);
+  }, 20_000);
+
+  it('should ask the real server to reap only for a dead pane that has no exit status or signal', async () => {
+    // Arrange — every command still reaches the real server, so the nudge must be one it accepts.
+    const subject = await fixture(0);
+    await exitHarness(subject);
+    const nudges: { readonly answer: string; readonly code: number }[] = [];
+    const recording = (answer: string): TmuxCommandPort => {
+      const reads = metadataAnswers(subject, () => ({ code: 0, stdout: answer }));
+      return {
+        execute: async (arguments_, stdin) => {
+          const result = await reads.execute(arguments_, stdin);
+          if (arguments_[0] === 'run-shell') {
+            should(arguments_).deepEqual(['run-shell', '-b', 'true']);
+            nudges.push({ answer, code: result.code });
+          }
+          return result;
+        },
+      };
+    };
+
+    // Act
+    for (const answer of ['1||', '1|3|', '1||9', '0||']) await observer(subject, recording(answer)).observe();
+
+    // Assert
+    should(nudges).deepEqual([{ answer: '1||', code: 0 }]);
   }, 20_000);
 
   it('should settle as not recorded only after the status stayed missing for three ticks', async () => {

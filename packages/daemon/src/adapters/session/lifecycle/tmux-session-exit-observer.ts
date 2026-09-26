@@ -55,6 +55,21 @@ function status(state: JsonValue | undefined): string | undefined {
  */
 const PANE_EXIT_FORMAT = '#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}';
 
+/**
+ * Asks the server to collect children whose SIGCHLD it lost.
+ *
+ * tmux resets SIGCHLD to its default for the moment it spends updating the login records of a pane
+ * whose terminal just closed (libutempter), and a pane process that finishes exiting inside that
+ * moment is left an unreaped zombie with no status — measured on a CI host with tmux 3.6a, where the
+ * server was idle in `poll` with the zombie its only child. It is never collected on its own, because
+ * tmux only reaps when a SIGCHLD reaches it. A background `run-shell` makes the server fork one
+ * short job, and that job's SIGCHLD runs the server's reap loop, which waits for ANY child, so the lost
+ * one is collected with it and the next tick reads its status. `-b` so the command returns at once:
+ * a blocking one waits on that same SIGCHLD and would hang a tick if it were lost too. The job is
+ * `true` under `/bin/sh` — no harness, no spend.
+ */
+const REAP_NUDGE = ['run-shell', '-b', 'true'] as const;
+
 function paneNumber(field: string | undefined): number | undefined {
   if (field === undefined || !/^[0-9]+$/u.test(field)) return undefined;
   return Number(field);
@@ -86,8 +101,10 @@ function samePane(left: RegisteredTerminalPane, right: RegisteredTerminalPane): 
  * The process-start incarnation is deliberately NOT consulted: it is how a LIVE pid is told apart
  * from a reused one, and a dead pane has no live process to ask; tmux's own `pane_dead` is the proof.
  *
- * NOTHING IS KILLED AND NOTHING IS LAUNCHED. The observation is three read-only tmux queries per
- * running session and the settle is one state write plus one journal event.
+ * NOTHING IS KILLED AND NO HARNESS IS LAUNCHED. The observation is three read-only tmux queries per
+ * running session, plus one `run-shell -b true` for a dead pane still missing its status, so tmux
+ * collects a child whose SIGCHLD it lost (see `REAP_NUDGE`); the settle is one state write plus one
+ * journal event.
  *
  * THE ONE PIECE OF STATE is how many consecutive ticks each dead pane has gone without an exit
  * status. It is memory only and keyed by the whole pane identity, so a restarted daemon simply
@@ -190,9 +207,12 @@ export class TmuxSessionExitObserver implements SessionExitPort {
       PANE_EXIT_FORMAT,
     ]);
     if (exitResult.code !== 0) return undefined;
-    const [dead, exitStatus, signal] = exitResult.stdout.trimEnd().split('|');
-    return dead === '1'
-      ? { kind: 'exited', exitStatus: paneNumber(exitStatus), signal: paneNumber(signal) }
-      : undefined;
+    const [dead, exitStatusField, signalField] = exitResult.stdout.trimEnd().split('|');
+    if (dead !== '1') return undefined;
+    const exitStatus = paneNumber(exitStatusField);
+    const signal = paneNumber(signalField);
+    // Best effort: a refused nudge changes nothing, and the missing-status bound still settles.
+    if (exitStatus === undefined && signal === undefined) await this.tmux.execute(REAP_NUDGE).catch(() => undefined);
+    return { kind: 'exited', exitStatus, signal };
   }
 }
