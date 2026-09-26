@@ -164,18 +164,34 @@ Five commands take you from a fresh install to a phone watching an agent work. I
    fy daemon password set
    ```
 
-3. **Sign the accounts in.**
+3. **Check the accounts are signed in.**
 
    ```bash
    fy fleet health
    ```
 
-   This checks every account without running a model, so it costs nothing. A new account shows
-   `NEEDS LOGIN` with the exact `fy fleet login <account id>` command to run beside it. Accounts that
-   share a provider login are signed in together, so one approval covers both default accounts. An
-   account whose short-lived token has expired but still holds a refresh token **renews itself on
-   first use**: the next time a session runs on it, the token is renewed with no browser. It shows
-   as "signed in, but this copy needs refreshing" and is not a fault.
+   This checks every account without running a model, so it costs nothing. If you were already
+   signed in to `claude` or `codex` on this machine, the first start copied that login into the new
+   accounts. The report then reads like this, leaving out the line under each row that says which
+   install its login was copied from:
+
+   ```text
+   4 accounts on 2 logins · 4 ready · checked just now
+
+     ○ Codex (default)   READY  renews itself the first time it's used
+       this login also covers Codex (default, auto)
+     ○ Claude (default)  READY  renews itself the first time it's used
+       this login also covers Claude (default, auto)
+   ```
+
+   `READY` needs nothing from you. The copied login's short-lived token has usually already expired,
+   and it **renews itself the first time it's used**: the first session on that account renews it
+   with no browser. Accounts that share a login are shown as one row. A copied Codex login adds one
+   more line, `first use signs your own Codex out on this machine — sign it back in once`, because
+   that renewal signs out the `codex` you use yourself. Claude shows no such line.
+
+   An account with no login to copy shows `NEEDS LOGIN` and one command to run, such as
+   `sign in: fy fleet login <account id>`. That one sign-in covers every account on the same login.
 
 4. **Pair your phone.**
 
