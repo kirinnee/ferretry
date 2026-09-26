@@ -253,8 +253,20 @@ jobs:
         with:
           name: cli-binaries
           path: dist/bin
+      # The smoke starts a real session, and a session lives in a tmux pane. Not every runner
+      # image ships tmux (macOS never does), so install it where it is missing.
+      - name: Install tmux
+        run: |
+          if command -v tmux >/dev/null 2>&1; then
+            tmux -V
+          elif [ "$(uname -s)" = Darwin ]; then
+            brew install tmux
+          else
+            sudo apt-get update && sudo apt-get install -y tmux
+          fi
       # download-artifact drops the exec bit; smoke.sh restores it. The binary name is derived
-      # from the CLI package's bin key so the matrix stays rename-proof.
+      # from the CLI package's bin key so the matrix stays rename-proof. It runs the daemon
+      # binary beside it too, through `daemon start`, and starts and stops one real session.
       - name: Smoke
         env:
           TARGET: ${{ matrix.target }}
