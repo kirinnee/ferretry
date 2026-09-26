@@ -85,7 +85,10 @@ describe('parseOnboardingProgress', () => {
     });
   });
 
-  it('keeps a connection answer that the journey really asks for', () => {
+  it('keeps the place of a reader who answered the carrier chooser before it was removed', () => {
+    // A stored journey from before the chooser went away still carries its
+    // answer. It is ignored, not refused: a reader parked on `local` keeps
+    // their place instead of being sent back to the first question.
     expect(
       parseOnboardingProgress(
         stored({
@@ -94,9 +97,9 @@ describe('parseOnboardingProgress', () => {
           route: 'first-time',
           target: 'this',
           doer: 'self',
-          connection: 'own-relay',
-          current: 'relay-source',
-          furthest: 'relay-source',
+          connection: 'default-relay',
+          current: 'local',
+          furthest: 'local',
         }),
         'desktop',
       ),
@@ -106,10 +109,29 @@ describe('parseOnboardingProgress', () => {
       route: 'first-time',
       target: 'this',
       doer: 'self',
-      connection: 'own-relay',
-      current: 'relay-source',
-      furthest: 'relay-source',
+      current: 'local',
+      furthest: 'local',
     });
+  });
+
+  it('starts again for a reader parked on a self-hosting step that no longer exists', () => {
+    for (const step of ['connect', 'relay-source']) {
+      expect(
+        parseOnboardingProgress(
+          stored({
+            v: 4,
+            stage: 'walk',
+            route: 'first-time',
+            target: 'this',
+            doer: 'self',
+            connection: 'own-relay',
+            current: step,
+            furthest: step,
+          }),
+          'desktop',
+        ),
+      ).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
+    }
   });
 
   it('starts at the entry question on anything it cannot fully trust', () => {
@@ -146,48 +168,9 @@ describe('parseOnboardingProgress', () => {
       // not this document.
       stored({ v: 4, stage: 'walk', route: 'add-client', target: 'this', current: 'pair', furthest: 'pair' }),
       stored({ v: 4, stage: 'walk', route: 'add-client', doer: 'self', current: 'pair', furthest: 'pair' }),
-      stored({
-        v: 4,
-        stage: 'walk',
-        route: 'add-client',
-        connection: 'direct',
-        current: 'pair',
-        furthest: 'pair',
-      }),
       // A step from another journey's list: not this reader's place, a mismatch.
       stored({ v: 4, stage: 'walk', route: 'add-client', current: 'install', furthest: 'install' }),
       walking('add-daemon', 'handoff', 'done'),
-      // A carrier answer on a journey that never reaches the carrier question.
-      stored({
-        v: 4,
-        stage: 'walk',
-        route: 'first-time',
-        target: 'other',
-        doer: 'self',
-        connection: 'direct',
-        current: 'elsewhere',
-        furthest: 'elsewhere',
-      }),
-      stored({
-        v: 4,
-        stage: 'walk',
-        route: 'first-time',
-        target: 'this',
-        doer: 'agent',
-        connection: 'direct',
-        current: 'brief',
-        furthest: 'brief',
-      }),
-      stored({
-        v: 4,
-        stage: 'walk',
-        route: 'first-time',
-        target: 'this',
-        doer: 'self',
-        connection: 'tunnel',
-        current: 'install',
-        furthest: 'install',
-      }),
       // A stored question that names something other than a daemon entry.
       stored({ v: 4, stage: 'doer', route: 'add-client', target: 'this' }),
       stored({ v: 4, stage: 'doer', route: 'first-time' }),
@@ -314,24 +297,6 @@ describe('resumeOnboardingRoute', () => {
     expect(resumeOnboardingRoute({ route: 'add-daemon', step: 'install' }, 'mobile')).toEqual(
       doerQuestion('add-daemon', 'other'),
     );
-  });
-
-  it('carries a connection answer through the hand-off when one was made', () => {
-    expect(
-      resumeOnboardingRoute(
-        { route: 'first-time', target: 'this', doer: 'self', step: 'relay-source', connection: 'own-relay' },
-        'desktop',
-      ),
-    ).toEqual({
-      v: 4,
-      stage: 'walk',
-      route: 'first-time',
-      target: 'this',
-      doer: 'self',
-      connection: 'own-relay',
-      current: 'relay-source',
-      furthest: 'relay-source',
-    });
   });
 });
 
@@ -470,11 +435,8 @@ describe('OnboardingProgressStore', () => {
     const store = onDevice('desktop', { storage: undefined });
     store.choose('first-time');
     store.chooseDoer('self');
-    store.goTo('connect');
-    store.chooseConnection('own-relay');
-    // "Rather have an agent do it?", pressed halfway through the commands. The
-    // carrier answer does not survive, because an agent is never asked it — and a
-    // stored answer nothing collects is a document the next load would refuse.
+    store.goTo('daemon');
+    // "Rather have an agent do it?", pressed halfway through the commands.
     expect(store.switchDoer('agent')).toEqual({
       v: 4,
       stage: 'walk',
@@ -503,48 +465,16 @@ describe('OnboardingProgressStore', () => {
     }
   });
 
-  it('persists the carrier answer with the expanded self-hosted route', () => {
-    const storage = new MemoryStorage();
-    const store = onDevice('desktop', { storage });
-    store.choose('first-time');
-    store.chooseDoer('self');
-    store.goTo('connect');
-
-    expect(store.chooseConnection('own-relay')).toEqual({
-      v: 4,
-      stage: 'walk',
-      route: 'first-time',
-      target: 'this',
-      doer: 'self',
-      connection: 'own-relay',
-      current: 'relay-fingerprint',
-      furthest: 'relay-fingerprint',
-    });
-    expect(onDevice('desktop', { storage }).snapshot()).toEqual(store.snapshot());
-  });
-
-  it('sends every other carrier straight to the same-machine pairing step', () => {
-    // No QR and no code: the daemon is on the machine reading this page.
+  it('goes from starting the daemon straight to the same-machine pairing step', () => {
+    // No carrier question in between: direct is tried first and the hosted relay
+    // is the automatic fallback, so there is nothing for the reader to decide.
     const store = onDevice('desktop', { storage: undefined });
     store.choose('add-daemon');
     store.chooseTarget('this');
     store.chooseDoer('self');
-    store.goTo('connect');
-    expect(store.chooseConnection('direct')).toMatchObject({ current: 'local', connection: 'direct' });
-  });
-
-  it('refuses a carrier answer from anywhere but the carrier question', () => {
-    const store = onDevice('desktop', { storage: undefined });
-    // A question is up: there is no journey to answer for.
-    expect(store.chooseConnection('direct')).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
-    store.choose('first-time');
-    store.chooseDoer('self');
-    // On the install step, this is a caller bug rather than a reader's choice.
-    expect(store.chooseConnection('direct')).toMatchObject({ current: 'install' });
-    // And the pairing entry never has the step at all.
-    const client = onDevice('desktop', { storage: undefined });
-    client.choose('add-client');
-    expect(client.chooseConnection('direct')).toMatchObject({ route: 'add-client', current: 'pair' });
+    store.goTo('daemon');
+    expect(store.goTo('local')).toMatchObject({ current: 'local', furthest: 'local' });
+    expect(store.snapshot()).not.toHaveProperty('connection');
   });
 
   it('refuses a step that is not on this journey, rather than inventing a place', () => {

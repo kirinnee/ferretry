@@ -30,9 +30,8 @@ the second kind, and which ones exist is the daemon's answer rather than the bro
 carrier the daemon published first, because direct has fewer hops and fewer observers; then each
 rendezvous it published, in the daemon's own order; and always say which carrier is live and why the
 others were passed over. No carrier chooser, nothing to opt into, and no silent degradation — a
-surface that shows a connection without naming its carrier is not conforming. The current PWA still
-contains an interim three-way chooser and self-hosting setup route; §13 lists their removal as
-unbuilt work rather than pretending otherwise.
+surface that shows a connection without naming its carrier is not conforming. The PWA's interim
+three-way chooser and self-hosting setup route have been removed (§13 piece 5).
 
 The decision layer for that behaviour is in this package today: `connectionPreferenceOrder` in
 `packages/relay/src/lib/connection.ts` orders direct before relay, and `chooseConnection` returns the
@@ -66,8 +65,7 @@ Anyone who would rather run the carrier themselves still can — the Worker in t
 to any Cloudflare account, and this document is the contract, so it can also be reimplemented from
 scratch. That is an **expert opt-in path with its own runbook**
 ([`cloudflare-relay-self-hosting.md`](cloudflare-relay-self-hosting.md)). The required product keeps
-it out of onboarding and ordinary setup rather than offering a third thing to decide about; the
-current interim chooser has not caught up with that contract yet.
+it out of onboarding and ordinary setup rather than offering a third thing to decide about.
 
 ---
 
@@ -487,8 +485,7 @@ That is the main reason to prefer it.
 ## 11. Running your own relay
 
 This is an **expert opt-in path**. The required onboarding and ordinary setup do not ask anyone to do
-it, because the hosted relay in §13 carries anyone who does not want to operate their own; the
-current interim chooser is the explicit exception listed in §13. It exists because someone should
+it, because the hosted relay in §13 carries anyone who does not want to operate their own. It exists because someone should
 always be able to own their own carrier — not because the product needs them to. The step-by-step
 procedure, including plan requirements, the narrowest API token that works,
 verification, teardown and what it costs, is
@@ -1130,14 +1127,12 @@ outstanding:
    `chooseConnection().reason` and the `describeConnectionMethod` observer list for whichever
    carrier a live session won on, from `DaemonCarrierRouter.choice`, in Settings › Daemons. A
    carrier nothing has measured yet says so rather than defaulting to "direct".
-5. **Removal of the interim carrier chooser and self-hosting setup route.** The current PWA still
-   renders `onboarding-connection-chooser.tsx`, offers `own-relay`, and routes it through
-   `SELF_HOSTED_RELAY_STEPS`. The conforming flow uses the automatic order above and leaves
-   self-hosting to the expert runbook.
-
-PR #202 also surfaced the live advertisement state in onboarding, and that screen's own text still
-says a relay is not dialled by anything — which was true when it was written and is not now. Piece 5
-is where it is corrected.
+5. **Removal of the interim carrier chooser and self-hosting setup route** — DONE. First run asks
+   no carrier question: the `connect` step, the `own-relay` answer and the four self-hosting steps
+   are gone, and the daemon step carries a read-only note (`onboarding-connection-note.tsx`) saying
+   direct is tried first and the hosted relay is the automatic fallback, with the live advertisement
+   state and what the relay would see. Self-hosting is left to the expert runbook, reached from the
+   docs rather than from the app.
 
 **Deploying a relay now gets you the whole journey**: first pairing for a device that has never
 reached the daemon directly, every request/response route afterwards, and the live event and

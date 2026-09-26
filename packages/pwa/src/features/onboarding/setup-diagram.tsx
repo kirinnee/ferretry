@@ -82,46 +82,6 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     label: 'The daemon is starting on your machine. This browser is not linked to it yet.',
   },
   /*
-   * The one step that is about the LINE, not the ends. Choosing a carrier decides
-   * how the two will reach each other, so the link is what lights up while both
-   * ends rest — and it is still dashed, because deciding is not connecting.
-   */
-  connect: {
-    machine: 'fyd running',
-    browser: 'waiting',
-    lit: { machine: false, browser: false, link: true },
-    linked: false,
-    label: 'Choosing how this browser will reach the daemon on your machine. They are not linked yet.',
-  },
-  'relay-fingerprint': {
-    machine: 'showing identity',
-    browser: 'waiting',
-    lit: { machine: true, browser: false, link: false },
-    linked: false,
-    label: 'Your computer is showing the daemon fingerprint for a relay configuration. This browser is waiting.',
-  },
-  'relay-source': {
-    machine: 'getting relay',
-    browser: 'waiting',
-    lit: { machine: true, browser: false, link: false },
-    linked: false,
-    label: 'Your computer is getting the relay deployment source. This browser is waiting.',
-  },
-  'relay-allow': {
-    machine: 'configuring relay',
-    browser: 'waiting',
-    lit: { machine: true, browser: false, link: false },
-    linked: false,
-    label: 'Your computer is allowing its daemon at your relay. This browser is waiting.',
-  },
-  'relay-deploy': {
-    machine: 'deploying relay',
-    browser: 'waiting',
-    lit: { machine: true, browser: false, link: false },
-    linked: false,
-    label: 'Your computer is deploying the relay. This browser is waiting.',
-  },
-  /*
    * THE COLLAPSE, DRAWN. The daemon and this browser are the SAME machine, so
    * both ends light at once and the link is already solid — there is no journey
    * across the picture for a code to make. It is the one step whose figure says

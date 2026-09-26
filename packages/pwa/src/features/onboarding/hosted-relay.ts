@@ -186,11 +186,11 @@ export const readHostedRelayFallback = async ({
 /* ---------- what the screen says about all this --------------------------- */
 
 /**
- * What the DEFAULT relay row on the connection chooser says about itself.
+ * What the connection note on the daemon step says about the hosted relay.
  *
- * The chooser in `onboarding-connection-chooser.tsx` offers three carriers; this
- * is the live fact the recommended one cannot state from a constant, because its
- * operator can withdraw it between a release and a reader arriving.
+ * `onboarding-connection-note.tsx` states the carrier order rather than asking
+ * for one; this is the live fact it cannot state from a constant, because the
+ * relay's operator can withdraw it between a release and a reader arriving.
  */
 export const HOSTED_RELAY_ROW_NOTE =
   'Ferretry runs this one. Direct is still used whenever the daemon is reachable; the relay carries the ' +
@@ -222,69 +222,42 @@ export const HOSTED_RELAY_ROW_NOTE =
  * unknown field. The order this function may state is two legs, not three.)
  *
  * WHAT ONBOARDING HONESTLY KNOWS IS THE ORDER, NOT THE ANSWER: direct is tried
- * first, and the fallback the reader picked carries it when direct does not work.
+ * first, and the hosted relay carries it when direct does not work. There is no
+ * reader's pick to echo back — the three-way carrier chooser this used to take an
+ * answer from is gone, because the order is the product contract, not a setting.
  * THE MEASURED ANSWER LIVES ELSEWHERE, deliberately: `ActiveCarrierCard` renders
  * `chooseConnection().reason` for whichever carrier a live session won on. A
  * setup screen cannot report a measurement that has not been taken yet.
  */
-export const activeCarrierStatus = (chosen: 'default-relay' | 'own-relay' | 'direct' | undefined): string => {
-  const measured = 'Settings › Daemons names the carrier in use, and why, once this daemon is asked for anything.';
-  const order = 'Not measured yet — the daemon is tried directly first';
-  if (chosen === 'default-relay') return `${order}, then the relay. ${measured}`;
-  if (chosen === 'own-relay') return `${order}, then your own relay. ${measured}`;
-  return `${order}. ${measured}`;
-};
+export const activeCarrierStatus = (): string =>
+  'Not measured yet — the daemon is tried directly first, then the hosted relay. Settings › Daemons names the ' +
+  'carrier in use, and why, once this daemon is asked for anything.';
 
 /**
  * THE WHOLE DISCLOSURE: what carries this connection, and what the FALLBACK
  * would see if it ever carried one.
  *
  * Naming the carrier in use is half of it. The other half is the half a reader
- * cannot check for themselves: the carrier they picked as a fallback is a third
- * party, and they chose it during setup — several screens and possibly several
- * days before anything was actually connected. Saying "Direct" at the end and
- * stopping there quietly retires a decision they made about somebody else's
- * infrastructure, so the fallback's terms are restated exactly where the
- * connection becomes real.
- *
- * It is stated ONLY for a relay choice. `direct` has no third party in it, and
- * an empty disclosure under a "what they can see" heading reads as a redaction
- * rather than as an absence.
+ * cannot check for themselves: the fallback is a third party, and the daemon step
+ * that first said so may be several screens and possibly several days behind
+ * them. Saying "Direct" at the end and stopping there would quietly retire that
+ * disclosure, so the fallback's terms are restated exactly where the connection
+ * becomes real.
  */
 export interface CarrierDisclosure {
   /** The carrier this build actually dials, said plainly. */
   readonly inUse: string;
-  /** What the chosen fallback would learn, if it were carrying the connection. */
+  /** What the fallback would learn, if it were carrying the connection. */
   readonly fallbackWouldSee: readonly string[];
-  /** How to name the fallback in a heading. Empty when the choice has no third party in it. */
+  /** How to name the fallback in a heading. */
   readonly fallbackName: string;
 }
 
-export const carrierDisclosure = (chosen: 'default-relay' | 'own-relay' | 'direct' | undefined): CarrierDisclosure => {
-  const inUse = activeCarrierStatus(chosen);
-  if (chosen === 'default-relay') {
-    return { inUse, fallbackName: 'the default relay', fallbackWouldSee: HOSTED_RELAY_DISCLOSURE };
-  }
-  if (chosen === 'own-relay') {
-    return { inUse, fallbackName: 'your own relay', fallbackWouldSee: OWN_RELAY_DISCLOSURE };
-  }
-  return { inUse, fallbackName: '', fallbackWouldSee: [] };
-};
-
-/**
- * The same three facts for a relay the READER runs.
- *
- * Not a copy of the hosted list with a name swapped: what changes is who is on
- * the other side of each fact, and that is the whole reason somebody self-hosts.
- * Cloudflare is still in the path — the Worker runs on their network — and
- * pretending otherwise would make self-hosting look like a stronger guarantee
- * than it is.
- */
-export const OWN_RELAY_DISCLOSURE = [
-  'You and Cloudflare would see your daemon’s fingerprint, both IP addresses, and when and how much you connect.',
-  'Neither could read a byte of it: frames, device tokens, commands, output and names are encrypted end to end.',
-  'Its limits, its bill and its uptime are yours, and no one else can switch it off.',
-] as const;
+export const carrierDisclosure = (): CarrierDisclosure => ({
+  inUse: activeCarrierStatus(),
+  fallbackName: 'the hosted relay',
+  fallbackWouldSee: HOSTED_RELAY_DISCLOSURE,
+});
 
 /**
  * What the fallback does and does not cover, said on the screen rather than only in

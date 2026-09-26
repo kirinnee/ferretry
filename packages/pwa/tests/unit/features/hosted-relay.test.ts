@@ -26,7 +26,6 @@ import {
   HOSTED_RELAY_UNDETERMINED_NOTE,
   type HostedRelayFetch,
   NO_RELAY_DIRECTORY,
-  OWN_RELAY_DISCLOSURE,
   activeCarrierStatus,
   parseHostedRelayAdvertisement,
   readHostedRelayFallback,
@@ -205,7 +204,7 @@ describe('bundledRelayDirectory', () => {
 });
 
 describe('activeCarrierStatus', () => {
-  it('names the carrier the app actually dials, whichever one was chosen', () => {
+  it('names the order the app actually dials in, and no answer', () => {
     // This line used to be the literal 'Direct', passed in by the composition
     // root whenever anything was paired — the same claim for every carrier, and
     // measured by nothing. It then said nothing dials a relay, which was true when
@@ -216,16 +215,16 @@ describe('activeCarrierStatus', () => {
     // for itself. (An earlier version of this comment named a middle leg, "the
     // link's rendezvous" — the withdrawn `v2` fragment. No link carries one.) So
     // what this may state is the ORDER, and it must not state an answer.
-    for (const chosen of ['direct', 'default-relay', 'own-relay', undefined] as const) {
-      expect(activeCarrierStatus(chosen)).toContain('Not measured yet');
-      expect(activeCarrierStatus(chosen)).toContain('tried directly first');
-      expect(activeCarrierStatus(chosen)).toContain('Settings › Daemons');
-      expect(activeCarrierStatus(chosen)).not.toContain('nothing dials a relay yet');
-      // The retired claims, each named so neither can come back by a rewording.
-      expect(activeCarrierStatus(chosen)).not.toContain('pairing is always direct');
-      expect(activeCarrierStatus(chosen)).not.toStartWith('Direct');
-    }
-    expect(activeCarrierStatus('own-relay')).toContain('then your own relay');
+    const status = activeCarrierStatus();
+    expect(status).toContain('Not measured yet');
+    expect(status).toContain('tried directly first, then the hosted relay');
+    expect(status).toContain('Settings › Daemons');
+    expect(status).not.toContain('nothing dials a relay yet');
+    // The retired claims, each named so neither can come back by a rewording.
+    expect(status).not.toContain('pairing is always direct');
+    expect(status).not.toStartWith('Direct');
+    // And no echo of a reader's pick: there is no carrier chooser to have picked in.
+    expect(status).not.toContain('your own relay');
   });
 });
 
@@ -272,37 +271,13 @@ describe('what the step says', () => {
 });
 
 describe('the carrier disclosure', () => {
-  it('names the carrier in use and what the chosen fallback would see', () => {
-    // The carrier in use is only half of it. The other half is about a third
-    // party the reader chose several screens ago and has not seen since.
-    const hosted = carrierDisclosure('default-relay');
-    expect(hosted.inUse).toBe(activeCarrierStatus('default-relay'));
-    expect(hosted.fallbackName).toBe('the default relay');
-    expect(hosted.fallbackWouldSee).toEqual(HOSTED_RELAY_DISCLOSURE);
-
-    const own = carrierDisclosure('own-relay');
-    expect(own.fallbackName).toBe('your own relay');
-    expect(own.fallbackWouldSee).toEqual(OWN_RELAY_DISCLOSURE);
-  });
-
-  it('does not pretend self-hosting removes Cloudflare from the path', () => {
-    // The Worker runs on their network either way. What changes is who holds
-    // the account, the bill and the off switch — which is the actual reason to
-    // self-host, and it is worth less if the page oversells it.
-    expect(OWN_RELAY_DISCLOSURE.join(' ')).toContain('Cloudflare');
-    expect(OWN_RELAY_DISCLOSURE.join(' ')).toContain('no one else can switch it off');
-    // Still end-to-end encrypted, said in both lists rather than only the hosted one.
-    for (const lines of [HOSTED_RELAY_DISCLOSURE, OWN_RELAY_DISCLOSURE]) {
-      expect(lines.join(' ')).toContain('encrypted end to end');
-    }
-  });
-
-  it('says nothing at all for a direct connection', () => {
-    // No third party is in it. An empty list under a "what they can see" heading
-    // reads as a redaction rather than as an absence.
-    const direct = carrierDisclosure('direct');
-    expect(direct.fallbackWouldSee).toEqual([]);
-    expect(direct.fallbackName).toBe('');
-    expect(carrierDisclosure(undefined).fallbackWouldSee).toEqual([]);
+  it('names the carrier order and what the hosted fallback would see', () => {
+    // The carrier in use is only half of it. The other half is about the third
+    // party that carries the connection whenever direct cannot.
+    const disclosure = carrierDisclosure();
+    expect(disclosure.inUse).toBe(activeCarrierStatus());
+    expect(disclosure.fallbackName).toBe('the hosted relay');
+    expect(disclosure.fallbackWouldSee).toEqual(HOSTED_RELAY_DISCLOSURE);
+    expect(HOSTED_RELAY_DISCLOSURE.join(' ')).toContain('encrypted end to end');
   });
 });
