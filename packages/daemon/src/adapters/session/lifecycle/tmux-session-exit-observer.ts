@@ -32,6 +32,17 @@ export interface SessionLaunchesInFlight {
  */
 const ABSENT_SESSION = /can't find session|no server running|error connecting to/iu;
 
+/**
+ * How long a dead pane is given to report its exit status.
+ *
+ * tmux marks a pane dead when its terminal closes, and records the status only once it reaps the
+ * child, a moment later. A tick landing between the two would otherwise settle the session as an
+ * exit nobody recorded, permanently, when the number was milliseconds away. A tmux that never
+ * reports one still settles, after the budget.
+ */
+const EXIT_STATUS_ATTEMPTS = 10;
+const EXIT_STATUS_POLL_MS = 50;
+
 function status(state: JsonValue | undefined): string | undefined {
   const value = jsonObject(state)?.status;
   return typeof value === 'string' ? value : undefined;
@@ -69,6 +80,7 @@ export class TmuxSessionExitObserver implements SessionExitPort {
     private readonly tmux: TmuxCommandPort,
     private readonly launches: SessionLaunchesInFlight,
     private readonly clock: ClockPort,
+    private readonly sleep: (milliseconds: number) => Promise<void> = milliseconds => Bun.sleep(milliseconds),
   ) {}
 
   async observe(): Promise<readonly SessionExitObservation[]> {
@@ -127,15 +139,19 @@ export class TmuxSessionExitObserver implements SessionExitPort {
   private async exitOf(registration: RegisteredTerminalPane): Promise<SessionPaneExit | undefined> {
     const present = await this.tmux.execute(hasSessionArguments(registration.tmuxSession));
     if (present.code !== 0) return ABSENT_SESSION.test(present.stderr) ? { kind: 'gone' } : undefined;
-    const [identityResult, metadataResult] = await Promise.all([
-      this.tmux.execute(paneIdentityArguments(registration.tmuxSession)),
-      this.tmux.execute(paneMetadataArguments(registration.tmuxSession)),
-    ]);
-    if (identityResult.code !== 0 || metadataResult.code !== 0) return undefined;
+    const identityResult = await this.tmux.execute(paneIdentityArguments(registration.tmuxSession));
+    if (identityResult.code !== 0) return undefined;
     const identity = parsePaneIdentity(identityResult.stdout);
     if (identity === undefined || identity.paneId !== registration.paneId || identity.pid !== registration.pid)
       return undefined;
-    const metadata = parsePaneMetadata(metadataResult.stdout);
-    return metadata.dead ? { kind: 'exited', exitStatus: metadata.exitCode } : undefined;
+    for (let attempt = 1; ; attempt += 1) {
+      const metadataResult = await this.tmux.execute(paneMetadataArguments(registration.tmuxSession));
+      if (metadataResult.code !== 0) return undefined;
+      const metadata = parsePaneMetadata(metadataResult.stdout);
+      if (!metadata.dead) return undefined;
+      if (metadata.exitCode !== undefined || attempt >= EXIT_STATUS_ATTEMPTS)
+        return { kind: 'exited', exitStatus: metadata.exitCode };
+      await this.sleep(EXIT_STATUS_POLL_MS);
+    }
   }
 }

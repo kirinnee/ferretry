@@ -135,10 +135,30 @@ async function fixture(exitCode: number): Promise<ExitFixture> {
   };
 }
 
-function observer(subject: ExitFixture, commands: TmuxCommandPort = subject.commands): TmuxSessionExitObserver {
-  return new TmuxSessionExitObserver(DAEMON, subject.storage, subject.store, commands, subject.gate, {
-    now: () => NOW,
-  });
+function observer(
+  subject: ExitFixture,
+  commands: TmuxCommandPort = subject.commands,
+  sleep?: (milliseconds: number) => Promise<void>,
+): TmuxSessionExitObserver {
+  return new TmuxSessionExitObserver(
+    DAEMON,
+    subject.storage,
+    subject.store,
+    commands,
+    subject.gate,
+    { now: () => NOW },
+    sleep,
+  );
+}
+
+/** The real server for everything but the pane-metadata read, which gets the given answer. */
+function metadataAnswers(subject: ExitFixture, answer: () => { code: number; stdout: string }): TmuxCommandPort {
+  return {
+    execute: async (arguments_, stdin) =>
+      arguments_[0] === 'display-message' && arguments_.at(-1)?.includes('pane_dead') === true
+        ? { stderr: '', ...answer() }
+        : await subject.commands.execute(arguments_, stdin),
+  };
 }
 
 /** The self-check with every port but the exit pass inert, so a tick does exactly one thing. */
@@ -347,5 +367,31 @@ describe('tmux session exit observer', () => {
 
     // Assert
     should(results).deepEqual([[], [], [], [], []]);
+  }, 20_000);
+
+  it('should wait briefly for an exit status tmux has not recorded yet, then settle without one', async () => {
+    // Arrange — tmux marks the pane dead before it reaps the child; here it never reaps at all.
+    const subject = await fixture(0);
+    await exitHarness(subject);
+    const sleeps: number[] = [];
+    let reads = 0;
+    const late = metadataAnswers(subject, () => {
+      reads += 1;
+      return { code: 0, stdout: reads < 3 ? '1||0|0|24|80' : '1|7|0|0|24|80' };
+    });
+    const never = metadataAnswers(subject, () => ({ code: 0, stdout: '1||0|0|24|80' }));
+    const refused = metadataAnswers(subject, () => ({ code: 1, stdout: '' }));
+    const sleep = async (milliseconds: number): Promise<void> => void sleeps.push(milliseconds);
+
+    // Act
+    const arrived = await observer(subject, late, sleep).observe();
+    const missing = await observer(subject, never, sleep).observe();
+    const unreadable = await observer(subject, refused, sleep).observe();
+
+    // Assert
+    should(arrived.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 7 }]);
+    should(missing.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: undefined }]);
+    should(unreadable).deepEqual([]);
+    should(sleeps.length).equal(2 + 9);
   }, 20_000);
 });
