@@ -136,3 +136,84 @@ fy --version
 fy --help
 fyd --version
 ```
+
+## First run
+
+Five commands take you from a fresh install to a phone watching an agent work. Install `claude`
+(Claude Code) or `codex` first, and `tmux`, which runs each session.
+
+1. **Start the daemon.**
+
+   ```bash
+   fy daemon start
+   ```
+
+   If `claude` or `codex` is on your `PATH`, this first start also creates two accounts for each:
+   `claude-default` is for using Claude yourself in a terminal, and `claude-auto-default` is the one
+   Ferretry runs sessions on (`codex-default` / `codex-auto-default` likewise). `fy fleet ls` lists
+   them. `fy doctor` checks what else the host is missing, and says what each missing program stops.
+
+2. **Answer the password question.** At a terminal, the first start offers to set an **operator
+   password**. It is not your system or `sudo` password; it is a Ferretry-only secret. Using this
+   machine locally never needs it. Pairing a phone or another device does, because a paired device
+   can change this machine's settings, so press Enter to skip it for now if you like. With no
+   terminal (a script, for example) nothing is asked, and the start prints the command instead. Set
+   or replace it at any time with:
+
+   ```bash
+   fy daemon password set
+   ```
+
+3. **Check the accounts are signed in.**
+
+   ```bash
+   fy fleet health
+   ```
+
+   This checks every account without running a model, so it costs nothing. If you were already
+   signed in to `claude` or `codex` on this machine, the first start copied that login into the new
+   accounts. The report then reads like this, leaving out the line under each row that says which
+   install its login was copied from:
+
+   ```text
+   4 accounts on 2 logins · 4 ready · checked just now
+
+     ○ Codex (default)   READY  renews itself the first time it's used
+       this login also covers Codex (default, auto)
+     ○ Claude (default)  READY  renews itself the first time it's used
+       this login also covers Claude (default, auto)
+   ```
+
+   `READY` needs nothing from you. The copied login's short-lived token has usually already expired,
+   and it **renews itself the first time it's used**: the first session on that account renews it
+   with no browser. Accounts that share a login are shown as one row. A copied Codex login adds one
+   more line, `first use signs your own Codex out on this machine — sign it back in once`, because
+   that renewal signs out the `codex` you use yourself. Claude shows no such line.
+
+   An account with no login to copy shows `NEEDS LOGIN` and one command to run, such as
+   `sign in: fy fleet login <account id>`. That one sign-in covers every account on the same login.
+
+4. **Pair your phone.**
+
+   ```bash
+   fy pair
+   ```
+
+   Scan the QR code with your phone's camera. The code lasts two minutes and works once. The phone
+   does not need to reach this machine directly: when it cannot, it pairs through Ferretry's hosted
+   relay, which never sees the code or anything you send.
+
+5. **Start a session** on the account marked `auto`:
+
+   ```bash
+   fy start --agent claude-auto-default "your task"
+   fy ps
+   ```
+
+   Add `--mode interactive` for a session you drive yourself, and `fy attach <id>` to open it in this
+   terminal. `claude-default` cannot run sessions; asking for it names the account to use instead.
+
+The hosted app at `https://ferretry.pages.dev` is the only browser origin a daemon accepts by default.
+If you serve the PWA yourself, add that page's origin to `corsOrigins` in
+`${FY_HOME:-~/.ferretry}/config/daemon.json` and restart the daemon, or the browser's requests are
+refused.
