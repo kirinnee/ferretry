@@ -78,16 +78,49 @@ A row's command is chosen from `HEALTH_REMEDY` in `packages/cli/src/lib/fleet/re
 table is exhaustive over `FleetHealthReason` — a reason added tomorrow is a compile error there rather
 than a row that silently stops offering a command.
 
-It used to be keyed on the **verdict**, and that was a reported defect. `oauth_refreshable` is a
-reason whose verdict is `unknown`, so a verdict-keyed table could not reach it however it was written:
-the row printed _"signed in, but this copy needs refreshing"_ and stopped, while
-`fy fleet login <accountId>` renewed exactly that account the whole time — a login pass renews before
-anything else, and a renewal that succeeds settles it with no browser at all. The row shows the
-account's display **name**, so the id the command needs was not on screen either. Somebody had to be
-told both, by hand.
+It used to be keyed on the **verdict**, and that was a reported defect: `oauth_refreshable` is a
+reason whose verdict is `unknown`, so a verdict-keyed table could not reach it however it was written.
+Rekeying made it reachable, and it then printed `fy fleet login <accountId>` beside every refreshable
+row — which turned out to be the next defect.
 
-Three `undefined` entries are load-bearing rather than incidental:
+### `READY`: a refreshable credential needs nothing
 
+A first run seeds every new account from this host's own harness login (see
+[fleet-defaults.md](fleet-defaults.md)), and the copied access token is nearly always already past
+its short life, with a good refresh token beside it. So **every new user's first `fy fleet health`**
+showed each account as `? UNKNOWN · signed in, but this copy needs refreshing · last check
+inconclusive` with its own `fy fleet login <uuid>` under it, which reads as "go and sign in four
+times" on an install whose whole promise is that nobody signs in.
+
+The harness renews such a token by itself the first time the account is used. So the terminal and the
+browser both present `unknown` / `oauth_refreshable` as **`READY` — "renews itself the first time
+it's used"**, in the calm tone, with no command and no "inconclusive" clause (an aged-out access token
+is exactly what the free check cannot use, so that check is inconclusive by construction). The
+**verdict is unchanged**: it is still `unknown` on the wire, in `--json`, and in every decision,
+because nothing has proved the provider still accepts the credential. `READY` is counted on its own in
+the header, never as healthy. `fy fleet login --status` says the same words for a `refreshable` home.
+
+A Codex account still holding the host's copied login also gets one plain line under its row:
+"first use signs your own Codex out on this machine — sign it back in once". Codex refresh tokens are
+proven single-use, so that is what the first use does. Nothing like it is said for Claude, whose
+rotation is unproven.
+
+Not printing the command is also the safer default: renewing early is what spends a copied refresh
+token, and for a seeded copy that can sign the host's own install out — see
+[design/credential-seeding.md](design/credential-seeding.md).
+
+### Accounts on one login are shown once
+
+`fy fleet login <accountId>` selects the account's whole login, so the report groups by the same
+identities: accounts on one login whose rows would say **exactly** the same thing print as one row
+with "this login also covers …", and one command where one is needed. Accounts on one login that say
+different things keep their own rows, and a configuration that cannot say which login is whose costs
+only the grouping. A remedy line leads with what it does — `sign in again: fy fleet login <id>` —
+because the id alone is an opaque string somebody is asked to run on trust.
+
+These `undefined` entries are load-bearing rather than incidental:
+
+- `oauth_refreshable` — see above; there is nothing to do, and the command would spend a copied token.
 - `oauth_rejection_unconfirmed` — see below; a browser approval that fixes nothing is the worst
   outcome available here.
 - `static_credential_missing` / `static_credential_rejected` — a login cannot repair an account that

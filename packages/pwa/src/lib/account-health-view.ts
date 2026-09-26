@@ -48,11 +48,11 @@
 
 import type { PickerAccountHealth, PickerHealthReason, PickerHealthVerdict } from './account-picker-catalog.ts';
 
-/** The tone a row paints itself with. Deliberately four, matching the four verdicts. */
+/** The tone a row paints itself with. Four, one per verdict — and `Ready` borrows `ok`; see {@link isReady}. */
 export type AccountHealthTone = 'ok' | 'bad' | 'warn' | 'muted';
 
 export interface AccountHealthView {
-  /** The headline: `Healthy`, `Needs re-login`, `Needs credential`, `Unknown`. */
+  /** The headline: `Healthy`, `Ready`, `Needs re-login`, `Needs credential`, `Unknown`. */
   readonly label: string;
   /** The instant clause beside it: `Checked 4m ago`, `Never checked`, `Confirmed 8m ago`. */
   readonly checked: string;
@@ -100,6 +100,20 @@ const VERDICT_TONE: Readonly<Record<PickerHealthVerdict, AccountHealthTone>> = {
 };
 
 /**
+ * A credential whose access token aged out beside a good refresh token: `Ready`, not `Unknown`.
+ *
+ * THE VERDICT STAYS `unknown` — nothing has proved the provider still accepts it, so it is never
+ * called `Healthy` — but it is also exactly what a first run leaves on every account, because the
+ * host's own login is copied and the copied access token is nearly always already past its short
+ * life. Shown as `Unknown` in the warning tone, a new user's whole fleet read as broken over a
+ * login that was fine: the harness renews such a token by itself the first time the account is
+ * used. So it gets its own headline and the calm tone, and the terminal says the same words
+ * (`packages/cli/src/lib/fleet/render.ts`, `READY`).
+ */
+const isReady = (health: PickerAccountHealth): boolean =>
+  health.verdict === 'unknown' && health.reason === 'oauth_refreshable';
+
+/**
  * Why, in one clause each.
  *
  * Every reason has words. A reason with no sentence would render as a bare
@@ -116,7 +130,7 @@ const REASON_DETAIL: Readonly<Record<PickerHealthReason, string>> = {
   static_credential_rejected: 'The provider rejected the credential this account is configured to use.',
   never_checked: 'Nothing has checked this account yet.',
   credential_unreadable: 'The credential could not be read, so nothing is known either way.',
-  oauth_refreshable: 'Signed in, but this copy needs refreshing.',
+  oauth_refreshable: 'Renews itself the first time it’s used.',
   oauth_rejection_unconfirmed:
     'The OAuth check was refused, but Ferretry could not tell whether the provider rejected this login or this client. This result does not mean you need to sign in again.',
   codex_liveness_unproven: 'Codex has no free way to prove a sign-in, so this is not a verdict about it.',
@@ -200,16 +214,19 @@ export function accountHealthView(health: PickerAccountHealth, now: number): Acc
     health.staleVerdict === undefined
       ? REASON_DETAIL[health.reason]
       : `${REASON_DETAIL.stale} It last read ${VERDICT_LABEL[health.staleVerdict].toLowerCase()}.`;
+  const ready = isReady(health);
+  // Not for `Ready`: an aged-out access token is exactly what the free check cannot use, so that check
+  // is inconclusive by construction, and saying so beside "renews itself" read as a second fault.
   const secondary =
-    health.lastCheckInconclusive && health.verdictAt !== null && health.lastCheckedAt !== null
+    !ready && health.lastCheckInconclusive && health.verdictAt !== null && health.lastCheckedAt !== null
       ? `The check ${relativeInstantLabel(health.lastCheckedAt, now)} was inconclusive.`
       : undefined;
   return {
-    label: VERDICT_LABEL[health.verdict],
+    label: ready ? 'Ready' : VERDICT_LABEL[health.verdict],
     checked: checkedClause(health, now),
     detail,
     ...(secondary === undefined ? {} : { secondary }),
-    tone: VERDICT_TONE[health.verdict],
+    tone: ready ? 'ok' : VERDICT_TONE[health.verdict],
     offersSignIn: accountHealthOffersSignIn(health),
     // A verdict AND its reason, both: `unknown` on its own is a real state somebody looked at and
     // could not conclude, which is a different row from one nobody has opened yet.
@@ -221,7 +238,8 @@ export function accountHealthView(health: PickerAccountHealth, now: number): Acc
 
 function checkedClause(health: PickerAccountHealth, now: number): string {
   if (health.lastCheckedAt === null) return 'Never checked';
-  if (health.verdictAt !== null && health.lastCheckInconclusive) {
+  // `Ready` is never "Confirmed": nothing has confirmed it, which is the one thing its headline admits.
+  if (!isReady(health) && health.verdictAt !== null && health.lastCheckInconclusive) {
     return `Confirmed ${relativeInstantLabel(health.verdictAt, now)}`;
   }
   return `Checked ${relativeInstantLabel(health.lastCheckedAt, now)}`;

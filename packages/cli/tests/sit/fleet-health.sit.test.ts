@@ -123,5 +123,9 @@ describe(`fleet account health (SIT, ${useInProcess ? 'in-process' : 'compiled b
     // And it says the row carries a copy-paste command, because the reported incident was somebody
     // reading a row that needed one action and finding no action on it.
     should(help.out).containEql('fy fleet login <accountId>');
+    // And it explains READY, the state every first run leaves on every seeded account, as one needing
+    // nothing — the owner's fresh install read four of them as "log in four times".
+    should(help.out).containEql('READY means the access token has aged out');
+    should(help.out).containEql('is nothing to run');
   });
 });

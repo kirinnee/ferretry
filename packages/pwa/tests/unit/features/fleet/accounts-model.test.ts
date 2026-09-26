@@ -73,6 +73,26 @@ describe('accountsRoster', () => {
     expect(rowFor(view, CLAUDE_ACCOUNT_ID).checkedAt).toBe(health.lastCheckedAt);
   });
 
+  it('says a first-run account is Ready in its headline AND its credential line, in the same words', () => {
+    // Arrange — what seeding leaves on every new account: the host's login, copied, with an access
+    // token that has already aged out beside a good refresh token. The terminal says `READY` and
+    // "renews itself the first time it's used" for this same row.
+    const health = healthRow({ verdict: 'unknown', reason: 'oauth_refreshable', lastCheckInconclusive: true });
+    const view = accountsRoster(
+      readiness([claudeIdentity([loginAccount({ credential: { state: 'refreshable' } })])]),
+      healthMap([health]),
+      undefined,
+      NOW,
+    );
+    const row = rowFor(view, CLAUDE_ACCOUNT_ID);
+
+    // Assert
+    expect(row.health.label).toBe('Ready');
+    expect(row.health.tone).toBe('ok');
+    expect(row.health.detail).toBe('Renews itself the first time it’s used.');
+    expect(row.credential).toStartWith('Ready · renews itself the first time it’s used');
+  });
+
   it('treats an account with no published health row as UNREAD, not as unknown', () => {
     const view = accountsRoster(readiness([claudeIdentity()]), new Map(), undefined, NOW);
 
