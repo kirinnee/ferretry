@@ -30,6 +30,8 @@ assumes it is running inside the nix devshell — see [Nix](../nix/index.md).
 | `task test:unit`         | unit suite only                                          |
 | `task test:int`          | integration suite only                                   |
 | `task test:sit`          | black-box journeys through the freshly compiled binary   |
+| `task test:e2e`          | isolated end-to-end journeys (`scripts/test/run-e2e.sh`) |
+| `task test:gate`         | the exact coverage gate CI runs (`scripts/ci/test.sh`)   |
 | `task test:coverage`     | every coverage-capable suite with coverage               |
 | `task test:watch`        | watch the fast unit suite                                |
 
@@ -69,10 +71,14 @@ block should not show up in `task --list` twice under two spellings.
 2. **Move conditional or multi-step local logic to `scripts/local/`.** `setup`, `build`, and
    `deadcode` are scripts because they guard inputs, chain steps, or verify their own output.
    See [Shell Script Conventions](../shell-scripts/index.md).
-3. **Never call `scripts/ci/*` from a Taskfile.** Those are workflow entry points and own
-   their own setup; GitHub Actions calls them directly. Taskfiles may call `scripts/local/*`
-   and `scripts/release/*` (`compile`, `compile:smoke`) — the release scripts are the same
-   code CI runs, which is the point.
+3. **Do not call `scripts/ci/*` from a Taskfile — with one sanctioned exception.** Those are
+   workflow entry points and own their own setup; GitHub Actions calls them directly. Taskfiles
+   may call `scripts/local/*`, `scripts/release/*` (`compile`, `compile:smoke`) and
+   `scripts/test/*` (`task test:e2e` runs `scripts/test/run-e2e.sh`) — the release scripts are
+   the same code CI runs, which is the point. The exception is `test:gate:unit` /
+   `test:gate:int`, which run `scripts/ci/test.sh unit|int`: those tasks exist to be **the exact
+   gate CI enforces**, coverage ledgers included, and the only way a local gate cannot drift from
+   CI's is to be the same script. No other task may call into `scripts/ci/`.
 4. **Use lowercase names and colon-separated namespaces.** `test:unit:coverage`, not
    `testUnitCoverage`.
 5. **Derive names; never hardcode them.** Root `vars:` compute the binary name, the

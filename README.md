@@ -59,8 +59,8 @@ actually using.
 Still missing, as [docs/relay-protocol.md](docs/relay-protocol.md) §13 lists in full:
 
 - There is no `fy` command for the daemon's relay list yet; you edit `config/daemon.json` by hand.
-- Some browser screens (for example files, skills, pins and remote transcript correction) still
-  connect directly only, so they show an error over the relay.
+- Some browser screens (for example files, skills and remote transcript correction) still connect
+  directly only, so they show an error over the relay.
 - When the relay refuses a new session because this daemon already has too many, no screen says so,
   and the live event feed fails silently.
 

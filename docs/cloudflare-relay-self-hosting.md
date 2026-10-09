@@ -22,25 +22,24 @@ the first time, close this and use the app.
 
 ## Read this before you start: what you will and will not get
 
-Deploying this Worker gets you **a working relay**. It does not yet get you a remote connection,
-because the transport that would dial it is not written.
+Deploying this Worker gets you **a relay both ends can use**. `fyd` dials out to it and carries
+sessions over it (`packages/daemon/src/lib/relay/`), and the PWA reaches a daemon through it
+(`packages/pwa/src/lib/relay-session.ts`, `relay-carrier.ts`, `relay-pairing.ts`). Pointing a daemon
+at it is one entry in that daemon's configuration — [Step 6](#step-6--point-fyd-at-it).
 
-- `packages/pwa/src/lib/daemon-transport.ts` builds every request from one direct `baseUrl`, and
-  `ConnectionMethod` — the carrier type that would replace it — has no consumer outside
-  `packages/relay`.
-- `fyd` has no dial-out relay client at all.
+One limit is declared rather than solved, and it decides whether this is useful to you:
 
-Separate work does let a browser discover Ferretry's hosted relay and read its kill switch, from a
-build-time origin. That is discovery, not transport, and it does nothing for a relay of your own —
-see [The client gap, exactly](#the-client-gap-exactly).
+- **A device that has never paired cannot find a relay you run yourself.** The only rendezvous a
+  fresh device can discover for itself is Ferretry's hosted one, and the pairing link does not name a
+  relay. So a daemon whose only relay is yours pairs a new device **only over a network where that
+  device can reach the daemon's own address** — the same LAN, or a VPN. Once paired, the device is
+  told about your relay and uses it from anywhere. Listing the hosted relay beside yours
+  ([Step 6](#step-6--point-fyd-at-it)) gives off-network first pairing back, at the cost of using
+  Ferretry's rendezvous for it.
 
-So today this runbook takes you as far as **"the relay is deployed, reachable, and serving the
-fingerprints I listed"**, verified at the Worker itself. The end-to-end sections below are written
-out in full, and marked with the prerequisite they wait on. See
-[The client gap, exactly](#the-client-gap-exactly) for the four named pieces and how to tell when
-they have landed.
-
-If that is not useful to you yet, stop here and come back when the prerequisite ships.
+The full list of what is built and what is still missing around the relay — including the browser
+screens that still connect directly only — is [relay-protocol.md](relay-protocol.md) §13,
+_What is built, and what is not_. This runbook does not restate it.
 
 ---
 
@@ -350,78 +349,69 @@ request metadata.
 
 ---
 
-## Step 6 — Point `fyd` and the PWA at it
+## Step 6 — Point `fyd` at it
 
-### The client gap, exactly
+You configure **the daemon only**. A paired browser learns where its daemon can be reached from the
+daemon itself — the `carriers` set on the pairing response and on `GET /v1/carriers`
+([relay-protocol.md](relay-protocol.md) §13, _The carrier set a daemon publishes_) — so there is no
+browser setting, and the relay address the browser dials is the exact string the daemon's claim
+signature covers.
 
-**There is no shipped interface for this step.** Nothing is missing from your relay; what is missing
-is the transport on the two ends that would dial one. Naming it precisely so you can tell when it
-lands — [PR #202](https://github.com/kirinnee/ferretry/pull/202) provides the first two, and neither
-helps you:
+**1. Add your relay to the daemon's carrier list.** Edit `${FY_HOME:-~/.ferretry}/config/daemon.json`
+(there is no `fy` command for this list yet):
 
-1. **A build-time discovery-origin constant in the PWA** — provided by #202. The relay lives on its
-   own hostname, so the browser cannot find a relay advertisement at its own origin. A relative
-   `/v1/default-relay` is wrong, and the PWA is served as a static Cloudflare Pages bundle — no
-   Function, no proxy — so the discovery origin is compiled into the build as
-   `FY_RELAY_DIRECTORY_ORIGIN`. That origin identifies a _service_; it is not a daemon URL and
-   identifies no user.
-2. **A fetch-and-parse step** — also #202 — that reads the advertisement through
-   `HostedRelayAdvertisementSchema` and turns it into a carrier via `hostedRelayConnection`.
-3. **A relay-capable transport on both ends.** This is the large one, and it is unstarted.
-   - **The daemon.** `packages/daemon/src` has **no relay client and no relay configuration at
-     all** — not a partial one, zero references to `packages/relay`. It needs a relay client that
-     dials out and holds the socket open, the persisted key material it signs its rendezvous claim
-     with, and the `fy` command surface and config layout to point it at an address.
-   - **The browser.** `DaemonConnection` in `packages/pwa/src/lib/daemon-connection.ts` is
-     `{ daemonId, baseUrl, deviceToken }` — it has no carrier field, so there is nowhere to record
-     that a daemon is reached through a relay. Four files move together:
-     `daemon-connection.ts` (the carrier on the record), `connections.ts` (persisting it),
-     `daemon-transport.ts` and `event-transport.ts` (both build every request and socket from that
-     single direct `baseUrl` today).
-4. **Active-carrier disclosure on screen** — rendering `chooseConnection().reason` and the
-   `describeConnectionMethod` observer list for a _live session_, so a session on a relay never looks
-   like a direct one.
+```jsonc
+"carriers": [
+  { "kind": "relay", "url": "wss://ferretry-relay.<your-subdomain>.workers.dev" }
+]
+```
 
-The decision layer those four would call is already written and tested in
-`packages/relay/src/lib/connection.ts`: `connectionPreferenceOrder` puts direct first,
-`chooseConnection` returns the plain sentence saying which carrier won and what it passed over.
+Use the address from [step 5](#step-5--verify-at-the-worker), or your custom hostname. It must be
+`wss:` (or `https:`); plain `ws:` is accepted only against loopback. An entry you write **wins and is
+never overwritten** by discovery. To keep Ferretry's hosted relay as well — which is what lets a
+device that has never paired reach the daemon off-network — list it beside yours:
 
-#202 also surfaces the live advertisement state in onboarding. It is **discovery-only**, and says on
-its own screen that nothing dials a relay, because nothing does.
+```jsonc
+"carriers": [
+  { "kind": "relay", "url": "wss://ferretry-relay.<your-subdomain>.workers.dev" },
+  { "kind": "relay", "source": "discovery" }
+]
+```
 
-**None of that helps a relay of your own**, and it is worth being blunt about why: what a browser
-discovers is the **hosted** deployment's advertisement, and `/v1/default-relay` is a hosted-mode
-route your `wrangler.jsonc` deployment does not serve at all. Pieces **3 and 4** are the ones that
-would let any browser dial any relay, and they are unwritten. Your relay is verified at the Worker,
-by [step 5](#step-5--verify-at-the-worker), and by nothing in a browser.
+At most four relays. A list with a duplicate or a fifth one refuses the boot rather than quietly
+dropping one. The schema is `packages/daemon/src/lib/runtime/carriers.ts`.
 
-**An expert override — a way to name a relay address for a specific daemon by hand — does not exist,
-and this document will not invent a command for it.** When one lands, the intended shape is unchanged
-from what the protocol already requires:
+**2. Restart `fyd`, then check what it decided:**
 
-- the **same** relay address string is configured on the daemon and in the browser, because it is the
-  `host` the daemon's claim signature covers, and a mismatch fails the claim rather than falling back;
-- the daemon dials `/v1/rendezvous/<its fingerprint>/daemon` and the browser dials
-  `/v1/rendezvous/<that fingerprint>/client`;
-- direct is still attempted first, and the surface still names the carrier it ended up on.
+```bash
+fyd --check
+```
 
-Nothing about your relay changes when that ships. A relay deployed today is the relay those clients
-will dial.
+It names the relay posture in one line — direct-only, hosted, or self-hosted, and which.
 
-### End-to-end verification, once the prerequisite is met
+**3. Pair a device.** Because a fresh device cannot discover your relay
+([the declared limit](#read-this-before-you-start-what-you-will-and-will-not-get)), first pairing
+goes direct unless the hosted entry is also listed. That means the device must be able to reach the
+daemon's own address for the pairing itself — the daemon has to listen beyond loopback, which is
+`"host": "0.0.0.0"` plus `"publicUrl"` in the same file ([pairing.md](pairing.md)). For a daemon
+that only listens on loopback and lists only your relay, `fy pair` draws no QR and says so, because
+nothing off that machine could redeem it.
 
-Written out so the procedure is on record, not because you can run it today.
+**4. Use it from anywhere.** Once paired, the device holds the daemon's published set and walks it:
+every direct address first, then every relay, in the daemon's order. Settings › Daemons names the
+carrier the live session is actually on and why the others were passed over.
 
-1. Put the daemon somewhere direct genuinely does not work — a different network from the phone, no
-   VPN. This is the case the relay exists for, and testing on one LAN proves nothing, because direct
-   would win.
-2. `fy pair` on the host; scan the QR with the phone.
-3. The session opens. **Confirm the screen names the carrier** and says why direct was passed over.
-   A session that connects without naming its carrier is the failure mode this whole design is
-   guarding against — report it rather than accepting it.
-4. On the host, `cd packages/relay && wrangler tail` should show the two socket arrivals
-   (`/daemon` and `/client`) and then traffic. Two arrivals and no traffic means the sockets
-   connected but the handshake did not complete.
+### End-to-end verification
+
+1. Pair the device as in step 3 above.
+2. Move the device to a network where the daemon's address is genuinely unreachable — a different
+   network, no VPN. Testing on one LAN proves nothing, because direct would win.
+3. Open the app. **Confirm Settings › Daemons names the relay as the carrier** and says why direct was
+   passed over. A session that connects without naming its carrier is the failure mode this design
+   guards against — report it rather than accepting it.
+4. On the host, `cd packages/relay && wrangler tail` should show the two socket arrivals (`/daemon`
+   and `/client`) and then traffic. Two arrivals and no traffic means the sockets connected but the
+   handshake did not complete.
 5. Confirm your own relay is the one carrying it — the address on screen should be your
    `workers.dev` (or custom) hostname, not Ferretry's.
 
@@ -462,9 +452,10 @@ Your Cloudflare account's own logs see the same metadata, on Cloudflare's terms 
 ## Operating it
 
 **You are now the availability.** If your relay is down, every daemon that depended on it is
-unreachable from outside its own network. There is no automatic failover to Ferretry's hosted relay
-from a relay you configured by hand — the address is a value you supplied, and the product will tell
-you it could not reach it rather than quietly using something else.
+unreachable from outside its own network — unless its `carriers` list also names the hosted relay
+(`"source": "discovery"`), in which case the device moves on to that one. A daemon whose list names
+only yours does not dial Ferretry's, and the product tells you it could not reach your relay rather
+than quietly using something else.
 
 **Monitor:**
 
@@ -521,10 +512,11 @@ the supported path.
 ### Return to the hosted default
 
 There is nothing to undo on the Ferretry side: a relay you ran was never registered anywhere central,
-and the hosted default is a runtime advertisement your client reads, not a per-user setting. Remove
-the relay address from the daemon and browser once the client override exists (see
-[the client gap](#the-client-gap-exactly)), and the hosted fallback applies again. Until it exists,
-there is nothing configured to remove.
+and the hosted default is a runtime advertisement both ends read, not a per-user setting. Remove
+your relay's entry from the daemon's `carriers` list and restart `fyd`: a list that declares no
+rendezvous takes the hosted one again. Nothing is changed in the browser — a paired device replaces
+its stored carriers with the daemon's published set after its next successful connection, so the
+old address drops out on its own.
 
 ### Credential cleanup
 
