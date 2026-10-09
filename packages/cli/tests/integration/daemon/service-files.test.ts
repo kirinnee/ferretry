@@ -21,6 +21,17 @@ describe('file service store', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('should read back a definition, answer absent for none, and surface any other failure', async () => {
+    // Arrange
+    const path = join(root, 'fyd.service');
+    await subject.writePrivate(path, 'Environment="FY_HOME=/srv/home"\n');
+
+    // Act + Assert — a directory where the definition belongs is damage, never "no definition".
+    should(await subject.read(path)).equal('Environment="FY_HOME=/srv/home"\n');
+    should(await subject.read(join(root, 'absent.service'))).be.undefined();
+    await should(subject.read(root)).be.rejected();
+  });
+
   it('should report a file absent before it is written and present after', async () => {
     // Arrange
     const path = join(root, 'fyd.service');

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { IServiceFilePort } from '../../lib/daemon/ports.ts';
 
@@ -61,5 +61,14 @@ export class FileServiceStore implements IServiceFilePort {
 
   async ensureDirectory(path: string): Promise<void> {
     await mkdir(path, { recursive: true });
+  }
+
+  async read(path: string): Promise<string | undefined> {
+    try {
+      return await readFile(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
   }
 }

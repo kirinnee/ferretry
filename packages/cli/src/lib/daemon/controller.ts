@@ -18,6 +18,7 @@ import type {
   IResetTreePort,
   IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
+  IStateHomeClaimPort,
   RetiredArtifactOutcome,
 } from './ports.ts';
 import { livenessOf } from './probe.ts';
@@ -129,6 +130,8 @@ export interface DaemonControllerDeps {
   readonly resetTrees: IResetTreePort;
   /** Counts what a reset destroys unrecoverably, from the daemon that still holds it. */
   readonly resetInventory: IResetInventoryPort;
+  /** Whether the state home carries the Ferretry marker, which a reset requires before it deletes. */
+  readonly claims: IStateHomeClaimPort;
   /** Where the typed reset confirmation is read from; never used off a terminal. */
   readonly prompt: IDaemonPrompt;
   /**
@@ -244,6 +247,8 @@ export class DaemonController {
   async #install(): Promise<void> {
     const daemon = this.deps.installedDaemon();
     const service = this.#service();
+    // Before anything is written: one definition per host, and it may belong to another state home.
+    await service.assertServes(undefined);
     // Before the definition is written, so a unit file never names a store path nothing is holding.
     await this.#holdDaemonClosure(daemon.path);
     await service.install(daemon.path);
@@ -254,6 +259,7 @@ export class DaemonController {
 
   async #uninstall(): Promise<void> {
     const service = this.#service();
+    await service.assertServes(undefined);
     await service.uninstall();
     // REMOVING SUPERVISION DOES NOT UNINSTALL THE DAEMON, so it does not release the daemon's root.
     //
@@ -266,18 +272,20 @@ export class DaemonController {
     // account for is its own kind of surprise.
     await this.#retireLegacyArtifacts();
     this.deps.out.success(
-      `${this.#name} user service removed; the installed daemon's Nix closure stays held by ${this.deps.layout.nixGcRoot} so a later fy daemon start still works`,
+      `${this.#name} user service removed; the installed daemon's Nix closure stays held by ${this.deps.layout.nixGcRoot} so a later ${this.deps.clientName} daemon start still works`,
     );
   }
 
   async #start(): Promise<void> {
+    const owner = await this.#owner();
     const serving = await this.deps.health.probe();
+    // "Already serving" is a claim about THIS state home, and so is the rewrite a start does below.
+    await owner.assertServes(serving?.pid);
     if (serving !== undefined) {
       this.#warnIfRunningIsStale(serving);
       this.deps.out.success(`${this.#name} is already serving (pid ${String(serving.pid)})`);
       return;
     }
-    const owner = await this.#owner();
     const incumbent = await owner.inspect();
     if (incumbent.state === 'running') {
       // A service manager reports `activating` as running. Leave that incumbent's executable and its
@@ -298,6 +306,7 @@ export class DaemonController {
   async #stop(): Promise<void> {
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
+    await owner.assertServes(health?.pid);
     if (!(await this.#running(owner, health))) {
       this.deps.out.warn(`${this.#name} is not running`);
       return;
@@ -313,6 +322,7 @@ export class DaemonController {
     const daemon = this.deps.installedDaemon();
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
+    await owner.assertServes(health?.pid);
     if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
     else this.deps.out.warn(`${this.#name} was not running; starting it`);
     // Restart is when an upgraded executable is picked up, so the root is reconciled here too.
@@ -342,9 +352,13 @@ export class DaemonController {
     // Before any measurement, let alone any removal: an operator-supplied FY_HOME that resolves
     // somewhere unresettable must fail while nothing has been touched.
     assertResettableRoots(roots, layout.homeDirectory);
+    await this.#assertClaimedStateHome();
 
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
+    // Before a single count is shown: the counts, the stop and the removal must all be of ONE daemon,
+    // and it has to be this state home's.
+    await owner.assertServes(health?.pid);
     const counted = health === undefined ? undefined : await this.deps.resetInventory.count();
     const surveys: ResetSurvey[] = [];
     for (const root of roots) surveys.push({ root, measure: await this.deps.resetTrees.measure(root.path) });
@@ -361,6 +375,24 @@ export class DaemonController {
     const removals: ResetSurvey[] = [];
     for (const root of roots) removals.push({ root, measure: await this.deps.resetTrees.remove(root.path) });
     this.deps.out.success(renderResetOutcome(this.#name, removals, this.deps.clientName));
+  }
+
+  /**
+   * Refuse to reset a state home that exists but carries no Ferretry marker.
+   *
+   * The path guards stop the home directory and its ancestors; they cannot stop `FY_HOME` pointing at
+   * `~/Documents`, which `--yes` would then delete without anybody reading the plan. The marker is
+   * the one thing that says Ferretry made a directory. An older release's home, which predates it, is
+   * exactly what `adopt` exists for: it shows what is inside and claims it only if every entry is ours.
+   */
+  async #assertClaimedStateHome(): Promise<void> {
+    const home = this.deps.layout.stateHome;
+    if ((await this.deps.claims.inspect(home)) !== 'unclaimed') return;
+    throw new DaemonResetRefusedError(
+      `refusing to reset ${home}: it carries no Ferretry marker, so it may not be a Ferretry state home and ` +
+        `nothing was removed. If it is one, run \`${this.deps.clientName} daemon adopt\` to inspect and claim it ` +
+        `first; otherwise point FY_HOME at the state home you meant`,
+    );
   }
 
   /**
@@ -439,7 +471,7 @@ export class DaemonController {
       lines.push(
         running.version === located.version
           ? 'the running daemon is the installed one'
-          : 'running and installed differ; run fy daemon restart to use the installed daemon',
+          : `running and installed differ; run ${this.deps.clientName} daemon restart to use the installed daemon`,
       );
     }
     this.deps.out.success(lines.join('\n'));
@@ -621,7 +653,7 @@ export class DaemonController {
     if ('reason' in located || located.version === undefined || located.version === running.version) return;
     this.deps.out.warn(
       `the running ${this.#name} is version ${running.version} but ${located.path} is ${located.version}; ` +
-        `run fy daemon restart to use the installed daemon`,
+        `run ${this.deps.clientName} daemon restart to use the installed daemon`,
     );
   }
 

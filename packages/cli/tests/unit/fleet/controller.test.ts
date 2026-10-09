@@ -7,7 +7,11 @@ import {
   MixedIdentityAuthError,
 } from '@ferretry/fleet';
 import should from 'should';
-import { FleetController, type FleetControllerDeps } from '../../../src/lib/fleet/controller';
+import {
+  FleetController,
+  type FleetControllerDeps,
+  FleetLoginIncompleteError,
+} from '../../../src/lib/fleet/controller';
 import type { IFleetIdentitySource } from '../../../src/lib/fleet/ports';
 import { PLAIN_FLEET_PRESENTATION } from '../../../src/lib/fleet/presentation';
 import {
@@ -546,19 +550,46 @@ describe('logging accounts in', () => {
     await should(subject.login([], {})).be.rejectedWith(/run "fy fleet apply" first/u);
   });
 
-  it('should report a failure rather than letting it read as a quiet success', async () => {
+  it('should report a failure on stderr and fail the run rather than exit 0 in the success colour', async () => {
     // Arrange
     const logins = new RecordingLoginService([
       { accountId: ACCOUNT_ID, identity: IDENTITY_KEY, status: 'failed', message: 'login process exited with code 7' },
     ]);
     const { subject, out } = controller({ logins });
 
-    // Act
-    await subject.login([], {});
+    // Act + Assert — a script reading exit 0 could not tell this run from one that worked.
+    await should(subject.login([], {})).be.rejectedWith(FleetLoginIncompleteError);
+    should(out.text).equal('');
+    should(out.warnings.join('\n')).containEql('1 failed');
+    should(out.warnings.join('\n')).containEql('FAILED');
+  });
 
-    // Assert
-    should(out.text).containEql('1 failed');
-    should(out.text).containEql('FAILED');
+  it('should fail the run when an account could not be read, and say which kind of problem it was', async () => {
+    // Arrange — an unreadable home is left untouched, so nothing says this account is signed in.
+    const logins = new RecordingLoginService([
+      { accountId: ACCOUNT_ID, identity: IDENTITY_KEY, status: 'indeterminate', message: 'credential file unreadable' },
+      { accountId: 'other', identity: IDENTITY_KEY, status: 'failed', message: 'login process exited with code 7' },
+    ]);
+    const { subject, out } = controller({ logins });
+
+    // Act + Assert
+    await should(subject.login([], {})).be.rejectedWith(
+      /login incomplete: 1 account\(s\) failed to sign in, 1 could not be read and were left untouched/u,
+    );
+    should(out.warnings.join('\n')).containEql('UNKNOWN, left untouched');
+  });
+
+  it('should still print the whole payload under --json before failing the run', async () => {
+    // Arrange
+    const logins = new RecordingLoginService([
+      { accountId: ACCOUNT_ID, identity: IDENTITY_KEY, status: 'indeterminate', message: 'credential file unreadable' },
+    ]);
+    const { subject, out } = controller({ logins });
+
+    // Act + Assert — stdout stays the machine shape; the exit status carries the verdict.
+    await should(subject.login([], { json: true })).be.rejectedWith(/1 could not be read/u);
+    should(JSON.parse(out.text)).have.length(1);
+    should(out.warnings).be.empty();
   });
 
   it('should print the payload under --json', async () => {

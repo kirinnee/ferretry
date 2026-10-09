@@ -99,6 +99,12 @@ function describe(entries: readonly string[]): string {
   return rest === 0 ? names : `${names} and ${String(rest)} more`;
 }
 
+/**
+ * The lock the daemon holds open for as long as it serves a state home, mirrored from its boot
+ * contract. Exported because `fy daemon` asks whether a pid holds it before signalling that pid.
+ */
+export const DAEMON_LOCK_FILENAME = 'daemon.lock';
+
 /** Enough to recognise a directory; not so many that the message scrolls away. */
 const MAX_NAMED_ENTRIES = 8;
 
@@ -117,7 +123,7 @@ const FERRETRY_HOME_ENTRIES: ReadonlySet<string> = new Set([
   'fleet',
   'logs',
   'state',
-  'daemon.lock',
+  DAEMON_LOCK_FILENAME,
   // Minted by the daemon on first boot, at the top level rather than under `state/`.
   'api-token',
 ]);
@@ -202,6 +208,18 @@ export class StateHomeClaimService {
     if (decision.kind === 'proceed') return { kind: 'already-claimed', home };
     await this.files.writeMarkerAtomic(this.#markerPath(home), layoutVersionContent(), LAYOUT_VERSION_MODE);
     return { kind: 'claimed', home };
+  }
+
+  /**
+   * Whether a home exists and carries our marker, WITHOUT creating or claiming anything.
+   *
+   * `absent` when there is no directory at all. The destructive verb that asks needs the read-only
+   * answer: a reset that claimed first would stamp our marker onto a stranger's directory and then
+   * delete it with a clear conscience.
+   */
+  async inspect(home: string): Promise<'absent' | 'claimed' | 'unclaimed'> {
+    if ((await this.files.listHome(home)) === undefined) return 'absent';
+    return (await this.files.readMarker(this.#markerPath(home))) === undefined ? 'unclaimed' : 'claimed';
   }
 
   /**

@@ -44,6 +44,10 @@ class RecordingProcesses implements IDaemonProcessPort {
   alive(): boolean {
     return false;
   }
+
+  holdsOpen(): Promise<boolean | undefined> {
+    return Promise.resolve(undefined);
+  }
 }
 
 async function createTemporaryRoot(): Promise<string> {

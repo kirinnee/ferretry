@@ -112,6 +112,10 @@ class ScriptedProcesses implements IDaemonProcessPort {
   alive(): boolean {
     return false;
   }
+
+  holdsOpen(): Promise<boolean | undefined> {
+    return Promise.resolve(undefined);
+  }
 }
 
 class ImmediateClock implements IClockPort {
@@ -159,6 +163,10 @@ class StubService implements IServiceDefinitionSupervisor {
 
   inspect(): Promise<DaemonSupervisorReport> {
     return Promise.resolve({ manager: 'systemd', state: 'absent' });
+  }
+
+  assertServes(): Promise<void> {
+    return Promise.resolve();
   }
 }
 
@@ -232,6 +240,7 @@ function deps(
     // calls it; `reset` has its own integration file, which boots the daemon on what it left behind.
     resetTrees: new FileResetTrees(),
     resetInventory: { count: () => Promise.resolve(undefined) },
+    claims: new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
     prompt: { ask: () => Promise.resolve('') },
     interactive: () => false,
     clientName: 'fy',

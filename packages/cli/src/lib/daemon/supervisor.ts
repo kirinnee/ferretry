@@ -1,4 +1,4 @@
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import type { DaemonLayout } from './layout.ts';
 import type {
   DaemonStartHandle,
@@ -11,7 +11,7 @@ import type {
   StopRequest,
 } from './ports.ts';
 import { parseLaunchdPrint, parseSystemdProperties, readLaunchdReport, readSystemdReport } from './probe.ts';
-import { renderLaunchAgentPlist, renderSystemdUnit } from './unit-file.ts';
+import { launchAgentStateHome, renderLaunchAgentPlist, renderSystemdUnit, systemdUnitStateHome } from './unit-file.ts';
 
 /** Raised when a verb needs a service manager this host does not have. */
 export class UnsupportedServiceManagerError extends Error {
@@ -27,6 +27,84 @@ export class ServiceManagerCommandError extends Error {
     super(stderr.trim() === '' ? `${argv.join(' ')} failed` : stderr.trim());
     this.name = 'ServiceManagerCommandError';
   }
+}
+
+/**
+ * Raised when a lifecycle verb would act on a daemon it cannot tie to the state home it was asked
+ * about. Nothing has been stopped, signalled or rewritten when this is thrown.
+ */
+export class DaemonOwnershipError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DaemonOwnershipError';
+  }
+}
+
+/**
+ * Throw unless `pid` provably serves `layout`'s state home, by holding that home's daemon lock open.
+ *
+ * A pid that answered a health probe is a NUMBER somebody sent over HTTP. A forwarded container port,
+ * a second installation on the default address or a daemon in another pid namespace all report a pid
+ * that names some unrelated local process here — and signalling it, then escalating to SIGKILL, is
+ * the defect this exists to prevent. The lock is held for the daemon's whole life and by nothing else,
+ * so it is the one identity none of those can share.
+ *
+ * `allowUnknown` is for a caller that will never signal the pid itself: a service manager stops its
+ * own unit, so a host that cannot answer the question costs that caller nothing. A `false` is refused
+ * by every caller, because a daemon that is provably someone else's must not be stopped or reset.
+ */
+async function assertPidServes(
+  processes: IDaemonProcessPort,
+  layout: DaemonLayout,
+  pid: number,
+  allowUnknown: boolean,
+): Promise<void> {
+  const holds = await processes.holdsOpen(pid, layout.daemonLockFile);
+  if (holds === true || (holds === undefined && allowUnknown)) return;
+  if (holds === false) {
+    throw new DaemonOwnershipError(
+      `the daemon answering for ${layout.stateHome} reports pid ${String(pid)}, but that process does not hold ` +
+        `${layout.daemonLockFile}, so it is not this state home's ${layout.daemonName} — it may be a forwarded ` +
+        `port, a container or another installation; nothing was signalled. Stop that daemon where it runs`,
+    );
+  }
+  throw new DaemonOwnershipError(
+    `cannot check which state home pid ${String(pid)} serves: this host offers neither /proc nor lsof, so ` +
+      `nothing was signalled. Stop ${layout.daemonName} from the terminal it runs in, or check it with ` +
+      `\`ps -p ${String(pid)}\` and end it with \`kill ${String(pid)}\` yourself`,
+  );
+}
+
+/**
+ * Throw unless the installed service definition supervises `layout`'s state home.
+ *
+ * ONE UNIT NAME PER HOST, whatever `FY_HOME` says: `fyd.service` and `com.ferretry.fyd` are spelled
+ * from the daemon name alone. So `FY_HOME=/other fy daemon reset` used to stop the PRIMARY daemon's
+ * unit and `start` used to rewrite it to serve `/other`. The definition is the only record of which
+ * home it supervises, so it is read back; one that names none was not written by this CLI and is
+ * refused rather than guessed about.
+ */
+async function assertDefinitionServes(
+  files: IServiceFilePort,
+  layout: DaemonLayout,
+  definitionPath: string,
+  stateHomeOf: (definition: string) => string | undefined,
+): Promise<void> {
+  const definition = await files.read(definitionPath);
+  if (definition === undefined) return;
+  const supervised = stateHomeOf(definition);
+  if (supervised === undefined) {
+    throw new DaemonOwnershipError(
+      `${definitionPath} names no FY_HOME, so it cannot be tied to ${layout.stateHome}; it was not written by ` +
+        `this client — remove it, then install again`,
+    );
+  }
+  if (resolve(supervised) === resolve(layout.stateHome)) return;
+  throw new DaemonOwnershipError(
+    `${definitionPath} supervises the ${layout.daemonName} for ${supervised}, not ${layout.stateHome}, and there ` +
+      `is one per host; nothing was changed. Run this again with FY_HOME=${supervised} to manage that daemon, ` +
+      `or uninstall it that way first to supervise ${layout.stateHome} instead`,
+  );
 }
 
 /** The description both service definitions carry. */
@@ -116,6 +194,11 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
         ? ['kill', '--signal=SIGKILL', this.layout.systemdUnitName]
         : ['stop', this.layout.systemdUnitName],
     );
+  }
+
+  async assertServes(pidHint: number | undefined): Promise<void> {
+    await assertDefinitionServes(this.files, this.layout, this.definitionPath, systemdUnitStateHome);
+    if (pidHint !== undefined) await assertPidServes(this.processes, this.layout, pidHint, true);
   }
 
   async inspect(): Promise<DaemonSupervisorReport> {
@@ -211,6 +294,11 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     );
   }
 
+  async assertServes(pidHint: number | undefined): Promise<void> {
+    await assertDefinitionServes(this.files, this.layout, this.definitionPath, launchAgentStateHome);
+    if (pidHint !== undefined) await assertPidServes(this.processes, this.layout, pidHint, true);
+  }
+
   async inspect(): Promise<DaemonSupervisorReport> {
     const present = await this.installed();
     const outcome = await this.processes.run(['launchctl', 'print', this.layout.launchdServiceTarget]);
@@ -273,11 +361,22 @@ export class DirectSupervisor implements IDaemonSupervisor {
     });
   }
 
-  stop(request: StopRequest): Promise<void> {
-    if (request.pidHint !== undefined) {
-      this.processes.signal(request.pidHint, request.escalate ? 'SIGKILL' : 'SIGTERM');
-    }
-    return Promise.resolve();
+  /**
+   * Signal the daemon, but only once its pid is proved to serve this state home.
+   *
+   * Checked HERE, on every press including the escalation, rather than trusted from the controller:
+   * this is the one place a pid that arrived over HTTP turns into a SIGKILL, so it is the place that
+   * has to be unable to send one to a stranger. A host that cannot answer refuses too, because there
+   * is no service manager behind this to stop the right thing instead.
+   */
+  async stop(request: StopRequest): Promise<void> {
+    if (request.pidHint === undefined) return;
+    await this.assertServes(request.pidHint);
+    this.processes.signal(request.pidHint, request.escalate ? 'SIGKILL' : 'SIGTERM');
+  }
+
+  async assertServes(pidHint: number | undefined): Promise<void> {
+    if (pidHint !== undefined) await assertPidServes(this.processes, this.layout, pidHint, false);
   }
 
   inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport> {

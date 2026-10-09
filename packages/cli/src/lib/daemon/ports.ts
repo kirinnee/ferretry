@@ -31,6 +31,13 @@ export interface IDaemonProcessPort {
   signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean;
   /** Does this pid still exist? */
   alive(pid: number): boolean;
+  /**
+   * Does process `pid` hold `path` open right now?
+   *
+   * `undefined` when this host offers no way to ask — never a guess in either direction, because the
+   * one caller uses a `true` to decide that a pid is safe to signal.
+   */
+  holdsOpen(pid: number, path: string): Promise<boolean | undefined>;
 }
 
 /**
@@ -54,6 +61,8 @@ export interface IDaemonLogPort {
  */
 export interface IStateHomeClaimPort {
   claim(home: string): Promise<unknown>;
+  /** Whether the home exists and carries the Ferretry marker; reads only, never claims. */
+  inspect(home: string): Promise<'absent' | 'claimed' | 'unclaimed'>;
 }
 
 /**
@@ -67,6 +76,8 @@ export interface IServiceFilePort {
   /** Remove the file; absent is success. */
   remove(path: string): Promise<void>;
   ensureDirectory(path: string): Promise<void>;
+  /** The file's text, or `undefined` when there is none — only ever a definition this CLI wrote. */
+  read(path: string): Promise<string | undefined>;
 }
 
 /**
@@ -302,6 +313,15 @@ export interface IDaemonSupervisor {
   stop(request: StopRequest): Promise<void>;
   /** `handle` lets the direct supervisor watch the child it just started. */
   inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport>;
+  /**
+   * Throw unless what this supervisor would act on belongs to THIS layout's state home.
+   *
+   * `pidHint` is the pid an answering daemon reported for itself. The answer arrives over HTTP, so it
+   * can be any process's number — a forwarded port, a container, a second installation — and a verb
+   * that stops, restarts or resets must not act on a daemon it cannot tie to the state home it was
+   * asked about.
+   */
+  assertServes(pidHint: number | undefined): Promise<void>;
 }
 
 /**

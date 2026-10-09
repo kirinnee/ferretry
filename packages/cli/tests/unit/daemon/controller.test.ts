@@ -10,7 +10,7 @@ import {
 } from '../../../src/lib/daemon/controller';
 import type { DaemonSupervisorReport } from '../../../src/lib/daemon/ports';
 import { ResetRefusedError } from '../../../src/lib/daemon/reset';
-import { UnsupportedServiceManagerError } from '../../../src/lib/daemon/supervisor';
+import { DaemonOwnershipError, UnsupportedServiceManagerError } from '../../../src/lib/daemon/supervisor';
 import {
   absentReport,
   CapturedOutput,
@@ -22,6 +22,7 @@ import {
   FakeResetInventory,
   FakeResetTrees,
   FakeRetiredArtifacts,
+  FakeStateHomeClaim,
   FakeSupervisor,
   failedReport,
   HOME,
@@ -66,6 +67,7 @@ function harness(options: {
   inventory?: { readonly secrets: number; readonly devices: number } | undefined;
   prompt?: FakePrompt;
   interactive?: boolean;
+  claims?: FakeStateHomeClaim;
   overrides?: Partial<DaemonControllerDeps>;
 }): Harness {
   const service = new FakeSupervisor('systemd', options.serviceFallback ?? runningReport);
@@ -97,6 +99,7 @@ function harness(options: {
     // `in` rather than `??`: an explicit `undefined` is the meaningful case — a daemon that is up but
     // will not answer the inventory routes — so it must not fall back to the default counts.
     resetInventory: new FakeResetInventory('inventory' in options ? options.inventory : { secrets: 3, devices: 2 }),
+    claims: options.claims ?? new FakeStateHomeClaim(),
     prompt,
     interactive: () => options.interactive ?? true,
     clientName: 'fy',
@@ -1601,6 +1604,7 @@ describe('daemon controller defaults', () => {
       retired: new FakeRetiredArtifacts(),
       resetTrees: new FakeResetTrees(),
       resetInventory: new FakeResetInventory(undefined),
+      claims: new FakeStateHomeClaim(),
       prompt: new FakePrompt(),
       interactive: () => false,
       clientName: 'fy',
@@ -1614,5 +1618,132 @@ describe('daemon controller defaults', () => {
 
     // Assert — construction with no policy must not throw, and the default status path must work.
     should(service.calls).containEql('installed');
+  });
+});
+
+describe('daemon lifecycle verbs act only on this state home', () => {
+  const stranger = (): DaemonOwnershipError =>
+    new DaemonOwnershipError('the daemon answering is not this state home fyd');
+
+  it('should refuse to stop a daemon its owner cannot tie to this state home, and press nothing', async () => {
+    // Arrange — a forwarded port or a second installation answered, and its pid names something else.
+    const subject = harness({ probes: [health({ pid: 4242 })] });
+    subject.service.ownershipError = stranger();
+
+    // Act + Assert
+    await should(subject.controller.stop()).be.rejectedWith(DaemonOwnershipError);
+    should(subject.service.calls).containEql('assertServes:4242');
+    should(subject.service.stops).be.empty();
+  });
+
+  it('should refuse a restart before it stops or starts anything', async () => {
+    // Arrange
+    const subject = harness({ probes: [health({ pid: 4242 })] });
+    subject.service.ownershipError = stranger();
+
+    // Act + Assert
+    await should(subject.controller.restart()).be.rejectedWith(DaemonOwnershipError);
+    should(subject.service.stops).be.empty();
+    should(subject.service.startedExecutables).be.empty();
+  });
+
+  it('should refuse a start rather than call a stranger "already serving" or rewrite its unit', async () => {
+    // Arrange
+    const subject = harness({ probes: [health({ pid: 4242 })] });
+    subject.service.ownershipError = stranger();
+
+    // Act + Assert
+    await should(subject.controller.start()).be.rejectedWith(DaemonOwnershipError);
+    should(subject.out.text).not.containEql('already serving');
+    should(subject.service.startedExecutables).be.empty();
+    should(subject.firstPassword.offers).equal(0);
+  });
+
+  it('should refuse install and uninstall over a definition that serves another state home', async () => {
+    // Arrange — one unit per host: writing or removing it changes the daemon another home depends on.
+    const subject = harness({});
+    subject.service.ownershipError = stranger();
+
+    // Act + Assert
+    await should(subject.controller.install()).be.rejectedWith(DaemonOwnershipError);
+    await should(subject.controller.uninstall()).be.rejectedWith(DaemonOwnershipError);
+    should(subject.service.installedExecutables).be.empty();
+    should(subject.service.calls).not.containEql('uninstall');
+    should(subject.nix.pinned).be.empty();
+  });
+
+  it('should refuse a reset before it counts, shows, stops or removes anything', async () => {
+    // Arrange — the counts were the PRIMARY daemon's and the removal was this home's: one verb, two
+    // daemons. Nothing may be shown that a person could authorize against.
+    const trees = populatedTrees();
+    const subject = resetSubject({ resetTrees: trees, probes: [health({ pid: 4242 })] });
+    subject.service.ownershipError = stranger();
+
+    // Act + Assert
+    await should(subject.controller.reset({ yes: true })).be.rejectedWith(DaemonOwnershipError);
+    should(trees.measured).be.empty();
+    should(trees.removed).be.empty();
+    should(subject.service.stops).be.empty();
+    should(subject.out.text).not.containEql('secret(s)');
+  });
+
+  it('should refuse to reset a state home that carries no Ferretry marker, even with --yes', async () => {
+    // Arrange — FY_HOME=~/Documents passes every path guard; only the marker says Ferretry made it.
+    const claims = new FakeStateHomeClaim();
+    claims.inspection = 'unclaimed';
+    const trees = populatedTrees();
+    const subject = resetSubject({ resetTrees: trees, claims });
+
+    // Act + Assert
+    await should(subject.controller.reset({ yes: true })).be.rejectedWith(DaemonResetRefusedError);
+    await should(subject.controller.reset({ yes: true })).be.rejectedWith(
+      /carries no Ferretry marker.*nothing was removed.*run `fy daemon adopt`/u,
+    );
+    should(trees.measured).be.empty();
+    should(trees.removed).be.empty();
+    should(subject.service.stops).be.empty();
+  });
+
+  it('should still reset a state home that is already gone', async () => {
+    // Arrange — absent is not a stranger's directory; the artifact tree may still be there to remove.
+    const claims = new FakeStateHomeClaim();
+    claims.inspection = 'absent';
+    const subject = resetSubject({ resetTrees: populatedTrees(), claims });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.resetTrees.removed).have.length(2);
+  });
+});
+
+describe('daemon remedies name the client that was typed', () => {
+  it('should spell every printed command with the injected client name', async () => {
+    // Arrange — the binary name is single-sourced; a literal `fy` is wrong after a rename.
+    const subject = harness({
+      probes: [health({ version: '0.1.0' }), health({ version: '0.1.0' })],
+      overrides: { clientName: 'zz' },
+    });
+
+    // Act
+    await subject.controller.which({});
+    await subject.controller.uninstall();
+
+    // Assert
+    should(subject.out.text).containEql('run zz daemon restart to use the installed daemon');
+    should(subject.out.text).containEql('so a later zz daemon start still works');
+    should(subject.out.text).not.match(/\bfy daemon\b/u);
+  });
+
+  it('should spell the stale-daemon warning with it too', async () => {
+    // Arrange
+    const subject = harness({ probes: [health({ version: '0.1.0' })], overrides: { clientName: 'zz' } });
+
+    // Act
+    await subject.controller.status({});
+
+    // Assert
+    should(subject.out.text).containEql('run zz daemon restart to use the installed daemon');
   });
 });

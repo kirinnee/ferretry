@@ -159,6 +159,20 @@ export class FakeProcesses implements IDaemonProcessPort {
   alive(pid: number): boolean {
     return this.livePids.has(pid);
   }
+
+  /**
+   * Every `holdsOpen` question asked, and the one answer each gets.
+   *
+   * Proven by default so a test about something else reads a daemon that IS this state home's; a test
+   * about identity sets `false` (someone else's daemon) or `undefined` (a host that cannot tell).
+   */
+  readonly holdQuestions: Array<{ pid: number; path: string }> = [];
+  holdsOpenAnswer: boolean | undefined = true;
+
+  holdsOpen(pid: number, path: string): Promise<boolean | undefined> {
+    this.holdQuestions.push({ pid, path });
+    return Promise.resolve(this.holdsOpenAnswer);
+  }
 }
 
 export class FakeFiles implements IServiceFilePort {
@@ -198,6 +212,10 @@ export class FakeFiles implements IServiceFilePort {
     this.trail.push(`mkdir:${path}`);
     return Promise.resolve();
   }
+
+  read(path: string): Promise<string | undefined> {
+    return Promise.resolve(this.written.get(path));
+  }
 }
 
 /** Records which home was claimed and when, against the same trail the filesystem writes to. */
@@ -212,6 +230,13 @@ export class FakeStateHomeClaim implements IStateHomeClaimPort {
     this.claimed.push(home);
     this.trail.push(`claim:${home}`);
     return this.refusal === undefined ? Promise.resolve({ kind: 'claimed', home }) : Promise.reject(this.refusal);
+  }
+
+  /** What `inspect` reports; claimed unless a test is about an unclaimed home. */
+  inspection: 'absent' | 'claimed' | 'unclaimed' = 'claimed';
+
+  inspect(_home: string): Promise<'absent' | 'claimed' | 'unclaimed'> {
+    return Promise.resolve(this.inspection);
   }
 }
 
@@ -457,6 +482,14 @@ export class FakeSupervisor implements IServiceDefinitionSupervisor {
   inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport> {
     this.calls.push(handle?.pid === undefined ? 'inspect' : `inspect:${String(handle.pid)}`);
     return Promise.resolve(this.reports.shift() ?? this.fallback);
+  }
+
+  /** Set to make the ownership check refuse, the way a stranger's daemon or definition does. */
+  ownershipError: Error | undefined;
+
+  assertServes(pidHint: number | undefined): Promise<void> {
+    this.calls.push(pidHint === undefined ? 'assertServes' : `assertServes:${String(pidHint)}`);
+    return this.ownershipError === undefined ? Promise.resolve() : Promise.reject(this.ownershipError);
   }
 }
 

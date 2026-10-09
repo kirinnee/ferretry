@@ -478,7 +478,12 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     layout,
     service,
     direct: new DirectSupervisor(layout, processes, files, claims),
-    health: new ProtocolDaemonHealth(lazyHealthClient(environment, layout.stateHome)),
+    /**
+     * THIS STATE HOME'S OWN ADDRESS, NEVER `FY_URL`. Every verb here manages the daemon process on
+     * this host, and stop, restart and reset act on whatever answered: honouring a remote or forwarded
+     * `FY_URL` reported a stranger's counts and handed its pid to a local SIGTERM.
+     */
+    health: new ProtocolDaemonHealth(lazyHealthClient({ ...environment, FY_URL: undefined }, layout.stateHome)),
     logs: new TailDaemonLog(),
     nix: new NixStoreGcRoot(processes),
     // The claim reads the same clock the readiness and shutdown waits do, so the bound a caller waits
@@ -496,6 +501,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
      * a courtesy to somebody deciding, never a precondition of the recovery path.
      */
     resetInventory: new ProtocolResetInventory(client),
+    claims,
     prompt: world.prompt,
     // Read when the reset would have to ask, not when this controller was built — the same answer every
     // other prompt in this CLI uses: both ends of the terminal, or nobody is there.

@@ -3,10 +3,12 @@ import should from 'should';
 import {
   EXIT_ALREADY_RUNNING,
   InvalidUnitValueError,
+  launchAgentStateHome,
   renderLaunchAgentPlist,
   renderSystemdUnit,
   systemdFileSpecifier,
   systemdQuote,
+  systemdUnitStateHome,
   xmlText,
 } from '../../../src/lib/daemon/unit-file';
 
@@ -244,5 +246,45 @@ describe('launch agent rendering', () => {
 
     // Assert
     should(actual.endsWith('</dict></plist>\n')).be.true();
+  });
+});
+
+describe('reading the state home back out of a definition', () => {
+  const awkward = '/srv/a "quoted" 100% \\ $HOME\ttab';
+
+  it('should double a dollar in ExecStart, the one directive that substitutes variables', () => {
+    // Arrange — `$HOME` inside a quoted ExecStart argument is still expanded by systemd; `$$` is a `$`.
+    const unit = renderSystemdUnit({ ...spec, daemonBinary: '/opt/a$b/fyd', stateHome: '/srv/$x' });
+
+    // Act + Assert
+    should(unit).containEql('ExecStart="/opt/a$$b/fyd"\n');
+    // Environment= does not substitute, so doubling there would change the value itself.
+    should(unit).containEql('Environment="FY_HOME=/srv/$x"\n');
+  });
+
+  it('should recover exactly the state home a rendered systemd unit hands its daemon', () => {
+    // Act + Assert
+    should(systemdUnitStateHome(renderSystemdUnit({ ...spec, stateHome: awkward }))).equal(awkward);
+  });
+
+  it('should recover exactly the state home a rendered launchd plist hands its daemon', () => {
+    // Arrange
+    const home = `/Users/u/a&b <c> 'd' "e"`;
+
+    // Act + Assert
+    should(launchAgentStateHome(renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd', stateHome: home }))).equal(
+      home,
+    );
+  });
+
+  it('should find no state home in a definition that names none, or names one in a shape it never writes', () => {
+    // Act + Assert — a guess here would decide whose daemon gets stopped.
+    should(systemdUnitStateHome('[Service]\nEnvironment="HOME=/home/u"\n')).be.undefined();
+    should(systemdUnitStateHome('Environment=FY_HOME=/unquoted\n')).be.undefined();
+    should(systemdUnitStateHome('Environment="FY_HOME=/bad\\qescape"\n')).be.undefined();
+    should(systemdUnitStateHome('Environment="FY_HOME=/lone%specifier"\n')).be.undefined();
+    should(systemdUnitStateHome('Environment="FY_HOME=/inner"quote"\n')).be.undefined();
+    should(systemdUnitStateHome('Environment="\n')).be.undefined();
+    should(launchAgentStateHome('<dict><key>HOME</key><string>/Users/u</string></dict>')).be.undefined();
   });
 });

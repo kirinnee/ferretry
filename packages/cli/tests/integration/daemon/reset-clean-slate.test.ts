@@ -151,6 +151,7 @@ function deps(layout: DaemonLayout, out: string[], serving: HealthView | undefin
     // The daemon is down in every case here, so nothing is ever asked of this. That is the ordinary
     // situation for a reset: somebody is resetting a machine whose daemon will not serve.
     resetInventory: { count: () => Promise.resolve(undefined) },
+    claims: new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
     prompt: { ask: () => Promise.resolve('') },
     interactive: () => false,
     clientName: 'fy',

@@ -58,6 +58,72 @@ export function systemdQuote(value: string): string {
     .replaceAll('%', '%%')}"`;
 }
 
+/**
+ * A command-line argument for `ExecStart=`: quoted, with `$` doubled as well.
+ *
+ * `ExecStart=` is the one directive here that substitutes `$NAME` and `${NAME}` from the unit's
+ * environment, quoted or not, and `$$` is its only escape. An executable path holding a `$` would
+ * otherwise launch a different path from the one recorded. `Environment=` and `Description=` do not
+ * substitute, so doubling there would write a second `$` into the value itself.
+ */
+function systemdArgument(value: string): string {
+  return systemdQuote(value).replaceAll('$', () => '$$');
+}
+
+/** Undo {@link systemdQuote}: `undefined` for anything it could not have written. */
+function systemdUnquote(quoted: string): string | undefined {
+  if (quoted.length < 2 || !quoted.startsWith('"') || !quoted.endsWith('"')) return undefined;
+  const escapes: Readonly<Record<string, string>> = { '\\': '\\', '"': '"', n: '\n', r: '\r', t: '\t' };
+  const body = quoted.slice(1, -1);
+  let value = '';
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index] ?? '';
+    const next = body[index + 1] ?? '';
+    if (character === '\\' || (character === '%' && next === '%')) {
+      const decoded = character === '%' ? '%' : escapes[next];
+      if (decoded === undefined) return undefined;
+      value += decoded;
+      index += 1;
+    } else if (character === '"' || character === '%') {
+      return undefined;
+    } else {
+      value += character;
+    }
+  }
+  return value;
+}
+
+/** The variable prefix both readers below look for. */
+const STATE_HOME_ASSIGNMENT = 'FY_HOME=';
+
+/**
+ * The state home a systemd unit this CLI rendered hands its daemon, or `undefined` when it names none.
+ *
+ * There is ONE unit name per host, whatever `FY_HOME` says, so the unit is the only record of which
+ * state home it supervises. A lifecycle verb run under a different `FY_HOME` reads it here before it
+ * stops, restarts, resets or rewrites the daemon somebody else's state home depends on.
+ */
+export function systemdUnitStateHome(unit: string): string | undefined {
+  for (const line of unit.split('\n')) {
+    if (!line.startsWith('Environment=')) continue;
+    const assignment = systemdUnquote(line.slice('Environment='.length).trimEnd());
+    if (assignment?.startsWith(STATE_HOME_ASSIGNMENT) === true) return assignment.slice(STATE_HOME_ASSIGNMENT.length);
+  }
+  return undefined;
+}
+
+/** The state home a launchd plist this CLI rendered hands its daemon, for the same reason. */
+export function launchAgentStateHome(plist: string): string | undefined {
+  const found = /<key>FY_HOME<\/key><string>([^<]*)<\/string>/u.exec(plist)?.[1];
+  if (found === undefined) return undefined;
+  return found
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
+}
+
 /** Tab, newline and carriage return are the only C0 characters XML 1.0 can represent at all. */
 function hasForbiddenControlCharacter(value: string): boolean {
   for (const character of value) {
@@ -138,7 +204,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${systemdQuote(spec.daemonBinary)}
+ExecStart=${systemdArgument(spec.daemonBinary)}
 Restart=always
 RestartSec=2
 # The daemon exits with the first code when another one of it already owns the address, and with the

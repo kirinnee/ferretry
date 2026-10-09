@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -164,5 +164,86 @@ describe('bun daemon process', () => {
     // Act + Assert — an unsignallable pid is a fact the caller reports, not an exception.
     should(subject.signal(0x7ffffff0, 'SIGTERM')).be.false();
     should(subject.alive(0x7ffffff0)).be.false();
+  });
+
+  it('should prove which process holds a file open, on this host, for this test and for a child it started', async () => {
+    // Arrange — the identity a lifecycle verb asks for before it signals: Linux answers from /proc and
+    // macOS from lsof, and the default adapter must pick whichever this host has.
+    const held = join(root, 'daemon.lock');
+    const other = join(root, 'other.lock');
+    await writeFile(held, '');
+    await writeFile(other, '');
+    const handle = await open(held, 'r');
+    const child = await subject.spawnDetached({
+      argv: ['sh', '-c', `exec 3<"${other}"; sleep 30`],
+      environment: { PATH: process.env.PATH ?? '' },
+      logFile: join(root, 'child.log'),
+    });
+    const childPid = child.pid ?? 0;
+    spawned.push(childPid);
+    await Bun.sleep(150);
+
+    try {
+      // Act
+      const answers = [
+        await subject.holdsOpen(process.pid, held),
+        await subject.holdsOpen(childPid, other),
+        await subject.holdsOpen(childPid, held),
+        await subject.holdsOpen(process.pid, join(root, 'never-created.lock')),
+      ];
+
+      // Assert
+      should(answers).deepEqual([true, true, false, false]);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('should read /proc descriptors and refuse to guess about a process it may not inspect', async () => {
+    // Arrange — a stand-in /proc, so the refusal does not depend on some other user's process.
+    const proc = join(root, 'proc');
+    const target = join(root, 'daemon.lock');
+    await writeFile(target, '');
+    await mkdir(join(proc, 'self', 'fd'), { recursive: true });
+    await mkdir(join(proc, '789', 'fd'), { recursive: true });
+    await writeFile(join(proc, '789', 'fd', '0'), 'not a descriptor link');
+    await symlink(target, join(proc, '789', 'fd', '3'));
+    await mkdir(join(proc, '790', 'fd'), { recursive: true });
+    await mkdir(join(proc, '123'), { recursive: true });
+    await writeFile(join(proc, '123', 'fd'), 'unreadable as a directory');
+    const faked = new BunDaemonProcess({ procDirectory: proc });
+
+    // Act
+    const answers = [
+      await faked.holdsOpen(789, target),
+      await faked.holdsOpen(790, target),
+      await faked.holdsOpen(456, target),
+      await faked.holdsOpen(123, target),
+    ];
+
+    // Assert — holds it, holds nothing, gone, and cannot be looked inside.
+    should(answers).deepEqual([true, false, false, undefined]);
+  });
+
+  it('should ask lsof where there is no /proc, and say it cannot tell when there is no lsof', async () => {
+    // Arrange — macOS's path, exercised here with stand-ins for the command.
+    const noProc = join(root, 'no-proc');
+    const target = join(root, 'daemon.lock');
+    const lsof = join(root, 'lsof');
+    await writeFile(lsof, '#!/bin/sh\necho 42\n');
+    await chmod(lsof, 0o755);
+    const answer = (command: string, pid: number): Promise<boolean | undefined> =>
+      new BunDaemonProcess({ procDirectory: noProc, lsof: command }).holdsOpen(pid, target);
+
+    // Act
+    const answers = [
+      await answer(lsof, 42),
+      await answer(lsof, 43),
+      await answer('false', 42),
+      await answer(join(root, 'missing-lsof'), 42),
+    ];
+
+    // Assert
+    should(answers).deepEqual([true, false, false, undefined]);
   });
 });

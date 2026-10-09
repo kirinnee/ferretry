@@ -71,6 +71,24 @@ export interface FleetLoginOptions extends FleetCommandOptions {
   readonly refresh?: boolean;
 }
 
+/**
+ * Raised AFTER a login pass has reported, when it did not leave every account signed in.
+ *
+ * The report is already printed by then, so this exists for the exit status alone: a pass that left
+ * an account `FAILED` used to exit 0 in the success colour, which is the one answer a script cannot
+ * tell apart from "everything worked".
+ */
+export class FleetLoginIncompleteError extends Error {
+  constructor(failed: number, unknown: number) {
+    const parts = [
+      ...(failed === 0 ? [] : [`${String(failed)} account(s) failed to sign in`]),
+      ...(unknown === 0 ? [] : [`${String(unknown)} could not be read and were left untouched`]),
+    ];
+    super(`login incomplete: ${parts.join(', ')} — the report above names each one`);
+    this.name = 'FleetLoginIncompleteError';
+  }
+}
+
 /** The collaborators the fleet group is wired with. */
 export interface FleetControllerDeps {
   readonly config: IFleetConfigSource;
@@ -305,7 +323,18 @@ export class FleetController {
       mode: options.syncOnly === true ? 'sync-only' : named ? 'reauthenticate' : 'full',
       refresh: options.refresh !== false,
     });
-    this.#report(results, options, () => renderLoginResults(results));
+    const failed = results.filter(result => result.status === 'failed').length;
+    // An unreadable home was left untouched, so this pass cannot say it is signed in: a script that
+    // read exit 0 as "every account works" would launch work onto it. It fails the run like a failure
+    // does, and the report and the message keep the two apart because their next steps differ.
+    const unknown = results.filter(result => result.status === 'indeterminate').length;
+    if (failed === 0 && unknown === 0) {
+      this.#report(results, options, () => renderLoginResults(results));
+      return;
+    }
+    if (options.json === true) this.deps.out.success(JSON.stringify(results, null, 2));
+    else this.deps.out.warn(renderLoginResults(results));
+    throw new FleetLoginIncompleteError(failed, unknown);
   }
 
   async recommend(words: readonly string[], options: FleetRecommendOptions): Promise<void> {
