@@ -66,7 +66,8 @@ import {
   NodeWorktreeFileSystem,
   SystemWorktreeClock,
 } from '../../../src/adapters/worktrees/index.ts';
-import { SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
+import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
+import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
 import { SessionForkRequestConflictError } from '../../../src/lib/fork/failures.ts';
 import { type SessionForkCommand, type SessionForkKey, sessionForkKey } from '../../../src/lib/fork/identity.ts';
 import { SessionForkService } from '../../../src/lib/fork/service.ts';
@@ -430,7 +431,14 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
   const directory = (id: string): string => createSessionPaths(opened.paths, parseSessionId(id)).directory;
   const effects = new FileSessionEffectLedger(id => directory(id));
   const attachments = (): SessionAttachmentStore =>
-    new SessionAttachmentStore({ root: opened.paths.state, daemonId: DAEMON_ID, now: () => new Date(AT) });
+    new SessionAttachmentStore({
+      daemonId: DAEMON_ID,
+      originals: new FileAttachmentOriginals(id => attachmentDirectory(opened.paths.state, DAEMON_ID, id)),
+      decrypt: async () => {
+        throw new Error('no unlock is exercised here');
+      },
+      now: () => new Date(AT),
+    });
   /** The target's private credential file: written by the lifecycle, proved by the binder. */
   const environments = (): FileSessionEnvironmentStore => new FileSessionEnvironmentStore(id => directory(id));
 

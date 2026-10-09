@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { decryptPdfInMemory, PdfDecryptError } from '../../../src/lib/attachments/index.ts';
+import { decryptPdfInMemory } from '../../../src/adapters/attachments/index.ts';
+import { PdfDecryptError } from '../../../src/lib/attachments/index.ts';
 
 type WorkerOutcome =
   | { readonly kind: 'message'; readonly data: unknown }
