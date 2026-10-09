@@ -148,4 +148,24 @@ describe('analytics command surface', () => {
     should(help).containEql('Examples:');
     should(help).containEql('sum(tokens) by agent');
   });
+
+  it('should name the binary it runs as in every example', async () => {
+    // Arrange — not the shipped name, so an example that spells "fy" cannot pass.
+    let help = '';
+    const program = new Command().name('foo').exitOverride();
+    program.configureOutput({
+      writeOut: text => {
+        help += text;
+      },
+      writeErr: () => {},
+    });
+    registerAnalyticsCommands(program, build().controller);
+
+    // Act
+    await should(program.parseAsync(['node', 'foo', 'analytics', '--help'])).be.rejected();
+
+    // Assert
+    should(help).containEql("foo analytics 'sum(tokens) by agent'");
+    should(help).not.match(/\bfy analytics/u);
+  });
 });

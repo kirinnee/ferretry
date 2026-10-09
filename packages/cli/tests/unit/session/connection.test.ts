@@ -45,7 +45,7 @@ describe('resolveConnection', () => {
   });
 
   const missing: readonly (readonly [string, { url?: string; token?: string }, RegExp])[] = [
-    ['no token', { url: 'http://d' }, /FY_TOKEN is not set/],
+    ['no token', { url: 'http://d' }, /^FY_TOKEN is not set — export the token the daemon issued/],
     ['a blank token', { url: 'http://d', token: ' ' }, /FY_TOKEN is not set/],
   ];
 

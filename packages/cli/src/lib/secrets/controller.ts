@@ -125,7 +125,7 @@ export class SecretController {
   private report(result: SecretUseResult): void {
     if (result.stdout !== '') this.out.raw('stdout', result.stdout);
     if (result.stderr !== '') this.out.raw('stderr', result.stderr);
-    if (result.truncated) this.out.error('(output was truncated by ferretry)');
+    if (result.truncated) this.out.error('(output was truncated by the daemon)');
     if (result.outcome === 'timeout') {
       this.out.error('the command did not finish in time and was stopped');
       this.out.setExitCode(SECRET_USE_UNFINISHED_EXIT);

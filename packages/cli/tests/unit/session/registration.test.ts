@@ -46,12 +46,13 @@ function harness(
     ...responses,
   });
   const { io, presenter } = capturedPresenter();
-  const program = new Command().exitOverride();
+  // Not the shipped name, so a help line that spells the binary instead of deriving it fails here.
+  const program = new Command().name('foo').exitOverride();
   const printed: string[] = [];
   program.configureOutput({ writeOut: text => printed.push(text), writeErr: () => {} });
   registerSessionCommands(program, {
     presenter,
-    start: new StartSessionController(api, files, presenter, environment),
+    start: new StartSessionController(api, files, presenter, environment, 'fy'),
     list: new ListSessionsController(api, presenter),
     status: new SessionStatusController(api, presenter),
     send: new SendMessageController(api, files, presenter, environment),
@@ -207,7 +208,7 @@ describe('registerSessionCommands · start', () => {
 
     // Assert
     should(failure).be.instanceof(CommanderError);
-    should(help).containEql('one `fy fleet ls` marks "auto", such as claude-auto-default');
+    should(help).containEql('one `foo fleet ls` marks "auto", such as claude-auto-default');
     should(help).containEql(
       '(such as claude-default) is for using the tool yourself in a terminal and cannot run sessions, in either --mode',
     );

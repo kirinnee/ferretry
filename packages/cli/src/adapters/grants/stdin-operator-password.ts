@@ -16,7 +16,11 @@ import type { IOperatorPasswordSource } from '../../lib/grants/ports.ts';
  * produces a failure whose cause is invisible.
  */
 export class StdinOperatorPassword implements IOperatorPasswordSource {
-  constructor(private readonly stream: NodeJS.ReadableStream = process.stdin) {}
+  /** `binaryName` is the shipped command name, so the hint names a command that exists. */
+  constructor(
+    private readonly binaryName: string,
+    private readonly stream: NodeJS.ReadableStream = process.stdin,
+  ) {}
 
   async read(): Promise<string> {
     const chunks: Buffer[] = [];
@@ -24,7 +28,7 @@ export class StdinOperatorPassword implements IOperatorPasswordSource {
     const text = Buffer.concat(chunks).toString('utf8');
     if (text === '')
       throw new Error(
-        'no password on stdin — pipe it in, e.g. `printf %s "$FY_OPERATOR_PASSWORD" | fy daemon password set`',
+        `no password on stdin — pipe it in, e.g. \`printf %s "$FY_OPERATOR_PASSWORD" | ${this.binaryName} daemon password set\``,
       );
     return text.endsWith('\n') ? text.slice(0, -1) : text;
   }

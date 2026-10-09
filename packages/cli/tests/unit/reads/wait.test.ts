@@ -187,14 +187,14 @@ describe('renderWaitOutcome', () => {
     );
     should(renderWaitOutcome({ kind: 'needs-attention', status: 'awaiting_user' })).match(/needs a human/);
     should(renderWaitOutcome({ kind: 'timed-out', status: 'running' })).match(/gave up while the session was still/);
-    should(renderWaitOutcome({ kind: 'timed-out' })).match(/before fyd returned a session state/);
+    should(renderWaitOutcome({ kind: 'timed-out' })).match(/before the daemon returned a session state/);
     should(
       renderWaitOutcome({
         kind: 'daemon-unavailable',
         failure: 'unresponsive',
         detail: 'request deadline passed',
       }),
-    ).match(/fyd became unresponsive: request deadline passed/);
+    ).match(/^the daemon became unresponsive: request deadline passed/);
   });
 
   it('should give daemon loss its own script-visible exit', () => {

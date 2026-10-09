@@ -50,7 +50,7 @@ export function registerSecretCommands(program: Command, controller: SecretContr
   secret
     .command('set <name>')
     .description('store or replace a secret, reading its VALUE from stdin')
-    .addHelpText('after', '\n  printf %s "$KEY" | fy secret set ANTHROPIC_KEY\n')
+    .addHelpText('after', `\n  printf %s "$KEY" | ${program.name()} secret set ANTHROPIC_KEY\n`)
     .action(async (name: string) => {
       await controller.set(name);
     });

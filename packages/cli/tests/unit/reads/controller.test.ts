@@ -37,7 +37,8 @@ function build(
   const clock = new FakeClock();
   const marker = new ScriptedMarker(markerAnswers);
   return {
-    controller: new ReadsController(gateway, io, clock, marker, attacher),
+    // A binary name other than the shipped one, so every note proves it is derived rather than spelled.
+    controller: new ReadsController(gateway, io, clock, marker, attacher, 'foo'),
     gateway,
     io,
     clock,
@@ -261,7 +262,7 @@ describe('fy stream', () => {
     await controller.stream('s1', { after: 3 }, new AbortController().signal);
 
     // Assert — silence is the daemon's claim, on stderr, so stdout stays a pure event channel.
-    should(io.err).eql(['fy stream: no new events for s1 in 30s (still following from #4)']);
+    should(io.err).eql(['foo stream: no new events for s1 in 30s (still following from #4)']);
     should(io.out).have.length(1);
   });
 
@@ -273,7 +274,7 @@ describe('fy stream', () => {
     await controller.stream(undefined, {}, new AbortController().signal);
 
     // Assert
-    should(io.err).eql(['fy stream: no new fleet events in 45s (socket is live; following 3 sessions)']);
+    should(io.err).eql(['foo stream: no new fleet events in 45s (socket is live; following 3 sessions)']);
   });
 
   it('should refuse an idle proof that contradicts the followed scope', async () => {
@@ -478,7 +479,7 @@ describe('fy wait', () => {
     // Assert — daemon loss is neither a successful wait nor a session failure.
     should(io.exitCode).equal(69);
     should(io.out).be.empty();
-    should(io.err.join('\n')).match(/fyd became unavailable/);
+    should(io.err.join('\n')).match(/^foo wait: the daemon became unavailable/m);
   });
 
   it('should distinguish an unresponsive daemon from the caller timeout', async () => {
@@ -491,7 +492,7 @@ describe('fy wait', () => {
 
     // Assert — transport timeout is daemon unavailability (69); only --timeout is 124.
     should(io.exitCode).equal(69);
-    should(io.err.join('\n')).match(/fyd became unresponsive/);
+    should(io.err.join('\n')).match(/^foo wait: the daemon became unresponsive/m);
   });
 
   it('should propagate a non-transport read failure', async () => {
@@ -519,7 +520,7 @@ describe('fy wait', () => {
     should(gateway.getSignals[0]?.aborted).be.true();
     should(io.exitCode).equal(124);
     should(io.out).be.empty();
-    should(io.err.join('\n')).match(/before fyd returned a session state/);
+    should(io.err.join('\n')).match(/^foo wait: timed out before the daemon returned a session state/m);
   });
 
   it('should refuse a timeout a caller mistyped', async () => {

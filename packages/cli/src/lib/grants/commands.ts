@@ -18,6 +18,8 @@ import type { GrantCommandOptions, GrantController } from './controller.ts';
  * document or re-run an installer. Grants change over the life of a machine.
  */
 export function registerGrantCommands(program: Command, controller: () => GrantController): void {
+  // The name the program was given, so every example below names the command that actually exists.
+  const bin = program.name();
   // The EXISTING `daemon` group, found rather than created. Creating a second one would give
   // commander two commands with one name and silently lose half the verbs; throwing here turns a
   // wiring mistake into a startup failure instead of a command that quietly does not exist.
@@ -76,11 +78,11 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
       'after',
       [
         '',
-        '  fy daemon config set warden --no-configure',
-        '  fy daemon config set browser --no-use --no-configure',
+        `  ${bin} daemon config set warden --no-configure`,
+        `  ${bin} daemon config set browser --no-use --no-configure`,
         '',
         'Widening reads the operator password from stdin when this machine has one:',
-        '  printf %s "$FY_OPERATOR_PASSWORD" | fy daemon config set fleet --configure',
+        `  printf %s "$FY_OPERATOR_PASSWORD" | ${bin} daemon config set fleet --configure`,
       ].join('\n'),
     )
     .action(async (capability: string, options: GrantCommandOptions) => {
@@ -109,7 +111,7 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
   password
     .command('set')
     .description('set or replace the operator password, reading it from stdin')
-    .addHelpText('after', '\n  printf %s "$FY_OPERATOR_PASSWORD" | fy daemon password set\n')
+    .addHelpText('after', `\n  printf %s "$FY_OPERATOR_PASSWORD" | ${bin} daemon password set\n`)
     .action(async () => {
       await controller().setPassword();
     });

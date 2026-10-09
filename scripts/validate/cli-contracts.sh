@@ -40,6 +40,8 @@ cd "${root_dir}"
 cli_pkg="packages/cli"
 name="$(jq -r '.bin | to_entries[0].key' "${cli_pkg}/package.json")"
 [ -z "${name}" ] || [ "${name}" = "null" ] && echo "❌ no .bin entry in ${cli_pkg}/package.json" >&2 && exit 1
+# The composition root is the bin entry's FILE, derived like the name so a rename moves both.
+cli_root="${cli_pkg}/$(jq -r '.bin | to_entries[0].value' "${cli_pkg}/package.json")"
 daemon_pkg="packages/daemon"
 daemon_name="$(jq -r '.bin | to_entries[0].key' "${daemon_pkg}/package.json")"
 [ -z "${daemon_name}" ] || [ "${daemon_name}" = "null" ] && echo "❌ no .bin entry in ${daemon_pkg}/package.json" >&2 && exit 1
@@ -223,13 +225,13 @@ state-home-layout-claim)
     exit 1
   }
   for writer in FileFleetScaffolder 'provisioner.apply'; do
-    rg -qF "${writer}" "${cli_pkg}/bin/fy.ts" || {
-      echo "❌ ${cli_pkg}/bin/fy.ts no longer wires ${writer}; re-check that its claim still guards it" >&2
+    rg -qF "${writer}" "${cli_root}" || {
+      echo "❌ ${cli_root} no longer wires ${writer}; re-check that its claim still guards it" >&2
       exit 1
     }
   done
-  rg -qF 'claimStateHome' "${cli_pkg}/bin/fy.ts" || {
-    echo "❌ ${cli_pkg}/bin/fy.ts does not claim the state home before the fleet writers run" >&2
+  rg -qF 'claimStateHome' "${cli_root}" || {
+    echo "❌ ${cli_root} does not claim the state home before the fleet writers run" >&2
     exit 1
   }
   # A refusal that does not name its repair is permanent: every home provisioned before the claim

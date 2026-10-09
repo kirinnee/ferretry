@@ -98,7 +98,7 @@ function declaredWaitNote(state: SessionState): string {
   const wait = state.waiting;
   const on = wait?.condition === undefined ? '' : ` on ${wait.condition}`;
   const until = wait?.until === undefined ? ' (open-ended)' : ` until ${wait.until}`;
-  return `fy wait: the teammate declared a wait${on}${until}; the daemon will wake it, so this keeps waiting`;
+  return `the teammate declared a wait${on}${until}; the daemon will wake it, so this keeps waiting`;
 }
 
 /**
@@ -129,7 +129,7 @@ export function decideWait(
       return {
         outcome: {
           kind: 'keep-waiting',
-          note: `fy wait: the session completed but ${marker.path} is not there yet; still waiting for it`,
+          note: `the session completed but ${marker.path} is not there yet; still waiting for it`,
         },
         notices: { ...notices, missingMarker: true },
       };
@@ -156,22 +156,22 @@ export function decideWait(
   return { outcome: { kind: 'keep-waiting' }, notices };
 }
 
-/** How an ended wait is explained on stderr. */
+/** How an ended wait is explained on stderr; the caller prefixes the command name. */
 export function renderWaitOutcome(outcome: Exclude<WaitOutcome, { kind: 'keep-waiting' }>): string | undefined {
   switch (outcome.kind) {
     case 'settled':
       return undefined;
     case 'ended':
       return outcome.marker === undefined
-        ? `fy wait: the session ended as ${outcome.status} rather than completing`
-        : `fy wait: the session is ${outcome.status} and ${outcome.marker} never appeared`;
+        ? `the session ended as ${outcome.status} rather than completing`
+        : `the session is ${outcome.status} and ${outcome.marker} never appeared`;
     case 'needs-attention':
-      return `fy wait: the session is ${outcome.status} and needs a human before it can go further`;
+      return `the session is ${outcome.status} and needs a human before it can go further`;
     case 'timed-out':
       return outcome.status === undefined
-        ? 'fy wait: timed out before fyd returned a session state'
-        : `fy wait: gave up while the session was still ${outcome.status}`;
+        ? 'timed out before the daemon returned a session state'
+        : `gave up while the session was still ${outcome.status}`;
     case 'daemon-unavailable':
-      return `fy wait: fyd became ${outcome.failure}: ${outcome.detail}`;
+      return `the daemon became ${outcome.failure}: ${outcome.detail}`;
   }
 }

@@ -74,6 +74,8 @@ export class ReadsController {
     private readonly clock: IReadsClock,
     private readonly marker: IMarkerProbe,
     private readonly attacher: ITerminalAttacher,
+    /** The shipped command name, which prefixes every stderr note so it names a command that exists. */
+    private readonly binaryName: string,
   ) {}
 
   /** Attach only after both daemon and client proved the complete tmux process incarnation. */
@@ -128,11 +130,11 @@ export class ReadsController {
       after,
       event => {
         if (sessionId !== undefined && event.sessionId !== sessionId)
-          throw new Error(`fyd returned an event for ${event.sessionId} while following ${sessionId}`);
+          throw new Error(`the daemon returned an event for ${event.sessionId} while following ${sessionId}`);
         const previous = positions.get(event.sessionId) ?? after;
         if (event.sequence <= previous)
           throw new Error(
-            `fyd returned a non-advancing event sequence #${event.sequence} for ${event.sessionId} after #${previous}`,
+            `the daemon returned a non-advancing event sequence #${event.sequence} for ${event.sessionId} after #${previous}`,
           );
         positions.set(event.sessionId, event.sequence);
         this.out.success(options.json === true ? JSON.stringify(event) : renderEvent(event));
@@ -140,14 +142,17 @@ export class ReadsController {
       signal,
       idle => {
         if (sessionId === undefined) {
-          if (idle.scope.kind !== 'fleet') throw new Error('fyd returned a session idle proof for a fleet stream');
-          this.out.error(renderFleetStreamIdle(idle.scope.followedSessions, idle.idleSeconds));
+          if (idle.scope.kind !== 'fleet')
+            throw new Error('the daemon returned a session idle proof for a fleet stream');
+          this.out.error(
+            `${this.binaryName} stream: ${renderFleetStreamIdle(idle.scope.followedSessions, idle.idleSeconds)}`,
+          );
           return;
         }
         const position = positions.get(sessionId) ?? after;
         if (idle.scope.kind !== 'session' || idle.scope.sessionId !== sessionId || idle.scope.after !== position)
-          throw new Error('fyd returned an idle proof that contradicted the followed session cursor');
-        this.out.error(renderStreamIdle(sessionId, position, idle.idleSeconds));
+          throw new Error('the daemon returned an idle proof that contradicted the followed session cursor');
+        this.out.error(`${this.binaryName} stream: ${renderStreamIdle(sessionId, position, idle.idleSeconds)}`);
       },
     );
   }
@@ -162,7 +167,7 @@ export class ReadsController {
     if (view !== undefined)
       this.out.success(json ? JSON.stringify(view.state) : `${sessionId} is ${view.state.status}`);
     const explanation = renderWaitOutcome(outcome);
-    if (explanation !== undefined) this.out.error(explanation);
+    if (explanation !== undefined) this.out.error(`${this.binaryName} wait: ${explanation}`);
     this.out.setExitCode(waitExitCode(outcome));
   }
 
@@ -229,7 +234,7 @@ export class ReadsController {
         );
         notices = decision.notices;
         if (decision.outcome.kind === 'keep-waiting') {
-          if (decision.outcome.note !== undefined) this.out.error(decision.outcome.note);
+          if (decision.outcome.note !== undefined) this.out.error(`${this.binaryName} wait: ${decision.outcome.note}`);
           const remainingMs = deadlineMs === undefined ? intervalMs : Math.max(0, deadlineMs - this.clock.nowMs());
           await this.clock.sleep(Math.min(intervalMs, remainingMs), deadline?.signal);
           continue;

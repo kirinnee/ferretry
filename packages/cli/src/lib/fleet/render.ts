@@ -239,13 +239,18 @@ export function renderApplyPlan(plan: FleetApplyPreview): string {
   return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`, ...linking, ...caveat].join('\n');
 }
 
+/** The next step for a fleet that declares nothing yet, naming commands by the binary they run as. */
+function noAccountsNextStep(binaryName: string): string {
+  return `  Next: declare an account in config.yaml and run "${binaryName} fleet apply". On a new host, "${binaryName} fleet init --first-account" creates one for you.`;
+}
+
 /** What an apply actually did, including anything it swept away. */
-export function renderApplyResult(result: FleetApplyResult): string {
+export function renderApplyResult(binaryName: string, result: FleetApplyResult): string {
   const lines =
     result.accountCount === 0
       ? [
           `The manifest declares no accounts; no wrappers were created in ${plural(result.operationCount, 'operation')}.`,
-          '  Next: declare an account in config.yaml and run "fy fleet apply". On a new host, "fy fleet init --first-account" creates one for you.',
+          noAccountsNextStep(binaryName),
           `  manifest: ${result.manifestPath}`,
         ]
       : [
@@ -349,7 +354,7 @@ function displacedLines(displaced: readonly DisplacedState[] | undefined): reado
  * it could not confirm, and a committed fleet is only safe to leave alone if you can see what it
  * committed.
  */
-export function renderFleetApplyFailure(failure: FleetApplyFailure, lockResidue?: string): string {
+export function renderFleetApplyFailure(binaryName: string, failure: FleetApplyFailure, lockResidue?: string): string {
   // The committed block prints the claim it carries, so printing the error's copy of the same path
   // again underneath it would read as two separate stuck claims.
   const alreadyNamed = failure.kind === 'history-failed-after-commit' ? failure.committed.lockResidue : undefined;
@@ -363,8 +368,8 @@ export function renderFleetApplyFailure(failure: FleetApplyFailure, lockResidue?
       // A stuck claim makes "just run it again" false: the next apply refuses until it is gone. The
       // advice has to bend to the residue rather than the residue being a footnote under the advice.
       lockResidue === undefined
-        ? '  safe to fix the cause and run "fy fleet apply" again'
-        : '  fix the cause AND clear the claim above, then run "fy fleet apply" again',
+        ? `  safe to fix the cause and run "${binaryName} fleet apply" again`
+        : `  fix the cause AND clear the claim above, then run "${binaryName} fleet apply" again`,
     ].join('\n');
   }
   if (failure.kind === 'rollback-incomplete') {
@@ -438,12 +443,9 @@ export function renderAccount(account: FleetManifestAccount): string {
 }
 
 /** The provisioned fleet. */
-export function renderManifest(manifest: FleetManifest): string {
+export function renderManifest(binaryName: string, manifest: FleetManifest): string {
   if (manifest.accounts.length === 0) {
-    return [
-      'The fleet manifest declares no accounts.',
-      '  Next: declare an account in config.yaml and run "fy fleet apply". On a new host, "fy fleet init --first-account" creates one for you.',
-    ].join('\n');
+    return ['The fleet manifest declares no accounts.', noAccountsNextStep(binaryName)].join('\n');
   }
   const header = `${plural(manifest.accounts.length, 'account')} provisioned ${manifest.generatedAt}`;
   return [header, ...manifest.accounts.map(renderAccount)].join('\n');
@@ -993,6 +995,7 @@ function padding(text: string, column: number): string {
  * read as the next account. The structure survived only on a wide screen.
  */
 function healthRowLines(
+  binaryName: string,
   group: HealthRowGroup,
   names: FleetAccountNames,
   columns: HealthColumns,
@@ -1048,7 +1051,7 @@ function healthRowLines(
     ? disclosed
     : [
         ...disclosed,
-        `${HEALTH_REMEDY_INDENT}${palette.muted(`${remedy}:`)} ${palette.command(`fy fleet login ${health.accountId}`)}`,
+        `${HEALTH_REMEDY_INDENT}${palette.muted(`${remedy}:`)} ${palette.command(`${binaryName} fleet login ${health.accountId}`)}`,
       ];
 }
 
@@ -1089,6 +1092,7 @@ function healthHeaderFragments(
  * report: every account on its own row, exactly as before grouping existed.
  */
 export function renderHealth(
+  binaryName: string,
   snapshot: FleetHealthSnapshot,
   names: FleetAccountNames,
   presentation: FleetPresentation,
@@ -1115,7 +1119,9 @@ export function renderHealth(
   return [
     ...header.map((line, index) => (index === 0 ? line : `${HEALTH_ROW_INDENT}${line}`)),
     '',
-    ...groups.flatMap(group => healthRowLines(group, names, columns, presentation, sharedCheck, snapshot.at)),
+    ...groups.flatMap(group =>
+      healthRowLines(binaryName, group, names, columns, presentation, sharedCheck, snapshot.at),
+    ),
     '',
     ...softWrap(HEALTH_DISCLOSURE, width - HEALTH_ROW_INDENT.length, width - HEALTH_ROW_INDENT.length).map(
       line => `${HEALTH_ROW_INDENT}${palette.muted(line)}`,
@@ -1132,6 +1138,7 @@ export function renderHealth(
  * produces nothing runnable.
  */
 export function renderScaffoldResult(
+  binaryName: string,
   result: FleetScaffoldResult,
   firstAccount: 'claude' | 'codex' | 'detected' | undefined = undefined,
 ): string {
@@ -1151,9 +1158,9 @@ export function renderScaffoldResult(
     result.declaredAccounts !== undefined
       ? // The harnesses rather than a count, because each one declares two accounts — an interactive
         // lane and an unattended one — so "declared 2 accounts" would read as two harnesses.
-        `Declared the default ${result.declaredAccounts.join(' and ')} accounts. Run "fy fleet apply" to materialise their wrappers.`
+        `Declared the default ${result.declaredAccounts.join(' and ')} accounts. Run "${binaryName} fleet apply" to materialise their wrappers.`
       : firstAccount === undefined
-        ? 'Then declare an account in the configuration and run "fy fleet apply".'
+        ? `Then declare an account in the configuration and run "${binaryName} fleet apply".`
         : 'Kept the existing configuration unchanged; it already declares one or more accounts, so no account was added.',
   );
   return lines.join('\n');

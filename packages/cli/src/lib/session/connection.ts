@@ -51,7 +51,10 @@ export function resolveConnection(input: ConnectionInput): DaemonConnection {
   const baseUrl = url === '' ? FY_DEFAULT_DAEMON_URL : url;
   const token = input.token?.trim() ?? '';
   if (token === '')
-    throw new SessionCommandError('FY_TOKEN is not set — export the token fyd issued so the CLI can authenticate', 1);
+    throw new SessionCommandError(
+      'FY_TOKEN is not set — export the token the daemon issued so the CLI can authenticate',
+      1,
+    );
 
   const sessionId = input.sessionId?.trim();
   return {

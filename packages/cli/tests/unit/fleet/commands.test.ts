@@ -20,7 +20,7 @@ import {
   StubManifestSource,
 } from './fixtures';
 
-function run(argv: string[]) {
+function run(argv: string[], binaryName = 'fy') {
   const applier = new RecordingApplier();
   const recommendations = new RecordingRecommendationGateway();
   const usage = new RecordingUsageCollector();
@@ -30,8 +30,9 @@ function run(argv: string[]) {
   const scaffolder = new RecordingScaffolder();
   const sharing = new RecordingSharingGateway();
   const out = new CapturingOutput();
-  const program = new Command().name('fy').exitOverride();
-  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  const program = new Command().name(binaryName).exitOverride();
+  const printed: string[] = [];
+  program.configureOutput({ writeOut: text => printed.push(text), writeErr: () => {} });
   registerFleetCommands(
     program,
     new FleetController({
@@ -49,10 +50,12 @@ function run(argv: string[]) {
       recommendations,
       out,
       presentation: PLAIN_FLEET_PRESENTATION,
+      binaryName,
     }),
   );
   return {
-    parsed: program.parseAsync(['node', 'fy', ...argv]),
+    parsed: program.parseAsync(['node', binaryName, ...argv]),
+    printed,
     applier,
     recommendations,
     usage,
@@ -250,6 +253,27 @@ describe('fleet init', () => {
     // Assert
     await should(parsed).be.rejectedWith(/must be "claude" or "codex"/u);
     should(scaffolder.calls).equal(0);
+  });
+
+  it('should name the binary it runs as in the first-account refusal', async () => {
+    // Arrange + Act — not the shipped name, so a spelled-out "fy" cannot pass.
+    const { parsed } = run(['fleet', 'init', '--first-account=other'], 'foo');
+
+    // Assert
+    await should(parsed).be.rejectedWith(/: foo fleet init --first-account=claude$/u);
+  });
+
+  it('should name the binary it runs as in the health and login help', async () => {
+    // Arrange + Act
+    const health = run(['fleet', 'health', '--help'], 'foo');
+    await should(health.parsed).be.rejected();
+    const login = run(['fleet', 'login', '--help'], 'foo');
+    await should(login.parsed).be.rejected();
+
+    // Assert
+    should(health.printed.join('')).containEql('`foo fleet login <accountId>` matches on the whole id');
+    should(login.printed.join('')).containEql('That is why `foo fleet health` prints this command');
+    should([...health.printed, ...login.printed].join('')).not.match(/\bfy fleet/u);
   });
 
   it('should not be the default verb — that must never be the one that writes', async () => {
