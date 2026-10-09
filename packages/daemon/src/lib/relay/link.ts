@@ -82,7 +82,7 @@ import {
 } from '@ferretry/relay';
 import type { ApiRequest, ApiResponse } from '../api/http.ts';
 import { SOCKET_CLOSES, type SocketDownstream, type SocketHandler, type SocketUpgradeDecision } from '../api/socket.ts';
-import type { PairingRedemption, RelayPairingAttempt } from '../pairing/index.ts';
+import type { DeviceConnectionTracker, PairingRedemption, RelayPairingAttempt } from '../pairing/index.ts';
 import {
   decodeTunnelClientMessage,
   encodeTunnelMessage,
@@ -268,6 +268,12 @@ export interface RelayLinkDependencies {
   readonly devices: RelayDeviceDirectory;
   readonly pairing: RelayPairingRedeemer;
   readonly scheduler: RelayLinkScheduler;
+  /**
+   * Where every session that presented a device credential is registered, so unpairing that device
+   * ends the session — and whatever stream it carries — instead of leaving it running on an
+   * authorization that no longer exists.
+   */
+  readonly connections: DeviceConnectionTracker;
 }
 
 /** What the link is doing, for a surface that has to say whether this daemon is reachable at all. */
@@ -330,6 +336,8 @@ interface LinkSession {
   sealing: PendingRecord | undefined;
   /** The one live stream this session carries, once it carries one. */
   stream: SocketHandler | undefined;
+  /** Stops the device registry tracking this session. Set once a credential identified it. */
+  release: (() => void) | undefined;
   /** Armed when the session opens, cancelled by the credential record that beats it. */
   credentialDeadline: RelayLinkTimer | undefined;
   /**
@@ -535,6 +543,7 @@ export class RelayLink {
       waiting: [],
       sealing: undefined,
       stream: undefined,
+      release: undefined,
       credentialDeadline: undefined,
       owesConclusion: false,
     };
@@ -719,7 +728,15 @@ export class RelayLink {
    */
   #identify(session: LinkSession, deviceToken: string): boolean {
     const device = this.deps.devices.identifyDevice(deviceToken)?.trim();
-    if (device !== undefined && device !== '') return true;
+    if (device !== undefined && device !== '') {
+      session.release = this.deps.connections.track(device, () => {
+        if (!this.#live(session)) return;
+        // Said exactly as an unknown credential is, so the carrier cannot tell a revocation apart.
+        this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+      });
+      // A device unpaired a moment ago is ended by the registry before `track` returns.
+      return this.#live(session);
+    }
     // An unattributable answer from the directory is a refusal, not a nameless success: a device
     // nobody can name would be journalled as `device` and authorized as an operator.
     this.#lastRefusal = 'a relayed client presented a credential this daemon does not know';
@@ -785,6 +802,9 @@ export class RelayLink {
     const decision = await this.deps
       .sockets(tunnelStreamRequest(request, session.sessionId.text))
       .catch((): SocketUpgradeDecision => ({ outcome: 'unclaimed' }));
+    // Ended while the route table was deciding — the device unpaired, the rendezvous closed it, the
+    // deadline fired. Nothing has been attached yet, so there is nothing to release.
+    if (!this.#live(session)) return;
     if (decision.outcome !== 'accepted') {
       // `unclaimed` means no socket route serves that path at all, which for a client asking to
       // stream is the same answer as a route that was never there: a 404 it can act on.
@@ -809,6 +829,12 @@ export class RelayLink {
         body: 'the daemon failed to attach this stream',
       });
       this.#conclude(session);
+      return;
+    }
+    // The same question after the attachment, and here there IS something to release: a handler
+    // installed on a session that already ended would hold its terminal with nothing to close it.
+    if (!this.#live(session)) {
+      handler.close();
       return;
     }
     session.stream = handler;
@@ -958,6 +984,9 @@ export class RelayLink {
     // will never read it.
     session.waiting.length = 0;
     this.#releaseStream(session);
+    const release = session.release;
+    session.release = undefined;
+    release?.();
   }
 
   /**

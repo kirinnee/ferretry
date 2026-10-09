@@ -63,7 +63,11 @@ import type {
   SocketHandler,
   SocketUpgradeDecision,
 } from '../../../src/lib/api/socket.ts';
-import type { PairingRedemption, RelayPairingAttempt } from '../../../src/lib/pairing/index.ts';
+import {
+  LiveDeviceConnections,
+  type PairingRedemption,
+  type RelayPairingAttempt,
+} from '../../../src/lib/pairing/index.ts';
 import {
   MAX_PRE_CREDENTIAL_SESSIONS,
   RELAY_CREDENTIAL_DEADLINE_MS,
@@ -139,6 +143,8 @@ interface Harness {
   /** Every pairing attempt the link handed to the redeemer. */
   readonly pairings: RelayPairingAttempt[];
   readonly timers: FakeTimer[];
+  /** The device registry the link reports to, so a test can unpair the device a session belongs to. */
+  readonly connections: LiveDeviceConnections;
 }
 
 function harness(
@@ -152,7 +158,9 @@ function harness(
   const upgrades: ApiRequest[] = [];
   const pairings: RelayPairingAttempt[] = [];
   const timers: FakeTimer[] = [];
+  const connections = new LiveDeviceConnections();
   const link = new RelayLink({
+    connections,
     crypto: crypto_,
     identity,
     relayHost: HOST,
@@ -184,7 +192,7 @@ function harness(
       },
     },
   });
-  return { link, wire: sent, requests, upgrades, pairings, timers };
+  return { link, wire: sent, requests, upgrades, pairings, timers, connections };
 }
 
 /** A stream handler that records what it was told, so a test can assert the bridge without a pane. */
@@ -1595,6 +1603,130 @@ describe('a stream session', () => {
   });
 });
 
+describe('a device unpaired while its sessions are live', () => {
+  const DEVICE_ID = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
+  const streamRequest = {
+    t: 'stream',
+    protocol: RELAY_PROTOCOL_ID,
+    deviceToken: DEVICE_TOKEN,
+    path: '/v1/terminals/fy_t/stream',
+    query: [],
+  };
+
+  it('should end its relayed terminal stream and its request session, and release the terminal', async () => {
+    // Arrange — one stream session and one request session, both the same device.
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const streaming = await keyedSession(harnessed);
+    await clientSend(harnessed.link, streaming.channel, streamRequest);
+    const second = sessionIdFromBytes(new Uint8Array(16).fill(42));
+    if (second === null) throw new Error('unreachable: 16 bytes');
+    const serving = await openSession(harnessed.link, harnessed.wire, second);
+    await clientSend(harnessed.link, serving.channel, {
+      t: 'auth',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    should(harnessed.link.report().sessions).equal(2);
+    should(stream.opened).have.length(1);
+
+    // Act
+    const ended = harnessed.connections.endDevice(DEVICE_ID);
+
+    // Assert — both gone, the terminal handler released, and each refusal reads exactly like an
+    // unknown credential so the carrier learns nothing about why.
+    should(ended).equal(2);
+    should(harnessed.link.report().sessions).equal(0);
+    should(stream.closed).have.length(1);
+    const closes = harnessed.wire.frames.map(controlOf).filter(message => message?.t === 'closed');
+    should(closes.slice(-2)).containDeep([
+      { t: 'closed', code: RELAY_CLOSE_CODES.authRejected, reason: 'unknown device credential' },
+      { t: 'closed', code: RELAY_CLOSE_CODES.authRejected, reason: 'unknown device credential' },
+    ]);
+    // The socket itself, and every other device's sessions on it, are untouched.
+    should(harnessed.wire.closes).be.empty();
+  });
+
+  it('should refuse a session for a device unpaired a moment before its credential arrived', async () => {
+    // Arrange — a credential still in the directory, for a device the registry has already unpaired.
+    const harnessed = harness();
+    harnessed.connections.endDevice(DEVICE_ID);
+    const opened = await keyedSession(harnessed);
+
+    // Act
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Assert — never authenticated, nothing dispatched, the session ended.
+    should(harnessed.link.report().sessions).equal(0);
+    should(harnessed.wire.frames.filter(frame => frame.kind === FRAME_KINDS.data)).have.length(0);
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+  });
+
+  it('should never install a stream whose session ended while the route table or the attachment was deciding', async () => {
+    // Arrange — the route table answers only once the device has been unpaired under it.
+    const decided = fakeStream();
+    let unpair = (): void => undefined;
+    const harnessed = harness(undefined, DEVICE_TOKEN, async () => {
+      unpair();
+      return await accepts(decided)();
+    });
+    unpair = () => harnessed.connections.endDevice(DEVICE_ID);
+    const opened = await keyedSession(harnessed);
+
+    // Act
+    await clientSend(harnessed.link, opened.channel, streamRequest);
+
+    // Assert — nothing attached, nothing opened.
+    should(decided.opened).have.length(0);
+    should(decided.downstream).be.undefined();
+
+    // Arrange — this time the device is unpaired while the ATTACHMENT runs, so a handler exists.
+    const attached = fakeStream();
+    let unpairAgain = (): void => undefined;
+    const late = harness(undefined, DEVICE_TOKEN, async () => ({
+      outcome: 'accepted',
+      attach: async downstream => {
+        attached.downstream = downstream;
+        unpairAgain();
+        return attached;
+      },
+    }));
+    unpairAgain = () => late.connections.endDevice(DEVICE_ID);
+    const keyed = await keyedSession(late);
+
+    // Act
+    await clientSend(late.link, keyed.channel, streamRequest);
+
+    // Assert — released at once, never opened, and the session is gone.
+    should(attached.closed).have.length(1);
+    should(attached.opened).have.length(0);
+    should(late.link.report().sessions).equal(0);
+  });
+
+  it('should stop tracking a session that ended on its own', async () => {
+    // Arrange
+    const harnessed = harness();
+    const opened = await keyedSession(harnessed);
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Act — the client went away, then the device was unpaired.
+    await harnessed.link.receiveBinary(
+      control({ t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'gone' }, sessionOne()),
+    );
+
+    // Assert — there was nothing left to end.
+    should(harnessed.connections.endDevice(DEVICE_ID)).equal(0);
+  });
+});
+
 describe('an outcome that has not crossed yet', () => {
   it('should hold the concluding close until the sealed one has actually left', async () => {
     // THE DEFECT THIS PINS. `4440` means "the outcome was stated inside the channel before this
@@ -1770,6 +1902,7 @@ async function heldStreamingLink(which: 'open' | 'seal'): Promise<HeldStream> {
     socket: sent.socket,
     dispatch: async () => json(200, {}),
     sockets: accepts(stream),
+    connections: new LiveDeviceConnections(),
     devices: {
       identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
     },
@@ -2242,6 +2375,7 @@ async function heldCredentialLink(which: 'handshake' | 'open'): Promise<HeldCred
     socket: sent.socket,
     dispatch: async () => json(200, {}),
     sockets: async () => ({ outcome: 'unclaimed' }),
+    connections: new LiveDeviceConnections(),
     devices: {
       identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
     },

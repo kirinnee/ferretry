@@ -6,10 +6,10 @@ import {
   DaemonIdSchema,
   DaemonNameSchema,
   DeviceTokenSchema,
-  type PairedDevice,
-  PairedDeviceSchema,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
+  type PairedDevice,
+  PairedDeviceSchema,
   type PairingCode,
   type PairingCodeMintResponse,
   PairingCodeMintResponseSchema,
@@ -18,13 +18,14 @@ import {
   type PairingId,
   PairingIdSchema,
   type PairingReach,
-  pairingLinkUrl,
   PairingRequestSchema,
   type PairingResponse,
   PairingResponseSchema,
   PublishedCarriersSchema,
+  pairingLinkUrl,
 } from '@ferretry/protocol';
 import { type DeviceCredentialVerifier, secretsMatch } from '../api/authentication.ts';
+import type { DeviceConnectionRevoker } from './live-connections.ts';
 
 const FERRETRY_PAIRING_APP_URL = 'https://ferretry.pages.dev/pair';
 const PAIRING_RATE_LIMIT_ATTEMPTS = 10;
@@ -302,6 +303,12 @@ interface PairingServiceOptions {
    * never leaks access. See `PushService` for both halves of that argument.
    */
   readonly deviceState?: readonly DeviceScopedState[];
+  /**
+   * Every live connection a device holds — terminals, event feeds, relayed streams — ended once its
+   * grant is gone. See `LiveDeviceConnections` for why it runs after the grant is removed rather
+   * than with the purge above.
+   */
+  readonly connections?: DeviceConnectionRevoker;
   readonly rateLimiter?: PairingRateLimiter;
   readonly compare?: (left: string, right: string) => boolean;
   readonly pairingAppUrl?: string;
@@ -554,6 +561,9 @@ export class PairingService {
     const removed = await this.options.devices.remove(id);
     if (!removed) return false;
     this.options.credentials.remove(id);
+    // Only now, with nothing left that verifies: a socket ended any earlier could be reopened on the
+    // credential this revocation is about to remove.
+    this.options.connections?.endDevice(id);
     return true;
   }
 

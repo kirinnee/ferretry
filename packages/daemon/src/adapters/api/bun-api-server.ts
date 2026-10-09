@@ -15,11 +15,11 @@ import {
   SOCKET_CLOSES,
   SOCKET_MAX_FRAME_BYTES,
   type SocketAttachment,
-  type SocketClose,
   type SocketDownstream,
   type SocketFrame,
   type SocketHandler,
 } from '../../lib/api/index.ts';
+import { DEVICE_UNPAIRED_CLOSE, type DeviceConnectionTracker } from '../../lib/pairing/index.ts';
 
 /**
  * What one upgraded request carries into the socket handlers.
@@ -31,6 +31,10 @@ import {
  */
 export interface HostSocketState {
   readonly attach: SocketAttachment;
+  /** The paired device this socket was authorized for. Absent for a host credential. */
+  readonly deviceId?: string;
+  /** Stops the device registry tracking this socket. Set once it is tracked. */
+  release?: () => void;
   /** Frames delivered before the handler was attached, in arrival order. Bounded; see
    *  `admitPendingSocketFrame`. */
   readonly pending: SocketFrame[];
@@ -146,10 +150,15 @@ export class BunApiServer implements ApiServerPort {
      * be measuring the machine it runs on rather than the bound. Nothing in the daemon passes it.
      */
     private readonly maxBodyBytes: number = MAX_REQUEST_BODY_BYTES,
+    /**
+     * Where a socket authorized for a paired device is registered, so unpairing that device closes
+     * it. Absent only where no device can authenticate at all.
+     */
+    private readonly connections?: DeviceConnectionTracker,
   ) {}
 
   async listen(surface: ApiSurface, options: ApiBindOptions): Promise<ApiServerHandle> {
-    const sockets = new HostSocketRegistry();
+    const sockets = new HostSocketRegistry(this.connections);
     const server = this.http.serve({
       hostname: options.host,
       port: options.port,
@@ -172,7 +181,12 @@ export class BunApiServer implements ApiServerPort {
             ? await surface.sockets.upgrade(apiRequest)
             : undefined;
         if (upgrade?.outcome === 'accepted')
-          return server.upgrade(request, { attach: upgrade.attach, pending: [], closed: false })
+          return server.upgrade(request, {
+            attach: upgrade.attach,
+            ...(upgrade.deviceId === undefined ? {} : { deviceId: upgrade.deviceId }),
+            pending: [],
+            closed: false,
+          })
             ? undefined
             : respond(toResponse(errorResponse(400, 'the websocket upgrade failed', 'upgrade_failed')));
         if (upgrade?.outcome === 'refused') return respond(toResponse(upgrade.response));
@@ -304,6 +318,8 @@ class HostSocketRegistry {
   private readonly live = new Set<HostSocket>();
   private closedHere = false;
 
+  constructor(private readonly connections: DeviceConnectionTracker | undefined) {}
+
   /**
    * Whether this host has closed a socket on its own initiative rather than letting the peer or the
    * runtime do it.
@@ -326,6 +342,15 @@ class HostSocketRegistry {
   opened(socket: HostSocket): void {
     this.live.add(socket);
     const state = socket.data;
+    // Tracked before the attachment runs, so a device unpaired while its terminal is still being
+    // resolved is closed like any other — and one unpaired already is closed right here.
+    if (state.deviceId !== undefined && this.connections !== undefined)
+      state.release = this.connections.track(state.deviceId, () => {
+        if (state.closed) return;
+        this.live.delete(socket);
+        finish(socket);
+        this.close(socket, DEVICE_UNPAIRED_CLOSE);
+      });
     void state
       .attach(downstreamFor(socket))
       .then(async handler => {
@@ -380,7 +405,7 @@ class HostSocketRegistry {
     this.live.clear();
   }
 
-  private close(socket: HostSocket, close: SocketClose): void {
+  private close(socket: HostSocket, close: { readonly code: number; readonly reason: string }): void {
     this.closedHere = true;
     socket.close(close.code, close.reason);
   }
@@ -402,6 +427,7 @@ function finish(socket: HostSocket): void {
   if (state.closed) return;
   state.closed = true;
   state.pending.length = 0;
+  state.release?.();
   state.handler?.close();
 }
 

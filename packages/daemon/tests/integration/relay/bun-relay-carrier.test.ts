@@ -52,7 +52,7 @@ import { BunRelayCarrier, type RelayWebSocket } from '../../../src/adapters/rela
 import { WebCryptoRelayIdentityKeys } from '../../../src/adapters/relay/web-crypto-relay-identity.ts';
 import type { ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketUpgradeDecision } from '../../../src/lib/api/socket.ts';
-import type { PairingRedemption } from '../../../src/lib/pairing/index.ts';
+import { LiveDeviceConnections, type PairingRedemption } from '../../../src/lib/pairing/index.ts';
 import { DaemonRelayConfigSchema } from '../../../src/lib/runtime/config.ts';
 
 const relayCrypto = new WebCryptoRelayCrypto();
@@ -221,6 +221,7 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async request =>
@@ -268,6 +269,7 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async () => ok({}),
@@ -326,6 +328,7 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async () => ok({}),
@@ -364,6 +367,7 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async () => ok({}),
@@ -413,6 +417,7 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async () => ok({}),
@@ -449,6 +454,7 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async () => {
@@ -494,6 +500,7 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async () => ok({}),
@@ -539,6 +546,7 @@ describe('what a stopped carrier owes a live stream', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      connections: new LiveDeviceConnections(),
       sockets: async () => ({
         outcome: 'accepted',
         attach: async () => ({

@@ -14,8 +14,10 @@
  * ticket recovered from a log cannot be replayed against an ordinary route even inside its window.
  *
  * What it is NOT is a way to hold authority longer or more widely than the credential behind it. A
- * device's ticket authorizes what a device may do; revoking the grant behind it leaves at most one
- * ticket-length window, which is why that window is seconds.
+ * device's ticket authorizes what a device may do. Revoking the grant does not spend the device's
+ * outstanding tickets, so one can still be redeemed for the seconds it has left — which is why that
+ * window is seconds — but the socket it opens is closed the moment it is opened, and every socket the
+ * device already held is closed by the revocation itself. See `LiveDeviceConnections`.
  */
 
 import { SOCKET_TICKET_TTL_SECONDS } from '@ferretry/protocol';

@@ -148,6 +148,8 @@ class RelayBridge {
       },
       dispatch,
       devices: { identifyDevice: token => (token === DEVICE_TOKEN || token === MINTED_TOKEN ? 'phone' : undefined) },
+      // No device is unpaired in these journeys, so nothing is ever ended through this.
+      connections: { track: () => () => undefined },
       pairing,
       sockets,
       // A REAL `setTimeout` LEFT ARMED WOULD OUTLIVE THE CASE. §14 gives every session a ten-second

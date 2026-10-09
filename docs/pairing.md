@@ -285,7 +285,10 @@ Two different things are revocable and they are not the same act:
 - **A device** — ends its access. The document is written **first**, and only a successful write drops the
   live grant from the registry; the other order turns a failed write into a phone that stops working now
   and works again after a restart. There is no `await` between the two, so no request can authenticate
-  against a credential the daemon has already promised to forget.
+  against a credential the daemon has already promised to forget. Only **then** is every live connection
+  the device holds closed — terminal and event sockets with `1008`, relayed sessions with the same `4403`
+  an unknown credential gets — because a socket is authorized once, at its upgrade, and would otherwise
+  outlive the grant. A socket opened afterwards with a ticket bought just before is closed as it opens.
 
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses
