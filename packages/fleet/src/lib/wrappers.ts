@@ -62,14 +62,24 @@ export function shellQuote(value: string): string {
  * Render a path that may be written relative to the user's home. `$HOME/x` and `~/x` become an
  * expanding `"$HOME/x"` so a generated script stays valid on another machine; anything else is an
  * inert literal.
+ *
+ * Only `$HOME` expands. A remainder holding anything a double-quoted word still interprets — a
+ * `$(…)`, a `$var`, a backtick, a backslash or a quote — is single-quoted after the expanding prefix
+ * instead, because inside `"$HOME/…"` it would run or substitute when the wrapper does. An ordinary
+ * remainder keeps the one-word spelling, so the wrappers already on a host do not all change.
  */
 export function shellPath(value: string): string {
   if (value === '~' || value === '$HOME') return '"$HOME"';
   for (const prefix of ['~/', '$HOME/']) {
-    if (value.startsWith(prefix)) return `"$HOME/${value.slice(prefix.length)}"`;
+    if (!value.startsWith(prefix)) continue;
+    const rest = value.slice(prefix.length);
+    return DOUBLE_QUOTE_ACTIVE.test(rest) ? `"$HOME"/${shellQuote(rest)}` : `"$HOME/${rest}"`;
   }
   return shellQuote(value);
 }
+
+/** The characters a double-quoted shell word still interprets. */
+const DOUBLE_QUOTE_ACTIVE = /[$`\\"]/u;
 
 export interface WrapperRenderOptions {
   /**

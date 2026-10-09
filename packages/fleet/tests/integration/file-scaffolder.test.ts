@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -261,6 +261,128 @@ describe('FileFleetScaffolder', () => {
 
       // Assert
       await should(act()).be.rejectedWith(/exists but is not a file/u);
+    });
+  });
+
+  /**
+   * The roots are checked where the path PHYSICALLY is, not only as written: a linked directory
+   * inside a root is lexically inside it and writes wherever it points.
+   */
+  describe('through links', () => {
+    const updatingConfig = (root: string): FleetScaffold => {
+      const scaffold = scaffoldFor(root);
+      return {
+        ...scaffold,
+        files: [{ ...scaffold.files[0]!, updateIfPresent: existing => `${existing}# updated\n` }],
+      };
+    };
+
+    it('should refuse a file whose parent directory is a link out of the root', async () => {
+      await withTemporaryFleet(async root => {
+        // Arrange
+        const outside = path.join(path.dirname(root), 'outside');
+        await mkdir(outside);
+        await mkdir(root);
+        await symlink(outside, path.join(root, 'assets'));
+        const scaffold = scaffoldFor(root);
+
+        // Act
+        const act = async (): Promise<unknown> =>
+          await new FileFleetScaffolder([root]).scaffold({ ...scaffold, directories: [root] });
+
+        // Assert — nothing landed where the link points.
+        await should(act()).be.rejectedWith(/refusing to write outside configured fleet roots/u);
+        should(await readdir(outside)).be.empty();
+      });
+    });
+
+    it('should refuse to create through a link that points at nothing', async () => {
+      await withTemporaryFleet(async root => {
+        // Arrange — a dangling link reads as "not there yet", and mkdir through it creates its target.
+        const outside = path.join(path.dirname(root), 'outside');
+        await mkdir(root);
+        await symlink(outside, path.join(root, 'assets'));
+        const scaffold: FleetScaffold = { ...scaffoldFor(root), directories: [path.join(root, 'assets', 'nested')] };
+
+        // Act
+        const act = async (): Promise<unknown> => await new FileFleetScaffolder([root]).scaffold(scaffold);
+
+        // Assert
+        await should(act()).be.rejectedWith(/refusing to write through a link that points at nothing/u);
+        should(await stat(outside).catch(() => undefined)).be.undefined();
+      });
+    });
+
+    it('should accept a root that is itself a link', async () => {
+      await withTemporaryFleet(async root => {
+        // Arrange — a temporary directory on macOS is one, and so is a relocated fleet directory.
+        const real = path.join(path.dirname(root), 'real');
+        await mkdir(real);
+        await symlink(real, root);
+
+        // Act
+        const actual = await new FileFleetScaffolder([root]).scaffold(scaffoldFor(root));
+
+        // Assert
+        should(actual.created).deepEqual([path.join(root, 'config.yaml'), path.join(root, 'assets', 'README.md')]);
+        should(await readFile(path.join(real, 'config.yaml'), 'utf8')).equal('agents: []\n');
+      });
+    });
+
+    it('should refuse a path that runs through a file', async () => {
+      await withTemporaryFleet(async root => {
+        // Arrange
+        const subject = new FileFleetScaffolder([root]);
+        await subject.scaffold(scaffoldFor(root));
+        const through: FleetScaffold = {
+          ...scaffoldFor(root),
+          files: [{ path: path.join(root, 'config.yaml', 'nested', 'x.yaml'), content: 'x\n', mode: 0o600 }],
+        };
+
+        // Act / Assert
+        await should(subject.scaffold(through)).be.rejected();
+      });
+    });
+
+    it('should replace an updated file by name rather than rewriting the file in place', async () => {
+      await withTemporaryFleet(async root => {
+        // Arrange — a second name for the same file. An in-place rewrite changes it under both names;
+        // a replacement gives the scaffold's name a new file and leaves the other one alone.
+        const subject = new FileFleetScaffolder([root]);
+        await subject.scaffold(scaffoldFor(root));
+        const config = path.join(root, 'config.yaml');
+        const other = path.join(path.dirname(root), 'other-name.yaml');
+        await link(config, other);
+        await chmod(config, 0o640);
+
+        // Act
+        const actual = await subject.scaffold(updatingConfig(root));
+
+        // Assert — and the mode somebody chose for the file is kept.
+        should(actual.updated).deepEqual([config]);
+        should(await readFile(config, 'utf8')).equal('agents: []\n# updated\n');
+        should(await readFile(other, 'utf8')).equal('agents: []\n');
+        should((await stat(config)).mode & 0o777).equal(0o640);
+        should((await readdir(root)).filter(name => name.endsWith('.tmp'))).be.empty();
+      });
+    });
+
+    it('should leave no temporary file behind when an update cannot land', async () => {
+      await withTemporaryFleet(async root => {
+        // Arrange — a fleet directory that can no longer be written to.
+        const subject = new FileFleetScaffolder([root]);
+        await subject.scaffold(scaffoldFor(root));
+        await chmod(root, 0o500);
+
+        try {
+          // Act / Assert
+          await should(subject.scaffold(updatingConfig(root))).be.rejectedWith(FleetScaffoldPartialError);
+          should(await readFile(path.join(root, 'config.yaml'), 'utf8')).equal('agents: []\n');
+        } finally {
+          await chmod(root, 0o700);
+        }
+        should((await readdir(root)).filter(name => name.endsWith('.tmp'))).be.empty();
+      });
     });
   });
 });

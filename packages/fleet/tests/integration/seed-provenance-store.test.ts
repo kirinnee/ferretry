@@ -7,7 +7,7 @@
  * bytes on disk are readable only by their owner.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -166,5 +166,22 @@ describe('FileSeedProvenanceStore', () => {
     // indistinguishable from one whose records never change.
     await should(blocked.write([record()])).be.rejected();
     should(await good.read()).have.length(1);
+  });
+
+  it('never writes through a link planted at a guessable temporary name', async () => {
+    // Arrange — the temporary name used to be `<file>.<pid>.tmp`, opened without `wx`, so a link
+    // left at that name sent the document into whatever file the link pointed at.
+    const directory = await workspace();
+    const file = seedProvenancePath(directory);
+    const victim = path.join(directory, 'victim');
+    await writeFile(victim, 'untouched', 'utf8');
+    await symlink(victim, `${file}.${String(process.pid)}.tmp`);
+
+    // Act
+    await new FileSeedProvenanceStore(file).write([record()]);
+
+    // Assert — the victim is byte-identical and the document landed as a file of its own.
+    should(await readFile(victim, 'utf8')).equal('untouched');
+    should(await new FileSeedProvenanceStore(file).read()).have.length(1);
   });
 });
