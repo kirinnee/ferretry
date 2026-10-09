@@ -55,6 +55,7 @@ import {
   fromBase64UrlFixed,
   grantCredit,
   HANDSHAKE_FRAME_SEQUENCE,
+  HEARTBEAT_GRACE_SECONDS,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
   MAX_PLAINTEXT_BYTES,
@@ -217,6 +218,30 @@ export const MAX_PRE_CREDENTIAL_SESSIONS = 6;
 export const RELAY_STREAM_MAX_BUFFERED_BYTES = 2 * 1_024 * 1_024;
 
 /**
+ * How long a session THIS DAEMON ended is remembered, so a frame already in flight for it is dropped
+ * rather than read as a carrier that has lost its mind.
+ *
+ * ENDING A SESSION IS ASYNCHRONOUS AND FRAMES CROSS THE CLOSE. The rendezvous keeps forwarding a
+ * client's frames until the daemon's `closed` reaches it, so a frame naming a session this daemon has
+ * just ended is the ordinary consequence of a close, not a protocol violation. It used to end the
+ * WHOLE SOCKET, and that was reachable by a stranger: open one session past
+ * {@link MAX_PRE_CREDENTIAL_SESSIONS} and send its hello at `ready` — the daemon ends it as busy,
+ * the forwarded hello arrives a moment later, and every honest session on the link died with it.
+ *
+ * The window is the rendezvous's own heartbeat grace: a socket whose in-flight frames take longer
+ * than that to arrive is a socket the rendezvous has already declared dead. A frame for a session
+ * this daemon never opened, or for one the RENDEZVOUS ended (it forwards nothing after it ends one),
+ * still ends the link — those are real disagreements about what is running.
+ */
+export const RELAY_ENDED_SESSION_GRACE_MS = HEARTBEAT_GRACE_SECONDS * 1_000;
+
+/**
+ * The most recently ended sessions one link remembers at once. Session arrivals are bounded by the
+ * rendezvous's admission rate, so this is a backstop for a bound that already holds, not the bound.
+ */
+export const RELAY_MAX_ENDED_SESSIONS = 64;
+
+/**
  * What this link's own overflow policies close a stream with.
  *
  * They are WebSocket close codes from §14's stream taxonomy, not daemon constants, and they are
@@ -324,6 +349,9 @@ interface LinkSession {
 
 export class RelayLink {
   readonly #sessions = new Map<string, LinkSession>();
+  /** Sessions this daemon ended recently, each with the timer that forgets it. See
+   *  {@link RELAY_ENDED_SESSION_GRACE_MS}. */
+  readonly #ended = new Map<string, RelayLinkTimer>();
   #claimed = false;
   #lastRefusal: string | undefined;
   /** Serialises everything that assigns a sequence number, because a record's nonce IS its sequence
@@ -386,6 +414,8 @@ export class RelayLink {
     }
     const session = this.#sessions.get(frame.sessionId.text);
     if (session === undefined) {
+      // In flight across a close this daemon made: dropped, and the other sessions keep running.
+      if (this.#ended.has(frame.sessionId.text)) return;
       this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'a frame named no live session');
       return;
     }
@@ -490,6 +520,10 @@ export class RelayLink {
       this.#endSession(sessionId, RELAY_CLOSE_CODES.rendezvousBusy, 'too many sessions are awaiting a credential');
       return;
     }
+    // A fresh session under an identifier this daemon ended is a new conversation, and its frames are
+    // its own rather than stragglers to drop.
+    this.#ended.get(sessionId.text)?.cancel();
+    this.#ended.delete(sessionId.text);
     const session: LinkSession = {
       sessionId,
       phase: 'awaiting-hello',
@@ -978,6 +1012,7 @@ export class RelayLink {
     session.owesConclusion = false;
     this.#forget(session);
     this.#sessions.delete(session.sessionId.text);
+    this.#rememberEnded(session.sessionId);
     this.#sendFrame({
       kind: FRAME_KINDS.control,
       sessionId: session.sessionId,
@@ -1157,6 +1192,7 @@ export class RelayLink {
     const session = this.#sessions.get(sessionId.text);
     if (session !== undefined) this.#forget(session);
     this.#sessions.delete(sessionId.text);
+    this.#rememberEnded(sessionId);
     this.#lastRefusal = `session ${code}: ${reason}`;
     this.#sendFrame({
       kind: FRAME_KINDS.control,
@@ -1164,6 +1200,22 @@ export class RelayLink {
       sequence: 0,
       payload: encodeControlMessage({ t: 'closed', code, reason }),
     });
+  }
+
+  /** Remember that this daemon ended a session, for as long as a frame for it may still be in flight. */
+  #rememberEnded(sessionId: SessionId): void {
+    const key = sessionId.text;
+    this.#ended.get(key)?.cancel();
+    this.#ended.delete(key);
+    if (this.#ended.size >= RELAY_MAX_ENDED_SESSIONS) {
+      const [oldest, timer] = this.#ended.entries().next().value as [string, RelayLinkTimer];
+      timer.cancel();
+      this.#ended.delete(oldest);
+    }
+    const timer = this.deps.scheduler.after(RELAY_ENDED_SESSION_GRACE_MS, () => {
+      if (this.#ended.get(key) === timer) this.#ended.delete(key);
+    });
+    this.#ended.set(key, timer);
   }
 
   /** End the whole link. Every session on it is gone with the socket, which is what §9 says. */
@@ -1186,5 +1238,7 @@ export class RelayLink {
   close(): void {
     for (const session of this.#sessions.values()) this.#forget(session);
     this.#sessions.clear();
+    for (const timer of this.#ended.values()) timer.cancel();
+    this.#ended.clear();
   }
 }

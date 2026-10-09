@@ -67,6 +67,8 @@ import type { PairingRedemption, RelayPairingAttempt } from '../../../src/lib/pa
 import {
   MAX_PRE_CREDENTIAL_SESSIONS,
   RELAY_CREDENTIAL_DEADLINE_MS,
+  RELAY_ENDED_SESSION_GRACE_MS,
+  RELAY_MAX_ENDED_SESSIONS,
   RelayLink,
   type RelayLinkSocket,
 } from '../../../src/lib/relay/link.ts';
@@ -732,6 +734,136 @@ describe('a relayed session', () => {
       encodeFrame({ kind: FRAME_KINDS.data, sessionId: sessionOne(), sequence: 1, payload: new Uint8Array(32) }),
     );
     should(sent.closes).containDeep([{ code: RELAY_CLOSE_CODES.protocolError }]);
+  });
+
+  it('should drop a frame already in flight for a session it ended, and keep every other session', async () => {
+    // THE ATTACK, as the carrier delivers it: a stranger opens one session past the pre-credential
+    // bound and sends its hello at `ready`. The rendezvous forwards `open` and the hello back to
+    // back, so the daemon ends that session as busy and only THEN reads the hello naming it.
+    const { link, wire: sent } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const ids = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS + 1 }, (_unused, index) => {
+      const id = sessionIdFromBytes(new Uint8Array([index + 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 99]));
+      if (id === null) throw new Error('unreachable: 16 bytes');
+      return id;
+    });
+    for (const id of ids.slice(0, MAX_PRE_CREDENTIAL_SESSIONS)) await link.receiveBinary(control({ t: 'open' }, id));
+    const busy = ids[MAX_PRE_CREDENTIAL_SESSIONS] as SessionId;
+    const pending = await startClientHandshake(crypto_, busy, identity.daemonId);
+
+    // Act
+    await link.receiveBinary(control({ t: 'open' }, busy));
+    await link.receiveBinary(
+      encodeFrame({
+        kind: FRAME_KINDS.handshake,
+        sessionId: busy,
+        sequence: HANDSHAKE_FRAME_SEQUENCE,
+        payload: encodeHandshakeMessage(pending.hello),
+      }),
+    );
+    await link.receiveBinary(
+      encodeFrame({ kind: FRAME_KINDS.credit, sessionId: busy, sequence: 0, payload: encodeCreditPayload(1) }),
+    );
+
+    // Assert — the busy session was refused, the stragglers were dropped, and the link still holds
+    // the socket and every session it admitted.
+    should(sent.closes).be.empty();
+    should(link.report().sessions).equal(MAX_PRE_CREDENTIAL_SESSIONS);
+    should(controlOf(sent.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.rendezvousBusy });
+  });
+
+  it('should drop a straggler for a concluded session, and forget it once the grace window passes', async () => {
+    // Arrange — a session that ends with a sealed outcome rather than a refusal.
+    const stream = fakeStream();
+    const { link, wire: sent, timers } = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const { channel: keyed } = await openSession(link, sent, sessionOne());
+    const channel = await clientSend(link, keyed, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+      query: [],
+    });
+    await clientSend(link, channel, { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1000, reason: 'x' });
+    should(concluded(sent)).be.true();
+    const straggler = encodeFrame({
+      kind: FRAME_KINDS.data,
+      sessionId: sessionOne(),
+      sequence: 9,
+      payload: new Uint8Array(32),
+    });
+
+    // Act + Assert — inside the window, dropped.
+    await link.receiveBinary(straggler);
+    should(sent.closes).be.empty();
+
+    // Act + Assert — once it passes, the identifier names nothing this daemon remembers.
+    const grace = timers.filter(timer => timer.milliseconds === RELAY_ENDED_SESSION_GRACE_MS);
+    should(grace).have.length(1);
+    for (const timer of grace) timer.fire();
+    await link.receiveBinary(straggler);
+    should(sent.closes).containDeep([
+      { code: RELAY_CLOSE_CODES.protocolError, reason: 'a frame named no live session' },
+    ]);
+  });
+
+  it('should treat a reopened identifier as a new session, and remember only the most recent endings', async () => {
+    // Arrange
+    const { link, wire: sent, timers } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const idFor = (index: number): SessionId => {
+      const id = sessionIdFromBytes(
+        new Uint8Array([index % 256, Math.floor(index / 256), 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 77]),
+      );
+      if (id === null) throw new Error('unreachable: 16 bytes');
+      return id;
+    };
+    const timeOut = async (id: SessionId): Promise<void> => {
+      await link.receiveBinary(control({ t: 'open' }, id));
+      timers
+        .filter(timer => timer.milliseconds === RELAY_CREDENTIAL_DEADLINE_MS)
+        .at(-1)
+        ?.fire();
+    };
+
+    // Act — one session ends, its identifier opens again, and the new one is served as itself.
+    await timeOut(idFor(0));
+    await link.receiveBinary(control({ t: 'open' }, idFor(0)));
+    should(link.report().sessions).equal(1);
+    await link.receiveBinary(control({ t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'gone' }, idFor(0)));
+
+    // Assert — a session the RENDEZVOUS ended is not one this daemon ended, so its stragglers are
+    // still a disagreement worth the link. Checked on a throwaway harness so this one keeps running.
+    const strict = harness();
+    await strict.link.receiveBinary(challenge());
+    await strict.link.receiveBinary(claimed());
+    await strict.link.receiveBinary(control({ t: 'open' }, idFor(0)));
+    await strict.link.receiveBinary(
+      control({ t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'gone' }, idFor(0)),
+    );
+    await strict.link.receiveBinary(
+      encodeFrame({ kind: FRAME_KINDS.data, sessionId: idFor(0), sequence: 1, payload: new Uint8Array(32) }),
+    );
+    should(strict.wire.closes).containDeep([{ code: RELAY_CLOSE_CODES.protocolError }]);
+
+    // Act — more endings than the link remembers.
+    for (let index = 1; index <= RELAY_MAX_ENDED_SESSIONS + 1; index += 1) await timeOut(idFor(index));
+    const frameFor = (id: SessionId): Uint8Array =>
+      encodeFrame({ kind: FRAME_KINDS.data, sessionId: id, sequence: 1, payload: new Uint8Array(32) });
+    await link.receiveBinary(frameFor(idFor(RELAY_MAX_ENDED_SESSIONS + 1)));
+    should(sent.closes).be.empty();
+    await link.receiveBinary(frameFor(idFor(1)));
+
+    // Assert — the oldest was forgotten to make room, so it names nothing now.
+    should(sent.closes).containDeep([{ code: RELAY_CLOSE_CODES.protocolError }]);
+
+    // Act + Assert — a forgotten ending's timer firing late touches nothing.
+    for (const timer of timers.filter(candidate => candidate.milliseconds === RELAY_ENDED_SESSION_GRACE_MS))
+      timer.fire();
   });
 
   it('should keep the reason a rendezvous refused it, without racing the close', async () => {

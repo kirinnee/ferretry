@@ -86,7 +86,36 @@ export interface RendezvousState {
   readonly sessions: readonly RendezvousSession[];
   /** Arrival timestamps still inside the rate window. */
   readonly arrivals: readonly number[];
+  /**
+   * Sessions THIS rendezvous ended while the daemon may still have frames in flight for them.
+   *
+   * Optional because a Durable Object reloads state an earlier deploy stored, and that state has no
+   * such field; absent reads as empty. See {@link ENDED_SESSION_GRACE_MS}.
+   */
+  readonly ended?: readonly EndedSession[];
 }
+
+/** One session this rendezvous ended, and when, so a daemon frame racing the close can be dropped. */
+export interface EndedSession {
+  readonly sessionId: string;
+  readonly at: number;
+}
+
+/**
+ * How long a session this rendezvous ended is remembered.
+ *
+ * ENDING A SESSION IS ASYNCHRONOUS AND FRAMES CROSS THE CLOSE. When a client hangs up, the daemon
+ * keeps sending for that session until the `closed` this machine sends it arrives, so a daemon frame
+ * naming a session that just ended is the ordinary consequence of the close. Reading it as a protocol
+ * error used to drop the DAEMON'S socket — every other client's session with it, on any client
+ * disconnect that happened to race an answer. The window is the heartbeat grace: a daemon whose
+ * in-flight frames take longer than that is one the sweep has already declared dead. A daemon frame
+ * for a session this rendezvous never opened, or one the daemon ITSELF closed, still ends the socket.
+ */
+export const ENDED_SESSION_GRACE_MS = HEARTBEAT_GRACE_SECONDS * 1000;
+
+/** A backstop on {@link RendezvousState.ended}; arrivals are already rate-limited well below it. */
+export const MAX_ENDED_SESSIONS = 64;
 
 export function initialRendezvousState(daemonId: string): RendezvousState {
   return { daemonId, daemon: null, pending: [], sessions: [], arrivals: [] };
@@ -193,6 +222,26 @@ function replaceSession(state: RendezvousState, updated: RendezvousSession): Ren
     ...state,
     sessions: state.sessions.map(session => (session.sessionId.text === updated.sessionId.text ? updated : session)),
   };
+}
+
+/**
+ * Remove a session this rendezvous ended on its own initiative, remembering it for the daemon's
+ * stragglers. Stale entries are pruned in the same breath, so the list only grows with real endings.
+ */
+function endedByRendezvous(state: RendezvousState, sessionId: SessionId, at: number): RendezvousState {
+  const kept = (state.ended ?? []).filter(
+    entry => entry.sessionId !== sessionId.text && entry.at + ENDED_SESSION_GRACE_MS > at,
+  );
+  return {
+    ...withoutSession(state, sessionId),
+    ended: [...kept.slice(Math.max(0, kept.length - MAX_ENDED_SESSIONS + 1)), { sessionId: sessionId.text, at }],
+  };
+}
+
+function recentlyEnded(state: RendezvousState, sessionId: SessionId, at: number): boolean {
+  return (state.ended ?? []).some(
+    entry => entry.sessionId === sessionId.text && entry.at + ENDED_SESSION_GRACE_MS > at,
+  );
 }
 
 function dropPending(state: RendezvousState, socketId: string): RendezvousState {
@@ -387,9 +436,10 @@ function forward(
   session: RendezvousSession,
   frame: RelayFrame,
   direction: Direction,
+  at: number,
 ): RendezvousStep {
   const endWithViolation = (reason: string): RendezvousStep => ({
-    state: withoutSession(state, session.sessionId),
+    state: endedByRendezvous(state, session.sessionId, at),
     effects: [
       ...endSession(session, RELAY_CLOSE_CODES.flowViolation, reason),
       ...tellDaemon(state, session, RELAY_CLOSE_CODES.flowViolation, reason),
@@ -413,9 +463,11 @@ function forward(
   };
 }
 
-function onDaemonFrame(state: RendezvousState, daemon: DaemonSlot, frame: RelayFrame): RendezvousStep {
+function onDaemonFrame(state: RendezvousState, daemon: DaemonSlot, frame: RelayFrame, at: number): RendezvousStep {
   const session = sessionFor(state, frame.sessionId);
   if (session === undefined) {
+    // In flight across a close this rendezvous made: dropped, and the daemon keeps its socket.
+    if (recentlyEnded(state, frame.sessionId, at)) return { state, effects: [] };
     return { state, effects: refuse(daemon.socketId, RELAY_CLOSE_CODES.protocolError, 'frame names no live session') };
   }
   if (frame.kind === FRAME_KINDS.control) {
@@ -431,16 +483,27 @@ function onDaemonFrame(state: RendezvousState, daemon: DaemonSlot, frame: RelayF
       effects: endSession(session, message.code, message.reason),
     };
   }
-  return forward(state, session, frame, {
-    toSocketId: session.clientSocketId,
-    send: session.fromDaemon,
-    credits: session.fromClient,
-    withSend: (target, window) => ({ ...target, fromDaemon: window }),
-    withCredits: (target, window) => ({ ...target, fromClient: window }),
-  });
+  return forward(
+    state,
+    session,
+    frame,
+    {
+      toSocketId: session.clientSocketId,
+      send: session.fromDaemon,
+      credits: session.fromClient,
+      withSend: (target, window) => ({ ...target, fromDaemon: window }),
+      withCredits: (target, window) => ({ ...target, fromClient: window }),
+    },
+    at,
+  );
 }
 
-function onClientFrame(state: RendezvousState, session: RendezvousSession, frame: RelayFrame): RendezvousStep {
+function onClientFrame(
+  state: RendezvousState,
+  session: RendezvousSession,
+  frame: RelayFrame,
+  at: number,
+): RendezvousStep {
   const daemon = state.daemon;
   if (daemon === null) {
     return {
@@ -449,7 +512,7 @@ function onClientFrame(state: RendezvousState, session: RendezvousSession, frame
     };
   }
   const endBoth = (code: number, reason: string): RendezvousStep => ({
-    state: withoutSession(state, session.sessionId),
+    state: endedByRendezvous(state, session.sessionId, at),
     effects: [...endSession(session, code, reason), ...tellDaemon(state, session, code, reason)],
   });
   if (frame.sessionId.text !== session.sessionId.text) {
@@ -462,23 +525,29 @@ function onClientFrame(state: RendezvousState, session: RendezvousSession, frame
     }
     return endBoth(message.code, message.reason);
   }
-  return forward(state, session, frame, {
-    toSocketId: daemon.socketId,
-    send: session.fromClient,
-    credits: session.fromDaemon,
-    withSend: (target, window) => ({ ...target, fromClient: window }),
-    withCredits: (target, window) => ({ ...target, fromDaemon: window }),
-  });
+  return forward(
+    state,
+    session,
+    frame,
+    {
+      toSocketId: daemon.socketId,
+      send: session.fromClient,
+      credits: session.fromDaemon,
+      withSend: (target, window) => ({ ...target, fromClient: window }),
+      withCredits: (target, window) => ({ ...target, fromDaemon: window }),
+    },
+    at,
+  );
 }
 
 function onFrame(state: RendezvousState, event: Extract<RendezvousEvent, { kind: 'frame' }>): RendezvousStep {
   const pending = state.pending.find(entry => entry.socketId === event.socketId);
   if (pending !== undefined) return onPendingFrame(state, pending, event.frame);
   if (state.daemon !== null && state.daemon.socketId === event.socketId) {
-    return onDaemonFrame(state, state.daemon, event.frame);
+    return onDaemonFrame(state, state.daemon, event.frame, event.at);
   }
   const session = state.sessions.find(entry => entry.clientSocketId === event.socketId);
-  if (session !== undefined) return onClientFrame(state, session, event.frame);
+  if (session !== undefined) return onClientFrame(state, session, event.frame, event.at);
   return {
     state,
     effects: refuse(event.socketId, RELAY_CLOSE_CODES.protocolError, 'socket is not part of this rendezvous'),
@@ -489,7 +558,8 @@ function onFrame(state: RendezvousState, event: Extract<RendezvousEvent, { kind:
 
 function dropDaemon(state: RendezvousState, code: number, reason: string): RendezvousStep {
   return {
-    state: { ...state, daemon: null, sessions: [] },
+    // A new daemon is a new socket, and nothing the old one had in flight can reach this one.
+    state: { ...state, daemon: null, sessions: [], ended: [] },
     effects: state.sessions.flatMap(session => endSession(session, code, reason)),
   };
 }
@@ -507,7 +577,7 @@ function onSocketClosed(
   const session = state.sessions.find(entry => entry.clientSocketId === event.socketId);
   if (session === undefined) return { state, effects: [] };
   return {
-    state: withoutSession(state, session.sessionId),
+    state: endedByRendezvous(state, session.sessionId, event.at),
     effects: tellDaemon(state, session, RELAY_CLOSE_CODES.daemonAbsent, 'the client disconnected'),
   };
 }
@@ -548,7 +618,7 @@ function onAlarm(state: RendezvousState, event: Extract<RendezvousEvent, { kind:
   for (const session of next.sessions) {
     if (!stale(session.clientSocketId, session.since)) continue;
     const reason = 'the client stopped answering';
-    next = withoutSession(next, session.sessionId);
+    next = endedByRendezvous(next, session.sessionId, event.at);
     effects.push(
       ...endSession(session, RELAY_CLOSE_CODES.heartbeatTimeout, reason),
       ...tellDaemon(next, session, RELAY_CLOSE_CODES.heartbeatTimeout, reason),
