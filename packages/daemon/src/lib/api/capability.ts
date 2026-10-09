@@ -34,7 +34,9 @@ import type { ApiActor } from './actor.ts';
  * loopback for a phone on the other side of the world and hand it the machine. `ApiRequest.loopback`
  * is therefore carrier-derived: the transport adapter sets it from the socket's real remote address,
  * and the relay tunnel sets it to `false` unconditionally, whatever address the hop appears to come
- * from. Nothing in this file re-derives it, and no header can move it.
+ * from. A loopback peer is still not the host — a locally bound proxy forwards remote callers from
+ * one — so the presentation carries `arrivedOnHost`'s proof rather than `loopback` itself. Nothing in
+ * this file re-derives it, and no header can move it.
  *
  * The types live at the boundary rather than inside the subsystem that implements them, so the
  * dependency runs one way: the boundary declares what it needs to decide a request, and
@@ -69,7 +71,8 @@ export interface CapabilityDemand {
  * its own evidence.
  */
 export interface CapabilityPresentation {
-  /** How the request ARRIVED. Carrier-derived; a relayed hop is never loopback. */
+  /** Whether the request is PROVED to come from this host (`arrivedOnHost`). Carrier-derived; a
+   *  relayed hop and a proxied loopback peer never are. */
   readonly loopback: boolean;
   /**
    * Whether the caller authenticated with the HOST's own admin token.

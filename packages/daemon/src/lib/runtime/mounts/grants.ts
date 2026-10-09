@@ -13,7 +13,7 @@ import { parseBody } from '../../api/body.ts';
 import type { CapabilityPresentation } from '../../api/capability.ts';
 import { OPERATOR_UNLOCK_HEADER } from '../../api/dispatcher.ts';
 import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, headerValue } from '../../api/http.ts';
+import { type ApiResponse, arrivedOnHost, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { GrantError } from '../../grants/index.ts';
@@ -94,14 +94,14 @@ function refuse(error: unknown): never {
 /**
  * What the grant layer is told about the caller, assembled from server-derived evidence only.
  *
- * `loopback` is the transport's own account of where the socket came from — a relayed hop is never
- * loopback, whatever address it appears to carry — and the actor is what `resolveApiActor` already
+ * `loopback` is `arrivedOnHost`'s answer — the carrier's proof, so neither a relayed hop nor a
+ * remote caller forwarded through a locally bound proxy reads as local — and the actor is what `resolveApiActor` already
  * derived. Neither is read from the body, and the actor decides nothing: it is carried so a change
  * can be attributed to whoever made it.
  */
 function presentationOf(context: RouteContext): CapabilityPresentation {
   return {
-    loopback: context.request.loopback,
+    loopback: arrivedOnHost(context.request, context.credential?.tokenClass === 'admin'),
     // The TOKEN CLASS, which the dispatcher derived from the credential that authenticated the request —
     // never the actor, which a self-identification header can refine. Absent means not the admin token,
     // which is the direction that adds a gate rather than removing one.

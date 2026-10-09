@@ -216,6 +216,7 @@ describe('ApiDispatcher authorization', () => {
         path: '/v1/local',
         headers: { authorization: 'Bearer device-secret' },
         loopback: true,
+        privilegedLoopback: true,
       }),
     );
     const remoteAdmin = await dispatcher.dispatch(
@@ -239,6 +240,26 @@ describe('ApiDispatcher authorization', () => {
     should(localDevice.status).equal(200);
     should(remoteAdmin.status).equal(403);
     should(remoteDevice.status).equal(403);
+  });
+
+  it('should refuse a privileged route to a device a local proxy forwarded, and keep the host admin', async () => {
+    // `tailscale serve` and `cloudflared` forward a remote caller from a LOOPBACK peer, so a loopback
+    // peer alone proved nothing: a paired phone behind one reached `PUT /v1/grants/password`. A device
+    // needs the carrier's proof; the admin token is a host file, so holding it over loopback is enough
+    // — which keeps `fy daemon password set` working on a daemon bound beyond loopback.
+    // Arrange
+    const dispatcher = dispatcherFor(echo('/v1/local', 'operator', 'POST', true));
+    const proxied = (token: string) =>
+      request({ method: 'POST', path: '/v1/local', headers: { authorization: `Bearer ${token}` }, loopback: true });
+
+    // Act
+    const proxiedDevice = await dispatcher.dispatch(proxied('device-secret'));
+    const hostAdmin = await dispatcher.dispatch(proxied('admin-secret'));
+
+    // Assert
+    should(proxiedDevice.status).equal(403);
+    should(jsonBody(proxiedDevice).code).equal('forbidden');
+    should(hostAdmin.status).equal(200);
   });
 
   it('should honour a query token only for a loopback peer', async () => {
@@ -553,6 +574,32 @@ describe('the operator grant layer', () => {
 
     // Assert
     should(seen).deepEqual([{ loopback: true, unlock: 'fy_unlock_abc' }]);
+  });
+
+  it('should present a device on a loopback peer as remote unless the carrier proved the host', async () => {
+    // A PROXIED phone is a loopback peer. Presenting it as local made it `hostLocal` — free to widen its
+    // own grants — and ungoverned on a machine with no password. Only the carrier's proof moves it.
+    // Arrange
+    const seen: boolean[] = [];
+    const recording: CapabilityGuard = {
+      decide: (_demand, presentation) => {
+        seen.push(presentation.loopback);
+        return { allowed: true, refusal: 'granted' };
+      },
+      governance: () => UNGOVERNED,
+      explain: () => undefined,
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording);
+    const asDevice = { authorization: 'Bearer device-secret' };
+
+    // Act
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: asDevice, loopback: true }));
+    await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', headers: asDevice, loopback: true, privilegedLoopback: true }),
+    );
+
+    // Assert
+    should(seen).deepEqual([false, true]);
   });
 });
 

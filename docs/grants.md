@@ -72,6 +72,20 @@ Nothing re-derives it, and no header can move it.
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
 presents every loopback-looking signal it can.
 
+**A loopback peer is still not proof of the host.** A remote caller forwarded through a locally bound
+proxy (`tailscale serve`, `cloudflared`) arrives from a loopback peer too, so every host-locality rule
+— `privilegedOnly` routes, widening (`hostLocal`) and whether a caller is governed — reads
+`arrivedOnHost` in `packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits:
+
+- a request whose carrier proved the host (`privilegedLoopback`: a loopback-only bind that advertises
+  no foreign address, `mayTrustDirectLoopback`), or
+- the host's **admin token** over a loopback peer — reading that token already needs this machine's
+  disk, and without it `fy daemon password set` would stop working on a daemon bound beyond loopback.
+
+The consequence, stated plainly: on a daemon bound to a wildcard address or advertised through a proxy,
+a **browser on the same machine is treated as remote** — governed, unable to widen and unable to set the
+operator password. `fy` on the host still can.
+
 ## Six capabilities, two axes
 
 | capability   | what it covers                                                         |
@@ -215,7 +229,8 @@ right about the artefact it was handed, and the formatter had changed the artefa
   disclosure.
 - **Rate limited per daemon**: five attempts, then a fifteen-minute lockout. A correct password
   during a lockout is still refused — a limiter that let one through early would leak that the guess
-  was right while claiming to be closed.
+  was right while claiming to be closed. Each attempt is **charged before the password is checked**,
+  so a burst of parallel guesses cannot all pass the lockout check while the slow verify is pending.
 - Set it with `fy daemon password set`, reading the value from **stdin**. There is no flag that takes
   one: an argument is in shell history and in `/proc/<pid>/cmdline` for every account on the box.
 - **A local browser can also set and replace it** — `PUT /v1/grants/password`, which is

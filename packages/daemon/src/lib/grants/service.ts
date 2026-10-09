@@ -191,12 +191,26 @@ export class CapabilityGrantService implements CapabilityGuard {
     // is what stops a caller believing it cleared a check that never ran — the same reason `unlock`
     // refuses to mint on such a machine instead of handing out a token that proves nothing.
     if (!this.passwordSet) return { kind: 'refused', reason: 'no-password' };
-    if (!(await this.deps.passwords.verify(password))) {
-      this.attempts = recordUnlockFailure(this.attempts, now);
+    if (!(await this.spendAttempt(password, now)))
       return { kind: 'refused', reason: isUnlockLocked(this.attempts, now) ? 'rate-limited' : 'wrong-password' };
-    }
-    this.attempts = recordUnlockSuccess();
     return { kind: 'confirmed' };
+  }
+
+  /**
+   * Checks one password against the store, charging the attempt BEFORE the check runs.
+   *
+   * THE CHARGE IS SYNCHRONOUS, AND THAT IS THE WHOLE POINT. The verify is a slow hash awaited off this
+   * turn, so a ledger written only after it would let any number of parallel guesses pass the lockout
+   * check together and all be verified — five tries becoming as many as one burst can carry. Charging
+   * first means the sixth concurrent attempt finds the daemon already locked. A correct password then
+   * clears the ledger exactly as before, so a person who types it right loses nothing; a verify that
+   * throws keeps its charge, because an attempt that could not be judged is not a free one.
+   */
+  private async spendAttempt(password: string, nowMs: number): Promise<boolean> {
+    this.attempts = recordUnlockFailure(this.attempts, nowMs);
+    if (!(await this.deps.passwords.verify(password))) return false;
+    this.attempts = recordUnlockSuccess();
+    return true;
   }
 
   /** The sentence that goes with a refusal, composed here because only this layer knows the client
@@ -256,8 +270,7 @@ export class CapabilityGrantService implements CapabilityGuard {
         refusal: { reason: 'rate-limited', attemptsRemaining: 0, ...unlockLockout(this.attempts) },
       };
     if (!this.passwordSet) return { kind: 'refused', refusal: { reason: 'no-password', attemptsRemaining: 0 } };
-    if (!(await this.deps.passwords.verify(password))) {
-      this.attempts = recordUnlockFailure(this.attempts, now);
+    if (!(await this.spendAttempt(password, now))) {
       return {
         kind: 'refused',
         refusal: {
@@ -267,7 +280,6 @@ export class CapabilityGrantService implements CapabilityGuard {
         },
       };
     }
-    this.attempts = recordUnlockSuccess();
     const token = this.deps.tokens.mint();
     const expiresAtMs = now + GRANT_UNLOCK_TTL_SECONDS * 1_000;
     // Expired unlocks are dropped on every mint rather than by a timer: the list is only read and

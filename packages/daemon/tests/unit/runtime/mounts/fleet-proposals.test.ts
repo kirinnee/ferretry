@@ -1450,6 +1450,7 @@ describe('a paired browser, against the real capability guard', () => {
         method: 'POST',
         path,
         loopback: true,
+        privilegedLoopback: true,
         headers: {
           authorization: 'Bearer paired-device',
           'x-ferretry-operator-unlock': token,
@@ -1468,6 +1469,7 @@ describe('a paired browser, against the real capability guard', () => {
         request({
           path: '/v1/fleet/permissions',
           loopback: true,
+          privilegedLoopback: true,
           headers: { authorization: 'Bearer paired-device', 'x-ferretry-operator-unlock': token },
         }),
       ),
