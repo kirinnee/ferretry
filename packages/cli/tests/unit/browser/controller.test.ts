@@ -92,7 +92,18 @@ describe('issuing browser calls', () => {
 
   it('should reach the daemon-global login route with no session in scope', async () => {
     // Arrange
-    const { sent, out, run } = harness({ state: 'open', profilePrimed: true });
+    const { sent, out, run } = harness({
+      state: 'open',
+      profilePrimed: true,
+      openedAt: '2026-01-01T00:00:00.000Z',
+      expiresAt: '2026-01-01T00:15:00.000Z',
+      connection: {
+        host: '127.0.0.1',
+        port: 5_901,
+        password: 'one-shot',
+        sshTunnel: 'ssh -N -L 5901:127.0.0.1:5901 host',
+      },
+    });
 
     // Act
     const actual = await run({ command: 'login', action: 'status' });
