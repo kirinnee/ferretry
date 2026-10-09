@@ -40,7 +40,8 @@ export interface TranscriptEntry {
 export const isTerminalSessionStatus = (status: SessionStatus): boolean =>
   status === 'completed' || status === 'failed' || status === 'stopped';
 
-export const sessionStatusLabel = (status: SessionStatus): string => status.replaceAll('_', ' ');
+/** A status in words, for every surface that shows one: `rate_limited` reads "rate limited". */
+export const sessionStatusLabel = (status: SessionStatus | string): string => status.replaceAll('_', ' ');
 
 export const relativeTime = (at: number | string | undefined, now = Date.now()): string => {
   if (!at) return '—';

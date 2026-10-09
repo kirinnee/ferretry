@@ -24,6 +24,7 @@ import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.t
 import { daemonRequest } from '../lib/daemon-transport.ts';
 import { formatReference, parseReferenceToken } from '../lib/references.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
+import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { describeSurfaceOwnership, type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
 import { rankSessions, recentSessions, type SessionEntry } from '../shell/palette-ranking.ts';
@@ -717,7 +718,7 @@ const agentCandidates = (
           .filter(Boolean)
           .join(' '),
         group: 'Agents',
-        badge: view.state.status.replaceAll('_', ' '),
+        badge: sessionStatusLabel(view.state.status),
         replacement: formatReference({ kind: 'agent', name: target.name }),
         append: 'space',
       } satisfies ComposerAutocompleteCandidate,

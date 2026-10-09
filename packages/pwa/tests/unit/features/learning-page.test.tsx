@@ -234,7 +234,8 @@ describe('LearningReview', () => {
       .findAllByType('span')
       .map(span => span.children.join(''))
       .join('');
-    expect(meta).toContain('teammate steer');
+    expect(meta).toContain('agent steer');
+    expect(meta).not.toContain('teammate');
     expect(meta).toContain('Ms-98');
     expect(meta).not.toContain('ms-98');
     // Local-zone rendering, so assert the shape rather than a fixed instant —

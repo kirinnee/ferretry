@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
+import { daemonSettingsPath } from '../../src/lib/pages/routes.ts';
+import { APP_BAR_DESTINATIONS } from '../../src/shell/app-bar.tsx';
 import {
   type AppBarDestinationLike,
   destinationExists,
   destinationPaletteEntries,
   SHELL_DESTINATIONS,
 } from '../../src/shell/palette-destinations.ts';
-import { APP_BAR_DESTINATIONS } from '../../src/shell/app-bar.tsx';
-import { daemonSettingsPath } from '../../src/lib/pages/routes.ts';
 
 const alpha = daemonId('alpha');
 const beta = daemonId('beta');
@@ -68,6 +68,14 @@ describe('destinationPaletteEntries', () => {
     const barEntry = APP_BAR_DESTINATIONS.find(destination => destination.id === 'settings');
 
     expect(settings?.description).toBe(barEntry?.title ?? '');
+  });
+
+  it('describes a destination without the old tool’s role word', () => {
+    // "teammate" stays a search keyword for people who still reach for it; it is never shown.
+    for (const destination of SHELL_DESTINATIONS) expect(destination.title.toLowerCase()).not.toContain('teammate');
+    expect(SHELL_DESTINATIONS.find(destination => destination.id === 'new-session')?.title).toBe(
+      'Start an agent in a working directory',
+    );
   });
 
   it('matches on the label, on the description, and on a keyword in neither', () => {

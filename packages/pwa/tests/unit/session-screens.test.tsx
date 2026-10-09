@@ -9,13 +9,13 @@ import { isSessionCommandUnsupported, SessionCommandControls } from '../../src/c
 import { SessionDetails } from '../../src/components/session-details.tsx';
 import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
-import { StatusMark, statusMark } from '../../src/components/status-mark.tsx';
 import { quotableTranscriptSelectionText, Transcript } from '../../src/components/transcript.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { isTerminalSessionStatus, relativeTime } from '../../src/lib/session-screens.ts';
+import { StatusMark, statusMark } from '../../src/shell/status-mark.tsx';
 import { render, run, runAsync } from '../support/react.ts';
 
 const daemonA = daemonConnection({
@@ -208,7 +208,7 @@ describe('session screen components', () => {
 
     expect(list.root.findByProps({ role: 'status' }).children).toContain('4');
     expect(list.root.findAllByProps({ className: 'fy-session-row-item' })).toHaveLength(4);
-    expect(list.root.findAllByProps({ className: 'fy-status-mark' }).map(mark => mark.props['aria-label'])).toEqual([
+    expect(list.root.findAllByProps({ role: 'img' }).map(mark => mark.props['aria-label'])).toEqual([
       'finished — failed',
       'finished — completed',
       'waiting — waiting',
@@ -279,17 +279,22 @@ describe('session screen components', () => {
       'waiting — parked for Hayden: CI',
       'finished — stalled',
     ]);
-    expect(
-      marks.root.findAllByProps({
-        className: 'fy-status-mark-glyph fy-status-mark-circle fy-status-mark-warn fy-status-mark-live',
-      }),
-    ).toHaveLength(1);
-    expect(
-      marks.root.findAllByProps({ className: 'fy-status-mark-glyph fy-status-mark-diamond fy-status-mark-warn' }),
-    ).toHaveLength(1);
-    expect(
-      marks.root.findAllByProps({ className: 'fy-status-mark-glyph fy-status-mark-square fy-status-mark-err' }),
-    ).toHaveLength(1);
+  });
+
+  test('names a stopped-but-not-finished session the same way in the list, the header and the sidebar', () => {
+    // The list and the header once rendered their own copy of the badge, which called an
+    // interrupted or rate-limited session "active" with a breathing circle while the sidebar
+    // called it "waiting — rate_limited". One owner now draws all three, in words.
+    const rateLimited = session('rate-limited', 'rate_limited');
+    const interrupted = session('interrupted', 'interrupted');
+    const list = render(
+      <SessionList daemonId="daemon-a" onOpenSession={() => {}} sessions={[rateLimited, interrupted]} />,
+    );
+    const labels = list.root.findAllByProps({ role: 'img' }).map(mark => mark.props['aria-label']);
+
+    expect(labels).toEqual(['waiting — rate limited', 'waiting — interrupted']);
+    expect(labels).toEqual([statusMark(rateLimited).label, statusMark(interrupted).label]);
+    expect(statusMark(rateLimited)).toMatchObject({ shape: 'diamond', live: false });
   });
 
   test('renders the original quiet mode badges in compact and full forms', () => {

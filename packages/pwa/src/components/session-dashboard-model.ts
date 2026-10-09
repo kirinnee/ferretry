@@ -13,9 +13,9 @@ import type { BadgeTone } from '../shell/primitives.tsx';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 
 export const DENSITY_COLUMN_LABELS: Readonly<Record<Density, readonly string[]>> = {
-  full: ['Teammate', 'Task', 'Status', 'Runtime', 'Activity', 'Signals'],
-  compact: ['Teammate', 'Task', 'Status'],
-  minimal: ['Teammate', 'Task'],
+  full: ['Agent', 'Task', 'Status', 'Runtime', 'Activity', 'Signals'],
+  compact: ['Agent', 'Task', 'Status'],
+  minimal: ['Agent', 'Task'],
 };
 
 /** Percentage widths for the fixed table within its own horizontal scroller. */

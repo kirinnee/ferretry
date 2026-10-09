@@ -24,7 +24,7 @@ import {
 import { displayCallsign } from '../../lib/callsign.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { relativeTime } from '../../lib/session-screens.ts';
+import { relativeTime, sessionStatusLabel } from '../../lib/session-screens.ts';
 
 export type WardenAttentionOutcome = 'items' | 'clean-sweep' | 'degraded' | 'no-sweep';
 export type WardenJudgementState = 'judged' | 'pending' | 'queued' | 'failed' | 'none';
@@ -373,7 +373,7 @@ function AttentionRow({
             </span>
           )}
           {item.sessionStatus && (
-            <span className="kt-label shrink-0 text-faint">{item.sessionStatus.replaceAll('_', ' ')}</span>
+            <span className="kt-label shrink-0 text-faint">{sessionStatusLabel(item.sessionStatus)}</span>
           )}
           {oldest && <span className="kt-label shrink-0 text-warn">oldest</span>}
         </span>

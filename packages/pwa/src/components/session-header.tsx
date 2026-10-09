@@ -5,9 +5,9 @@ import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
+import { StatusMark } from '../shell/status-mark.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
 import { ModeBadge } from './mode-badge.tsx';
-import { StatusMark } from './status-mark.tsx';
 
 export interface SessionHeaderProps {
   /** The paired daemon owns navigation; session ids are not fleet-global. */

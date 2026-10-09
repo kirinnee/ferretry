@@ -448,7 +448,8 @@ export function RemoteBrowserPane({
                 <>
                   <p className="mb-0 mt-3 text-ui font-medium text-fg">Browser is stopped</p>
                   <p className="mb-0 mt-1 text-meta leading-base text-muted">
-                    Start it here or run <code>kteam browser open</code>. Login state remains in the persistent profile.
+                    Start it here or run <code>fy browser start --session {scope.sessionId}</code>. Login state remains
+                    in the persistent profile.
                   </p>
                 </>
               ) : (

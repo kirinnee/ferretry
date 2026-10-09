@@ -72,7 +72,7 @@ export const SHELL_DESTINATIONS = [
   {
     id: 'new-session',
     label: 'New session',
-    title: 'Start a teammate in a working directory',
+    title: 'Start an agent in a working directory',
     path: daemonNewSessionPath,
   },
 ] as const satisfies readonly AppBarDestinationLike[];
