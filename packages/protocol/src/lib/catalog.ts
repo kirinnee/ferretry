@@ -67,6 +67,39 @@ export const ProjectPathSchema = z.string().trim().min(1).refine(isProjectPathAb
   message: ProjectPathMustBeAbsoluteMessage,
 });
 
+export const ProjectCloneUrlUnsupportedMessage = 'a clone address must be an https://, ssh:// or file:/// URL';
+
+/** The transports a clone may use. `GIT_ALLOW_PROTOCOL` on the daemon's clone spells the same set. */
+const CLONE_TRANSPORTS: ReadonlySet<string> = new Set(['https:', 'ssh:', 'file:']);
+
+/**
+ * Whether git may be handed this exact text as a clone source.
+ *
+ * Judged on the RAW text as well as the parsed URL, because git receives the raw text: the WHATWG
+ * parser repairs `https:/host`, strips an embedded tab and accepts `ssh::x`, while git would read the
+ * first as an scp-style host, carry the tab, and read the last as `<transport>::<address>` — the
+ * remote-helper syntax `ext::` uses to run a command. A host starting with `-` is refused so it can
+ * never reach ssh as an option. `file:///` stays: it is the local-mirror clone the add-project form
+ * offers, and it reaches nothing a caller allowed to register a project could not already register
+ * as an existing folder.
+ */
+function isProjectCloneUrl(value: string): boolean {
+  if (/[\p{Cc}\s]/u.test(value) || !URL.canParse(value)) return false;
+  const url = new URL(value);
+  if (!CLONE_TRANSPORTS.has(url.protocol)) return false;
+  if (!value.toLowerCase().startsWith(`${url.protocol}//`)) return false;
+  if (url.protocol === 'file:') return url.host === '';
+  return url.hostname !== '' && !url.hostname.startsWith('-');
+}
+
+/**
+ * The single owner of "this is a clone address" (fact-ownership R1), shared by the wire and by the
+ * daemon's catalog, which re-parses it because a direct caller never passed through the wire.
+ */
+export const ProjectCloneUrlSchema = z
+  .string()
+  .refine(isProjectCloneUrl, { message: ProjectCloneUrlUnsupportedMessage });
+
 /** Every route is explicit: scanning a path is never a registration operation. */
 export const RegisterProjectRequestSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('existing-folder'), path: ProjectPathSchema, name: z.string().trim().min(1).optional() }),
@@ -83,7 +116,7 @@ export const RegisterProjectRequestSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     kind: z.literal('clone'),
-    url: z.string().url(),
+    url: ProjectCloneUrlSchema,
     path: ProjectPathSchema,
     name: z.string().trim().min(1).optional(),
   }),

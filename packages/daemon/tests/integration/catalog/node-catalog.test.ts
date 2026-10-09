@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ProjectCloneUrlUnsupportedMessage } from '@ferretry/protocol';
 import should from 'should';
 import { FileProjectCatalog, NodeCatalog } from '../../../src/adapters/catalog/index.ts';
 import { sessionView } from '../../unit/runtime/mounts/support.ts';
@@ -79,6 +80,11 @@ describe('catalogs', () => {
     await should(
       projects.register({ kind: 'clone', url: 'file:///does-not-exist', path: join(root, 'missing') }),
     ).be.rejected();
+    // A direct caller skips the mount's body parse, so the catalog refuses a transport that runs a
+    // command itself, in the schema's words rather than as a failed git.
+    await should(
+      projects.register({ kind: 'clone', url: 'ext::sh -c id', path: join(root, 'commanded') }),
+    ).be.rejectedWith(ProjectCloneUrlUnsupportedMessage);
     await writeFile(registry, '{not json}', 'utf8');
     await should(projects.projects()).be.rejectedWith('the project registry is damaged and cannot be read');
   });

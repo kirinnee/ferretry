@@ -300,6 +300,8 @@ interface Fixture {
 
 interface FixtureOptions {
   readonly wrapperMissing?: boolean;
+  /** Replaces the wrapper read, so a test can hold the flow inside it. */
+  readonly readWrapper?: (wrapper: string) => Promise<string | undefined>;
   /** A different declared fleet, for the credential sources {@link CONFIG} has no account of. */
   readonly config?: FleetConfig;
   readonly manifest?: FleetManifest;
@@ -366,7 +368,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
       OPENAI_API_KEY: 'referenced-key-TESTONLY',
       PROXY_KEY: 'proxy-key',
     },
-    readWrapper: async () => (options.wrapperMissing === true ? undefined : WRAPPER_SCRIPT),
+    readWrapper: options.readWrapper ?? (async () => (options.wrapperMissing === true ? undefined : WRAPPER_SCRIPT)),
     timer: {
       after: (milliseconds, run) => {
         const entry = { milliseconds, run, disarmed: false };
@@ -855,6 +857,36 @@ describe('the per-change confirmation', () => {
 
     // Assert
     should(subject.children).be.empty();
+  });
+
+  it('should refuse the second of two sign-ins whose password checks overlap, and spawn one child', async () => {
+    // Arrange — both confirmations are held open, so both starts are past the in-progress check
+    // before either has launched anything. Each check costs real time (argon2), so this is the
+    // ordinary shape of two quick clicks, not a contrived one.
+    const releases: (() => void)[] = [];
+    const subject = fixture({
+      confirmChange: async () => {
+        await new Promise<void>(resolve => releases.push(resolve));
+        return { kind: 'confirmed' };
+      },
+    });
+    const first = subject.service.start({ accountId: INTERACTIVE_ID, operatorPassword: 'pw' }, BROWSER);
+    const second = refusalOf(async () =>
+      subject.service.start({ accountId: AUTO_ID, operatorPassword: 'pw' }, BROWSER),
+    );
+    await subject.settle();
+    should(releases).have.length(2);
+
+    // Act
+    for (const release of releases) release();
+    const started = await first;
+    const actual = await second;
+    await subject.settle();
+
+    // Assert
+    should(actual.code).equal('fleet_login_in_progress');
+    should(actual.message).match(new RegExp(`already running as flow "${started.flowId}"`, 'u'));
+    should(subject.children).have.length(1);
   });
 });
 
@@ -1496,6 +1528,57 @@ describe('a login’s lifetime', () => {
     should(actual).have.property('reason', 'this sign-in was cancelled');
     should(child.killed).be.true();
     should(subject.timers[0]).have.property('disarmed', true);
+  });
+
+  it('should launch no child when the flow is cancelled while its wrapper is being read', async () => {
+    // Arrange — the wrapper read is held open, which is where a cancel can land between the
+    // "has this ended" check and the spawn.
+    let release: (() => void) | undefined;
+    const subject = fixture({
+      readWrapper: async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+        return WRAPPER_SCRIPT;
+      },
+    });
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    await subject.settle();
+    should(release).be.a.Function();
+
+    // Act
+    const actual = await subject.service.cancel(started.flowId);
+    release?.();
+    await subject.settle();
+
+    // Assert — a child launched now would have nobody left to kill it.
+    should(actual).have.property('reason', 'this sign-in was cancelled');
+    should(subject.children).be.empty();
+    should(await subject.service.status(started.flowId)).have.property('reason', 'this sign-in was cancelled');
+  });
+
+  it('should launch no child when the window closes while its wrapper is being read', async () => {
+    // Arrange
+    let release: (() => void) | undefined;
+    const subject = fixture({
+      readWrapper: async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+        return WRAPPER_SCRIPT;
+      },
+    });
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    await subject.settle();
+
+    // Act
+    subject.timers[0]?.run();
+    release?.();
+    await subject.settle();
+
+    // Assert
+    should(subject.children).be.empty();
+    should(await subject.service.status(started.flowId)).have.property('state', 'failed');
   });
 
   it('should let a new sign-in start once the previous one is cancelled', async () => {
