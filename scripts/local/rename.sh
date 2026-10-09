@@ -90,8 +90,21 @@ if [ -n "${new_bin}" ] && [ "${new_bin}" != "${old_bin}" ]; then
     packages/cli/package.json >packages/cli/package.json.tmp
   mv packages/cli/package.json.tmp packages/cli/package.json
   git mv "packages/cli/${entry_old}" "packages/cli/${entry_new}"
-  sed -i "s|bin/${old_bin}|bin/${new_bin}|g" packages/cli/tests/sit/driver.ts
+  # Every tracked reference to the moved entry file — an import with or without `.ts` (single-quoted,
+  # as the formatter writes them), a Nix build entry, a doc naming the composition root — must move
+  # with it, or a test or a build reads a path that is gone. Bounded by the extension or the closing
+  # quote, so a Nix output path (`/bin/<old>"`), `bin/<old>-<account>` wrappers and other names that
+  # merely start with the binary are left alone. The changelog records history.
+  while IFS= read -r -d '' entry_file; do
+    [ -f "${entry_file}" ] && sed -i -E "s#bin/${old_bin}(\.ts|')#bin/${new_bin}\1#g" "${entry_file}"
+  done < <(git grep -lzE "bin/${old_bin}(\.ts|')" -- . ':!CHANGELOG.md' 2>/dev/null || true)
   rewrite "${old_bin}" "${new_bin}"
+  # Release archives are named `<bin>_<os>_<arch>`, and `_` is a word character, so the word-bounded
+  # rewrite above cannot see them. Only the archive shapes move: `<bin>_` also prefixes wire ids
+  # such as `fy_daemon_…`, which are a protocol format rather than the binary's name.
+  for file in "${static_files[@]}" Casks/*.rb; do
+    [ -f "${file}" ] && sed -i -E "s/\b${old_bin}_(\{\{|<os>_|darwin_|linux_)/${new_bin}_\1/g" "${file}"
+  done
 fi
 
 # Refresh the lockfile so the workspace package names match. Run from a package directory so Bun
