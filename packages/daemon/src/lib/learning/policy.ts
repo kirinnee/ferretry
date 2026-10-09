@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { z } from 'zod';
 import type { Observation, Proposal, Tombstone } from './types.ts';
 
 /** Stable kebab-case identity from arbitrary human or miner text. */
@@ -74,14 +75,18 @@ export function recomputeProposal(proposal: Proposal, observations: ReadonlyMap<
   };
 }
 
-/** Parse an append-only JSONL file without allowing one torn line to poison prior evidence. */
-export function parseJsonl<T>(text: string): readonly T[] {
-  const records: T[] = [];
+/**
+ * Parse an append-only JSONL file without allowing one torn line to poison prior evidence. A line
+ * that is JSON but not the record the schema describes is dropped exactly as a torn one is.
+ */
+export function parseJsonl<S extends z.ZodType>(text: string, schema: S): readonly z.output<S>[] {
+  const records: z.output<S>[] = [];
   for (const line of text.split('\n')) {
     const value = line.trim();
     if (value.length === 0) continue;
     try {
-      records.push(JSON.parse(value) as T);
+      const parsed = schema.safeParse(JSON.parse(value));
+      if (parsed.success) records.push(parsed.data);
     } catch {
       // A corrupt tail is ignored; valid preceding append records remain readable.
     }

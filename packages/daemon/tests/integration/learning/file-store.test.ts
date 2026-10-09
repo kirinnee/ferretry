@@ -103,7 +103,10 @@ describe('file learning store', () => {
     await writeFile(join(learningDirectory, 'state.json'), '{broken');
     await writeFile(join(learningDirectory, 'proposals.json'), '{broken');
     await writeFile(join(learningDirectory, 'tombstones.json'), '{broken');
-    await writeFile(join(learningDirectory, 'observations.jsonl'), '{"id":"valid"}\n{broken\n');
+    await writeFile(
+      join(learningDirectory, 'observations.jsonl'),
+      `${JSON.stringify(observation('valid'))}\n{broken\n`,
+    );
 
     // Act
     const state = await store.loadState();
@@ -115,7 +118,55 @@ describe('file learning store', () => {
     should(state).deepEqual({});
     should(proposals).deepEqual([]);
     should(tombstones).deepEqual([]);
-    should(observations).deepEqual([{ id: 'valid' }]);
+    should(observations).deepEqual([observation('valid')]);
+  });
+
+  it('should drop records that are JSON but not the shape the store wrote, one record at a time', async () => {
+    // Arrange
+    const { home, store } = await createStore();
+    const learningDirectory = join(home, 'state', 'learning');
+    const tombstone = { identity: 'old', titleHash: 'hash', ruleGist: 'old rule', rejectedAt: now };
+    await store.ensureDirectories();
+    await writeFile(join(learningDirectory, 'state.json'), JSON.stringify({ watermarkAt: 7 }));
+    await writeFile(
+      join(learningDirectory, 'proposals.json'),
+      JSON.stringify([{ ...proposal, id: 'bad', target: { kind: 'global-agent-guidance', anchor: 7 } }, proposal]),
+    );
+    await writeFile(join(learningDirectory, 'tombstones.json'), JSON.stringify([{ identity: 1 }, tombstone]));
+    await writeFile(
+      join(learningDirectory, 'observations.jsonl'),
+      `${JSON.stringify({ id: 'shapeless' })}\n${JSON.stringify(observation('one'))}\n`,
+    );
+    await store.writeRunManifest(manifest('run-a'));
+    await writeFile(join(learningDirectory, 'runs', 'run-a', 'manifest.json'), JSON.stringify({ runId: 'run-a' }));
+
+    // Act
+    const state = await store.loadState();
+    const proposals = await store.loadProposals();
+    const tombstones = await store.loadTombstones();
+    const observations = await store.readObservations();
+    const read = await store.readRunManifest('run-a');
+
+    // Assert
+    should(state).deepEqual({});
+    should(proposals).deepEqual([proposal]);
+    should(tombstones).deepEqual([tombstone]);
+    should(observations).deepEqual([observation('one')]);
+    should(read).be.undefined();
+  });
+
+  it('should read back a proposal whose evidence has all been pruned', async () => {
+    // Arrange: the counters are recomputed from surviving evidence, so the daemon itself can write
+    // a proposal the wire contract's one-or-more would refuse; reading must not delete it.
+    const { store } = await createStore();
+    const pruned = { ...proposal, observationIds: [], occurrences: 0, crossRepoCount: 0 };
+    await store.saveProposals([pruned]);
+
+    // Act
+    const proposals = await store.loadProposals();
+
+    // Assert
+    should(proposals).deepEqual([pruned]);
   });
 
   it('should round-trip state, proposals, tombstones, manifests, and the newest manifest', async () => {

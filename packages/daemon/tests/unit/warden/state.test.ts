@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   EMPTY_WARDEN_STATE,
@@ -106,6 +107,23 @@ describe('reading the durable warden state', () => {
     should(actual.assignedQueue).be.undefined();
     should(actual.assignments?.s1?.wardenId).equal('w1');
   });
+
+  it.each(SessionStatusSchema.options.map(status => ({ status })))(
+    'should keep a queued anomaly for a session that is $status',
+    ({ status }) => {
+      // Arrange: the warden reads the protocol's statuses, so none of them may drop a queued anomaly.
+      const document = {
+        ...full(),
+        assignedQueue: [{ kind: 'sus_subprocess', sessionId: 's2', status, detail: 'a long subprocess' }],
+      };
+
+      // Act
+      const actual = parseWardenRuntimeState(document);
+
+      // Assert
+      should(actual.assignedQueue?.[0]?.status).equal(status);
+    },
+  );
 
   it('should drop an assignment that lost its capability, so no warden inherits authority', () => {
     // Arrange

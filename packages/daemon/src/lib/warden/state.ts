@@ -19,12 +19,12 @@
  * Pure: no IO, no clock, no globals.
  */
 
+import { SessionStatusSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { Blessing, BlessingStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
-import type { WardenSessionStatus } from './types.ts';
 
 const Instant = z.string().min(1);
 
@@ -50,25 +50,6 @@ export const WARDEN_ANOMALY_KINDS = [
 ] as const satisfies readonly WardenAnomalyKind[];
 
 const AnomalyKindSchema = z.enum(WARDEN_ANOMALY_KINDS);
-
-const SessionStatusSchema = z.enum([
-  'created',
-  'starting',
-  'running',
-  'thinking',
-  'tool_running',
-  'awaiting_question',
-  'awaiting_user',
-  'interrupted',
-  'rate_limited',
-  'retrying',
-  'kill_failed',
-  'waiting',
-  'completed',
-  'failed',
-  'stalled',
-  'stopped',
-] as const satisfies readonly WardenSessionStatus[]);
 
 const LedgerSchema = z.object({
   lastTranscriptAt: Instant.optional(),

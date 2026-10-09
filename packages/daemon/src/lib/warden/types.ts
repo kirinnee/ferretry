@@ -3,32 +3,20 @@
  *
  * These are deliberately narrow structural types rather than the full protocol
  * session schemas: the warden reads a handful of fields, and declaring exactly
- * those keeps the pure decision layer independent of the wire contract.
+ * those keeps the pure decision layer independent of the wire contract. The
+ * status union is the exception — a narrower copy of it would silently drop a
+ * session in a status the warden had never heard of.
  */
+
+import type { SessionStatus } from '@ferretry/protocol';
 
 /** Label that marks a fleet-warden session. Warden sessions — and everything
  *  they spawn — are excluded from every anomaly class so a warden can never
  *  escalate against itself. */
 export const WARDEN_LABEL = 'fleet-warden';
 
-/** Session lifecycle states the warden distinguishes. */
-export type WardenSessionStatus =
-  | 'created'
-  | 'starting'
-  | 'running'
-  | 'thinking'
-  | 'tool_running'
-  | 'awaiting_question'
-  | 'awaiting_user'
-  | 'interrupted'
-  | 'rate_limited'
-  | 'retrying'
-  | 'kill_failed'
-  | 'waiting'
-  | 'completed'
-  | 'failed'
-  | 'stalled'
-  | 'stopped';
+/** Session lifecycle states — the protocol's own union, so a new status can never fall outside the warden. */
+export type WardenSessionStatus = SessionStatus;
 
 /** Statuses a session never leaves. */
 export const WARDEN_TERMINAL_STATUSES: readonly WardenSessionStatus[] = [

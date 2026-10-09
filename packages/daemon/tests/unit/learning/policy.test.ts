@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { z } from 'zod';
 import {
   matchesTombstone,
   normalizeForMatch,
@@ -150,9 +151,18 @@ describe('learning policy', () => {
 
   it('should retain valid JSONL records when blank and corrupt lines are present', () => {
     // Act
-    const actual = parseJsonl<{ readonly id: number }>('{"id":1}\n\nnot json\n {"id":2} \n');
+    const actual = parseJsonl('{"id":1}\n\nnot json\n {"id":2} \n', z.object({ id: z.number() }));
 
     // Assert
     should(actual).deepEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  it('should drop a well-formed line that is not the record the schema describes', () => {
+    // Act — valid JSON of the wrong shape is as unreadable as a torn line, and must not reach a caller
+    // typed as though it were a record.
+    const actual = parseJsonl('{"id":1}\n{"id":"two"}\n[3]\n{"id":4}\n', z.object({ id: z.number() }));
+
+    // Assert
+    should(actual).deepEqual([{ id: 1 }, { id: 4 }]);
   });
 });

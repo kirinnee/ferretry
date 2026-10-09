@@ -1,4 +1,6 @@
 import { join } from 'node:path';
+import { RunManifestSchema } from '@ferretry/protocol';
+import type { z } from 'zod';
 import type {
   ClockPort,
   FileSystemPort,
@@ -11,6 +13,12 @@ import type {
   Tombstone,
 } from '../../lib/index.ts';
 import { parseJsonl, slugify } from '../../lib/learning/policy.ts';
+import {
+  LearningStateSchema,
+  ObservationSchema,
+  StoredProposalSchema,
+  TombstoneSchema,
+} from '../../lib/learning/types.ts';
 
 interface LearningPaths {
   readonly directory: string;
@@ -40,13 +48,28 @@ function runPath(paths: LearningPaths, runId: string): string {
   return join(paths.runs, runId);
 }
 
-function decodeOr<T>(text: string | undefined, fallback: T): T {
-  if (text === undefined) return fallback;
+function decodeJson(text: string | undefined): unknown {
+  if (text === undefined) return undefined;
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text);
   } catch {
-    return fallback;
+    return undefined;
   }
+}
+
+function decodeOr<T>(text: string | undefined, schema: z.ZodType<T>, fallback: T): T {
+  const parsed = schema.safeParse(decodeJson(text));
+  return parsed.success ? parsed.data : fallback;
+}
+
+/** One malformed record costs that record alone, never the rest of the file. */
+function decodeEach<T>(text: string | undefined, schema: z.ZodType<T>): readonly T[] {
+  const value = decodeJson(text);
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(entry => {
+    const parsed = schema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  });
 }
 
 /** File-authoritative learning storage with durable JSONL evidence appends. */
@@ -70,7 +93,7 @@ export class FileLearningStore implements LearningStorePort {
   }
 
   async loadState(): Promise<LearningState> {
-    return decodeOr(await this.files.readText(this.paths.state), {});
+    return decodeOr(await this.files.readText(this.paths.state), LearningStateSchema, {});
   }
 
   async saveState(state: LearningState): Promise<void> {
@@ -78,7 +101,7 @@ export class FileLearningStore implements LearningStorePort {
   }
 
   async readObservations(): Promise<readonly Observation[]> {
-    return parseJsonl<Observation>((await this.files.readText(this.paths.observations)) ?? '');
+    return parseJsonl((await this.files.readText(this.paths.observations)) ?? '', ObservationSchema);
   }
 
   async observationsById(): Promise<ReadonlyMap<string, Observation>> {
@@ -100,7 +123,7 @@ export class FileLearningStore implements LearningStorePort {
   }
 
   async loadProposals(): Promise<readonly Proposal[]> {
-    return decodeOr(await this.files.readText(this.paths.proposals), []);
+    return decodeEach(await this.files.readText(this.paths.proposals), StoredProposalSchema);
   }
 
   async saveProposals(proposals: readonly Proposal[]): Promise<void> {
@@ -108,7 +131,7 @@ export class FileLearningStore implements LearningStorePort {
   }
 
   async loadTombstones(): Promise<readonly Tombstone[]> {
-    return decodeOr(await this.files.readText(this.paths.tombstones), []);
+    return decodeEach(await this.files.readText(this.paths.tombstones), TombstoneSchema);
   }
 
   async saveTombstones(tombstones: readonly Tombstone[]): Promise<void> {
@@ -123,7 +146,7 @@ export class FileLearningStore implements LearningStorePort {
 
   async readRunManifest(runId: string): Promise<RunManifest | undefined> {
     const text = await this.files.readText(join(runPath(this.paths, runId), 'manifest.json'));
-    return decodeOr<RunManifest | undefined>(text, undefined);
+    return decodeOr(text, RunManifestSchema.optional(), undefined);
   }
 
   async latestRunManifest(): Promise<RunManifest | undefined> {
