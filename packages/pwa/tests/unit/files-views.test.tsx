@@ -18,6 +18,8 @@ const byLabel = (container: HTMLElement, label: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(`[aria-label="${label}"]`), `an element labelled ${label}`);
 
 const listing = (entries: readonly FsEntry[], extra: { truncated?: boolean } = {}) => ({
+  root: '/work',
+  path: '',
   entries: [...entries],
   ...extra,
 });
@@ -227,7 +229,12 @@ describe('the source-line view', () => {
   });
 });
 
-const file = (overrides: Partial<FsFile> = {}): FsFile => ({ path: 'src/a.ts', content: 'const a = 1;', ...overrides });
+const file = (overrides: Partial<FsFile> = {}): FsFile => ({
+  path: 'src/a.ts',
+  size: 12,
+  content: 'const a = 1;',
+  ...overrides,
+});
 
 describe('the file body', () => {
   it('shows the daemon’s refusal instead of a blank pane', async () => {
@@ -256,10 +263,10 @@ describe('the file body', () => {
   });
 
   it('highlights recognised code and drops to plain text on request', async () => {
-    const view = await mount(<FileBody file={file({ lang: 'ts' })} path="src/a.ts" />);
-    expect(must(view.container.querySelector('code'), 'the code cell').className).toContain('language-ts');
+    const view = await mount(<FileBody file={file()} path="src/a.ts" />);
+    expect(must(view.container.querySelector('code'), 'the code cell').className).toContain('language-typescript');
 
-    await view.render(<FileBody file={file({ lang: 'ts' })} path="src/a.ts" raw />);
+    await view.render(<FileBody file={file()} path="src/a.ts" raw />);
     expect(view.container.querySelector('code')).toBeNull();
     expect(must(view.container.querySelector('pre'), 'the raw block').textContent).toBe('const a = 1;');
     await view.unmount();
@@ -267,18 +274,16 @@ describe('the file body', () => {
 
   it('explains the highlighter’s own cap rather than silently rendering plain text', async () => {
     const huge = `${'const a = 1;\n'.repeat(6_000)}`;
-    const view = await mount(<FileBody file={file({ content: huge, lang: 'ts' })} path="src/big.ts" />);
+    const view = await mount(<FileBody file={file({ content: huge })} path="src/big.ts" />);
     expect(view.container.textContent).toContain('Syntax highlighting is off above 60,000 characters.');
 
-    await view.render(
-      <FileBody file={file({ content: huge, lang: 'ts' })} path="src/big.ts" selection={{ line: 1 }} />,
-    );
+    await view.render(<FileBody file={file({ content: huge })} path="src/big.ts" selection={{ line: 1 }} />);
     expect(view.container.textContent).toContain('Syntax highlighting is off above 60,000 characters.');
     await view.unmount();
   });
 
   it('falls back to plain text for a language the highlighter does not know', async () => {
-    const view = await mount(<FileBody file={file({ content: 'plain words', lang: undefined })} path="notes.txt" />);
+    const view = await mount(<FileBody file={file({ content: 'plain words' })} path="notes.txt" />);
     expect(view.container.querySelector('code')).toBeNull();
     expect(view.container.textContent).toContain('plain words');
     await view.unmount();

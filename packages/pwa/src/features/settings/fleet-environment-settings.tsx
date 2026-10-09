@@ -13,55 +13,23 @@
  * that answer and the Fleet panel renders it; a second statement of it here could
  * only ever drift.
  */
+import type { FleetEnvironmentView } from '@ferretry/protocol';
 import { RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import {
+  type EnvironmentDifferenceKind,
+  environmentDifferences,
+  readFleetEnvironment,
+} from '../../lib/fleet-environment.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { PanelPath } from '../../shell/panel-typography.tsx';
 
-interface EnvironmentView {
-  readonly profiles: Readonly<Record<string, Readonly<Record<string, string>>>>;
-}
-
-type DifferenceKind = 'target-only' | 'source-only' | 'differs';
-
-interface EnvironmentDifference {
-  readonly key: string;
-  readonly kind: DifferenceKind;
-  readonly target?: string;
-  readonly source?: string;
-}
-
-const DIFFERENCE_LABEL: Readonly<Record<DifferenceKind, string>> = {
+const DIFFERENCE_LABEL: Readonly<Record<EnvironmentDifferenceKind, string>> = {
   'target-only': 'target only',
   'source-only': 'source only',
   differs: 'differs',
 };
-
-async function environmentAt(connection: DaemonConnection): Promise<EnvironmentView> {
-  const response = await fetch(new URL('/v1/fleet/environment', connection.baseUrl), {
-    headers: { Authorization: `Bearer ${connection.deviceToken}`, 'x-ferretry-client': 'ui' },
-    credentials: 'include',
-  });
-  if (!response.ok)
-    throw new Error((await response.json().catch(() => ({}))).error ?? `Read failed (${response.status})`);
-  return (await response.json()) as EnvironmentView;
-}
-
-function differences(
-  target: Readonly<Record<string, string>>,
-  source: Readonly<Record<string, string>>,
-): EnvironmentDifference[] {
-  const result: EnvironmentDifference[] = [];
-  for (const key of [...new Set([...Object.keys(target), ...Object.keys(source)])].sort()) {
-    const inTarget = key in target;
-    const inSource = key in source;
-    if (inTarget && !inSource) result.push({ key, kind: 'target-only', target: target[key] });
-    else if (inSource && !inTarget) result.push({ key, kind: 'source-only', source: source[key] });
-    else if (target[key] !== source[key])
-      result.push({ key, kind: 'differs', target: target[key], source: source[key] });
-  }
-  return result;
-}
 
 export interface FleetEnvironmentSettingsProps {
   readonly connection: DaemonConnection;
@@ -69,34 +37,60 @@ export interface FleetEnvironmentSettingsProps {
 }
 
 export function FleetEnvironmentSettings({ connection, connections }: FleetEnvironmentSettingsProps) {
-  const [target, setTarget] = useState<EnvironmentView>();
-  const [source, setSource] = useState<EnvironmentView>();
+  const fetcher = useDaemonFetch();
+  const [target, setTarget] = useState<FleetEnvironmentView>();
+  const [source, setSource] = useState<FleetEnvironmentView>();
   const [sourceId, setSourceId] = useState(String(connection.daemonId));
   const [profile, setProfile] = useState('');
   const [issue, setIssue] = useState<string>();
   const [loading, setLoading] = useState(false);
+  // ONE read is current at a time. Choosing another daemon to compare with starts a new read while the
+  // old one may still be in flight, and the slower of the two used to land last and overwrite the
+  // newer answer — a comparison labelled with one daemon showing another's entries. The superseded
+  // read is aborted, and its answer is dropped even if it arrives anyway.
+  const current = useRef<AbortController | null>(null);
 
   const reload = useCallback(async () => {
+    current.current?.abort();
+    const controller = new AbortController();
+    current.current = controller;
     setLoading(true);
     setIssue(undefined);
     try {
       const sourceConnection = connections.find(candidate => String(candidate.daemonId) === sourceId) ?? connection;
-      const [nextTarget, nextSource] = await Promise.all([environmentAt(connection), environmentAt(sourceConnection)]);
+      const [nextTarget, nextSource] = await Promise.all([
+        readFleetEnvironment(connection, fetcher, controller.signal),
+        readFleetEnvironment(sourceConnection, fetcher, controller.signal),
+      ]);
+      if (current.current !== controller) return;
       setTarget(nextTarget);
       setSource(nextSource);
-      setProfile(profile || Object.keys(nextTarget.profiles)[0] || '');
+      // A chosen profile survives a refresh while the daemon still publishes it.
+      setProfile(previous =>
+        previous !== '' && Object.hasOwn(nextTarget.profiles, previous)
+          ? previous
+          : (Object.keys(nextTarget.profiles)[0] ?? ''),
+      );
     } catch (error) {
+      if (current.current !== controller) return;
       setIssue(error instanceof Error ? error.message : 'Fleet environment could not be read.');
       setTarget(undefined);
       setSource(undefined);
     } finally {
-      setLoading(false);
+      if (current.current === controller) setLoading(false);
     }
-  }, [connection, connections, profile, sourceId]);
+  }, [connection, connections, fetcher, sourceId]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
+  useEffect(
+    () => () => {
+      current.current?.abort();
+      current.current = null;
+    },
+    [],
+  );
 
   const targetEnvironment = target?.profiles[profile] ?? {};
   const sourceEnvironment = source?.profiles[profile] ?? {};
@@ -104,7 +98,10 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
     () => Object.entries(targetEnvironment).sort(([left], [right]) => left.localeCompare(right)),
     [targetEnvironment],
   );
-  const diff = useMemo(() => differences(targetEnvironment, sourceEnvironment), [targetEnvironment, sourceEnvironment]);
+  const diff = useMemo(
+    () => environmentDifferences(targetEnvironment, sourceEnvironment),
+    [targetEnvironment, sourceEnvironment],
+  );
 
   return (
     <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel" aria-labelledby="fleet-environment-heading">

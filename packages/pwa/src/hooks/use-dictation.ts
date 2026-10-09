@@ -31,6 +31,7 @@ import {
   browserRecognitionProvider,
 } from '../lib/stt/browser-recognition.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import { enhance } from '../lib/stt/enhancement.ts';
 import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
 import { type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
@@ -177,6 +178,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const optionsRef = useRef(options);
   const recognitionRef = useRef(recognition);
   optionsRef.current = options;
+  // The correction is a daemon request, so it travels the carrier router unless a caller hands in its
+  // own. It used to fall back to the plain network, which on a relay-only daemon turned every remote
+  // correction into "could not be reached".
+  const routedFetch = useDaemonFetch();
+  const routedFetchRef = useRef(routedFetch);
+  routedFetchRef.current = routedFetch;
   recognitionRef.current = recognition;
 
   const isCurrent = useCallback((token: number): boolean => generationRef.current === token, []);
@@ -262,7 +269,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
             context,
             userContext: active.userContext,
             ...(signal ? { signal } : {}),
-            ...(current.enhancementFetch ? { fetchImpl: current.enhancementFetch } : {}),
+            fetchImpl: current.enhancementFetch ?? routedFetchRef.current,
           });
           return result.text;
         } catch (failure) {

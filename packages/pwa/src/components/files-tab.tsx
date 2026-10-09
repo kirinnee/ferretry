@@ -27,6 +27,7 @@ import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { formatCodeReference } from '../lib/references.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import { FileTree } from './file-tree.tsx';
 import { type FsFile, type FsListing, fsApi, useFsProbe } from './files-api.ts';
 import { baseName, crumbs, isOpenablePath, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
@@ -95,6 +96,7 @@ export const FilesTab = ({
   markdown,
   onOpenFile,
 }: FilesTabProps) => {
+  const fetcher = useDaemonFetch();
   const probe = useFsProbe(daemon, scope);
   const layout = useLayoutMode();
   const key = daemonSessionKey(scope);
@@ -237,21 +239,27 @@ export const FilesTab = ({
   // opposite case and keep the default.
   const listing = useFsResource<FsListing>(
     stateMatchesScope && !active && !unavailable ? `list:${key}:${dir}` : null,
-    useCallback(signal => fsApi.list(daemon, scope, dir, signal), [daemon, scope, dir]),
+    useCallback(signal => fsApi.list(daemon, scope, dir, signal, fetcher), [daemon, fetcher, scope, dir]),
     { refetchOnRearm: true },
   );
 
   const diffPath = !unavailable && active?.view === 'diff' && active.selection === undefined ? active.path : null;
   const diff = useFsResource<string>(
     diffPath ? `diff:${key}:${diffPath}` : null,
-    useCallback(signal => fsApi.diff(daemon, scope, diffPath ?? '', signal), [daemon, scope, diffPath]),
+    useCallback(
+      signal => fsApi.diff(daemon, scope, diffPath ?? '', signal, fetcher),
+      [daemon, fetcher, scope, diffPath],
+    ),
   );
 
   const filePath =
     !unavailable && active && (active.view !== 'diff' || active.selection !== undefined) ? active.path : null;
   const file = useFsResource<FsFile>(
     filePath ? `file:${key}:${filePath}` : null,
-    useCallback(signal => fsApi.file(daemon, scope, filePath ?? '', undefined, signal), [daemon, scope, filePath]),
+    useCallback(
+      signal => fsApi.file(daemon, scope, filePath ?? '', undefined, signal, fetcher),
+      [daemon, fetcher, scope, filePath],
+    ),
   );
 
   useEffect(() => {

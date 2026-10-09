@@ -64,10 +64,71 @@ if [ "${scan_status}" -eq 0 ]; then
 fi
 [ "${scan_status}" -gt 1 ] && echo "❌ failed to scan packages/pwa/src for fetch bindings" >&2 && exit "${scan_status}"
 
+# ── Second rule: nothing CALLS the network directly, except the files below. ──────────────────────
+#
+# The rule above stops a builtin being stored; it never stopped one being CALLED. Two screens built a
+# daemon request by hand and called the builtin on it — Settings' environment inspection and Tasks
+# search with its "Mark done" — so on a daemon only the relay can reach they failed while every other
+# screen worked. Renaming such a call to `browserFetch(` would have passed a spelling check just as
+# well, so the rule is about the CALL, under either name: a daemon request goes through the carrier
+# router (`useDaemonFetch()` in a component, the store's `carrier.fetch` in the composition root).
+#
+# A default parameter or a fallback VALUE (`fetcher: DaemonFetch = browserFetch`) is not a call and is
+# not matched here; that is a known, separate residual.
+#
+# Each allowed file must name WHY it may reach the network without the carrier, and an entry whose
+# file no longer makes such a call is a failure, so the list can only shrink honestly.
+declare -A call_allowlist=(
+  ['packages/pwa/src/lib/runtime-models.ts']='defines browserFetch, the one wrapper around the builtin'
+  ['packages/pwa/src/components/fy-render-sandbox.tsx']='fetches a pinned rendering library from this page'"'"'s own origin, never a daemon'
+)
+
+call_hits=""
+call_status=1
+set +e
+call_hits="$(rg --line-number --pcre2 \
+  -e '(?<![\w$.])(?:fetch|browserFetch)\s*\(' \
+  -e '\b(?:globalThis|window|self)\.fetch\s*\(' \
+  -- "${scan_files[@]}" "${definition}")"
+call_status=$?
+set -e
+[ "${call_status}" -gt 1 ] && echo "❌ failed to scan packages/pwa/src for direct network calls" >&2 && exit "${call_status}"
+
+unexpected=""
+declare -A calling_files=()
+while IFS= read -r hit; do
+  [ -n "${hit}" ] || continue
+  path="${hit%%:*}"
+  calling_files["${path}"]=1
+  [ -n "${call_allowlist[${path}]+set}" ] || unexpected+="${hit}"$'\n'
+done <<<"${call_hits}"
+
+if [ -n "${unexpected}" ]; then
+  echo "❌ a direct network call in packages/pwa/src skips the carrier router:" >&2
+  printf '%s' "${unexpected}" >&2
+  echo >&2
+  echo "   A daemon request must reach a daemon the browser can only reach through the relay." >&2
+  echo "   In a component use useDaemonFetch() from src/lib/store.tsx; in a module take a DaemonFetch" >&2
+  echo "   from the caller. If this call genuinely never talks to a daemon, add the file to" >&2
+  echo "   call_allowlist in ${BASH_SOURCE[0]} with the reason." >&2
+  exit 1
+fi
+
+for path in "${!call_allowlist[@]}"; do
+  if [ -z "${call_allowlist[${path}]}" ]; then
+    echo "❌ ${path} is allowed to call the network directly but names no reason" >&2
+    exit 1
+  fi
+  if [ -z "${calling_files[${path}]+set}" ]; then
+    echo "❌ ${path} is allowed to call the network directly but no longer does — delete its entry" >&2
+    exit 1
+  fi
+done
+
 # The definition itself must keep the wrapper shape it promises everyone else.
 if ! rg -q --fixed-strings 'export const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);' "${definition}"; then
   echo "❌ ${definition} no longer defines browserFetch as an arrow wrapper around globalThis.fetch" >&2
   exit 1
 fi
 
-echo "✅ No unbound fetch builtin is used as a value in packages/pwa/src"
+echo "✅ No unbound fetch builtin is used as a value, and no direct network call skips the carrier, in packages/pwa/src"

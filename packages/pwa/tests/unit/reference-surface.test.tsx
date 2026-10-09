@@ -7,6 +7,7 @@ import {
   useReferenceSurface,
 } from '../../src/components/reference-surface.tsx';
 import type { DaemonConnection, DaemonId } from '../../src/lib/daemon-connection.ts';
+import { browserFetch } from '../../src/lib/runtime-models.ts';
 import {
   readSidePaneTabsState,
   resetSidePaneTabRegistry,
@@ -71,7 +72,7 @@ describe('useReferenceSurface', () => {
 describe('sessionReferenceSurface', () => {
   test('should supply a resolver only for what this session can actually prove', () => {
     // Act
-    const bare = sessionReferenceSurface({ connection, scope });
+    const bare = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
     // Assert — an unread fleet, no board, no ledger and no catalog each mean
     // "cannot prove", which is not the same as "nothing matches".
@@ -87,6 +88,7 @@ describe('sessionReferenceSurface', () => {
     // Arrange
     const surface = sessionReferenceSurface({
       connection,
+      fetcher: browserFetch,
       scope,
       sessions: [sessionView('session-9', 'zelda')],
       onNavigate: () => undefined,
@@ -104,6 +106,7 @@ describe('sessionReferenceSurface', () => {
     // Arrange
     const surface = sessionReferenceSurface({
       connection,
+      fetcher: browserFetch,
       scope,
       tasks: [{ id: 'F12' }],
       attentionIds: ['A3' as AttentionId],
@@ -124,7 +127,7 @@ describe('sessionReferenceSurface', () => {
     // grammar accepts lowercase ones only. `Floop` therefore has NO valid
     // reference at all, and `/floop` is a different identity that this session
     // may well not have.
-    const surface = sessionReferenceSurface({ connection, scope, skills: ['Floop', 'run'] });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch, skills: ['Floop', 'run'] });
 
     // Assert — case-folding the proof set used to make `/floop` live off the
     // back of `Floop`, while Add to chat kept refusing `/Floop`: the transcript
@@ -137,7 +140,7 @@ describe('sessionReferenceSurface', () => {
 
   test('should ask the session filesystem for nothing when there is no candidate', async () => {
     // Arrange
-    const surface = sessionReferenceSurface({ connection, scope, cwd: '/repo' });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch, cwd: '/repo' });
 
     // Act — no candidates means no directory read at all, so this cannot reach
     // the daemon.
@@ -149,7 +152,7 @@ describe('sessionReferenceSurface', () => {
 
   test('should open a file reference as a file instance tab carrying its lines', () => {
     // Arrange
-    const surface = sessionReferenceSurface({ connection, scope });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
     // Act
     surface.onCodeReferenceOpen?.({ path: 'src/api.ts', line: 12, endLine: 20 });
@@ -162,7 +165,7 @@ describe('sessionReferenceSurface', () => {
 
   test('should open a bare file reference without claiming a line', () => {
     // Arrange
-    const surface = sessionReferenceSurface({ connection, scope });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
     // Act
     surface.onCodeReferenceOpen?.({ path: 'README.md' });
@@ -174,7 +177,7 @@ describe('sessionReferenceSurface', () => {
 
   test('should open a file reference with only a start line', () => {
     // Arrange
-    const surface = sessionReferenceSurface({ connection, scope });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
     // Act
     surface.onCodeReferenceOpen?.({ path: 'src/api.ts', line: 4 });
@@ -186,7 +189,7 @@ describe('sessionReferenceSurface', () => {
 
   test('should send task and skill clicks to their own pane', () => {
     // Arrange
-    const surface = sessionReferenceSurface({ connection, scope });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
     // Act
     surface.onTaskOpen?.('F12');
@@ -202,7 +205,12 @@ describe('sessionReferenceSurface', () => {
   // OWNS that modal, and a host without one must not manufacture a dead link.
   test('should offer no Attention opener when the host owns no action modal', () => {
     // Arrange — a ledger, but nowhere to open it.
-    const surface = sessionReferenceSurface({ connection, scope, attentionIds: ['A3' as AttentionId] });
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      attentionIds: ['A3' as AttentionId],
+    });
     const before = readSidePaneTabsState(scope).active;
 
     // Act
@@ -219,6 +227,7 @@ describe('sessionReferenceSurface', () => {
     const opened: [AttentionId, HTMLElement | null | undefined][] = [];
     const surface = sessionReferenceSurface({
       connection,
+      fetcher: browserFetch,
       scope,
       attentionIds: ['A3' as AttentionId],
       onAttentionOpen: (id, opener) => opened.push([id, opener]),
@@ -238,7 +247,12 @@ describe('sessionReferenceSurface', () => {
     const opened: AttentionId[] = [];
 
     // Act
-    const surface = sessionReferenceSurface({ connection, scope, onAttentionOpen: id => opened.push(id) });
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onAttentionOpen: id => opened.push(id),
+    });
 
     // Assert
     should(surface.attentionReferenceResolver).be.undefined();
@@ -248,7 +262,7 @@ describe('sessionReferenceSurface', () => {
 
   test('should open a proved terminal surface as that exact terminal instance', () => {
     // Arrange
-    const surface = sessionReferenceSurface({ connection, scope });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
     // Act
     surface.onSurfaceOpen?.({
@@ -268,7 +282,12 @@ describe('sessionReferenceSurface', () => {
     const visited: string[] = [];
 
     // Act
-    const surface = sessionReferenceSurface({ connection, scope, onNavigate: to => visited.push(to) });
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+    });
     surface.onNavigate?.('/d/daemon-a/session/session-9');
 
     // Assert

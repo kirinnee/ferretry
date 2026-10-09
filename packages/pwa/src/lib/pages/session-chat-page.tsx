@@ -59,6 +59,7 @@ import { daemonSessionScope } from '../daemon-scope.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
+import { useDaemonFetch } from '../store.tsx';
 import type { TranscriptEntry } from '../session-screens.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
@@ -418,7 +419,9 @@ export function SessionChatPage({
   // snapshot is: both the pane and the reference surface need it, and two reads
   // would be two owners that disagree after a refresh. `names` is undefined
   // until a catalog has actually been read — unread, never "no skills".
-  const skills = useSessionSkills(connection, scope);
+  // The carrier router: the `@file` proof and the skills read both reach a relay-only daemon.
+  const referenceFetch = useDaemonFetch();
+  const skills = useSessionSkills(connection, scope, referenceFetch);
   const attentionId = useId();
   const [attentionOpen, setAttentionOpen] = useState(false);
   const [attentionTarget, setAttentionTarget] = useState<AttentionId | null>(null);
@@ -476,6 +479,7 @@ export function SessionChatPage({
     () =>
       sessionReferenceSurface({
         connection,
+        fetcher: referenceFetch,
         scope,
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
@@ -495,6 +499,7 @@ export function SessionChatPage({
       }),
     [
       connection,
+      referenceFetch,
       scope,
       session.config.cwd,
       fleetIdentity,

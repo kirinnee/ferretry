@@ -50,7 +50,8 @@ const relayed = (carrier: ConnectionMethod | undefined): boolean => carrier?.kin
  *  a viewer than one that says the daemon would not have it. */
 export const daemonEventTicket = async (
   daemon: DaemonConnection,
-  send: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
+  // Required: the ticket is a daemon request, and the store hands in the carrier router's fetch.
+  send: (url: string, init: RequestInit) => Promise<Response>,
   carrier: ActiveCarrier = () => undefined,
 ): Promise<string> => {
   // Not minted at all on a relay: §14 refuses a ticket in a stream's query, so one bought here would

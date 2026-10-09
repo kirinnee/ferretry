@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { formatCodeReference } from '../lib/references.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import type { SidePaneTabInstance } from '../shell/side-pane-tab-model.ts';
 import { fsApi, useFsProbe, type FsFile } from './files-api.ts';
 import { baseName, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
@@ -56,6 +57,7 @@ export interface FileInstanceSurfaceProps {
 const instanceSelection = (instance: SidePaneTabInstance): FileLineSelection | undefined => instance.selection;
 
 export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileInstanceSurfaceProps) => {
+  const fetcher = useDaemonFetch();
   const probe = useFsProbe(daemon, scope);
   const path = instance.key;
   const key = daemonSessionKey(scope);
@@ -78,11 +80,11 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
 
   const diff = useFsResource<string>(
     !unavailable && diffActive ? `diff:${key}:${path}` : null,
-    useCallback(signal => fsApi.diff(daemon, scope, path, signal), [daemon, scope, path]),
+    useCallback(signal => fsApi.diff(daemon, scope, path, signal, fetcher), [daemon, fetcher, scope, path]),
   );
   const file = useFsResource<FsFile>(
     !unavailable && !diffActive ? `file:${key}:${path}` : null,
-    useCallback(signal => fsApi.file(daemon, scope, path, undefined, signal), [daemon, scope, path]),
+    useCallback(signal => fsApi.file(daemon, scope, path, undefined, signal, fetcher), [daemon, fetcher, scope, path]),
   );
 
   // `instance.revision` is a dependency ON PURPOSE: re-delivering the same path

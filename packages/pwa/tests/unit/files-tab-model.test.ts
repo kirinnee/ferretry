@@ -120,15 +120,15 @@ describe('the spoken change description', () => {
 
 describe('the file endpoint’s refusals', () => {
   it('reports them in reading order and stays silent when nothing was refused', () => {
-    expect(fileRefusal({ path: 'a', denied: true, ignored: true, binary: true })).toContain('denylist');
-    expect(fileRefusal({ path: 'a', ignored: true })).toContain('gitignored');
+    expect(fileRefusal({ path: 'a', size: 0, denied: true, ignored: true, binary: true })).toContain('denylist');
+    expect(fileRefusal({ path: 'a', size: 0, ignored: true })).toContain('gitignored');
     // A gitignored file whose content the daemon DID serve is readable.
-    expect(fileRefusal({ path: 'a', ignored: true, content: 'x' })).toBeNull();
+    expect(fileRefusal({ path: 'a', size: 1, ignored: true, content: 'x' })).toBeNull();
     expect(fileRefusal({ path: 'a', tooLarge: true, size: 4_194_304 })).toBe(
       'This file is 4.0 MB — over the daemon’s 1 MB view limit.',
     );
-    expect(fileRefusal({ path: 'a', tooLarge: true })).toContain('too large');
-    expect(fileRefusal({ path: 'a', binary: true })).toContain('binary');
-    expect(fileRefusal({ path: 'a', content: 'hello' })).toBeNull();
+    expect(fileRefusal({ path: 'a', size: Number.NaN, tooLarge: true })).toContain('too large');
+    expect(fileRefusal({ path: 'a', size: 0, binary: true })).toContain('binary');
+    expect(fileRefusal({ path: 'a', size: 5, content: 'hello' })).toBeNull();
   });
 });

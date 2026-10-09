@@ -49,6 +49,8 @@ import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
+import type { DaemonFetch } from '../../lib/runtime-models.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { nextActiveIndex, paletteCountLabel } from '../../shell/palette-model.ts';
 import { type FuzzyField, SUBSTRING_SCORE, scoreFields, WORD_START_SCORE } from '../../shell/palette-ranking.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../shell/palette-shortcut.ts';
@@ -237,9 +239,14 @@ const taskQueryPath = (scope: DaemonSessionScope, query: string): string => {
 const taskOverlayKey = (scope: DaemonSessionScope, taskId: string): string =>
   JSON.stringify([scope.daemonId, scope.sessionId, taskId]);
 
-const readJson = async <Value,>(daemon: DaemonConnection, path: string, signal: AbortSignal): Promise<Value> => {
+const readJson = async <Value,>(
+  daemon: DaemonConnection,
+  path: string,
+  signal: AbortSignal,
+  fetcher: DaemonFetch,
+): Promise<Value> => {
   const target = daemonRequest(daemon, path, { signal });
-  const response = await fetch(target.url, target.init);
+  const response = await fetcher(target.url, target.init);
   if (!response.ok) throw new Error(`The daemon could not read current-session search data (HTTP ${response.status}).`);
   return (await response.json()) as Value;
 };
@@ -253,10 +260,11 @@ const readTasks = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   signal: AbortSignal,
+  fetcher: DaemonFetch,
   query?: string,
 ): Promise<TaskListRead> => {
   const path = query === undefined ? taskPath(scope) : taskQueryPath(scope, query);
-  const parsed = SessionTaskListResponseSchema.safeParse(await readJson(daemon, path, signal));
+  const parsed = SessionTaskListResponseSchema.safeParse(await readJson(daemon, path, signal, fetcher));
   if (!parsed.success) {
     throw new Error('The daemon returned an unreadable task list.');
   }
@@ -277,8 +285,9 @@ const readFiles = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   signal: AbortSignal,
+  fetcher: DaemonFetch,
 ): Promise<FileIndexRead> => {
-  const parsed = SessionFileIndexResponseSchema.safeParse(await fsApi.index(daemon, scope, signal));
+  const parsed = SessionFileIndexResponseSchema.safeParse(await fsApi.index(daemon, scope, signal, fetcher));
   if (!parsed.success) throw new Error('The daemon returned an unreadable file index.');
   if (parsed.data.sessionId !== scope.sessionId)
     throw new Error('The daemon returned a file index from another session.');
@@ -339,6 +348,7 @@ export function SessionSearchProvider({
   readonly focusSignal: number;
   readonly children: ReactNode;
 }) {
+  const fetcher = useDaemonFetch();
   const [stored, setStored] = useState<KeyedSnapshot>({ key: '', snapshot: INITIAL });
   const [query, setQueryState] = useState('');
   const [presenting, setPresenting] = useState<string | null>(null);
@@ -431,7 +441,7 @@ export function SessionSearchProvider({
     // provider has not read yet is already what `snapshot` derives above, and
     // writing it would be a second, later answer to the same question.
     const forKey = daemonSessionKey(scope);
-    const taskRead = readTasks(connection, scope, controller.signal).then(
+    const taskRead = readTasks(connection, scope, controller.signal, fetcher).then(
       read => {
         if (!controller.signal.aborted)
           publish(forKey, current => ({
@@ -458,7 +468,7 @@ export function SessionSearchProvider({
     void taskRead.finally(() => {
       if (taskPending.current === pending) taskPending.current = null;
     });
-    void readFiles(connection, scope, controller.signal).then(
+    void readFiles(connection, scope, controller.signal, fetcher).then(
       read => {
         if (!controller.signal.aborted)
           publish(forKey, current => ({
@@ -489,7 +499,7 @@ export function SessionSearchProvider({
       queryController.current?.abort();
       queryController.current = null;
     };
-  }, [connection, publish, scope]);
+  }, [connection, fetcher, publish, scope]);
 
   useDebouncedEffect(
     () => {
@@ -500,7 +510,7 @@ export function SessionSearchProvider({
       queryController.current?.abort();
       queryController.current = controller;
       publish(forKey, current => ({ ...current, matchState: 'searching', matchError: null }));
-      void readTasks(connection, scope, controller.signal, normalizedQuery).then(
+      void readTasks(connection, scope, controller.signal, fetcher, normalizedQuery).then(
         read => {
           if (controller.signal.aborted || queryGeneration.current !== generation || currentKey.current !== forKey)
             return;
@@ -526,7 +536,7 @@ export function SessionSearchProvider({
         },
       );
     },
-    [connection, key, normalizedQuery],
+    [connection, fetcher, key, normalizedQuery],
     SESSION_SEARCH_QUERY_DEBOUNCE_MS,
   );
 
@@ -1059,6 +1069,7 @@ const asSummary = (task: ScopedTaskView): ScopedTaskSummary => {
 /** The real Tasks singleton: List and Kanban both consume the shared search control and model. */
 export function SessionTasksSearchSurface() {
   const search = useSessionSearch();
+  const fetcher = useDaemonFetch();
   const compact = useLayoutMode() === 'drawer';
   const [view, setView] = useState<'list' | 'kanban'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1133,7 +1144,7 @@ export function SessionTasksSearchSurface() {
           headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: requestId },
           body: JSON.stringify({ action: 'phase', phase: 'done', reason: 'Marked done from Tasks.' }),
         });
-        const response = await fetch(target.url, target.init);
+        const response = await fetcher(target.url, target.init);
         if (!response.ok) throw new Error(`The daemon refused to mark this task done (HTTP ${response.status}).`);
         const parsed = ScopedTaskViewSchema.safeParse(await response.json());
         if (!parsed.success || parsed.data.sessionId !== scope.sessionId)
@@ -1148,7 +1159,7 @@ export function SessionTasksSearchSurface() {
         setMarkingDoneKey(null);
       }
     },
-    [markingDoneKey, search.connection, search.scope, search.tasks],
+    [fetcher, markingDoneKey, search.connection, search.scope, search.tasks],
   );
 
   // Add to chat — put THIS task's reference into THIS session's draft.

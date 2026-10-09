@@ -837,6 +837,19 @@ export function useAppStore(): AppStore {
 }
 
 /**
+ * The fetch a screen reads a daemon through: the carrier router, so a daemon only the relay can reach
+ * is reached through the relay.
+ *
+ * Screens that built their own request and called the network directly worked on the LAN and failed
+ * on precisely the phone that needed the relay. This is the one way a component gets a daemon fetch.
+ * Outside a provider — a component rendered on its own by a test — there is no router to route
+ * through, and the answer is the plain network.
+ */
+export function useDaemonFetch(): DaemonFetch {
+  return useContext(StoreContext)?.carrier.fetch ?? browserFetch;
+}
+
+/**
  * Reads the pairing registry, resubscribing only when the store itself changes.
  *
  * The callbacks are memoised against the current connection store: a fresh

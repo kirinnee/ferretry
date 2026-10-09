@@ -25,6 +25,7 @@ import { addReferenceToComposer } from '../../src/lib/composer-references.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../src/lib/quote.ts';
+import { browserFetch } from '../../src/lib/runtime-models.ts';
 import { render, run } from '../support/react.ts';
 
 const connection = daemonConnection({
@@ -65,7 +66,7 @@ describe('an inserted reference is live in the surface that reads it back', () =
     // Arrange — the draft is produced by the real delivery path, not typed here.
     const draft = draftAfter(() => addReferenceToComposer({ kind: 'task', id: 'F12' }, scope), 'please finish');
     should(draft).equal('please finish &F12 ');
-    const surface = sessionReferenceSurface({ connection, scope, tasks: BOARD });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch, tasks: BOARD });
 
     // Act — the transcript reads that exact draft back.
     const tree = render(<Markdown {...surface} text={`${draft}and not &F99`} />);
@@ -83,7 +84,7 @@ describe('an inserted reference is live in the surface that reads it back', () =
     const claude = draftAfter(() => addSkillInvocationToComposer(skillInsertText('claude', 'floop'), scope));
     const codex = draftAfter(() => addSkillInvocationToComposer(skillInsertText('codex', 'floop'), scope));
     should([claude, codex]).deepEqual(['/floop ', '$floop ']);
-    const surface = sessionReferenceSurface({ connection, scope, skills: [...CATALOG_NAMES] });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch, skills: [...CATALOG_NAMES] });
 
     // Act
     const tree = render(<Markdown {...surface} text={`${claude}${codex}but not /absent`} />);
@@ -100,7 +101,7 @@ describe('an inserted reference is live in the surface that reads it back', () =
   test('should leave an inserted token as prose while the session has proved nothing yet', () => {
     // Arrange — an unread board and an unread catalog are NOT empty ones, and
     // this is the state the workspace is in before either read answers.
-    const surface = sessionReferenceSurface({ connection, scope });
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
     // Act
     const tree = render(<Markdown {...surface} text="&F12 and /floop" />);
