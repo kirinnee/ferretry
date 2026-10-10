@@ -72,7 +72,6 @@ import {
   parseFyRenderSandboxMessage,
 } from '../lib/fy-render.ts';
 
-import { browserFetch } from '../lib/runtime-models.ts';
 /**
  * The static shell, served from this origin by the Pages deployment.
  *
@@ -264,7 +263,7 @@ export function FyRenderSandbox({
          * fetching bytes from somewhere else entirely. `cache: 'no-cache'`
          * revalidates, so a stale bundle cannot be pinned behind a hash change.
          */
-        const response = await browserFetch(descriptor.url, {
+        const response = await fetch(descriptor.url, {
           cache: 'no-cache',
           credentials: 'omit',
           redirect: 'error',
