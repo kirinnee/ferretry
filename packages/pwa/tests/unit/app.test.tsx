@@ -547,7 +547,8 @@ const appStore = async (
       // own failure path is what the projects-route test asserts on.
       if (options.projects !== undefined && new URL(url).pathname === '/v1/projects')
         return Response.json(options.projects);
-      return Response.json({});
+      // Tasks search and its file index travel the carrier now, so they are answered here too.
+      return sessionSearchFixture(new URL(url)) ?? Response.json({});
     },
   });
 
@@ -2138,9 +2139,10 @@ describe('the command palette shortcut', () => {
    * rather than lower bounds.
    */
   it('reads one board and one file index for the session route, and neither fan-out returns', async () => {
-    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { carrierRequests, view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
     await settle();
-    const mine = requestedUrls
+    // Counted on the CARRIER: these reads used to dial the daemon's address directly.
+    const mine = carrierRequests
       .map(raw => new URL(raw, 'https://fixture.example.test'))
       .filter(url => url.pathname.startsWith('/v1/sessions/s1/'));
 

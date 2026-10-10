@@ -9,6 +9,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -846,7 +847,14 @@ export function useAppStore(): AppStore {
  * through, and the answer is the plain network.
  */
 export function useDaemonFetch(): DaemonFetch {
-  return useContext(StoreContext)?.carrier.fetch ?? browserFetch;
+  const store = useContext(StoreContext);
+  // ONE identity per store, read through at call time. Effects list this fetch as a dependency, so a
+  // carrier whose `fetch` member is re-read as a fresh function (a wrapped router hands out a new
+  // bound one per read) would otherwise restart every read on every render, forever.
+  return useMemo<DaemonFetch>(
+    () => (store === null ? browserFetch : async (input, init) => await store.carrier.fetch(input, init)),
+    [store],
+  );
 }
 
 /**

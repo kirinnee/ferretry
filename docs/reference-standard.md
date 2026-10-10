@@ -202,6 +202,11 @@ A reader with no resolver for a kind cannot prove it, so that kind stays prose t
 answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with
 nobody in it, and is treated as "cannot prove".
 
+**A proof is read the way every other daemon read is.** The listing a `file` proof asks for travels
+the carrier router, so a session on a daemon that only the relay reaches proves its paths too; and
+the answer is parsed against the protocol's listing schema before any entry is believed, so a body
+that is not a listing proves nothing rather than promoting a path.
+
 **Surfaces have a third answer, and it is visible.** For every other family "we cannot prove it" and
 "it is not there" are the same answer, so both render as prose. For a surface they are not: the
 daemon's terminal listing for a session is a COMPLETE enumeration, so an id missing from it is proved
