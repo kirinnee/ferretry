@@ -450,6 +450,32 @@ describe('the command surface', () => {
     expect(daemon?.commands.map(command => command.name())).toEqual(['config', 'password']);
   });
 
+  it('should name the binary it runs as in every example', async () => {
+    // Arrange — not the shipped name, so an example that spells "fy" cannot pass.
+    let help = '';
+    const program = new Command().name('foo').exitOverride();
+    program.configureOutput({
+      writeOut: text => {
+        help += text;
+      },
+      writeErr: () => {},
+    });
+    program.command('daemon').description('manage the daemon');
+    const { instance } = controller(new FakeGateway());
+    registerGrantCommands(program, () => instance);
+
+    // Act
+    await expect(program.parseAsync(['node', 'foo', 'daemon', 'config', 'set', '--help'])).rejects.toThrow();
+    await expect(program.parseAsync(['node', 'foo', 'daemon', 'password', 'set', '--help'])).rejects.toThrow();
+
+    // Assert
+    expect(help).toContain('  foo daemon config set warden --no-configure');
+    expect(help).toContain('  foo daemon config set browser --no-use --no-configure');
+    expect(help).toContain('printf %s "$FY_OPERATOR_PASSWORD" | foo daemon config set fleet --configure');
+    expect(help).toContain('printf %s "$FY_OPERATOR_PASSWORD" | foo daemon password set');
+    expect(help).not.toMatch(/\bfy daemon/u);
+  });
+
   it('should accept `list` wherever `ls` works', () => {
     // `fy fleet list` failing confusingly is a mistake this repository has already made once.
     // Arrange

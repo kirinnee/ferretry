@@ -41,6 +41,8 @@ import { Command } from 'commander';
 import type { z } from 'zod';
 // The root manifest is the single source for the PRODUCT name; this package's own name is the BINARY.
 import root from '../../../package.json' with { type: 'json' };
+// The daemon package names the daemon binary, exactly as this package names the client one.
+import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { readDaemonToken } from '../src/adapters/daemon/api-token';
@@ -146,9 +148,11 @@ import { registerWorktreeCommands } from '../src/lib/worktrees/commands';
 import { WorktreeController } from '../src/lib/worktrees/controller';
 import { ProtocolWorktreeGateway } from '../src/lib/worktrees/gateway';
 
-// Identity is single-sourced from package.json: the bin key names the binary, version feeds --version.
+// Identity is single-sourced from package.json: the bin key names the binary (and the daemon package's bin
+// key names the daemon), version feeds --version.
 const BINARY_NAME = Object.keys(pkg.bin)[0] ?? pkg.name;
 const PRODUCT_NAME = root.name;
+const DAEMON_NAME = Object.keys(daemonPkg.bin)[0] ?? daemonPkg.name;
 const DESCRIPTION = 'Command-line client for the per-host agent daemon';
 
 /**
@@ -184,7 +188,7 @@ function registerDoctorCommand(program: Command, environment: Record<string, str
     .command('doctor')
     .description('check host dependencies and what each missing program prevents')
     .action(async () => {
-      const daemon = `${BINARY_NAME}d`;
+      const daemon = DAEMON_NAME;
       const executable = Bun.which(daemon, { PATH: environment.PATH ?? '' });
       if (executable === null)
         throw new Error(
@@ -449,7 +453,7 @@ function daemonBinaryVersion(path: string): string | undefined {
 function buildDaemonController(world: CliWorld, client: SharedDaemonClient): DaemonController {
   const environment = world.environment;
   const out = world.io;
-  const daemonName = `${BINARY_NAME}d`;
+  const daemonName = DAEMON_NAME;
   const layout: DaemonLayout = resolveDaemonLayout({
     platform: process.platform,
     homeDirectory: resolveUserHome(environment),
@@ -583,7 +587,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new SecretController(
         new ProtocolSecretGateway(client),
         new SecretConsoleOutput(world.io),
-        new StdinSecretValue(),
+        new StdinSecretValue(BINARY_NAME),
         process.cwd(),
       ),
     ),
@@ -649,6 +653,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new SystemPollClock(),
         new FileMarkerProbe(world.cwd),
         new ExactTmuxAttacher(new BunTmuxAttachProcess(), world.environment),
+        BINARY_NAME,
       ),
     ),
   // The daemon group manages a LOCAL PROCESS, so nothing in it may depend on a token existing: it has
@@ -673,7 +678,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new GrantController({
           gateway: new ProtocolGrantGateway(client),
-          passwords: new StdinOperatorPassword(),
+          passwords: new StdinOperatorPassword(BINARY_NAME),
           out: world.io,
           clientName: BINARY_NAME,
         }),
@@ -757,7 +762,7 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
             : options.firstAccount;
         if (options.firstAccount === 'detected' && firstAccount === undefined) {
           throw new Error(
-            'no launchable Claude or Codex CLI was found on this host — install one, or choose explicitly with "fy fleet init --first-account=claude"',
+            `no launchable Claude or Codex CLI was found on this host — install one, or choose explicitly with "${BINARY_NAME} fleet init --first-account=claude"`,
           );
         }
         // Before the scaffolder writes a single byte: a refusal here must leave the directory
@@ -882,6 +887,7 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     // `fy fleet health` colours by severity, and chalk decides per call whether this run may emit an
     // escape code at all — so `NO_COLOR`, a pipe and a redirect get the identical plain report.
     presentation: terminalFleetPresentation(world.stdout),
+    binaryName: BINARY_NAME,
   });
 }
 
@@ -918,7 +924,7 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
 
   return {
     presenter,
-    start: new StartSessionController(api, files, presenter, environment),
+    start: new StartSessionController(api, files, presenter, environment, BINARY_NAME),
     list: new ListSessionsController(api, presenter),
     status: new SessionStatusController(api, presenter),
     send: new SendMessageController(api, files, presenter, environment),

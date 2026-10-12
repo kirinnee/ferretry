@@ -15,7 +15,7 @@ import {
   StubQrEncoder,
 } from './fixtures';
 
-function run(argv: string[]) {
+function run(argv: string[], binaryName = 'fy') {
   const gateway = new ScriptedPairGateway([expired]);
   const screen = new CapturingScreen();
   const qr = new StubQrEncoder();
@@ -29,15 +29,25 @@ function run(argv: string[]) {
     qr,
     terminal: new FixedTerminalSize(100),
     browser,
-    binaryName: 'fy',
+    binaryName,
   };
-  const program = new Command().name('fy').exitOverride();
-  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  const program = new Command().name(binaryName).exitOverride();
+  const printed: string[] = [];
+  program.configureOutput({ writeOut: text => printed.push(text), writeErr: () => {} });
   registerPairCommands(program, new PairController(deps));
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, screen, qr, browser };
+  return { parsed: program.parseAsync(['node', binaryName, ...argv]), printed, gateway, screen, qr, browser };
 }
 
 describe('pair command surface', () => {
+  it('should name the binary it runs as when it says how to set the password', async () => {
+    // Arrange + Act — not the shipped name, so a help line that spells "fy" cannot pass.
+    const { parsed, printed } = run(['pair', '--help'], 'foo');
+    await should(parsed).be.rejected();
+
+    // Assert
+    should(printed.join('')).containEql('Set one with `foo daemon password set`');
+  });
+
   it('should pair with no flags at all', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(['pair']);

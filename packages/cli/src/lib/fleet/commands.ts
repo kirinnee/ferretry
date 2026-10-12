@@ -30,6 +30,8 @@ function scoped(command: Command): Command {
  * to disk.
  */
 export function registerFleetCommands(program: Command, controller: FleetController): void {
+  // The name the program was given, so every hint below names the command that actually exists.
+  const bin = program.name();
   const fleet = scoped(
     program
       .command('fleet')
@@ -71,7 +73,7 @@ export function registerFleetCommands(program: Command, controller: FleetControl
       readonly firstAccount?: unknown;
     };
     if (firstAccount !== undefined && firstAccount !== true && firstAccount !== 'claude' && firstAccount !== 'codex') {
-      throw new Error('first account must be "claude" or "codex": fy fleet init --first-account=claude');
+      throw new Error(`first account must be "claude" or "codex": ${bin} fleet init --first-account=claude`);
     }
     await controller.init({
       ...options,
@@ -103,7 +105,7 @@ export function registerFleetCommands(program: Command, controller: FleetControl
           'a billable turn per account — and the description said so. It is now a local credential read\n' +
           'plus one free read-only status endpoint, and the report repeats that promise every time.\n\n' +
           'An account that needs signing in gets that exact command under its row, after what it does:\n' +
-          '`fy fleet login <accountId>` matches on the whole id, and the row above it shows the name.\n' +
+          `\`${bin} fleet login <accountId>\` matches on the whole id, and the row above it shows the name.\n` +
           'Accounts that share one login and say the same thing are shown once, with one command.\n\n' +
           'READY means the access token has aged out beside a good refresh token — what a first run\n' +
           'copies from this host — and it renews itself the first time the account is used, so there\n' +
@@ -154,7 +156,7 @@ export function registerFleetCommands(program: Command, controller: FleetControl
           'Naming an account also SIGNS IT IN rather than reporting what it holds. A token the provider\n' +
           'has revoked still reads as valid here — it has an access token and its expiry is in the\n' +
           'future — so a pass that trusted the homes would answer "already had a usable credential" for\n' +
-          'exactly the account you asked about. That is why `fy fleet health` prints this command beside\n' +
+          `exactly the account you asked about. That is why \`${bin} fleet health\` prints this command beside\n` +
           'an account that needs a login. The approval runs in that account’s OWN wrapper, so the\n' +
           'credential lands in its own home, and its own home is then read to prove it did — if it did\n' +
           'not, that account says so by name rather than being reported alongside a sibling that worked.\n' +

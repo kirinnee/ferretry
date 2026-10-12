@@ -253,7 +253,7 @@ describe('apply plan rendering', () => {
 
   it('should report what an apply actually did', () => {
     // Act
-    const rendered = renderApplyResult(applyResult());
+    const rendered = renderApplyResult('fy', applyResult());
 
     // Assert
     should(rendered).containEql('applied 1 account in 2 operations');
@@ -262,7 +262,7 @@ describe('apply plan rendering', () => {
 
   it('should make an observed empty apply a next step, not an accomplishment', () => {
     // Act
-    const rendered = renderApplyResult(applyResult({ accountCount: 0, operationCount: 4 }));
+    const rendered = renderApplyResult('fy', applyResult({ accountCount: 0, operationCount: 4 }));
 
     // Assert
     should(rendered).containEql('The manifest declares no accounts');
@@ -272,6 +272,7 @@ describe('apply plan rendering', () => {
   it('should report each harness pool an apply migrated', () => {
     // Act
     const rendered = renderApplyResult(
+      'fy',
       applyResult({
         sharedHistory: [
           {
@@ -332,7 +333,7 @@ describe('apply plan rendering', () => {
     });
 
     // Act
-    const rendered = renderApplyResult(pooled);
+    const rendered = renderApplyResult('fy', pooled);
 
     // Assert
     should(rendered).containEql('shared codex: 3 migrated entries');
@@ -343,7 +344,7 @@ describe('apply plan rendering', () => {
 
   it('should leave a Claude-only apply free of the Codex caveat', () => {
     // Act + Assert
-    should(renderApplyResult(applyResult())).not.containEql('Codex resume');
+    should(renderApplyResult('fy', applyResult())).not.containEql('Codex resume');
   });
 
   it('should promise a pool link only for the emptied directories that actually get one', () => {
@@ -431,6 +432,7 @@ describe('apply plan rendering', () => {
   it('should keep the same split in the record of what an apply did', () => {
     // Act
     const rendered = renderApplyResult(
+      'fy',
       applyResult({
         sharedHistory: [
           {
@@ -561,6 +563,7 @@ describe('apply plan rendering', () => {
   it('should carry the merge caveat into the applied report too', () => {
     // Act
     const rendered = renderApplyResult(
+      'fy',
       applyResult({
         sharedHistory: [
           {
@@ -618,7 +621,7 @@ describe('apply plan rendering', () => {
 
   it('should name every wrapper that was swept away', () => {
     // Act
-    const rendered = renderApplyResult(applyResult({ prunedWrappers: ['fy-old-a', 'fy-old-b'] }));
+    const rendered = renderApplyResult('fy', applyResult({ prunedWrappers: ['fy-old-a', 'fy-old-b'] }));
 
     // Assert
     should(rendered).containEql('pruned 2 wrappers: fy-old-a, fy-old-b');
@@ -721,13 +724,13 @@ describe('manifest rendering', () => {
 
   it('should say plainly when the manifest declares nothing', () => {
     // Act + Assert
-    should(renderManifest(manifest([]))).containEql('The fleet manifest declares no accounts.');
-    should(renderManifest(manifest([]))).containEql('fy fleet init --first-account');
+    should(renderManifest('fy', manifest([]))).containEql('The fleet manifest declares no accounts.');
+    should(renderManifest('fy', manifest([]))).containEql('fy fleet init --first-account');
   });
 
   it('should head the listing with when provisioning ran', () => {
     // Act + Assert
-    should(renderManifest(manifest()).split('\n')[0]).equal('1 account provisioned 2026-07-31T09:00:00.000Z');
+    should(renderManifest('fy', manifest()).split('\n')[0]).equal('1 account provisioned 2026-07-31T09:00:00.000Z');
   });
 });
 
@@ -926,7 +929,7 @@ const everyName = new Map([
 describe('health rendering', () => {
   it('should account for EVERY account in one header line, not only the actionable ones', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, WIDE);
 
     // Assert — "4 accounts, 2 need sign-in" said nothing about the other two and read as a promise
     // that they were fine. They were UNKNOWN. Every verdict present is now named and counted.
@@ -937,7 +940,7 @@ describe('health rendering', () => {
 
   it('should fold the header at the terminal width rather than off the edge of it', () => {
     // Act — the same five counts on a terminal too narrow to hold them.
-    const lines = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, plainAt(80)).split('\n');
+    const lines = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, plainAt(80)).split('\n');
 
     // Assert — it breaks between counts, never inside one, and the fold is indented so it cannot be
     // mistaken for the first row.
@@ -947,7 +950,7 @@ describe('health rendering', () => {
 
   it('should say a check time the whole fleet shares ONCE, in the header', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, WIDE);
     const rows = rendered.split('\n').filter(line => /(NEEDS|UNKNOWN|HEALTHY)/u.test(line));
 
     // Assert — four copies of one fact used to sit in the widest column of every row, pushing the
@@ -965,7 +968,7 @@ describe('health rendering', () => {
     ];
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, new Map(), PLAIN_FLEET_PRESENTATION);
+    const rendered = renderHealth('fy', { at: NOW, accounts }, new Map(), PLAIN_FLEET_PRESENTATION);
 
     // Assert
     should(rendered.split('\n')[0]).equal('2 accounts · 1 needs sign-in · 1 healthy');
@@ -975,7 +978,7 @@ describe('health rendering', () => {
 
   it('should order the rows worst first rather than in manifest order', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, WIDE);
     const verdicts = rendered
       .split('\n')
       .flatMap(line => ['NEEDS LOGIN', 'NEEDS CREDENTIAL', 'UNKNOWN', 'HEALTHY'].filter(word => line.includes(word)));
@@ -987,7 +990,7 @@ describe('health rendering', () => {
 
   it('should line the verdicts up in one column whatever the names are', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, WIDE);
     const columns = new Set(
       rendered
         .split('\n')
@@ -1002,8 +1005,8 @@ describe('health rendering', () => {
 
   it('should carry severity in colour AND in a glyph, so a pipe loses nothing', () => {
     // Arrange / Act
-    const painted = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, labelled());
-    const bare = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, PLAIN_FLEET_PRESENTATION);
+    const painted = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, labelled());
+    const bare = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, PLAIN_FLEET_PRESENTATION);
 
     // Assert — colour is the SECOND channel and never the only one. `NO_COLOR`, a redirect and a
     // reader who cannot separate red from grey all keep the glyph, the column and the order.
@@ -1017,7 +1020,7 @@ describe('health rendering', () => {
 
   it('should mute UNKNOWN rather than paint it as a warning', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, labelled());
+    const rendered = renderHealth('fy', { at: NOW, accounts: oneOfEach }, everyName, labelled());
 
     // Assert — unknown is an honest absence of evidence, not a fault: it is what Codex correctly
     // publishes about itself, and a fleet whose every Codex row glowed amber would teach its owner
@@ -1034,7 +1037,7 @@ describe('health rendering', () => {
     const accounts = [healthRow({ accountId, verdict: 'needs_relogin', reason: 'oauth_token_rejected' })];
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, new Map([[accountId, 'Claude (default)']]), labelled());
+    const rendered = renderHealth('fy', { at: NOW, accounts }, new Map([[accountId, 'Claude (default)']]), labelled());
 
     // Assert
     should(rendered).containEql(`<command>fy fleet login ${accountId}</command>`);
@@ -1047,7 +1050,7 @@ describe('health rendering', () => {
     const accounts = [healthRow({ accountId, verdict: 'needs_relogin', reason: 'oauth_token_rejected' })];
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, new Map(), plainAt(40));
+    const rendered = renderHealth('fy', { at: NOW, accounts }, new Map(), plainAt(40));
 
     // Assert
     should(rendered.split('\n')).containEql(`      sign in again: fy fleet login ${accountId}`);
@@ -1069,7 +1072,7 @@ describe('health rendering', () => {
 
     // Act / Assert
     for (const account of cases) {
-      should(renderHealth({ at: NOW, accounts: [account] }, names, PLAIN_FLEET_PRESENTATION)).not.containEql(
+      should(renderHealth('fy', { at: NOW, accounts: [account] }, names, PLAIN_FLEET_PRESENTATION)).not.containEql(
         'fy fleet login',
       );
     }
@@ -1081,7 +1084,7 @@ describe('health rendering', () => {
     const accounts = [healthRow({ accountId: 'r', verdict: 'needs_relogin', reason: 'oauth_access_expired' })];
 
     // Act
-    const lines = renderHealth({ at: NOW, accounts }, new Map(), plainAt(48)).split('\n');
+    const lines = renderHealth('fy', { at: NOW, accounts }, new Map(), plainAt(48)).split('\n');
     const wrapped = lines.filter(line => line.startsWith('    ') && !line.trimStart().startsWith('fy '));
 
     // Assert — every continuation sits deeper than the two spaces a row starts at, and no line is
@@ -1097,9 +1100,12 @@ describe('health rendering', () => {
     const accounts = [healthRow({ accountId: 'r', verdict: 'needs_credentials', reason: 'static_credential_missing' })];
 
     // Act
-    const lines = renderHealth({ at: NOW, accounts }, new Map([['r', 'Claude (bulk, api key)']]), plainAt(44)).split(
-      '\n',
-    );
+    const lines = renderHealth(
+      'fy',
+      { at: NOW, accounts },
+      new Map([['r', 'Claude (bulk, api key)']]),
+      plainAt(44),
+    ).split('\n');
 
     // Assert — the row ends at its verdict, and the reason follows at the continuation indent.
     should(lines).containEql('  ✗ Claude (bulk, api key)  NEEDS CREDENTIAL');
@@ -1120,7 +1126,7 @@ describe('health rendering', () => {
     ];
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, names, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts }, names, WIDE);
 
     // Assert
     should(rendered).containEql('UNKNOWN  Codex offers no free check');
@@ -1143,7 +1149,7 @@ describe('health rendering', () => {
     ];
 
     // Act
-    const painted = renderHealth({ at: NOW, accounts }, new Map([['r', 'Claude (default)']]), labelled());
+    const painted = renderHealth('fy', { at: NOW, accounts }, new Map([['r', 'Claude (default)']]), labelled());
 
     // Assert — no command, and the SAME muted class as every other unknown rather than the red one a
     // reader has learned means "act on this". The clause keeps all three meanings the wording agreed:
@@ -1160,6 +1166,7 @@ describe('health rendering', () => {
     // Arrange / Act — "signed in, but this copy needs refreshing" was true and read as a chore. The
     // harness renews an aged-out access token itself the first time the account is used.
     const rendered = renderHealth(
+      'fy',
       { at: NOW, accounts: [healthRow({ verdict: 'unknown', reason: 'oauth_refreshable' })] },
       names,
       WIDE,
@@ -1181,7 +1188,7 @@ describe('health rendering', () => {
     ];
 
     // Act
-    const painted = renderHealth({ at: NOW, accounts }, new Map([[accountId, 'Claude (default)']]), labelled());
+    const painted = renderHealth('fy', { at: NOW, accounts }, new Map([[accountId, 'Claude (default)']]), labelled());
 
     // Assert — no command and no id; the good ink rather than the warning or the danger one; and no
     // "last check inconclusive", because an expired access token is exactly what the free check cannot
@@ -1203,7 +1210,7 @@ describe('health rendering', () => {
     ];
 
     // Act
-    const lines = renderHealth({ at: NOW, accounts }, new Map(), WIDE).split('\n');
+    const lines = renderHealth('fy', { at: NOW, accounts }, new Map(), WIDE).split('\n');
 
     // Assert — and it sorts between the two, because it needs nothing and is still unproved.
     should(lines[0]).equal('3 accounts · 1 unknown · 1 ready · 1 healthy · checked 4m ago');
@@ -1237,7 +1244,7 @@ describe('health rendering', () => {
     ]);
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, defaultNames, plainAt(80), logins);
+    const rendered = renderHealth('fy', { at: NOW, accounts }, defaultNames, plainAt(80), logins);
 
     // Assert — the whole report, because what it must NOT say matters as much as what it says.
     should(rendered).equal(
@@ -1267,7 +1274,7 @@ describe('health rendering', () => {
     ]);
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, new Map(), WIDE, logins);
+    const rendered = renderHealth('fy', { at: NOW, accounts }, new Map(), WIDE, logins);
 
     // Assert
     should(rendered).containEql('○ cla  READY');
@@ -1281,7 +1288,7 @@ describe('health rendering', () => {
     const accounts = [healthRow({ accountId: 'a' }), healthRow({ accountId: 'b' })];
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, new Map(), WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts }, new Map(), WIDE);
 
     // Assert
     should(rendered.split('\n')[0]).equal('2 accounts · 2 healthy · checked 4m ago');
@@ -1310,7 +1317,7 @@ describe('health rendering', () => {
     ]);
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, workNames, WIDE, logins);
+    const rendered = renderHealth('fy', { at: NOW, accounts }, workNames, WIDE, logins);
 
     // Assert — and the command says what it does before the opaque id it needs.
     should(rendered).containEql('this login also covers Claude (work, auto) and Claude (work, bulk)');
@@ -1322,6 +1329,7 @@ describe('health rendering', () => {
   it('should say what the command does, in the muted ink, and keep only the command copy-paste painted', () => {
     // Act
     const painted = renderHealth(
+      'fy',
       { at: NOW, accounts: [healthRow({ accountId: 'r', verdict: 'needs_relogin', reason: 'oauth_token_rejected' })] },
       new Map(),
       labelled(),
@@ -1334,7 +1342,12 @@ describe('health rendering', () => {
   it('should still say a check was inconclusive when the reason does not already say so', () => {
     // Arrange / Act — hiding a failed attempt is how a fleet reads healthy while every provider call
     // is failing, so the clause is suppressed only where it would be the same fact twice.
-    const rendered = renderHealth({ at: NOW, accounts: [healthRow({ lastCheckInconclusive: true })] }, names, WIDE);
+    const rendered = renderHealth(
+      'fy',
+      { at: NOW, accounts: [healthRow({ lastCheckInconclusive: true })] },
+      names,
+      WIDE,
+    );
 
     // Assert
     should(rendered).containEql('· last check inconclusive');
@@ -1350,7 +1363,7 @@ describe('health rendering', () => {
     ];
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts }, new Map(), PLAIN_FLEET_PRESENTATION);
+    const rendered = renderHealth('fy', { at: NOW, accounts }, new Map(), PLAIN_FLEET_PRESENTATION);
 
     // Assert
     should(rendered).containEql('? y  UNKNOWN  the last result is too old to trust · was HEALTHY');
@@ -1385,7 +1398,7 @@ describe('health rendering', () => {
 
   it('should say a credential is still the copy taken from this host, and when', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: [seedRow()] }, names, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: [seedRow()] }, names, WIDE);
 
     // Assert — the directory is the only thing a person can go and check, and the date is absolute
     // because a seed may be months old and "94d ago" is not something anybody can match to a memory.
@@ -1396,7 +1409,7 @@ describe('health rendering', () => {
 
   it('should keep the Claude consequence CONDITIONAL, because nothing here proves Claude rotates', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: [seedRow()] }, names, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: [seedRow()] }, names, WIDE);
 
     // Assert — the evidence for Claude is that a REPLACEMENT refresh token is stored, which is not
     // the same claim as the old one being invalidated. Nobody has measured that.
@@ -1420,7 +1433,7 @@ describe('health rendering', () => {
     ];
 
     // Act
-    const lines = renderHealth({ at: NOW, accounts }, names, WIDE).split('\n');
+    const lines = renderHealth('fy', { at: NOW, accounts }, names, WIDE).split('\n');
 
     // Assert — its own line, directly under the row, above the longer provenance sentence.
     const head = lines.findIndex(line => line.includes('READY'));
@@ -1433,6 +1446,7 @@ describe('health rendering', () => {
   it('should say nothing like it for Claude, whose rotation nobody has proved', () => {
     // Act
     const rendered = renderHealth(
+      'fy',
       { at: NOW, accounts: [seedRow({}, { verdict: 'unknown', reason: 'oauth_refreshable' })] },
       names,
       WIDE,
@@ -1445,6 +1459,7 @@ describe('health rendering', () => {
   it('should not warn about signing anybody out once the copy is its own login', () => {
     // Act
     const rendered = renderHealth(
+      'fy',
       {
         at: NOW,
         accounts: [seedRow({ state: 'own_login', rotation: 'single_use' }, { kind: 'codex' })],
@@ -1459,7 +1474,7 @@ describe('health rendering', () => {
 
   it('should hedge the whole sentence when this home credential could not be read', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: [seedRow({ state: 'undetermined' })] }, names, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: [seedRow({ state: 'undetermined' })] }, names, WIDE);
 
     // Assert — fail-closed, and SAID to be fail-closed. A locked keychain reads as "may belong to the
     // donor", and pretending that was a measurement would be the same overstatement in a new place.
@@ -1470,7 +1485,7 @@ describe('health rendering', () => {
 
   it('should say a home that has since rotated is its own, with no consequence attached', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: [seedRow({ state: 'own_login' })] }, names, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: [seedRow({ state: 'own_login' })] }, names, WIDE);
 
     // Assert — the risk has passed, so no sentence about signing anybody out is printed at all. This
     // line is also what turns a SILENT row into information: silence means nothing was recorded.
@@ -1482,7 +1497,7 @@ describe('health rendering', () => {
 
   it('should say nothing at all about an account with no seed record', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] }, names, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: [healthRow()] }, names, WIDE);
 
     // Assert — absence of a record is NOT evidence of an own login, so the row makes no claim either
     // way. Rendering it as "own login" would clear exactly the hosts this cannot say anything about.
@@ -1493,6 +1508,7 @@ describe('health rendering', () => {
   it('should print the disclosure above the command it changes the meaning of', () => {
     // Arrange — an account a login repairs, whose credential is still the donor's copy.
     const rendered = renderHealth(
+      'fy',
       { at: NOW, accounts: [seedRow({}, { verdict: 'needs_relogin', reason: 'oauth_access_expired' })] },
       names,
       WIDE,
@@ -1508,13 +1524,13 @@ describe('health rendering', () => {
   it('should print the raw harness when the daemon named one this build does not know', () => {
     // Assert — `kind` is an open string on the wire so a third harness stays conformant. A closed
     // lookup would print `undefined` in the middle of a sentence about somebody's credential.
-    const rendered = renderHealth({ at: NOW, accounts: [seedRow({}, { kind: 'gemini' })] }, names, WIDE);
+    const rendered = renderHealth('fy', { at: NOW, accounts: [seedRow({}, { kind: 'gemini' })] }, names, WIDE);
     should(unwrapped(rendered)).containEql("this host's own gemini install");
   });
 
   it('should wrap the disclosure under the account rather than against the left margin', () => {
     // Arrange — an 80-column terminal, which is what a pipe and a default window both give.
-    const lines = renderHealth({ at: NOW, accounts: [seedRow()] }, names, plainAt(80)).split('\n');
+    const lines = renderHealth('fy', { at: NOW, accounts: [seedRow()] }, names, plainAt(80)).split('\n');
 
     // Assert — every line of it is indented, so a wrapped clause never reads as the next account.
     const disclosure = lines.filter(line => line.trim().startsWith('seeded copy:') || line.includes('rotates refresh'));
@@ -1527,6 +1543,7 @@ describe('health rendering', () => {
     // removed the account. A verdict about something the manifest cannot name is STILL a true verdict,
     // so the row is printed with the id rather than hidden or given an invented name.
     const rendered = renderHealth(
+      'fy',
       { at: NOW, accounts: [healthRow({ accountId: 'departed' })] },
       names,
       PLAIN_FLEET_PRESENTATION,
@@ -1545,6 +1562,7 @@ describe('health rendering', () => {
 
     // Act
     const rendered = renderHealth(
+      'fy',
       { at: NOW, accounts },
       new Map([
         ['long', long],
@@ -1562,6 +1580,7 @@ describe('health rendering', () => {
     // Arrange / Act — the harness reads an environment variable and never consults its own credential
     // store, so telling somebody to sign in sends them to do something that cannot work.
     const rendered = renderHealth(
+      'fy',
       { at: NOW, accounts: [healthRow({ verdict: 'needs_credentials', reason: 'static_credential_rejected' })] },
       names,
       PLAIN_FLEET_PRESENTATION,
@@ -1575,6 +1594,7 @@ describe('health rendering', () => {
   it('should call a 403 healthy and say the quota is what is unknown', () => {
     // Arrange / Act — the rule the whole feature turns on.
     const rendered = renderHealth(
+      'fy',
       { at: NOW, accounts: [healthRow({ reason: 'usage_scope_unavailable' })] },
       names,
       WIDE,
@@ -1589,6 +1609,7 @@ describe('health rendering', () => {
   it('should say a check has never run rather than inventing an instant', () => {
     // Arrange / Act
     const rendered = renderHealth(
+      'fy',
       {
         at: NOW,
         accounts: [healthRow({ verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null })],
@@ -1606,7 +1627,7 @@ describe('health rendering', () => {
   it('should state that it spends nothing, every time, as an aside rather than as a heading', () => {
     // The command this replaced launched every account's wrapper and asked a model for a sentinel.
     // Somebody who used it before has every reason to assume this one still bills them.
-    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] }, names, labelled());
+    const rendered = renderHealth('fy', { at: NOW, accounts: [healthRow()] }, names, labelled());
 
     // Assert
     should(rendered).containEql(
@@ -1615,7 +1636,7 @@ describe('health rendering', () => {
   });
 
   it('should explain an empty health snapshot without pretending a check ran', () => {
-    should(renderHealth({ at: NOW, accounts: [] }, names, PLAIN_FLEET_PRESENTATION)).equal(
+    should(renderHealth('fy', { at: NOW, accounts: [] }, names, PLAIN_FLEET_PRESENTATION)).equal(
       'No accounts to report health for.',
     );
   });
@@ -1831,7 +1852,7 @@ describe('renderIdentityStatus', () => {
 describe('renderScaffoldResult', () => {
   it('should list what it created and always say what must go on PATH', () => {
     // Act
-    const actual = renderScaffoldResult(scaffoldResult());
+    const actual = renderScaffoldResult('fy', scaffoldResult());
 
     // Assert
     should(actual).containEql('prepared the fleet in /state/fleet');
@@ -1841,7 +1862,7 @@ describe('renderScaffoldResult', () => {
 
   it('should still print the PATH line on a re-run that changed nothing', () => {
     // Act — the line is the one step nothing else can do for the person.
-    const actual = renderScaffoldResult(scaffoldResult({ created: [], kept: ['/state/fleet/config.yaml'] }));
+    const actual = renderScaffoldResult('fy', scaffoldResult({ created: [], kept: ['/state/fleet/config.yaml'] }));
 
     // Assert
     should(actual).containEql('already set up');
@@ -1854,6 +1875,7 @@ describe('renderScaffoldResult', () => {
   it('should say directly which harnesses this run declared accounts for', () => {
     // Act
     const actual = renderScaffoldResult(
+      'fy',
       scaffoldResult({
         created: [],
         updated: ['/state/fleet/config.yaml'],
@@ -1870,6 +1892,7 @@ describe('renderScaffoldResult', () => {
   it('should name every harness when a host had both detected', () => {
     // Act
     const actual = renderScaffoldResult(
+      'fy',
       scaffoldResult({ created: ['/state/fleet/config.yaml'], declaredAccounts: ['claude', 'codex'] }),
     );
 
@@ -1879,7 +1902,7 @@ describe('renderScaffoldResult', () => {
 
   it('should not claim a directory it does not know', () => {
     // Act
-    const actual = renderScaffoldResult(scaffoldResult({ directories: [] }));
+    const actual = renderScaffoldResult('fy', scaffoldResult({ directories: [] }));
 
     // Assert
     should(actual).containEql('prepared the fleet in its directory');
@@ -1889,7 +1912,7 @@ describe('renderScaffoldResult', () => {
 describe('rendering how an apply ended badly', () => {
   it('should lead with the verdict, not the error, for a clean rollback', () => {
     // Act
-    const actual = renderFleetApplyFailure(ROLLED_BACK);
+    const actual = renderFleetApplyFailure('fy', ROLLED_BACK);
 
     // Assert — "what is my host now" is the question that decides what happens next
     should(actual.split('\n')[1]).containEql('the host is exactly as it was');
@@ -1898,7 +1921,7 @@ describe('rendering how an apply ended badly', () => {
 
   it('should print an unrestored path with no surviving backup without inventing one', () => {
     // Act
-    const actual = renderFleetApplyFailure(ROLLBACK_INCOMPLETE);
+    const actual = renderFleetApplyFailure('fy', ROLLBACK_INCOMPLETE);
 
     // Assert
     should(actual).containEql('/state/fleet/bin/fy-claude-work — still held open');
@@ -1909,7 +1932,7 @@ describe('rendering how an apply ended badly', () => {
 
   it('should count a single unrestored path in the singular', () => {
     // Act
-    const actual = renderFleetApplyFailure({
+    const actual = renderFleetApplyFailure('fy', {
       kind: 'rollback-incomplete',
       failedOperation: 'file /a',
       reason: 'nope',
@@ -1922,7 +1945,7 @@ describe('rendering how an apply ended badly', () => {
 
   it('should report the history migrations that DID complete before the failure', () => {
     // Act — the committed state is the point; a partial migration is part of it
-    const actual = renderFleetApplyFailure({
+    const actual = renderFleetApplyFailure('fy', {
       kind: 'history-failed-after-commit',
       failedHarness: 'codex',
       reason: 'pool vanished',
@@ -1942,7 +1965,7 @@ describe('rendering how an apply ended badly', () => {
 
   it('should say nothing about residue when an apply left none', () => {
     // Act
-    const actual = renderFleetApplyFailure({
+    const actual = renderFleetApplyFailure('fy', {
       kind: 'history-failed-after-commit',
       failedHarness: 'claude',
       reason: 'nope',
@@ -1955,7 +1978,7 @@ describe('rendering how an apply ended badly', () => {
 
   it('should keep a successful apply unchanged when there is no residue', () => {
     // Act — the success surface must not grow noise for the ordinary case
-    const actual = renderApplyResult(applyResult());
+    const actual = renderApplyResult('fy', applyResult());
 
     // Assert
     should(actual).not.containEql('moved-aside');
@@ -1964,7 +1987,7 @@ describe('rendering how an apply ended badly', () => {
 
   it('should count one moved-aside original in the singular', () => {
     // Act
-    const actual = renderApplyResult(applyResult({ backupResidue: ['/state/fleet/.bak/one'] }));
+    const actual = renderApplyResult('fy', applyResult({ backupResidue: ['/state/fleet/.bak/one'] }));
 
     // Assert
     should(actual).containEql('1 moved-aside original');
@@ -1974,7 +1997,7 @@ describe('rendering how an apply ended badly', () => {
 describe('rendering residue and displacement a failed apply left behind', () => {
   it('should keep displaced content in its own block, never folded into unrestored', () => {
     // Act
-    const actual = renderFleetApplyFailure(ROLLBACK_WITH_DISPLACED);
+    const actual = renderFleetApplyFailure('fy', ROLLBACK_WITH_DISPLACED);
 
     // Assert — unrestored is OUR state we could not put back; displaced is SOMEBODY ELSE'S file now
     // living under another name. A reader acts differently on each, so they must not be one list.
@@ -1987,7 +2010,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should say nothing about displacement when nothing of anyone else was moved', () => {
     // Act — the ordinary rollback-incomplete carries no displaced entries
-    const actual = renderFleetApplyFailure(ROLLBACK_INCOMPLETE);
+    const actual = renderFleetApplyFailure('fy', ROLLBACK_INCOMPLETE);
 
     // Assert
     should(actual).not.containEql('moved aside');
@@ -1995,7 +2018,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should name a stuck apply claim and say it blocks the next apply', () => {
     // Act
-    const actual = renderFleetApplyFailure(ROLLED_BACK, LOCK_RESIDUE);
+    const actual = renderFleetApplyFailure('fy', ROLLED_BACK, LOCK_RESIDUE);
 
     // Assert — residue, never a failure, but it is not cosmetic either
     should(actual).containEql(`the exclusive apply claim at ${LOCK_RESIDUE} could not be cleared`);
@@ -2004,7 +2027,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should stop calling a re-run safe when a claim is still blocking it', () => {
     // Act — "the host is exactly as it was" is true; "safe to run again" would not be
-    const actual = renderFleetApplyFailure(ROLLED_BACK, LOCK_RESIDUE);
+    const actual = renderFleetApplyFailure('fy', ROLLED_BACK, LOCK_RESIDUE);
 
     // Assert
     should(actual).not.containEql('safe to fix the cause');
@@ -2013,7 +2036,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should still call a clean rollback safe to re-run', () => {
     // Act
-    const actual = renderFleetApplyFailure(ROLLED_BACK);
+    const actual = renderFleetApplyFailure('fy', ROLLED_BACK);
 
     // Assert
     should(actual).containEql('safe to fix the cause and run "fy fleet apply" again');
@@ -2022,7 +2045,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should carry a stuck claim through the unverified-state outcome too', () => {
     // Act
-    const actual = renderFleetApplyFailure(ROLLBACK_INCOMPLETE, LOCK_RESIDUE);
+    const actual = renderFleetApplyFailure('fy', ROLLBACK_INCOMPLETE, LOCK_RESIDUE);
 
     // Assert
     should(actual).containEql('UNVERIFIED STATE');
@@ -2031,7 +2054,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should report a claim the committed state itself carries', () => {
     // Act
-    const actual = renderFleetApplyFailure({
+    const actual = renderFleetApplyFailure('fy', {
       kind: 'history-failed-after-commit',
       failedHarness: 'claude',
       reason: 'pool vanished',
@@ -2046,6 +2069,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
   it('should not print the same stuck claim twice when both sides carry it', () => {
     // Act — the committed block and the error both know about one claim; it is still one claim
     const actual = renderFleetApplyFailure(
+      'fy',
       {
         kind: 'history-failed-after-commit',
         failedHarness: 'claude',
@@ -2062,6 +2086,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
   it('should report a claim the error knows about that the committed state does not', () => {
     // Act
     const actual = renderFleetApplyFailure(
+      'fy',
       {
         kind: 'history-failed-after-commit',
         failedHarness: 'claude',
@@ -2077,7 +2102,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should report a stuck claim on a SUCCESSFUL apply, without calling it a failure', () => {
     // Act
-    const actual = renderApplyResult(applyResult({ lockResidue: LOCK_RESIDUE }));
+    const actual = renderApplyResult('fy', applyResult({ lockResidue: LOCK_RESIDUE }));
 
     // Assert — the fleet landed; the claim is residue that blocks the next run
     should(actual).containEql('applied 1 account in 2 operations');
@@ -2087,7 +2112,7 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
   it('should stay quiet on a successful apply that left no claim', () => {
     // Act
-    const actual = renderApplyResult(applyResult());
+    const actual = renderApplyResult('fy', applyResult());
 
     // Assert
     should(actual).not.containEql('exclusive apply claim');
@@ -2347,5 +2372,55 @@ describe('rendering the sharing report', () => {
 
     // Assert — a row that is simply missing reads as "I did not look".
     should(actual).match(/skills {3}—/u);
+  });
+});
+
+describe('naming the binary every hint tells a person to run', () => {
+  // Not the shipped name: after `rename.sh --bin foo` a hint that spelled "fy" names a command that is
+  // gone, so each renderer must say the name it is given and nothing else.
+  const BIN = 'foo';
+
+  it('should name it in the next step for a fleet that declares nothing', () => {
+    // Act
+    const applied = renderApplyResult(BIN, applyResult({ accountCount: 0, operationCount: 4 }));
+    const listed = renderManifest(BIN, manifest([]));
+
+    // Assert
+    for (const rendered of [applied, listed]) {
+      should(rendered).containEql('run "foo fleet apply". On a new host, "foo fleet init --first-account"');
+      should(rendered).not.match(/\bfy fleet/u);
+    }
+  });
+
+  it('should name it in the retry advice after a rolled-back apply', () => {
+    // Act
+    const clean = renderFleetApplyFailure(BIN, ROLLED_BACK);
+    const stuck = renderFleetApplyFailure(BIN, ROLLED_BACK, LOCK_RESIDUE);
+
+    // Assert
+    should(clean).containEql('safe to fix the cause and run "foo fleet apply" again');
+    should(stuck).containEql('then run "foo fleet apply" again');
+  });
+
+  it('should name it in the sign-in remedy under a health row', () => {
+    // Arrange
+    const accountId = '34ffb79f-786c-4179-a8aa-f2180a76252a';
+    const accounts = [healthRow({ accountId, verdict: 'needs_relogin', reason: 'oauth_token_rejected' })];
+
+    // Act
+    const rendered = renderHealth(BIN, { at: NOW, accounts }, new Map(), plainAt(40));
+
+    // Assert
+    should(rendered.split('\n')).containEql(`      sign in again: foo fleet login ${accountId}`);
+  });
+
+  it('should name it in what an init leaves a person to do', () => {
+    // Act
+    const declared = renderScaffoldResult(BIN, scaffoldResult({ declaredAccounts: ['claude'] }));
+    const bare = renderScaffoldResult(BIN, scaffoldResult());
+
+    // Assert
+    should(declared).containEql('Run "foo fleet apply" to materialise their wrappers.');
+    should(bare).containEql('run "foo fleet apply".');
   });
 });

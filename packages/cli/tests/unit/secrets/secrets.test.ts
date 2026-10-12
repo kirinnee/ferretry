@@ -186,6 +186,8 @@ describe('fy secret use', () => {
     // Assert
     expect(out.exitCode).toBe(SECRET_USE_UNFINISHED_EXIT);
     expect(out.errors.join('\n')).toContain('did not finish');
+    // Says who truncated it without naming the product, which a rename would leave stale.
+    expect(out.errors).toContain('(output was truncated by the daemon)');
   });
 
   it('should report a spawn failure as its own outcome', async () => {
@@ -394,6 +396,25 @@ describe('the command surface', () => {
 
     // Assert — a credential on a command line is in shell history and in /proc for every account.
     expect(set?.registeredArguments.map(argument => argument.name())).toEqual(['name']);
+  });
+
+  it('should name the binary it runs as in the set example', async () => {
+    // Arrange — not the shipped name, so an example that spells "fy" cannot pass.
+    let help = '';
+    const program = new Command().name('foo').exitOverride();
+    program.configureOutput({
+      writeOut: text => {
+        help += text;
+      },
+      writeErr: () => {},
+    });
+    registerSecretCommands(program, controller(new FakeGateway(), new RecordingOutput()));
+
+    // Act
+    await expect(program.parseAsync(['node', 'foo', 'secret', 'set', '--help'])).rejects.toThrow();
+
+    // Assert
+    expect(help).toContain('printf %s "$KEY" | foo secret set ANTHROPIC_KEY');
   });
 });
 

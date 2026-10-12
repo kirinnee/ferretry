@@ -50,6 +50,7 @@ const list = (options: CommanderOptions, key: string): string[] =>
  * becomes a one-line message and an exit code rather than a stack trace.
  */
 export function registerSessionCommands(program: Command, deps: SessionCommandDeps): void {
+  const bin = program.name();
   const guard = <A extends unknown[]>(run: (...args: A) => Promise<void>) => {
     return async (...args: A): Promise<void> => {
       try {
@@ -62,11 +63,11 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
 
   program
     .command('start')
-    .description('start a session on one of your fleet accounts marked "auto" in `fy fleet ls`')
+    .description(`start a session on one of your fleet accounts marked "auto" in \`${bin} fleet ls\``)
     .argument('[prompt...]', 'the task prompt; required for --mode auto')
     .requiredOption(
       '-a, --agent <agent>',
-      'the account to run the session on — one `fy fleet ls` marks "auto", such as claude-auto-default. ' +
+      `the account to run the session on — one \`${bin} fleet ls\` marks "auto", such as claude-auto-default. ` +
         'An account without "auto" (such as claude-default) is for using the tool yourself in a terminal ' +
         'and cannot run sessions, in either --mode',
     )

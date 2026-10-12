@@ -97,6 +97,7 @@ describe('CLI shared-history apply', () => {
       recommendations: new RecordingRecommendationGateway(),
       out: output,
       presentation: PLAIN_FLEET_PRESENTATION,
+      binaryName: 'fy',
     });
     const pool = path.join(layout.fleetDirectory, 'shared', 'claude');
     const pooledFile = path.join(pool, 'projects', 'project', 'conversation.jsonl');

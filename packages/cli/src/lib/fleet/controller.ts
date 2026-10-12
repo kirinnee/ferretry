@@ -114,6 +114,8 @@ export interface FleetControllerDeps {
    * a test too and report differently on every developer's machine.
    */
   readonly presentation: FleetPresentation;
+  /** The shipped command name, so every hint names a command that exists after a rename. */
+  readonly binaryName: string;
 }
 
 /**
@@ -163,7 +165,7 @@ export class FleetController {
    */
   async init(options: FleetInitOptions): Promise<void> {
     const result = await this.deps.scaffolder.scaffold({ firstAccount: options.firstAccount });
-    this.#report(result, options, () => renderScaffoldResult(result, options.firstAccount));
+    this.#report(result, options, () => renderScaffoldResult(this.deps.binaryName, result, options.firstAccount));
   }
 
   /**
@@ -199,7 +201,7 @@ export class FleetController {
     }
     try {
       const result = await this.deps.applier.apply(plan);
-      this.#report(result, options, () => renderApplyResult(result));
+      this.#report(result, options, () => renderApplyResult(this.deps.binaryName, result));
     } catch (error) {
       if (!(error instanceof FleetApplyFailureError)) throw error;
       if (options.json === true) {
@@ -208,13 +210,15 @@ export class FleetController {
       }
       // `cause` keeps the typed failure reachable for any embedder that wants it; the message is
       // replaced because the root prints exactly one thing and it should be the useful one.
-      throw new Error(renderFleetApplyFailure(error.failure, error.lockResidue), { cause: error });
+      throw new Error(renderFleetApplyFailure(this.deps.binaryName, error.failure, error.lockResidue), {
+        cause: error,
+      });
     }
   }
 
   async list(options: FleetCommandOptions): Promise<void> {
     const manifest = await this.#manifest();
-    this.#report(manifest, options, () => renderManifest(manifest));
+    this.#report(manifest, options, () => renderManifest(this.deps.binaryName, manifest));
   }
 
   /**
@@ -268,7 +272,7 @@ export class FleetController {
     // The one report whose colour MEANS something per line, so it is the one that must reach stdout
     // unrepainted. Everything else here says "that worked" in one colour, which `success` supplies.
     this.#reportRendered(snapshot, options, () =>
-      renderHealth(snapshot, fleetAccountNames(manifest), this.deps.presentation, logins),
+      renderHealth(this.deps.binaryName, snapshot, fleetAccountNames(manifest), this.deps.presentation, logins),
     );
   }
 
@@ -339,7 +343,7 @@ export class FleetController {
 
   async recommend(words: readonly string[], options: FleetRecommendOptions): Promise<void> {
     const task = words.join(' ').replaceAll(/\s+/gu, ' ').trim();
-    if (task === '') throw new Error('describe the task: fy fleet recommend "<what needs doing>"');
+    if (task === '') throw new Error(`describe the task: ${this.deps.binaryName} fleet recommend "<what needs doing>"`);
     const recommendation = await this.deps.recommendations.recommend({ task, usage: options.usage !== false });
     this.#report(recommendation, options, () => renderRecommendation(recommendation));
   }
@@ -364,7 +368,8 @@ export class FleetController {
   /** The provisioned manifest, or a message naming the command that would create one. */
   async #manifest(): Promise<FleetManifest> {
     const manifest = await this.deps.manifests.load();
-    if (manifest === undefined) throw new Error('no fleet manifest on this host — run "fy fleet apply" first');
+    if (manifest === undefined)
+      throw new Error(`no fleet manifest on this host — run "${this.deps.binaryName} fleet apply" first`);
     return manifest;
   }
 

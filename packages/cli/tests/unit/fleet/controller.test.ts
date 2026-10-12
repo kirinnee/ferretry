@@ -64,6 +64,7 @@ function controller(overrides: Partial<FleetControllerDeps> = {}): {
     recommendations: new RecordingRecommendationGateway(),
     out,
     presentation: PLAIN_FLEET_PRESENTATION,
+    binaryName: 'fy',
     ...overrides,
   };
   return { subject: new FleetController(deps), deps, out };
@@ -152,10 +153,10 @@ describe('listing the provisioned fleet', () => {
 
   it('should name the command that would create a manifest, on a host with none', async () => {
     // Arrange
-    const { subject } = controller({ manifests: new StubManifestSource(null) });
+    const { subject } = controller({ manifests: new StubManifestSource(null), binaryName: 'foo' });
 
     // Act + Assert
-    await should(subject.list({})).be.rejectedWith('no fleet manifest on this host — run "fy fleet apply" first');
+    await should(subject.list({})).be.rejectedWith('no fleet manifest on this host — run "foo fleet apply" first');
   });
 
   it('should emit the manifest under --json', async () => {
@@ -451,10 +452,12 @@ describe('recommending a team', () => {
   it('should refuse an empty task rather than asking the daemon to guess', async () => {
     // Arrange
     const recommendations = new RecordingRecommendationGateway();
-    const { subject } = controller({ recommendations });
+    const { subject } = controller({ recommendations, binaryName: 'foo' });
 
-    // Act + Assert
-    await should(subject.recommend(['   '], {})).be.rejectedWith(/describe the task/u);
+    // Act + Assert — the example names the binary it was given, so a rename never strands it.
+    await should(subject.recommend(['   '], {})).be.rejectedWith(
+      'describe the task: foo fleet recommend "<what needs doing>"',
+    );
     should(recommendations.requests).be.empty();
   });
 

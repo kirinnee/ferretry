@@ -14,22 +14,24 @@ function stdin(text: string): NodeJS.ReadableStream {
 
 describe('reading a value from stdin', () => {
   it('should read a piped value', async () => {
-    expect(await new StdinSecretValue(stdin('sk-live-0123456789')).read()).toBe('sk-live-0123456789');
+    expect(await new StdinSecretValue('fy', stdin('sk-live-0123456789')).read()).toBe('sk-live-0123456789');
   });
 
   it('should strip exactly one trailing newline, so echo and printf agree', async () => {
     // Assert — otherwise half the people using this store a credential with a newline welded on and
     // get a signature failure they cannot see.
-    expect(await new StdinSecretValue(stdin('sk-live-0123456789\n')).read()).toBe('sk-live-0123456789');
-    expect(await new StdinSecretValue(stdin('sk-live-0123456789\n\n')).read()).toBe('sk-live-0123456789\n');
+    expect(await new StdinSecretValue('fy', stdin('sk-live-0123456789\n')).read()).toBe('sk-live-0123456789');
+    expect(await new StdinSecretValue('fy', stdin('sk-live-0123456789\n\n')).read()).toBe('sk-live-0123456789\n');
   });
 
   it('should keep other whitespace, which can be load-bearing in a key', async () => {
-    expect(await new StdinSecretValue(stdin('  padded-secret  ')).read()).toBe('  padded-secret  ');
+    expect(await new StdinSecretValue('fy', stdin('  padded-secret  ')).read()).toBe('  padded-secret  ');
   });
 
   it('should refuse an empty stdin with the spelling that works', async () => {
-    await expect(new StdinSecretValue(stdin('')).read()).rejects.toThrow(/printf/u);
+    await expect(new StdinSecretValue('foo', stdin('')).read()).rejects.toThrow(
+      /printf %s "\$KEY" \| foo secret set NAME/u,
+    );
   });
 
   it('should read a multi-chunk stream whole', async () => {
@@ -37,7 +39,7 @@ describe('reading a value from stdin', () => {
     const stream = Readable.from([Buffer.from('-----BEGIN'), Buffer.from(' KEY-----\n')]);
 
     // Act / Assert
-    expect(await new StdinSecretValue(stream).read()).toBe('-----BEGIN KEY-----');
+    expect(await new StdinSecretValue('fy', stream).read()).toBe('-----BEGIN KEY-----');
   });
 });
 

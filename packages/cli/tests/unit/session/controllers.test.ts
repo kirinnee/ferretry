@@ -27,7 +27,7 @@ describe('StartSessionController', () => {
     const api = new RecordingApi({ start: sessionView({ teammate: 'Hayden' }) });
     const files = new FakeFiles({ '/tmp/brief.md': 'the long brief' });
     const { io, presenter } = capturedPresenter();
-    const controller = new StartSessionController(api, files, presenter, HERE);
+    const controller = new StartSessionController(api, files, presenter, HERE, 'fy');
 
     // Act
     await controller.execute({ agent: 'claude-alpha', mode: 'auto', prompt: 'do it', promptFile: '/tmp/brief.md' });
@@ -43,7 +43,7 @@ describe('StartSessionController', () => {
     const api = new RecordingApi({ start: sessionView() });
     const files = new FakeFiles({}, { 'shot.png': { filename: 'shot.png', mime: 'image/png', base64: 'AAAA' } });
     const { presenter } = capturedPresenter();
-    const controller = new StartSessionController(api, files, presenter, HERE);
+    const controller = new StartSessionController(api, files, presenter, HERE, 'fy');
 
     // Act
     await controller.execute({
@@ -63,7 +63,7 @@ describe('StartSessionController', () => {
     // Arrange
     const api = new RecordingApi({ start: sessionView() });
     const { io, presenter } = capturedPresenter();
-    const controller = new StartSessionController(api, new FakeFiles(), presenter, HERE);
+    const controller = new StartSessionController(api, new FakeFiles(), presenter, HERE, 'fy');
 
     // Act
     await controller.execute({ agent: 'claude-alpha', mode: 'auto', prompt: 'go', turnTimeout: 60, json: true });
@@ -77,20 +77,22 @@ describe('StartSessionController', () => {
     // Arrange
     const api = new RecordingApi({ start: sessionView({}, { status: 'starting' }) });
     const { io, presenter } = capturedPresenter();
-    const controller = new StartSessionController(api, new FakeFiles(), presenter, HERE);
+    const controller = new StartSessionController(api, new FakeFiles(), presenter, HERE, 'foo');
 
     // Act
     await controller.execute({ agent: 'claude-alpha', mode: 'auto', prompt: 'go' });
 
     // Assert
     should(io.err.join('\n')).match(/still launching in the background/);
+    // The hint names the binary it was given, so a renamed CLI never advises a command that is gone.
+    should(io.err.join('\n')).match(/watch it with `foo ps` or `foo status /);
   });
 
   it('should refuse an auto start with no prompt before calling the daemon', async () => {
     // Arrange
     const api = new RecordingApi();
     const { presenter } = capturedPresenter();
-    const controller = new StartSessionController(api, new FakeFiles(), presenter, HERE);
+    const controller = new StartSessionController(api, new FakeFiles(), presenter, HERE, 'fy');
 
     // Act
     const failure = await controller.execute({ agent: 'claude-alpha', mode: 'auto' }).catch((error: Error) => error);

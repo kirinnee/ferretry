@@ -14,14 +14,20 @@ import type { ISecretValueSource } from '../../lib/secrets/ports.ts';
  * produces a failure whose cause is invisible.
  */
 export class StdinSecretValue implements ISecretValueSource {
-  constructor(private readonly stream: NodeJS.ReadableStream = process.stdin) {}
+  /** `binaryName` is the shipped command name, so the hint names a command that exists. */
+  constructor(
+    private readonly binaryName: string,
+    private readonly stream: NodeJS.ReadableStream = process.stdin,
+  ) {}
 
   async read(): Promise<string> {
     const chunks: Buffer[] = [];
     for await (const chunk of this.stream) chunks.push(Buffer.from(chunk));
     const text = Buffer.concat(chunks).toString('utf8');
     if (text === '')
-      throw new Error('no value on stdin — pipe the secret in, e.g. `printf %s "$KEY" | fy secret set NAME`');
+      throw new Error(
+        `no value on stdin — pipe the secret in, e.g. \`printf %s "$KEY" | ${this.binaryName} secret set NAME\``,
+      );
     return text.endsWith('\n') ? text.slice(0, -1) : text;
   }
 }

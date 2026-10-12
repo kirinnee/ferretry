@@ -21,6 +21,8 @@ export class StartSessionController {
     private readonly files: ISessionFiles,
     private readonly presenter: SessionPresenter,
     private readonly environment: SessionEnvironment,
+    /** The shipped command name, so the follow-up hint names commands that exist. */
+    private readonly binaryName: string,
   ) {}
 
   async execute(flags: StartCommandFlags): Promise<void> {
@@ -37,7 +39,7 @@ export class StartSessionController {
     // agent keeps coming up, so say where to watch it rather than implying something broke.
     if (view.state.status === 'starting')
       this.presenter.note(
-        `note: ${view.config.id} is still launching in the background — watch it with \`fy ps\` or \`fy status ${view.config.id}\``,
+        `note: ${view.config.id} is still launching in the background — watch it with \`${this.binaryName} ps\` or \`${this.binaryName} status ${view.config.id}\``,
       );
   }
 }

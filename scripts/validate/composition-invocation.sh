@@ -37,6 +37,17 @@ set -euo pipefail
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
+# Each composition root is its package's bin entry, read from the manifest rather than spelled, so a
+# rename of either binary moves the file this gate reads instead of leaving it reading nothing.
+bin_entry() {
+  local entry
+  entry="$(jq -r '.bin | to_entries[0].value' "$1/package.json")"
+  [ -z "${entry}" ] || [ "${entry}" = "null" ] && echo "❌ no .bin entry in $1/package.json" >&2 && exit 1
+  printf '%s/%s\n' "$1" "${entry}"
+}
+daemon_root="$(bin_entry packages/daemon)"
+cli_root="$(bin_entry packages/cli)"
+
 status=0
 blocked_file="scripts/validate/invocation-blocked.txt"
 declared=""
@@ -147,8 +158,8 @@ check_root() {
   fi
 }
 
-check_root packages/daemon/bin/fyd.ts DaemonWorld packages/daemon/src
-check_root packages/cli/bin/fy.ts CliWorld packages/cli/src
+check_root "${daemon_root}" DaemonWorld packages/daemon/src
+check_root "${cli_root}" CliWorld packages/cli/src
 
 if [ "${status}" -ne 0 ]; then
   echo "   Each is a capability the product does not have: the code is built, tested and" >&2
