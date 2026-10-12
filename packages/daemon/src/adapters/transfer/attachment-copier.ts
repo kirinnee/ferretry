@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { type AttachmentFacet, AttachmentFacetSchema, AttachmentViewSchema } from '@ferretry/protocol';
+import { type AttachmentFacet, AttachmentFacetSchema } from '@ferretry/protocol';
+import { parseStoredAttachmentManifest, type StoredAttachment } from '../../lib/attachments/index.ts';
 import type { TransferAttachmentCopier, TransferAttachmentCopyInput } from '../../lib/transfer/types.ts';
 import { type DurableArtifactIo, TransferArtifactDurability } from './durable-artifact.ts';
 
 const ATTACHMENT_ID = /^att_[0-9a-f]{64}$/;
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const SAFE_NAME = /^[^/\\\0]+$/;
-const STORED_MANIFEST_KEYS = new Set(['id', 'filename', 'mime', 'size', 'sha256', 'createdAt', 'encrypted']);
 
 export type AttachmentCopyFailure = 'invalid' | 'not_found' | 'corrupt';
 
@@ -19,16 +19,6 @@ export class SessionAttachmentCopyError extends Error {
   ) {
     super(message);
   }
-}
-
-interface StoredAttachment {
-  readonly id: string;
-  readonly filename: string;
-  readonly mime: string;
-  readonly size: number;
-  readonly sha256: string;
-  readonly createdAt: string;
-  readonly encrypted?: { readonly kind: 'pdf' };
 }
 
 type PlannedAttachment = AttachmentFacet['attachments'][number];
@@ -65,10 +55,9 @@ type PlannedAttachment = AttachmentFacet['attachments'][number];
  * names still resolve to those inodes — rather than trusting that reading it back means it is on the
  * medium.
  *
- * INTEGRATION NOTE: construct it with the same per-session layout `SessionAttachmentStore` uses —
- * `new FileSessionAttachmentCopier(sessionId => join(paths.home, 'attachments', daemonId,
- * sessionId))` — so the explicit `newSessionId` lands in the exact store a later `download` /
- * `unlock` reads.
+ * INTEGRATION NOTE: construct it with the per-session resolver the store's own originals adapter
+ * uses — `sessionId => attachmentDirectory(paths.state, daemonId, sessionId)` — so the explicit
+ * `newSessionId` lands in the exact tree a later `download` / `unlock` reads.
  */
 export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
   private readonly durability: TransferArtifactDurability;
@@ -190,52 +179,13 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
     } catch {
       throw new SessionAttachmentCopyError('corrupt', 'source attachment manifest is not valid JSON');
     }
-    const record: Readonly<Record<string, unknown>> =
-      typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-        ? (parsed as Readonly<Record<string, unknown>>)
-        : {};
-    // The raw source manifest is copied verbatim. Reject fields outside the durable manifest before
-    // that copy, otherwise an unplanned field could cross into the target (or survive there on
-    // replay) even though the semantic comparison below never saw it.
-    const hasOnlyDurableFields = Object.keys(record).every(key => STORED_MANIFEST_KEYS.has(key));
-    const encrypted = record.encrypted;
-    const encryptionIsDurable =
-      encrypted === undefined ||
-      (typeof encrypted === 'object' &&
-        encrypted !== null &&
-        !Array.isArray(encrypted) &&
-        Object.keys(encrypted).length === 1 &&
-        (encrypted as { readonly kind?: unknown }).kind === 'pdf');
-    const durable = AttachmentViewSchema.safeParse({
-      id: record.id,
-      filename: record.filename,
-      mime: record.mime,
-      size: record.size,
-      sha256: record.sha256,
-      createdAt: record.createdAt,
-      ...(encrypted === undefined ? {} : { encrypted: { kind: 'pdf', locked: true } }),
-    });
-    if (
-      !durable.success ||
-      !hasOnlyDurableFields ||
-      !encryptionIsDurable ||
-      durable.data.id !== attachmentId ||
-      durable.data.id !== `att_${durable.data.sha256}` ||
-      !SAFE_NAME.test(durable.data.filename) ||
-      durable.data.filename === '.' ||
-      durable.data.filename === '..'
-    ) {
+    // The raw source manifest is copied verbatim, so it is parsed by the one parser the store reads it
+    // with — durable keys only, so an unplanned field cannot cross into the target unseen.
+    try {
+      return parseStoredAttachmentManifest(parsed, attachmentId);
+    } catch {
       throw new SessionAttachmentCopyError('corrupt', 'source attachment manifest is invalid');
     }
-    return {
-      id: durable.data.id,
-      filename: durable.data.filename,
-      mime: durable.data.mime,
-      size: durable.data.size,
-      sha256: durable.data.sha256,
-      createdAt: durable.data.createdAt,
-      ...(encrypted === undefined ? {} : { encrypted: { kind: 'pdf' as const } }),
-    };
   }
 
   private plannedManifest(stored: StoredAttachment): PlannedAttachment {

@@ -2,7 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
 import { FileSessionAttachmentCopier } from '../../../src/adapters/transfer/attachment-copier.ts';
-import { SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
+import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
+import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -38,15 +39,26 @@ afterEach(async () => {
   await cleanupTempDirectories();
 });
 
+/** The store exactly as `bin/fyd.ts` composes it: its originals adapter over `attachmentDirectory`. */
+function singletonStore(state: string): SessionAttachmentStore {
+  return new SessionAttachmentStore({
+    daemonId: DAEMON_ID,
+    originals: new FileAttachmentOriginals(id => attachmentDirectory(state, DAEMON_ID, id)),
+    decrypt: async () => {
+      throw new Error('no unlock is exercised here');
+    },
+  });
+}
+
 describe('the fork attachment tree', () => {
   it('should copy an original the singleton attachment store can then read from the target', async () => {
     const state = await tempDirectory('fork-attachments');
-    const store = new SessionAttachmentStore({ root: state, daemonId: DAEMON_ID });
+    const store = singletonStore(state);
     const uploaded = await store.upload(SOURCE, { filename: 'notes.txt', mime: 'text/plain', bytes: BYTES });
 
     // The exact resolver `createForkSubsystem` is handed in `bin/fyd.ts`, spelled once here so this
     // test fails if that wiring is changed to a different tree.
-    const copier = new FileSessionAttachmentCopier(id => join(state, 'attachments', DAEMON_ID, id));
+    const copier = new FileSessionAttachmentCopier(id => attachmentDirectory(state, DAEMON_ID, id));
     await copier.copyOriginal({
       fromSessionId: SOURCE,
       newSessionId: TARGET,
@@ -65,10 +77,10 @@ describe('the fork attachment tree', () => {
 
   it('should leave the source readable and unchanged, because a fork never touches what it read', async () => {
     const state = await tempDirectory('fork-attachments');
-    const store = new SessionAttachmentStore({ root: state, daemonId: DAEMON_ID });
+    const store = singletonStore(state);
     const uploaded = await store.upload(SOURCE, { filename: 'notes.txt', mime: 'text/plain', bytes: BYTES });
 
-    const copier = new FileSessionAttachmentCopier(id => join(state, 'attachments', DAEMON_ID, id));
+    const copier = new FileSessionAttachmentCopier(id => attachmentDirectory(state, DAEMON_ID, id));
     await copier.copyOriginal({
       fromSessionId: SOURCE,
       newSessionId: TARGET,
@@ -93,7 +105,7 @@ describe('the fork attachment tree', () => {
    */
   it('should refuse and write nothing when the copier is pointed at another tree', async () => {
     const state = await tempDirectory('fork-attachments');
-    const store = new SessionAttachmentStore({ root: state, daemonId: DAEMON_ID });
+    const store = singletonStore(state);
     const uploaded = await store.upload(SOURCE, { filename: 'notes.txt', mime: 'text/plain', bytes: BYTES });
 
     const wrong = new FileSessionAttachmentCopier(id => join(state, 'sessions', id, 'attachments'));

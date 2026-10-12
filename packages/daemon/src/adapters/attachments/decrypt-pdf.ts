@@ -1,20 +1,8 @@
-import type { PdfDecryptWorkerRequest, PdfDecryptWorkerResponse } from './pdf-decrypt-protocol.ts';
-
-export type PdfDecryptFailure = 'wrong_password' | 'unreadable_document' | 'decryption_timeout' | 'too_large';
-
-export class PdfDecryptError extends Error {
-  constructor(readonly failure: PdfDecryptFailure) {
-    super(
-      failure === 'wrong_password'
-        ? 'that password did not unlock this PDF'
-        : failure === 'decryption_timeout'
-          ? 'PDF decryption exceeded the processing time limit'
-          : failure === 'too_large'
-            ? 'the decrypted PDF exceeds the in-memory size limit'
-            : 'this PDF could not be decrypted',
-    );
-  }
-}
+import {
+  PdfDecryptError,
+  type PdfDecryptWorkerRequest,
+  type PdfDecryptWorkerResponse,
+} from '../../lib/attachments/pdf-decrypt-protocol.ts';
 
 function workerResponse(value: unknown): value is PdfDecryptWorkerResponse {
   if (typeof value !== 'object' || value === null) return false;

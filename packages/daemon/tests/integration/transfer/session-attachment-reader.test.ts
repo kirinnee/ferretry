@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { SessionAttachmentTransferReader } from '../../../src/adapters/transfer/session-attachment-reader.ts';
-import { SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
+import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
+import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
 
 /**
  * The inventory a transfer plan pins, off the real attachment store.
@@ -32,7 +33,11 @@ async function temporaryRoot(): Promise<string> {
 }
 
 function store(root: string): SessionAttachmentStore {
-  return new SessionAttachmentStore({ root, daemonId: 'daemon-a', decrypt: async () => plaintext.slice() });
+  return new SessionAttachmentStore({
+    daemonId: 'daemon-a',
+    originals: new FileAttachmentOriginals(id => attachmentDirectory(root, 'daemon-a', id)),
+    decrypt: async () => plaintext.slice(),
+  });
 }
 
 const directory = (root: string, sessionId: string, attachmentId: string): string =>

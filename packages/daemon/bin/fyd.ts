@@ -30,7 +30,12 @@ import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { BunSqliteAnalyticsStoreFactory, HttpAnalyticsPricingFeed } from '../src/adapters/analytics/index.ts';
-import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
+import {
+  decryptPdfInMemory,
+  FileAttachmentOriginals,
+  FileSessionAttachmentStore,
+  NodeRawDeflate,
+} from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import {
@@ -324,6 +329,7 @@ import {
   type DaemonHealthSubsystem,
   type DecodedInitialAttachment,
   DONE_MARKER_FILENAME,
+  attachmentDirectory,
   decodeInitialAttachments,
   defaultSessionLifecycleSettings,
   defaultSessionMonitorSettings,
@@ -445,6 +451,7 @@ import {
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
+  releasingAttachmentsOnStop,
   renderInitialAttachmentSection,
   resolveStateHome,
   FleetLaunchEnvironment,
@@ -463,8 +470,8 @@ import {
   type SerialExecutor,
   SessionAnswerError,
   type SessionAnswerSubsystem,
-  SessionAttachmentError,
   SessionAttachmentStore,
+  sessionScopedAttachments,
   SessionAttachService,
   SessionControlError,
   type SessionControlFailure,
@@ -4094,8 +4101,8 @@ interface ForkSubsystemParts {
   readonly paths: FoundationPaths;
   readonly attachmentStore: SessionAttachmentStore;
   /**
-   * Where one session's attachment originals live, in the layout `SessionAttachmentStore` itself
-   * uses: `<state>/attachments/<daemonId>/<sessionId>`.
+   * Where one session's attachment originals live: `attachmentDirectory`'s
+   * `<state>/attachments/<daemonId>/<sessionId>`, the same resolver the store's originals adapter reads.
    *
    * It is a PARAMETER rather than something derived here, and that is the whole point. The daemon id
    * is only known after pairing opens, and the copier and the store must address one tree: a copier
@@ -5446,32 +5453,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // captured by closures, so its narrowing does not survive into one, and a second reader that
       // re-checked could disagree with this one about which daemon's tree it is addressing.
       const attachmentsDaemonId = attachmentDaemonId;
-      const attachmentStore = new SessionAttachmentStore({ root: paths.state, daemonId: attachmentsDaemonId });
-      const sessionAttachments = {
-        upload: async (
-          id: string,
-          request: { readonly filename: string; readonly mime: string; readonly bytes: Uint8Array },
-        ) => {
-          if ((await sessions.get(id)) === undefined)
-            throw new SessionAttachmentError('not_found', 'session was not found');
-          return await attachmentStore.upload(id, request);
+      // The ONE resolver for this daemon's attachment tree: the store's originals adapter and the fork's
+      // copier both take it, so neither can address a directory the other never reads.
+      const attachmentOriginals = (id: string): string => attachmentDirectory(paths.state, attachmentsDaemonId, id);
+      const attachmentStore = new SessionAttachmentStore({
+        daemonId: attachmentsDaemonId,
+        originals: new FileAttachmentOriginals(attachmentOriginals),
+        decrypt: decryptPdfInMemory,
+        // An unlocked plaintext nobody reads again is still zeroed at its expiry, not at process exit.
+        // Unref'd, so a pending eviction never holds the daemon open.
+        scheduleEviction: (delayMs, evict) => {
+          setTimeout(evict, delayMs).unref();
         },
-        download: async (id: string, attachmentId: string) => {
-          if ((await sessions.get(id)) === undefined)
-            throw new SessionAttachmentError('not_found', 'session was not found');
-          return await attachmentStore.download(id, attachmentId);
-        },
-        unlock: async (id: string, attachmentId: string, password: string) => {
-          if ((await sessions.get(id)) === undefined)
-            throw new SessionAttachmentError('not_found', 'session was not found');
-          return await attachmentStore.unlock(id, attachmentId, password);
-        },
-        lock: async (id: string, attachmentId: string) => {
-          if ((await sessions.get(id)) === undefined)
-            throw new SessionAttachmentError('not_found', 'session was not found');
-          return await attachmentStore.lock(id, attachmentId);
-        },
-      };
+      });
+      // A session that is gone, or is stopped through the control route, has its plaintext zeroed.
+      const sessionAttachments = sessionScopedAttachments(
+        attachmentStore,
+        async id => (await sessions.get(id)) !== undefined,
+      );
       // ONE resume service for this opened storage, shared by the revive and the migration: its
       // executor and its launch gate are what stop two relaunches of one session racing, and a
       // second service would give each caller a private copy of both. See the revive's own header.
@@ -5674,40 +5673,43 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // The instruction a quarantined session shows a human names the CLI they actually type.
         clientName: CLIENT_NAME,
       });
-      const sessionControl = createSessionControlSubsystem(
-        storage,
-        sessions,
-        createSessionLifecycle,
-        planner,
-        launcher,
-        accounts,
-        executables,
-        sessionIds,
-        createCallsignClaims(storage, stateFiles, paths, callsignClaims),
-        payloadDigests,
-        // The session's own private directory holds the files, and the extractor over them is the
-        // production one: `initialAttachments` is the only mounted route that carries document
-        // bytes, so this is where a DOCX becomes text the agent can read.
-        {
-          plan: (id, decoded) =>
-            planInitialAttachments(
-              decoded,
-              join(createSessionPaths(paths, id).directory, 'attachments'),
-              new NodeRawDeflate(),
-            ),
-          write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
-        },
-        // The board grant a `--board-access` start asks for, over the same world and the same
-        // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
-        childGrantRequester(boards),
-        transcriptProvenance,
-        new NodeWorkingDirectoryResolver(),
-        id => createSessionPaths(paths, id).directory,
-        sessionRuntime,
-        // The stamper the world already constructed, now actually called. Before this it was a field
-        // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
-        spawnProvenance,
-        clock,
+      const sessionControl = releasingAttachmentsOnStop(
+        createSessionControlSubsystem(
+          storage,
+          sessions,
+          createSessionLifecycle,
+          planner,
+          launcher,
+          accounts,
+          executables,
+          sessionIds,
+          createCallsignClaims(storage, stateFiles, paths, callsignClaims),
+          payloadDigests,
+          // The session's own private directory holds the files, and the extractor over them is the
+          // production one: `initialAttachments` is the only mounted route that carries document
+          // bytes, so this is where a DOCX becomes text the agent can read.
+          {
+            plan: (id, decoded) =>
+              planInitialAttachments(
+                decoded,
+                join(createSessionPaths(paths, id).directory, 'attachments'),
+                new NodeRawDeflate(),
+              ),
+            write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
+          },
+          // The board grant a `--board-access` start asks for, over the same world and the same
+          // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
+          childGrantRequester(boards),
+          transcriptProvenance,
+          new NodeWorkingDirectoryResolver(),
+          id => createSessionPaths(paths, id).directory,
+          sessionRuntime,
+          // The stamper the world already constructed, now actually called. Before this it was a field
+          // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
+          spawnProvenance,
+          clock,
+        ),
+        attachmentStore,
       );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({
@@ -5789,11 +5791,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         storage,
         paths,
         attachmentStore,
-        // Derived from the SAME two values `attachmentStore` was constructed from, three lines above,
-        // and in the only scope that holds both: `SessionAttachmentStore` composes
-        // `<root>/attachments/<daemonId>/<sessionId>` internally, so the copier is pointed at that
-        // tree explicitly rather than at a plausible-looking directory beside the session.
-        attachmentOriginals: id => join(paths.state, 'attachments', attachmentsDaemonId, id),
+        // The resolver the store's originals adapter was built from, never a plausible-looking
+        // directory beside the session.
+        attachmentOriginals,
         transcriptSources,
         gateway,
         accounts: async agent => await resolveStartAccount(accounts, agent, executables),
