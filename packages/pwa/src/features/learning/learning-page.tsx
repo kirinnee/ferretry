@@ -459,7 +459,7 @@ export function ProposalCard({
               >
                 <span className="text-ui text-fg-soft">“{evidence.quote}”</span>
                 <span className="mono text-meta text-faint">
-                  {evidence.source === 'teammate' ? 'teammate steer' : 'human'}
+                  {evidence.source === 'teammate' ? 'agent steer' : 'human'}
                   {evidence.teammate ? ` · ${displayCallsign(evidence.teammate)}` : ''} · {evidence.repo} ·{' '}
                   {absoluteTime(evidence.at)}
                 </span>

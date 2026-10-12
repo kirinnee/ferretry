@@ -58,7 +58,7 @@ describe('session dashboard groups', () => {
     expect(table.props.className).toContain('min-w-[900px]');
     expect(table.parent?.props.className).toContain('overflow-x-auto');
     expect(tree.root.findAllByType('th').map(header => text(header))).toEqual([
-      'Teammate',
+      'Agent',
       'Task',
       'Status',
       'Runtime',
@@ -106,7 +106,7 @@ describe('session dashboard groups', () => {
         scoped={false}
       />,
     );
-    expect(compact.root.findAllByType('th').map(header => text(header))).toEqual(['Teammate', 'Task', 'Status']);
+    expect(compact.root.findAllByType('th').map(header => text(header))).toEqual(['Agent', 'Task', 'Status']);
     expect(
       compact.root
         .findAllByType('th')
@@ -126,7 +126,7 @@ describe('session dashboard groups', () => {
         />,
       ),
     );
-    expect(compact.root.findAllByType('th').map(header => text(header))).toEqual(['Teammate', 'Task']);
+    expect(compact.root.findAllByType('th').map(header => text(header))).toEqual(['Agent', 'Task']);
     expect(
       compact.root
         .findAllByType('th')

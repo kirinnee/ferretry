@@ -337,7 +337,10 @@ describe('RemoteBrowserPane composition', () => {
     // A stopped daemon reports no pages, so there is no invented client tab.
     expect(renderer.root.findAll(node => node.props.role === 'tab')).toHaveLength(0);
     expect(json(renderer)).toContain('Browser is stopped');
-    expect(json(renderer)).toContain('kteam browser open');
+    // The hint names a command the shipped CLI has, for this session: the old tool's name was here.
+    const hint = renderer.root.findByType('code').children.join('');
+    expect(hint).toBe('fy browser start --session same-session');
+    expect(json(renderer)).not.toContain('kteam');
     // The pane already owns the source status chrome; the viewer must not add a
     // second generic header inside the display.
     expect(renderer.root.findAllByType('header')).toHaveLength(0);

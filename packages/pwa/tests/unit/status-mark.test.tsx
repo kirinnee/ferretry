@@ -16,7 +16,7 @@ describe('statusMark', () => {
       expect(info.shape).toBe('square');
       expect(info.klass).toBe('finished');
       expect(info.live).toBe(false);
-      expect(info.label).toBe(`finished — ${status}`);
+      expect(info.label).toBe(`finished — ${status.replaceAll('_', ' ')}`);
     }
   });
 
@@ -33,8 +33,13 @@ describe('statusMark', () => {
       expect(info.shape).toBe('diamond');
       expect(info.klass).toBe('waiting');
       expect(info.live).toBe(false);
-      expect(info.label).toBe(`waiting — ${status}`);
+      expect(info.label).toBe(`waiting — ${status.replaceAll('_', ' ')}`);
     }
+  });
+
+  it('names a status in words, never as its wire spelling', () => {
+    expect(statusMark(sessionView('s', { state: { status: 'rate_limited' } })).label).toBe('waiting — rate limited');
+    expect(statusMark(sessionView('s', { state: { status: 'kill_failed' } })).label).toBe('finished — kill failed');
   });
 
   it('accents the two statuses that are asking a human for something', () => {
@@ -85,7 +90,7 @@ describe('statusMark', () => {
     expect(info.klass).toBe('active');
     expect(info.tone).toBe('warn');
     expect(info.live).toBe(true);
-    expect(info.label).toBe('active — tool_running');
+    expect(info.label).toBe('active — tool running');
   });
 });
 
@@ -98,13 +103,13 @@ describe('nameToneClass', () => {
 });
 
 describe('StatusMark', () => {
-  it('announces the class and the raw status on one element, and hover-titles the same words', () => {
+  it('announces the class and the status in words on one element, and hover-titles the same words', () => {
     const wrapper = render(
       <StatusMark view={sessionView('s', { state: { status: 'awaiting_user' } })} />,
     ).root.findByType('span');
 
     expect(wrapper.props.role).toBe('img');
-    expect(wrapper.props['aria-label']).toBe('waiting — awaiting_user');
+    expect(wrapper.props['aria-label']).toBe('waiting — awaiting user');
     expect(wrapper.props.title).toBe(wrapper.props['aria-label']);
   });
 

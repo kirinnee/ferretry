@@ -1,10 +1,10 @@
 import type { SessionView } from '@ferretry/protocol';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import { relativeTime, sessionNavigation, sessionStatusLabel } from '../lib/session-screens.ts';
+import { StatusMark } from '../shell/status-mark.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
 import { ModeBadge } from './mode-badge.tsx';
 import { QuotaReadout } from './quota-readout.tsx';
-import { StatusMark } from './status-mark.tsx';
 
 export interface SessionListProps {
   readonly daemonId: string;

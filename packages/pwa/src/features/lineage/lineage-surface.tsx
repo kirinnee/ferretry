@@ -10,6 +10,7 @@ import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonFleetStore } from '../../lib/fleet-store.ts';
 import { lineageIndent, lineageLabel, MAX_INDENT_DEPTH } from '../../lib/lineage.ts';
 import { daemonSessionPath } from '../../lib/pages/routes.ts';
+import { sessionStatusLabel } from '../../lib/session-screens.ts';
 import { Badge } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { StatusMark, statusMark } from '../../shell/status-mark.tsx';
@@ -26,8 +27,6 @@ import {
   surfaceRows,
   toggleLineageStatusFilter,
 } from './lineage-surface-model.ts';
-
-const statusLabel = (status: SessionStatus): string => status.replaceAll('_', ' ');
 
 function StatusFilter({
   counts,
@@ -68,8 +67,12 @@ function StatusFilter({
             key={status}
             type="button"
             aria-pressed={active}
-            aria-label={`${statusLabel(status)}, ${count} ${count === 1 ? 'session' : 'sessions'}`}
-            title={active ? `Remove ${statusLabel(status)} from the filter` : `Show ${statusLabel(status)} sessions`}
+            aria-label={`${sessionStatusLabel(status)}, ${count} ${count === 1 ? 'session' : 'sessions'}`}
+            title={
+              active
+                ? `Remove ${sessionStatusLabel(status)} from the filter`
+                : `Show ${sessionStatusLabel(status)} sessions`
+            }
             onClick={() => onSelect(status)}
             className={cn(
               'inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center gap-xs rounded-control border px-2 text-2xs font-semibold',
@@ -78,7 +81,7 @@ function StatusFilter({
                 : 'border-border-soft bg-surface text-muted hover:border-accent-border hover:text-fg',
             )}
           >
-            {statusLabel(status)} <span className="mono text-faint">{count}</span>
+            {sessionStatusLabel(status)} <span className="mono text-faint">{count}</span>
           </button>
         );
       })}
@@ -166,7 +169,7 @@ function SessionLineageLink({
       />
       {matchesFilter ? (
         <Badge aria-hidden="true" tone={mark.tone} className="max-w-[104px] shrink-0 truncate text-2xs">
-          {statusLabel(view.state.status)}
+          {sessionStatusLabel(view.state.status)}
         </Badge>
       ) : (
         <span

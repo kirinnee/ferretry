@@ -13,9 +13,9 @@
  *           square   it is over (completed, failed, stalled, stopped)
  *   COLOUR  the existing ok / warn / err / pend tones, per theme, never the
  *           only difference between two states
- *   TEXT    an `aria-label` + `title` naming the class AND the raw status, so a
- *           screen reader says "waiting — awaiting_user" and a mouse user gets
- *           the same string on hover
+ *   TEXT    an `aria-label` + `title` naming the class AND the status in
+ *           words, so a screen reader says "waiting — awaiting user" and a
+ *           mouse user gets the same string on hover
  *
  * The shapes are markup rather than tokens on purpose (a theme may not redefine
  * "waiting is a diamond" — the convention has to hold across all of them); only
@@ -24,6 +24,7 @@
 
 import type { SessionStatus, SessionView } from '@ferretry/protocol';
 import { cn } from '../lib/class-names.ts';
+import { sessionStatusLabel } from '../lib/session-screens.ts';
 
 /**
  * Wider than `isTerminalSessionStatus` in `lib/session-screens.ts` on purpose:
@@ -73,7 +74,7 @@ export function statusMark(view: SessionView): StatusMarkInfo {
       shape: 'square',
       klass: 'finished',
       tone: ok ? 'ok' : 'err',
-      label: `finished — ${status}`,
+      label: `finished — ${sessionStatusLabel(status)}`,
       live: false,
     };
   }
@@ -85,7 +86,7 @@ export function statusMark(view: SessionView): StatusMarkInfo {
     const wait = view.state.waiting;
     const detail = wait
       ? `parked${wait.peerName ? ` for ${wait.peerName}` : ''}${wait.condition ? `: ${wait.condition}` : ''}`
-      : status;
+      : sessionStatusLabel(status);
     return {
       shape: 'diamond',
       klass: 'waiting',
@@ -99,7 +100,7 @@ export function statusMark(view: SessionView): StatusMarkInfo {
     shape: 'circle',
     klass: 'active',
     tone: 'warn',
-    label: `active — ${status}`,
+    label: `active — ${sessionStatusLabel(status)}`,
     live: true,
   };
 }

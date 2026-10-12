@@ -14,6 +14,7 @@
  */
 
 import type { TaskPhase, TaskStaleness, TaskStatus, TaskSummary } from '@ferretry/protocol';
+import { sessionStatusLabel } from '../../lib/session-screens.ts';
 
 /** The five contrast-checked state roles shared with `.kt-badge`. */
 export type TaskTone = 'ok' | 'warn' | 'err' | 'pend' | 'accent';
@@ -153,7 +154,7 @@ export const taskAssigneePresentation = (task: TaskAssigneeSource): TaskAssignee
   const status = task.live.staleness
     ? TASK_STALENESS_COPY[task.live.staleness].label
     : task.live.assigneeStatus
-      ? task.live.assigneeStatus.replaceAll('_', ' ')
+      ? sessionStatusLabel(task.live.assigneeStatus)
       : stored
         ? 'status unavailable'
         : null;

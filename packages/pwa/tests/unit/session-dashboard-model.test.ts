@@ -31,9 +31,9 @@ const view = (
 describe('session dashboard model', () => {
   it('keeps the original density labels and fixed percentage columns', () => {
     expect(DENSITY_COLUMN_LABELS).toEqual({
-      full: ['Teammate', 'Task', 'Status', 'Runtime', 'Activity', 'Signals'],
-      compact: ['Teammate', 'Task', 'Status'],
-      minimal: ['Teammate', 'Task'],
+      full: ['Agent', 'Task', 'Status', 'Runtime', 'Activity', 'Signals'],
+      compact: ['Agent', 'Task', 'Status'],
+      minimal: ['Agent', 'Task'],
     });
     expect(DENSITY_COLUMN_WIDTHS.full).toEqual(['w-[16%]', 'w-[22%]', 'w-[11%]', 'w-[14%]', 'w-[24%]', 'w-[13%]']);
     expect(DENSITY_COLUMN_WIDTHS.compact).toEqual(['w-[28%]', 'w-[44%]', 'w-[28%]']);
