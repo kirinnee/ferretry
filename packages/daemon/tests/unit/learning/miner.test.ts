@@ -288,3 +288,92 @@ test('records an empty run when its watermark has no newer terminal sessions', a
 
   expect(run.message).toBe('no new terminal sessions to scan');
 });
+
+test('drops a malformed miner entry alone and keeps the rest of the run', async () => {
+  const store = new Store();
+  const filesystem = files({
+    '/daemon/state/sessions/session-1/turns/turn-001.md': 'Use direnv exec . for every command.',
+    '/daemon/state/sessions/session-1/channel/inbox.jsonl':
+      '{"type":"message","message":"Use direnv exec . for every command."}\n{"type":"message","message":7}\n',
+    '/daemon/state/sessions/session-1/events.jsonl': '"not an event"\n{"type":"control.interrupted"}\n',
+  });
+  const miner = new LearningMiner(
+    paths,
+    filesystem,
+    store,
+    { list: async () => [session()], get: async () => undefined } as SessionDirectorySubsystem,
+    {
+      tail: async () => [{ type: 'chat.user', timestamp: AT, data: { text: 'Use direnv exec . for every command.' } }],
+    } as unknown as SessionTranscriptReader,
+    {
+      start: async () => session(),
+      stop: async () => session(),
+      recover: async () => undefined,
+    } as SessionControlSubsystem,
+    () => config,
+    () => AT,
+  );
+  await miner.run(true);
+  await filesystem.writeTextAtomic(
+    '/daemon/state/learning/runs/2026-08-01T00-00-00-000Z/observations.json',
+    JSON.stringify({
+      observations: [
+        { key: 'bad', sessionId: 'session-1', kind: 'correction', gist: 'Use direnv', quote: 5 },
+        {
+          key: 'o1',
+          sessionId: 'session-1',
+          kind: 'correction',
+          gist: 'Use direnv',
+          quote: 'Use direnv exec . for every command.',
+        },
+      ],
+      proposals: [
+        { title: 'Odd anchor', ruleText: 'Anchor is a number', anchor: 7, observationKeys: ['o1'] },
+        { title: 'Use direnv', ruleText: 'Use direnv exec .', observationKeys: ['o1'] },
+      ],
+    }),
+  );
+
+  const run = await miner.run(false);
+
+  expect(run.message).toBeUndefined();
+  expect(store.observations.map(item => item.quote)).toEqual(['Use direnv exec . for every command.']);
+  expect(store.proposals.map(item => item.title)).toEqual(['Use direnv']);
+  expect(store.proposals[0]?.target.anchor).toBe('## Agent rules');
+});
+
+test('quarantines a miner output that is JSON but not an output document', async () => {
+  const store = new Store();
+  const filesystem = files({
+    '/daemon/state/sessions/session-1/turns/turn-001.md': 'Use direnv exec . for every command.',
+    '/daemon/state/sessions/session-1/channel/inbox.jsonl':
+      '{"type":"message","message":"Use direnv exec . for every command."}\n',
+    '/daemon/state/sessions/session-1/events.jsonl': '',
+  });
+  const miner = new LearningMiner(
+    paths,
+    filesystem,
+    store,
+    { list: async () => [session()], get: async () => undefined } as SessionDirectorySubsystem,
+    {
+      tail: async () => [{ type: 'chat.user', timestamp: AT, data: { text: 'Use direnv exec . for every command.' } }],
+    } as unknown as SessionTranscriptReader,
+    {
+      start: async () => session(),
+      stop: async () => session(),
+      recover: async () => undefined,
+    } as SessionControlSubsystem,
+    () => config,
+    () => AT,
+  );
+  await miner.run(true);
+  await filesystem.writeTextAtomic(
+    '/daemon/state/learning/runs/2026-08-01T00-00-00-000Z/observations.json',
+    JSON.stringify({ observations: 'none' }),
+  );
+
+  const run = await miner.run(false);
+
+  expect(run.message).toBe('miner output was not valid JSON — quarantined');
+  expect(store.observations).toHaveLength(0);
+});

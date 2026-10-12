@@ -1,12 +1,13 @@
 import { join } from 'node:path';
 import type { LearningConfig, RunManifest, SessionView, StartSessionRequest } from '@ferretry/protocol';
+import { z } from 'zod';
 import {
   applyMinerOutput,
   extractSession,
   parseJsonl,
+  parseMinerOutput,
   type InboxSendLike,
   type LearningStorePort,
-  type MinerOutput,
   type NormalizedRecordLike,
   type RawSessionInput,
   type SessionDigest,
@@ -22,6 +23,19 @@ export const LEARNING_MINER_LABEL = 'ferretry-learning';
 
 const TERMINAL = new Set(['completed', 'failed', 'stalled', 'stopped']);
 const RECORD_CAP = 1_200;
+
+/** The one field the miner reads from a session event; every other field passes through unread. */
+const EventTypeSchema = z.object({ type: z.string().optional() });
+
+/** The inbox fields a human message may carry; a line of another shape is not a message. */
+const InboxEntrySchema = z.object({
+  type: z.string().optional(),
+  message: z.string().optional(),
+  text: z.string().optional(),
+  from: z.string().optional(),
+  fromName: z.string().optional(),
+  at: z.string().optional(),
+});
 
 /**
  * The IO orchestration around the pure extractor and aggregator.
@@ -165,8 +179,9 @@ export class LearningMiner {
     );
     const turnTexts = await this.turnTexts(session.directory);
     const inbox = this.inbox(await this.files.readText(join(session.directory, 'channel', 'inbox.jsonl')));
-    const events = parseJsonl<{ type?: string }>(
+    const events = parseJsonl(
       (await this.files.readText(join(session.directory, 'events.jsonl'))) ?? '',
+      EventTypeSchema,
     );
     return {
       sessionId: session.config.id,
@@ -195,14 +210,7 @@ export class LearningMiner {
   }
 
   private inbox(text: string | undefined): readonly InboxSendLike[] {
-    return parseJsonl<{
-      type?: string;
-      message?: string;
-      text?: string;
-      from?: string;
-      fromName?: string;
-      at?: string;
-    }>(text ?? '')
+    return parseJsonl(text ?? '', InboxEntrySchema)
       .filter(entry => entry.type === undefined || entry.type === 'message')
       .map(entry => ({
         text: entry.message ?? entry.text ?? '',
@@ -226,9 +234,8 @@ export class LearningMiner {
       if (digestsText === undefined || outputText === undefined) continue;
       try {
         const digests = JSON.parse(digestsText) as SessionDigest[];
-        const output = JSON.parse(outputText) as MinerOutput;
-        if (!Array.isArray(digests) || typeof output !== 'object' || output === null)
-          throw new Error('invalid miner output');
+        const output = parseMinerOutput(JSON.parse(outputText));
+        if (!Array.isArray(digests) || output === undefined) throw new Error('invalid miner output');
         const result = applyMinerOutput(
           await this.store.loadProposals(),
           await this.store.loadTombstones(),

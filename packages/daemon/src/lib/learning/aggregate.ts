@@ -1,31 +1,62 @@
+import { z } from 'zod';
 import type { ObservationKind, ObservationSource, Proposal } from './types.ts';
 import type { SessionDigest } from './extract.ts';
 import { matchesTombstone, observationId, recomputeProposal, slugify, verifyQuote } from './policy.ts';
 import type { Observation, Tombstone } from './types.ts';
 
 /** Untrusted observation emitted by a miner session. */
-export interface MinerObservation {
-  readonly key: string;
-  readonly sessionId: string;
-  readonly kind: string;
-  readonly gist: string;
-  readonly quote: string;
-  readonly source?: string;
-}
+const MinerObservationSchema = z.object({
+  key: z.string(),
+  sessionId: z.string(),
+  kind: z.string(),
+  gist: z.string(),
+  quote: z.string(),
+  source: z.string().optional(),
+});
+export type MinerObservation = z.infer<typeof MinerObservationSchema>;
 
 /** Untrusted candidate rule emitted by a miner session. */
-export interface MinerProposal {
-  readonly identity?: string;
-  readonly title: string;
-  readonly ruleText: string;
-  readonly target?: 'global-agent-guidance' | 'automation-guidance';
-  readonly anchor?: string;
-  readonly observationKeys: readonly string[];
-}
+const MinerProposalSchema = z.object({
+  identity: z.string().optional(),
+  title: z.string(),
+  ruleText: z.string(),
+  target: z.enum(['global-agent-guidance', 'automation-guidance']).optional(),
+  anchor: z.string().optional(),
+  observationKeys: z.array(z.string()),
+});
+export type MinerProposal = z.infer<typeof MinerProposalSchema>;
 
 export interface MinerOutput {
   readonly observations?: readonly MinerObservation[];
   readonly proposals?: readonly MinerProposal[];
+}
+
+const MinerOutputSchema = z.object({
+  observations: z.array(z.unknown()).optional(),
+  proposals: z.array(z.unknown()).optional(),
+});
+
+function validEntries<T>(entries: readonly unknown[] | undefined, schema: z.ZodType<T>): readonly T[] | undefined {
+  return entries?.flatMap(entry => {
+    const parsed = schema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+/**
+ * Parses a miner's file one entry at a time. A miner is a model writing JSON, so one malformed
+ * entry is ordinary and must cost that entry alone — never the rest of the run. `undefined` means
+ * the document itself is not a miner output at all.
+ */
+export function parseMinerOutput(value: unknown): MinerOutput | undefined {
+  const parsed = MinerOutputSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const observations = validEntries(parsed.data.observations, MinerObservationSchema);
+  const proposals = validEntries(parsed.data.proposals, MinerProposalSchema);
+  return {
+    ...(observations === undefined ? {} : { observations }),
+    ...(proposals === undefined ? {} : { proposals }),
+  };
 }
 
 export interface AggregateStats {

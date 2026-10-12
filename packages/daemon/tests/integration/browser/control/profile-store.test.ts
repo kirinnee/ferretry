@@ -48,6 +48,30 @@ describe('BrowserProfileStore', () => {
     should(await lease.release()).be.false();
   });
 
+  it('should still refuse a Chrome downgrade when one recorded version is not a string', async () => {
+    // Arrange — a hand-edited metadata file whose created version became a number. The other recorded
+    // version still guards the profile, so the damaged field must cost itself alone.
+    const subject = await profile();
+    const lease = await subject.acquire({ sessionId: 'first' });
+    await lease.release();
+    await writeFile(
+      path.join(subject.browserDirectory, 'profile.metadata.json'),
+      JSON.stringify({ createdChromeVersion: 150, latestChromeVersion: 'Chrome 151.0.0.0' }),
+    );
+
+    // Act
+    let downgrade: unknown;
+    try {
+      await subject.assertChromeVersionCompatible('Chrome 150.0.0.0');
+    } catch (error) {
+      downgrade = error;
+    }
+
+    // Assert
+    should(downgrade).instanceOf(BrowserControlError);
+    should((downgrade as BrowserControlError).code).equal('launch_failed');
+  });
+
   it('should refuse a second acquisition by the session that already holds the lease', async () => {
     // A lease is exclusive against EVERYONE, and the owner is not an exception. The launcher keeps a
     // lease it could not prove safe to release, so the session named on that record is the first

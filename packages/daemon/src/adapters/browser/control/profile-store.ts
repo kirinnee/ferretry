@@ -1,6 +1,7 @@
 import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { z } from 'zod';
 import {
   BrowserControlError,
   BrowserProfileBusyError,
@@ -21,6 +22,20 @@ const reclaimName = 'profile.lock.reclaim';
 const metadataName = 'profile.metadata.json';
 const primedName = 'profile.primed.json';
 const staleChromeFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort'] as const;
+
+/**
+ * The profile's version record, read field by field: one damaged field costs that field alone, so a
+ * hand edit to one version cannot erase the others that guard the profile against a Chrome downgrade.
+ */
+const MetadataFieldSchema = z.string().optional().catch(undefined);
+const BrowserProfileMetadataSchema = z.object({
+  createdChromeVersion: MetadataFieldSchema,
+  createdAt: MetadataFieldSchema,
+  primedChromeVersion: MetadataFieldSchema,
+  primedAt: MetadataFieldSchema,
+  latestChromeVersion: MetadataFieldSchema,
+  latestAt: MetadataFieldSchema,
+}) satisfies z.ZodType<BrowserProfileMetadata>;
 
 type SingletonLockState =
   | { readonly kind: 'missing' }
@@ -130,11 +145,11 @@ export class BrowserProfileStore implements BrowserProfilePort {
   }
 
   async isPrimed(): Promise<boolean> {
-    return isPrimedMarker(await this.readJson(path.join(this.browserDirectory, primedName)));
+    return isPrimedMarker(await this.readJson(path.join(this.browserDirectory, primedName), z.unknown()));
   }
 
   async assertChromeVersionCompatible(runningChromeVersion: string): Promise<void> {
-    const metadata = await this.readJson<BrowserProfileMetadata>(path.join(this.browserDirectory, metadataName));
+    const metadata = await this.readJson(path.join(this.browserDirectory, metadataName), BrowserProfileMetadataSchema);
     const recorded = highestChromeVersion(metadata);
     if (!recorded || compareChromeVersions(runningChromeVersion, recorded) !== -1) return;
     throw new BrowserControlError(
@@ -162,7 +177,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
     await chmod(this.browserDirectory, 0o700);
     await chmod(this.profile, 0o700);
     const metadataFile = path.join(this.browserDirectory, metadataName);
-    if (!(await this.readJson(metadataFile)) && chromeVersion?.trim()) {
+    if (!(await this.readJson(metadataFile, BrowserProfileMetadataSchema)) && chromeVersion?.trim()) {
       await this.writeJson(metadataFile, {
         createdChromeVersion: chromeVersion.trim(),
         createdAt: this.now().toISOString(),
@@ -191,7 +206,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
     if (!version)
       throw new BrowserControlError('bad_request', 'the Chrome version used to prime the profile is required');
     const metadataFile = path.join(this.browserDirectory, metadataName);
-    const metadata = (await this.readJson<BrowserProfileMetadata>(metadataFile)) ?? {};
+    const metadata = (await this.readJson(metadataFile, BrowserProfileMetadataSchema)) ?? {};
     const previous = highestChromeVersion(metadata);
     const latestChromeVersion = previous && compareChromeVersions(version, previous) === -1 ? previous : version;
     const now = this.now().toISOString();
@@ -212,7 +227,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
       throw new BrowserControlError('launch_failed', 'Chrome returned an unreadable version for the shared profile');
     }
     const file = path.join(this.browserDirectory, metadataName);
-    const metadata = (await this.readJson<BrowserProfileMetadata>(file)) ?? {};
+    const metadata = (await this.readJson(file, BrowserProfileMetadataSchema)) ?? {};
     const previous = highestChromeVersion(metadata);
     if (previous && compareChromeVersions(version, previous) !== 1) return;
     await this.writeJson(file, { ...metadata, latestChromeVersion: version, latestAt: this.now().toISOString() });
@@ -337,9 +352,9 @@ export class BrowserProfileStore implements BrowserProfilePort {
     if (current && sameBrowserProfileLease(current, record)) await rm(this.leaseFile, { force: true });
   }
 
-  private async readJson<T = unknown>(file: string): Promise<T | undefined> {
+  private async readJson<T>(file: string, schema: z.ZodType<T>): Promise<T | undefined> {
     try {
-      return JSON.parse(await readFile(file, 'utf8')) as T;
+      return schema.safeParse(JSON.parse(await readFile(file, 'utf8'))).data;
     } catch {
       return undefined;
     }
