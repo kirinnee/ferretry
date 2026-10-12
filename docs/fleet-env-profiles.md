@@ -180,17 +180,11 @@ Both reasons are in the module headers. Do not unify them.
 
 ## What is not built yet
 
-- **No surface for creating a profile — GAP.** A profile is written in the fleet configuration today.
-  The PWA half of this feature is a separate change and is not in this one.
-- **The browser is told `environment`, not `secret-store` — GAP.** `credentialSourceOf` answers
-  `secret-store` and every host-side surface reads it; the wire union has no such member, so the
-  sign-in row narrows it to `environment` with the variable's name. That is TRUE of it — the daemon
-  does put the value into the environment the wrapper is launched with, and the "nothing to sign in
-  to" verdict is identical — and what the browser loses is the sentence naming Ferretry's own store.
-  Widening the protocol union means a matching arm in the browser's copy: **do not add the member
-  without that arm in the same commit**, or the browser renders its total fallback sentence
-  ("the harness writes this account's credential into its own store when somebody signs in") for
-  exactly the accounts this feature is for.
+- **A profile can be created only while creating an account — GAP.** The New account form can
+  declare one, and it lands in the fleet configuration on the same reviewed apply
+  (`declareProfiles` on `create-account` in `packages/protocol/src/lib/fleet-changes.ts`, written by
+  `packages/daemon/src/lib/fleet/mutations.ts`). There is no surface to edit or remove a profile
+  that already exists; that is still done in the fleet configuration.
 - **Composition is visible only for secret-backed variables — GAP.** The listing above is a listing of
   secrets, so a purely literal profile still composes with no surface reporting where its values came
   from. `envComposition` answers that for every variable and nothing renders it; the report a screen

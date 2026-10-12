@@ -60,8 +60,8 @@ names unambiguous:
 
 - **`fy`** is the CLI binary — the client you type at. (The binary name is single-sourced from
   the `bin` key in `packages/cli/package.json`; never hardcode it.)
-- **`fyd`** is the planned per-host daemon. It does not exist yet; naming it now keeps the boundary
-  between _CLI_ and _daemon_ unambiguous when it lands.
+- **`fyd`** is the per-host daemon (`packages/daemon`, composition root `bin/fyd.ts`). Keeping it a
+  separate name from `fy` keeps the boundary between _CLI_ and _daemon_ unambiguous.
 - **session**, **task**, **attention**, **warden**, and **fleet** are the product's established
   domain terms. They are named here only to fix the vocabulary — this document does **not** define
   their schemas, lifecycles, or features, and none should be inferred from their appearance in

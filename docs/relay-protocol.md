@@ -503,9 +503,11 @@ is public — it is printed in the pairing QR — so this is configuration, not 
 list serves nobody**, which is the only safe reading of a relay whose operator never said who it is
 for.
 
-Then point both ends at it: the daemon's relay address and the browser's must be the same string,
-because it is the `host` the claim signature covers. Today there is no shipped interface for saying
-so — see the client gap recorded in the runbook.
+Then point the daemon at it with a `relay` entry in its `carriers` list (§13). The browser is not
+configured separately: it dials the address the daemon publishes, so both ends use the same string,
+which matters because it is the `host` the claim signature covers. A device that has never paired
+cannot discover a rendezvous you run — the declared gap in §13 — so the runbook says how such a
+daemon gets its first device.
 
 ### What you are taking on
 
@@ -1100,13 +1102,15 @@ outstanding:
      rendezvous session, stamped inside the ONE constructor that builds a relayed request, so the
      repair covers every rate-limited relayed route rather than the pairing one alone.
    - **Not every browser call site is routed yet.** The composition root hands the carrier-aware
-     fetcher to everything it already injects one into — the projects, usage and push ports, and now
-     the TYPED API CLIENT, whose transport used to dial the daemon's own address itself. That last
+     fetcher to everything it already injects one into — the projects, usage and push ports, the
+     attention and pin clients (`packages/pwa/src/lib/store.tsx` builds `DaemonAttentionClient` and
+     `DaemonPinClient` with it, so the attention modal and the pins board work over a relay), and
+     now the TYPED API CLIENT, whose transport used to dial the daemon's own address itself. That last
      one was not only unrouted, it was actively misleading: the Settings reachability probe is a
      typed-client call, so a green `Reachable` pill could sit beside a Carrier panel saying nothing
      worked, and a daemon reachable only through the relay was reported down by a probe that never
      tried the relay. The feature modules that default their `fetcher` parameter to `browserFetch`
-     — the direct network — (`learning-api.ts`, `attention-client.ts`, `pin-client.ts`,
+     — the direct network — and are never handed another (`learning-api.ts`,
      `remote-browser.ts`, `skills-api.ts`, `files-api.ts`,
      `attachment-source.ts`, `runtime-models.ts`, `stt/*`) are still
      direct-only. They FAIL rather than mislead — a request to an unreachable daemon address is a
@@ -1115,9 +1119,10 @@ outstanding:
      the stale item this list carried longest: the terminal deck is handed the carrier-aware fetcher
      by the composition root and its live half is a §14 stream session, so a relayed terminal opens,
      paints and takes keystrokes. What is left of it is narrower and belongs beside the modules above
-     rather than as a claim about the file: two OTHER callers of `listSessionTerminals` — the
-     composer's `%terminal:` autocomplete and the session surface-references panel — still pass no
-     fetcher, so those two READ-ONLY lists are direct-only while the deck beside them is not.
+     rather than as a claim about the file: one OTHER caller of `listSessionTerminals` — the session
+     surface-references panel (`session-surface-references.tsx`) — still passes no fetcher, so that
+     READ-ONLY list is direct-only while the deck beside it is not. The composer's `%terminal:`
+     autocomplete is off this list too: `App.tsx` hands it the carrier fetcher as `composerFetch`.
      `stt/*` stays on this list on purpose and for the ordinary reason:
      it is now a single text-only route, `POST /v1/stt/enhance`, and
      `packages/pwa/src/lib/stt/remote-enhancement.ts` still defaults its `fetchImpl` to the global

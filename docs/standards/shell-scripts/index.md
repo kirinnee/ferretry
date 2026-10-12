@@ -32,9 +32,21 @@ set -euo pipefail
 
 - Avoid functions — keep scripts top-to-bottom readable.
 - Execute commands sequentially; separate phases with comments.
-- Define a function only when it removes genuine repetition that no other construct can.
-  `scripts/local/rename.sh` has exactly one (`rewrite`, applying the same `sed` across a file
-  list) and it is the only function in `scripts/`.
+- Define a function only when it removes genuine repetition that no other construct can, or when
+  the shell itself needs a name to call. Three shapes qualify, and `scripts/` has about two dozen
+  functions across them (`rg -n '^\s*[a-z_]+\(\) \{' scripts`):
+  - **one repeated operation** — `rewrite` in `scripts/local/rename.sh` applies the same `sed`
+    across a file list; `render` in `scripts/local/gen-pwa-icons.sh` draws each icon size;
+  - **a trap or failure handler** — `cleanup` (`scripts/test/run-e2e.sh`,
+    `scripts/release/smoke.sh`) runs from `trap … EXIT`, which only takes a command, and `fail`
+    (`scripts/ci/relay-directory-origin.sh`, `scripts/validate/relay-config.sh`) is the one message
+    shape every refusal in that script uses;
+  - **a repeated check in a validator** — `scripts/validate/*` contracts such as
+    `pages-config.sh` (`require_in_block`, `refuse_in_block`) and `contract-registry.sh`
+    (`compare_sets`) assert the same shape many times, and a copy-pasted pipeline per assertion is
+    how two copies drift.
+
+  A function that only gives a straight-line phase a name is still out — use a comment.
 
 ### Run from the repository root
 
@@ -133,7 +145,7 @@ the contract:
 
 ```
 scripts/
-├── ci/        # workflow entry points — GitHub Actions only
+├── ci/        # workflow entry points — GitHub Actions (and test:gate:* for test.sh)
 │   ├── setup.sh        install locked dependencies
 │   ├── pre-commit.sh   every gate
 │   ├── test.sh         one tier (unit | int | sit) + coverage ledger checks
@@ -141,19 +153,30 @@ scripts/
 │   └── release.sh      semantic-release
 ├── local/     # developer helpers, called from Taskfiles
 ├── release/   # compile, shim, publish, smoke, installer, bump, changelog backup
+├── test/      # e2e runner and test fixtures, called from Taskfiles and tests
 └── validate/  # repository policy checks, called from pre-commit
 ```
 
-| Caller            | May call                               |
-| ----------------- | -------------------------------------- |
-| GitHub workflows  | `scripts/ci/*`, `scripts/release/*`    |
-| Taskfiles         | `scripts/local/*`, `scripts/release/*` |
-| pre-commit hooks  | `scripts/validate/*`                   |
-| `.releaserc.yaml` | `scripts/release/*`                    |
+| Caller            | May call                                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------------------- |
+| GitHub workflows  | `scripts/ci/*`, `scripts/release/*`                                                                 |
+| Taskfiles         | `scripts/local/*`, `scripts/release/*`, `scripts/test/*`, `scripts/ci/test.sh` (`test:gate:*` only) |
+| pre-commit hooks  | `scripts/validate/*`                                                                                |
+| `.releaserc.yaml` | `scripts/release/*`                                                                                 |
 
-Taskfiles never call `scripts/ci/*` — those scripts own their own setup and exist for the
-pipeline. Each `scripts/ci/*` script begins by running `scripts/ci/setup.sh` so a workflow job
+Taskfiles do not call `scripts/ci/*` in general — those scripts own their own setup and exist for
+the pipeline. Each `scripts/ci/*` script begins by running `scripts/ci/setup.sh` so a workflow job
 is a single line.
+
+One exception is deliberate: `task test:gate:unit` and `task test:gate:int` run
+`scripts/ci/test.sh unit|int`. Their whole job is to be **the exact gate CI enforces**, coverage
+ledgers included, and a local copy of that script would be a second owner of the gate that
+drifts from the first. Running `setup.sh` first is the price of that, and it is idempotent.
+
+`scripts/test/` holds the e2e tier's harness: `run-e2e.sh`, which `tasks/Taskfile.test.yaml`
+calls for `task test:e2e`, and the TypeScript fixtures it and the tests start (fake daemon, fake
+harness, rendezvous process). It is a Taskfile caller's directory like `scripts/local/`, kept
+apart because its contents are test fixtures rather than developer helpers.
 
 ## Summary
 

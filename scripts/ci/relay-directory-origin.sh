@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 #
 # Prints the hosted relay's compiled discovery ORIGIN.
 #
@@ -23,8 +24,6 @@
 # discover Ferretry's hosted relay by default. The runtime environment variable
 # still overrides it, and an explicit daemon relay block still wins before any
 # directory is asked.
-
-set -euo pipefail
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
