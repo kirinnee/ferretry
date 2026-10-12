@@ -185,8 +185,11 @@ describe(`fleet login (SIT, ${useInProcess ? 'in-process' : 'compiled binary'})`
     // Act
     const login = await driver.run(['fleet', 'login', subject.auto.id, '--no-refresh'], subject.environment);
 
-    // Assert — it still ran the right wrapper, and it refuses to call that a success.
-    should(login.code).equal(0, login.err);
+    // Assert — it still ran the right wrapper, and it refuses to call that a success: the report is
+    // printed, and the EXIT says the pass is incomplete so a script cannot read it as signed in. Both
+    // lanes of the identity count: the sibling shares the credential that never arrived.
+    should(login.code).equal(1, login.out);
+    should(login.err).containEql('login incomplete: 2 account(s) failed to sign in');
     should(await launches(subject)).have.length(1);
     should(login.out).containEql('FAILED');
     should(login.out).not.containEql('logged in');

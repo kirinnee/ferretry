@@ -1,4 +1,4 @@
-import { open } from 'node:fs/promises';
+import { open, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import type { CommandOutcome, DaemonStartHandle, DetachedLaunch, IDaemonProcessPort } from '../../lib/daemon/ports.ts';
 
 /**
@@ -9,6 +9,12 @@ import type { CommandOutcome, DaemonStartHandle, DetachedLaunch, IDaemonProcessP
  * the daemon's output to.
  */
 export class BunDaemonProcess implements IDaemonProcessPort {
+  /**
+   * Where `holdsOpen` looks. Both default to the host's own; a test points them elsewhere so the
+   * `lsof` answer is exercised on Linux and the `/proc` refusals without another user's process.
+   */
+  constructor(private readonly options: { readonly procDirectory?: string; readonly lsof?: string } = {}) {}
+
   async run(argv: readonly string[]): Promise<CommandOutcome> {
     const [command, ...args] = argv;
     if (command === undefined) throw new Error('cannot run an empty command');
@@ -68,4 +74,44 @@ export class BunDaemonProcess implements IDaemonProcessPort {
       return false;
     }
   }
+
+  /**
+   * Whether `pid` has `path` open, read from `/proc` where there is one and from `lsof` otherwise.
+   *
+   * Linux answers from `/proc/<pid>/fd`, which needs nothing installed. macOS has no `/proc` and ships
+   * `lsof`. A host with neither gets `undefined`, and so does a process this user may not inspect —
+   * which is a process this user could not signal either.
+   */
+  async holdsOpen(pid: number, path: string): Promise<boolean | undefined> {
+    const proc = this.options.procDirectory ?? '/proc';
+    if (await isDirectory(`${proc}/self/fd`)) return await holdsOpenPerProc(proc, pid, path);
+    const listed = await this.run([this.options.lsof ?? 'lsof', '-t', '-a', '-p', String(pid), '--', path]);
+    if (listed.code === 127) return undefined;
+    return listed.code === 0 && listed.stdout.split('\n').some(line => line.trim() === String(pid));
+  }
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  return await stat(path).then(
+    found => found.isDirectory(),
+    () => false,
+  );
+}
+
+/** The `/proc` answer: does any of `pid`'s descriptors resolve to the file `path` names? */
+async function holdsOpenPerProc(proc: string, pid: number, path: string): Promise<boolean | undefined> {
+  // No such file means no daemon has ever held it open, so this pid does not.
+  const target = await realpath(path).catch(() => undefined);
+  if (target === undefined) return false;
+  const directory = `${proc}/${String(pid)}/fd`;
+  // Gone means it holds nothing; anything else is a process this user may not look inside.
+  const descriptors = await readdir(directory).catch((error: NodeJS.ErrnoException) =>
+    error.code === 'ENOENT' ? false : undefined,
+  );
+  if (descriptors === false || descriptors === undefined) return descriptors;
+  for (const descriptor of descriptors) {
+    // A descriptor closed between the listing and the read is simply not this file.
+    if ((await readlink(`${directory}/${descriptor}`).catch(() => undefined)) === target) return true;
+  }
+  return false;
 }

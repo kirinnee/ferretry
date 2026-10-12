@@ -333,3 +333,27 @@ describe('adopting a home Ferretry created before claims existed', () => {
     should(store.writes[0]?.path).equal('/tmp/home/layout-version');
   });
 });
+
+describe('inspecting a state home without claiming it', () => {
+  it('should say absent, claimed or unclaimed and write nothing in any case', async () => {
+    // Arrange — a reset asks this before it deletes, so asking must never stamp our marker on a
+    // stranger's directory first.
+    const absent = service(undefined);
+    const claimed = service(files('layout-version'), '1\n');
+    const stranger = service(files('taxes.pdf'));
+
+    // Act
+    const answers = [
+      await absent.claims.inspect(HOME),
+      await claimed.claims.inspect(HOME),
+      await stranger.claims.inspect(HOME),
+    ];
+
+    // Assert
+    should(answers).deepEqual(['absent', 'claimed', 'unclaimed']);
+    for (const subject of [absent, claimed, stranger]) {
+      should(subject.store.writes).be.empty();
+      should(subject.store.created).be.empty();
+    }
+  });
+});

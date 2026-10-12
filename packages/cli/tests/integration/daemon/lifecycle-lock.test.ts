@@ -50,6 +50,10 @@ class ScriptedProcesses implements IDaemonProcessPort {
   alive(): boolean {
     return this.living;
   }
+
+  holdsOpen(): Promise<boolean | undefined> {
+    return Promise.resolve(this.living);
+  }
 }
 
 function lock(processes: IDaemonProcessPort = new ScriptedProcesses()): FileDaemonLifecycleLock {

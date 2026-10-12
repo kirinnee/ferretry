@@ -248,6 +248,27 @@ describe('SendMessageController', () => {
     should(io.err.join('\n')).match(/parked awaiting a reply from Hayden \(until 2h\)/);
   });
 
+  it('should keep a delivered send a success when only the park after it failed', async () => {
+    // Arrange — no `signal` stub, so the park is refused the way an unreachable daemon refuses it.
+    const api = new RecordingApi({ send: sendResult('queued', 'Hayden') });
+    const { io, presenter } = capturedPresenter();
+
+    // Act — resolving, not rejecting: a script that retried a non-zero exit would send it twice.
+    await new SendMessageController(api, new FakeFiles(), presenter, IN_PANE).execute('Hayden', {
+      message: 'and you?',
+      ask: true,
+    });
+
+    // Assert
+    should(api.methods()).deepEqual(['send', 'signal']);
+    should(io.exitCode).equal(0);
+    should(io.err.join('\n')).match(
+      /message sent, but this session could not be parked to wait for Hayden \(the test did not stub signal\); do not send it again/u,
+    );
+    should(io.err.join('\n')).not.match(/parked awaiting a reply/u);
+    should(io.out).not.be.empty();
+  });
+
   it('should refuse to park when the message only queued for a revive', async () => {
     // Arrange
     const api = new RecordingApi({ send: sendResult('queued-for-revive', 'Hayden') });

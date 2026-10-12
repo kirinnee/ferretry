@@ -58,12 +58,23 @@ export class SendMessageController {
       peer: peer.peerName,
       ...(park.until === undefined ? {} : { until: park.until }),
     });
-    if (decision.parked)
-      await this.api.signal(park.callerSessionId, 'waiting', undefined, {
-        peer: peer.peerId,
-        ...(park.until === undefined ? {} : { until: park.until }),
-        condition: `a reply from ${peer.peerName}`,
-      });
+    if (decision.parked) {
+      try {
+        await this.api.signal(park.callerSessionId, 'waiting', undefined, {
+          peer: peer.peerId,
+          ...(park.until === undefined ? {} : { until: park.until }),
+          condition: `a reply from ${peer.peerName}`,
+        });
+      } catch (error) {
+        // THE MESSAGE IS ALREADY DELIVERED, so this must not exit non-zero: a script that retries a
+        // failed send would send it twice. The wait is what failed, and saying so is the whole answer.
+        this.presenter.note(
+          `message sent, but this session could not be parked to wait for ${peer.peerName} ` +
+            `(${error instanceof Error ? error.message : String(error)}); do not send it again`,
+        );
+        return;
+      }
+    }
     this.presenter.note(decision.note);
   }
 }

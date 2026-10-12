@@ -1,4 +1,5 @@
 import { basename, dirname, isAbsolute, join, normalize, parse } from 'node:path';
+import { DAEMON_LOCK_FILENAME } from '../state-home/claim.ts';
 import { type CallerLocale, daemonLocale } from './locale.ts';
 
 /** The service managers this CLI knows how to drive, plus the no-manager fallback. */
@@ -56,6 +57,14 @@ export interface DaemonLayout {
    */
   readonly homeDirectory: string;
   readonly stateHome: string;
+  /**
+   * The lock a daemon serving THIS state home holds open for its whole life.
+   *
+   * The CLI never reads it. It is named so a pid that answered a health probe can be tied to this
+   * state home before anything signals it: holding this file open is the one identity a forwarded
+   * port, a container or a second installation cannot share.
+   */
+  readonly daemonLockFile: string;
   /**
    * The one tree of CLI-owned installation artifacts, keyed by `XDG_STATE_HOME` and the product.
    *
@@ -250,6 +259,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     product,
     homeDirectory,
     stateHome,
+    daemonLockFile: join(stateHome, DAEMON_LOCK_FILENAME),
     stateArtifactRoot,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),

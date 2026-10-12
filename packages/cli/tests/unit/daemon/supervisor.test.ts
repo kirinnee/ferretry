@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  DaemonOwnershipError,
   DirectSupervisor,
   LaunchdSupervisor,
   ServiceManagerCommandError,
@@ -526,5 +527,151 @@ describe('direct supervisor', () => {
     // Assert — this is the fast-fail a readiness wait needs, without any pid file.
     should(actual.state).equal('failed');
     should(actual.detail).equal('the process this command started has exited');
+  });
+});
+
+describe('direct supervisor refuses a pid it cannot tie to this state home', () => {
+  function direct(): { supervisor: DirectSupervisor; processes: FakeProcesses } {
+    const processes = new FakeProcesses();
+    const files = new FakeFiles();
+    return { supervisor: new DirectSupervisor(linux, processes, files, new FakeStateHomeClaim()), processes };
+  }
+
+  it('should send nothing to a pid that does not hold this state home lock', async () => {
+    // Arrange — the pid came over HTTP from whatever answered: a forwarded container port reports a
+    // pid from ITS namespace, which names some unrelated process on this host.
+    const { supervisor, processes } = direct();
+    processes.holdsOpenAnswer = false;
+
+    // Act + Assert
+    await should(supervisor.stop({ pidHint: 4242, escalate: false })).be.rejectedWith(DaemonOwnershipError);
+    await should(supervisor.stop({ pidHint: 4242, escalate: true })).be.rejectedWith(
+      /does not hold .*daemon\.lock.*nothing was signalled/u,
+    );
+    should(processes.signalled).be.empty();
+  });
+
+  it('should send nothing, and say what to do instead, when this host cannot tell', async () => {
+    // Arrange
+    const { supervisor, processes } = direct();
+    processes.holdsOpenAnswer = undefined;
+
+    // Act + Assert
+    await should(supervisor.stop({ pidHint: 4242, escalate: false })).be.rejectedWith(
+      /neither \/proc nor lsof.*`ps -p 4242`.*`kill 4242` yourself/u,
+    );
+    should(processes.signalled).be.empty();
+  });
+
+  it('should ask about the lock of THIS state home, and signal once it is proved', async () => {
+    // Arrange
+    const { supervisor, processes } = direct();
+
+    // Act
+    await supervisor.stop({ pidHint: 4242, escalate: false });
+
+    // Assert
+    should(processes.holdQuestions).deepEqual([{ pid: 4242, path: `${linux.stateHome}/daemon.lock` }]);
+    should(processes.signalled).deepEqual([{ pid: 4242, signal: 'SIGTERM' }]);
+  });
+
+  it('should have nothing to check when there is no pid', async () => {
+    // Arrange
+    const { supervisor, processes } = direct();
+
+    // Act
+    await supervisor.assertServes(undefined);
+
+    // Assert
+    should(processes.holdQuestions).be.empty();
+  });
+});
+
+describe('service supervisors refuse a definition or daemon belonging to another state home', () => {
+  const elsewhere = '/srv/another-ferretry-home';
+
+  it('should refuse when the one systemd unit on this host serves another state home', async () => {
+    // Arrange — `fyd.service` is one name per host whatever FY_HOME says, so the primary daemon's
+    // unit is what `FY_HOME=/other fy daemon reset` would have stopped.
+    const { supervisor, files, processes } = systemd();
+    const other = new SystemdSupervisor(layout({ stateHome: elsewhere }), processes, files, new FakeStateHomeClaim());
+    await other.install(daemonBinary.path);
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(DaemonOwnershipError);
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(
+      new RegExp(`supervises the fyd for ${elsewhere}, not ${linux.stateHome}.*FY_HOME=${elsewhere}`, 'u'),
+    );
+  });
+
+  it('should accept the unit it would write itself, and no unit at all', async () => {
+    // Arrange
+    const { supervisor, processes } = systemd();
+    await supervisor.assertServes(undefined);
+    await supervisor.install(daemonBinary.path);
+
+    // Act
+    await supervisor.assertServes(4242);
+
+    // Assert — a service manager stops its own unit, so it asks about the pid but never signals it.
+    should(processes.holdQuestions).deepEqual([{ pid: 4242, path: `${linux.stateHome}/daemon.lock` }]);
+    should(processes.signalled).be.empty();
+  });
+
+  it('should refuse a unit that names no state home rather than guess which it serves', async () => {
+    // Arrange
+    const { supervisor, files } = systemd();
+    await files.writePrivate(linux.systemdUnitFile, '[Service]\nExecStart=/usr/bin/fyd\n');
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(/names no FY_HOME/u);
+  });
+
+  it('should refuse a daemon that answered but provably serves another state home', async () => {
+    // Arrange
+    const { supervisor, processes } = systemd();
+    await supervisor.install(daemonBinary.path);
+    processes.holdsOpenAnswer = false;
+
+    // Act + Assert
+    await should(supervisor.assertServes(4242)).be.rejectedWith(/not this state home's fyd/u);
+  });
+
+  it('should let the unit stop its own daemon on a host that cannot tell', async () => {
+    // Arrange — no pid is ever signalled on this path, so an unanswerable question costs nothing.
+    const { supervisor, processes } = systemd();
+    await supervisor.install(daemonBinary.path);
+    processes.holdsOpenAnswer = undefined;
+
+    // Act + Assert
+    await should(supervisor.assertServes(4242)).be.fulfilled();
+  });
+
+  it('should refuse when the one launchd agent on this host serves another state home', async () => {
+    // Arrange
+    const { supervisor, files, processes } = launchd();
+    const other = new LaunchdSupervisor(
+      layout({ platform: 'darwin', userId: 501, stateHome: elsewhere }),
+      processes,
+      files,
+      new FakeStateHomeClaim(),
+    );
+    await other.install(daemonBinary.path);
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(
+      new RegExp(`supervises the fyd for ${elsewhere}`, 'u'),
+    );
+  });
+
+  it('should accept the launchd agent it would write itself and check the pid it was given', async () => {
+    // Arrange
+    const { supervisor, processes } = launchd();
+    await supervisor.install(daemonBinary.path);
+    processes.holdsOpenAnswer = false;
+
+    // Act + Assert
+    await supervisor.assertServes(undefined);
+    await should(supervisor.assertServes(4242)).be.rejectedWith(DaemonOwnershipError);
   });
 });

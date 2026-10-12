@@ -17,6 +17,7 @@ import {
   FakeResetInventory,
   FakeResetTrees,
   FakeRetiredArtifacts,
+  FakeStateHomeClaim,
   FakeSupervisor,
   health,
   installedDaemon,
@@ -76,6 +77,7 @@ function run(
         retired: new FakeRetiredArtifacts(),
         resetTrees,
         resetInventory: new FakeResetInventory({ secrets: 1, devices: 1 }),
+        claims: new FakeStateHomeClaim(),
         prompt,
         // No terminal, so `reset` routes here and then refuses unless `--yes` was passed. That is what
         // this suite is for: the flag reaching the controller, not the decision it drives.
