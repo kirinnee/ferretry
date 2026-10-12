@@ -21,6 +21,8 @@ interface World {
   readonly service: CapabilityGrantService;
   readonly audit: GrantAuditEntry[];
   written(): CapabilityGrants | undefined;
+  /** How many passwords were actually checked against the store. */
+  verified(): number;
   advance(milliseconds: number): void;
 }
 
@@ -29,6 +31,7 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
   let written: CapabilityGrants | undefined;
   let stored = options.password;
   let minted = 0;
+  let verified = 0;
   let now = NOW;
   const audit: GrantAuditEntry[] = [];
   const service = new CapabilityGrantService({
@@ -48,7 +51,10 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
       set: async password => {
         stored = password;
       },
-      verify: async candidate => stored !== undefined && candidate === stored,
+      verify: async candidate => {
+        verified += 1;
+        return stored !== undefined && candidate === stored;
+      },
     },
     tokens: {
       mint: () => {
@@ -69,6 +75,7 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
     service,
     audit,
     written: () => written,
+    verified: () => verified,
     advance: milliseconds => {
       now += milliseconds;
     },
@@ -260,6 +267,44 @@ describe('unlocking', () => {
     // rather than defend against a guesser.
     context.advance(GRANT_UNLOCK_LOCKOUT_SECONDS * 1_000 + 1);
     should((await context.service.unlock('operator-secret')).kind).equal('unlocked');
+  });
+
+  it('should check no more passwords than the budget when the guesses arrive all at once', async () => {
+    // The verify is a slow hash awaited off the request's turn. A ledger written only AFTER it let
+    // every guess in one parallel burst pass the lockout check together, so the five tries bounded
+    // nothing — a guesser just sent them concurrently.
+    // Arrange
+    const context = world({ password: 'operator-secret' });
+    await context.service.refresh();
+
+    // Act
+    const burst = await Promise.all(
+      Array.from({ length: GRANT_UNLOCK_MAX_ATTEMPTS * 4 }, () => context.service.unlock('wrong')),
+    );
+
+    // Assert
+    should(context.verified()).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
+    should(burst.every(outcome => outcome.kind === 'refused')).be.true();
+    should(context.service.view(remote).lockedUntil).be.a.String();
+    should((await context.service.unlock('operator-secret')).kind).equal('refused');
+  });
+
+  it('should still unlock a correct password that arrives beside wrong ones', async () => {
+    // Charging before the check must not cost the holder anything: a right password clears the ledger.
+    // Arrange
+    const context = world({ password: 'operator-secret' });
+    await context.service.refresh();
+
+    // Act
+    const [wrong, right] = await Promise.all([
+      context.service.unlock('wrong'),
+      context.service.unlock('operator-secret'),
+    ]);
+
+    // Assert
+    should(wrong.kind).equal('refused');
+    should(right.kind).equal('unlocked');
+    should(context.service.view(remote).attemptsRemaining).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
   });
 });
 
@@ -814,6 +859,29 @@ describe('confirming one change against the operator password', () => {
     // Assert
     should(last).deepEqual({ kind: 'refused', reason: 'rate-limited' });
     should(correct).deepEqual({ kind: 'refused', reason: 'rate-limited' });
+  });
+
+  it('should spend the shared budget on a parallel burst of confirmations, not one per guess', async () => {
+    // The same race as the unlock's, on the per-change proof: it shares that ledger, so it must share
+    // the synchronous charge too, or a burst of confirmations would be an unbounded guessing oracle.
+    // Arrange
+    const context = world({ password: 'the operator knows this' });
+    await context.service.refresh();
+
+    // Act
+    const burst = await Promise.all(
+      Array.from({ length: GRANT_UNLOCK_MAX_ATTEMPTS * 4 }, () => context.service.confirmChange('not it')),
+    );
+
+    // Assert
+    should(context.verified()).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
+    should(burst.filter(outcome => outcome.kind === 'refused' && outcome.reason === 'rate-limited').length).be.above(
+      GRANT_UNLOCK_MAX_ATTEMPTS * 3 - 1,
+    );
+    should(await context.service.confirmChange('the operator knows this')).deepEqual({
+      kind: 'refused',
+      reason: 'rate-limited',
+    });
   });
 
   it('should clear the ledger when the password is right, exactly as an unlock does', async () => {

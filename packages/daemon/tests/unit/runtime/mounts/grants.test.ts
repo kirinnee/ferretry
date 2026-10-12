@@ -223,12 +223,25 @@ describe('the operator password route', () => {
       }),
     );
     const passwordAfterRemoteAdmin = subsystem.hasPassword();
+    // A loopback PEER is not the host: a local proxy forwards a remote phone from one. Refused first,
+    // so the password it tried is provably never set.
+    const proxiedDevice = await withDevices.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/grants/password',
+        headers: { authorization: 'Bearer device-secret' },
+        loopback: true,
+        body: JSON.stringify({ password: 'forwarded' }),
+      }),
+    );
+    const passwordAfterProxiedDevice = subsystem.hasPassword();
     const localDevice = await withDevices.dispatch(
       request({
         method: 'PUT',
         path: '/v1/grants/password',
         headers: { authorization: 'Bearer device-secret' },
         loopback: true,
+        privilegedLoopback: true,
         body: JSON.stringify({ password: 'operator-secret' }),
       }),
     );
@@ -245,6 +258,8 @@ describe('the operator password route', () => {
     // Assert
     should(remoteAdmin.status).equal(403);
     should(passwordAfterRemoteAdmin).be.false();
+    should(proxiedDevice.status).equal(403);
+    should(passwordAfterProxiedDevice).be.false();
     should(localDevice.status).equal(200);
     should(jsonBody(localDevice)).deepEqual({ passwordSet: true });
     should(subsystem.hasPassword()).be.true();
@@ -265,19 +280,22 @@ describe('the operator password route', () => {
       devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
     };
     const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials, NO_GOVERNED_ROUTES_GUARD);
-    const put = (headers: Record<string, string>, password: string) =>
+    const put = (headers: Record<string, string>, password: string, privilegedLoopback?: true) =>
       withDevices.dispatch(
         request({
           method: 'PUT',
           path: '/v1/grants/password',
           headers,
           loopback: true,
+          privilegedLoopback,
           body: JSON.stringify({ password }),
         }),
       );
 
-    // Act
-    const browser = await put({ authorization: 'Bearer device-secret' }, 'a-browser-tried-this');
+    // Act — the browser is PROVED local, so the refusal is the gate's and not the arrival's. The host
+    // token carries no such proof, as on a daemon bound beyond loopback, and is served anyway: the
+    // escape hatch must not depend on how the daemon was bound.
+    const browser = await put({ authorization: 'Bearer device-secret' }, 'a-browser-tried-this', true);
     const hostToken = await put(human, 'the-host-repaired-it');
 
     // Assert

@@ -2,7 +2,14 @@ import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
 import { type CallerGovernance, type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
-import { type ApiRequest, type ApiResponse, headerValue, queryValue, type RouteParameters } from './http.ts';
+import {
+  type ApiRequest,
+  type ApiResponse,
+  arrivedOnHost,
+  headerValue,
+  queryValue,
+  type RouteParameters,
+} from './http.ts';
 import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
@@ -133,9 +140,13 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: methodNotAllowedResponse(request.method, request.path, lookup.allowed),
     };
 
+  // Host arrival is PROVED, never inferred from a loopback peer: a remote caller forwarded through a
+  // locally bound proxy is a loopback peer too. Decided once so the privileged-arrival check and the
+  // grant presentation below cannot disagree about where the same request came from.
+  const onHost = arrivedOnHost(request, authentication.tokenClass === 'admin');
   if (
     !meetsMinimum(authentication.tokenClass, lookup.route.minimum) ||
-    (lookup.route.privilegedOnly === true && !request.loopback)
+    (lookup.route.privilegedOnly === true && !onHost)
   )
     return {
       kind: 'refused',
@@ -174,9 +185,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   let governance: CallerGovernance | undefined;
   if (demand !== undefined) {
     const presentation = {
-      // The TRANSPORT's answer, never a header's. A relayed hop terminates on this very host, so
-      // anything derived from an address would read as local and hand a remote caller the machine.
-      loopback: request.loopback,
+      // The CARRIER's proof, never a header's. A relayed hop terminates on this very host and a
+      // locally bound proxy forwards from a loopback peer, so anything derived from an address would
+      // read as local and hand a remote caller the machine.
+      loopback: onHost,
       // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
       // headers and would make this decision movable by a header. The host's command line holds this
       // token and is ungoverned; a browser on the same machine does not and is gated until it unlocks.

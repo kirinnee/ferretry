@@ -192,3 +192,48 @@ describe('use without read', () => {
     should(runner.spec?.maxOutputBytes).be.greaterThan(0);
   });
 });
+
+describe('a value the output limit cut in half', () => {
+  /** A runner that hands back exactly what a capped read would have kept. */
+  const cutAt = (stdout: string, truncated: boolean): SecretChildRunner => ({
+    run: async (): Promise<SecretChildOutcome> => ({ outcome: 'exited', exitCode: 0, stdout, stderr: '', truncated }),
+  });
+
+  it('should mask the beginning of a value the cut left at the very end', async () => {
+    // Arrange — the cap fell eight characters into the token, so no whole-value match can see it.
+    const service = new SecretUseService(await vaultHolding({ TOKEN }), cutAt(`key=${TOKEN.slice(0, 8)}`, true));
+
+    // Act
+    const result = await service.run(request({ secrets: ['TOKEN'] }));
+
+    // Assert
+    should(result.stdout).equal('key=[redacted:TOKEN]');
+    should(result.stdout).not.containEql(TOKEN.slice(0, 8));
+    should(result.truncated).be.true();
+  });
+
+  it('should mask a prefix hidden behind a character the byte cut split', async () => {
+    // Arrange — a multi-byte character cut in half decodes as U+FFFD, which would shield what precedes it.
+    const service = new SecretUseService(await vaultHolding({ TOKEN: 'pässwörd-0123' }), cutAt('pw=p�', true));
+
+    // Act
+    const result = await service.run(request({ secrets: ['TOKEN'] }));
+
+    // Assert
+    should(result.stdout).equal('pw=[redacted:TOKEN]');
+  });
+
+  it('should leave the end of an output that was not cut, and of one with no partial value, alone', async () => {
+    // Arrange — a whole output may end however its program chose; only a cut can split a value.
+    const whole = new SecretUseService(await vaultHolding({ TOKEN }), cutAt(`tail ${TOKEN.slice(0, 8)}`, false));
+    const unrelated = new SecretUseService(await vaultHolding({ TOKEN }), cutAt('nothing secret here�', true));
+
+    // Act
+    const wholeResult = await whole.run(request({ secrets: ['TOKEN'] }));
+    const unrelatedResult = await unrelated.run(request({ secrets: ['TOKEN'] }));
+
+    // Assert
+    should(wholeResult.stdout).equal(`tail ${TOKEN.slice(0, 8)}`);
+    should(unrelatedResult.stdout).equal('nothing secret here�');
+  });
+});

@@ -323,6 +323,7 @@ describe('push routes', () => {
         path: '/v1/push/subscriptions',
         headers: browser,
         loopback: true,
+        privilegedLoopback: true,
         body: JSON.stringify(body),
       }),
     );
