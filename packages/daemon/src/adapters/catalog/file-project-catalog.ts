@@ -2,12 +2,21 @@ import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/prom
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
+  ProjectCloneUrlSchema,
+  ProjectCloneUrlUnsupportedMessage,
   ProjectListSchema,
   ProjectPathSchema,
   type ProjectInfo,
   type ProjectList,
   type RegisterProjectRequest,
 } from '@ferretry/protocol';
+
+/**
+ * The transports a clone may use, handed to git itself. `ProjectCloneUrlSchema` already refuses every
+ * other one; this is the same set where git enforces it, so a host git configuration that enables
+ * `ext::`, or anything git follows on the way, cannot reach a transport that runs a command.
+ */
+const CLONE_PROTOCOLS = 'https:ssh:file';
 
 /**
  * The daemon's authoritative Project registry.  This deliberately has no scan
@@ -68,7 +77,10 @@ export class FileProjectCatalog {
       await mkdir(requested, { recursive: false, mode: 0o700 });
       if (request.initializeGit) await this.runGit(['init', requested]);
     } else if (request.kind === 'clone') {
-      await this.runGit(['clone', '--', request.url, requested]);
+      // The same re-parse as the path, for the same reason: a direct caller skips the mount's parseBody.
+      const url = ProjectCloneUrlSchema.safeParse(request.url);
+      if (!url.success) throw new Error(ProjectCloneUrlUnsupportedMessage);
+      await this.runGit(['clone', '--', url.data, requested], { GIT_ALLOW_PROTOCOL: CLONE_PROTOCOLS });
     }
     const information = await stat(requested).catch(() => undefined);
     if (information === undefined || !information.isDirectory())
@@ -90,8 +102,12 @@ export class FileProjectCatalog {
     }
   }
 
-  private async runGit(arguments_: readonly string[]): Promise<void> {
-    const process = Bun.spawn(['git', ...arguments_], { stdout: 'pipe', stderr: 'pipe' });
+  private async runGit(arguments_: readonly string[], environment: Record<string, string> = {}): Promise<void> {
+    const process = Bun.spawn(['git', ...arguments_], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...Bun.env, ...environment },
+    });
     if ((await process.exited) === 0) return;
     throw new Error(`git ${arguments_[0] ?? 'operation'} failed`);
   }

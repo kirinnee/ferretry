@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AvailableSkillSchema,
+  ProjectCloneUrlSchema,
+  ProjectCloneUrlUnsupportedMessage,
   ProjectInfoSchema,
   ProjectPathSchema,
   RegisterProjectRequestSchema,
@@ -78,6 +80,42 @@ describe('catalog protocol contracts', () => {
     ] as const;
     for (const request of arms) {
       should(RegisterProjectRequestSchema.parse({ ...request }).path).equal(request.path);
+    }
+  });
+
+  it('accepts only the three clone transports, judged on the text git will receive', () => {
+    for (const accepted of [
+      'https://github.com/you/p.git',
+      'ssh://git@github.com/you/p.git',
+      'file:///srv/mirror.git',
+      'HTTPS://github.com/you/p.git',
+    ]) {
+      should(ProjectCloneUrlSchema.safeParse(accepted).success).be.true();
+    }
+    for (const refused of [
+      // Remote-helper syntax: `ext::` runs a command, and the rest are not addresses git can clone.
+      'ext::sh -c id',
+      'fd::0',
+      'ssh::opaque',
+      // Other transports, and an ssh host git would read as an option.
+      'http://example.com/p.git',
+      'git://example.com/p.git',
+      'ssh://-oProxyCommand=id/p.git',
+      // Text the URL parser repairs and git would not: an scp-style host, an embedded tab, a padded
+      // address, and a file URL naming another machine.
+      'https:/github.com/you/p.git',
+      'https://github.com/you/p\t.git',
+      ' https://github.com/you/p.git',
+      'file://server/share.git',
+      'file:/srv/mirror.git',
+      // Not URLs at all.
+      'git@github.com:you/p.git',
+      '/srv/mirror.git',
+      '',
+    ]) {
+      const parsed = RegisterProjectRequestSchema.safeParse({ kind: 'clone', url: refused, path: '/work/p' });
+      should(parsed.success).be.false();
+      should(parsed.error?.issues[0]?.message).equal(ProjectCloneUrlUnsupportedMessage);
     }
   });
 });

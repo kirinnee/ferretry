@@ -588,6 +588,10 @@ export class HarnessLoginService {
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────
 
   #launch(identity: FleetIdentity, accountId: string): HarnessLoginFlow {
+    // Checked AGAIN, and this is the check that holds: `#authorize`'s copy runs before the password is
+    // proved, and that proof is an await, so two starts for one identity can both pass it. Nothing
+    // between here and the record landing in `#flows` awaits, so the later of the two is refused here.
+    this.#assertSingleFlight(identity);
     this.#prune();
     const startedAt = this.options.clock.now();
     const window = (this.options.windowMinutes ?? HARNESS_LOGIN_WINDOW_MINUTES) * 60_000;
@@ -663,6 +667,9 @@ export class HarnessLoginService {
     if (settled(record.stage)) return { status: 'failed', message: 'this sign-in ended before the harness started' };
 
     const script = await this.options.readWrapper(target.wrapper);
+    // Asked again after the read: a cancel or a closed window can land during it, and a child spawned
+    // after the flow ended would have nobody left to kill it.
+    if (settled(record.stage)) return { status: 'failed', message: 'this sign-in ended before the harness started' };
     if (script === undefined) {
       // NO `PATH` FALLBACK. A daemon started by a service manager inherits no shell profile, so a
       // name-based lookup cannot resolve the fleet's own bin directory however correctly it was
