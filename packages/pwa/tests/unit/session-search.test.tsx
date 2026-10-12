@@ -27,6 +27,7 @@ import {
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../src/lib/quote.ts';
+import { browserFetch } from '../../src/lib/runtime-models.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../src/shell/palette-shortcut.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { type TaskSummaryOverrides, taskSummary } from '../support/tasks.ts';
@@ -1569,6 +1570,7 @@ describe('the published scope and the published evidence never disagree', () => 
         ? null
         : sessionReferenceSurface({
             connection: search.connection,
+            fetcher: browserFetch,
             scope: search.scope,
             ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
           });

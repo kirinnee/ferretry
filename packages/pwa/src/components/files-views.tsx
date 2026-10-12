@@ -377,7 +377,7 @@ export interface FileBodyProps {
 export const FileBody = ({ file, path, raw = false, selection, targetLineRef, markdown, preview }: FileBodyProps) => {
   const refusal = fileRefusal(file);
   const content = file.content ?? '';
-  const lang = file.lang ?? langFromPath(path);
+  const lang = langFromPath(path);
   const renderedMarkdown = isMarkdownPath(path) && selection === undefined;
   const richKind = richFileKind(path);
   // `file.binary || content` is what stops a rich preview from swallowing the

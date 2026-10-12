@@ -23,6 +23,7 @@ import { Download, ExternalLink } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import { fsApi } from './files-api.ts';
 import { StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
@@ -171,9 +172,10 @@ export interface RichFilePreviewProps {
 }
 
 export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePreviewProps) => {
+  const fetcher = useDaemonFetch();
   const kind = richFileKind(path);
   const key = kind === null ? null : `preview:${daemonSessionKey(scope)}:${path}`;
-  const preview = useFsResource(key, signal => fsApi.preview(daemon, scope, path, signal));
+  const preview = useFsResource(key, signal => fsApi.preview(daemon, scope, path, signal, fetcher));
   const [url, setUrl] = useState<string | null>(null);
   // The revision this preview's bytes were fetched against. Seeded from the
   // mounting revision so the first read is not immediately re-run.

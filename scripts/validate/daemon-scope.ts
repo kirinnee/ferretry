@@ -413,7 +413,14 @@ function retentionVerdict(
 
 // ─── pass: ACCESS ─────────────────────────────────────────────────────────────────────────────
 
-const NETWORK_CALLS = [/(?<![.\w])fetch\s*\(/u, /new\s+WebSocket\s*\(/u, /new\s+EventSource\s*\(/u, /sendBeacon\s*\(/u];
+// `browserFetch(` is the same network call under the one name this package may give it; matching
+// only `fetch(` let a rename make a call invisible here.
+const NETWORK_CALLS = [
+  /(?<![.\w])(?:fetch|browserFetch)\s*\(/u,
+  /new\s+WebSocket\s*\(/u,
+  /new\s+EventSource\s*\(/u,
+  /sendBeacon\s*\(/u,
+];
 
 // ─── pass: INVALIDATE ─────────────────────────────────────────────────────────────────────────
 

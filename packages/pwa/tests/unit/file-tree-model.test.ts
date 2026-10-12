@@ -19,6 +19,8 @@ import {
 describe('file tree model', () => {
   it('only loads expanded visible non-refused directories', () => {
     let state = setTreeDirListing(createFileTreeState(), '', {
+      root: '/work',
+      path: '',
       entries: [
         { name: 'src', type: 'dir' },
         { name: '.git', type: 'dir', denied: true },
@@ -30,6 +32,8 @@ describe('file tree model', () => {
   });
   it('renders daemon uncertainty honestly and preserves raw refused names', () => {
     let state = setTreeDirListing(createFileTreeState(), '', {
+      root: '/work',
+      path: '',
       entries: [
         { name: 'a\\b', type: 'file' },
         { name: 'src', type: 'dir' },
@@ -61,7 +65,7 @@ describe('file tree model', () => {
     state = resetTreeDir(state, 'src');
     expect(treeDirNode(state, 'src').status).toBe('unloaded');
     expect(invalidateTree(initial)).toBe(initial);
-    expect(treeRows(setTreeDirListing(state, '', { entries: [] }))).toEqual([
+    expect(treeRows(setTreeDirListing(state, '', { root: '/work', path: '', entries: [] }))).toEqual([
       { kind: 'note', note: 'empty', dir: '', depth: 0 },
     ]);
   });

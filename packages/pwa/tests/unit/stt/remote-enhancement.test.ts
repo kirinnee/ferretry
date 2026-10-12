@@ -56,6 +56,10 @@ const ask = (overrides: Partial<RemoteEnhancementInput> = {}): RemoteEnhancement
   dictionary: [],
   context: [],
   userContext: '',
+  // A transport is required now; a case that never reaches the network gets one that says so if it does.
+  fetchImpl: async () => {
+    throw new Error('this request must not be sent');
+  },
   ...overrides,
 });
 

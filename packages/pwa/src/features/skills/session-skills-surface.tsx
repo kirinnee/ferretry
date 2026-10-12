@@ -26,6 +26,7 @@ import { useCallback, useMemo } from 'react';
 import { addReferenceMessage } from '../../lib/composer-references.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { type SkillsCatalogLoader, skillsCatalogLoader } from './skills-api.ts';
 import { addSkillInvocationToComposer } from './skills-composer.ts';
 import { SkillsSurface } from './skills-surface.tsx';
@@ -44,13 +45,14 @@ export interface SessionSkillsSurfaceProps {
 }
 
 export function SessionSkillsSurface({ connection, scope, loadCatalog }: SessionSkillsSurfaceProps) {
+  const fetcher = useDaemonFetch();
   const load = useMemo(
-    () => loadCatalog ?? skillsCatalogLoader(connection),
+    () => loadCatalog ?? skillsCatalogLoader(connection, fetcher),
     // The connection is the identity the loader closes over, so a re-pairing
     // rebuilds it and the surface refetches. A fresh object with the same daemon
     // id does not, which is what keeps an unrelated parent render from
     // re-reading the catalog.
-    [connection, loadCatalog],
+    [connection, fetcher, loadCatalog],
   );
   const insert = useCallback(
     (invocation: string): string | undefined => {

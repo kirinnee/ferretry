@@ -26,7 +26,9 @@ const otherScope = daemonSessionScope(other, 'work');
  * reload that must survive it — the bytes, the mounted nodes, the scroll
  * offset — is only observable while the reread has not settled.
  */
-type FileAnswer = FsFile | Error | Promise<FsFile>;
+/** `size` is the daemon's to state; it defaults to the length of whatever bytes are served. */
+type ServedFile = Omit<FsFile, 'size'> & { size?: number };
+type FileAnswer = ServedFile | Error | Promise<ServedFile>;
 
 interface Fixture {
   changes?: FsChanges | Error;
@@ -58,9 +60,9 @@ const route = async (url: string): Promise<Response> => {
   const preview = parsed.searchParams.get('format') === 'base64';
   const answer = await (preview ? fixture.previews?.[path] : fixture.files?.[path]);
   if (answer instanceof Error) throw answer;
-  return json(
-    answer ?? (preview ? { path, base64: btoa(`bytes of ${path}`) } : { path, content: `contents of ${path}` }),
-  );
+  const served =
+    answer ?? (preview ? { path, base64: btoa(`bytes of ${path}`) } : { path, content: `contents of ${path}` });
+  return json({ size: (served.content ?? served.base64 ?? '').length, ...served });
 };
 
 beforeEach(() => {
@@ -359,9 +361,9 @@ describe('a file instance tab body', () => {
       const body = must(pane.firstElementChild, 'the mounted file body');
       pane.scrollTop = 120;
 
-      let release: ((file: FsFile) => void) | null = null;
+      let release: ((file: ServedFile) => void) | null = null;
       fixture.files = {
-        'src/api.ts': new Promise<FsFile>(resolve => {
+        'src/api.ts': new Promise<ServedFile>(resolve => {
           release = resolve;
         }),
       };
@@ -421,9 +423,9 @@ describe('a file instance tab body', () => {
       // no longer applies, so the alert must clear and the progress region must
       // say the read started — a retry that still renders its own failure is
       // asserting a stale error as current.
-      let release: ((file: FsFile) => void) | null = null;
+      let release: ((file: ServedFile) => void) | null = null;
       fixture.files = {
-        'src/api.ts': new Promise<FsFile>(resolve => {
+        'src/api.ts': new Promise<ServedFile>(resolve => {
           release = resolve;
         }),
       };
@@ -604,10 +606,10 @@ describe('a file instance tab body showing a rich preview', () => {
         );
         const before = previewReads();
 
-        let release: ((file: FsFile) => void) | null = null;
+        let release: ((file: ServedFile) => void) | null = null;
         fixture.files = { 'report.html': { path: 'report.html', content: '<h1>two</h1>' } };
         fixture.previews = {
-          'report.html': new Promise<FsFile>(resolve => {
+          'report.html': new Promise<ServedFile>(resolve => {
             release = resolve;
           }),
         };
@@ -668,9 +670,9 @@ describe('a file instance tab body showing a rich preview', () => {
 
         // And its retry is honest too: while the second read is in flight the
         // settled failure no longer applies.
-        let release: ((file: FsFile) => void) | null = null;
+        let release: ((file: ServedFile) => void) | null = null;
         fixture.previews = {
-          'report.html': new Promise<FsFile>(resolve => {
+          'report.html': new Promise<ServedFile>(resolve => {
             release = resolve;
           }),
         };

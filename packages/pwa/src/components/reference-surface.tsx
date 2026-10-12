@@ -29,6 +29,7 @@ import { createContext, type ReactNode, useContext } from 'react';
 import { createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { createSurfaceReferenceResolver } from '../lib/surface-references.ts';
 import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
 import {
@@ -63,6 +64,11 @@ export function ReferenceSurfaceProvider({
 
 export interface SessionReferenceSurfaceOptions {
   readonly connection: DaemonConnection;
+  /**
+   * The fetch the `@file` proof reads listings through — the carrier router, so a session on a
+   * daemon only the relay reaches still proves its file references.
+   */
+  readonly fetcher: DaemonFetch;
   readonly scope: DaemonSessionScope;
   /** The session's working directory; without it no absolute path can resolve. */
   readonly cwd?: string;
@@ -109,8 +115,19 @@ const fileSelection = (line?: number, endLine?: number): SidePaneFileSelection |
  * second half-built detail view.
  */
 export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions): ReferenceSurface {
-  const { connection, scope, cwd, sessions, tasks, attentionIds, onAttentionOpen, skills, terminals, onNavigate } =
-    options;
+  const {
+    connection,
+    fetcher,
+    scope,
+    cwd,
+    sessions,
+    tasks,
+    attentionIds,
+    onAttentionOpen,
+    skills,
+    terminals,
+    onNavigate,
+  } = options;
   const attention = attentionIds === undefined ? undefined : new Set<string>(attentionIds);
   // EXACT names, never case-folded. The catalog accepts any nonempty trimmed
   // name, while the reference grammar accepts lowercase ones only — so folding a
@@ -133,7 +150,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     // listing to answer from.
     surfaceReferenceResolver: createSurfaceReferenceResolver(scope, terminals),
     resolveFilePaths: async (candidates, signal) =>
-      await resolveFsFilePaths(connection, scope, candidates, cwd, signal),
+      await resolveFsFilePaths(connection, scope, candidates, cwd, fetcher, signal),
     onCodeReferenceOpen: reference => {
       openSidePaneFileTab(scope, reference.path, fileSelection(reference.line, reference.endLine));
     },

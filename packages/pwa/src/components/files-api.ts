@@ -1,54 +1,33 @@
-import type { SessionFileIndexResponse } from '@ferretry/protocol';
+import {
+  type SessionFileIndexResponse,
+  SessionFileIndexResponseSchema,
+  type SessionFsChanges,
+  SessionFsChangesSchema,
+  type SessionFsEntry,
+  type SessionFsEntryType,
+  type SessionFsFile,
+  SessionFsFileSchema,
+  type SessionFsListing,
+  SessionFsListingSchema,
+  type SessionGitChange,
+} from '@ferretry/protocol';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import type { z } from 'zod';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { daemonRequest } from '../lib/daemon-transport.ts';
 import { grantRefusalNotice } from '../lib/grants.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
+import { type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import { baseName, isOpenableName, isOpenablePath, parentRel } from './files-model.ts';
 
-export type FsEntryType = 'file' | 'dir' | 'symlink';
-export interface FsEntry {
-  name: string;
-  type: FsEntryType;
-  size?: number;
-  mtime?: number | string;
-  ignored?: boolean;
-  denied?: boolean;
-  escapes?: boolean;
-}
-export interface FsListing {
-  root?: string;
-  path?: string;
-  entries: FsEntry[];
-  truncated?: boolean;
-}
-export interface FsChange {
-  path: string;
-  status: string;
-  from?: string;
-  additions?: number;
-  deletions?: number;
-}
-export interface FsChanges {
-  repo: boolean;
-  branch?: string;
-  changes: FsChange[];
-  truncated?: boolean;
-}
-export interface FsFile {
-  path: string;
-  size?: number;
-  mtime?: number | string;
-  lang?: string;
-  binary?: boolean;
-  tooLarge?: boolean;
-  denied?: boolean;
-  ignored?: boolean;
-  content?: string;
-  /** Explicitly requested bounded bytes. Never a URL: preview code creates a local object URL. */
-  base64?: string;
-}
+// The wire shapes are the protocol's. These names stay because the views already speak them.
+export type FsEntryType = SessionFsEntryType;
+export type FsEntry = SessionFsEntry;
+export type FsListing = SessionFsListing;
+export type FsChange = SessionGitChange;
+export type FsChanges = SessionFsChanges;
+export type FsFile = SessionFsFile;
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('file scope must belong to the requested daemon');
@@ -76,71 +55,103 @@ const failure = async (response: Response): Promise<DaemonResponseError> => {
     typeof body.code === 'string' ? body.code : undefined,
   );
 };
-const request = async <T>(
+/**
+ * One file-surface read, through the fetch the caller hands in.
+ *
+ * The fetch is REQUIRED. It used to default to the plain network, so every caller that forgot it — the
+ * Files tab, an open file, the `@file` reference proof — read a relay-only daemon over an address the
+ * browser could not reach. A caller now passes the carrier router's fetch, which `useDaemonFetch` returns.
+ */
+const send = async (
   daemon: DaemonConnection,
   path: string,
-  fetcher: DaemonFetch = browserFetch,
-  signal?: AbortSignal,
-): Promise<T> => {
+  fetcher: DaemonFetch,
+  signal: AbortSignal | undefined,
+): Promise<Response> => {
   // The daemon also marks these responses `no-store`; setting the request side
   // makes a reader's explicit refresh a network read even behind a broken or
   // overly-helpful intermediary cache.
   const target = daemonRequest(daemon, path, { signal, cache: 'no-store' });
   const response = await fetcher(target.url, target.init);
   if (!response.ok) throw await failure(response);
-  return (response.headers.get('content-type') ?? '').includes('application/json')
-    ? ((await response.json()) as T)
-    : ((await response.text()) as T);
+  return response;
+};
+/**
+ * A JSON answer, PARSED. A listing decides which `@file` references become links — an entry flagged
+ * `denied`, `ignored` or `escapes` never does — so a cast here would let any body promote a path.
+ */
+const readJson = async <Schema extends z.ZodType>(
+  schema: Schema,
+  daemon: DaemonConnection,
+  path: string,
+  fetcher: DaemonFetch,
+  signal: AbortSignal | undefined,
+): Promise<z.output<Schema>> => {
+  const response = await send(daemon, path, fetcher, signal);
+  const parsed = schema.safeParse(await response.json().catch(() => undefined));
+  if (!parsed.success) throw new DaemonResponseError(502, 'the daemon answered with a body this page cannot read');
+  return parsed.data;
 };
 export const fsApi = {
   list: (
     daemon: DaemonConnection,
     scope: DaemonSessionScope,
     path: string,
-    signal?: AbortSignal,
-    fetcher?: DaemonFetch,
-  ) => {
+    signal: AbortSignal | undefined,
+    fetcher: DaemonFetch,
+  ): Promise<FsListing> => {
     assertScopeDaemon(daemon, scope);
-    return request<FsListing>(daemon, listUrl(scope, path), fetcher, signal);
+    return readJson(SessionFsListingSchema, daemon, listUrl(scope, path), fetcher, signal);
   },
   file: (
     daemon: DaemonConnection,
     scope: DaemonSessionScope,
     path: string,
-    rev?: 'head',
-    signal?: AbortSignal,
-    fetcher?: DaemonFetch,
-  ) => {
+    rev: 'head' | undefined,
+    signal: AbortSignal | undefined,
+    fetcher: DaemonFetch,
+  ): Promise<FsFile> => {
     assertScopeDaemon(daemon, scope);
-    return request<FsFile>(daemon, fileUrl(scope, path, rev), fetcher, signal);
+    return readJson(SessionFsFileSchema, daemon, fileUrl(scope, path, rev), fetcher, signal);
   },
   preview: (
     daemon: DaemonConnection,
     scope: DaemonSessionScope,
     path: string,
-    signal?: AbortSignal,
-    fetcher?: DaemonFetch,
-  ) => {
+    signal: AbortSignal | undefined,
+    fetcher: DaemonFetch,
+  ): Promise<FsFile> => {
     assertScopeDaemon(daemon, scope);
-    return request<FsFile>(daemon, previewUrl(scope, path), fetcher, signal);
+    return readJson(SessionFsFileSchema, daemon, previewUrl(scope, path), fetcher, signal);
   },
-  index: (daemon: DaemonConnection, scope: DaemonSessionScope, signal?: AbortSignal, fetcher?: DaemonFetch) => {
+  index: (
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    signal: AbortSignal | undefined,
+    fetcher: DaemonFetch,
+  ): Promise<SessionFileIndexResponse> => {
     assertScopeDaemon(daemon, scope);
-    return request<SessionFileIndexResponse>(daemon, indexUrl(scope), fetcher, signal);
+    return readJson(SessionFileIndexResponseSchema, daemon, indexUrl(scope), fetcher, signal);
   },
-  changes: (daemon: DaemonConnection, scope: DaemonSessionScope, signal?: AbortSignal, fetcher?: DaemonFetch) => {
+  changes: (
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    signal: AbortSignal | undefined,
+    fetcher: DaemonFetch,
+  ): Promise<FsChanges> => {
     assertScopeDaemon(daemon, scope);
-    return request<FsChanges>(daemon, changesUrl(scope), fetcher, signal);
+    return readJson(SessionFsChangesSchema, daemon, changesUrl(scope), fetcher, signal);
   },
-  diff: (
+  /** The one text answer: a unified diff. */
+  diff: async (
     daemon: DaemonConnection,
     scope: DaemonSessionScope,
     path: string,
-    signal?: AbortSignal,
-    fetcher?: DaemonFetch,
-  ) => {
+    signal: AbortSignal | undefined,
+    fetcher: DaemonFetch,
+  ): Promise<string> => {
     assertScopeDaemon(daemon, scope);
-    return request<string>(daemon, diffUrl(scope, path), fetcher, signal);
+    return await (await send(daemon, diffUrl(scope, path), fetcher, signal)).text();
   },
 };
 
@@ -154,11 +165,16 @@ export const codeReferenceRelativePath = (candidate: string, cwd?: string): stri
   return isOpenablePath(value) ? value : null;
 };
 const pendingListings = new Map<string, Promise<FsListing>>();
-const listing = (daemon: DaemonConnection, scope: DaemonSessionScope, directory: string): Promise<FsListing> => {
+const listing = (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  directory: string,
+  fetcher: DaemonFetch,
+): Promise<FsListing> => {
   const key = JSON.stringify([daemon.daemonId, scope.sessionId, directory]);
   const existing = pendingListings.get(key);
   if (existing) return existing;
-  const next = fsApi.list(daemon, scope, directory).finally(() => {
+  const next = fsApi.list(daemon, scope, directory, undefined, fetcher).finally(() => {
     if (pendingListings.get(key) === next) pendingListings.delete(key);
   });
   pendingListings.set(key, next);
@@ -170,10 +186,11 @@ const waitForListing = (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   directory: string,
+  fetcher: DaemonFetch,
   signal?: AbortSignal,
 ): Promise<FsListing> => {
   if (signal?.aborted) return Promise.reject(abortReason(signal));
-  const next = listing(daemon, scope, directory);
+  const next = listing(daemon, scope, directory, fetcher);
   if (!signal) return next;
   return new Promise((resolve, reject) => {
     const abort = () => reject(abortReason(signal));
@@ -196,7 +213,8 @@ export const resolveFsFilePaths = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   candidates: readonly string[],
-  cwd?: string,
+  cwd: string | undefined,
+  fetcher: DaemonFetch,
   signal?: AbortSignal,
 ): Promise<Map<string, string>> => {
   assertScopeDaemon(daemon, scope);
@@ -214,7 +232,7 @@ export const resolveFsFilePaths = async (
     [...directories].map(async ([directory, rows]) => {
       let found: FsListing;
       try {
-        found = await waitForListing(daemon, scope, directory, signal);
+        found = await waitForListing(daemon, scope, directory, fetcher, signal);
       } catch (error) {
         if (signal?.aborted || isAbort(error)) throw error;
         return;
@@ -295,6 +313,7 @@ const publish = (record: ProbeRecord, next: Partial<FsProbeSnapshot>) => {
 export const loadFsChanges = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
+  fetcher: DaemonFetch,
   force = false,
 ): Promise<void> => {
   assertScopeDaemon(daemon, scope);
@@ -307,7 +326,7 @@ export const loadFsChanges = async (
   record.inflight = true;
   publish(record, record.snapshot.changes ? { refreshing: true, error: null } : { state: 'probing', error: null });
   try {
-    const changes = await fsApi.changes(daemon, scope);
+    const changes = await fsApi.changes(daemon, scope, undefined, fetcher);
     if (record.seq === seq) publish(record, { state: 'ready', changes, error: null, refreshing: false });
   } catch (error) {
     if (record.seq !== seq) return;
@@ -341,6 +360,7 @@ export interface FsProbe extends FsProbeSnapshot {
 }
 export const useFsProbe = (daemon: DaemonConnection, scope: DaemonSessionScope): FsProbe => {
   assertScopeDaemon(daemon, scope);
+  const fetcher = useDaemonFetch();
   const subscribe = useCallback(
     (listener: () => void) => {
       const record = recordFor(scope);
@@ -355,7 +375,8 @@ export const useFsProbe = (daemon: DaemonConnection, scope: DaemonSessionScope):
     () => recordFor(scope).snapshot,
   );
   useEffect(() => {
-    if (recordFor(scope).snapshot.state === 'probing' && !recordFor(scope).inflight) void loadFsChanges(daemon, scope);
-  }, [daemon, scope]);
-  return { ...snapshot, refresh: () => void loadFsChanges(daemon, scope, true) };
+    if (recordFor(scope).snapshot.state === 'probing' && !recordFor(scope).inflight)
+      void loadFsChanges(daemon, scope, fetcher);
+  }, [daemon, fetcher, scope]);
+  return { ...snapshot, refresh: () => void loadFsChanges(daemon, scope, fetcher, true) };
 };

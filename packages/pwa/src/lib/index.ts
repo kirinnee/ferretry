@@ -249,6 +249,7 @@ export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
 export * from './drafts.ts';
 export * from './event-transport.ts';
+export * from './fleet-environment.ts';
 export * from './fleet-grouping.ts';
 export * from './fleet-store.ts';
 // Namespaced, like the other `*-model` modules: the grammar's `FyRenderBlock`

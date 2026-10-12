@@ -21,6 +21,7 @@ import {
 } from '../../src/components/files-api.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { browserFetch } from '../../src/lib/runtime-models.ts';
 import { render, runAsync } from '../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a-token' });
@@ -33,13 +34,15 @@ describe('files API', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const listing = await fsApi.list(daemonA, scopeA, 'src', undefined, async (url, init) => {
       calls.push({ url: String(url), init });
-      return new Response(JSON.stringify({ entries: [] }), { headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ root: '/work', path: '', entries: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
     });
     expect(listing.entries).toEqual([]);
     expect(listUrl(scopeA, 'src')).toBe('/v1/sessions/same%2Fsession/fs?path=src');
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs?path=src');
     expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer a-token');
-    expect(() => fsApi.list(daemonA, scopeB, '')).toThrow('file scope must belong');
+    expect(() => fsApi.list(daemonA, scopeB, '', undefined, browserFetch)).toThrow('file scope must belong');
   });
 
   /**
@@ -87,7 +90,7 @@ describe('files API', () => {
     // A session id is daemon-local, so the same id on two daemons names two
     // different sessions. Reading beta's index through alpha's credentials would
     // hand a reader another machine's file names.
-    expect(() => fsApi.index(daemonA, scopeB)).toThrow('file scope must belong');
+    expect(() => fsApi.index(daemonA, scopeB, undefined, browserFetch)).toThrow('file scope must belong');
     await expect(
       fsApi.index(
         daemonA,
@@ -108,14 +111,14 @@ describe('files API', () => {
     const original = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request) => {
       seen.push(String(input));
-      return new Response(JSON.stringify({ entries: [{ name: 'a.ts', type: 'file' }] }), {
+      return new Response(JSON.stringify({ root: '/work', path: 'src', entries: [{ name: 'a.ts', type: 'file' }] }), {
         headers: { 'content-type': 'application/json' },
       });
     }) as unknown as typeof fetch;
     try {
       const [a, b] = await Promise.all([
-        resolveFsFilePaths(daemonA, scopeA, ['src/a.ts']),
-        resolveFsFilePaths(daemonB, scopeB, ['src/a.ts']),
+        resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch),
+        resolveFsFilePaths(daemonB, scopeB, ['src/a.ts'], undefined, browserFetch),
       ]);
       expect(a.get('src/a.ts')).toBe('src/a.ts');
       expect(b.get('src/a.ts')).toBe('src/a.ts');
@@ -133,12 +136,16 @@ describe('files API', () => {
       const url = String(input);
       if (url.includes('/diff')) return new Response('diff text', { headers: { 'content-type': 'text/plain' } });
       if (url.includes('/file'))
-        return new Response(JSON.stringify({ path: 'a.ts' }), { headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ path: 'a.ts', size: 0 }), {
+          headers: { 'content-type': 'application/json' },
+        });
       if (url.includes('/changes'))
         return new Response(JSON.stringify({ repo: true, changes: [{ path: 'fresh.ts', status: '??' }] }), {
           headers: { 'content-type': 'application/json' },
         });
-      return new Response(JSON.stringify({ entries: [] }), { headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ root: '/work', path: '', entries: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
     };
     expect(fileUrl(scopeA, 'a.ts', 'head')).toContain('/file?rev=head&path=a.ts');
     expect(changesUrl(scopeA)).toContain('/changes');
@@ -187,7 +194,7 @@ describe('files API', () => {
       );
     }) as unknown as typeof fetch;
     try {
-      await loadFsChanges(daemonA, scopeA);
+      await loadFsChanges(daemonA, scopeA, browserFetch);
       expect(readFsProbe(scopeA)).toMatchObject({
         state: 'unsupported',
         changes: null,
@@ -195,7 +202,7 @@ describe('files API', () => {
       });
       // Settled, not merely failed: re-asking a machine what it is spends a request to hear the same
       // answer, so only a forced refresh may repeat it.
-      await loadFsChanges(daemonA, scopeA);
+      await loadFsChanges(daemonA, scopeA, browserFetch);
       expect(asked).toBe(1);
     } finally {
       globalThis.fetch = original;
@@ -209,26 +216,26 @@ describe('files API', () => {
       throw new Error('offline');
     }) as unknown as typeof fetch;
     try {
-      expect(await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'])).toEqual(new Map());
+      expect(await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch)).toEqual(new Map());
       globalThis.fetch = (async () =>
-        new Response(JSON.stringify({ entries: [] }), {
+        new Response(JSON.stringify({ root: '/work', path: '', entries: [] }), {
           headers: { 'content-type': 'application/json' },
         })) as unknown as typeof fetch;
       const liveController = new AbortController();
-      expect(await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, liveController.signal)).toEqual(
-        new Map(),
-      );
+      expect(
+        await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch, liveController.signal),
+      ).toEqual(new Map());
       globalThis.fetch = (async () => {
         throw new Error('offline again');
       }) as unknown as typeof fetch;
-      expect(await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, new AbortController().signal)).toEqual(
-        new Map(),
-      );
+      expect(
+        await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch, new AbortController().signal),
+      ).toEqual(new Map());
       const controller = new AbortController();
       controller.abort('stopped');
-      await expect(resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, controller.signal)).rejects.toBe(
-        'stopped',
-      );
+      await expect(
+        resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch, controller.signal),
+      ).rejects.toBe('stopped');
     } finally {
       globalThis.fetch = original;
     }
@@ -242,9 +249,9 @@ describe('files API', () => {
         headers: { 'content-type': 'application/json' },
       })) as unknown as typeof fetch;
     try {
-      await loadFsChanges(daemonA, scopeA);
+      await loadFsChanges(daemonA, scopeA, browserFetch);
       expect(readFsProbe(scopeA)).toMatchObject({ state: 'ready', refreshing: false });
-      await loadFsChanges(daemonA, scopeA);
+      await loadFsChanges(daemonA, scopeA, browserFetch);
       let probe!: ReturnType<typeof useFsProbe>;
       const Probe = () => {
         probe = useFsProbe(daemonA, scopeA);
@@ -261,7 +268,7 @@ describe('files API', () => {
           status: 404,
           headers: { 'content-type': 'application/json' },
         })) as unknown as typeof fetch;
-      await loadFsChanges(daemonA, scopeA, true);
+      await loadFsChanges(daemonA, scopeA, browserFetch, true);
       expect(readFsProbe(scopeA).state).toBe('absent');
       expect(isUnknownRoute({})).toBeFalse();
       globalThis.fetch = (async () =>
@@ -269,7 +276,7 @@ describe('files API', () => {
           status: 403,
           headers: { 'content-type': 'application/json' },
         })) as unknown as typeof fetch;
-      await loadFsChanges(daemonA, scopeA, true);
+      await loadFsChanges(daemonA, scopeA, browserFetch, true);
       expect(readFsProbe(scopeA)).toMatchObject({ state: 'error', error: 'denied' });
     } finally {
       globalThis.fetch = original;

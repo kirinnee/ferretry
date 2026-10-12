@@ -29,7 +29,8 @@ let previewFailure: Error | null;
 const previewFetch: typeof fetch = Object.assign(
   (async () => {
     if (previewFailure) throw previewFailure;
-    return Response.json(previewPayload);
+    // `size` is the daemon's to state; these cases are about the bytes, not the size.
+    return Response.json({ size: 0, ...previewPayload });
   }) satisfies DaemonFetch,
   { preconnect: originalFetch.preconnect },
 );

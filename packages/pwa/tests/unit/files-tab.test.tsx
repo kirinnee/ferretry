@@ -23,8 +23,10 @@ const secondScope = daemonSessionScope(second, 'work');
 
 interface DaemonFixture {
   changes?: FsChanges | Error;
-  listings?: Record<string, FsListing>;
-  files?: Record<string, FsFile | Error>;
+  /** `root` and `path` are the daemon's to state, so the route fills them in from the request. */
+  listings?: Record<string, Omit<FsListing, 'root' | 'path'>>;
+  /** `size` defaults to the length of the served content, as a real daemon would state it. */
+  files?: Record<string, (Omit<FsFile, 'size'> & { size?: number }) | Error>;
   diffs?: Record<string, string | Error>;
 }
 
@@ -46,14 +48,15 @@ const route = (url: string): Response => {
   if (parsed.pathname.endsWith('/fs/file')) {
     const answer = fixture.files?.[path];
     if (answer instanceof Error) throw answer;
-    return json(answer ?? { path, content: `contents of ${path}` });
+    const served = answer ?? { path, content: `contents of ${path}` };
+    return json({ size: (served.content ?? '').length, ...served });
   }
   if (parsed.pathname.endsWith('/fs/diff')) {
     const answer = fixture.diffs?.[path];
     if (answer instanceof Error) throw answer;
     return new Response(answer ?? '', { headers: { 'content-type': 'text/plain' } });
   }
-  return json(fixture.listings?.[path] ?? { entries: [] });
+  return json({ root: '/work', path, ...(fixture.listings?.[path] ?? { entries: [] }) });
 };
 
 /**
@@ -202,7 +205,7 @@ describe('the Files tab', () => {
   it('switches a file between rendered, raw and diff, and closes it again', async () => {
     fixture.changes = { repo: true, changes: [{ path: 'a.ts', status: ' M', additions: 1, deletions: 1 }] };
     fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
-    fixture.files = { 'a.ts': { path: 'a.ts', lang: 'ts', content: 'const a = 1;' } };
+    fixture.files = { 'a.ts': { path: 'a.ts', content: 'const a = 1;' } };
     fixture.diffs = {
       'a.ts': ['diff --git a/a.ts b/a.ts', '@@ -1 +1 @@', '-const a = 0;', '+const a = 1;'].join('\n'),
     };

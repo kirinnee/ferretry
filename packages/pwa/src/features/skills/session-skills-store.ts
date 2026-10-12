@@ -34,6 +34,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '../../lib/daemon-scope.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { type SkillsCatalogLoader, skillsCatalogLoader } from './skills-api.ts';
 import type { SkillsCatalog } from './skills-catalog.ts';
 
@@ -83,10 +84,11 @@ export function useSessionSkills(
   // scope object.
   const { daemonId, sessionId } = scope;
   const key = daemonSessionKey({ daemonId, sessionId });
-  const loader = useMemo(
-    () => (fetcher === undefined ? skillsCatalogLoader(connection) : skillsCatalogLoader(connection, fetcher)),
-    [connection, fetcher],
-  );
+  // The carrier router unless a caller hands in its own: a skills read that went straight to the
+  // daemon's address left a relay-only session with no catalog, so `/skill` never proved.
+  const routed = useDaemonFetch();
+  const effective = fetcher ?? routed;
+  const loader = useMemo(() => skillsCatalogLoader(connection, effective), [connection, effective]);
 
   // A read of the session this hook is holding updates the shared answer. A read
   // of any other session still gets its result — the pane asked for it — but must

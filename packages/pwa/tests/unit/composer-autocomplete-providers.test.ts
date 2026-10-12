@@ -75,6 +75,9 @@ const deferred = <Value>() => {
 
 const json = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+/** A directory listing as the daemon sends it: the pinned root and the listed path come with it. */
+const fsListing = (value: { readonly path?: string; readonly entries: readonly unknown[] }): Response =>
+  json({ root: '/work', path: '', ...value });
 
 describe('composer skills provider', () => {
   it('binds transport, auth, cache, provider ids, and candidate ids to the full daemon/session scope', async () => {
@@ -237,7 +240,7 @@ describe('composer files provider', () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetcher: DaemonFetch = async (input, init = {}) => {
       calls.push({ url: String(input), init });
-      return json({
+      return fsListing({
         path: 'src',
         entries: [
           { name: 'components', type: 'dir' },
@@ -291,7 +294,7 @@ describe('composer files provider', () => {
     const urls: string[] = [];
     const fetcher: DaemonFetch = async input => {
       urls.push(String(input));
-      return json({ entries: [{ name: 'same.ts', type: 'file' }] });
+      return fsListing({ entries: [{ name: 'same.ts', type: 'file' }] });
     };
     const providerA = createFilesProvider({ daemon: daemonA, scope: scopeA, fetcher });
     const providerB = createFilesProvider({ daemon: daemonB, scope: scopeB, fetcher });
@@ -314,7 +317,7 @@ describe('composer files provider', () => {
       daemon: daemonA,
       scope: scopeA,
       fetcher: async () =>
-        json({
+        fsListing({
           entries: [
             { name: 'app.ts', type: 'file' },
             { name: 'a+b.ts', type: 'file' },
@@ -378,7 +381,7 @@ describe('composer files provider', () => {
       daemon: daemonA,
       scope: scopeA,
       fetcher: async () =>
-        json({
+        fsListing({
           entries: [
             { name: 'components', type: 'dir' },
             { name: 'v1.', type: 'dir' },
@@ -412,7 +415,7 @@ describe('composer files provider', () => {
     const provider = createFilesProvider({
       daemon: daemonA,
       scope: scopeA,
-      fetcher: async () => json({ entries: [{ name: 'app.ts', type: 'file' }] }),
+      fetcher: async () => fsListing({ entries: [{ name: 'app.ts', type: 'file' }] }),
     });
 
     const result = await provider.candidates(context('@', 'app.ts:12:4'));
@@ -431,7 +434,7 @@ describe('composer files provider', () => {
       scope: scopeA,
       fetcher: async () => {
         requests += 1;
-        return json({ entries: [] });
+        return fsListing({ entries: [] });
       },
     });
 

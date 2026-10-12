@@ -2,6 +2,7 @@ import { FileText, Folder, Link2Off, Loader2, Lock, RefreshCw, ChevronRight } fr
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import { describeFsError, fsApi, isAbort } from './files-api.ts';
 import { formatBytes } from './files-model.ts';
 import {
@@ -160,6 +161,7 @@ export interface FileTreeProps {
   onOpenFile(path: string): void;
 }
 export const FileTree = ({ daemon, scope, dir, refreshNonce = 0, hidden, onEnter, onOpenFile }: FileTreeProps) => {
+  const fetcher = useDaemonFetch();
   const [state, setState] = useState(createFileTreeState);
   const inflight = useRef(new Map<string, AbortController>());
   useEffect(() => {
@@ -178,7 +180,7 @@ export const FileTree = ({ daemon, scope, dir, refreshNonce = 0, hidden, onEnter
       inflight.current.set(pendingDir, controller);
       setState(current => markTreeDirLoading(current, pendingDir));
       void fsApi
-        .list(daemon, scope, pendingDir, controller.signal)
+        .list(daemon, scope, pendingDir, controller.signal, fetcher)
         .then(listing => {
           if (!controller.signal.aborted) setState(current => setTreeDirListing(current, pendingDir, listing));
         })
@@ -190,7 +192,7 @@ export const FileTree = ({ daemon, scope, dir, refreshNonce = 0, hidden, onEnter
           if (inflight.current.get(pendingDir) === controller) inflight.current.delete(pendingDir);
         });
     }
-  }, [daemon, scope, state]);
+  }, [daemon, fetcher, scope, state]);
   useEffect(
     () => () => {
       for (const controller of inflight.current.values()) controller.abort();

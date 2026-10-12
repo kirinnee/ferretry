@@ -64,7 +64,8 @@ export interface RemoteEnhancementInput {
   readonly userContext: string;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
-  readonly fetchImpl?: RemoteEnhancementFetch;
+  /** The carrier router's fetch: this is a daemon request and must reach a relay-only daemon. */
+  readonly fetchImpl: RemoteEnhancementFetch;
 }
 
 export interface RemoteEnhancementResult {
@@ -159,7 +160,7 @@ export async function requestRemoteEnhancement(
     }),
     signal: controller.signal,
   });
-  const send = input.fetchImpl ?? ((url: string, init: RequestInit) => fetch(url, init));
+  const send = input.fetchImpl;
 
   try {
     let response: Response;

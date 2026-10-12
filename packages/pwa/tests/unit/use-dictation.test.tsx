@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { FyEvent } from '@ferretry/protocol';
+import type { ReactElement } from 'react';
 import {
   CONTEXT_FETCH_LIMIT,
   type DictationDraftResult,
@@ -12,6 +13,8 @@ import {
   withinContextFetchBudget,
 } from '../../src/hooks/use-dictation.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
+import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { RemoteEnhancementError } from '../../src/lib/stt/remote-enhancement.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import {
@@ -34,7 +37,8 @@ interface Harness {
 }
 
 /** Mounts the hook and exposes the live handle plus every draft it produced. */
-const harness = async (initial: Partial<UseDictationOptions> = {}): Promise<Harness> => {
+/** `carrier`, when given, is the store's carrier router — the fetch the hook falls back to. */
+const harness = async (initial: Partial<UseDictationOptions> = {}, carrier?: DaemonFetch): Promise<Harness> => {
   const drafts: DictationDraftResult[] = [];
   const latest: { handle: DictationHandle | null } = { handle: null };
 
@@ -52,14 +56,20 @@ const harness = async (initial: Partial<UseDictationOptions> = {}): Promise<Harn
     ...overrides,
   });
 
-  const view = await mount(<Probe {...propsFor({})} />);
+  const wrap = (probe: ReactElement): ReactElement =>
+    carrier === undefined ? (
+      probe
+    ) : (
+      <StoreProvider store={{ carrier: { fetch: carrier } } as unknown as AppStore}>{probe}</StoreProvider>
+    );
+  const view = await mount(wrap(<Probe {...propsFor({})} />));
   return {
     handle: () => {
       if (latest.handle === null) throw new Error('the hook did not run');
       return latest.handle;
     },
     drafts,
-    render: async next => view.render(<Probe {...propsFor(next)} />),
+    render: async next => view.render(wrap(<Probe {...propsFor(next)} />)),
     unmount: () => view.unmount(),
   };
 };
@@ -550,5 +560,43 @@ describe('useDictation enhancement', () => {
     expect(view.drafts[0]?.text).toBe('Raw words.');
     expect(view.drafts[0]?.enhancementError).toBeUndefined();
     await view.unmount();
+  });
+});
+
+describe('useDictation over a relay-only daemon', () => {
+  it('sends the Groq correction through the carrier router when no fetch is handed in', async () => {
+    // Arrange: the direct network throws, as it does for a daemon only the relay reaches. Nothing in
+    // production ever handed in `enhancementFetch`, so every correction used to take this path.
+    const originalFetch = globalThis.fetch;
+    const direct: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      direct.push(String(input));
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch;
+    const carried: string[] = [];
+    const provider = fakeRecognitionProvider();
+    try {
+      const view = await harness(
+        { recognition: provider, settings: settingsWith({ enhancementProvider: 'groq' }) },
+        async input => {
+          carried.push(new URL(String(input)).pathname);
+          return Response.json({ text: 'Relayed words.' });
+        },
+      );
+
+      // Act
+      await record(view, provider);
+      await interact(() => provider.speak('relayed words'));
+      await finishTake(view, provider);
+
+      // Assert
+      expect(view.drafts[0]?.text).toBe('Relayed words.');
+      expect(view.drafts[0]?.enhancementError).toBeUndefined();
+      expect(carried).toHaveLength(1);
+      expect(direct).toEqual([]);
+      await view.unmount();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
