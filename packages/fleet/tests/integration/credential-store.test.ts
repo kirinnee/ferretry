@@ -6,7 +6,7 @@
  * it is exercised on a host that is not macOS — which is the only way it gets tested at all.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -20,9 +20,11 @@ import {
   DEFAULT_KEYCHAIN_SERVICE,
   FALLBACK_KEYCHAIN_ACCOUNT,
   harnessKeychainAccount,
+  KEYCHAIN_INTERACTIVE_LINE_LIMIT,
   KEYCHAIN_ITEM_NOT_FOUND,
   keychainService,
   keychainServices,
+  keychainWriteLine,
   PlatformFleetCredentialStore,
   SpawnCredentialCommand,
 } from '../../src/adapters/credential-store.ts';
@@ -62,14 +64,27 @@ const claudeBlob = (expiresAt: number): string =>
 /** A `security` whose every invocation is scripted, so no real keychain is ever touched. */
 class ScriptedCommand implements CredentialCommand {
   readonly calls: string[][] = [];
+  /** What each invocation was handed on standard input, by the same index as `calls`. */
+  readonly inputs: (string | undefined)[] = [];
 
   constructor(private readonly replies: readonly CredentialCommandResult[]) {}
 
-  run(command: readonly [string, ...string[]]): Promise<CredentialCommandResult> {
+  run(command: readonly [string, ...string[]], _timeoutMs: number, stdin?: string): Promise<CredentialCommandResult> {
     this.calls.push([...command]);
+    this.inputs.push(stdin);
     return Promise.resolve(this.replies[this.calls.length - 1] ?? { code: 0, stdout: '' });
   }
 }
+
+/** The item a scripted `security -i` write named, and the material it carried, parsed from its input. */
+const writtenItem = (line: string | undefined): { account: string; service: string; blob: string } => {
+  const match = /^add-generic-password -U -a "([^"]*)" -s "([^"]*)" -X ([0-9a-f]+)\n$/u.exec(line ?? '');
+  if (match === null) throw new Error(`not a keychain write: ${String(line)}`);
+  return { account: match[1]!, service: match[2]!, blob: Buffer.from(match[3]!, 'hex').toString('utf8') };
+};
+
+/** A read-back that answers with the material that was just written. */
+const readBack = (blob: string): CredentialCommandResult => ({ code: 0, stdout: `${blob}\n` });
 
 const fileStore = (replies: readonly CredentialCommandResult[] = []): PlatformFleetCredentialStore =>
   new PlatformFleetCredentialStore({
@@ -87,6 +102,14 @@ describe('SpawnCredentialCommand', () => {
     // Assert
     should(actual.code).equal(0);
     should(actual.stdout.trim()).equal('placeholder-output');
+  });
+
+  it('should hand the child its standard input and close it', async () => {
+    // Act — `cat` only exits once its input is closed, so this also proves the close.
+    const actual = await new SpawnCredentialCommand().run(['/bin/cat'], 5_000, 'placeholder-input');
+
+    // Assert
+    should(actual).deepEqual({ code: 0, stdout: 'placeholder-input' });
   });
 
   it('should report a non-zero exit rather than throwing', async () => {
@@ -347,6 +370,87 @@ describe('PlatformFleetCredentialStore copying a file-backed credential', () => 
     should(await readFile(claudeFilePath(targetHome), 'utf8')).equal(claudeBlob(NOW + HOUR));
   });
 
+  it.each([
+    ['is not JSON', '{ "projects": { "/work": { "hasTrustDialogAccepted": true } }'],
+    ['is JSON but not an object', '["placeholder"]'],
+  ])('should leave a target harness config that %s byte for byte', async (_label, existing) => {
+    // Arrange — that file holds the harness's projects, trust decisions and MCP servers. Merging into
+    // what could not be read used to replace ALL of it with `{ oauthAccount }`.
+    const donorHome = await temporaryDirectory();
+    const targetHome = await temporaryDirectory();
+    await writeFile(claudeFilePath(donorHome), claudeBlob(NOW + HOUR));
+    await writeFile(claudeConfigPath(donorHome), JSON.stringify({ oauthAccount: { emailAddress: 'placeholder' } }));
+    await writeFile(claudeConfigPath(targetHome), existing);
+
+    // Act
+    const actual = await fileStore().clone('claude', member(donorHome), member(targetHome, 'account-two'));
+
+    // Assert — the credential still landed; only the display name was given up.
+    should(actual).deepEqual({ ok: true });
+    should(await readFile(claudeConfigPath(targetHome), 'utf8')).equal(existing);
+    should(await readFile(claudeFilePath(targetHome), 'utf8')).equal(claudeBlob(NOW + HOUR));
+  });
+
+  it.each([
+    ['claude', claudeFilePath],
+    ['codex', codexPath],
+  ] as const)('should refuse to write a %s credential through a symbolic link', async (kind, locate) => {
+    // Arrange — a home whose credential file is linked to somebody's own login.
+    const donorHome = await temporaryDirectory();
+    const targetHome = await temporaryDirectory();
+    const linked = path.join(await temporaryDirectory(), 'linked-credential');
+    const blob =
+      kind === 'claude' ? claudeBlob(NOW + HOUR) : JSON.stringify({ tokens: { refresh_token: 'placeholder-refresh' } });
+    await writeFile(locate(donorHome), blob);
+    await writeFile(linked, 'untouched');
+    await symlink(linked, locate(targetHome));
+
+    // Act / Assert — the throw becomes a refusal naming the link, one layer up.
+    await fileStore()
+      .clone(kind, member(donorHome), member(targetHome, 'account-two'))
+      .should.be.rejectedWith(/is a symbolic link/u);
+    should(await readFile(linked, 'utf8')).equal('untouched');
+  });
+
+  it('should replace the credential file rather than rewrite it in place', async () => {
+    // Arrange — a second name for the target's credential file. An in-place truncate-and-write is
+    // visible under both names, and a crash part-way leaves a truncated credential under both.
+    const donorHome = await temporaryDirectory();
+    const targetHome = await temporaryDirectory();
+    const otherName = path.join(await temporaryDirectory(), 'other-name');
+    await writeFile(claudeFilePath(donorHome), claudeBlob(NOW + HOUR));
+    await writeFile(claudeFilePath(targetHome), 'previous', { mode: 0o644 });
+    await link(claudeFilePath(targetHome), otherName);
+
+    // Act
+    const actual = await fileStore().clone('claude', member(donorHome), member(targetHome, 'account-two'));
+
+    // Assert — a new file at the name, owner-only, with no temporary file left beside it.
+    should(actual).deepEqual({ ok: true });
+    should(await readFile(claudeFilePath(targetHome), 'utf8')).equal(claudeBlob(NOW + HOUR));
+    should(await readFile(otherName, 'utf8')).equal('previous');
+    should((await stat(claudeFilePath(targetHome))).mode & 0o777).equal(0o600);
+    should((await readdir(targetHome)).filter(name => name.endsWith('.tmp'))).be.empty();
+  });
+
+  it('should leave the target harness config alone when it is a symbolic link', async () => {
+    // Arrange
+    const donorHome = await temporaryDirectory();
+    const targetHome = await temporaryDirectory();
+    const linked = path.join(await temporaryDirectory(), 'linked-config.json');
+    await writeFile(claudeFilePath(donorHome), claudeBlob(NOW + HOUR));
+    await writeFile(claudeConfigPath(donorHome), JSON.stringify({ oauthAccount: { emailAddress: 'placeholder' } }));
+    await writeFile(linked, JSON.stringify({ theme: 'dark' }));
+    await symlink(linked, claudeConfigPath(targetHome));
+
+    // Act
+    const actual = await fileStore().clone('claude', member(donorHome), member(targetHome, 'account-two'));
+
+    // Assert
+    should(actual).deepEqual({ ok: true });
+    should(await readFile(linked, 'utf8')).equal(JSON.stringify({ theme: 'dark' }));
+  });
+
   it('should let a write that fails throw, so the service reports it with the underlying reason', async () => {
     // Arrange
     const donorHome = await temporaryDirectory();
@@ -427,6 +531,36 @@ describe('harnessKeychainAccount', () => {
   });
 });
 
+describe('keychainWriteLine', () => {
+  it('should carry the material hex-encoded, so nothing in it is ever quoted', () => {
+    // Act
+    const actual = keychainWriteLine('placeholder-user', 'Claude Code-credentials', 'a "b" \\ c');
+
+    // Assert
+    should(actual).equal(
+      `add-generic-password -U -a "placeholder-user" -s "Claude Code-credentials" -X ${Buffer.from('a "b" \\ c').toString('hex')}\n`,
+    );
+  });
+
+  it.each([
+    ['an account holding a quote', 'odd"name', 'Claude Code-credentials'],
+    ['an account holding a backslash', 'odd\\name', 'Claude Code-credentials'],
+    ['a service holding a line break', 'placeholder-user', 'Claude\nCode'],
+    ['an empty account', '', 'Claude Code-credentials'],
+  ])('should refuse %s rather than escape it', (_label, account, service) => {
+    should(keychainWriteLine(account, service, 'placeholder')).be.undefined();
+  });
+
+  it('should refuse a line its reader could cut short, rather than store a truncated credential', () => {
+    // Arrange — hex doubles the material, so half the limit is already over it.
+    const blob = 'x'.repeat(KEYCHAIN_INTERACTIVE_LINE_LIMIT / 2);
+
+    // Act / Assert
+    should(keychainWriteLine('placeholder-user', 'Claude Code-credentials', blob)).be.undefined();
+    should(keychainWriteLine('placeholder-user', 'Claude Code-credentials', 'x'.repeat(1_000))).be.a.String();
+  });
+});
+
 describe('PlatformFleetCredentialStore on macOS', () => {
   const macStore = (replies: readonly CredentialCommandResult[], command = new ScriptedCommand(replies)) => ({
     store: new PlatformFleetCredentialStore({
@@ -479,24 +613,106 @@ describe('PlatformFleetCredentialStore on macOS', () => {
       { code: 0, stdout: claudeBlob(NOW + HOUR) },
       { code: 0, stdout: '"acct"<blob>="existing-account"\n"svce"<blob>="Claude Code-credentials-abc"' },
       { code: 0, stdout: '' },
+      readBack(claudeBlob(NOW + HOUR)),
+    ]);
+
+    // Act
+    const actual = await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'));
+
+    // Assert — the write goes through `security -i` on stdin, then is proved by reading the same pair.
+    should(actual).deepEqual({ ok: true });
+    should(command.calls[2]).deepEqual(['security', '-i']);
+    should(writtenItem(command.inputs[2])).deepEqual({
+      account: 'existing-account',
+      service: keychainService('/homes/target'),
+      blob: claudeBlob(NOW + HOUR),
+    });
+    should(command.calls[3]).deepEqual([
+      'security',
+      'find-generic-password',
+      '-a',
+      'existing-account',
+      '-s',
+      keychainService('/homes/target'),
+      '-w',
+    ]);
+  });
+
+  it('should never put the credential in any argument list', async () => {
+    // Arrange — every argv is visible to every local process through `ps` while the command runs.
+    const blob = claudeBlob(NOW + HOUR);
+    const { store, command } = macStore([
+      { code: 0, stdout: blob },
+      { code: 0, stdout: '"acct"<blob>="existing-account"' },
+      { code: 0, stdout: '' },
+      readBack(blob),
+    ]);
+
+    // Act
+    const actual = await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'));
+
+    // Assert — neither the material nor its hex spelling appears in any command line.
+    should(actual).deepEqual({ ok: true });
+    const hex = Buffer.from(blob, 'utf8').toString('hex');
+    for (const argv of command.calls) {
+      should(argv.some(argument => argument.includes('placeholder-access') || argument.includes(hex))).be.false();
+    }
+  });
+
+  it('should refuse a write whose read-back does not hold what was written', async () => {
+    // Arrange — `security -i` exits 0 even when the command it ran failed, so the read decides.
+    const { store } = macStore([
+      { code: 0, stdout: claudeBlob(NOW + HOUR) },
+      { code: 0, stdout: '"acct"<blob>="existing-account"' },
+      { code: 0, stdout: '' },
+      { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' },
     ]);
 
     // Act
     const actual = await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'));
 
     // Assert
-    should(actual).deepEqual({ ok: true });
-    should(command.calls[2]).deepEqual([
-      'security',
-      'add-generic-password',
-      '-U',
-      '-a',
-      'existing-account',
-      '-s',
-      keychainService('/homes/target'),
-      '-w',
-      claudeBlob(NOW + HOUR),
+    should(actual).deepEqual({ ok: false, reason: 'the keychain write could not be confirmed (exit 44)' });
+  });
+
+  it('should refuse a write whose read-back holds a different credential', async () => {
+    // Arrange
+    const { store } = macStore([
+      { code: 0, stdout: claudeBlob(NOW + HOUR) },
+      { code: 0, stdout: '"acct"<blob>="existing-account"' },
+      { code: 0, stdout: '' },
+      readBack(claudeBlob(NOW + 2 * HOUR)),
     ]);
+
+    // Act / Assert
+    should(await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'))).deepEqual({
+      ok: false,
+      reason: 'the keychain write could not be confirmed (exit 0)',
+    });
+  });
+
+  it('should refuse a write it could not make without exposing the credential', async () => {
+    // Arrange — an `acct` holding a quote cannot be carried literally, so nothing is run at all.
+    const command = new ScriptedCommand([
+      { code: 0, stdout: claudeBlob(NOW + HOUR) },
+      { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' },
+    ]);
+    const store = new PlatformFleetCredentialStore({
+      platform: 'darwin',
+      command,
+      now: () => NOW,
+      keychainAccount: 'odd"name',
+    });
+
+    // Act
+    const actual = await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'));
+
+    // Assert
+    should(actual).deepEqual({
+      ok: false,
+      reason: 'the keychain write was refused, because it could not be made without exposing the credential',
+    });
+    should(command.calls).have.length(2);
   });
 
   it('should fall back to the supplied account when the target item names none', async () => {
@@ -505,13 +721,14 @@ describe('PlatformFleetCredentialStore on macOS', () => {
       { code: 0, stdout: claudeBlob(NOW + HOUR) },
       { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' },
       { code: 0, stdout: '' },
+      readBack(claudeBlob(NOW + HOUR)),
     ]);
 
     // Act
     await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'));
 
     // Assert
-    should(command.calls[2]?.[4]).equal('placeholder-user');
+    should(writtenItem(command.inputs[2]).account).equal('placeholder-user');
   });
 
   it('should fall back to the supplied account when the attribute output has no acct', async () => {
@@ -520,13 +737,14 @@ describe('PlatformFleetCredentialStore on macOS', () => {
       { code: 0, stdout: claudeBlob(NOW + HOUR) },
       { code: 0, stdout: '"svce"<blob>="Claude Code-credentials-abc"' },
       { code: 0, stdout: '' },
+      readBack(claudeBlob(NOW + HOUR)),
     ]);
 
     // Act
     await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'));
 
     // Assert
-    should(command.calls[2]?.[4]).equal('placeholder-user');
+    should(writtenItem(command.inputs[2]).account).equal('placeholder-user');
   });
 
   it('should fall back to the supplied account when the item names an empty one', async () => {
@@ -535,13 +753,14 @@ describe('PlatformFleetCredentialStore on macOS', () => {
       { code: 0, stdout: claudeBlob(NOW + HOUR) },
       { code: 0, stdout: '"acct"<blob>=""' },
       { code: 0, stdout: '' },
+      readBack(claudeBlob(NOW + HOUR)),
     ]);
 
     // Act
     await store.clone('claude', member('/homes/donor'), member('/homes/target', 'account-two'));
 
     // Assert
-    should(command.calls[2]?.[4]).equal('placeholder-user');
+    should(writtenItem(command.inputs[2]).account).equal('placeholder-user');
   });
 
   it('should report a keychain write that failed as a refused copy', async () => {
@@ -642,6 +861,7 @@ describe('PlatformFleetCredentialStore on macOS', () => {
       { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' },
       { code: 0, stdout: '"acct"<blob>="existing-account"' },
       { code: 0, stdout: '' },
+      readBack(claudeBlob(NOW + HOUR)),
     ]);
 
     // Act
@@ -649,8 +869,10 @@ describe('PlatformFleetCredentialStore on macOS', () => {
 
     // Assert — a write to the suffixed name would add an item the harness never reads.
     should(actual).deepEqual({ ok: true });
-    should(command.calls[3]?.[6]).equal(DEFAULT_KEYCHAIN_SERVICE);
-    should(command.calls[3]?.[4]).equal('existing-account');
+    should(writtenItem(command.inputs[3])).containDeep({
+      service: DEFAULT_KEYCHAIN_SERVICE,
+      account: 'existing-account',
+    });
   });
 
   /**
@@ -748,9 +970,9 @@ describe('the first run seed through the platform store', () => {
   });
 
   it('should seed a macOS account by rewriting the keychain item derived from its home', async () => {
-    // Arrange — five scripted invocations, in this order: the target item (absent), the donor item,
+    // Arrange — six scripted invocations, in this order: the target item (absent), the donor item,
     // the donor item AGAIN because the store re-reads and re-classifies at copy time, the target's
-    // keychain attributes, and the write.
+    // keychain attributes, the write, and the read that proves the write landed.
     const donorHome = '/Users/operator/.claude';
     const targetHome = '/Users/operator/.ferretry/fleet/homes/claude-default';
     const command = new ScriptedCommand([
@@ -759,6 +981,7 @@ describe('the first run seed through the platform store', () => {
       { code: 0, stdout: claudeBlob(NOW + HOUR) },
       { code: 0, stdout: '"acct"<blob>="operator"' },
       { code: 0, stdout: '' },
+      readBack(claudeBlob(NOW + HOUR)),
     ]);
     const store = new PlatformFleetCredentialStore({
       platform: 'darwin',
@@ -778,8 +1001,8 @@ describe('the first run seed through the platform store', () => {
     should(results[0]?.outcome).deepEqual({ kind: 'seeded', donorHome });
     should(command.calls[0]).deepEqual(['security', 'find-generic-password', '-s', keychainService(targetHome), '-w']);
     should(command.calls[1]).deepEqual(['security', 'find-generic-password', '-s', keychainService(donorHome), '-w']);
-    should(command.calls[4]?.slice(0, 6)).deepEqual(['security', 'add-generic-password', '-U', '-a', 'operator', '-s']);
-    should(command.calls[4]?.[6]).equal(keychainService(targetHome));
+    should(command.calls[4]).deepEqual(['security', '-i']);
+    should(writtenItem(command.inputs[4])).containDeep({ account: 'operator', service: keychainService(targetHome) });
     should(keychainService(donorHome)).not.equal(keychainService(targetHome));
   });
 
@@ -823,5 +1046,39 @@ describe('the first run seed through the platform store', () => {
     // Assert
     should(results[0]?.outcome).deepEqual({ kind: 'no-donor', donorHome });
     should(await Bun.file(codexPath(targetHome)).exists()).be.false();
+  });
+});
+
+/**
+ * The write line against the real `security`, which only a Mac has.
+ *
+ * Everything above drives a scripted command, so it proves what this store HANDS `security` and
+ * nothing about whether `security -i` parses it. This does, against a throwaway keychain file, so the
+ * user's own keychains are never touched; the keychain path is the one word the store does not add.
+ */
+describe.skipIf(process.platform !== 'darwin')('keychainWriteLine against the real security command', () => {
+  it('should store the material through standard input and read it back unchanged', async () => {
+    // Arrange
+    const keychain = path.join(await temporaryDirectory(), 'fy-test.keychain-db');
+    const command = new SpawnCredentialCommand();
+    const service = 'Claude Code-credentials-fytest';
+    const blob = claudeBlob(NOW + HOUR);
+    should((await command.run(['security', 'create-keychain', '-p', 'placeholder', keychain], 10_000)).code).equal(0);
+
+    try {
+      // Act
+      const line = keychainWriteLine('placeholder-user', service, blob) ?? '';
+      const written = await command.run(['security', '-i'], 10_000, `${line.trimEnd()} "${keychain}"\n`);
+      const read = await command.run(
+        ['security', 'find-generic-password', '-a', 'placeholder-user', '-s', service, '-w', keychain],
+        10_000,
+      );
+
+      // Assert
+      should(written.code).equal(0);
+      should({ code: read.code, stdout: read.stdout.trim() }).deepEqual({ code: 0, stdout: blob });
+    } finally {
+      await command.run(['security', 'delete-keychain', keychain], 10_000);
+    }
   });
 });

@@ -32,6 +32,7 @@
  * The document is `0600`: it holds digests rather than material, and a digest is an equality token
  * rather than an oracle, but it is still derived from a credential and nothing else needs to read it.
  */
+import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -83,9 +84,9 @@ export class FileSeedProvenanceStore implements FleetSeedProvenanceStore {
       accounts: [...records],
     });
     await mkdir(path.dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.${String(process.pid)}.tmp`;
+    const temporary = `${this.file}.${randomUUID()}.tmp`;
     try {
-      await writeFile(temporary, `${JSON.stringify(document, undefined, 2)}\n`, { mode: FILE_MODE });
+      await writeFile(temporary, `${JSON.stringify(document, undefined, 2)}\n`, { flag: 'wx', mode: FILE_MODE });
       await rename(temporary, this.file);
       // A rename carries the temporary file's mode, which is already the final one; this only
       // narrows a document that already existed at a wider mode before this build wrote it.

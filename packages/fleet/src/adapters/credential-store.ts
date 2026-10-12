@@ -48,9 +48,9 @@
  * `security` at all — is `unreadable`. That distinction is the whole reason a sibling's working
  * credential does not get overwritten by a read that merely failed.
  */
-import { createHash } from 'node:crypto';
-import { chmod, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmod, lstat, rename, unlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import {
   type CredentialCloneOutcome,
   type CredentialMaterial,
@@ -72,9 +72,12 @@ export interface CredentialCommandResult {
  *
  * A seam rather than a direct spawn because the macOS keychain cannot be exercised on any other
  * platform, and a test must be able to drive every exit code this store distinguishes.
+ *
+ * `stdin`, when given, is written to the child and closed. It is how material reaches a command
+ * without being in its argument list, which any local process can read.
  */
 export interface CredentialCommand {
-  run(command: readonly [string, ...string[]], timeoutMs: number): Promise<CredentialCommandResult>;
+  run(command: readonly [string, ...string[]], timeoutMs: number, stdin?: string): Promise<CredentialCommandResult>;
 }
 
 /** The exit code `security` uses for "the specified item could not be found in the keychain". */
@@ -99,10 +102,19 @@ const DEFAULT_KEYCHAIN_TIMEOUT_MS = 5_000;
  * the store reads a failure as unreadable rather than as a home with no credential.
  */
 export class SpawnCredentialCommand implements CredentialCommand {
-  async run(command: readonly [string, ...string[]], timeoutMs: number): Promise<CredentialCommandResult> {
+  async run(
+    command: readonly [string, ...string[]],
+    timeoutMs: number,
+    stdin?: string,
+  ): Promise<CredentialCommandResult> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const spawned = Bun.spawn({ cmd: [...command], stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
+      const spawned = Bun.spawn({
+        cmd: [...command],
+        stdout: 'pipe',
+        stderr: 'ignore',
+        stdin: stdin === undefined ? 'ignore' : new TextEncoder().encode(stdin),
+      });
       const collected = Promise.all([new Response(spawned.stdout).text(), spawned.exited]).then(([stdout, code]) => ({
         code,
         stdout,
@@ -165,22 +177,51 @@ async function readFileMaterial(path: string): Promise<CredentialMaterial> {
   return blob.length === 0 ? { outcome: 'absent' } : { outcome: 'found', blob };
 }
 
-/** Write credential material with an owner-only mode, on a fresh file and on an existing one alike. */
-async function writeCredentialFile(path: string, blob: string): Promise<void> {
-  await writeFile(path, blob, { mode: CREDENTIAL_FILE_MODE });
-  await chmod(path, CREDENTIAL_FILE_MODE);
+/**
+ * Replace a file with owner-only content, atomically, and never through a link.
+ *
+ * The content goes to a temporary file created exclusively at the final mode and is then renamed over
+ * the destination, so a crash or a harness refreshing the same credential at the same moment leaves
+ * the old file or the new one and never a truncated credential. A destination that is a symlink is
+ * refused rather than replaced: somebody linked it on purpose — a home sharing one login file — and
+ * neither writing through the link nor silently breaking it is this copy's decision to make.
+ */
+async function replaceOwnerOnlyFile(path: string, content: string): Promise<void> {
+  const existing = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (existing?.isSymbolicLink() === true) {
+    throw new Error(`${path} is a symbolic link, so it was left as it is rather than replaced`);
+  }
+  const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, content, { flag: 'wx', mode: CREDENTIAL_FILE_MODE });
+    // `wx` honours the umask, which can only narrow; this pins the mode the harness expects.
+    await chmod(temporary, CREDENTIAL_FILE_MODE);
+    await rename(temporary, path);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
 }
 
-async function readJsonObject(path: string): Promise<Record<string, unknown> | undefined> {
+/** A harness config file, read for a merge: absent, a JSON object, or something that is neither. */
+type JsonObjectReading =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'object'; readonly value: Record<string, unknown> }
+  | { readonly kind: 'unusable' };
+
+async function readJsonObject(path: string): Promise<JsonObjectReading> {
   const material = await readFileMaterial(path);
-  if (material.outcome !== 'found') return undefined;
+  if (material.outcome !== 'found') return { kind: 'absent' };
   try {
     const parsed = JSON.parse(material.blob) as unknown;
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
+      ? { kind: 'object', value: parsed as Record<string, unknown> }
+      : { kind: 'unusable' };
   } catch {
-    return undefined;
+    return { kind: 'unusable' };
   }
 }
 
@@ -250,7 +291,7 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     if (kind === 'claude' && this.deps.platform === 'darwin') return await this.#writeKeychain(target.home, blob);
     // A write that fails throws: the service turns that into a refusal with the underlying reason,
     // and duplicating the conversion here would mean two definitions of a failed copy.
-    await writeCredentialFile(kind === 'codex' ? codexPath(target.home) : claudeFilePath(target.home), blob);
+    await replaceOwnerOnlyFile(kind === 'codex' ? codexPath(target.home) : claudeFilePath(target.home), blob);
     return { ok: true };
   }
 
@@ -289,19 +330,36 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
   }
 
   /**
-   * Add or update the target's keychain item.
+   * Add or update the target's keychain item, with the material never in an argument list.
    *
-   * The material is passed as an argument, which is how `security` accepts it and therefore how this
-   * is done at all; it is briefly visible to anyone who can already enumerate this user's running
-   * commands, which on a single-user host is the same person who can read the keychain.
+   * `security add-generic-password -w <blob>` put the credential in argv, where `ps` shows it to every
+   * local process for as long as the command runs. So the command is handed to `security -i` on its
+   * standard input instead, carrying the material hex-encoded through `-X` so no quoting of the
+   * credential is ever needed; only the item's name and `acct` are quoted, and one that cannot be
+   * quoted safely is refused.
+   *
+   * `security -i` does not reliably report a command that failed through its own exit status, so the
+   * write is then PROVED by reading the item back under the same (`acct`, `svce`) pair and comparing
+   * — inside this adapter, where the material already is.
    */
   async #writeKeychain(home: string, blob: string): Promise<CredentialCloneOutcome> {
     const { service, account } = await this.#writeTarget(home);
-    const { code } = await this.deps.command.run(
-      ['security', 'add-generic-password', '-U', '-a', account, '-s', service, '-w', blob],
+    const line = keychainWriteLine(account, service, blob);
+    if (line === undefined) {
+      return {
+        ok: false,
+        reason: 'the keychain write was refused, because it could not be made without exposing the credential',
+      };
+    }
+    const { code } = await this.deps.command.run(['security', '-i'], this.#timeout(), line);
+    if (code !== 0) return { ok: false, reason: `the keychain write failed (exit ${code})` };
+    const stored = await this.deps.command.run(
+      ['security', 'find-generic-password', '-a', account, '-s', service, '-w'],
       this.#timeout(),
     );
-    return code === 0 ? { ok: true } : { ok: false, reason: `the keychain write failed (exit ${code})` };
+    return stored.code === 0 && stored.stdout.trim() === blob
+      ? { ok: true }
+      : { ok: false, reason: `the keychain write could not be confirmed (exit ${stored.code})` };
   }
 
   /**
@@ -333,14 +391,21 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
    *
    * Display metadata only. A failure here is swallowed: the credential copy already succeeded, and
    * reporting the wrong email is not worth undoing a working login over.
+   *
+   * The target is MERGED into, so it is written only when it is absent or parsed as a JSON object. A
+   * file that is there but unreadable as one — damaged, mid-edit, or a format this build does not
+   * know — holds the harness's projects, trust decisions and MCP servers, and replacing it with
+   * `{ oauthAccount }` would delete all of them to fix a display name. It is left byte for byte.
    */
   async #copyOauthAccount(donorHome: string, targetHome: string): Promise<void> {
     try {
       const donor = await readJsonObject(claudeConfigPath(donorHome));
-      if (donor?.oauthAccount === undefined) return;
+      if (donor.kind !== 'object' || donor.value.oauthAccount === undefined) return;
       const path = claudeConfigPath(targetHome);
-      const target = (await readJsonObject(path)) ?? {};
-      await writeFile(path, `${JSON.stringify({ ...target, oauthAccount: donor.oauthAccount }, null, 2)}\n`);
+      const target = await readJsonObject(path);
+      if (target.kind === 'unusable') return;
+      const merged = { ...(target.kind === 'object' ? target.value : {}), oauthAccount: donor.value.oauthAccount };
+      await replaceOwnerOnlyFile(path, `${JSON.stringify(merged, null, 2)}\n`);
     } catch {
       /* display-only metadata — never fail a completed credential copy over it */
     }
@@ -349,6 +414,30 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
   #timeout(): number {
     return this.deps.keychainTimeoutMs ?? DEFAULT_KEYCHAIN_TIMEOUT_MS;
   }
+}
+
+/**
+ * The longest command line handed to `security -i`. Its interactive reader takes a line into a fixed
+ * buffer of a few kilobytes, and a line cut short there would store a truncated credential — so a
+ * longer one is refused, never split and never moved back into an argument.
+ */
+export const KEYCHAIN_INTERACTIVE_LINE_LIMIT = 4_000;
+
+/** An `acct` or `svce` value that a double-quoted `security -i` word carries literally. */
+const KEYCHAIN_QUOTABLE = /^[^"'\\\r\n]+$/u;
+
+/**
+ * The `security -i` line that writes one keychain item, or `undefined` when it cannot be written safely.
+ *
+ * The material travels as `-X <hex>`, which has nothing to quote. The two names are double-quoted, and
+ * a name holding a quote, a backslash or a line break is refused rather than escaped, because the
+ * escaping rules of that reader are not a contract anyone publishes.
+ */
+export function keychainWriteLine(account: string, service: string, blob: string): string | undefined {
+  if (!KEYCHAIN_QUOTABLE.test(account) || !KEYCHAIN_QUOTABLE.test(service)) return undefined;
+  const hex = Buffer.from(blob, 'utf8').toString('hex');
+  const line = `add-generic-password -U -a "${account}" -s "${service}" -X ${hex}\n`;
+  return line.length <= KEYCHAIN_INTERACTIVE_LINE_LIMIT ? line : undefined;
 }
 
 /** The item name Claude Code uses when no `CLAUDE_CONFIG_DIR` names a home for it. */

@@ -107,6 +107,11 @@ describe('shellPath', () => {
     ['bare tilde', '~', '"$HOME"'],
     ['an absolute path', '/state/fleet/bin', "'/state/fleet/bin'"],
     ['a path with a space', '/state/my fleet', "'/state/my fleet'"],
+    // Only `$HOME` may expand: a remainder a double-quoted word would still interpret is single-quoted.
+    ['a tilde path holding a command substitution', '~/$(touch pwned)', `"$HOME"/'$(touch pwned)'`],
+    ['a $HOME path holding a variable', '$HOME/$USER/fleet', `"$HOME"/'$USER/fleet'`],
+    ['a tilde path holding a backtick', '~/`id`', `"$HOME"/'\`id\`'`],
+    ['a tilde path holding a quote', `~/it's "here"`, `"$HOME"/'it'\\''s "here"'`],
   ])('should render %s correctly', (_label, input, expected) => {
     // Act
     const actual = shellPath(input);
