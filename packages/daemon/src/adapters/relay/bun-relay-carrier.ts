@@ -26,6 +26,7 @@
 
 import type { DaemonIdentity, RelayCrypto } from '@ferretry/relay';
 import { RELAY_CLOSE_CODES } from '@ferretry/relay';
+import type { DeviceConnectionTracker } from '../../lib/pairing/index.ts';
 import type {
   RelayApiDispatch,
   RelayDeviceDirectory,
@@ -66,6 +67,8 @@ export interface BunRelayCarrierDependencies {
   readonly sockets: RelayStreamDispatch;
   readonly devices: RelayDeviceDirectory;
   readonly pairing: RelayPairingRedeemer;
+  /** Where each relayed session's device is registered, so unpairing it ends the session. */
+  readonly connections: DeviceConnectionTracker;
   readonly socketFactory?: RelayWebSocketFactory;
   /** A seam, so the pre-credential deadline can be proved without a test that waits ten seconds. */
   readonly scheduler?: RelayLinkScheduler;
@@ -174,6 +177,7 @@ export class BunRelayCarrier {
       sockets: this.deps.sockets,
       devices: this.deps.devices,
       pairing: this.deps.pairing,
+      connections: this.deps.connections,
       scheduler: this.deps.scheduler ?? runtimeScheduler,
     });
     this.#link = link;

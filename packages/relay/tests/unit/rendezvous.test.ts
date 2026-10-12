@@ -5,11 +5,13 @@ import {
   type ControlMessage,
   CREDIT_WINDOW_FRAMES,
   decodeControlMessage,
+  ENDED_SESSION_GRACE_MS,
   encodeControlMessage,
   encodeCreditPayload,
   FRAME_KINDS,
   HEARTBEAT_GRACE_SECONDS,
   initialRendezvousState,
+  MAX_ENDED_SESSIONS,
   MAX_PENDING_DAEMON_SOCKETS,
   MAX_SESSIONS_PER_RENDEZVOUS,
   newSendWindow,
@@ -492,6 +494,122 @@ describe('rendezvous: forwarding', () => {
       at: 3_000,
     });
     should(closures(step.effects)[0]?.reason).match(/no live session/u);
+  });
+
+  it('should drop a daemon frame racing a client disconnect, and keep every other session', () => {
+    // Arrange — two clients, and one of them hangs up while the daemon is mid-answer.
+    const both = reduceRendezvous(withClient().state, {
+      kind: 'client-arrived',
+      socketId: 'laptop',
+      sessionId: sessionId(2),
+      at: 2_500,
+    });
+    const gone = reduceRendezvous(both.state, { kind: 'socket-closed', socketId: 'phone', at: 3_000 });
+
+    // Act — what the daemon already had in flight for that session, before the `closed` reached it.
+    const stragglers = [
+      record(sessionId(1), 1),
+      credit(sessionId(1), 1),
+      control(sessionId(1), { t: 'closed', code: 4440, reason: 'x' }),
+    ];
+    let state = gone.state;
+    for (const frame of stragglers) {
+      const step = reduceRendezvous(state, { kind: 'frame', socketId: 'daemon', frame, at: 3_100 });
+      // Assert — dropped, the daemon keeps its socket.
+      should(step.effects).deepEqual([]);
+      state = step.state;
+    }
+
+    // Assert — the other client is still served.
+    const served = reduceRendezvous(state, {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: record(sessionId(2), 1),
+      at: 3_200,
+    });
+    should(forwarded(served.effects)).deepEqual([{ socketId: 'laptop', frame: record(sessionId(2), 1) }]);
+
+    // Act + Assert — past the grace window the identifier names nothing again.
+    const late = reduceRendezvous(state, {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: record(sessionId(1), 2),
+      at: 3_000 + ENDED_SESSION_GRACE_MS,
+    });
+    should(closures(late.effects)[0]).match({ socketId: 'daemon', reason: 'frame names no live session' });
+  });
+
+  it('should remember every ending it made itself, and none the daemon made', () => {
+    const straggler = (state: RendezvousState, target = sessionId(1)) =>
+      reduceRendezvous(state, { kind: 'frame', socketId: 'daemon', frame: record(target, 5), at: 3_500 }).effects;
+
+    // A client close, a client flow violation and a daemon flow violation are all this machine's
+    // endings, so the daemon's stragglers for each are dropped.
+    const byClient = reduceRendezvous(withClient().state, {
+      kind: 'frame',
+      socketId: 'phone',
+      frame: control(sessionId(1), { t: 'closed', code: 4400, reason: 'done' }),
+      at: 3_000,
+    });
+    should(straggler(byClient.state)).deepEqual([]);
+    const violation = reduceRendezvous(withClient().state, {
+      kind: 'frame',
+      socketId: 'phone',
+      frame: credit(sessionId(1), 1),
+      at: 3_000,
+    });
+    should(straggler(violation.state)).deepEqual([]);
+
+    // The daemon's own close is not: it said the session was over, so a frame after it is a daemon
+    // that disagrees with itself.
+    const byDaemon = reduceRendezvous(withClient().state, {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: control(sessionId(1), { t: 'closed', code: 4440, reason: 'x' }),
+      at: 3_000,
+    });
+    should(closures(straggler(byDaemon.state))[0]).match({ socketId: 'daemon', code: RELAY_CLOSE_CODES.protocolError });
+
+    // A heartbeat eviction is this machine's too.
+    const at = 2_000 + HEARTBEAT_GRACE_SECONDS * 1_000 + 1;
+    const evicted = reduceRendezvous(withClient().state, { kind: 'alarm', at, lastSeen: { daemon: at - 100 } });
+    should(
+      reduceRendezvous(evicted.state, { kind: 'frame', socketId: 'daemon', frame: record(sessionId(1), 5), at: at + 1 })
+        .effects,
+    ).deepEqual([]);
+
+    // A new daemon inherits nothing the old one had in flight.
+    const dropped = reduceRendezvous(byClient.state, { kind: 'socket-closed', socketId: 'daemon', at: 3_200 });
+    should(dropped.state.ended).deepEqual([]);
+  });
+
+  it('should bound what it remembers, and read state stored before it remembered anything', () => {
+    // Arrange — state an earlier deploy stored has no `ended` at all.
+    const { ended: _absent, ...legacy } = withClient().state;
+    const gone = reduceRendezvous(legacy, { kind: 'socket-closed', socketId: 'phone', at: 3_000 });
+    should(gone.state.ended).deepEqual([{ sessionId: sessionId(1).text, at: 3_000 }]);
+    should(
+      reduceRendezvous(legacy, { kind: 'frame', socketId: 'daemon', frame: record(sessionId(1), 1), at: 3_000 })
+        .effects,
+    ).not.deepEqual([]);
+
+    // Act — more endings than the backstop holds, each through a fresh session.
+    let state = gone.state;
+    for (let fill = 2; fill <= MAX_ENDED_SESSIONS + 2; fill += 1) {
+      state = reduceRendezvous(state, {
+        kind: 'client-arrived',
+        socketId: `c${fill}`,
+        sessionId: sessionId(fill),
+        at: 3_000 + fill,
+      }).state;
+      state = { ...state, arrivals: [] };
+      state = reduceRendezvous(state, { kind: 'socket-closed', socketId: `c${fill}`, at: 3_000 + fill }).state;
+    }
+
+    // Assert — capped, newest kept, oldest forgotten.
+    should(state.ended?.length).equal(MAX_ENDED_SESSIONS);
+    should(state.ended?.at(-1)?.sessionId).equal(sessionId(MAX_ENDED_SESSIONS + 2).text);
+    should(state.ended?.some(entry => entry.sessionId === sessionId(1).text)).be.false();
   });
 
   it('should refuse a frame from a socket it never accepted', () => {

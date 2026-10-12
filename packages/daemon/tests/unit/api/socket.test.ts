@@ -126,6 +126,31 @@ describe('ApiSocketDispatcher', () => {
     should(sent).deepEqual(['s1']);
   });
 
+  it('should name the paired device an upgrade was authorized for, and no device for a host token', async () => {
+    // The transport tracks a device's socket under this id, so unpairing the device closes it.
+    // Arrange
+    const dispatcher = new ApiSocketDispatcher(
+      new ApiRouter([streamRoute()]),
+      {
+        ...CREDENTIALS,
+        devices: { identify: token => (token === 'fy_device_phone' ? 'fy_device_id_phone' : undefined) },
+      },
+      NO_TICKETS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+
+    // Act
+    const device = await dispatcher.upgrade(
+      request({ path: '/v1/sessions/s1/stream', headers: { authorization: 'Bearer fy_device_phone' } }),
+    );
+    const host = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', headers: human }));
+
+    // Assert
+    should(device).containDeep({ outcome: 'accepted', deviceId: 'fy_device_id_phone' });
+    should(host.outcome).equal('accepted');
+    should(host).not.have.property('deviceId');
+  });
+
   it('should refuse an unauthenticated upgrade before the route is ever accepted', async () => {
     // The whole point of deciding this on the handshake: an anonymous peer must never hold a socket,
     // not even briefly, and must never learn which sockets exist by watching how one dies.

@@ -3,8 +3,8 @@ import {
   type Advertisement,
   type DaemonCarrier,
   type DaemonId,
-  decideAdvertisement,
   type DeviceToken,
+  decideAdvertisement,
   invitationRedeemableByAnotherDevice,
   type PairingCode,
   type PairingId,
@@ -12,6 +12,8 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import {
+  type DeviceConnectionRevoker,
+  LiveDeviceConnections,
   type PairingCryptography,
   type PairingDeviceRecord,
   PairingDeviceRegistry,
@@ -149,6 +151,7 @@ function fixture(
     /** The decision this daemon was built with. Dialable unless a case is about the other two. */
     readonly advertisement?: Advertisement;
     readonly deviceState?: readonly RecordingDeviceState[];
+    readonly connections?: DeviceConnectionRevoker;
     /** What this daemon resolved at boot, for a case about what a redemption hands out. */
     readonly carriers?: readonly DaemonCarrier[];
     /** The rendezvous the composition root proved a fresh device could discover, if any. */
@@ -183,6 +186,7 @@ function fixture(
     rateLimiter: options.limiter,
     compare: options.compare,
     deviceState: options.deviceState,
+    ...(options.connections === undefined ? {} : { connections: options.connections }),
     operatorPassword: new FakeOperatorPassword(options.passwordSet ?? true, options.passwordFailure),
     clientName: 'fy',
   });
@@ -841,6 +845,43 @@ describe('PairingService revocation', () => {
     // Assert
     should(push.forgotten).deepEqual([FIRST_DEVICE_ID]);
     should(devices.records).be.empty();
+  });
+
+  it('should close the device’s live connections, and only once its credential no longer verifies', async () => {
+    // A socket is authorized once, at the upgrade, so removing the grant alone left a revoked phone's
+    // open terminal running. The connections end AFTER the grant is gone: ended any earlier, the
+    // device could reconnect on the credential the revocation was about to remove.
+    // Arrange
+    const live = new LiveDeviceConnections();
+    const verifiedAtEnd: Array<string | undefined> = [];
+    const connections: DeviceConnectionRevoker = {
+      endDevice: deviceId => {
+        verifiedAtEnd.push(credentials.identify(DEVICE_TOKEN));
+        return live.endDevice(deviceId);
+      },
+    };
+    const { credentials, service, mint } = fixture({ connections });
+    await mint();
+    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    const ended: string[] = [];
+    live.track(FIRST_DEVICE_ID, () => ended.push('terminal'));
+
+    // Act
+    should(await service.revokeDevice(FIRST_DEVICE_ID)).be.true();
+
+    // Assert
+    should(ended).deepEqual(['terminal']);
+    should(verifiedAtEnd).deepEqual([undefined]);
+  });
+
+  it('should leave a device’s connections open when there was no grant to revoke', async () => {
+    const live = new LiveDeviceConnections();
+    const { service } = fixture({ connections: live });
+    const ended: string[] = [];
+    live.track(FIRST_DEVICE_ID, () => ended.push('terminal'));
+
+    should(await service.revokeDevice(FIRST_DEVICE_ID)).be.false();
+    should(ended).be.empty();
   });
 
   it('should leave the device fully paired when its other state cannot be purged', async () => {

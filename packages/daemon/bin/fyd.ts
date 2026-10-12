@@ -1,8 +1,20 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
-import { accessSync, constants as fsConstants, existsSync, statSync, writeSync } from 'node:fs';
+import { accessSync, existsSync, constants as fsConstants, statSync, writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { FleetIdentityService, FleetTokenRefreshService, HARNESS_BINARIES, type HarnessKind } from '@ferretry/fleet';
+import {
+  FileFleetConfigSource,
+  type FleetBinaryLookup,
+  harnessKeychainAccount,
+  PlatformFleetCredentialStore,
+  ProcessFleetTokenRefreshPort,
+  readFleetWrapperScript,
+  resolveUserHome,
+  SpawnCredentialCommand,
+  spawnFleetTokenRefreshProcess,
+} from '@ferretry/fleet/adapters';
 import {
   type Advertisement,
   type DaemonCarrier,
@@ -11,8 +23,8 @@ import {
   localOnlyNotice,
   type MigrateSessionRequest,
   type RegisterProjectRequest,
-  refusalNotice,
   type RuntimeControlRequest,
+  refusalNotice,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -37,11 +49,20 @@ import {
   NodeRawDeflate,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
+import {
+  FileSessionForkReceiptStore,
+  forkOpeningTurnRefusal,
+  forkReceiptFile,
+  type SessionForkStartAccountResolver,
+  SessionForkTargetBinder,
+  SessionForkTargetResolver,
+} from '../src/adapters/fork/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
+import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import {
   BrowserLoginWindowService,
   BrowserProfileStore,
-  NodeSessionBrowserLauncher,
   BrowserWorkerClient,
   BunApiServer,
   BunProcessProbe,
@@ -50,13 +71,6 @@ import {
   BunSecretShell,
   BunSqliteIndexFactory,
   CachedUsageFeed,
-  FileCgroupApplyStatusStore,
-  FileCgroupConfigStore,
-  FileSessionSpawnFacts,
-  hostCgroupFacts,
-  ProcCgroupPlacements,
-  RegisteredCgroupPaneLedger,
-  SpawnCgroupCommands,
   ConfigGrantDocument,
   ConfigSecretRecipes,
   DaemonBinder,
@@ -66,6 +80,8 @@ import {
   daemonSecretSourceProgram,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
+  FileCgroupApplyStatusStore,
+  FileCgroupConfigStore,
   FileDaemonConfig,
   FileOperatorPassword,
   FileProjectCatalog,
@@ -75,28 +91,34 @@ import {
   FileScratchCollector,
   FileSecretDocumentStore,
   FileSecretKey,
+  FileSessionSpawnFacts,
   FleetUsageSource,
   foreignHistoryRoots,
   HostedRelayDirectory,
   HttpUsageSource,
+  harnessHomeLayouts,
+  hostCgroupFacts,
   JournalGrantAudit,
   KeyedSerialExecutor,
-  harnessHomeLayouts,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
-  NodeHarnessHomeDocuments,
   NodeCatalog,
   NodeForeignHistoryFiles,
+  NodeHarnessHomeDocuments,
   NodePairingCryptography,
+  NodeSessionBrowserLauncher,
   NodeSocketTicketSecrets,
   type OpenedDaemonStorage,
   PaneProcessInventory,
   PerformanceStopwatch,
+  ProcCgroupPlacements,
   ProcessSecretReader,
   quotaFailoverRoot,
   RandomUnlockTokens,
+  RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
   SocketViewerDownstream,
+  SpawnCgroupCommands,
   SqliteHomeLockFactory,
   StateApiCredentials,
   StateFileSystem,
@@ -117,47 +139,12 @@ import {
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
-import {
-  FileSessionForkReceiptStore,
-  forkOpeningTurnRefusal,
-  forkReceiptFile,
-  SessionForkTargetBinder,
-  SessionForkTargetResolver,
-  type SessionForkStartAccountResolver,
-} from '../src/adapters/fork/index.ts';
-import {
-  FileSessionAttachmentCopier,
-  FileSessionTransferBriefWriter,
-  FileSessionTransferTargetPlanStore,
-  GitTransferWorkspaceProbe,
-  SessionAttachmentTransferReader,
-  StorageTransferConversationReader,
-  StorageTransferEnvelopeWriter,
-  StorageTransferSourceReader,
-} from '../src/adapters/transfer/index.ts';
-import {
-  AttachmentFacetContributor,
-  ConversationFacetContributor,
-  LineageFacetContributor,
-  ReferenceFacetContributor,
-  SessionTransferPreparer,
-  TransferPrepareError,
-  WorkspaceFacetContributor,
-} from '../src/lib/transfer/index.ts';
-import {
-  SessionForkFacade,
-  type SessionForkIdFactory,
-  sessionForkKey,
-  SessionForkService,
-} from '../src/lib/fork/index.ts';
-import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
-import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index.ts';
-import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
+import { FileSessionEffectLedger } from '../src/adapters/session/effects/index.ts';
 import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
   PosixSessionRootPinner,
@@ -172,7 +159,6 @@ import {
 import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
-  TmuxSessionExitObserver,
   ExactTmuxPaneReaper,
   FileSessionEnvironmentStore,
   FileSessionTaskStore,
@@ -182,17 +168,16 @@ import {
   type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
   TimeSessionIdFactory,
+  TmuxSessionExitObserver,
   TmuxSessionLifecycleLauncher,
 } from '../src/adapters/session/lifecycle/index.ts';
-import { FileSessionEffectLedger } from '../src/adapters/session/effects/index.ts';
-import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
-import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
+import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
   FileResumeTurnStore,
@@ -225,10 +210,10 @@ import {
   FileHarnessWrapperSource,
   FileSessionTranscriptMessageTokenCodec,
   NodeCodexRolloutIndex,
-  sessionMessageTokenKeyFile,
   StorageTranscriptClaims,
   StorageTranscriptDigestJournal,
   StorageTranscriptProvenanceStore,
+  sessionMessageTokenKeyFile,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
@@ -255,6 +240,16 @@ import {
 import { BunTmuxProcess, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
+  FileSessionAttachmentCopier,
+  FileSessionTransferBriefWriter,
+  FileSessionTransferTargetPlanStore,
+  GitTransferWorkspaceProbe,
+  SessionAttachmentTransferReader,
+  StorageTransferConversationReader,
+  StorageTransferEnvelopeWriter,
+  StorageTransferSourceReader,
+} from '../src/adapters/transfer/index.ts';
+import {
   FileWardenArtifacts,
   FileWardenConfigStore,
   FileWardenStateStore,
@@ -273,6 +268,23 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
+import { MAX_ASSET_FILE_BYTES } from '../src/lib/fleet/assets.ts';
+import {
+  decideFleetBootPreparation,
+  fleetNothingAddedNotice,
+  fleetPreparationDisclosure,
+  fleetPreparationFailure,
+  fleetPreparationRefusal,
+  fleetPreparedDisclosure,
+} from '../src/lib/fleet/boot-preparation.ts';
+import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
+import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
+import {
+  SessionForkFacade,
+  type SessionForkIdFactory,
+  SessionForkService,
+  sessionForkKey,
+} from '../src/lib/fork/index.ts';
 import {
   type AccountInventoryPort,
   type AnalyticsIndexStoreFactory,
@@ -300,9 +312,9 @@ import {
   type BootNoticePort,
   type BootRefusal,
   type BrowserLoginLifecycle,
+  BrowserSessionService,
   type BrowserViewerHost,
   BrowserViewerStream,
-  BrowserSessionService,
   CALLSIGN_WINDOW_MS,
   CapabilityGrantService,
   type CatalogSubsystem,
@@ -317,6 +329,7 @@ import {
   type CoreAccount,
   childGrantRequester,
   chooseRelayCarrierSources,
+  combinedReferences,
   configuredAt,
   contextWindowForSession,
   createFoundationPaths,
@@ -327,10 +340,12 @@ import {
   type DaemonConfig,
   type DaemonConfigStore,
   type DaemonHealthSubsystem,
+  DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
   DONE_MARKER_FILENAME,
   attachmentDirectory,
   decodeInitialAttachments,
+  defaultManagedWorktreeRoot,
   defaultSessionLifecycleSettings,
   defaultSessionMonitorSettings,
   defaultSessionResumeSettings,
@@ -345,61 +360,62 @@ import {
   type ExecutableResolverPort,
   exactWorkerAssignee,
   FleetEventStreamService,
+  FleetLaunchEnvironment,
+  FleetLaunchRenewal,
   FleetManifestUnreadableError,
   FleetRefreshService,
+  FleetSecretReferences,
   ForeignHistoryImporter,
   type FoundationPaths,
   firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
   HARNESS_PICKER_COMMAND,
-  DEFAULT_HANDOVER_SETTINGS,
   HandoverError,
   type HandoverJournalAppend,
   type HandoverReceiptStore,
   HandoverReconcileLoop,
-  SessionHandoverService,
   type HarnessDiscoveryPolicy,
-  locateHarnessCommand,
   type HarnessPreflight,
   HarnessQuirkService,
-  harnessQuirks,
   harnessAbsentWarning,
   harnessDiscoveryPolicy,
   harnessLocationSummary,
   harnessMigrationRefusal,
   harnessOverrideFailures,
   harnessPreflightSummary,
+  harnessQuirks,
   InitialAttachmentError,
   InvalidDeadlineRefused,
   isTaskBoardError,
   jsonObject,
   type LearningSubsystem,
+  LiveDeviceConnections,
   type LogLevel,
-  MigrationPreflight,
-  type MigrationReportStore,
-  defaultManagedWorktreeRoot,
-  ManagedWorktreeService,
+  locateHarnessCommand,
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
+  ManagedWorktreeService,
+  MigrationPreflight,
+  type MigrationReportStore,
   type MillisecondClockPort,
-  mayTrustDirectLoopback,
   type MountedSubsystems,
+  mayTrustDirectLoopback,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
-  NotificationService,
   type NameClaim,
   type NameSubsystem,
   NO_PASSWORD_DISCLOSURE,
-  type OperatorMessageSource,
+  NotificationService,
   normalizeCallsign,
   type ObservedSession,
-  observedRuntimeStatePatch,
   type OpenedAnalyticsIndexStore,
+  type OperatorMessageSource,
   type OperatorPasswordPort,
   OperatorReadService,
+  observedRuntimeStatePatch,
   overriddenBy,
   PairedPushDevices,
   PairingDeviceRegistry,
@@ -414,10 +430,10 @@ import {
   parseWardenConfigPatch,
   planInitialAttachments,
   portCandidates,
+  projectObservedRuntime,
   projectStructuredQuestion,
   publishableDirectCarrier,
   publishedDaemonCarriers,
-  projectObservedRuntime,
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
@@ -454,11 +470,9 @@ import {
   releasingAttachmentsOnStop,
   renderInitialAttachmentSection,
   resolveStateHome,
-  FleetLaunchEnvironment,
-  FleetLaunchRenewal,
-  FleetSecretReferences,
+  runtimeQuarantineState,
   type ScratchReclamation,
-  combinedReferences,
+  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
   SecretDirectory,
   SecretRedactor,
   type SecretSubsystem,
@@ -468,6 +482,7 @@ import {
   SendPending,
   SendRefused,
   type SerialExecutor,
+  type SessionAncestor,
   SessionAnswerError,
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
@@ -478,6 +493,7 @@ import {
   type SessionControlSubsystem,
   type SessionDirectorySubsystem,
   SessionFilesystem,
+  SessionHandoverService,
   SessionHealthService,
   type SessionHealthSettings,
   type SessionId,
@@ -490,7 +506,6 @@ import {
   type SessionMigrateSubsystem,
   SessionMonitorService,
   SessionPlanner,
-  type SessionAncestor,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
   SessionReadError,
@@ -500,17 +515,15 @@ import {
   type SessionRootPinner,
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
-  runtimeQuarantineState,
   SessionSendError,
   SessionSendService,
   type SessionSendSubsystem,
   SessionSignalError,
   SessionSignalService,
   type SessionSignalSubsystem,
+  type SessionTranscriptMessageTokenCodec,
   SessionTranscriptReader,
   SessionTranscriptResolver,
-  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-  type SessionTranscriptMessageTokenCodec,
   type SessionTranscriptTail,
   SignalRefused,
   type SocketTicketBroker,
@@ -561,31 +574,19 @@ import {
   WardenSweepService,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
-import { MAX_ASSET_FILE_BYTES } from '../src/lib/fleet/assets.ts';
-import {
-  decideFleetBootPreparation,
-  fleetNothingAddedNotice,
-  fleetPreparationDisclosure,
-  fleetPreparationFailure,
-  fleetPreparationRefusal,
-  fleetPreparedDisclosure,
-} from '../src/lib/fleet/boot-preparation.ts';
-import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
+import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
+import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
+import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import {
-  type FleetBinaryLookup,
-  FileFleetConfigSource,
-  harnessKeychainAccount,
-  PlatformFleetCredentialStore,
-  ProcessFleetTokenRefreshPort,
-  readFleetWrapperScript,
-  resolveUserHome,
-  SpawnCredentialCommand,
-  spawnFleetTokenRefreshProcess,
-} from '@ferretry/fleet/adapters';
-import { FleetIdentityService, FleetTokenRefreshService, HARNESS_BINARIES, type HarnessKind } from '@ferretry/fleet';
-import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
-import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
+  AttachmentFacetContributor,
+  ConversationFacetContributor,
+  LineageFacetContributor,
+  ReferenceFacetContributor,
+  SessionTransferPreparer,
+  TransferPrepareError,
+  WorkspaceFacetContributor,
+} from '../src/lib/transfer/index.ts';
 import { daemonVersion } from '../src/lib/version.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -5066,6 +5067,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
       defaultSessionResumeSettings,
     );
+  // Every live socket and relayed session a paired device holds, so revoking it closes them too.
+  // ONE registry, shared by the bound address, every relay carrier and the pairing service.
+  const deviceConnections = new LiveDeviceConnections();
   const browserTransport: BrowserTransportWorld = {
     connectWorker: options => BrowserWorkerClient.connect(options),
     openViewerStream: (host, sessionId, socket) =>
@@ -5289,6 +5293,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
           // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
           deviceState: [push],
+          // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
+          connections: deviceConnections,
           // WHY PAIRING HOLDS THE VERIFIER. A machine with no operator password will not hand out a
           // pairing code, because pairing is the moment access leaves this host and a device paired
           // without one arrives able to configure the fleet. It is the SAME object the grant subsystem
@@ -5307,7 +5313,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       sources: transcriptSources,
       search: (events, query, options) => searchTranscript(events, query, options),
     },
-    api: new BunApiServer(),
+    api: new BunApiServer(undefined, undefined, deviceConnections),
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
@@ -5339,6 +5345,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             sockets,
             devices,
             pairing,
+            connections: deviceConnections,
           }),
         })),
       };

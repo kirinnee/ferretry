@@ -52,7 +52,7 @@ import type { ApiResponse } from '../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../../src/lib/api/socket.ts';
 import { SocketTicketRegistry } from '../../../src/lib/api/socket-ticket.ts';
-import type { PairingRedemption } from '../../../src/lib/pairing/index.ts';
+import { LiveDeviceConnections, type PairingRedemption } from '../../../src/lib/pairing/index.ts';
 import { RelayLink, type RelayLinkSocket } from '../../../src/lib/relay/index.ts';
 import { fleetEventSocketRoutes } from '../../../src/lib/runtime/mounts/fleet-events.ts';
 import { FleetEventStreamService } from '../../../src/lib/session/events/index.ts';
@@ -187,6 +187,7 @@ describe('a live event stream carried by a rendezvous', () => {
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
       sockets: async request => await socketDispatcher(events).upgrade(request),
       devices: { identifyDevice: token => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) },
+      connections: new LiveDeviceConnections(),
       pairing: { redeemOverRelay: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
       scheduler: {
         after: (milliseconds, action) => {
@@ -304,6 +305,7 @@ describe('a live event stream carried by a rendezvous', () => {
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
       sockets: async request => await socketDispatcher(events).upgrade(request),
       devices: { identifyDevice: token => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) },
+      connections: new LiveDeviceConnections(),
       pairing: { redeemOverRelay: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
       scheduler: {
         after: (milliseconds, action) => {
