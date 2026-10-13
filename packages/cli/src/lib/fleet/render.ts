@@ -246,7 +246,9 @@ const SYMLINK_NOTE: readonly string[] = [
 export function renderApplyPlan(plan: FleetApplyPreview): string {
   const historyChanges = plan.sharedHistory.reduce((total, preview) => total + preview.changes.length, 0);
   const header = `${plural(plan.manifest.accounts.length, 'account')}, ${plural(plan.operations.length, 'operation')}, ${plural(historyChanges, 'history change')} — nothing has been written`;
-  const operations = plan.operations.map(operation => `  ${operationWord(operation).padEnd(9)} ${operationTarget(operation)}`);
+  const operations = plan.operations.map(
+    operation => `  ${operationWord(operation).padEnd(9)} ${operationTarget(operation)}`,
+  );
   const history = plan.sharedHistory.flatMap(preview => [
     `  shared    ${preview.kind} pool ${preview.pool} (${preview.migrated} migrated entries, ${preview.conflicts} collisions, ${preview.links} links)`,
     ...preview.changes.map(change => `    ${historyChange(change)}`),

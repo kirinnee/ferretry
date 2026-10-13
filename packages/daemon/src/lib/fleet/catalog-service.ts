@@ -78,6 +78,7 @@ import { ApiError } from '../api/error.ts';
 import {
   type CatalogFacts,
   componentCatalog,
+  componentUsage,
   machineView,
   profileCatalog,
   runtimeCatalog,
@@ -274,6 +275,16 @@ function stagedChange(change: FleetAccountChange): FleetAccountChange {
   return rest;
 }
 
+/**
+ * The runtimes a component edit lands on even when no catalogue row reads differently: a new text for
+ * an instructions, settings or hooks file changes what those runtimes launch with, and the catalogue
+ * never shows file text.
+ */
+const textUsers = (model: AccountModel, change: AccountPlanChange): ReadonlySet<string> =>
+  change.kind === 'component.put' && change.content !== undefined
+    ? new Set(componentUsage(model, `${change.component.kind}/${change.name}`).runtimes)
+    : new Set();
+
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
 
 export class FleetCatalogService {
@@ -388,7 +399,8 @@ export class FleetCatalogService {
     const disabled = await this.deps.writesRefusal();
     if (disabled !== undefined) throw new FleetCatalogRefusal('fleet_change_disabled', disabled);
     const reading = await this.#read();
-    if (reading.format === 'version-1') throw new FleetCatalogRefusal('fleet_change_refused', VERSION_ONE_WRITES_SENTENCE);
+    if (reading.format === 'version-1')
+      throw new FleetCatalogRefusal('fleet_change_refused', VERSION_ONE_WRITES_SENTENCE);
     return reading;
   }
 
@@ -487,7 +499,9 @@ export class FleetCatalogService {
         runningSessions: await this.#runningSessions(),
       });
     } catch (error) {
-      throw error instanceof FleetMutationRefusal ? new FleetCatalogRefusal('fleet_change_refused', error.message) : error;
+      throw error instanceof FleetMutationRefusal
+        ? new FleetCatalogRefusal('fleet_change_refused', error.message)
+        : error;
     }
     const bodies = await this.#bodies(edit.model, edit.files);
     const layout = this.deps.layout;
@@ -541,7 +555,7 @@ export class FleetCatalogService {
             path: document.path,
             bytes: new TextEncoder().encode(document.content).length,
           })),
-          runtimes: await this.#changedRuntimes(reading, edit.model, bodies),
+          runtimes: await this.#changedRuntimes(reading, edit.model, bodies, textUsers(reading.model, change)),
         },
       },
     };
@@ -556,13 +570,14 @@ export class FleetCatalogService {
     reading: AccountDocumentReading,
     candidate: AccountModel,
     bodies: MaterialiseBodies,
+    textUsers: ReadonlySet<string>,
   ): Promise<Extract<FleetAccountChangePreview, { kind: 'apply' }>['runtimes']> {
     const rows = (catalog: FleetRuntimeCatalog): ReadonlyMap<string, string> =>
       new Map(catalog.runtimes.map(runtime => [runtime.name, JSON.stringify(runtime)]));
     const before = rows(runtimeCatalog(reading.model, await this.#facts(reading)));
     const after = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }, bodies));
     return after.runtimes
-      .filter(runtime => before.get(runtime.name) !== JSON.stringify(runtime))
+      .filter(runtime => textUsers.has(runtime.name) || before.get(runtime.name) !== JSON.stringify(runtime))
       .map(runtime => ({ name: runtime.name, harness: runtime.harness, agent: runtime.agent, launch: runtime.launch }));
   }
 
@@ -574,7 +589,8 @@ export class FleetCatalogService {
       throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
     }
     const row = list.credentials.find(credential => credential.id === id);
-    if (row === undefined) throw new FleetCatalogRefusal('fleet_change_refused', `no login ${id} exists on this machine`);
+    if (row === undefined)
+      throw new FleetCatalogRefusal('fleet_change_refused', `no login ${id} exists on this machine`);
     if (!row.signOut.available) {
       throw new FleetCatalogRefusal('fleet_change_refused', `Login ${id} cannot be signed out from here.`);
     }
@@ -666,7 +682,9 @@ export class FleetCatalogService {
         // U13's executor: the harness's own logout against the one store. Never re-implemented here.
         outcome = await this.deps.credentials.signOut(payload.preview.credential);
       } catch (error) {
-        throw error instanceof FleetCredentialRefusal ? new FleetCatalogRefusal('fleet_change_failed', error.message) : error;
+        throw error instanceof FleetCredentialRefusal
+          ? new FleetCatalogRefusal('fleet_change_failed', error.message)
+          : error;
       }
       return outcome.outcome === 'signed-out'
         ? { outcome: 'signed-out', credential: outcome.credential }

@@ -1,0 +1,220 @@
+/**
+ * The account model's catalogue at the daemon's front door: four reads and the stage, read and
+ * apply of a change (docs/design/account-model.md §7).
+ *
+ * The service behind it is a stub, because what the mount owns is the HTTP shape: which status a
+ * refusal becomes, that every answer is parsed through the shared schema and never cached, and that an
+ * apply is handed the caller's governance rather than deciding it.
+ */
+import { describe, it } from 'bun:test';
+import type {
+  FleetAccountChange,
+  FleetAccountChangeView,
+  FleetMachineView,
+  FleetProposalApplyRequest,
+} from '@ferretry/protocol';
+import should from 'should';
+import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
+import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
+import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import {
+  FleetCatalogRefusal,
+  FleetCatalogService,
+  type FleetCatalogServiceDeps,
+} from '../../../../src/lib/fleet/catalog-service.ts';
+import {
+  createFleetCatalogSubsystem,
+  type FleetCatalogSubsystem,
+  fleetCatalogRoutes,
+} from '../../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { jsonBody, request } from '../../api/support.ts';
+import { CREDENTIALS, GRANTED, human } from './support.ts';
+
+const ID = 'fy_fprop_abcdefghijklmnopqrstuv';
+
+const MACHINE: FleetMachineView = {
+  name: 'studio',
+  format: 'version-2',
+  setUp: true,
+  agentPermissions: 'auto',
+  tools: [],
+  runtimeCount: 1,
+  runningSessions: 0,
+  changes: { available: true },
+};
+
+const VIEW: FleetAccountChangeView = {
+  id: ID,
+  revision: 'absent',
+  change: { kind: 'machine.settings', agentPermissions: 'skip' },
+  summary: 'Set agent permissions to Skip all permission checks',
+  consequences: ['Applies to new sessions.'],
+  expiresAt: '2026-10-13T08:15:00.000Z',
+  state: 'pending',
+  preview: { kind: 'apply', operations: [], documents: [], runtimes: [] },
+};
+
+interface Calls {
+  proposed: FleetAccountChange[];
+  read: string[];
+  applied: { id: string; request: FleetProposalApplyRequest; governance: CallerGovernance | undefined }[];
+}
+
+function stub(overrides: Partial<FleetCatalogSubsystem> = {}): { subsystem: FleetCatalogSubsystem; calls: Calls } {
+  const calls: Calls = { proposed: [], read: [], applied: [] };
+  return {
+    calls,
+    subsystem: {
+      machine: async () => MACHINE,
+      components: async () => ({ format: 'version-2', kinds: [] }),
+      profiles: async () => ({ format: 'version-2', profiles: [] }),
+      runtimes: async () => ({ format: 'version-2', runtimes: [] }),
+      propose: async change => {
+        calls.proposed.push(change);
+        return VIEW;
+      },
+      read: async id => {
+        calls.read.push(id);
+        return VIEW;
+      },
+      apply: async (id, body, governance) => {
+        calls.applied.push({ id, request: body, governance });
+        return { outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' };
+      },
+      ...overrides,
+    },
+  };
+}
+
+const dispatcher = (subsystem: FleetCatalogSubsystem): ApiDispatcher =>
+  new ApiDispatcher(new ApiRouter(fleetCatalogRoutes(subsystem)), CREDENTIALS, GRANTED);
+
+const get = (path: string) => request({ path, headers: human });
+const post = (path: string, body?: string) =>
+  request({
+    method: 'POST',
+    path,
+    headers: { ...human, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body }),
+  });
+
+describe('the fleet catalogue mount', () => {
+  it('should answer all four reads through the shared schema and never let one be cached', async () => {
+    // Arrange
+    const { subsystem } = stub();
+    const paths = ['/v1/fleet/machine', '/v1/fleet/components', '/v1/fleet/profile-stacks', '/v1/fleet/runtimes'];
+
+    // Act
+    const responses = await Promise.all(paths.map(async path => await dispatcher(subsystem).dispatch(get(path))));
+
+    // Assert
+    should(responses.map(response => response.status)).deepEqual([200, 200, 200, 200]);
+    should(responses.map(response => response.headers.get('cache-control'))).deepEqual([
+      'no-store',
+      'no-store',
+      'no-store',
+      'no-store',
+    ]);
+    should(jsonBody(responses[0] as never)).deepEqual(MACHINE);
+  });
+
+  it('should stage the one change the body names and read it back by id', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+    const change = { kind: 'machine.settings', agentPermissions: 'skip' };
+
+    // Act
+    const staged = await dispatcher(subsystem).dispatch(post('/v1/fleet/changes', JSON.stringify({ change })));
+    const read = await dispatcher(subsystem).dispatch(get(`/v1/fleet/changes/${ID}`));
+
+    // Assert
+    should(staged.status).equal(200);
+    should(jsonBody(staged)).deepEqual(VIEW);
+    should(calls.proposed).deepEqual([change]);
+    should(read.status).equal(200);
+    should(calls.read).deepEqual([ID]);
+  });
+
+  it('should hand an apply its password and the caller governance, and an empty body as no password', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const confirmed = await dispatcher(subsystem).dispatch(
+      post(`/v1/fleet/changes/${ID}/apply`, JSON.stringify({ operatorPassword: 'correct horse' })),
+    );
+    await dispatcher(subsystem).dispatch(post(`/v1/fleet/changes/${ID}/apply`));
+
+    // Assert
+    should(confirmed.status).equal(200);
+    should(jsonBody(confirmed)).deepEqual({ outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' });
+    should(calls.applied.map(call => call.request)).deepEqual([{ operatorPassword: 'correct horse' }, {}]);
+    should(calls.applied[0]?.governance).containDeep({ confirmChange: false });
+  });
+
+  it('should answer 404 for a change it never staged and 409 for every other refusal', async () => {
+    // Arrange
+    const { subsystem } = stub({
+      read: async () => {
+        throw new FleetCatalogRefusal('fleet_change_unknown', 'no change by that id');
+      },
+      apply: async () => {
+        throw new FleetCatalogRefusal('fleet_change_disabled', 'The new account model is not switched on.');
+      },
+    });
+
+    // Act
+    const unknown = await dispatcher(subsystem).dispatch(get(`/v1/fleet/changes/${ID}`));
+    const disabled = await dispatcher(subsystem).dispatch(post(`/v1/fleet/changes/${ID}/apply`));
+
+    // Assert
+    should(unknown.status).equal(404);
+    should(jsonBody(unknown)).deepEqual({ error: 'no change by that id', code: 'fleet_change_unknown' });
+    should(disabled.status).equal(409);
+    should(jsonBody(disabled).code).equal('fleet_change_disabled');
+  });
+
+  it('should refuse a change id that cannot be decoded, and a body naming no known change, before the service', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const badId = await dispatcher(subsystem).dispatch(get('/v1/fleet/changes/%E0'));
+    const badBody = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/changes', JSON.stringify({ change: { kind: 'config.replace', document: {} } })),
+    );
+
+    // Assert
+    should(badId.status).equal(400);
+    should(jsonBody(badId).code).equal('bad_request');
+    should(badBody.status).equal(400);
+    should(calls.read).have.length(0);
+    should(calls.proposed).have.length(0);
+  });
+
+  it('should leave an unexpected failure to the dispatcher rather than dress it as a refusal', async () => {
+    // Arrange
+    const { subsystem } = stub({
+      runtimes: async () => {
+        throw new Error('the disk went away');
+      },
+    });
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(get('/v1/fleet/runtimes'));
+
+    // Assert
+    should(response.status).equal(500);
+  });
+
+  it('should build the service the composition root mounts', () => {
+    // Act
+    const subsystem = createFleetCatalogSubsystem({
+      now: () => 0,
+      mintId: () => 'x',
+    } as unknown as FleetCatalogServiceDeps);
+
+    // Assert
+    should(subsystem).be.instanceOf(FleetCatalogService);
+  });
+});

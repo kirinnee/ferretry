@@ -40,11 +40,7 @@ import { decodeParameter } from '../../api/http.ts';
 import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import {
-  FleetCatalogRefusal,
-  FleetCatalogService,
-  type FleetCatalogServiceDeps,
-} from '../../fleet/catalog-service.ts';
+import { FleetCatalogRefusal, FleetCatalogService, type FleetCatalogServiceDeps } from '../../fleet/catalog-service.ts';
 
 /** The machine, its components, profiles and runtimes, and every change to them. */
 export type FleetCatalogSubsystem = Pick<

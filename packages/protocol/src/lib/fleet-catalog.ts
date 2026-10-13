@@ -38,7 +38,11 @@ import {
   FleetProposalIdSchema,
   FleetWriteOperationSchema,
 } from './fleet-changes.ts';
-import { FleetCredentialStoreSchema, FleetCredentialStatusWordSchema, FleetCredentialViewSchema } from './fleet-credentials.ts';
+import {
+  FleetCredentialStoreSchema,
+  FleetCredentialStatusWordSchema,
+  FleetCredentialViewSchema,
+} from './fleet-credentials.ts';
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
@@ -303,7 +307,10 @@ export type FleetRuntimeCatalog = z.infer<typeof FleetRuntimeCatalogSchema>;
 // ── Changes ──────────────────────────────────────────────────────────────────────────────────────
 
 /** An environment value as an edit sends it: a new value, or "keep the one it has". */
-export const FleetEnvInputSchema = z.record(z.string(), z.union([z.string(), z.strictObject({ keep: z.literal(true) })]));
+export const FleetEnvInputSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.strictObject({ keep: z.literal(true) })]),
+);
 export type FleetEnvInput = z.infer<typeof FleetEnvInputSchema>;
 
 /**
@@ -394,7 +401,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     harness: HarnessKindSchema,
     label: NonEmptyStringSchema.optional(),
   }),
-  z.strictObject({ kind: z.literal('credential.label'), id: NonEmptyStringSchema, label: NonEmptyStringSchema.nullable() }),
+  z.strictObject({
+    kind: z.literal('credential.label'),
+    id: NonEmptyStringSchema,
+    label: NonEmptyStringSchema.nullable(),
+  }),
   z.strictObject({ kind: z.literal('credential.remove'), id: NonEmptyStringSchema }),
   z.strictObject({ kind: z.literal('credential.signout'), id: NonEmptyStringSchema }),
   z.strictObject({ kind: z.literal('machine.settings'), agentPermissions: z.enum(['auto', 'skip']) }),
@@ -473,7 +484,11 @@ export const FleetAccountChangeOutcomeSchema = z.discriminatedUnion('outcome', [
     reason: NonEmptyStringSchema,
     credential: FleetCredentialViewSchema,
   }),
-  z.strictObject({ outcome: z.literal('executed'), executor: z.enum(['setup', 'clone']), summary: NonEmptyStringSchema }),
+  z.strictObject({
+    outcome: z.literal('executed'),
+    executor: z.enum(['setup', 'clone']),
+    summary: NonEmptyStringSchema,
+  }),
 ]);
 export type FleetAccountChangeOutcome = z.infer<typeof FleetAccountChangeOutcomeSchema>;
 

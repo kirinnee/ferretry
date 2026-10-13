@@ -81,7 +81,11 @@ export function operationSummary(operation: FleetWriteOperation): FleetWireOpera
     };
   }
   if (operation.kind === 'symlink') {
-    return { kind: operation.dangling === true ? 'credential-link' : 'symlink', source: operation.source, path: operation.path };
+    return {
+      kind: operation.dangling === true ? 'credential-link' : 'symlink',
+      source: operation.source,
+      path: operation.path,
+    };
   }
   if (operation.kind === 'prune') {
     return { kind: 'prune', path: operation.path, marker: operation.marker, keep: [...operation.keep] };

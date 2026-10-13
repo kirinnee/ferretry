@@ -152,7 +152,12 @@ describe('apply plan rendering', () => {
     // Arrange
     const promoted = plan({
       operations: [
-        { kind: 'symlink', source: '/state/fleet/credentials/work/auth.json', path: '/state/fleet/homes/a/auth.json', dangling: true },
+        {
+          kind: 'symlink',
+          source: '/state/fleet/credentials/work/auth.json',
+          path: '/state/fleet/homes/a/auth.json',
+          dangling: true,
+        },
         {
           kind: 'settings',
           path: '/state/fleet/homes/a/.claude.json',
@@ -171,8 +176,12 @@ describe('apply plan rendering', () => {
     const rendered = renderApplyPlan(promoted);
 
     // Assert
-    should(rendered).containEql('credential-link /state/fleet/homes/a/auth.json ← /state/fleet/credentials/work/auth.json');
-    should(rendered).containEql('json-keys /state/fleet/homes/a/.claude.json (replacing mcpServers; every other key kept)');
+    should(rendered).containEql(
+      'credential-link /state/fleet/homes/a/auth.json ← /state/fleet/credentials/work/auth.json',
+    );
+    should(rendered).containEql(
+      'json-keys /state/fleet/homes/a/.claude.json (replacing mcpServers; every other key kept)',
+    );
     should(rendered).containEql('retire    /state/fleet/homes/a (only what Ferretry placed: skills, hooks)');
     should(rendered).containEql('prune-directory /state/fleet/homes/a/skills (keeping 1)');
   });

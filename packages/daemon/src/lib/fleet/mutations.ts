@@ -730,7 +730,9 @@ function assertDocument(text: string, format: SettingsFormat, what: string): voi
   try {
     parseSettings(text, format);
   } catch (error) {
-    refuse(`the ${what} text is not valid ${format.toUpperCase()}: ${error instanceof Error ? error.message : String(error)}`);
+    refuse(
+      `the ${what} text is not valid ${format.toUpperCase()}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -782,7 +784,8 @@ function componentOf(
     }
     case 'hooks': {
       if (content !== undefined) assertDocument(content, 'json', owner);
-      const directory = typeof existing?.directory === 'string' && written === undefined ? existing.directory : undefined;
+      const directory =
+        typeof existing?.directory === 'string' && written === undefined ? existing.directory : undefined;
       if (directory !== undefined) {
         return { component: { harness: input.harness, directory } };
       }
@@ -862,9 +865,7 @@ export function deriveAccountChange(
   const summary = applyAccountChange(model, draft, change, facts, files, consequences);
   const parsed = AccountModelSchema.safeParse(draft);
   if (!parsed.success) {
-    refuse(
-      `this change would leave the setup invalid: ${parsed.error.issues.map(issue => issue.message).join('; ')}`,
-    );
+    refuse(`this change would leave the setup invalid: ${parsed.error.issues.map(issue => issue.message).join('; ')}`);
   }
   return { model: (parsed as { data: AccountModel }).data, files, summary, consequences };
 }
@@ -979,7 +980,8 @@ function putRuntime(
   }
   const credential = model.credentials[change.credential];
   if (credential === undefined) return refuse(`no login ${change.credential} exists on this machine`);
-  if (model.profiles[change.profile] === undefined) return refuse(`no profile ${change.profile} exists on this machine`);
+  if (model.profiles[change.profile] === undefined)
+    return refuse(`no profile ${change.profile} exists on this machine`);
   // P5, E14: a profile with nothing for this login's harness launches nothing of the person's setup.
   const resolved = resolveProfile({ model, profile: change.profile, harness: credential.harness });
   if (resolved.ok && !resolved.resolved.availability.available) {
@@ -996,9 +998,12 @@ function putRuntime(
     .map(([name]) => name)
     .toSorted();
   if (twins.length > 0 && change.addAnother !== true) {
-    refuse(`${listed(twins)} already ${twins.length === 1 ? 'uses' : 'use'} this login and profile. Add another anyway?`);
+    refuse(
+      `${listed(twins)} already ${twins.length === 1 ? 'uses' : 'use'} this login and profile. Add another anyway?`,
+    );
   }
-  if (twins.length > 0) consequences.push(`${listed(twins)} already ${twins.length === 1 ? 'uses' : 'use'} this login and profile.`);
+  if (twins.length > 0)
+    consequences.push(`${listed(twins)} already ${twins.length === 1 ? 'uses' : 'use'} this login and profile.`);
   draft.runtimes[change.name] = { credential: change.credential, profile: change.profile, agent: change.agent };
   if (exists) consequences.push('Running sessions keep the old setup until restarted.');
   return exists ? `Change runtime ${change.name}` : `Add runtime ${change.name}`;
@@ -1114,7 +1119,9 @@ function removeComponent(
     for (const profile of usage.direct) {
       const layers = (draft.profiles[profile] as { layers: string[] }).layers.filter(layer => layer !== reference);
       if (layers.length === 0) {
-        refuse(`removing ${word} ${change.name} would leave profile ${profile} with no layers; add another layer to it first`);
+        refuse(
+          `removing ${word} ${change.name} would leave profile ${profile} with no layers; add another layer to it first`,
+        );
       }
       (draft.profiles[profile] as { layers: string[] }).layers = layers;
     }

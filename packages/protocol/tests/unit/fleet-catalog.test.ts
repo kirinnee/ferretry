@@ -40,7 +40,9 @@ const stack = {
   harness: 'claude',
   available: { available: true },
   applied: ['instructions/main', 'mcp/notes'],
-  skipped: [{ reference: 'settings/codex', sentence: 'Settings codex is for Codex only, so it is skipped on Claude Code.' }],
+  skipped: [
+    { reference: 'settings/codex', sentence: 'Settings codex is for Codex only, so it is skipped on Claude Code.' },
+  ],
   conflicts: [
     {
       harness: 'claude',
@@ -112,7 +114,9 @@ const view = {
   state: 'pending',
   preview: {
     kind: 'apply',
-    operations: [{ kind: 'credential-link', source: '/fy/fleet/credentials/codex/auth.json', path: '/fy/homes/x/auth.json' }],
+    operations: [
+      { kind: 'credential-link', source: '/fy/fleet/credentials/codex/auth.json', path: '/fy/homes/x/auth.json' },
+    ],
     documents: [{ path: '/fy/fleet/config.yaml', bytes: 120 }],
     runtimes: [{ name: 'claude-default', harness: 'claude', agent: true, launch: { available: true } }],
   },
@@ -221,7 +225,14 @@ describe('the account-model catalogue wire contract', () => {
   it('should accept every kind of change the catalogue stages', () => {
     // Arrange
     const changes = [
-      { kind: 'runtime.put', name: 'Claude Review', credential: 'claude-you', profile: 'default', agent: false, create: true },
+      {
+        kind: 'runtime.put',
+        name: 'Claude Review',
+        credential: 'claude-you',
+        profile: 'default',
+        agent: false,
+        create: true,
+      },
       { kind: 'runtime.remove', name: 'claude-review' },
       { kind: 'profile.put', name: 'agent', layers: ['profile/default', 'settings/claude'], create: false },
       { kind: 'profile.remove', name: 'agent', switchRuntimesTo: 'default' },

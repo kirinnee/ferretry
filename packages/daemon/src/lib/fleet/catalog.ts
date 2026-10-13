@@ -350,7 +350,10 @@ function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind):
     harness,
     available: act(unavailableReason(resolved)),
     applied: resolved.applied.map(layer => layer.reference),
-    skipped: resolved.skipped.map(skip => ({ reference: skip.layer.reference, sentence: skippedSentence(skip, harness) })),
+    skipped: resolved.skipped.map(skip => ({
+      reference: skip.layer.reference,
+      sentence: skippedSentence(skip, harness),
+    })),
     conflicts: resolved.conflicts.map(conflictView),
     partial: resolved.partial.map(entry => ({ reference: entry.reference, reason: describePartialSupport(entry) })),
   };
@@ -435,7 +438,12 @@ function fixedLayerView(
       ? []
       : applyFixedLayer(resolved, fixed).overridden.map(entry =>
           entry.kind === 'setting'
-            ? { key: entry.key, value: shown(entry.value), from: entry.layer.name, sentence: OVERRIDE_SENTENCE(entry.layer.name) }
+            ? {
+                key: entry.key,
+                value: shown(entry.value),
+                from: entry.layer.name,
+                sentence: OVERRIDE_SENTENCE(entry.layer.name),
+              }
             : {
                 key: entry.tokens[0] as string,
                 value: entry.tokens.join(' '),
@@ -446,7 +454,9 @@ function fixedLayerView(
   return {
     view: {
       agentPermissions: fixed.agentPermissions,
-      entries: fixed.entries.map(entry => FIXED_ENTRY_WORDS[entry.purpose] ?? { key: entry.key, value: shown(entry.value) }),
+      entries: fixed.entries.map(
+        entry => FIXED_ENTRY_WORDS[entry.purpose] ?? { key: entry.key, value: shown(entry.value) },
+      ),
       overridden,
     },
   };

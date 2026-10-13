@@ -94,12 +94,8 @@ export const applyFleetChange = async (
   request: FleetProposalApplyRequest = {},
   unlock?: string,
 ): Promise<FleetAccountChangeOutcome> =>
-  await client.request(
-    `${FLEET_CHANGES_PATH}/${encodeURIComponent(changeId)}/apply`,
-    FleetAccountChangeOutcomeSchema,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
-      body: JSON.stringify(FleetProposalApplyRequestSchema.parse(request)),
-    },
-  );
+  await client.request(`${FLEET_CHANGES_PATH}/${encodeURIComponent(changeId)}/apply`, FleetAccountChangeOutcomeSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    body: JSON.stringify(FleetProposalApplyRequestSchema.parse(request)),
+  });
