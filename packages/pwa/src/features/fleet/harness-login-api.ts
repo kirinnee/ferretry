@@ -40,7 +40,7 @@ export type CredentialLoginStartRequest = HarnessLoginStartRequest;
 /**
  * Starts signing one CREDENTIAL in: every runtime on it, or none yet — an empty slot is signed in
  * before anything uses it (E12, E31).
-*/
+ */
 export const startCredentialSignIn = async (
   client: FleetClient,
   request: CredentialLoginStartRequest,
@@ -52,17 +52,11 @@ export const startCredentialSignIn = async (
   });
 
 /** Re-reads one live credential sign-in. Polled, because the person is acting somewhere this browser cannot see. */
-export const readCredentialSignIn = async (
-  client: FleetClient,
-  flowId: string,
-): Promise<CredentialLoginFlow> =>
+export const readCredentialSignIn = async (client: FleetClient, flowId: string): Promise<CredentialLoginFlow> =>
   await client.request(flowPath(flowId), HarnessLoginFlowSchema);
 
 /** Ends one credential sign-in and the harness child behind it. */
-export const cancelCredentialSignIn = async (
-  client: FleetClient,
-  flowId: string,
-): Promise<CredentialLoginFlow> =>
+export const cancelCredentialSignIn = async (client: FleetClient, flowId: string): Promise<CredentialLoginFlow> =>
   await client.request(flowPath(flowId), HarnessLoginFlowSchema, { method: 'DELETE' });
 
 /**

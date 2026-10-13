@@ -454,11 +454,7 @@ describe('AddDeviceSurface', () => {
 
     // Assert — and the code is gone from the screen once the machine has ended it.
     should(showed).equal(1);
-    should(calls).deepEqual([
-      'GET /v1/pair/devices',
-      'POST /v1/pair/code',
-      `DELETE /v1/pair/code/${PAIRING_ID}`,
-    ]);
+    should(calls).deepEqual(['GET /v1/pair/devices', 'POST /v1/pair/code', `DELETE /v1/pair/code/${PAIRING_ID}`]);
     should(marked(surface, 'data-pair-code')).be.empty();
   });
 

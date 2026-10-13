@@ -47,10 +47,12 @@ export function InstallTool(props: InstallToolProps) {
   latest.current = access;
   const read = useCallback((): void => {
     setIssue(null);
-    void latest.current.read(client => readFleetSetupScan(client)).then(answer => {
-      if (answer.kind === 'done') setScan(answer.value);
-      else setIssue(answer.sentence);
-    });
+    void latest.current
+      .read(client => readFleetSetupScan(client))
+      .then(answer => {
+        if (answer.kind === 'done') setScan(answer.value);
+        else setIssue(answer.sentence);
+      });
   }, []);
   const started = useRef(false);
   useEffect(() => {

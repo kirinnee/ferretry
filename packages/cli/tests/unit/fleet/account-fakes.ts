@@ -21,11 +21,7 @@ import type {
   HarnessLoginSubmission,
 } from '@ferretry/protocol';
 import { Command } from 'commander';
-import type {
-  AccountCommandDeps,
-  AccountHarness,
-  IAccountGateway,
-} from '../../../src/lib/fleet/account-ports.ts';
+import type { AccountCommandDeps, AccountHarness, IAccountGateway } from '../../../src/lib/fleet/account-ports.ts';
 
 /** One call the fake gateway saw. */
 interface GatewayCall {

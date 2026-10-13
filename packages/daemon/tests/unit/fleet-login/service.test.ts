@@ -1306,11 +1306,7 @@ describe('the harness login routes', () => {
 
     // Act
     const actual = await pairedDispatcher(subject, NARROWED).dispatch(
-      startRequest(
-        { credentialId: CLAUDE_CREDENTIAL },
-        browser,
-        pairedDevice,
-      ),
+      startRequest({ credentialId: CLAUDE_CREDENTIAL }, browser, pairedDevice),
     );
 
     // Assert

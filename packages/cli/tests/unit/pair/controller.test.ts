@@ -332,7 +332,8 @@ describe('fy pair', () => {
     // and reported by it: this command and the browser meet ONE rule and read ONE sentence. What this
     // asserts is that the sentence reaches the person, and that nothing draws a code that was never issued.
     // Arrange
-    const refusal = 'this caller may not mint a pairing code. Make the request from this machine, and pairing works again.';
+    const refusal =
+      'this caller may not mint a pairing code. Make the request from this machine, and pairing works again.';
     const h = harness({}, new ScriptedPairGateway([pending], new Error(refusal)));
 
     // Act + Assert

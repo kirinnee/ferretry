@@ -13,7 +13,13 @@
  * else: no header, no token, no confirmation field — nothing here for a credential to leak from.
  */
 
-import { type GrantsPatch, GrantsPatchSchema, type GrantsView, GrantsViewSchema, type IFyApiClient } from '@ferretry/protocol';
+import {
+  type GrantsPatch,
+  GrantsPatchSchema,
+  type GrantsView,
+  GrantsViewSchema,
+  type IFyApiClient,
+} from '@ferretry/protocol';
 
 /** The only client capability the grant surface uses. */
 export type GrantClient = Pick<IFyApiClient, 'request'>;

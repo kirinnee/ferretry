@@ -73,4 +73,3 @@ export interface GrantAuditReading {
 export interface GrantClock {
   nowMs(): number;
 }
-

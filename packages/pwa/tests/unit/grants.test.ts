@@ -278,7 +278,9 @@ describe('grantRefusalNotice', () => {
   });
 
   it('carries an empty detail rather than inventing one when the daemon said nothing', () => {
-    expect(grantRefusalNotice(Object.assign(new Error(''), { status: 403, code: STEP_UP_REQUIRED_CODE }))?.detail).toBe('');
+    expect(grantRefusalNotice(Object.assign(new Error(''), { status: 403, code: STEP_UP_REQUIRED_CODE }))?.detail).toBe(
+      '',
+    );
   });
 });
 

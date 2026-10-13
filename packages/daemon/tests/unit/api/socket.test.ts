@@ -174,7 +174,9 @@ describe('ApiSocketDispatcher', () => {
     const stepUpGuard: CapabilityGuard = {
       decide: (_demand, presentation) => {
         presented.push(presentation);
-        return presentation.stepUp ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' };
+        return presentation.stepUp
+          ? { allowed: true, refusal: 'granted' }
+          : { allowed: false, refusal: 'step-up-required' };
       },
       governance: () => ({ governed: true, decide: () => ({ allowed: false, refusal: 'undetermined' }) }),
       explain: () => 'confirm with your passkey',

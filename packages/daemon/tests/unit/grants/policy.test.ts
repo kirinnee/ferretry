@@ -261,7 +261,9 @@ describe('the per-capability decision matrix', () => {
       for (const axis of AXES) {
         for (const stepUp of [true, false]) {
           for (const hostLocal of [true, false]) {
-            should(decideCapability({ capability, axis }, evaluation({ grants: SHUT, stepUp, hostLocal })).allowed).be.false();
+            should(
+              decideCapability({ capability, axis }, evaluation({ grants: SHUT, stepUp, hostLocal })).allowed,
+            ).be.false();
           }
         }
       }

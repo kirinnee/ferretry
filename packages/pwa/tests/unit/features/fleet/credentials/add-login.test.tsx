@@ -149,10 +149,7 @@ interface World {
   readonly refuse?: (change: { kind: string; id: string }) => Error | undefined;
 }
 
-const open = async (
-  world: World,
-  props: Partial<Pick<HostProps, 'initial' | 'harness' | 'tool' | 'pollMs'>> = {},
-) => {
+const open = async (world: World, props: Partial<Pick<HostProps, 'initial' | 'harness' | 'tool' | 'pollMs'>> = {}) => {
   const calls: Call[] = [];
   const added: HostProps['added'] = [];
   const made = { value: false };
@@ -408,7 +405,6 @@ describe('AddLoginStep · Sign in', () => {
     expect(changeBodies(calls)).toHaveLength(1);
     await view.unmount();
   });
-
 });
 
 describe('AddLoginStep · Label (E26)', () => {

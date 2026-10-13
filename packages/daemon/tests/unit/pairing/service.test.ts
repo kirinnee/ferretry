@@ -270,7 +270,7 @@ describe('PairingService minting and status', () => {
     should(redemption.response.carriers).deepEqual(carriers);
 
     const discovered = fixture({ carriers, discoveredRelayUrl: 'wss://hosted.example.test/fy' });
-    should((discovered.mint()).discoveredRelayUrl).equal('wss://hosted.example.test/fy');
+    should(discovered.mint().discoveredRelayUrl).equal('wss://hosted.example.test/fy');
   });
 
   it('should mint the same fragment whether or not a rendezvous is discoverable', async () => {

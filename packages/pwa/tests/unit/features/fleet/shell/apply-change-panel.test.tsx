@@ -9,14 +9,7 @@ import {
 } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
-import {
-  APPLY_PATH,
-  type Call,
-  machineAnswer,
-  OUTCOME,
-  STAGED,
-  scriptedClient,
-} from './change-support.ts';
+import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from './change-support.ts';
 
 const CHANGE = { kind: 'machine.settings', agentPermissions: 'auto' } as const;
 const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });

@@ -105,10 +105,7 @@ export const stageAccountChange = async (client: FleetClient, change: FleetAccou
 };
 
 /** Apply exactly a change that was staged. */
-export const applyStagedChange = async (
-  client: FleetClient,
-  staged: FleetAccountChangeView,
-): Promise<ChangeResult> => {
+export const applyStagedChange = async (client: FleetClient, staged: FleetAccountChangeView): Promise<ChangeResult> => {
   try {
     return { kind: 'applied', staged, outcome: await applyFleetChange(client, staged.id) };
   } catch (error) {

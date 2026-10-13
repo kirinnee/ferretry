@@ -9,7 +9,11 @@ import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-co
 import { StepUpGate } from '../../src/lib/step-up-gate.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
-const studio = daemonConnection({ daemonId: 'daemon-studio', baseUrl: 'https://studio.example', deviceId: 'device-one' });
+const studio = daemonConnection({
+  daemonId: 'daemon-studio',
+  baseUrl: 'https://studio.example',
+  deviceId: 'device-one',
+});
 
 /** A gate whose ceremony the test settles by hand, so a busy prompt can be looked at. */
 function harness() {

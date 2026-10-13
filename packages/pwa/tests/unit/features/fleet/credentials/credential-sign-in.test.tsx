@@ -6,15 +6,7 @@ import type { FleetClient } from '../../../../../src/features/fleet/fleet-client
 import type { CredentialLoginFlow } from '../../../../../src/features/fleet/harness-login-api.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
-import {
-  type Call,
-  claudeFlow,
-  credential,
-  machineWith,
-  READS,
-  STUDIO,
-  scripted,
-} from '../account-support.ts';
+import { type Call, claudeFlow, credential, machineWith, READS, STUDIO, scripted } from '../account-support.ts';
 
 const LOGIN = 'POST /v1/fleet/login';
 const FLOW = '/v1/fleet/login/flow-1';

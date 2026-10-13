@@ -41,7 +41,9 @@ describe('requireMayApply', () => {
   it('should refuse when the grant settings could not be read', async () => {
     // Arrange
     const world = fakeWorld({
-      gateway: { machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'undetermined' }) }) },
+      gateway: {
+        machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'undetermined' }) }),
+      },
     });
 
     // Act + Assert

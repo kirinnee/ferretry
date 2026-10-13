@@ -183,7 +183,9 @@ describe('pairing routes', () => {
     const fromHostCli = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
     );
-    const fromLocalBrowser = await surface.dispatch(request({ method: 'POST', path: '/v1/pair/code', ...localBrowser }));
+    const fromLocalBrowser = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', ...localBrowser }),
+    );
     // A loopback peer WITHOUT the host proof is a proxied remote phone, and is governed like one.
     const fromProxiedPhone = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, device: browser }),
@@ -303,7 +305,9 @@ describe('pairing routes', () => {
     const fromHostCli = await surface.dispatch(request({ path: '/v1/pair/devices', headers: admin, loopback: true }));
     // A remote caller reads the list only once confirmed, and is told it is NOT on the host.
     const confirmed = await mount(subject, true, { held: () => true });
-    const fromRemote = await confirmed.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: false }));
+    const fromRemote = await confirmed.dispatch(
+      request({ path: '/v1/pair/devices', device: browser, loopback: false }),
+    );
 
     // Assert
     should(jsonBody(fromBrowser)).deepEqual({

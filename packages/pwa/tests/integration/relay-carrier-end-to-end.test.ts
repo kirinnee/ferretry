@@ -775,28 +775,28 @@ const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
   await bridge.admitDaemon(identity, answered('{}'), undefined, {
     reauthorize: () => true,
     upgrade: async request => {
-    upgrade = request;
-    if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
-    return {
-      outcome: 'accepted',
-      attach: async socket => {
-        downstream = socket;
-        return {
-          open: async () => {
-            attached += 1;
-            // Produced by the handler rather than by the case, so what crosses is what a mounted
-            // stream would have written: this bridge is `SocketDownstream` and nothing else.
-            socket.send(SHELL_OUTPUT);
-            await Promise.resolve();
-          },
-          fromClient: frame => fromClient.push(clientFrame(frame)),
-          close: () => {
-            released += 1;
-          },
-        };
-      },
-    } satisfies SocketUpgradeDecision;
-  },
+      upgrade = request;
+      if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
+      return {
+        outcome: 'accepted',
+        attach: async socket => {
+          downstream = socket;
+          return {
+            open: async () => {
+              attached += 1;
+              // Produced by the handler rather than by the case, so what crosses is what a mounted
+              // stream would have written: this bridge is `SocketDownstream` and nothing else.
+              socket.send(SHELL_OUTPUT);
+              await Promise.resolve();
+            },
+            fromClient: frame => fromClient.push(clientFrame(frame)),
+            close: () => {
+              released += 1;
+            },
+          };
+        },
+      } satisfies SocketUpgradeDecision;
+    },
   });
 
   const overHttp: string[] = [];

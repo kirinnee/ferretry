@@ -208,9 +208,7 @@ describe('why each capability is open', () => {
     const renderer = render(
       <CapabilityList
         connection={localLookingConnection()}
-        capabilities={[
-          entry({ capability: 'fleet', configure: false, configureRefusal: 'step-up-required' }),
-        ]}
+        capabilities={[entry({ capability: 'fleet', configure: false, configureRefusal: 'step-up-required' })]}
         governed
       />,
     );

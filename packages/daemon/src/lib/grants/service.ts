@@ -218,7 +218,10 @@ export class CapabilityGrantService implements CapabilityGuard {
           );
       }
       if (!evaluation.stepUp)
-        throw new GrantError('step-up-required', 'changing these grants needs a passkey confirmation from this device.');
+        throw new GrantError(
+          'step-up-required',
+          'changing these grants needs a passkey confirmation from this device.',
+        );
     }
     const changes = grantChanges(current, next);
     await this.deps.document.write(next);

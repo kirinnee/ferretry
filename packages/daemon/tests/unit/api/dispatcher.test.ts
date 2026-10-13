@@ -645,7 +645,9 @@ describe('the operator grant layer', () => {
     // Act
     await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
     await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: { ...DEVICE, appSession: 'app-two' } }));
-    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: { deviceId: 'device-2', appSession: 'app-one' } }));
+    await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', device: { deviceId: 'device-2', appSession: 'app-one' } }),
+    );
     await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }));
 
     // Assert — the deviceless caller never reaches the witness at all.

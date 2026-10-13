@@ -274,7 +274,13 @@ export function GrantStepUpPanel({
       <p className="m-0 text-meta leading-base text-muted">{STEP_UP_NOTE}</p>
       {steppedUp || onStepUp === undefined ? null : (
         <div>
-          <button type="button" className="kt-btn min-h-[44px]" data-grant-step-up-open="" disabled={busy} onClick={onStepUp}>
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            data-grant-step-up-open=""
+            disabled={busy}
+            onClick={onStepUp}
+          >
             <Fingerprint size={15} aria-hidden="true" />
             Confirm with passkey…
           </button>
@@ -339,11 +345,7 @@ export function GrantsCard({
           moment it is not. It is never inferred from this page's address, which would invert the answer
           over a relay. The fallback stays for a browser meeting an OLDER daemon that does not send the
           field. */}
-      <CapabilityList
-        connection={connection}
-        capabilities={view.capabilities}
-        governed={view.governed}
-      />
+      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">

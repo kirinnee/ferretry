@@ -96,9 +96,7 @@ describe('the fleet credentials mount', () => {
     const { subsystem, calls } = recording(async () => VIEW);
 
     // Act
-    const response = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/credentials/work/check'),
-    );
+    const response = await dispatcher(subsystem).dispatch(post('/v1/fleet/credentials/work/check'));
 
     // Assert
     should(response.status).equal(200);

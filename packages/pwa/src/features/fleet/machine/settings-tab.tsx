@@ -164,17 +164,10 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
 
   if (flow === 'setup' || flow === 'import')
     return <MachineFirstRun key={flow} {...props} mode={flow} onDone={toRuntimes} onLeave={leave} />;
-  if (flow === 'clone')
-    return <CloneMachine {...props} sources={sources} onDone={toRuntimes} onLeave={leave} />;
+  if (flow === 'clone') return <CloneMachine {...props} sources={sources} onDone={toRuntimes} onLeave={leave} />;
   if (flow === 'install-claude' || flow === 'install-codex')
     return (
-      <InstallTool
-        key={flow}
-        {...props}
-       
-        harness={flow === 'install-claude' ? 'claude' : 'codex'}
-        onLeave={leave}
-      />
+      <InstallTool key={flow} {...props} harness={flow === 'install-claude' ? 'claude' : 'codex'} onLeave={leave} />
     );
 
   if (machine === null)

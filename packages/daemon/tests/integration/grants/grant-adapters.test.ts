@@ -1,11 +1,7 @@
 import { describe, it } from 'bun:test';
 import { DAEMON_CAPABILITIES } from '@ferretry/protocol';
 import should from 'should';
-import {
-  ConfigGrantDocument,
-  JournalGrantAudit,
-  SystemGrantClock,
-} from '../../../src/adapters/grants/index.ts';
+import { ConfigGrantDocument, JournalGrantAudit, SystemGrantClock } from '../../../src/adapters/grants/index.ts';
 import { FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import { DEFAULT_CAPABILITY_GRANTS, type FileSystemPort, type FoundationPaths } from '../../../src/lib/index.ts';

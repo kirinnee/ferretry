@@ -464,13 +464,13 @@ export function AddRuntime({
     const profile = draft.profile;
     const create = async (): Promise<void> => {
       const result = await changes.apply({
-          kind: 'runtime.put',
-          name: draft.name,
-          credential: credential.id,
-          profile,
-          agent: draft.agent,
-          create: true,
-          ...(draft.addAnother ? { addAnother: true } : {}),
+        kind: 'runtime.put',
+        name: draft.name,
+        credential: credential.id,
+        profile,
+        agent: draft.agent,
+        create: true,
+        ...(draft.addAnother ? { addAnother: true } : {}),
       });
       if (result.kind === 'refused') return;
       onDraft({ ...draft, made: draft.name });

@@ -16,9 +16,7 @@ function Host({ probe, client }: { readonly probe: Probe; readonly client: Fleet
   const createClient = useMemo(() => async () => client, [client]);
   const access = useSetupAccess({ connection: STUDIO, createClient });
   probe.current = access;
-  return (
-    <p data-authority={access.changes.authority?.kind ?? 'reading'}>{access.changes.refusal ?? ''}</p>
-  );
+  return <p data-authority={access.changes.authority?.kind ?? 'reading'}>{access.changes.refusal ?? ''}</p>;
 }
 
 const settle = async (): Promise<void> => {

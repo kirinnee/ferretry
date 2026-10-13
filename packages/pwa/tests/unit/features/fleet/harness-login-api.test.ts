@@ -46,11 +46,7 @@ describe('signing in a credential', () => {
   it('reads, cancels and submits on the flow path', async () => {
     const flow = claudeFlow('awaiting-code');
     const cases: readonly (readonly [unknown, (client: FleetClient) => Promise<unknown>, string | undefined])[] = [
-      [
-        flow,
-        async client => await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }),
-        'POST',
-      ],
+      [flow, async client => await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }), 'POST'],
       [flow, async client => await readCredentialSignIn(client, flow.flowId), undefined],
       [flow, async client => await cancelCredentialSignIn(client, flow.flowId), 'DELETE'],
       [
@@ -58,11 +54,7 @@ describe('signing in a credential', () => {
         async client => await submitCredentialSignInCode(client, flow.flowId, 'x'),
         'POST',
       ],
-      [
-        { outcome: 'accepted', flow },
-        async client => await switchCredentialSignInToLink(client, flow.flowId),
-        'POST',
-      ],
+      [{ outcome: 'accepted', flow }, async client => await switchCredentialSignInToLink(client, flow.flowId), 'POST'],
     ];
     for (const [answer, call, method] of cases) {
       const { client, calls } = clientFor(answer);

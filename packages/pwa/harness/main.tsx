@@ -1219,7 +1219,9 @@ const HARNESS_GRANTS_STEPPED_UP: GrantsView = {
 
 /** A browser ON the machine: ungoverned, every axis open, and the only caller that may widen. */
 const HARNESS_GRANTS_LOCAL: GrantsView = {
-  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'granted', 'default', true)),
+  capabilities: DAEMON_CAPABILITIES.map(capability =>
+    grantEntry(capability, on, 'granted', 'granted', 'default', true),
+  ),
   governed: false,
   hostLocal: true,
   steppedUp: false,
@@ -5703,11 +5705,7 @@ function Shell() {
       label: 'Capability limits — daemon cannot say',
       render: () => (
         <div data-harness="grants-undetermined">
-          <GrantsCard
-            connection={daemon}
-            view={HARNESS_GRANTS_UNDETERMINED}
-            onChange={() => {}}
-          />
+          <GrantsCard connection={daemon} view={HARNESS_GRANTS_UNDETERMINED} onChange={() => {}} />
         </div>
       ),
     },

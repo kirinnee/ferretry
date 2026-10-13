@@ -7,11 +7,7 @@ import {
   STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
-import {
-  type CapabilityPresentation,
-  NO_STEP_UP_WITNESS,
-  type StepUpWitness,
-} from '../../api/capability.ts';
+import { type CapabilityPresentation, NO_STEP_UP_WITNESS, type StepUpWitness } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { arrivedOnHost } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';

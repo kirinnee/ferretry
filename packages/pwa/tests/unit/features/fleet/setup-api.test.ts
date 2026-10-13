@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type {
-  FleetCloneBundle,
-  FleetSetupScan,
-  FleetToolInstallResult,
-} from '@ferretry/protocol';
+import type { FleetCloneBundle, FleetSetupScan, FleetToolInstallResult } from '@ferretry/protocol';
 import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
@@ -20,7 +16,6 @@ interface Call {
   readonly path: string;
   readonly init: RequestInit | undefined;
 }
-
 
 const SCAN = {
   machine: 'studio',

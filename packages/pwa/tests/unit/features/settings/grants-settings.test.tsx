@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { type CapabilityGrantView, DAEMON_CAPABILITIES, type GrantsView } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import {
-  GrantStepUpPanel,
-  GrantsCard,
-  GrantsSurface,
-} from '../../../../src/features/settings/grants-settings.tsx';
+import { GrantStepUpPanel, GrantsCard, GrantsSurface } from '../../../../src/features/settings/grants-settings.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { STEP_UP_NOTE } from '../../../../src/lib/grants.ts';
 import { render, run, runAsync } from '../../../support/react.ts';
@@ -89,11 +85,7 @@ describe('GrantsCard', () => {
     expect(text(confirmed)).toContain('passkey confirmed');
 
     const local = render(
-      <GrantsCard
-        connection={connection()}
-        view={view({ governed: false, hostLocal: true })}
-        onChange={() => {}}
-      />,
+      <GrantsCard connection={connection()} view={view({ governed: false, hostLocal: true })} onChange={() => {}} />,
     );
     expect(marked(local, 'data-grant-step-up')).toHaveLength(0);
     expect(marked(local, 'data-grant-stepped-up')).toHaveLength(0);
@@ -307,7 +299,9 @@ describe('GrantsCard', () => {
     const renderer = render(
       <GrantsCard
         connection={connection()}
-        view={view({ capabilities: [entry({ capability: 'fleet', origin: 'config file' }), entry({ capability: 'warden' })] })}
+        view={view({
+          capabilities: [entry({ capability: 'fleet', origin: 'config file' }), entry({ capability: 'warden' })],
+        })}
         onChange={() => {}}
       />,
     );
@@ -387,7 +381,9 @@ describe('GrantsSurface', () => {
     };
   };
 
-  const mountSurface = async (props: Partial<Parameters<typeof GrantsSurface>[0]> & { create: () => Promise<never> }) => {
+  const mountSurface = async (
+    props: Partial<Parameters<typeof GrantsSurface>[0]> & { create: () => Promise<never> },
+  ) => {
     let renderer: ReactTestRenderer | undefined;
     await runAsync(async () => {
       renderer = render(<GrantsSurface connection={connection()} createClient={props.create} {...props} />);
@@ -418,7 +414,9 @@ describe('GrantsSurface', () => {
   });
 
   it('says it is still reading before an answer lands, rather than implying no limits', () => {
-    const renderer = render(<GrantsSurface connection={connection()} createClient={async () => new Promise(() => {})} />);
+    const renderer = render(
+      <GrantsSurface connection={connection()} createClient={async () => new Promise(() => {})} />,
+    );
     expect(text(renderer)).toContain('Reading what this machine allows');
   });
 

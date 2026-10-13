@@ -70,10 +70,7 @@ export const stageFleetChange = async (
   });
 
 /** One staged change, read back. */
-export const readFleetChange = async (
-  client: FleetClient,
-  changeId: string,
-): Promise<FleetAccountChangeView> =>
+export const readFleetChange = async (client: FleetClient, changeId: string): Promise<FleetAccountChangeView> =>
   await client.request(`${FLEET_PROPOSALS_PATH}/${encodeURIComponent(changeId)}`, FleetAccountChangeViewSchema);
 
 /** Apply exactly the change that was previewed. */

@@ -184,9 +184,7 @@ describe('the decision for each kind of caller', () => {
 
     // Act + Assert
     should(service.decide({ capability: 'warden', axis: 'use' }, remoteWarden).allowed).be.true();
-    should(service.decide({ capability: 'warden', axis: 'configure' }, remoteWarden).refusal).equal(
-      'step-up-required',
-    );
+    should(service.decide({ capability: 'warden', axis: 'configure' }, remoteWarden).refusal).equal('step-up-required');
     should(service.view(remoteWarden)).containDeep({ governed: true, hostLocal: false, steppedUp: false });
   });
 });
@@ -211,7 +209,9 @@ describe('telling open streams the answer moved', () => {
 describe('the grant view a UI reads', () => {
   it('should report every capability with both axes, the document underneath, and each reason', async () => {
     // Arrange
-    const { service } = await ready({ grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } } });
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } },
+    });
 
     // Act
     const view = service.view(remote);
@@ -549,7 +549,9 @@ describe('where a caller stands, for a route that must add one step', () => {
 
   it('should answer for an axis its own route never demanded, and never disagree with the boundary', async () => {
     // Arrange
-    const { service } = await ready({ grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } } });
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } },
+    });
 
     // Act
     const governance = service.governance(remote);

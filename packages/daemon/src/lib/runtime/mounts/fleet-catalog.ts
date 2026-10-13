@@ -150,7 +150,9 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       handle: async context => {
         // An empty strict body: a field an older client still sends is refused, not ignored.
         await parseOptionalBody(context.request, FleetProposalApplyRequestSchema);
-        return await answer(FleetAccountChangeOutcomeSchema, () => subsystem.apply(proposalId(context), context.governance));
+        return await answer(FleetAccountChangeOutcomeSchema, () =>
+          subsystem.apply(proposalId(context), context.governance),
+        );
       },
     },
   ];

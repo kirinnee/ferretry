@@ -675,10 +675,7 @@ describe('first-run import and clone', () => {
     // Act
     const setup = await service.propose({ kind: 'setup.import' });
     const clone = await service.propose({ kind: 'clone.import', mode: 'replace', bundle: {} });
-    const outcomes = [
-      await service.apply(setup.id, governance),
-      await service.apply(clone.id, governance),
-    ];
+    const outcomes = [await service.apply(setup.id, governance), await service.apply(clone.id, governance)];
 
     // Assert
     should(setup.preview).deepEqual({ kind: 'executor', executor: 'setup', description: 'Adds 2 runtimes.' });
