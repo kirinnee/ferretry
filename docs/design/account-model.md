@@ -509,7 +509,7 @@ the add flow.
 │ ‹ Accounts     claude-default      │   │ ‹ Accounts   Claude · you@ex…      │
 │                                    │   │ ● Ready · checked 4m ago           │
 │ Login        you@example.com     › │   │ 5h   ▓▓▓▓▓▓░░░░░░  38%  2h 10m     │
-│ Model        Opus 5              › │   │ Week ▓▓▓▓▓▓▓▓▓░░░  61%  Fri        │
+│ Model        Opus 5.5            › │   │ Week ▓▓▓▓▓▓▓▓▓░░░  61%  Fri        │
 │ Instructions CLAUDE.md           › │   │ ┌────────────────────────────────┐ │
 │ Skills       review, deploy      › │   │ │           Check now            │ │
 │ MCP servers  2                   › │   │ └────────────────────────────────┘ │
