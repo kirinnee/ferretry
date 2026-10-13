@@ -465,8 +465,9 @@ That is a change to how the host behaves, so:
   inside the flow asks nothing more. [grants.md](../grants.md) owns what the step-up does and costs.
 - **Use the one prompt.** The browser's single step-up requirement is the only place a person is asked,
   and the login panel raises it or asks for nothing, so a capability never grows its own inline field.
-- **A caller on the host is ungoverned, and `fy` on the host never is governed** ([grants.md](../grants.md)).
-  So the operator standing at the machine sees no prompt.
+- **Only `fy` with the host's admin token is ungoverned** ([grants.md](../grants.md)). So the operator at
+  the machine's command line sees no prompt; a browser on the host is a governed device and is asked for a
+  passkey step-up like any other.
 - **Keep the credential minimum where the other fleet routes have it.** Every fleet route is
   `minimum: 'operator'` (`fleet.ts:1226-1230`); an `admin-token` minimum would 403 the browser, which
   is always a paired device ([grants.md](../grants.md)), and the whole point is the browser.

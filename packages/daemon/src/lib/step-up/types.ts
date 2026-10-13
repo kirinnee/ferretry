@@ -82,9 +82,11 @@ export interface StepUpDeviceDirectory {
 
 /**
  * Who is asking. `device` is the session's proven device; `hostLocal` is the boundary's own proof that
- * the request arrived on this host. Neither comes from a body.
+ * this is the OWNER at the machine (`arrivedOnHost`); `actor` names them in the audit. None comes
+ * from a body.
  */
 export interface StepUpCaller {
   readonly device?: { readonly deviceId: string; readonly appSession: string };
   readonly hostLocal: boolean;
+  readonly actor?: string;
 }

@@ -5,9 +5,10 @@ than the name suggests.
 
 ## The one-sentence version
 
-**A caller that arrived on the host is ungoverned. Everything here is about the caller that did not** — a
-paired phone, a browser across the network, a session carried over the relay — which may do what the
-operator granted, and needs a passkey step-up for the dangerous parts.
+**Only the owner at the machine — `fy` with the host's admin token — is ungoverned. Everything here is about
+every other caller**: a paired phone, a browser across the network, a session carried over the relay, and a
+browser on the host itself. Each may do what the operator granted, and needs a passkey step-up for the
+dangerous parts.
 
 ## Why the host command line is exempt
 
@@ -18,26 +19,28 @@ that gated the command line would add friction and no safety — and it would sl
 feature cannot brick a machine. `fy` authenticates with the admin token, and reading that file already
 requires being on the host.
 
-## A browser on the host is ungoverned too — when the host is proven
+## A browser on the host is an ordinary device
 
-A **browser is a paired device wherever it runs**, including on the machine itself. Whether it is governed
-is decided by how its request **arrived**, not by who it claims to be: a browser whose request came over a
-carrier that proved the host (see below) is ungoverned, and every other browser is governed. There is no
-unlock to present and no password to set — **a fresh install needs no setup, no questionnaire and no secret**
-to be useful, and the only thing that moves a caller from governed to ungoverned is being at the machine.
+A **browser is a paired device wherever it runs**, including on the machine itself, and it is **governed like
+every other device** (owner decision, 2026-10-13; [design/zero-trust.md](design/zero-trust.md) B4). The reason
+is that nothing can tell it apart from a stranger: `ssh -L`, `socat`, `cloudflared`, `tailscale serve` or any
+reverse proxy to `127.0.0.1` arrives exactly as a local browser does — a loopback peer, even on a
+loopback-only bind. Only the host's admin token proves the owner, because reading it needs this machine's disk.
 
-**It is friction, not a boundary, and no comment in this repository may say otherwise.** A person at
-that keyboard can open a terminal, read the admin token and do all of it anyway; a browser tab left open on
-the host is not protected by any of this. What the model buys is that a remote caller is bounded and
-deliberate, not that the host is defended against somebody sitting at it.
+So a browser on the host confirms the dangerous acts with a passkey, as a phone does, and cannot widen a
+grant: that is `fy` at the machine. There is still no password to set and **a fresh install needs no setup,
+no questionnaire and no secret** to be useful.
 
-The answer has three cases:
+**It is friction, not a boundary, and no comment in this repository may say otherwise.** A person at that
+keyboard can open a terminal, read the admin token and do all of it anyway. What the model buys is that every
+browser is bounded and deliberate, not that the host is defended against somebody sitting at it.
 
-| caller                                                | governed?            |
-| ----------------------------------------------------- | -------------------- |
-| `fy` on the host (admin token, loopback)              | no, always           |
-| a browser whose request arrived on a host-proven path | no                   |
-| anything else                                         | yes, unconditionally |
+The answer has two cases:
+
+| caller                                   | governed?            |
+| ---------------------------------------- | -------------------- |
+| `fy` on the host (admin token, loopback) | no, always           |
+| anything else, a browser on the host too | yes, unconditionally |
 
 `GrantsView` carries `governed` (do the limits apply to me), `hostLocal` (did this request arrive on the
 machine) and `steppedUp` (does this device hold a passkey step-up right now). Today `hostLocal` is exactly
@@ -64,19 +67,16 @@ Nothing re-derives it, and no header can move it.
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
 presents every loopback-looking signal it can.
 
-**A loopback peer is still not proof of the host.** A remote caller forwarded through a locally bound
-proxy (`tailscale serve`, `cloudflared`) arrives from a loopback peer too, so every host-locality rule
-— `privilegedOnly` routes, widening (`hostLocal`) and whether a caller is governed — reads
-`arrivedOnHost` in `packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits:
+**A loopback peer is not proof of the owner.** A remote caller forwarded through a locally bound proxy
+(`tailscale serve`, `cloudflared`, `ssh -L`) arrives from a loopback peer too, so every owner rule — widening
+(`hostLocal`), whether a caller is governed, and the owner's passkey recovery — reads `arrivedOnHost` in
+`packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits **only the host's admin token over a
+loopback peer**: reading that token already needs this machine's disk, so nobody can present it who did not
+already have the machine.
 
-- a request whose carrier proved the host (`privilegedLoopback`: a loopback-only bind that advertises
-  no foreign address, `mayTrustDirectLoopback`), or
-- the host's **admin token** over a loopback peer — reading that token already needs this machine's
-  disk, and without it the host's own command line would stop working on a daemon bound beyond loopback.
-
-The consequence, stated plainly: on a daemon bound to a wildcard address or advertised through a proxy,
-a **browser on the same machine is treated as remote** — governed, needing a step-up for the dangerous
-acts and unable to widen. `fy` on the host still can.
+The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises no foreign address,
+`mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
+— a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
 ## Seven capabilities, two axes
 
@@ -127,12 +127,9 @@ so it is worth saying out loud why it needs no exception to the permissive defau
   the admin token — a file on the machine. So the UI could not add a second device even while running
   _on_ the machine, and "add a device" had no home outside a terminal. The routes now sit at `admin`
   scope with a `pairing` demand, which is the layer that can say "loopback yes, remote by decision".
-- **The scope move widens the layer beneath this one.** Any paired device reaching the daemon over
-  loopback can mint **when its request arrived on a host-proven carrier**. That is the loopback principle
-  applied consistently — somebody at the machine already has the machine — and a grant cannot narrow it,
-  because a grant only ever governs a caller who is not on this host. It is stated here rather than
-  discovered, because it is the part of the design a reviewer should agree to. A governed caller minting
-  needs a step-up (`pairing.use`); see [pairing](pairing.md).
+- **The scope move does not widen the layer beneath this one.** A paired device minting a code is governed
+  wherever it runs, a browser on the host included: it needs `pairing.use` and a step-up. Only `fy pair`
+  with the host's admin token mints without either; see [pairing](pairing.md).
 - **Its safety is the one-way gate, not its default.** A caller who is not on the host may switch
   `pairing` **off** and can never switch it back **on**. An operator who decides that only the machine
   itself hands out credentials therefore makes a decision that sticks: a stolen phone cannot restore an
@@ -299,8 +296,8 @@ device that holds `pairing.configure` and an axis itself may give that axis to a
 step-up — never more than the daemon-wide document allows, so it is a copy, not a widening of the machine
 (see [Per-device grants](#per-device-grants)).
 
-"Local" below means **arrived on the host** — `fy` with the admin token, or a browser on a host-proven
-carrier. A caller that did not arrive on the host is governed, and **no step-up buys it a widening**.
+"Local" below means **the owner at the machine** — `fy` with the admin token. Every other caller, a browser
+on the host included, is governed, and **no step-up buys it a widening**.
 
 | act                                | on the host (ungoverned) | remote (governed)                          |
 | ---------------------------------- | ------------------------ | ------------------------------------------ |
@@ -368,8 +365,10 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
 ### Changing a device's grants
 
 `PATCH /v1/pair/devices/:deviceId/grants` with a partial `DeviceGrantsPatch`, answering the whole device
-list. At the machine: `fy device grant <device> <capability> --use|--no-use|--configure|--no-configure`,
-or the local browser's Settings → Add a device, where each device's capabilities are toggles.
+list. At the machine — `fy` with the admin token, the only ungoverned caller (B4):
+`fy device grant <device> <capability> --use|--no-use|--configure|--no-configure`. In the app, Settings →
+Add a device shows each device's capabilities as toggles; a browser is a governed device wherever it runs, so
+its toggles follow the remote column below — a toggle it may not turn on says so, with the `fy` command.
 
 | change                        | on the host | a remote device                                                                        |
 | ----------------------------- | ----------- | -------------------------------------------------------------------------------------- |
@@ -471,16 +470,14 @@ command says so at the moment somebody might be tempted to do that instead.
 
 ## Declared GAPs
 
-- **An SSH tunnel to the daemon port reads as loopback**, because the socket genuinely is local. The
-  model accepts this — a tunnel needs shell access, and anybody with that can read the admin token
-  anyway — but `pairing` is the capability where it matters most, so it is written down rather than
-  discovered.
-- **A caller on the host is ungoverned, so a browser tab left open on the host is unprotected.** Anybody at
-  that keyboard can open a terminal, read the admin token and change everything; the step-up does not
-  defend an unattended host, and no passkey prompt is asked of a browser that arrived on a host-proven
-  carrier. That is the same door the recovery path depends on (a lost phone, a lost passkey or a device
-  narrowed to nothing is repaired at the machine), and there is no version of this that is both
-  unbypassable and recoverable — recoverable is the one that was chosen.
+- **An SSH tunnel to the daemon port is a governed caller**, like any browser: it is a loopback peer, and a
+  loopback peer proves nothing about the owner. Only the admin token does.
+- **The host's command line is ungoverned, so an unattended, unlocked host is unprotected.** Anybody at that
+  keyboard can open a terminal, read the admin token and change everything; the step-up does not defend it.
+  That is the same door the recovery path depends on — a lost phone, a lost passkey (`fy passkey window
+<device>` re-opens a device's passkey window for ten minutes) or a device narrowed to nothing is repaired
+  at the machine — and there is no version of this that is both unbypassable and recoverable. Recoverable
+  is the one that was chosen. A browser tab left open on the host is no longer the exception: it is governed.
 - **A step-up is per device and per app session, and bounds nothing about what the confirmed act does.**
   Within its window a step-up covers any number of `configure` acts and any number of `terminal.use`
   streams. It says "the person holding this device agreed recently", not "this particular diff was read".

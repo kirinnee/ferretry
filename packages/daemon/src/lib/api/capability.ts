@@ -15,9 +15,8 @@ import type { SessionDevice } from './http.ts';
  * ## THE BOUNDARY IS ARRIVAL ON THE HOST
  *
  * Somebody on the machine already HAS the machine: they can edit the configuration document, run the
- * command line, or start anything they like. So a caller that PROVED it arrived on the host — the
- * command line holding the admin token, or a local browser carrying the host proof — is not governed
- * by this layer at all, and a fresh install needs no setup and no questionnaire. See
+ * command line, or start anything they like. So the owner at the machine — the command line holding the admin token, over loopback — is
+ * not governed by this layer at all (a browser on the host is a device like any other, B4), and a fresh install needs no setup and no questionnaire. See
  * `isGovernedCaller` for the whole rule.
  *
  * A governed caller exercising a dangerous demand must also hold a recent passkey step-up for its
