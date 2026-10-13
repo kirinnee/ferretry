@@ -165,10 +165,14 @@ GET ws(s)://<daemon address>/v1/rendezvous/<daemonId>/client      (WebSocket upg
   it.
 - **Every browser request goes through a session.** The router's direct branch opens a direct
   session instead of calling `fetch`, and event, terminal and remote-browser streams open stream
-  sessions on either carrier. Single-use socket tickets remain only for the host's own tokens.
+  sessions on either carrier. Single-use socket tickets are deleted entirely — daemon routes,
+  protocol schema and PWA client: a stream is its own session, so nothing is left for a ticket to do.
+  (GAP: the remote-browser viewer is unmounted and still written against tickets; it moves onto a
+  stream session before it is mounted again.)
 - The HTTP listener keeps serving the **host's** credentials (admin token, warden token) exactly as
-  before. It no longer resolves a device credential of any kind: `ApiCredentials.devices` and
-  `DeviceCredentialVerifier` are deleted, so a device identity can only come from a session.
+  before. It no longer resolves a device credential of any kind: the device bearer path is deleted,
+  so a device identity can only come from a session. `ApiCredentials.devices` survives only as a
+  yes/no "is this device still paired" check on each request, which fails closed when absent.
 
 ### A4. The mutual handshake: the device signs the transcript
 
@@ -419,6 +423,67 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
 - Web Push self-enrolment moves off `pairing.use`: a device enrolling **itself** for notifications is
   allowed for every paired device (it grants nothing), so a default device still gets alerts.
 
+### B6. Per-daemon security settings
+
+Owner decision (2026-10-13). One **Security** section per machine — in the app's Settings for that
+machine, and `fy daemon security` at the host — holds the knobs below. Each has a default and hard
+bounds; a value outside the bounds is refused, never clamped.
+
+| Setting                         | Default    | Bounds                       | Narrower means        |
+| ------------------------------- | ---------- | ---------------------------- | --------------------- |
+| `stepUpWindowMinutes`           | 15         | 0–60 (0 = every time)        | smaller               |
+| `deviceKeyRotationDays`         | 30         | 7–90                         | smaller               |
+| `presenceOnOpen`                | off        | on / off                     | on                    |
+| `presenceValidityHours`         | 8          | 1–24                         | smaller               |
+| `idleExpiryDays`                | 30         | 1–90                         | smaller               |
+| access lease                    | 15 minutes | **fixed, not a setting**     | —                     |
+
+- **Step-up window.** How long one passkey assertion covers dangerous actions (B1) for one
+  `appSession`. `0` asks every time.
+- **Device-key rotation.** The `authenticated` and `stream-opened` records carry `rotateBy`. Once it
+  has passed, the next step-up ceremony also rotates the key: the browser mints a new non-extractable
+  key, the daemon receives `{ deviceKey, proof }` where `proof` is the NEW key's signature over
+  `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey)`, inside a session the OLD
+  key opened, together with the assertion. The daemon swaps the SPKI, closes the device's other
+  sessions with `4441` (so they reopen with the new key), and audits `device.key-rotated`. The old key
+  then opens nothing. No extra prompt exists for this: a device that is overdue cannot complete a
+  step-up-gated action without rotating in the same ceremony, while plain `fleet.use` keeps working.
+  Lost answer: the browser stores the new key as *pending* before sending and, if the old key is
+  refused, tries the pending one once — so a dropped response never strands the device.
+- **Presence on open.** Off by default. When on, a session still opens (the device key is proved as
+  always), but every request answers `401 presence_required` until the device completes a passkey
+  assertion; one assertion is good for `presenceValidityHours` for that device, across page loads.
+  Dangerous actions still need their own step-up window — presence never counts as a step-up.
+- **Idle expiry.** A6's 30 days, now a setting. Shortening it applies at the next check (boot, auth,
+  device list), so it can expire devices immediately; the confirmation says how many.
+- **The access lease stays fixed at 15 minutes**, deliberately. Renewal is silent, so a longer lease
+  buys a person nothing and only widens how long a revoked or expired device's open channel lives; a
+  shorter one costs renewals without a security gain worth a knob. Fixed is simpler and safer.
+
+**Who may change them — the grants.md asymmetry, again.** Changing any setting is a *configure*
+action on the `pairing` capability.
+
+- **Narrowing** (a smaller window or period, `presenceOnOpen` → on) is allowed remotely by a device
+  holding `pairing.configure` **with a current step-up**.
+- **Widening** (a larger window or period, `presenceOnOpen` → off) is allowed **only at the machine**
+  — a loopback caller, the CLI, or the local browser. A remote widen is `403` with a sentence naming
+  the command to run at the machine.
+- A request that changes several fields is judged field by field and refused whole if any field
+  widens remotely.
+- Where it lives: `<FY_HOME>/state/security.json` (`schemaVersion: 1`, written atomically, mode
+  `0600`). An unreadable or invalid document **fails closed to the defaults' narrowest reading**
+  (presence on, window 0) with a notice naming the file, never to "off".
+- Every change is audited as `security.changed` with the field, old value, new value and actor.
+
+Tests: each bound accepted at its edges and refused one past them; each field's widen refused
+remotely and accepted at loopback; narrow refused without a step-up and accepted with one; a mixed
+request refused whole; rotation end to end (old key refused afterwards, other sessions closed, the
+pending-key recovery); presence gating on and off; the corrupt-document fail-closed path; and the
+audit record for every change.
+
+Delivery: built after B (it needs the step-up ceremony), as part of B if it fits, otherwise as a
+small PR E immediately after it.
+
 ## C. Audit log and alerts
 
 - **Where:** `<FY_HOME>/state/audit.jsonl`, rotated to `audit.1.jsonl` at 1 MiB, two files kept —
@@ -428,7 +493,7 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   for: `device.paired`, `device.revoked`, `device.expired`, `pairing.code-minted`, `pairing.refused`,
   `session.opened` (carrier + locality, at most one per device per hour), `step-up.succeeded`,
   `step-up.failed`, `passkey.registered`, `terminal.opened`, `fleet.configured`, `grants.changed`,
-  `secrets.used`. **Names and ids only** — never a code, key, proof, assertion, secret value or
+  `secrets.used`, `security.changed`, `device.key-rotated`. **Names and ids only** — never a code, key, proof, assertion, secret value or
   command line; a test greps every written record for each of those.
 - **Read:** `GET /v1/audit?limit=` (newest first, at most 200, `pairing.use`), `fy daemon audit`, and
   a Settings › Security view in the app. A line that does not parse is counted and reported, never
