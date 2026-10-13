@@ -19,6 +19,7 @@ import {
   type SessionEventStreamStatus,
   startSessionEventStream,
 } from './components/session-event-stream-model.ts';
+import { browserTerminalDeckDependencies } from './components/session-terminal-deck.tsx';
 import {
   type SessionWorkspaceRefreshControl,
   type SessionWorkspaceRefreshEnvironment,
@@ -29,6 +30,7 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { accountsSettingsTab } from './features/fleet/accounts-page.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
+import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { emptyMachineTab, type MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -58,8 +60,8 @@ import { WardenStrip } from './features/warden/warden-strip.tsx';
 import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
 import { useActiveCarrier } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
-import { useInputModality } from './hooks/use-input-modality.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useInputModality } from './hooks/use-input-modality.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
   type NotificationControlsHost,
@@ -94,7 +96,6 @@ import {
   routePageKey,
   setupPath,
 } from './lib/pages/routes.ts';
-import { browserTerminalDeckDependencies } from './components/session-terminal-deck.tsx';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
@@ -943,7 +944,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   credentials: emptyMachineTab('credentials'),
   profiles: emptyMachineTab('profiles'),
   components: emptyMachineTab('components'),
-  settings: emptyMachineTab('settings'),
+  settings: MachineSettingsSurface,
 };
 
 function SettingsRoute({ connection }: DaemonPageProps) {

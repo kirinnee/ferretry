@@ -1,3 +1,3 @@
-// Account-model seed, created empty by U0 and filled by U19 (docs/design/account-model.md §13.2).
-// It exists so the barrel line and registration that reach it are already in place.
-export {};
+// The Machines Settings tab (docs/design/account-model.md §4.2): Agent permissions, tools, setup
+// and the machine's facts.
+export * from './settings-tab.tsx';
