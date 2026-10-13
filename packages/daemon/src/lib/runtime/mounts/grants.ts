@@ -73,6 +73,8 @@ function refuse(error: unknown): never {
  * nothing: it is carried so a change can be attributed to whoever made it.
  */
 function presentationOf(context: RouteContext, stepUps: StepUpWitness): CapabilityPresentation {
+  // The boundary's own assembly when it made one — the same object every route decision used.
+  if (context.presentation !== undefined) return context.presentation;
   const device = context.request.device;
   return {
     loopback: arrivedOnHost(context.request, context.credential?.tokenClass === 'admin'),

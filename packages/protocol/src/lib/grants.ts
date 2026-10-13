@@ -291,9 +291,12 @@ export const GrantAuditEntryViewSchema = z.strictObject({
    * record of who did something must not become a durable record of the credential they did it with.
    */
   actor: z.string().min(1).max(256),
-  /** Each axis that moved, as `capability.axis=on|off`. Empty is impossible — a patch that changed
-   *  nothing is not recorded. */
-  changes: z.array(z.string().min(1).max(64)).readonly(),
+  /**
+   * Each axis that moved, as `capability.axis=on|off` for the daemon-wide document, or
+   * `<deviceId>/capability.axis=on|off` for one device's own grant. Empty is impossible — a patch that
+   * changed nothing is not recorded.
+   */
+  changes: z.array(z.string().min(1).max(96)).readonly(),
 });
 export type GrantAuditEntryView = z.infer<typeof GrantAuditEntryViewSchema>;
 

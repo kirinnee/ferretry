@@ -89,7 +89,11 @@ export function demandNeedsStepUp(demand: CapabilityDemand): boolean {
   return STEP_UP_USE_CAPABILITIES.has(demand.capability);
 }
 
-const STEP_UP_USE_CAPABILITIES: ReadonlySet<DaemonCapability> = new Set(['terminal', 'browser', 'pairing']);
+/**
+ * `secrets.use` is here because it RUNS A COMMAND — the value goes into a child's environment — so it is
+ * code execution on the host exactly as a terminal is (`docs/design/zero-trust.md` B1).
+ */
+const STEP_UP_USE_CAPABILITIES: ReadonlySet<DaemonCapability> = new Set(['terminal', 'browser', 'pairing', 'secrets']);
 
 /** Everything the per-request decision reads, gathered so none of it comes from a global. */
 export interface GrantEvaluation {
@@ -104,6 +108,15 @@ export interface GrantEvaluation {
   readonly hostLocal: boolean;
   /** Whether this caller's proven device holds a live passkey step-up for this app session. */
   readonly stepUp: boolean;
+  /**
+   * What the caller's OWN paired device has been granted, for a governed device caller.
+   *
+   * `undefined` for a caller that is not a paired device (a remote warden) — no device narrowing then
+   * applies, because there is no device record to narrow by — and for an ungoverned caller, which nothing
+   * narrows. `null` is a device the session proved but whose record is gone: it is refused, never treated
+   * as unnarrowed.
+   */
+  readonly device?: CapabilityGrants | null;
 }
 
 /**
@@ -126,6 +139,14 @@ export function decideCapability(demand: CapabilityDemand, evaluation: GrantEval
   const grant = grants[demand.capability];
   if (!grant.use) return { allowed: false, refusal: 'not-granted' };
   if (demand.axis === 'configure' && !grant.configure) return { allowed: false, refusal: 'not-granted' };
+  // effective = daemonWide ∧ device. The machine-wide answer is asked first so its remedy, a host
+  // change for everyone, is named before the per-device one.
+  if (evaluation.device === null) return { allowed: false, refusal: 'undetermined' };
+  if (evaluation.device !== undefined) {
+    const own = evaluation.device[demand.capability];
+    if (!own.use || (demand.axis === 'configure' && !own.configure))
+      return { allowed: false, refusal: 'device-not-granted' };
+  }
   if (demandNeedsStepUp(demand) && !evaluation.stepUp) return { allowed: false, refusal: 'step-up-required' };
   return { allowed: true, refusal: 'granted' };
 }
@@ -169,6 +190,8 @@ export function describeGrantRefusal(
     return demand.axis === 'use'
       ? `the operator of this machine has not granted the UI the use of ${noun}. Grant it on the host with \`${clientName} daemon config set ${demand.capability} --use\`.`
       : `the operator of this machine has not granted the UI permission to change the settings for ${noun}. Grant it on the host with \`${clientName} daemon config set ${demand.capability} --configure\`.`;
+  if (refusal === 'device-not-granted')
+    return `this device has not been given ${demand.axis === 'use' ? 'the use of' : 'permission to change the settings for'} ${noun}. Grant it at the machine with \`${clientName} device grant <device> ${demand.capability} --${demand.axis}\`, or from a device that holds it and may manage devices.`;
   return demand.axis === 'use'
     ? `using ${noun} needs a passkey confirmation from this device.`
     : `changing the settings for ${noun} needs a passkey confirmation from this device.`;
@@ -230,4 +253,105 @@ export function grantChanges(current: CapabilityGrants, next: CapabilityGrants):
 /** One demand named for a log line or a report row. */
 export function describeDemand(capability: DaemonCapability, axis: CapabilityAxis): string {
   return `${capability}.${axis}`;
+}
+
+/** Everything one device-grant change is judged by. None of it comes from the request body. */
+export interface DeviceGrantJudgement {
+  /** The device's grants now, and what the patch would make them. */
+  readonly current: CapabilityGrants;
+  readonly next: CapabilityGrants;
+  /** Whether the caller arrived on the host — ungoverned, so every widen is its to make. */
+  readonly hostLocal: boolean;
+  /** Whether the caller's device holds a live passkey step-up. */
+  readonly stepUp: boolean;
+  /**
+   * What the CALLER may do itself, effective (daemon-wide ∧ its own device), or `undefined` for a
+   * governed caller that is not a paired device and therefore holds nothing it could pass on.
+   */
+  readonly holder: CapabilityGrants | undefined;
+}
+
+/** Why a device-grant change was refused, in a vocabulary the service turns into a status. */
+export type DeviceGrantVerdict =
+  | { readonly kind: 'allowed' }
+  | { readonly kind: 'step-up-required' }
+  | { readonly kind: 'forbidden'; readonly widened: readonly string[] };
+
+/**
+ * Which axes a caller may turn ON for another device (`docs/design/zero-trust.md` B5).
+ *
+ * At the machine, every axis. Remotely, an axis the caller itself holds effectively — and only when it
+ * also holds `pairing.configure`, the permission to manage devices. NO DEVICE CAN GRANT WHAT IT DOES NOT
+ * HOLD, so nothing escalates: the most a device can give another is a copy of what it already has.
+ * `configure` needs the matching `use` too, because a device must never hold `configure` without `use`.
+ */
+export function widenableBy(hostLocal: boolean, holder: CapabilityGrants | undefined): CapabilityGrants {
+  const managesDevices = holder?.pairing.use === true && holder.pairing.configure;
+  const answer: Record<DaemonCapability, CapabilityGrant> = { ...ALL_OFF_GRANTS };
+  for (const capability of DAEMON_CAPABILITIES) {
+    if (hostLocal) answer[capability] = { use: true, configure: true };
+    else if (managesDevices && holder !== undefined)
+      answer[capability] = {
+        use: holder[capability].use,
+        configure: holder[capability].use && holder[capability].configure,
+      };
+  }
+  return answer;
+}
+
+const ALL_OFF_GRANTS: CapabilityGrants = Object.fromEntries(
+  DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false }]),
+) as CapabilityGrants;
+
+/**
+ * The one decision about a change to ONE device's grants, field by field, refused WHOLE.
+ *
+ * - A caller on the host may make any change: it already has the machine (B4).
+ * - A governed caller needs a live step-up for ANY change — narrowing included, on any device, its own
+ *   included — and nothing else for a narrowing. Revoking is never harder than granting.
+ * - A governed widen is allowed only for axes {@link widenableBy} lists. One illegal widen refuses the
+ *   whole patch, so a mixed patch never half-applies.
+ *
+ * The forbidden verdict is checked before the step-up one: a widen no step-up could buy must not ask
+ * for a passkey first and then refuse anyway.
+ */
+export function judgeDeviceGrantChange(judgement: DeviceGrantJudgement): DeviceGrantVerdict {
+  if (judgement.hostLocal) return { kind: 'allowed' };
+  const allowed = widenableBy(false, judgement.holder);
+  const illegal = widenedBy(judgement.current, judgement.next).filter(axis => {
+    const [capability, which] = axis.split('.') as [DaemonCapability, CapabilityAxis];
+    return !allowed[capability][which];
+  });
+  if (illegal.length > 0) return { kind: 'forbidden', widened: illegal };
+  if (!judgement.stepUp) return { kind: 'step-up-required' };
+  return { kind: 'allowed' };
+}
+
+/**
+ * A device patch applied, with `configure ⇒ use` kept true of the RESULT.
+ *
+ * Turning `configure` on turns `use` on with it, and turning `use` off turns `configure` off with it, so
+ * a device can never hold the incoherent "may reconfigure what it may not use". The coupled axis is
+ * judged like any other: a `configure` widen that drags `use` on must be allowed for `use` too.
+ */
+export function applyDeviceGrantPatch(current: CapabilityGrants, patch: GrantsPatch): CapabilityGrants {
+  const next: Record<DaemonCapability, CapabilityGrant> = { ...applyGrantPatch(current, patch) };
+  for (const capability of DAEMON_CAPABILITIES) {
+    const change = patch[capability];
+    if (change === undefined) continue;
+    // A patch naming `use: false` and `configure: true` together narrows: the safer reading wins.
+    if (change.use === false) next[capability] = { use: false, configure: false };
+    else if (change.configure === true) next[capability] = { use: true, configure: true };
+  }
+  return next;
+}
+
+/** `left ∧ right`, axis by axis — the effective grant of a device under the daemon-wide document. */
+export function intersectGrants(left: CapabilityGrants, right: CapabilityGrants): CapabilityGrants {
+  return Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [
+      capability,
+      { use: left[capability].use && right[capability].use, configure: left[capability].configure && right[capability].configure },
+    ]),
+  ) as CapabilityGrants;
 }

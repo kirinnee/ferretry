@@ -353,6 +353,7 @@ import {
   CgroupLaunchPlanner,
   CgroupService,
   type ChildGrantRequester,
+  DeviceGrantService,
   ClaudeTranscriptParser,
   type ClockPort,
   CodexPickerCleanup,
@@ -6312,6 +6313,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Built above, and the same instance the fleet mount confirms a change through. See its
         // definition for why one instance rather than two.
         grants,
+        // One device's own grants (B5): the pairing service holds them, the daemon-wide answer is the
+        // other half of `effective`, and a change reaches open streams and the grant journal.
+        deviceGrants: new DeviceGrantService({
+          devices: pairing,
+          daemonWide: () => grants.enforced(),
+          audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          clock: new SystemGrantClock(),
+          clientName: CLIENT_NAME,
+          changed: () => deviceConnections.recheckAll(),
+        }),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
@@ -6483,7 +6494,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const base = {
     credentials: {
       ...(await world.credentials.load()),
-      devices: { has: (deviceId: string) => pairing.credentials.get(deviceId) !== undefined },
+      devices: {
+        has: (deviceId: string) => pairing.credentials.get(deviceId) !== undefined,
+        grants: (deviceId: string) => pairing.credentials.get(deviceId)?.grants,
+      },
     },
     usage,
     clock: world.clock,

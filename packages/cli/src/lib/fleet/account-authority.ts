@@ -6,6 +6,8 @@ type MachineAuthority = FleetMachineView['authority'];
 /** Why this caller may not change the machine at all, in words, per shared grant refusal. */
 const REFUSALS: Record<MachineAuthority['applyRefusal'], string> = {
   'not-granted': "This caller is not allowed to change this machine's setup: the operator has not granted it.",
+  'device-not-granted':
+    "This device has not been given permission to change this machine's setup. Grant it at the machine with `device grant`, or from a device that holds it.",
   'step-up-required':
     'This change needs a passkey confirmation from a paired device, which a command line cannot give. Make it from the app, or run this on the machine itself.',
   undetermined: "This machine's grant settings could not be read, so no change is allowed until they are fixed.",

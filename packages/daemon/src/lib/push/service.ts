@@ -84,6 +84,16 @@ export class PushService {
     return (await this.enrolments()).map(pushDeviceView);
   }
 
+  /** The enrolments ONE device filed — what a device may always see of its own notifications. */
+  async listFor(deviceId: string): Promise<readonly PushDeviceView[]> {
+    return (await this.enrolments()).filter(record => record.deviceId === deviceId).map(pushDeviceView);
+  }
+
+  /** Which device filed an enrolment, or nothing for an id that is not enrolled. */
+  async ownerOf(id: string): Promise<string | undefined> {
+    return (await this.enrolments()).find(record => record.id === id)?.deviceId;
+  }
+
   /**
    * Enrols one browser, on behalf of the paired device that asked.
    *
