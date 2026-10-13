@@ -1,11 +1,17 @@
 import { describe, it } from 'bun:test';
-import type { PairedDevice, PairingCodeMintResponse, PairingCodeStatusResponse, PairingId } from '@ferretry/protocol';
+import {
+  DEFAULT_DEVICE_GRANTS,
+  type PairedDevice,
+  type PairingCodeMintResponse,
+  type PairingCodeStatusResponse,
+  type PairingId,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter, type StepUpWitness } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { grantSubsystem } from './support.ts';
+import { deviceGrantsOver, grantSubsystem } from './support.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const pairingId = `fy_pair_${'c'.repeat(22)}` as PairingId;
@@ -31,6 +37,7 @@ const device = (id: string, name: string): PairedDevice => ({
   createdAt: '2026-08-01T09:00:00.000Z',
   lastSeenAt: '2026-08-03T11:58:00.000Z',
   idleExpiresAt: '2026-09-02T11:58:00.000Z',
+  grants: DEFAULT_DEVICE_GRANTS,
 });
 
 class FakePairing implements PairingSubsystem {
@@ -81,7 +88,12 @@ class FakePairing implements PairingSubsystem {
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { has: (deviceId: string) => deviceId !== 'unpaired-device' },
+  devices: {
+    has: (deviceId: string) => deviceId !== 'unpaired-device',
+    // Every capability: these tests are about the daemon-wide grant and the step-up, and the per-device
+    // half has its own file (`device-grants.test.ts`).
+    grants: (deviceId: string) => (deviceId === 'unpaired-device' ? undefined : DEFAULT_CAPABILITY_GRANTS),
+  },
 };
 
 const admin = { authorization: 'Bearer admin-secret' };
@@ -107,7 +119,13 @@ async function mount(subject: PairingSubsystem, allow = true, stepUps?: StepUpWi
     grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: allow, configure: allow } },
   });
   await grants.refresh();
-  return new ApiDispatcher(new ApiRouter(pairingRoutes(subject)), credentials, grants, undefined, stepUps);
+  return new ApiDispatcher(
+    new ApiRouter(pairingRoutes(subject, deviceGrantsOver(grants))),
+    credentials,
+    grants,
+    undefined,
+    stepUps,
+  );
 }
 
 describe('pairing routes', () => {

@@ -1,4 +1,3 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -6,7 +5,7 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { secretRoutes, type SecretSubsystem } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, EchoSecretChildRunner, human, MemorySecretDocuments, secretSubsystem } from './support.ts';
+import { CREDENTIALS, EchoSecretChildRunner, GRANTED, human, MemorySecretDocuments, secretSubsystem } from './support.ts';
 
 /**
  * The HTTP surface of the secret store.
@@ -19,7 +18,7 @@ import { CREDENTIALS, EchoSecretChildRunner, human, MemorySecretDocuments, secre
 const TOKEN = 'sk-live-0123456789';
 
 function dispatcher(subsystem: SecretSubsystem): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(secretRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  return new ApiDispatcher(new ApiRouter(secretRoutes(subsystem)), CREDENTIALS, GRANTED);
 }
 
 async function store(subsystem: SecretSubsystem, name: string, value: string): Promise<void> {

@@ -145,9 +145,9 @@ async function devicesView(
   const thisDeviceId = callerDeviceId(context.actor);
   return PairedDevicesViewSchema.parse({
     devices: await subsystem.devices(),
-    // The TRANSPORT's answer and nothing else. A relayed hop terminates on this very host, so anything
-    // derived from an address, a `Host` header or the URL would tell a remote phone it is local.
-    hostLocal: context.request.loopback,
+    // `arrivedOnHost`'s answer, as the boundary computed it — never `request.loopback`: a relayed hop or a
+    // caller behind a locally bound proxy is a loopback peer and is NOT at the machine.
+    hostLocal: presentationIn(context).loopback,
     ...(thisDeviceId === undefined ? {} : { thisDeviceId }),
     mayWiden: grants.mayWiden(presentationIn(context)),
   });

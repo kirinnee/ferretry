@@ -313,7 +313,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // registered EARLY and is itself ungoverned so a restricted UI can always read the reason it is
     // restricted — a grant report a restricted caller could not fetch would be the greyed control
     // with no explanation this whole feature exists to remove.
-    ...grantRoutes(subsystems.grants, subsystems.stepUp),
+    ...grantRoutes(subsystems.grants),
     // The carrier refresh sits beside pairing because it is the SECOND half of one exchange: pairing
     // hands a device the set of ways to reach this daemon, and this is where that device asks again
     // when the set has changed. `/v1/carriers` is a fixed literal no other subsystem uses, so it can

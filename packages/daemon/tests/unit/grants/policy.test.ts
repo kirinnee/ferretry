@@ -57,6 +57,7 @@ const NEEDS_STEP_UP: Readonly<Record<DaemonCapability, Readonly<Record<Capabilit
   filesystem: { use: false, configure: true },
   warden: { use: false, configure: true },
   pairing: { use: true, configure: true },
+  secrets: { use: true, configure: true },
 };
 
 /** The grant document states a matrix row can find a capability in. */
@@ -171,7 +172,7 @@ describe('who the grants govern', () => {
 });
 
 describe('which demands need a step-up', () => {
-  it('should need one for every configure and for the use of terminal, browser and pairing only', () => {
+  it('should need one for every configure and for the use of terminal, browser, pairing and secrets only', () => {
     // Act + Assert
     for (const capability of DAEMON_CAPABILITIES) {
       for (const axis of AXES) {
@@ -338,6 +339,7 @@ describe('what a refused caller is told', () => {
       'the project filesystem',
       'fleet supervision',
       'device pairing',
+      'the secret store',
     ]);
     should(describeDemand('fleet', 'configure')).equal('fleet.configure');
   });
