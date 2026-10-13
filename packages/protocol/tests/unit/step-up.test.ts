@@ -8,6 +8,7 @@ const ORIGIN = 'https://app.ferretry.test';
 const CHALLENGE = 'Y2hhbGxlbmdlLWJ5dGVz';
 const CREDENTIAL = 'Y3JlZGVudGlhbC1pZA';
 const allow = [{ type: 'public-key', id: CREDENTIAL }];
+const DEVICE_ID = `fy_device_id_${'d'.repeat(22)}`;
 
 const stepUpCases: SchemaCase[] = [
   { name: 'app origin', schema: stepUp.AppOriginSchema, value: ORIGIN },
@@ -54,6 +55,12 @@ const stepUpCases: SchemaCase[] = [
       stepUpUntil: LATER_INSTANT,
     },
   },
+  { name: 'window request', schema: stepUp.PasskeyWindowRequestSchema, value: { deviceId: DEVICE_ID } },
+  {
+    name: 'window opened',
+    schema: stepUp.PasskeyWindowOpenedSchema,
+    value: { deviceId: DEVICE_ID, deviceName: 'Pixel 8', closesAt: LATER_INSTANT },
+  },
 ];
 
 describe('the passkey step-up wire', () => {
@@ -84,6 +91,22 @@ describe('the passkey step-up wire', () => {
         schema: stepUp.PasskeysViewSchema,
         value: { passkeys: [], registration: 'open' },
       },
+      // A browser is never the owner (B4), so the posture that said "you are the host" is gone for good.
+      {
+        name: 'the retired host posture',
+        schema: stepUp.PasskeysViewSchema,
+        value: { passkeys: [], registration: 'host' },
+      },
+      {
+        name: 'a window for something that is not a device id',
+        schema: stepUp.PasskeyWindowRequestSchema,
+        value: { deviceId: 'phone' },
+      },
+      {
+        name: 'a window answer with no name',
+        schema: stepUp.PasskeyWindowOpenedSchema,
+        value: { deviceId: DEVICE_ID, deviceName: '', closesAt: LATER_INSTANT },
+      },
     ]);
   });
 
@@ -95,6 +118,8 @@ describe('the passkey step-up wire', () => {
       'step_up_too_many_passkeys',
       'step_up_no_passkey',
       'step_up_not_verified',
+      'step_up_not_at_machine',
+      'step_up_unknown_device',
     ]);
     should(stepUp.STEP_UP_REQUIRED_CODE).equal('grant_step_up_required');
   });
