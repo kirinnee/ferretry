@@ -21,7 +21,14 @@ import type {
   FleetSetupTool,
 } from '@ferretry/protocol';
 import type { StepperStep } from '../shell/stepper-model.ts';
-import { countWords, fileName, listWords, SETUP_HARNESS_NAMES, SETUP_HARNESSES, type SetupHarness } from './setup-words.ts';
+import {
+  countWords,
+  fileName,
+  listWords,
+  SETUP_HARNESS_NAMES,
+  SETUP_HARNESSES,
+  type SetupHarness,
+} from './setup-words.ts';
 
 export type FirstRunMode = 'setup' | 'import';
 
@@ -186,7 +193,8 @@ export const foundRows = (scan: FleetSetupScan, harness: SetupHarness, claudeImp
       key: 'settings',
       label: 'Settings',
       title: fileName(found.settings.source),
-      detail: hooks === 0 ? countWords(count, 'setting') : `${countWords(count, 'setting')}, ${countWords(hooks, 'hook')}`,
+      detail:
+        hooks === 0 ? countWords(count, 'setting') : `${countWords(count, 'setting')}, ${countWords(hooks, 'hook')}`,
       badges:
         found.secretKeys.length === 0
           ? []
@@ -288,7 +296,8 @@ export const nameProblem = (
   if (name === '') return { message: 'Give the runtime a name.' };
   if (!NAME_PATTERN.test(name) || name.length > 64)
     return { message: 'Use only letters, digits and dashes.', suggestion: freeName(slug(name) || 'runtime', all) };
-  if (taken.has(name)) return { message: `${name} is already a runtime on ${machineName}.`, suggestion: freeName(name, all) };
+  if (taken.has(name))
+    return { message: `${name} is already a runtime on ${machineName}.`, suggestion: freeName(name, all) };
   if (others.includes(name)) return { message: 'Both runtimes have this name.', suggestion: freeName(name, all) };
   return null;
 };

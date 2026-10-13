@@ -11,7 +11,8 @@ export const SETUP_HARNESSES: readonly SetupHarness[] = ['claude', 'codex'];
 export const SETUP_HARNESS_NAMES: Readonly<Record<SetupHarness, string>> = { claude: 'Claude Code', codex: 'Codex' };
 
 /** "1 runtime", "3 runtimes". */
-export const countWords = (count: number, word: string): string => `${String(count)} ${count === 1 ? word : `${word}s`}`;
+export const countWords = (count: number, word: string): string =>
+  `${String(count)} ${count === 1 ? word : `${word}s`}`;
 
 /** "a", "a and b", "a, b and c". */
 export const listWords = (items: readonly string[]): string => {
@@ -20,4 +21,8 @@ export const listWords = (items: readonly string[]): string => {
 };
 
 /** The last part of a path: a person sees `settings.json`, never where it lives. */
-export const fileName = (path: string): string => path.split(/[\\/]/u).filter(part => part !== '').pop() ?? path;
+export const fileName = (path: string): string =>
+  path
+    .split(/[\\/]/u)
+    .filter(part => part !== '')
+    .pop() ?? path;

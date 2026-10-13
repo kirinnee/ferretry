@@ -50,10 +50,12 @@ export function InstallTool(props: InstallToolProps) {
   latest.current = access;
   const read = useCallback((password?: string): void => {
     setIssue(null);
-    void latest.current.read((client, unlock) => readFleetSetupScan(client, unlock), password).then(answer => {
-      if (answer.kind === 'done') setScan(answer.value);
-      else if (!answer.passwordRejected) setIssue(answer.sentence);
-    });
+    void latest.current
+      .read((client, unlock) => readFleetSetupScan(client, unlock), password)
+      .then(answer => {
+        if (answer.kind === 'done') setScan(answer.value);
+        else if (!answer.passwordRejected) setIssue(answer.sentence);
+      });
   }, []);
   const started = useRef(false);
   const authorityKnown = changes.authority !== null;

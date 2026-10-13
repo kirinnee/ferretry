@@ -170,7 +170,12 @@ export function ToolInstall({
       )}
       {manual.map(tool =>
         tool.install.kind === 'runnable' ? null : (
-          <SetupNote key={tool.harness} tone="warn" name="install-manual" title={`${SETUP_HARNESS_NAMES[tool.harness]} can’t be installed from here`}>
+          <SetupNote
+            key={tool.harness}
+            tone="warn"
+            name="install-manual"
+            title={`${SETUP_HARNESS_NAMES[tool.harness]} can’t be installed from here`}
+          >
             <span>{tool.install.reason}</span>
             <span>Run this yourself in a terminal on {machineName}:</span>
             <SetupCommand>{tool.install.manualCommand}</SetupCommand>
