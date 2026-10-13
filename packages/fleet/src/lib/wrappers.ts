@@ -325,9 +325,6 @@ function environmentLines(
  */
 export const HISTORY_CLAIM_HELD_EXIT_CODE = 75;
 
-/** The variable every runtime's wrapper exports naming its credential, inherited by the statusLine child. */
-export const RUNTIME_CREDENTIAL_ENV = 'FY_CREDENTIAL';
-
 /** The variable naming the runtime a wrapper launches, read by `fy history claim` for its refusal sentence. */
 export const RUNTIME_NAME_ENV = 'FY_RUNTIME';
 

@@ -38,9 +38,9 @@ import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
 import { serializeSettings, type SettingsObject } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
+import { CREDENTIAL_ENV } from '../usage.ts';
 import {
   MANAGED_MARKER,
-  RUNTIME_CREDENTIAL_ENV,
   RUNTIME_NAME_ENV,
   renderCommandScript,
   renderRuntimeWrapperScript,
@@ -88,7 +88,7 @@ const LAUNCH_FOLDER_PLACEHOLDER = '/ferretry-launch-folder';
  */
 const REFUSED_LAUNCH_VARIABLES: Readonly<Record<string, string>> = {
   HOME: 'a runtime keeps your real home, because that is where your own login and keychain are found; its config directory is what keeps it separate',
-  [RUNTIME_CREDENTIAL_ENV]: "Ferretry sets it to the runtime's own credential",
+  [CREDENTIAL_ENV]: "Ferretry sets it to the runtime's own credential",
   [RUNTIME_NAME_ENV]: "Ferretry sets it to the runtime's own name",
   [STATE_HOME_ENV]: 'Ferretry sets it to its own state directory',
 };
@@ -345,7 +345,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     for (const [variable, reason] of Object.entries(REFUSED_LAUNCH_VARIABLES)) {
       if (variable in env) problems.push({ runtime: name, message: `it may not set ${variable}: ${reason}` });
     }
-    env[RUNTIME_CREDENTIAL_ENV] = runtime.credential;
+    env[CREDENTIAL_ENV] = runtime.credential;
     env[RUNTIME_NAME_ENV] = name;
     env[STATE_HOME_ENV] = layout.stateHome;
     if (harness === 'codex') env.CODEX_SQLITE_HOME = codexSqliteHome;
