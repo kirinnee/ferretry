@@ -1,6 +1,10 @@
 /**
  * The fleet configuration schema — the one place untrusted YAML becomes a domain type.
  *
+ * This is VERSION 1, the agent / route / variant document. Version 2 — Machine, Credential, Component,
+ * Profile, Runtime — is `./account/schema.ts`, and `./account/legacy.ts` reads either and converts this
+ * one in memory, so a version-1 file keeps working without ever being rewritten.
+ *
  * Everything composes from profiles: a profile is a reusable bundle of harness settings, a variant
  * is a lane that bundle is cloned into, and an agent binds them to one provider account. Each
  * (agent × variant) pair the author opts into becomes one **account route**, and a route carries
@@ -51,11 +55,30 @@ export const EnvNameSchema = z.string().regex(POSIX_ENV_NAME, {
 });
 
 /**
- * Variables that bind a harness to its configuration directory. A route declares its `home`
- * explicitly, so allowing configuration to also set these would let an account silently detach
- * from the home the manifest publishes for it.
+ * Variables configuration may never set, because Ferretry sets them and a second writer would lie.
+ *
+ * The first three bind a harness to its configuration directory: a route declares its `home`
+ * explicitly, so allowing configuration to also set these would let an account silently detach from
+ * the home the manifest publishes for it. `CLAUDE_SECURESTORAGE_CONFIG_DIR` binds a Claude runtime to
+ * its CREDENTIAL (docs/design/account-model.md §8.1.1), so a value set here could point a runtime at
+ * another login's store.
  */
-export const RESERVED_ENV_NAMES = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CODEX_SQLITE_HOME'] as const;
+export const RESERVED_ENV_NAMES = [
+  'CLAUDE_CONFIG_DIR',
+  'CODEX_HOME',
+  'CODEX_SQLITE_HOME',
+  'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+] as const;
+type ReservedEnvName = (typeof RESERVED_ENV_NAMES)[number];
+
+/** Why each reserved variable is reserved, in the sentence a refusal prints. */
+const RESERVED_ENV_REASONS: Readonly<Record<ReservedEnvName, string>> = {
+  CLAUDE_CONFIG_DIR: 'an account\'s home is declared by its "home" field, not by the environment',
+  CODEX_HOME: 'an account\'s home is declared by its "home" field, not by the environment',
+  CODEX_SQLITE_HOME: 'an account\'s home is declared by its "home" field, not by the environment',
+  CLAUDE_SECURESTORAGE_CONFIG_DIR:
+    "Ferretry sets it to the runtime's own credential, and another value could point it at a different login",
+};
 
 /**
  * An environment value, in one of three spellings.
@@ -101,7 +124,7 @@ export const EnvSchema = z.record(z.string(), EnvValueSchema).check(ctx => {
     if ((RESERVED_ENV_NAMES as readonly string[]).includes(name)) {
       ctx.issues.push({
         code: 'custom',
-        message: `"${name}" is reserved — an account's home is declared by its "home" field, not by the environment`,
+        message: `"${name}" is reserved — ${RESERVED_ENV_REASONS[name as ReservedEnvName]}`,
         input: name,
         path: [name],
       });

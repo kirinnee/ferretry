@@ -3,16 +3,18 @@ import should from 'should';
 import {
   FleetManifestAccountSchema,
   FleetManifestModelSchema,
+  FleetManifestRuntimeSchema,
   FleetManifestSchema,
   MANIFEST_VERSION,
   availableAccounts,
   buildFleetManifest,
   findAccountById,
   isModelSelectable,
+  manifestRuntimes,
   selectableModelIds,
   wrapperName,
 } from '../../src/lib/manifest.ts';
-import type { FleetManifestAccount } from '../../src/lib/manifest.ts';
+import type { FleetManifestAccount, FleetManifestRuntime } from '../../src/lib/manifest.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
 const ID_TWO = '00000000-0000-4000-8000-000000000002';
@@ -355,5 +357,78 @@ describe('the secret bindings a manifest publishes', () => {
     // Assert
     should(parsed.success).be.false();
     should(JSON.stringify(parsed.error?.issues)).match(/is not a secret reference/u);
+  });
+});
+
+const runtime = (overrides: Partial<FleetManifestRuntime> = {}): FleetManifestRuntime => ({
+  id: ID_ONE,
+  name: 'claude-default',
+  harness: 'claude',
+  credential: 'claude-you',
+  profile: 'default',
+  agent: false,
+  wrapper: '/state/fleet/bin/claude-default',
+  models: [
+    { id: 'model-one', available: true },
+    { id: 'model-two', available: false, unavailableReason: 'not available on this login' },
+  ],
+  defaultModel: 'model-one',
+  ...overrides,
+});
+
+describe('the runtimes a manifest publishes', () => {
+  it('should publish a runtime row beside the accounts', () => {
+    // Act
+    const manifest = buildFleetManifest({ generatedAt: GENERATED_AT, accounts: [account()], runtimes: [runtime()] });
+
+    // Assert
+    should(manifestRuntimes(manifest)).deepEqual([runtime()]);
+  });
+
+  it('should read a manifest written before runtimes as publishing none', () => {
+    // Act
+    const manifest = buildFleetManifest({ generatedAt: GENERATED_AT, accounts: [account()] });
+
+    // Assert
+    should(manifest).not.have.property('runtimes');
+    should(manifestRuntimes(manifest)).deepEqual([]);
+  });
+
+  it('should accept a runtime whose profile has no model set', () => {
+    // Act
+    const parsed = FleetManifestRuntimeSchema.safeParse(runtime({ models: [], defaultModel: null }));
+
+    // Assert
+    should(parsed.success).be.true();
+  });
+
+  it.each([
+    ['model-three', /defaultModel "model-three" is not one of this runtime's models/u],
+    ['model-two', /defaultModel "model-two" is not available on this login \(not available on this login\)/u],
+  ])('should refuse default %p', (defaultModel, expected) => {
+    // Act
+    const parsed = FleetManifestRuntimeSchema.safeParse(runtime({ defaultModel }));
+
+    // Assert
+    should(parsed.success).be.false();
+    should(parsed.error?.issues.map(issue => issue.message).join('\n')).match(expected);
+  });
+
+  it.each([
+    ['id', { name: 'other', wrapper: '/state/fleet/bin/other' }, /duplicate runtime id/u],
+    ['name', { id: ID_TWO, wrapper: '/state/fleet/bin/other' }, /duplicate runtime name ..claude-default/u],
+    ['wrapper', { id: ID_TWO, name: 'other' }, /duplicate runtime wrapper/u],
+  ])('should refuse two runtimes with one %s', (_field, second, expected) => {
+    // Act
+    const parsed = FleetManifestSchema.safeParse({
+      version: MANIFEST_VERSION,
+      generatedAt: GENERATED_AT,
+      accounts: [],
+      runtimes: [runtime(), runtime(second as Partial<FleetManifestRuntime>)],
+    });
+
+    // Assert
+    should(parsed.success).be.false();
+    should(JSON.stringify(parsed.error?.issues)).match(expected);
   });
 });

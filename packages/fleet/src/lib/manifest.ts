@@ -188,6 +188,59 @@ export const FleetManifestAccountSchema = z.strictObject(accountShape).check(ctx
 });
 export type FleetManifestAccount = z.infer<typeof FleetManifestAccountSchema>;
 
+/**
+ * One published RUNTIME (docs/design/account-model.md §5.4): a credential plus a profile, launched
+ * under its name.
+ *
+ * Published beside `accounts` rather than instead of them, so the manifest stays readable by every
+ * consumer of version 1 while version 2 lands (§13.3 "Old and new coexist"). The id is the same opaque
+ * join key an account's is — a migrated runtime keeps its route's UUID (R6) — and, as for an account,
+ * `wrapper` is the generated executable's absolute path; {@link wrapperNameOf} recovers its name.
+ *
+ * `models` uses the published model shape, so a model this runtime's credential cannot use is carried
+ * as `available: false` with its reason (K8) instead of disappearing.
+ */
+export const FleetManifestRuntimeSchema = z
+  .strictObject({
+    id: AccountIdSchema,
+    /** The runtime's name: the word a person types. */
+    name: NonEmptyString,
+    harness: HarnessKindSchema,
+    /** The credential's id in the configuration. */
+    credential: NonEmptyString,
+    /** The profile's name in the configuration. */
+    profile: NonEmptyString,
+    /** "Ferretry launches this as an agent" (R3). Only an agent runtime may start unattended. */
+    agent: z.boolean(),
+    wrapper: NonEmptyString,
+    models: z.array(FleetManifestModelSchema).readonly(),
+    /** The model the runtime uses when nobody names one, or `null` when its profile has no model set. */
+    defaultModel: NonEmptyString.nullable(),
+  })
+  .check(ctx => {
+    const runtime = ctx.value;
+    if (runtime.defaultModel === null) return;
+    const chosen = runtime.models.find(model => model.id === runtime.defaultModel);
+    if (chosen === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `defaultModel "${runtime.defaultModel}" is not one of this runtime's models`,
+        input: runtime.defaultModel,
+        path: ['defaultModel'],
+      });
+      return;
+    }
+    if (!chosen.available) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `defaultModel "${runtime.defaultModel}" is not available on this login (${chosen.unavailableReason})`,
+        input: runtime.defaultModel,
+        path: ['defaultModel'],
+      });
+    }
+  });
+export type FleetManifestRuntime = z.infer<typeof FleetManifestRuntimeSchema>;
+
 /** Bumped only when the on-disk shape changes incompatibly. */
 export const MANIFEST_VERSION = 1 as const;
 
@@ -207,9 +260,31 @@ export const FleetManifestSchema = z
     /** When provisioning produced this manifest, as an ISO-8601 instant. */
     generatedAt: z.iso.datetime(),
     accounts: z.array(FleetManifestAccountSchema).readonly(),
+    /**
+     * The published runtimes. ABSENT on a manifest written before version 2 of the configuration,
+     * which is not the same as an empty list and is why it is optional rather than defaulted: a reader
+     * asks {@link manifestRuntimes} and never has to tell the two apart.
+     */
+    runtimes: z.array(FleetManifestRuntimeSchema).readonly().optional(),
   })
   .check(ctx => {
     const { accounts } = ctx.value;
+    const runtimes = ctx.value.runtimes ?? [];
+
+    for (const [field, message] of [
+      ['id', 'runtime id'],
+      ['name', 'runtime name'],
+      ['wrapper', 'runtime wrapper'],
+    ] as const) {
+      for (const repeated of duplicates(runtimes.map(runtime => runtime[field]))) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `duplicate ${message} "${repeated}" — every runtime needs its own`,
+          input: repeated,
+          path: ['runtimes'],
+        });
+      }
+    }
 
     for (const [field, message] of [
       ['id', 'account id'],
@@ -232,6 +307,8 @@ export type FleetManifest = z.infer<typeof FleetManifestSchema>;
 export interface FleetManifestInput {
   readonly generatedAt: string;
   readonly accounts: readonly unknown[];
+  /** Omitted by a writer that publishes no runtimes yet; see {@link FleetManifestSchema}. */
+  readonly runtimes?: readonly unknown[];
 }
 
 /**
@@ -243,7 +320,13 @@ export function buildFleetManifest(input: FleetManifestInput): FleetManifest {
     version: MANIFEST_VERSION,
     generatedAt: input.generatedAt,
     accounts: input.accounts,
+    ...(input.runtimes === undefined ? {} : { runtimes: input.runtimes }),
   });
+}
+
+/** The runtimes a manifest publishes; none for a manifest written before they existed. */
+export function manifestRuntimes(manifest: FleetManifest): readonly FleetManifestRuntime[] {
+  return manifest.runtimes ?? [];
 }
 
 /**

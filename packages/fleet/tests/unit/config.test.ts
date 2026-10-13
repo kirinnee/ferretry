@@ -126,6 +126,19 @@ describe('FleetConfigSchema', () => {
     should(actual).matchAny(/reserved/);
   });
 
+  it('should say that the secure-storage variable would point an account at another login', () => {
+    // Arrange — it binds a Claude runtime to its credential store, not to its home
+    const input = config({ agents: [agent({ env: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/elsewhere' } })] });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual).matchAny(
+      /"CLAUDE_SECURESTORAGE_CONFIG_DIR" is reserved — Ferretry sets it to the runtime's own credential/,
+    );
+  });
+
   it('should accept literal and referenced environment values', () => {
     // Arrange
     const input = config({
