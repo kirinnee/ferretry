@@ -260,11 +260,36 @@ const firstRunSeedLines = (kind: HarnessKind): readonly string[] => {
  */
 export function renderWrapperScript(account: ResolvedAccount, options: WrapperRenderOptions = {}): string {
   const { secretsFile } = options;
-  const guard = options.guardEnvReferences ?? true;
-  const entries = Object.entries(account.env).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  const environment = environmentLines(account.env, secretsFile);
 
-  // A value naming a secret is neither a literal nor an environment reference: nothing in this script
-  // may produce it, so it is separated out here and reaches only the guard block below.
+  const lines: string[] = [
+    '#!/bin/sh',
+    MANAGED_MARKER,
+    `# account ${account.id} (${account.kind}, ${account.mode})`,
+    '',
+    ...sourceSecretsLines(secretsFile),
+    ...((options.guardEnvReferences ?? true) && environment.guards.length > 0 ? [...environment.guards, ''] : []),
+    `export ${HARNESS_HOME_ENV[account.kind]}=${shellPath(account.home)}`,
+    ...environment.exports,
+  ];
+
+  lines.push(...firstRunSeedLines(account.kind));
+
+  const flags = account.flags.map(shellQuote).join(' ');
+  lines.push('', `exec ${HARNESS_BINARIES[account.kind]}${flags === '' ? '' : ` ${flags}`} "$@"`, '');
+  return lines.join('\n');
+}
+
+/**
+ * The guard and export lines for one launch environment, sorted by variable so re-rendering an
+ * unchanged runtime is byte-identical. A value naming a `${secret:NAME}` is neither a literal nor an
+ * environment reference: nothing in a script may produce it, so it reaches only the guards.
+ */
+function environmentLines(
+  env: Readonly<Record<string, string>>,
+  secretsFile: string | undefined,
+): { readonly guards: readonly string[]; readonly exports: readonly string[] } {
+  const entries = Object.entries(env).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   const storeBacked = entries.flatMap(([name, value]) => {
     const secrets = secretReferencesIn(value);
     return secrets.length === 0 ? [] : [[name, secrets] as const];
@@ -274,34 +299,182 @@ export function renderWrapperScript(account: ResolvedAccount, options: WrapperRe
     const name = envReferenceName(value);
     return name === undefined ? [] : [name];
   });
-  const uniqueReferenced = [...new Set(referenced)];
   const guards = [
-    ...uniqueReferenced.map(name => guardLine(name, secretsFile)),
+    ...[...new Set(referenced)].map(name => guardLine(name, secretsFile)),
     ...storeBacked.map(([name, secrets]) => secretGuardLine(name, secrets)),
   ];
-
-  const lines: string[] = [
-    '#!/bin/sh',
-    MANAGED_MARKER,
-    `# account ${account.id} (${account.kind}, ${account.mode})`,
-    '',
-    ...sourceSecretsLines(secretsFile),
-    ...(guard && guards.length > 0 ? [...guards, ''] : []),
-    `export ${HARNESS_HOME_ENV[account.kind]}=${shellPath(account.home)}`,
-  ];
-
   const storeBackedNames = new Set(storeBacked.map(([name]) => name));
-  for (const [name, value] of entries) {
-    if (storeBackedNames.has(name)) continue;
+  const exports = entries.flatMap(([name, value]) => {
+    if (storeBackedNames.has(name)) return [];
     const reference = envReferenceName(value);
-    lines.push(`export ${name}=${reference === undefined ? shellQuote(value) : `"\${${reference}}"`}`);
+    return [`export ${name}=${reference === undefined ? shellQuote(value) : `"\${${reference}}"`}`];
+  });
+  return { guards, exports };
+}
+
+// ── Account-model runtimes (docs/design/account-model.md §8.4) ──────────────────────────────────
+
+/**
+ * The exit status `fy history claim` reports when another live writer HOLDS the conversation, and the
+ * one status a runtime wrapper turns into not launching (§9.3).
+ *
+ * It has to be distinct from every other way `fy` can fail. A lease bug, a damaged store or a missing
+ * `fy` must never stop the person's own CLI from starting, so the wrapper launches anyway on any other
+ * non-zero status — and it can only tell "refused" from "broken" if refused has a number of its own.
+ * 75 is `EX_TEMPFAIL`: the conversation is busy now and will not be later.
+ */
+export const HISTORY_CLAIM_HELD_EXIT_CODE = 75;
+
+/** The variable every runtime's wrapper exports naming its credential, inherited by the statusLine child. */
+export const RUNTIME_CREDENTIAL_ENV = 'FY_CREDENTIAL';
+
+/** The variable naming the runtime a wrapper launches, read by `fy history claim` for its refusal sentence. */
+export const RUNTIME_NAME_ENV = 'FY_RUNTIME';
+
+/** The variable naming Ferretry's state home, so a child `fy` reads the same state as the wrapper's daemon. */
+export const STATE_HOME_ENV = 'FY_HOME';
+
+/** One runtime's launch, as everything its wrapper needs and nothing it has to work out. */
+export interface RuntimeWrapperInput {
+  /** The runtime's name: the word a person types, and the wrapper's file name. */
+  readonly name: string;
+  readonly id: string;
+  readonly harness: HarnessKind;
+  /** "Ferretry launches this as an agent" (R3). */
+  readonly agent: boolean;
+  /** Absolute path of the runtime's config directory. */
+  readonly configDirectory: string;
+  /**
+   * The launch environment beyond the config directory, each value a literal, a `$NAME` reference or a
+   * `${secret:NAME}` reference. Never `HOME`: the person's real home is kept (credentials.ts).
+   */
+  readonly env: Readonly<Record<string, string>>;
+  /** Launch arguments before the person's own: the profile's flags and, for an agent, the fixed layer. */
+  readonly args: readonly string[];
+  /** The model the runtime starts with when nobody names one. A later `--model` the caller passes wins. */
+  readonly defaultModel?: string | undefined;
+  /** Claude agent runtimes: re-assert the trust and onboarding keys before every launch (§8.4). */
+  readonly seedFirstRun?: boolean;
+  /** Codex agent runtimes: trust the launch folder with the measured `-c projects={…}` table. */
+  readonly trustLaunchFolder?: boolean;
+  /** The `fy` executable a wrapper runs to claim a conversation it is about to resume. */
+  readonly fyCommand: string;
+  readonly secretsFile?: string | undefined;
+  /**
+   * Why this runtime cannot launch at all, when it cannot (O4, G5). The wrapper then says so and exits
+   * non-zero rather than starting a harness that is set up wrong.
+   */
+  readonly refusal?: string | undefined;
+}
+
+/**
+ * The arguments that may name a conversation, per harness: the shell `case` patterns a wrapper looks
+ * for before it pays for a `fy history claim`. Wider than what names one — `--resume` alone opens a
+ * picker — because `fy` decides exactly (`conversationFromArguments` in `./shared-history.ts`);
+ * this only keeps an ordinary launch from running it.
+ */
+const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
+  claude: '--resume|--resume=*|-r|--session-id|--session-id=*',
+  codex: 'resume',
+};
+
+/**
+ * One live writer per conversation (§9.3): claim the conversation before `exec` hands this pid to the
+ * harness. Exits ONLY when the claim is refused because somebody else is writing it. Every other
+ * failure — no `fy`, a lease store that errors — prints one line and launches anyway, because a lease
+ * bug must never stop the person's own CLI from starting.
+ */
+const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly string[] => {
+  const fy = shellPath(fyCommand);
+  return [
+    '',
+    '# One live writer per conversation: claim the one these arguments resume before handing this pid to',
+    '# the harness. Only a refusal stops the launch; any other failure warns and launches anyway.',
+    '_fy_claim=0',
+    'for _fy_arg in "$@"; do',
+    `  case "$_fy_arg" in ${CONVERSATION_ARGUMENT_PATTERNS[harness]}) _fy_claim=1 ;; esac`,
+    'done',
+    'if [ "$_fy_claim" = 1 ]; then',
+    `  if command -v ${fy} >/dev/null 2>&1; then`,
+    `    ${fy} history claim --harness ${harness} --pid $$ --from-arguments -- "$@"`,
+    '    _fy_status=$?',
+    `    if [ "$_fy_status" -eq ${HISTORY_CLAIM_HELD_EXIT_CODE} ]; then exit ${HISTORY_CLAIM_HELD_EXIT_CODE}; fi`,
+    '    if [ "$_fy_status" -ne 0 ]; then',
+    '      echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2',
+    '    fi',
+    '  else',
+    '    echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2',
+    '  fi',
+    'fi',
+  ];
+};
+
+/**
+ * Codex's trust for the folder it is launched in, built at launch because only then is the folder
+ * known — the measured TOML inline table `codexTrustOverride` (`./account/fixed-layer.ts`) produces, in shell.
+ *
+ * The folder is the PHYSICAL one (`pwd -P`), which is what Codex itself reads. Backslash and double
+ * quote are the two characters a TOML basic string must escape; a folder holding a control character
+ * would need `\uXXXX` escapes the shell cannot produce reliably, so it gets no override and says so —
+ * a trust prompt, never a malformed `-c` that stops Codex starting.
+ */
+const codexTrustLines = (): readonly string[] => [
+  '',
+  '# Trust the launch folder (the measured -c projects={"<folder>"={trust_level="trusted"}} form).',
+  '_fy_cwd="$(pwd -P 2>/dev/null)" || _fy_cwd="$PWD"',
+  'case "$_fy_cwd" in',
+  '  *[[:cntrl:]]*)',
+  '    echo "ferretry: this folder\'s name holds a control character, so Codex may ask whether to trust it" >&2',
+  '    ;;',
+  '  *)',
+  `    _fy_cwd="$(printf '%s' "$_fy_cwd" | sed 's/[\\\\"]/\\\\&/g')"`,
+  '    set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"',
+  '    ;;',
+  'esac',
+];
+
+/** The launch arguments that start a runtime on its model set's default (§8.3). */
+const defaultModelArgs = (harness: HarnessKind, model: string | undefined): readonly string[] => {
+  if (model === undefined) return [];
+  // Codex: a config override rather than `-m`, so a `-m` the caller passes still decides.
+  return harness === 'claude' ? ['--model', model] : ['-c', `model=${tomlBasicString(model)}`];
+};
+
+/** A TOML basic string, for a value a Codex `-c` override carries. */
+const tomlBasicString = (value: string): string => `"${value.replace(/[\\"]/gu, character => `\\${character}`)}"`;
+
+/**
+ * Render the launch script for one account-model runtime (§8.4).
+ *
+ * Both kinds of runtime export the config directory, the credential's variables and the `FY_*`
+ * variables. An agent runtime's launch arguments carry the fixed layer, which outranks every file the
+ * harness or the person can edit. Nothing here sets `HOME`: the person's real home is how both
+ * harnesses find a `host` login, and on macOS how Claude finds the keychain at all.
+ *
+ * Order is fixed: refuse (when the runtime cannot launch), source secrets, guard, export, seed, claim
+ * the conversation, trust the folder, exec. A non-agent runtime gets no permission mode and no seeding:
+ * it behaves like the person's own CLI.
+ */
+export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
+  const header = ['#!/bin/sh', MANAGED_MARKER, `# runtime ${input.name} ${input.id} (${input.harness}${input.agent ? ', agent' : ''})`, ''];
+  if (input.refusal !== undefined) {
+    return [...header, `echo ${shellQuote(`ferretry: ${input.name} cannot start: ${input.refusal}`)} >&2`, 'exit 1', ''].join('\n');
   }
-
-  lines.push(...firstRunSeedLines(account.kind));
-
-  const flags = account.flags.map(shellQuote).join(' ');
-  lines.push('', `exec ${HARNESS_BINARIES[account.kind]}${flags === '' ? '' : ` ${flags}`} "$@"`, '');
-  return lines.join('\n');
+  const environment = environmentLines(input.env, input.secretsFile);
+  const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args].map(shellQuote).join(' ');
+  return [
+    ...header,
+    ...sourceSecretsLines(input.secretsFile),
+    ...(environment.guards.length > 0 ? [...environment.guards, ''] : []),
+    `export ${HARNESS_HOME_ENV[input.harness]}=${shellPath(input.configDirectory)}`,
+    ...environment.exports,
+    ...(input.seedFirstRun === true ? firstRunSeedLines(input.harness) : []),
+    ...historyClaimLines(input.harness, input.fyCommand),
+    ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
+    '',
+    `exec ${HARNESS_BINARIES[input.harness]}${args === '' ? '' : ` ${args}`} "$@"`,
+    '',
+  ].join('\n');
 }
 
 /** What {@link renderCommandScript} needs: the command plus its target's declared wrapper name. */

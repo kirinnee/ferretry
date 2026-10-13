@@ -86,7 +86,8 @@ describe('HistoryController', () => {
     should(io.errors).eql([
       `conversation ${CONVERSATION} is being written by session ms8-holder01 on claude-review since 2026-10-13 14:02 UTC: stop or resume session ms8-holder01 instead; only one writer may hold a conversation at a time`,
     ]);
-    should(io.code).equal(1);
+    // The one status a wrapper treats as "do not launch"; every other failure launches anyway.
+    should(io.code).equal(75);
   });
 
   it('should claim nothing when the launch names no conversation', async () => {

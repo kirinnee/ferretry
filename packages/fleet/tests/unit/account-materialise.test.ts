@@ -1,0 +1,715 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../src/lib/account/ids.ts';
+import {
+  FIXED_SETTINGS_FILE,
+  FleetMaterialiseError,
+  MATERIALISED_RECORD_FILE,
+  type MaterialiseInput,
+  materialiseFleet,
+  RUNTIME_STATE_DIRECTORY,
+} from '../../src/lib/account/materialise.ts';
+import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../src/lib/account/schema.ts';
+import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../src/lib/provisioning.ts';
+import { MANAGED_MARKER } from '../../src/lib/wrappers.ts';
+
+const LAYOUT: FleetLayout = {
+  stateHome: '/fy',
+  userHome: '/home/person',
+  fleetDirectory: '/fy/fleet',
+  binDirectory: '/fy/fleet/bin',
+  homesDirectory: '/fy/fleet/homes',
+  assetsDirectory: '/fy/fleet/assets',
+  manifestPath: '/fy/fleet/manifest.json',
+  defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
+};
+
+const ID_A = '00000000-0000-4000-8000-00000000000a';
+const ID_B = '00000000-0000-4000-8000-00000000000b';
+const ID_C = '00000000-0000-4000-8000-00000000000c';
+const HOME_A = `/fy/fleet/homes/${ID_A}`;
+const HOME_B = `/fy/fleet/homes/${ID_B}`;
+
+const COMPONENTS = {
+  instructions: { main: { file: 'components/instructions/main.md' } },
+  mcp: { github: { command: 'npx', args: ['server-github'], env: { GITHUB_TOKEN: '${secret:GH_TOKEN}' } } },
+  skills: { mine: { items: ['review'] } },
+  modelSets: {
+    claude: { models: ['claude-opus-5-5', 'claude-sonnet-5-5'], default: 'claude-opus-5-5' },
+    codex: { models: ['gpt-6'], default: 'gpt-6' },
+  },
+} satisfies AccountModelDocument['components'];
+
+const DEFAULT_LAYERS = ['instructions/main', 'mcp/github', 'skills/mine', 'modelSets/claude', 'modelSets/codex'];
+
+/** A two-runtime machine: Claude on the person's own login, Codex on a login Ferretry keeps. */
+const modelOf = (overrides: Partial<AccountModelDocument> = {}): AccountModel =>
+  parseAccountModel({
+    version: 2,
+    credentials: {
+      'claude-you': { harness: 'claude', store: 'host' },
+      'codex-work': { harness: 'codex', store: 'ferretry' },
+    },
+    components: COMPONENTS,
+    profiles: { default: { layers: DEFAULT_LAYERS } },
+    runtimes: {
+      'claude-default': { credential: 'claude-you', profile: 'default' },
+      'codex-default': { credential: 'codex-work', profile: 'default' },
+    },
+    ...overrides,
+  });
+
+/** Mints ids in order, so a test knows which runtime gets which. */
+const minter = (...ids: string[]) => {
+  const queue = [...ids];
+  return () => queue.shift() ?? 'exhausted';
+};
+
+const plan = (model: AccountModel, overrides: Partial<MaterialiseInput> = {}): FleetModelApplyPlan =>
+  materialiseFleet({
+    model,
+    layout: LAYOUT,
+    ids: EMPTY_RUNTIME_IDS,
+    mint: minter(ID_A, ID_B, ID_C),
+    generatedAt: '2026-10-13T08:00:00.000Z',
+    claudeStatusline: own => (own === undefined ? "'fy' statusline" : `'fy' statusline --then '${own}'`),
+    fyCommand: '/opt/ferretry/bin/fy',
+    hostCodexHome: '/home/person/.codex',
+    acceptsAutoPermissionMode: true,
+    ...overrides,
+  });
+
+const at = (result: FleetModelApplyPlan, path: string): FleetWriteOperation[] =>
+  result.operations.filter(operation => operation.path === path);
+
+const only = (result: FleetModelApplyPlan, path: string): FleetWriteOperation => {
+  const found = at(result, path);
+  should(found).have.length(1);
+  return found[0] as FleetWriteOperation;
+};
+
+const wrapperOf = (result: FleetModelApplyPlan, name: string): string => {
+  const operation = only(result, `/fy/fleet/bin/${name}`);
+  if (operation.kind !== 'file') throw new Error(`${name} is not a file`);
+  return operation.content;
+};
+
+const failure = (run: () => unknown): FleetMaterialiseError => {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof FleetMaterialiseError) return error;
+    throw error;
+  }
+  throw new Error('expected the plan to be refused');
+};
+
+describe('materialiseFleet', () => {
+  it('should mint an id per runtime and write ids.json inside the same plan', () => {
+    // Arrange / Act
+    const result = plan(modelOf());
+
+    // Assert
+    should(result.ids.runtimes).eql({
+      'claude-default': { id: ID_A, formerNames: [] },
+      'codex-default': { id: ID_B, formerNames: [] },
+    });
+    const ids = only(result, '/fy/fleet/ids.json');
+    should(ids).match({ kind: 'file', mode: 0o600 });
+    should(JSON.parse((ids as { content: string }).content).runtimes['claude-default'].id).equal(ID_A);
+  });
+
+  it('should keep an existing id and put a migrated runtime in the config directory it already has', () => {
+    // Arrange
+    const ids: RuntimeIds = {
+      version: 1,
+      runtimes: { 'claude-default': { id: ID_C, formerNames: ['claude-old'], home: 'claude-default' } },
+    };
+
+    // Act
+    const result = plan(modelOf(), { ids });
+
+    // Assert
+    should(result.ids.runtimes['claude-default']).eql({ id: ID_C, formerNames: ['claude-old'], home: 'claude-default' });
+    should(at(result, '/fy/fleet/homes/claude-default')).not.be.empty();
+    should(result.manifest.runtimes?.[0]).match({ id: ID_C, name: 'claude-default' });
+  });
+
+  it('should refuse two runtimes recorded with one config directory', () => {
+    // Arrange
+    const ids: RuntimeIds = {
+      version: 1,
+      runtimes: {
+        'claude-default': { id: ID_A, formerNames: [], home: 'shared' },
+        'codex-default': { id: ID_B, formerNames: [], home: 'shared' },
+      },
+    };
+
+    // Act
+    const error = failure(() => plan(modelOf(), { ids }));
+
+    // Assert
+    should(error.problems).eql([
+      { runtime: 'codex-default', message: `its config directory /fy/fleet/homes/shared is already runtime "claude-default"'s` },
+    ]);
+    should(error.message).startWith('the fleet cannot be applied: codex-default: its config directory');
+  });
+
+  it('should create the fleet directories, every Ferretry-kept login and the Codex SQLite pool', () => {
+    // Act
+    const result = plan(modelOf());
+
+    // Assert
+    should(result.operations.slice(0, 3)).eql([
+      { kind: 'directory', path: '/fy/fleet', mode: 0o700 },
+      { kind: 'directory', path: '/fy/fleet/bin', mode: 0o700 },
+      { kind: 'directory', path: '/fy/fleet/homes', mode: 0o700 },
+    ]);
+    should(only(result, '/fy/fleet/credentials/codex-work')).eql({
+      kind: 'directory',
+      path: '/fy/fleet/credentials/codex-work',
+      mode: 0o700,
+    });
+    should(at(result, '/fy/fleet/credentials/claude-you')).be.empty();
+    should(only(result, '/fy/fleet/shared/codex/sqlite')).match({ kind: 'directory', mode: 0o700 });
+  });
+
+  it('should leave the Codex SQLite pool alone on a machine with no Codex runtime', () => {
+    // Arrange
+    const model = modelOf({ runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } } });
+
+    // Act / Assert
+    should(at(plan(model), '/fy/fleet/shared/codex/sqlite')).be.empty();
+  });
+
+  it('should materialise a Claude config directory with links, the narrowed sweep and the record last', () => {
+    // Act
+    const result = plan(modelOf());
+    const inHome = result.operations.filter(operation => operation.path.startsWith(HOME_A));
+
+    // Assert
+    should(inHome.map(operation => [operation.kind, operation.path.slice(HOME_A.length)])).eql([
+      ['directory', ''],
+      ['directory', '/.fy'],
+      ['prune-directory', '/.fy'],
+      ['prune-directory', ''],
+      ['symlink', '/CLAUDE.md'],
+      ['directory', '/skills'],
+      ['symlink', '/skills/review'],
+      ['prune-directory', '/skills'],
+      ['settings', '/settings.json'],
+      ['settings', '/.claude.json'],
+      ['file', '/.fy/materialised.json'],
+    ]);
+    should(inHome[3]).eql({
+      kind: 'prune-directory',
+      path: HOME_A,
+      keep: [],
+      only: ['hooks'],
+      record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+    });
+    should(inHome[2]).eql({ kind: 'prune-directory', path: `${HOME_A}/.fy`, keep: ['materialised.json'] });
+    should(inHome[4]).eql({
+      kind: 'symlink',
+      source: '/fy/fleet/assets/components/instructions/main.md',
+      path: `${HOME_A}/CLAUDE.md`,
+    });
+    should(inHome[6]).eql({ kind: 'symlink', source: '/fy/fleet/assets/skills/review', path: `${HOME_A}/skills/review` });
+    should(inHome[7]).eql({ kind: 'prune-directory', path: `${HOME_A}/skills`, keep: ['review'] });
+    should(inHome[8]).eql({
+      kind: 'settings',
+      path: `${HOME_A}/settings.json`,
+      format: 'json',
+      layers: [{ from: 'inline', settings: { statusLine: { type: 'command', command: "'fy' statusline" } } }],
+      mode: 0o600,
+      preserveExisting: true,
+    });
+    should(inHome[9]).eql({
+      kind: 'settings',
+      path: `${HOME_A}/.claude.json`,
+      format: 'json',
+      layers: [
+        {
+          from: 'inline',
+          settings: {
+            mcpServers: {
+              github: { type: 'stdio', command: 'npx', args: ['server-github'], env: { GITHUB_TOKEN: '${GITHUB_TOKEN}' } },
+            },
+          },
+        },
+      ],
+      mode: 0o600,
+      preserveExisting: true,
+      replaceKeys: ['mcpServers'],
+    });
+    should(inHome[10]).eql({
+      kind: 'file',
+      path: `${HOME_A}/.fy/materialised.json`,
+      content: '{"version":1,"entries":["CLAUDE.md"]}\n',
+      mode: 0o600,
+    });
+  });
+
+  it('should link a Codex config directory to its canonical auth.json and never sweep .system', () => {
+    // Act
+    const result = plan(modelOf());
+
+    // Assert
+    should(only(result, `${HOME_B}/auth.json`)).eql({
+      kind: 'symlink',
+      source: '/fy/fleet/credentials/codex-work/auth.json',
+      path: `${HOME_B}/auth.json`,
+      dangling: true,
+    });
+    should(only(result, `${HOME_B}/skills`)).eql({ kind: 'directory', path: `${HOME_B}/skills`, mode: 0o700 });
+    should(at(result, `${HOME_B}/skills`)).be.empty().or.be.ok();
+    const sweeps = result.operations.filter(
+      operation => operation.kind === 'prune-directory' && operation.path === `${HOME_B}/skills`,
+    );
+    should(sweeps).eql([{ kind: 'prune-directory', path: `${HOME_B}/skills`, keep: ['review', '.system'] }]);
+    should(only(result, `${HOME_B}/config.toml`)).match({
+      kind: 'settings',
+      format: 'toml',
+      preserveExisting: true,
+      layers: [
+        {
+          from: 'inline',
+          settings: {
+            mcp_servers: { github: { command: 'npx', args: ['server-github'], env_vars: ['GITHUB_TOKEN'] } },
+            cli_auth_credentials_store: 'file',
+            sqlite_home: '/fy/fleet/shared/codex/sqlite',
+          },
+        },
+      ],
+    });
+    should(JSON.parse((only(result, `${HOME_B}/.fy/materialised.json`) as { content: string }).content)).eql({
+      version: 1,
+      entries: ['AGENTS.md', 'auth.json'],
+    });
+  });
+
+  it("should link a host Codex runtime to the person's own auth.json", () => {
+    // Arrange
+    const model = modelOf({
+      credentials: { 'claude-you': { harness: 'claude', store: 'host' }, 'codex-work': { harness: 'codex', store: 'host' } },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    should(only(result, `${HOME_B}/auth.json`)).match({ source: '/home/person/.codex/auth.json', dangling: true });
+    should(at(result, '/fy/fleet/credentials/codex-work')).be.empty();
+  });
+
+  it('should make a host Codex runtime unlaunchable, not the fleet, when the Codex home cannot be named', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: { 'claude-you': { harness: 'claude', store: 'host' }, 'codex-work': { harness: 'codex', store: 'host' } },
+    });
+
+    // Act
+    const result = plan(model, { hostCodexHome: undefined });
+
+    // Assert
+    const reason =
+      'its login "codex-work" cannot be reached: your own Codex home could not be named, because CODEX_HOME is set to a relative path';
+    should(wrapperOf(result, 'codex-default')).containEql(`echo 'ferretry: codex-default cannot start: ${reason}' >&2\nexit 1`);
+    should(wrapperOf(result, 'codex-default')).not.containEql('exec codex');
+    should(result.manifest.accounts[1]).match({ available: false, unavailableReason: reason });
+    should(at(result, `${HOME_B}/auth.json`)).be.empty();
+  });
+
+  it('should write a wrapper that exports the config directory, the credential store and the FY variables', () => {
+    // Act
+    const wrapper = wrapperOf(plan(modelOf()), 'claude-default');
+
+    // Assert
+    should(wrapper.startsWith(`#!/bin/sh\n${MANAGED_MARKER}\n# runtime claude-default ${ID_A} (claude)\n`)).be.true();
+    should(wrapper).containEql(`export CLAUDE_CONFIG_DIR='${HOME_A}'`);
+    should(wrapper).containEql("export CLAUDE_SECURESTORAGE_CONFIG_DIR=''");
+    should(wrapper).containEql("export FY_CREDENTIAL='claude-you'");
+    should(wrapper).containEql("export FY_RUNTIME='claude-default'");
+    should(wrapper).containEql("export FY_HOME='/fy'");
+    should(wrapper).containEql('${GITHUB_TOKEN:?ferretry: GITHUB_TOKEN is not set');
+    should(wrapper).not.match(/export HOME=/);
+    should(wrapper).containEql("'/opt/ferretry/bin/fy' history claim --harness claude --pid $$ --from-arguments");
+    // A runtime that is not an agent behaves like the person's own CLI: no mode, no seeding.
+    should(wrapper).not.containEql('--permission-mode');
+    should(wrapper).not.containEql('FY_SEED_FIRST_RUN');
+    should(wrapper).endWith(`exec claude '--model' 'claude-opus-5-5' "$@"\n`);
+  });
+
+  it("should export a Ferretry-kept Claude login's own store and the Codex SQLite pool", () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'ferretry' },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    should(wrapperOf(result, 'claude-default')).containEql(
+      "export CLAUDE_SECURESTORAGE_CONFIG_DIR='/fy/fleet/credentials/claude-you'",
+    );
+    should(only(result, '/fy/fleet/credentials/claude-you')).match({ kind: 'directory', mode: 0o700 });
+    should(wrapperOf(result, 'codex-default')).containEql("export CODEX_SQLITE_HOME='/fy/fleet/shared/codex/sqlite'");
+    should(wrapperOf(result, 'codex-default')).containEql(`exec codex '-c' 'model="gpt-6"' "$@"`);
+  });
+
+  it("should export an environment credential's variables and publish only the secret references", () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+      advanced: { secretsFile: '~/.secrets' },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    const wrapper = wrapperOf(result, 'claude-default');
+    should(wrapper).containEql('if [ -r "$HOME/.secrets" ]; then');
+    should(wrapper).containEql('${ANTHROPIC_API_KEY:?ferretry: ANTHROPIC_API_KEY is not set');
+    should(wrapper).not.containEql('CLAUDE_SECURESTORAGE_CONFIG_DIR');
+    should(result.manifest.accounts[0]?.secretEnv).eql({
+      ANTHROPIC_API_KEY: '${secret:WORK_KEY}',
+      GITHUB_TOKEN: '${secret:GH_TOKEN}',
+    });
+  });
+
+  it('should publish each runtime and a version-1 account row beside it', () => {
+    // Act
+    const result = plan(modelOf({ runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } } }));
+
+    // Assert
+    should(result.manifest.runtimes).eql([
+      {
+        id: ID_A,
+        name: 'claude-default',
+        harness: 'claude',
+        credential: 'claude-you',
+        profile: 'default',
+        agent: true,
+        wrapper: '/fy/fleet/bin/claude-default',
+        models: [
+          { id: 'claude-opus-5-5', available: true },
+          { id: 'claude-sonnet-5-5', available: true },
+        ],
+        defaultModel: 'claude-opus-5-5',
+      },
+    ]);
+    should(result.manifest.accounts).eql([
+      {
+        id: ID_A,
+        kind: 'claude',
+        mode: 'auto',
+        wrapper: '/fy/fleet/bin/claude-default',
+        home: HOME_A,
+        displayName: 'claude-default',
+        defaultModel: 'claude-opus-5-5',
+        models: [
+          { id: 'claude-opus-5-5', available: true },
+          { id: 'claude-sonnet-5-5', available: true },
+        ],
+        available: true,
+        unavailableReason: null,
+        secretEnv: { GITHUB_TOKEN: '${secret:GH_TOKEN}' },
+      },
+    ]);
+    should(result.manifestPath).equal('/fy/fleet/manifest.json');
+  });
+
+  it("should strike out a model the credential cannot use and fall back to one it can (E23)", () => {
+    // Act
+    const result = plan(modelOf(), { availableModels: { 'claude-you': ['claude-sonnet-5-5'] } });
+
+    // Assert
+    should(result.manifest.runtimes?.[0]).match({
+      models: [
+        { id: 'claude-opus-5-5', available: false, unavailableReason: 'Not available on this login' },
+        { id: 'claude-sonnet-5-5', available: true },
+      ],
+      defaultModel: 'claude-sonnet-5-5',
+    });
+    should(wrapperOf(result, 'claude-default')).containEql("'--model' 'claude-sonnet-5-5'");
+  });
+
+  it('should publish a runtime with no model set as one the old account surface cannot start', () => {
+    // Arrange
+    const model = modelOf({ profiles: { default: { layers: ['instructions/main'] } } });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    should(result.manifest.runtimes?.[0]).match({ models: [], defaultModel: null });
+    should(result.manifest.accounts[0]).match({
+      available: false,
+      unavailableReason: 'profile "default" names no model it can use',
+    });
+    should(wrapperOf(result, 'claude-default')).endWith('exec claude "$@"\n');
+  });
+
+  it('should pool every harness, every runtime of it included', () => {
+    // Act / Assert
+    should(plan(modelOf()).sharedHistoryRequests).eql([
+      { kind: 'claude', poolRoot: '/fy/fleet/shared', homes: [{ account: ID_A, path: HOME_A }] },
+      { kind: 'codex', poolRoot: '/fy/fleet/shared', homes: [{ account: ID_B, path: HOME_B }] },
+    ]);
+  });
+
+  it('should sweep stale wrappers from the bin directory, keeping every runtime and command', () => {
+    // Arrange
+    const model = modelOf({
+      advanced: {
+        commands: [{ wrapper: 'review', runtime: 'claude-default', flags: ['--agent', 'reviewer'] }],
+        aliases: { fast: { claude: '--model  haiku', codex: ['-m', 'gpt-6-mini'] }, deep: { codex: ['-c', 'effort=high'] } },
+      },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    should(result.operations.at(-1)).eql({
+      kind: 'prune',
+      path: '/fy/fleet/bin',
+      marker: MANAGED_MARKER,
+      keep: ['claude-default', 'codex-default', 'review', 'deep-codex-default', 'fast-claude-default', 'fast-codex-default'],
+    });
+    should(wrapperOf(result, 'review')).containEql(`exec '/fy/fleet/bin/claude-default' '--agent' 'reviewer' "$@"`);
+    should(wrapperOf(result, 'fast-claude-default')).containEql(`exec '/fy/fleet/bin/claude-default' '--model' 'haiku' "$@"`);
+    should(wrapperOf(result, 'fast-codex-default')).containEql(`'-m' 'gpt-6-mini'`);
+    should(at(result, '/fy/fleet/bin/deep-claude-default')).be.empty();
+  });
+
+  it('should refuse a command and an alias that would be one executable', () => {
+    // Arrange
+    const model = modelOf({
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'x-claude-default': { credential: 'claude-you', profile: 'default' },
+      },
+      advanced: { aliases: { x: { claude: '--verbose' } } },
+    });
+
+    // Act
+    const error = failure(() => plan(model));
+
+    // Assert
+    should(error.problems).eql([
+      {
+        runtime: 'x-claude-default',
+        message: 'alias x and runtime x-claude-default would both be the executable "x-claude-default"',
+      },
+    ]);
+  });
+
+  describe('agent runtimes', () => {
+    const agents = (agentPermissions: 'auto' | 'skip'): AccountModel =>
+      modelOf({
+        machine: { agentPermissions },
+        runtimes: {
+          'claude-agent': { credential: 'claude-you', profile: 'default', agent: true },
+          'codex-agent': { credential: 'codex-work', profile: 'default', agent: true },
+        },
+      });
+
+    it('should launch a Claude agent with an explicit Auto mode and re-assert trust and onboarding', () => {
+      // Act
+      const result = plan(agents('auto'));
+      const wrapper = wrapperOf(result, 'claude-agent');
+
+      // Assert
+      should(wrapper).containEql('FY_SEED_FIRST_RUN');
+      should(wrapper).endWith(
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--disallowed-tools=AskUserQuestion' "$@"\n`,
+      );
+      should(wrapper).not.containEql('--settings');
+      should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).be.empty();
+      should(only(result, `${HOME_A}/settings.json`)).match({
+        layers: [{ settings: { permissions: { defaultMode: 'auto' } } }],
+      });
+    });
+
+    it('should give a Claude agent on Skip the settings overlay and keep the placeholder folder out of every file', () => {
+      // Act
+      const result = plan(agents('skip'));
+      const wrapper = wrapperOf(result, 'claude-agent');
+
+      // Assert
+      const overlay = `${HOME_A}/.fy/fixed.json`;
+      should(wrapper).endWith(
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--disallowed-tools=AskUserQuestion' '--settings' '${overlay}' "$@"\n`,
+      );
+      should(only(result, overlay)).eql({
+        kind: 'file',
+        path: overlay,
+        content: '{\n  "skipDangerousModePermissionPrompt": true\n}\n',
+        mode: 0o600,
+      });
+      should(result.operations.find(operation => operation.path === `${HOME_A}/.fy` && operation.kind === 'prune-directory')).eql(
+        { kind: 'prune-directory', path: `${HOME_A}/.fy`, keep: ['materialised.json', 'fixed.json'] },
+      );
+      should(JSON.stringify(result.operations)).not.containEql('ferretry-launch-folder');
+    });
+
+    it('should launch a Codex agent with its approval and sandbox, trusting the real folder at launch', () => {
+      // Act
+      const result = plan(agents('auto'));
+      const wrapper = wrapperOf(result, 'codex-agent');
+
+      // Assert
+      should(wrapper).endWith(
+        `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' "$@"\n`,
+      );
+      should(wrapper).containEql('set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"');
+      should(wrapper).not.containEql('ferretry-launch-folder');
+      should(only(result, `${HOME_B}/config.toml`)).match({
+        layers: [{ settings: { approval_policy: 'on-request', sandbox_mode: 'workspace-write' } }],
+      });
+      should(JSON.stringify(only(result, `${HOME_B}/config.toml`))).not.containEql('projects');
+    });
+
+    it('should refuse to launch a Claude agent in Auto mode on a Claude that does not accept it (O4)', () => {
+      // Act
+      const result = plan(agents('auto'), { acceptsAutoPermissionMode: false });
+
+      // Assert
+      const wrapper = wrapperOf(result, 'claude-agent');
+      should(wrapper).containEql("ferretry: claude-agent cannot start: Claude Code on this machine does not accept Auto mode");
+      should(wrapper).containEql('exit 1');
+      should(wrapper).not.containEql('exec claude');
+      should(result.manifest.accounts[0]).match({ available: false, mode: 'auto' });
+      // Codex is unaffected by what Claude accepts.
+      should(wrapperOf(result, 'codex-agent')).containEql('exec codex');
+    });
+  });
+
+  describe('profiles a runtime cannot use', () => {
+    it('should make a runtime whose profile has nothing for its harness unlaunchable (P5)', () => {
+      // Arrange
+      const model = modelOf({
+        components: { ...COMPONENTS, settings: { codex: { harness: 'codex', flags: ['--search'] } } },
+        profiles: { default: { layers: DEFAULT_LAYERS }, codexOnly: { layers: ['settings/codex'] }, empty: { layers: [] } },
+        runtimes: {
+          'claude-default': { credential: 'claude-you', profile: 'codexOnly' },
+          'codex-default': { credential: 'codex-work', profile: 'empty' },
+        },
+      });
+
+      // Act
+      const result = plan(model);
+
+      // Assert
+      should(result.manifest.accounts[0]?.unavailableReason).equal('nothing in profile "codexOnly" applies to Claude Code');
+      should(result.manifest.accounts[1]?.unavailableReason).equal('profile "empty" has no layers');
+    });
+
+    it('should pass a settings component’s flags and environment to the launch', () => {
+      // Arrange
+      const model = modelOf({
+        components: {
+          ...COMPONENTS,
+          settings: { claude: { harness: 'claude', flags: ['--verbose'], env: { LOG_LEVEL: 'debug' }, file: 'claude.json' } },
+        },
+        profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/claude'] } },
+      });
+
+      // Act
+      const result = plan(model, { bodies: { settings: { claude: { theme: 'dark' } } } });
+
+      // Assert
+      const wrapper = wrapperOf(result, 'claude-default');
+      should(wrapper).containEql("export LOG_LEVEL='debug'");
+      should(wrapper).endWith(`exec claude '--model' 'claude-opus-5-5' '--verbose' "$@"\n`);
+      should(only(result, `${HOME_A}/settings.json`)).match({ layers: [{ settings: { theme: 'dark' } }] });
+    });
+
+    it('should generate one instructions document from several, and copy one from outside the asset tree', () => {
+      // Arrange
+      const model = modelOf({
+        components: {
+          ...COMPONENTS,
+          instructions: {
+            main: { file: 'components/instructions/main.md' },
+            extra: { file: 'components/instructions/extra.md', harness: 'claude' },
+            mine: { file: '/home/person/AGENTS.md', harness: 'codex' },
+          },
+        },
+        profiles: { default: { layers: [...DEFAULT_LAYERS, 'instructions/extra'] }, codex: { layers: ['instructions/mine'] } },
+        runtimes: {
+          'claude-default': { credential: 'claude-you', profile: 'default' },
+          'codex-default': { credential: 'codex-work', profile: 'codex' },
+        },
+      });
+
+      // Act
+      const result = plan(model, { bodies: { instructions: { main: 'Main.', extra: 'Extra.' } } });
+
+      // Assert
+      should(only(result, `${HOME_A}/CLAUDE.md`)).match({ kind: 'file', mode: 0o600 });
+      should((only(result, `${HOME_A}/CLAUDE.md`) as { content: string }).content).containEql('Main.\n\nExtra.');
+      should(only(result, `${HOME_B}/AGENTS.md`)).eql({
+        kind: 'copy',
+        source: '/home/person/AGENTS.md',
+        path: `${HOME_B}/AGENTS.md`,
+      });
+    });
+
+    it('should refuse, naming every problem, what no apply can write', () => {
+      // Arrange
+      const model = modelOf({
+        components: {
+          ...COMPONENTS,
+          instructions: { main: { file: 'a.md' }, extra: { file: 'b.md' } },
+          settings: {
+            claude: { harness: 'claude', file: 'claude.json', env: { HOME: '/elsewhere' } },
+            codex: { harness: 'codex', env: { FY_RUNTIME: 'other' } },
+          },
+        },
+        profiles: {
+          default: { layers: ['instructions/main', 'instructions/extra', 'settings/claude', 'settings/codex', 'modelSets/claude'] },
+        },
+      });
+
+      // Act
+      const error = failure(() => plan(model));
+
+      // Assert
+      should(error.problems).eql([
+        { runtime: 'claude-default', message: 'settings "claude" could not be read' },
+        { runtime: 'claude-default', message: 'instructions "main" could not be read, so CLAUDE.md cannot be put together' },
+        { runtime: 'claude-default', message: 'instructions "extra" could not be read, so CLAUDE.md cannot be put together' },
+        {
+          runtime: 'claude-default',
+          message:
+            'it may not set HOME: a runtime keeps your real home, because that is where your own login and keychain are found; its config directory is what keeps it separate',
+        },
+        { runtime: 'codex-default', message: 'instructions "main" could not be read, so AGENTS.md cannot be put together' },
+        { runtime: 'codex-default', message: 'instructions "extra" could not be read, so AGENTS.md cannot be put together' },
+        { runtime: 'codex-default', message: "it may not set FY_RUNTIME: Ferretry sets it to the runtime's own name" },
+      ]);
+    });
+
+    it('should refuse a hand-built model whose runtime names a profile that does not exist', () => {
+      // Arrange: the schema refuses this, so only a model built without parsing can get here.
+      const model = { ...modelOf(), runtimes: { 'claude-default': { credential: 'claude-you', profile: 'gone', agent: false } } };
+
+      // Act
+      const error = failure(() => plan(model));
+
+      // Assert
+      should(error.problems).have.length(1);
+      should(error.problems[0]).match({ runtime: 'claude-default', message: /^profile "gone" cannot be read: / });
+    });
+  });
+});
