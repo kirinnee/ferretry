@@ -39,6 +39,7 @@
  */
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema } from './common.ts';
+import { FleetCredentialIdSchema as CredentialIdSchema } from './fleet-credentials.ts';
 import { OperatorPasswordSchema } from './grants.ts';
 import { SecretNameSchema } from './secrets.ts';
 
@@ -340,8 +341,13 @@ export type HarnessLoginLastCode = z.infer<typeof HarnessLoginLastCodeSchema>;
 /** Every flow state carries these, in every state, so a reader never has to ask which flow it holds. */
 const flowShape = {
   flowId: NonEmptyStringSchema,
-  /** The account whose wrapper was launched. Its identity's other lanes receive a copy. */
-  accountId: AccountIdSchema,
+  /**
+   * The account whose wrapper was launched, for a sign-in started from an account. Its identity's other
+   * lanes receive a copy. Absent for a sign-in started from a CREDENTIAL, which launches no wrapper.
+   */
+  accountId: AccountIdSchema.optional(),
+  /** The account-model credential being signed in, for a sign-in started from one. */
+  credentialId: CredentialIdSchema.optional(),
   identity: NonEmptyStringSchema,
   startedAt: InstantSchema,
   /** When this flow is abandoned and its child killed. Bounded in minutes, never open-ended. */
@@ -433,18 +439,34 @@ export type CodexLoginFlow = z.infer<typeof CodexLoginFlowSchema>;
 export const HarnessLoginFlowSchema = z.union([ClaudeLoginFlowSchema, CodexLoginFlowSchema]);
 export type HarnessLoginFlow = z.infer<typeof HarnessLoginFlowSchema>;
 
-/** Start one identity's login. The caller names an ACCOUNT — never a command, never a path. */
-export const HarnessLoginStartRequestSchema = z.strictObject({
-  accountId: AccountIdSchema,
-  /**
-   * The per-change confirmation, for a governed caller that owes one.
-   *
-   * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE, held to the same rule by the same schema the fleet's
-   * proposal apply uses, and spent against this one start. It is not a second gate: `fleet.configure`
-   * decides whether this caller may reach the route at all, and this proves the change.
-   */
-  operatorPassword: OperatorPasswordSchema.optional(),
-});
+/** Start one login. The caller names an ACCOUNT or a CREDENTIAL — never a command, never a path. */
+export const HarnessLoginStartRequestSchema = z
+  .strictObject({
+    /** The account to sign in. Exactly one of this and `credentialId`. */
+    accountId: AccountIdSchema.optional(),
+    /**
+     * The account-model credential to sign in (design §4.6, §7): every runtime on it, or none yet — an
+     * empty slot is signed in before anything uses it. Exactly one of this and `accountId`.
+     */
+    credentialId: CredentialIdSchema.optional(),
+    /**
+     * The per-change confirmation, for a governed caller that owes one.
+     *
+     * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE, held to the same rule by the same schema the fleet's
+     * proposal apply uses, and spent against this one start. It is not a second gate: `fleet.configure`
+     * decides whether this caller may reach the route at all, and this proves the change.
+     */
+    operatorPassword: OperatorPasswordSchema.optional(),
+  })
+  .check(ctx => {
+    if ((ctx.value.accountId === undefined) !== (ctx.value.credentialId === undefined)) return;
+    ctx.issues.push({
+      code: 'custom',
+      message: 'a sign-in names exactly one of "accountId" and "credentialId"',
+      input: ctx.value,
+      path: [],
+    });
+  });
 export type HarnessLoginStartRequest = z.infer<typeof HarnessLoginStartRequestSchema>;
 
 /**

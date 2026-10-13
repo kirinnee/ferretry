@@ -4,18 +4,28 @@ import { accessSync, existsSync, constants as fsConstants, statSync, writeSync }
 import { hostname } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
+  CredentialStatusService,
   FleetIdentityService,
   FleetTokenRefreshService,
   HARNESS_BINARIES,
   type HarnessKind,
   hostCodexCredentialFile,
+  hostCodexHome,
+  InMemoryCredentialStatusStore,
+  sanitizeHarnessEnv,
 } from '@ferretry/fleet';
 import {
+  AnthropicUsageProbe,
+  CodexUsageProbe,
   FileConversationLeaseStore,
   FileFleetConfigSource,
+  FilePassiveUsageStore,
   type FleetBinaryLookup,
+  fetchQuota,
   harnessKeychainAccount,
+  newestRolloutRateLimits,
   PlatformFleetCredentialStore,
+  StoredCredentialClassifier,
   ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
   resolveUserHome,
@@ -285,7 +295,18 @@ import {
   fleetPreparationRefusal,
   fleetPreparedDisclosure,
 } from '../src/lib/fleet/boot-preparation.ts';
-import { createFleetCredentialsSubsystem } from '../src/lib/fleet/credentials-service.ts';
+import {
+  CredentialEmailReader,
+  ensurePrivateDirectory,
+  readFleetDocumentFile,
+  rolloutFiles,
+  runCredentialHarness,
+} from '../src/adapters/fleet-credentials/credential-facts.ts';
+import {
+  createFleetCredentialsSubsystem,
+  credentialPassiveUsage,
+  FleetCredentialCatalog,
+} from '../src/lib/fleet/credentials-service.ts';
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
@@ -4673,9 +4694,35 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     renewal: harnessRenewal,
     notices: bootNotices,
   });
+  /**
+   * The account model's credentials (docs/design/account-model.md §3.2): which logins this machine has
+   * and where each one's login lives, read from `config.yaml` on every call. Built here because a
+   * sign-in by credential id resolves through it, and the credentials subsystem below reads it too.
+   */
+  const credentialClassifier = new StoredCredentialClassifier({
+    credentials: harnessCredentials,
+    now: () => millisecondClock.now(),
+  });
+  const credentialHostCodexHome = hostCodexHome(process.env.CODEX_HOME, userHome);
+  const fleetCredentialCatalog = new FleetCredentialCatalog({
+    document: async () => await readFleetDocumentFile(join(paths.fleet, 'config.yaml')),
+    manifest: async () => await fleet.accounts(),
+    paths: {
+      fleetRoot: paths.fleet,
+      userHome,
+      ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
+    },
+    classify: async resolution => await credentialClassifier.classify(resolution),
+    ensureDirectory: ensurePrivateDirectory,
+  });
+  const locateHarness = (kind: HarnessKind): string | undefined => harnessBinary(HARNESS_BINARIES[kind]);
   const harnessLogin = new HarnessLoginService({
     fleet,
     credentials: harnessCredentials,
+    credentialTargets: {
+      target: async id => fleetCredentialCatalog.signInTarget(await fleetCredentialCatalog.entry(id)),
+    },
+    locate: locateHarness,
     clock: millisecondClock,
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     spawn: spawnHarnessLoginChild,
@@ -5823,6 +5870,72 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { paths, storage, sessions, accounts, executables, planner, clock, journalSerial: new KeyedSerialExecutor() },
         handoverReceipts,
       );
+      /**
+       * The account model's credentials: status, usage and Check now (docs/design/account-model.md §7).
+       *
+       * Its heads live in memory, so a restart reads every login locally again. The usage pass below
+       * observes it with FREE reads only; the one Codex refresh is Check now, which a person presses.
+       */
+      let credentialUsageIntervalMs = usageRefreshMs(undefined);
+      void fleet.config().then(
+        declared => {
+          credentialUsageIntervalMs = usageRefreshMs(declared.usage.interval);
+        },
+        () => undefined,
+      );
+      const credentialStatus = new CredentialStatusService({
+        classify: async resolution => await credentialClassifier.classify(resolution),
+        material: async resolution => await harnessCredentials.storedMaterial(resolution),
+        passiveUsage: credentialPassiveUsage({
+          catalog: fleetCredentialCatalog,
+          claude: async id => await new FilePassiveUsageStore(paths.fleet).read(id),
+          sessions: async () =>
+            (
+              await Promise.all(
+                storage.listSessions().map(async session => {
+                  const config = SessionConfigSchema.safeParse(
+                    await storage.readConfig(session.id).catch(() => undefined),
+                  );
+                  return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
+                }),
+              )
+            ).flat(),
+          newestRollout: async files => await newestRolloutRateLimits(await rolloutFiles(files)),
+        }),
+        activeUsage: async (harness, resolution) =>
+          harness === 'claude'
+            ? await new AnthropicUsageProbe({
+                fetch: fetchQuota,
+                credentials: harnessCredentials,
+                stored: harnessCredentials,
+              }).probeCredential(resolution)
+            : await new CodexUsageProbe({
+                fetch: fetchQuota,
+                stored: harnessCredentials,
+                now: () => millisecondClock.now(),
+              }).probeCredential(resolution),
+        refresh: new ProcessFleetTokenRefreshPort({
+          spawn: spawnFleetTokenRefreshProcess,
+          environment: process.env,
+          which: harnessBinary,
+        }),
+        heads: new InMemoryCredentialStatusStore(),
+        now: () => millisecondClock.now(),
+        get usageIntervalMs() {
+          return credentialUsageIntervalMs;
+        },
+      });
+      const fleetCredentials = createFleetCredentialsSubsystem({
+        catalog: fleetCredentialCatalog,
+        status: credentialStatus,
+        email: async source => await new CredentialEmailReader(harnessCredentials).email(source),
+        confirmChange: async password => await grants.confirmChange(password),
+        machineName: () => hostname(),
+        clientName: CLIENT_NAME,
+        locate: locateHarness,
+        run: async spec => await runCredentialHarness(spec),
+        baseEnvironment: () => sanitizeHarnessEnv(process.env),
+      });
       return {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -5848,7 +5961,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // report different quota for the same account on the same host.
         fleet,
         harnessLogin,
-        fleetCredentials: createFleetCredentialsSubsystem(),
+        fleetCredentials,
         fleetCatalog: createFleetCatalogSubsystem(),
         fleetSetup: createFleetSetupSubsystem(),
         /**
@@ -5898,7 +6011,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // another daemon can neither join nor delay it. It is deliberately NOT handed the fleet: the
         // health probe launches a wrapper and spends a real billable turn per account, which a timer
         // must never do. Health belongs where a person chose it.
-        fleetRefresh: new FleetRefreshService({ usage }),
+        fleetRefresh: new FleetRefreshService({ usage, credentials: fleetCredentials }),
         notifications,
         attention,
         pins: new PinService(

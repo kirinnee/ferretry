@@ -4,14 +4,18 @@ import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../src/features/fleet/fleet-api.ts';
 import {
+  cancelCredentialSignIn,
   cancelHarnessLogin,
   FLEET_LOGIN_PATH,
+  readCredentialSignIn,
   readDaemonUsageFeed,
   readFleetLoginReadiness,
   readHarnessLoginFlow,
   renewFleetCredential,
   FLEET_RENEW_PATH,
+  startCredentialSignIn,
   startHarnessLogin,
+  submitCredentialSignInCode,
   submitHarnessLoginCode,
   USAGE_FEED_PATH,
   usageByWrapper,
@@ -202,5 +206,77 @@ describe('the harness login wire client', () => {
     expect(calls[0]?.path).toBe(USAGE_FEED_PATH);
     expect(byWrapper.get('claude-studio')?.fiveHourPercent).toBe(42);
     expect(byWrapper.get('claude-auto')).toBeUndefined();
+  });
+});
+
+describe('signing in a credential rather than an account', () => {
+  const CREDENTIAL_ID = 'claude-work';
+  /** A flow started from a credential: it names the credential and launched no account. */
+  const credentialFlow = (state: 'starting' | 'awaiting-code' = 'awaiting-code') => {
+    const { accountId: _accountId, ...flow } = claudeFlow(state);
+    return { ...flow, credentialId: CREDENTIAL_ID };
+  };
+
+  it('starts with POST, naming the credential and nothing else', async () => {
+    const { client, calls } = clientFor(credentialFlow('starting'));
+
+    const flow = await startCredentialSignIn(client, { credentialId: CREDENTIAL_ID });
+
+    expect(flow.credentialId).toBe(CREDENTIAL_ID);
+    expect(calls[0]?.path).toBe(FLEET_LOGIN_PATH);
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(bodyOf(calls[0]?.init)).toEqual({ credentialId: CREDENTIAL_ID });
+  });
+
+  it('reads, cancels and submits on the flow path, carrying the unlock on every call', async () => {
+    const flow = credentialFlow();
+    const cases: readonly (readonly [unknown, (client: FleetClient) => Promise<unknown>, string | undefined])[] = [
+      [flow, async client => await startCredentialSignIn(client, { credentialId: CREDENTIAL_ID }, TOKEN), 'POST'],
+      [flow, async client => await readCredentialSignIn(client, flow.flowId, TOKEN), undefined],
+      [flow, async client => await cancelCredentialSignIn(client, flow.flowId, TOKEN), 'DELETE'],
+      [
+        { outcome: 'accepted', flow },
+        async client => await submitCredentialSignInCode(client, flow.flowId, 'x', TOKEN),
+        'POST',
+      ],
+    ];
+    for (const [answer, call, method] of cases) {
+      const { client, calls } = clientFor(answer);
+      await call(client);
+      const headers = (calls[0]?.init?.headers ?? {}) as Record<string, string>;
+      expect(headers[OPERATOR_UNLOCK_HEADER]).toBe(TOKEN);
+      expect(calls[0]?.init?.method).toBe(method);
+    }
+  });
+
+  it('types an accepted submission by how the flow was started', async () => {
+    const { client } = clientFor({ outcome: 'accepted', flow: credentialFlow() });
+
+    const outcome = await submitCredentialSignInCode(client, 'flow-one', 'pasted-code');
+
+    expect(outcome).toMatchObject({ outcome: 'accepted', flow: { credentialId: CREDENTIAL_ID } });
+  });
+
+  it('passes a refusal through unchanged rather than throwing on one', async () => {
+    const { client } = clientFor({ outcome: 'conflict', reason: 'this login is no longer running' });
+
+    expect(await submitCredentialSignInCode(client, 'flow-one', 'x')).toEqual({
+      outcome: 'conflict',
+      reason: 'this login is no longer running',
+    });
+  });
+
+  it('refuses a flow that lacks the id its caller is keyed on', async () => {
+    // A credential flow handed to the Accounts page would be filed under `undefined`, and an account
+    // flow handed to a credential surface the same: each is refused at the call instead.
+    await expect(readHarnessLoginFlow(clientFor(credentialFlow()).client, 'flow-one')).rejects.toThrow(
+      'was not started from an account',
+    );
+    await expect(readCredentialSignIn(clientFor(claudeFlow('awaiting-code')).client, 'flow-one')).rejects.toThrow(
+      'was not started from a login',
+    );
+    await expect(
+      submitHarnessLoginCode(clientFor({ outcome: 'accepted', flow: credentialFlow() }).client, 'flow-one', 'x'),
+    ).rejects.toThrow('was not started from an account');
   });
 });
