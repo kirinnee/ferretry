@@ -12,12 +12,14 @@ concurrency:
 # THREE JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD (docs/pwa-release-signing.md).
 #
 #   build   installs dependencies and builds the release. Holds NO secret: any dependency's install
-#           script or build plugin runs here, and can at worst spoil this one release.
+#           script or build plugin runs here, so NOTHING it produces is trusted downstream.
 #   sign    holds the signing key, and nothing else. It installs nothing and runs no build — only
-#           openssl, through scripts/ci/sign-pwa-release.sh, over the list the build produced. A key
-#           that leaked would compromise every installed copy forever, so this job runs no code but
-#           this repository's own shell script and GitHub's artifact actions.
-#   deploy  holds only the Cloudflare token. It proves the signature and every file's hash
+#           openssl and jq, through scripts/ci/sign-pwa-release.sh. Before it signs, that script
+#           proves the list says only what THIS run decided (scripts/ci/check-pwa-release.sh): this
+#           run's number and commit, the checkout's next key or none, no Pages server code, and
+#           exactly the built files. A compromised build therefore cannot get a real signature on an
+#           attacker's next key or a frozen sequence; at worst it spoils one release's app code.
+#   deploy  holds only the Cloudflare token. It runs the same check and proves the signature
 #           (scripts/ci/verify-pwa-release.sh) before it uploads a byte.
 #
 # Every action in this workflow is pinned to an exact SHA, because two of its jobs hold long-lived
@@ -84,7 +86,8 @@ jobs:
             exit 1
           fi
           printf '%s\n' "${PWA_RELEASE_SIGNING_KEY}" |
-            env -u PWA_RELEASE_SIGNING_KEY ./scripts/ci/sign-pwa-release.sh "${RUNNER_TEMP}/dist"
+            env -u PWA_RELEASE_SIGNING_KEY ./scripts/ci/sign-pwa-release.sh \
+              --sequence "${GITHUB_RUN_NUMBER}" --commit "${GITHUB_SHA}" "${RUNNER_TEMP}/dist"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pwa-release-signature
@@ -117,7 +120,8 @@ jobs:
         run: |
           set -euo pipefail
           cp "${RUNNER_TEMP}/signature/release-manifest.sig" packages/pwa/dist/release-manifest.sig
-          nix develop .#ci -c ./scripts/ci/verify-pwa-release.sh packages/pwa/dist
+          ./scripts/ci/check-pwa-release.sh --sequence "${GITHUB_RUN_NUMBER}" --commit "${GITHUB_SHA}" packages/pwa/dist
+          ./scripts/ci/verify-pwa-release.sh packages/pwa/dist
       # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action
       # installs wrangler with whichever package manager it detects, picks bun from this repository's
       # lockfile, and then cannot find bun — it runs outside the nix shell that provides it. Calling

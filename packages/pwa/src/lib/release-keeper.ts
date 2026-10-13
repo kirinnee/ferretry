@@ -27,7 +27,6 @@ import {
   RELEASE_MANIFEST_FILE,
   RELEASE_SIGNATURE_FILE,
   releasePathForRequest,
-  toBase64Url,
 } from './release-manifest.ts';
 import {
   type InstalledOrder,
@@ -172,27 +171,39 @@ const UNVERIFIABLE_BODY = encoder.encode(
   'This part of Ferretry could not be checked against its signed release, so it was not loaded.\n',
 );
 
-/** At most this many signature checks are remembered; each is keyed by the exact bytes checked. */
+/** At most this many signature checks are remembered. */
 const CHECK_MEMO_LIMIT = 32;
+
+const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
+  left.length === right.length && left.every((byte, index) => byte === right[index]);
 
 export class ReleaseKeeper {
   /** One update at a time: a second caller waits for, and is told, the first one's answer. */
   #running: Promise<ReleaseOutcome> | null = null;
   /**
-   * Signature checks already made, keyed by the chain AND the exact bytes, so a request does not
-   * cost an Ed25519 verify. This memory is the worker's own — no page can write it.
+   * Signature checks already made, so a request does not cost an Ed25519 verify. Keyed by the chain
+   * and the signature text, and a hit counts only if the bytes are THE SAME bytes: a page can pair a
+   * genuine signature with bytes of its own, so the signature alone names nothing. This memory is
+   * the worker's own — no page can write it.
    */
-  readonly #checks = new Map<string, Promise<SignatureCheck>>();
+  readonly #checks = new Map<string, { readonly bytes: Uint8Array; readonly check: Promise<SignatureCheck> }>();
+  /**
+   * The highest release sequence this worker has installed or confirmed FROM THE SITE since it
+   * started. A stored release below it is one a page put back — an older release whose bug the newer
+   * one fixed — so it is not served (`docs/pwa-release-signing.md`). Worker memory, so it starts at 0
+   * each time the browser starts the worker; the worker re-checks the site on every page load.
+   */
+  #floor = 0;
 
   constructor(private readonly options: ReleaseKeeperOptions) {}
 
   #check(release: SignedRelease, chain: readonly string[]): Promise<SignatureCheck> {
-    const key = `${chain.join(' ')}\n${release.signatureText}\n${toBase64Url(release.manifestBytes)}`;
+    const key = `${chain.join(' ')}\n${release.signatureText}`;
     const known = this.#checks.get(key);
-    if (known !== undefined) return known;
+    if (known !== undefined && sameBytes(known.bytes, release.manifestBytes)) return known.check;
     if (this.#checks.size >= CHECK_MEMO_LIMIT) this.#checks.clear();
     const check = checkReleaseSignature(release, chain, { allowUnsigned: false });
-    this.#checks.set(key, check);
+    this.#checks.set(key, { bytes: release.manifestBytes, check });
     return check;
   }
 
@@ -220,9 +231,10 @@ export class ReleaseKeeper {
       if ((await this.#check(endorsement, chain)).ok) endorsements.push(endorsement);
     }
     const outcome = ReleaseOutcomeSchema.safeParse(field(stored, 'lastOutcome'));
+    const active = await this.#reverify(field(stored, 'active'), chain);
     return {
       chain,
-      active: await this.#reverify(field(stored, 'active'), chain),
+      active: active !== null && active.manifest.sequence < this.#floor ? null : active,
       previous: await this.#reverify(field(stored, 'previous'), chain),
       endorsements,
       lastOutcome: outcome.success ? outcome.data : null,
@@ -283,7 +295,10 @@ export class ReleaseKeeper {
         ? { status: 'unverified' }
         : { status: 'refused', refusal: decision.refusal, hadRelease };
     }
-    if (decision.standing === 'same') return { status: 'current' };
+    if (decision.standing === 'same') {
+      this.#floor = Math.max(this.#floor, decision.manifest.sequence);
+      return { status: 'current' };
+    }
 
     const { manifest } = decision;
     const cacheName = cacheNameFor(manifest);
@@ -303,6 +318,7 @@ export class ReleaseKeeper {
           : [...state.endorsements, candidate].slice(-ENDORSEMENT_LIMIT),
       lastOutcome: outcome,
     });
+    this.#floor = Math.max(this.#floor, manifest.sequence);
     await this.#prune([cacheName, state.active?.cacheName]);
     return outcome;
   }

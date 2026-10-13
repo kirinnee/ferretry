@@ -375,6 +375,44 @@ describe('ReleaseKeeper.update', () => {
   });
 });
 
+describe('what a page writes back', () => {
+  it('does not serve an older release a page put back after this worker installed a newer one', async () => {
+    // Arrange: release 1 is replaced by 2, then a page writes 1 back as active.
+    const signer = await releaseSigner();
+    const first = await buildRelease(signer, { commit: 'aaaaaaa', sequence: 1 });
+    const served = site(first);
+    const { subject, state } = keeperFor(signer, served.network);
+    await subject.update();
+    served.serve(await buildRelease(signer, { commit: 'bbbbbbb', sequence: 2 }));
+    await subject.update();
+    state.write({ ...state.current(), active: signed(first) });
+
+    // Act
+    const answer = await subject.respond({ pathname: '/', navigate: true });
+    const checked = await subject.update();
+
+    // Assert: nothing served from release 1, and the next check puts release 2 back.
+    should(answer).be.null();
+    should(checked).eql({ status: 'updated' });
+  });
+
+  it('does not take a remembered signature as proof for different bytes', async () => {
+    // Arrange: the genuine list was checked (and remembered); a page pairs its signature with other bytes.
+    const signer = await releaseSigner();
+    const release = await buildRelease(signer);
+    const { subject, state } = keeperFor(signer, site(release).network);
+    await subject.update();
+    const forged = bytesOf(text(release.manifestBytes).replace('1.0.0', '9.9.9'));
+    state.write({ ...state.current(), active: { manifestBytes: forged, signatureText: release.signatureText } });
+
+    // Act
+    const actual = await subject.respond({ pathname: '/', navigate: true });
+
+    // Assert
+    should(actual).be.null();
+  });
+});
+
 describe('ReleaseKeeper.respond', () => {
   const installed = async () => {
     const signer = await releaseSigner();

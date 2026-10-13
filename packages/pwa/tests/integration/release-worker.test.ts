@@ -23,7 +23,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
@@ -43,6 +43,7 @@ let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 /** What the server serves right now: path → bytes. Each scene rewrites it. */
 let served = new Map<string, Uint8Array>();
+/** Every request the server saw, as `<Sec-Fetch-Mode> <path>`: a page load is `navigate /…`. */
 const requests: string[] = [];
 
 const run = (command: string[], cwd = packageRoot, input?: Uint8Array): void => {
@@ -74,6 +75,9 @@ const release = async (
   const dist = join(workDirectory, name);
   await mkdir(dist, { recursive: true });
   await writeFile(join(dist, 'index.html'), PAGE);
+  // Pages configuration, as `vite build` copies it from `public/`; the signer checks it is the real one.
+  for (const config of ['_headers', '_redirects'])
+    await copyFile(join(packageRoot, 'public', config), join(dist, config));
   await writeFile(join(dist, 'release.js'), SCRIPT(label));
   run([
     'bun',
@@ -91,7 +95,16 @@ const release = async (
   ]);
   if (sign) {
     run(
-      [join(repositoryRoot, 'scripts/ci/sign-pwa-release.sh'), dist, key.pub],
+      [
+        join(repositoryRoot, 'scripts/ci/sign-pwa-release.sh'),
+        '--sequence',
+        String(identity.sequence),
+        '--commit',
+        identity.commit,
+        '--public-key',
+        key.pub,
+        dist,
+      ],
       repositoryRoot,
       new Uint8Array(await readFile(key.pem)),
     );
@@ -120,7 +133,7 @@ beforeAll(async () => {
     port: 0,
     fetch: request => {
       const { pathname } = new URL(request.url);
-      requests.push(pathname);
+      requests.push(`${request.headers.get('sec-fetch-mode') ?? ''} ${pathname}`);
       const path = pathname === '/' ? 'index.html' : pathname.slice(1);
       const bytes = served.get(path);
       if (bytes === undefined) return new Response('not found', { status: 404 });
@@ -157,6 +170,8 @@ const installed = async (files: Map<string, Uint8Array>): Promise<{ context: Bro
   // The first load was not controlled; this one is.
   await page.reload();
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  // That load started the worker's own check of the site; let it finish so a scene starts quiet.
+  await ask(page, { type: 'fy-release-check' });
   return { context, page };
 };
 
@@ -336,7 +351,47 @@ describe('the signed-release service worker', () => {
     const reply = await ask(page, { type: 'fy-release-check' });
 
     expect(await label(page)).toBe('first');
-    expect(reply).toEqual({ type: 'fy-release-outcome', outcome: { status: 'updated' } });
+    // (The reload's own check may already have installed it, so this one may find it current.)
+    expect(['updated', 'current']).toContain((reply as { outcome: { status: string } }).outcome.status);
+    await context.close();
+  }, 120_000);
+
+  test('does not serve an older release a page put back after the worker moved past it', async () => {
+    // R2: an XSS in release 1 keeps its signed bytes and writes them back once release 2 installs.
+    const { context, page } = await installed(first);
+    served = new Map(second);
+    await ask(page, { type: 'fy-release-check' });
+    const restore = {
+      manifest: [...(first.get('release-manifest.json') ?? [])],
+      signature: new TextDecoder().decode(first.get('release-manifest.sig')),
+    };
+    await page.evaluate(async record => {
+      const database = await new Promise<IDBDatabase>((resolveOpen, rejectOpen) => {
+        const request = indexedDB.open('ferretry-release', 1);
+        request.onsuccess = () => resolveOpen(request.result);
+        request.onerror = () => rejectOpen(request.error);
+      });
+      await new Promise<void>((resolveWrite, rejectWrite) => {
+        const transaction = database.transaction('state', 'readwrite');
+        const store = transaction.objectStore('state');
+        const read = store.get('keeper');
+        read.onsuccess = () =>
+          store.put(
+            {
+              ...read.result,
+              active: { manifestBytes: Uint8Array.from(record.manifest), signatureText: record.signature },
+            },
+            'keeper',
+          );
+        transaction.oncomplete = () => resolveWrite();
+        transaction.onerror = () => rejectWrite(transaction.error);
+      });
+      database.close();
+    }, restore);
+
+    await page.reload();
+
+    expect(await label(page)).toBe('second');
     await context.close();
   }, 120_000);
 
@@ -355,7 +410,7 @@ describe('the signed-release service worker', () => {
       await page.goto(`${origin()}${pathname}`);
 
       expect(await label(page)).toBe('first');
-      expect(requests).not.toContain(pathname);
+      expect(requests).not.toContain(`navigate ${pathname}`);
       await context.close();
     },
     120_000,
@@ -440,7 +495,7 @@ describe('the signed-release service worker', () => {
     const status = await page.evaluate(async () => (await fetch('/not-listed.txt')).status);
 
     expect(status).toBe(404);
-    expect(requests).toContain('/not-listed.txt');
+    expect(requests.some(seen => seen.endsWith(' /not-listed.txt'))).toBe(true);
     await context.close();
   }, 120_000);
 });

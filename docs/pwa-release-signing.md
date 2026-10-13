@@ -31,8 +31,8 @@ and what to do when something goes wrong.
   bytes, never a conclusion like "this key is trusted". It checks them again, from the key compiled
   into itself, every time it reads them. It re-hashes every cached file before serving it, and fetches
   a fresh copy of any file that no longer matches.
-- **An update is checked before it is used.** When the app opens, and each time the tab becomes
-  visible, the worker fetches the list and its signature, verifies the signature, fetches every listed
+- **An update is checked before it is used.** On every page load, when the app opens, and each time
+  the tab becomes visible, the worker fetches the list and its signature, verifies the signature, fetches every listed
   file, checks every hash, writes them into a new cache, and only then moves one pointer to it. The
   pointer is one IndexedDB record written in one transaction, so a check interrupted halfway changes
   nothing.
@@ -57,7 +57,8 @@ and what to do when something goes wrong.
 | `packages/pwa/src/shell/release-notice.tsx`       | the notice the reader sees                                            |
 | `packages/pwa/scripts/build-release.ts`           | builds the worker, writes the list and the UNSIGNED marker            |
 | `scripts/ci/sign-pwa-release.sh`                  | signs the list with openssl; the key arrives on stdin                 |
-| `scripts/ci/verify-pwa-release.sh`                | proves the signature and every file's hash before a deploy            |
+| `scripts/ci/check-pwa-release.sh`                 | proves the list says only what the run decided, before signing/deploy |
+| `scripts/ci/verify-pwa-release.sh`                | proves the signature before a deploy                                  |
 | `packages/pwa/release-signing-key.pub`            | the public key, compiled into every worker                            |
 | `.github/workflows/pwa-pages.yaml`                | three jobs — build, sign, deploy — so the key never meets the build   |
 
@@ -152,13 +153,30 @@ decision the build made out loud, never a missing upload.
   until this is set, a workflow on any branch could name the environment and read the secret.
 - **Only the `sign` job holds it.** `pwa-pages.yaml` runs three jobs:
   - **`build`** installs dependencies and builds the release, and holds no secret. Any dependency's
-    install script or build plugin runs here, where it can at worst spoil one release.
+    install script or build plugin runs here, so nothing it produces is trusted downstream.
   - **`sign`** holds the key. It installs nothing and runs no build: it checks out the repository for
-    `scripts/ci/sign-pwa-release.sh` and the public key, downloads the built list, and signs with
-    openssl.
-  - **`deploy`** holds only the Cloudflare token. It proves the signature and every file's hash
+    the scripts and the public keys, downloads the built release, and signs with openssl. **It never
+    signs what it has not read.** A signature makes the list's trust fields permanent for every
+    installed copy, so `scripts/ci/check-pwa-release.sh` first proves the list says only what this
+    run decided, from facts the sign job knows on its own. Any refusal stops before the key is read:
+    - only the fields of the format, and an `x.y.z` version;
+    - `sequence` is this run's number and `commit` is this run's commit;
+    - `worker` is `sw.verified.js`;
+    - `nextKey` is the checkout's `release-signing-key.next.pub`, or absent when that file is;
+    - every path is plain and none is Pages server code or configuration (`_worker.js`,
+      `_routes.json`, anything starting with `_`, `functions/`);
+    - the list names exactly the files built, each with its real hash, and nothing in the release is
+      a symlink;
+    - `_headers` and `_redirects` are byte-for-byte the checkout's.
+
+    So a compromised build cannot get a real signature on an attacker's next key (as good as the
+    stolen key) or on a huge sequence (every later release refused as older, forever). At worst it
+    spoils one release's app code, which the list still names exactly.
+
+  - **`deploy`** holds only the Cloudflare token. It runs the same check and proves the signature
     before it uploads.
     Every action in the workflow is pinned to an exact SHA.
+
 - **In the `sign` job** the key reaches the signer on **stdin** (`printf`, a shell builtin, so no
   process's arguments carry it), and the signer runs without it in its environment. The signer writes
   it only to a `0600` file inside a fresh `mktemp -d` directory, which an `EXIT` trap removes. It is
@@ -267,8 +285,14 @@ update look like a bad deploy (a tampered cached copy is fetched again, not refu
   as everywhere else in the zero-trust design. What it can still do to the worker's storage:
   - **wipe it**, after which the worker has no release, lets requests reach the network, and
     installs whatever signed release the site serves at the next check;
-  - **put back an older release it kept a copy of** — genuine signed bytes, so the worker serves an
-    older signed version until the next check moves it forward again;
+  - **put back an older release it kept a copy of** — genuine signed bytes. Once this worker has
+    installed or confirmed a newer release from the site, it remembers that release's sequence and
+    never serves a stored one below it. But that memory is the worker's own, and the browser stops an
+    idle worker within minutes. **The first page load after the worker restarts serves the restored
+    release.** That load also re-checks the site and moves forward again, but the restored release has
+    already run once. So an XSS in release N, fixed in N+1, can keep coming back: it runs again on the
+    first load after each worker restart, for as long as it keeps writing N back. Clearing the site's
+    data ends it. Ending it for good needs storage a page cannot write, which a website does not have;
   - **break the database** (for example by upgrading its version), after which the worker cannot read
     its record and lets requests reach the network.
 

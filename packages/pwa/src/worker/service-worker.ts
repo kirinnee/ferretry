@@ -11,8 +11,9 @@
  * What it does, in order:
  *   - install: download, verify and cache the release the site serves now;
  *   - activate: take control of the pages that are open, so the first install protects them now;
- *   - fetch: once a verified release exists, answer EVERY same-origin page load from it and every
- *     subresource it lists, from bytes re-hashed on the way out, with the headers `_headers` names;
+ *   - fetch: re-check the site on every page load; once a verified release exists, answer EVERY
+ *     same-origin page load from it and every subresource it lists, from bytes re-hashed on the
+ *     way out, with the headers `_headers` names;
  *     leave everything else — every daemon request included — exactly as the page sent it;
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
  *   - push / notificationclick: show a daemon's Web Push notification and open what it names.
@@ -105,9 +106,14 @@ worker.addEventListener('fetch', event => {
   const url = new URL(request.url);
   // Not this site: a daemon, a relay, anything else. Never touched.
   if (url.origin !== origin) return;
+  const navigate = request.mode === 'navigate';
+  // Every page load also re-checks the site (two small files; one check at a time). That is what
+  // keeps a release a page put back from outliving one load after the worker starts: the check
+  // re-confirms the newer release and raises the worker's floor above the restored one.
+  if (navigate) event.waitUntil(keeper.update().catch(() => undefined));
   event.respondWith(
     keeper
-      .respond({ pathname: url.pathname, navigate: request.mode === 'navigate' })
+      .respond({ pathname: url.pathname, navigate })
       .catch(() => null)
       .then(answer =>
         answer === null

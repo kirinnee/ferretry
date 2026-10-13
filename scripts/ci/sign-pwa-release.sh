@@ -3,7 +3,14 @@
 # <dist>/release-manifest.json, written to <dist>/release-manifest.sig as
 # `<SHA-256 of the key's SPKI, base64url>.<signature, base64url>` (docs/pwa-release-signing.md).
 #
-#   printf '%s\n' "${KEY}" | scripts/ci/sign-pwa-release.sh <dist> [<public-key.pem>]
+#   printf '%s\n' "${KEY}" | scripts/ci/sign-pwa-release.sh --sequence <n> --commit <sha>
+#     [--public-key <pem>] [--next-public-key <pem>] [--public-dir <dir>] <dist>
+#
+# IT NEVER SIGNS WHAT IT HAS NOT READ. The list was written by the untrusted `build` job, and a
+# signature makes its trust fields permanent, so check-pwa-release.sh proves first that it says only
+# what this run decided: this run's sequence and commit, the checkout's next key (or none), no Pages
+# server code, and exactly the files in <dist> with their real hashes. Any refusal stops before the key
+# is even read.
 #
 # DEPENDENCY-FREE ON PURPOSE: openssl and coreutils, nothing else. It runs in the `sign` job of
 # pwa-pages.yaml, the only job that holds the key, which installs no package and runs no build — so
@@ -19,8 +26,16 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-dist="${1:?usage: sign-pwa-release.sh <dist> [<public-key.pem>]  (key on stdin)}"
-public_key="${2:-${script_dir}/../../packages/pwa/release-signing-key.pub}"
+public_key="${script_dir}/../../packages/pwa/release-signing-key.pub"
+check_args=()
+dist=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --public-key) public_key="${2:-}" && shift 2 ;;
+  --sequence | --commit | --next-public-key | --public-dir) check_args+=("$1" "${2:-}") && shift 2 ;;
+  *) dist="$1" && shift ;;
+  esac
+done
 manifest="${dist}/release-manifest.json"
 
 fail() {
@@ -28,7 +43,8 @@ fail() {
   exit 1
 }
 
-[[ -s ${manifest} ]] || fail "${manifest} is missing or empty; build the release first"
+[[ -n ${dist} ]] || fail "usage: sign-pwa-release.sh --sequence <n> --commit <sha> [...] <dist>  (key on stdin)"
+"${script_dir}/check-pwa-release.sh" "${check_args[@]}" "${dist}"
 openssl pkey -pubin -in "${public_key}" -noout -text 2>/dev/null | grep -q '^ED25519 Public-Key' ||
   fail "${public_key} is not an Ed25519 public key"
 
@@ -51,5 +67,5 @@ fingerprint="$(openssl pkey -pubin -in "${public_key}" -outform DER | openssl dg
 openssl pkeyutl -sign -inkey "${key_file}" -rawin -in "${manifest}" -out "${key_dir}/signature.bin"
 printf '%s.%s\n' "${fingerprint}" "$(b64url <"${key_dir}/signature.bin")" >"${dist}/release-manifest.sig"
 
-"${script_dir}/verify-pwa-release.sh" --signature-only "${dist}" "${public_key}"
+"${script_dir}/verify-pwa-release.sh" "${dist}" "${public_key}"
 echo "✅ PWA release signed"
