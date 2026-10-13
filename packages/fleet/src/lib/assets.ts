@@ -39,6 +39,24 @@ export function skillItemName(reference: string): string {
   return segments.at(-1) ?? canonical;
 }
 
+/**
+ * Entries inside a harness's skills destination that the HARNESS writes and Ferretry must never
+ * remove, replace or claim as an item.
+ *
+ * Measured on Codex 0.145.0: the first start writes Codex's bundled skills into
+ * `$CODEX_HOME/skills/.system/`. A sweep that keeps only the selected items would delete it on every
+ * apply, and an item of that name would replace it. Claude writes nothing there.
+ */
+export const HARNESS_OWNED_SKILL_ENTRIES: Readonly<Record<HarnessKind, readonly string[]>> = {
+  claude: [],
+  codex: ['.system'],
+};
+
+/** Whether `entry`, directly inside `kind`'s skills destination, belongs to the harness itself. */
+export function isHarnessOwnedSkillEntry(kind: HarnessKind, entry: string): boolean {
+  return HARNESS_OWNED_SKILL_ENTRIES[kind].includes(entry);
+}
+
 /** Whether a derived item name is a single path component that can safely be a destination. */
 export function isUsableSkillItemName(name: string): boolean {
   return name !== '' && name !== '.' && name !== '..' && !name.includes('/');
