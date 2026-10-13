@@ -9,6 +9,7 @@ import {
   HARNESS_BINARIES,
   type HarnessKind,
   hostCodexCredentialFile,
+  runtimeIdsPath,
 } from '@ferretry/fleet';
 import {
   FileConversationLeaseStore,
@@ -607,6 +608,14 @@ import {
   LeaseClaimingLaunchWrapper,
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
+// U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
+import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
+import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
+import {
+  RuntimeSupervisedLauncher,
+  RuntimeSupervisedReaper,
+} from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
+import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -4482,7 +4491,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   };
   /** The published fleet, read fresh on every call. ONE inventory for the whole process: the
    *  recommender's advice and a start's account resolution must not disagree about what the fleet is. */
-  const accounts = new ManifestAccountInventory(stateFiles, paths.fleetManifest);
+  const accounts = new RuntimeAwareAccountInventory(
+    new ManifestAccountInventory(stateFiles, paths.fleetManifest),
+    new RuntimeIdsFile(stateFiles, runtimeIdsPath(paths.fleet)),
+  );
+  /** Stops the app-server daemon a Codex runtime started, once nothing uses that runtime (U12). */
+  const codexAppServers = new CodexAppServerSupervisor({
+    inventory: accounts,
+    processes: new HostCodexAppServerProcesses({ platform: process.platform, psExecutable: Bun.which('ps') ?? undefined }),
+    homesDirectory: join(paths.fleet, 'homes'),
+    sleep: milliseconds => Bun.sleep(milliseconds),
+  });
   /**
    * What an account's own profile supplies at launch, when the profile authenticates it instead of a
    * login. The THIRD thing in this daemon holding a vault, and the reasoning for that — plus why it
@@ -5122,7 +5141,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     ),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
     browserTransport,
-    sessionLauncher: new TmuxSessionLifecycleLauncher(
+    sessionLauncher: new RuntimeSupervisedLauncher(
+      new TmuxSessionLifecycleLauncher(
       // A private absolute socket inside the state home is what keeps managed panes off any
       // tmux server the host already runs.
       launchTmux,
@@ -5145,6 +5165,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Attended renewal's second door: a person started this session, so the account's credential is
       // given its chance to rotate while somebody is still here to be told it could not.
       accountLaunchRenewal,
+      ),
+      codexAppServers,
+      { text: async record => (await launchTmux.state(record.config.tmuxSession)).visible },
     ),
     createSessionLifecycle,
     createTerminalReaper: storage => {
@@ -5155,7 +5178,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { list: daemonId => store.registrations(daemonId) },
         { list: daemonId => store.sessions(daemonId) },
         runtime,
-        runtime,
+        new RuntimeSupervisedReaper(runtime, codexAppServers, async sessionId => {
+          const config = SessionConfigSchema.safeParse(await storage.readConfig(parseSessionId(sessionId)));
+          return config.success ? config.data.agent : undefined;
+        }),
       );
     },
     createSessionHealth: (storage, settings) =>

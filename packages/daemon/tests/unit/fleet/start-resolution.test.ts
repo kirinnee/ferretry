@@ -139,3 +139,75 @@ describe('resolveStartAccount', () => {
     should(error.message).match(/this host cannot run that file/u);
   });
 });
+
+describe('resolveStartAccount by a runtime name it had before', () => {
+  const RUNTIME_ID = '00000000-0000-4000-8000-0000000000aa';
+  const renamed = account({ id: RUNTIME_ID, agent: 'reviewer' });
+  const host = hostRunning(renamed.wrapper);
+  const ids = {
+    version: 1 as const,
+    runtimes: { reviewer: { id: RUNTIME_ID, formerNames: ['claude-auto-review'] } },
+  };
+  const withIds = (read: () => Promise<typeof ids | undefined>) => ({ ...inventory(renamed), ids: read });
+
+  it('should resolve an old wrapper name to the runtime it became', async () => {
+    // Act
+    const actual = await resolveStartAccount(withIds(async () => ids), 'claude-auto-review', host, 'fy');
+
+    // Assert
+    should(actual.account.agent).equal('reviewer');
+  });
+
+  it('should still resolve a name and an id without reading the runtime ids', async () => {
+    // Arrange
+    let reads = 0;
+    const counted = withIds(async () => {
+      reads++;
+      return ids;
+    });
+
+    // Act
+    const byName = await resolveStartAccount(counted, 'reviewer', host, 'fy');
+    const byId = await resolveStartAccount(withIds(async () => undefined), RUNTIME_ID, host, 'fy');
+
+    // Assert
+    should(byName.account.id).equal(RUNTIME_ID);
+    should(byId.account.id).equal(RUNTIME_ID);
+    should(reads).equal(0);
+  });
+
+  it('should refuse as unknown a name that is neither current nor former', async () => {
+    // Act
+    const error = await refusal(resolveStartAccount(withIds(async () => ids), 'nobody', host, 'fy'));
+
+    // Assert
+    should(error.failure).equal('unknown_agent');
+  });
+
+  it('should refuse as unavailable when the runtime ids cannot be read, unless the request is an id', async () => {
+    // Arrange
+    const broken = withIds(async () => {
+      throw new Error('ids.json is damaged');
+    });
+
+    // Act
+    const error = await refusal(resolveStartAccount(broken, 'claude-auto-review', host, 'fy'));
+    const byId = await resolveStartAccount(broken, RUNTIME_ID, host, 'fy');
+
+    // Assert
+    should(error.failure).equal('unavailable');
+    should(error.message).match(/ids\.json is damaged/u);
+    should(byId.account.agent).equal('reviewer');
+  });
+
+  it('should not follow a former name to a runtime the manifest does not publish', async () => {
+    // Arrange — ids.json knows the runtime; the manifest has not published it yet.
+    const unpublished = { ...inventory(), ids: async () => ids };
+
+    // Act
+    const error = await refusal(resolveStartAccount(unpublished, 'claude-auto-review', host, 'fy'));
+
+    // Assert
+    should(error.failure).equal('unknown_agent');
+  });
+});

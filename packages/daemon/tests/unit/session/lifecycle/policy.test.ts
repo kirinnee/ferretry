@@ -7,6 +7,7 @@ import {
   createSessionRecord,
   defaultSessionLifecycleSettings,
   firstTurnInstruction,
+  isAgentAccount,
   lifecycleSessionId,
   MAX_ASSIGNED_TASK_LENGTH,
   SESSION_ID_VARIABLE,
@@ -145,6 +146,16 @@ describe('session lifecycle policy', () => {
     should(() => createSessionRecord(request({ agent: shell, command: [shell, '-c', 'echo'] }), context())).throw(
       /not a fleet auto wrapper/u,
     );
+  });
+
+  it('should launch a version-2 runtime from a fleet bin directory whatever its name, and nothing outside one', () => {
+    // Arrange
+    const runtime = '/state/fleet/bin/reviewer';
+
+    // Act + Assert
+    should(authorizeSessionCommand(runtime, [runtime], SETTINGS)).deepEqual([runtime]);
+    for (const refused of ['/usr/bin/reviewer', 'reviewer', '/state/fleet/bin/../../bin/sh', '/state/fleet/bin/a b'])
+      should(() => authorizeSessionCommand(refused, [refused], SETTINGS)).throw(/not a fleet auto wrapper/u);
   });
 
   it('should clamp a tmux name to something tmux can address, whatever the session id', () => {
@@ -394,6 +405,19 @@ describe('session lifecycle policy', () => {
       should(otherHarness).match(/Start it on codex-auto-default instead/u);
       for (const offered of [auto, other, codex])
         should(authorizeSessionCommand(offered.wrapper, [offered.wrapper], SETTINGS)).deepEqual([offered.wrapper]);
+    });
+
+    it('should run a version-2 agent runtime by its declaration, and never a terminal runtime by its name', () => {
+      // Arrange — the manifest's mode is the agent flag; the name is the person's choice.
+      const agent = account('reviewer', { mode: 'auto' });
+      const lookalike = account('claude-auto-mine', { mode: 'interactive' });
+
+      // Act + Assert
+      should(isAgentAccount(agent, SETTINGS)).be.true();
+      should(isAgentAccount(lookalike, SETTINGS)).be.false();
+      should(isAgentAccount(account('x', { mode: 'auto', wrapper: '/usr/bin/x' }), SETTINGS)).be.false();
+      should(unrunnableAccountRefusal(agent, [agent], SETTINGS, 'fy')).be.undefined();
+      should(unrunnableAccountRefusal(lookalike, [lookalike, agent], SETTINGS, 'fy')).match(/Start it on reviewer instead/u);
     });
 
     it('should say how to get a runnable account when the host has none', () => {

@@ -423,3 +423,95 @@ describe('what a launch-time renewal says out loud', () => {
     should(renewal.asked).have.length(1);
   });
 });
+
+describe('FleetLaunchRenewal for version-2 runtimes', () => {
+  const CODEX_A = '00000000-0000-4000-8000-0000000000c1';
+  const CODEX_B = '00000000-0000-4000-8000-0000000000c2';
+  const CODEX_OTHER = '00000000-0000-4000-8000-0000000000c3';
+  const CLAUDE_V2 = '00000000-0000-4000-8000-0000000000c4';
+  const KEYED_V2 = '00000000-0000-4000-8000-0000000000c5';
+
+  const published = (id: string, name: string, kind: HarnessKind, secretEnv: Record<string, string> = {}) => ({
+    ...manifestAccount(id, name, 'auto'),
+    kind,
+    secretEnv,
+  });
+  const runtime = (id: string, name: string, harness: HarnessKind, credential: string) => ({
+    id,
+    name,
+    harness,
+    credential,
+    profile: 'default',
+    agent: true,
+    wrapper: `/fleet/bin/${name}`,
+    models: [{ id: 'model-one', available: true }],
+    defaultModel: 'model-one',
+  });
+  const V2: FleetManifest = FleetManifestSchema.parse({
+    version: 1,
+    generatedAt: '2026-08-19T09:00:00.000Z',
+    accounts: [
+      published(CODEX_A, 'codex-a', 'codex'),
+      published(CODEX_B, 'codex-b', 'codex'),
+      published(CODEX_OTHER, 'codex-other', 'codex'),
+      published(CLAUDE_V2, 'claude-v2', 'claude'),
+      published(KEYED_V2, 'codex-keyed', 'codex', { OPENAI_API_KEY: '${secret:KEY}' }),
+    ],
+    runtimes: [
+      runtime(CODEX_A, 'codex-a', 'codex', 'work'),
+      runtime(CODEX_B, 'codex-b', 'codex', 'work'),
+      runtime(CODEX_OTHER, 'codex-other', 'codex', 'personal'),
+      runtime(CLAUDE_V2, 'claude-v2', 'claude', 'work-claude'),
+      runtime(KEYED_V2, 'codex-keyed', 'codex', 'keyed'),
+    ],
+  });
+  const v2Reader = (): LaunchRenewalFleetReader => ({
+    config: async () => {
+      throw new Error('a version-2 runtime must not need the configuration');
+    },
+    accounts: async () => V2,
+  });
+
+  it('should renew per credential: every runtime on that login, and no other', async () => {
+    // Arrange
+    const store = new CountingStore();
+    const renewal = new RecordingRenewal({ status: 'renewed', accountId: CODEX_A, ran: true });
+    const subject = new FleetLaunchRenewal({ fleet: v2Reader(), identities: survey(store), renewal });
+
+    // Act
+    const actual = await subject.decide('/fleet/bin/codex-b');
+
+    // Assert
+    should(renewal.asked).deepEqual([{ identity: 'credential:work', members: 2 }]);
+    should(store.reads.toSorted()).deepEqual([`codex ${CODEX_A}`, `codex ${CODEX_B}`]);
+    should(actual).match({ kind: 'decided', result: { identity: 'credential:work', status: 'renewed' } });
+  });
+
+  it('should leave a Claude runtime to renew its own login, reading nothing', async () => {
+    // Arrange
+    const store = new CountingStore();
+    const renewal = new RecordingRenewal({ status: 'renewed', ran: true });
+    const subject = new FleetLaunchRenewal({ fleet: v2Reader(), identities: survey(store), renewal });
+
+    // Act
+    const actual = await subject.decide('/fleet/bin/claude-v2');
+
+    // Assert
+    should(actual).deepEqual({ kind: 'not-a-fleet-account' });
+    should(store.reads).be.empty();
+    should(renewal.asked).be.empty();
+  });
+
+  it('should treat a credential authenticated by the environment as having no token to renew', async () => {
+    // Arrange
+    const store = new CountingStore();
+    const renewal = new RecordingRenewal({ status: 'not-required', ran: false });
+    const subject = new FleetLaunchRenewal({ fleet: v2Reader(), identities: survey(store), renewal });
+
+    // Act
+    await subject.decide('/fleet/bin/codex-keyed');
+
+    // Assert
+    should(renewal.asked).deepEqual([{ identity: 'credential:keyed', members: 1 }]);
+  });
+});
