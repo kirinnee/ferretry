@@ -35,7 +35,7 @@
  */
 import type { AssetField } from '../assets.ts';
 import { HARNESS_ASSETS } from '../assets.ts';
-import { type FleetConfig, FleetConfigSchema, type SettingsLayer } from '../config.ts';
+import { type FleetConfig, FleetConfigSchema, SafeNameSchema, type SettingsLayer } from '../config.ts';
 import { credentialSourceOf, HARNESS_CREDENTIAL_ENV } from '../credential-source.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { canonicalAssetReference } from '../paths.ts';
@@ -212,6 +212,22 @@ const sharedNameFor = (registry: Readonly<Record<string, string>>, reference: st
     ([, path]) => canonicalAssetReference(path) === canonicalAssetReference(reference),
   )?.[0];
 
+/**
+ * The version-2 item a version-1 skills reference names, or `undefined` when it has no spelling there.
+ *
+ * Version 1 lists references (`./skills/review`, as docs/fleet-sharing.md documents); a version-2
+ * skills component lists bare item names. A bare name is already one, and a reference directly under
+ * `skills/` is its last segment. Anything else — another directory, an absolute path, a nested item —
+ * names no item the store can hold, so it is reported rather than turned into a name that would make
+ * the whole document unreadable.
+ */
+const skillItemOf = (reference: string): string | undefined => {
+  const segments = canonicalAssetReference(reference).split('/');
+  const item =
+    segments.length === 1 ? segments[0] : segments.length === 2 && segments[0] === 'skills' ? segments[1] : undefined;
+  return item !== undefined && SafeNameSchema.safeParse(item).success ? item : undefined;
+};
+
 const isAgentRuntime = (account: ResolvedAccount, routeMode: string | undefined): boolean =>
   account.mode === 'auto' || (account.variant === 'auto' && routeMode === undefined);
 
@@ -371,8 +387,17 @@ export function convertLegacyConfig(config: FleetConfig, options: LegacyConversi
       layers.push(`instructions/${name}`);
     }
 
-    if (account.skills !== undefined && account.skills.length > 0) {
-      const items = [...new Set(account.skills)];
+    const items: string[] = [];
+    for (const reference of account.skills ?? []) {
+      const item = skillItemOf(reference);
+      if (item === undefined) {
+        note(
+          [...path],
+          `skill "${reference}" is not a skill in the skills folder, which is the only place a skill can be selected from, so it is not carried`,
+        );
+      } else if (!items.includes(item)) items.push(item);
+    }
+    if (items.length > 0) {
       const name = skills.use(keyOf([...items].sort()), `${runtime}-skills`, { items }, harness);
       layers.push(`skills/${name}`);
     }
