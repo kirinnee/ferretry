@@ -582,6 +582,7 @@ describe('PairingService redemption', () => {
       list: async () => [],
       remove: async () => false,
       touch: async () => undefined,
+      setGrants: async () => false,
     };
     const service = new PairingService({
       daemonId: DAEMON_ID,
@@ -890,6 +891,7 @@ describe('PairingDeviceRegistry', () => {
     createdAt: '2026-08-03T12:00:00.000Z',
     lastSeenAt: '2026-08-03T12:00:00.000Z',
     publicKey: DEVICE_KEY,
+    grants: DEFAULT_DEVICE_GRANTS,
     ...overrides,
   });
 

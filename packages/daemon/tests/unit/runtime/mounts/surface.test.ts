@@ -97,6 +97,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   push: {
     publicKey: async () => 'the-application-server-key',
     list: async () => [],
+    listFor: async () => [],
+    ownerOf: async () => undefined,
     register: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -447,6 +449,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   grants: grantSubsystem(),
+  deviceGrants: { mayWiden: () => DEFAULT_CAPABILITY_GRANTS, change: async () => 'not-found' as const },
 });
 
 describe('the mounted daemon surface', () => {

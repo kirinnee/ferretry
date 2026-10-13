@@ -14,6 +14,7 @@ import { StatePushRepository, StateVapidKeys, WebPushFetchTransport } from '../.
 import { ApiDispatcher, type ApiRequest, ApiRouter, headersFrom, queryFrom } from '../../../src/lib/api/index.ts';
 import {
   CapabilityGrantService,
+  DeviceGrantService,
   createFoundationPaths,
   DEFAULT_CAPABILITY_GRANTS,
   PairedPushDevices,
@@ -169,10 +170,25 @@ async function daemon(label: string) {
     clientName: 'fy',
   });
   await grants.refresh();
+  const deviceGrants = new DeviceGrantService({
+    devices: pairing,
+    daemonWide: () => grants.enforced(),
+    audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+    clock: { nowMs: () => Date.now() },
+    clientName: 'fy',
+  });
 
   const surface = new ApiDispatcher(
-    new ApiRouter([...pairingRoutes(pairing), ...pushRoutes(push)]),
-    { admin: ADMIN, warden: 'warden-secret', devices: { has: deviceId => credentials.get(deviceId) !== undefined } },
+    new ApiRouter([...pairingRoutes(pairing, deviceGrants), ...pushRoutes(push, grants)]),
+    {
+      admin: ADMIN,
+      warden: 'warden-secret',
+      // The REAL registry's grants: a device paired here holds the default, `fleet.use` only.
+      devices: {
+        has: deviceId => credentials.get(deviceId) !== undefined,
+        grants: deviceId => credentials.get(deviceId)?.grants,
+      },
+    },
     grants,
     undefined,
     stepUp,
@@ -345,11 +361,10 @@ describe('push enrolment over the real route surface', () => {
     should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).be.empty();
   });
 
-  it('should refuse a paired browser that has not confirmed with its passkey, and store nothing', async () => {
-    // THE GOVERNED ENROLMENT, HONESTLY. Enrolment is `pairing.use`, which the policy holds behind a
-    // step-up for a caller that did not arrive on the host. The same device, route and body succeed
-    // above once confirmed; here the only thing that differs is the witness, so the refusal is the
-    // step-up gate and nothing else.
+  it('should let a DEFAULT paired browser enrol ITSELF with no passkey confirmation (B5)', async () => {
+    // Self-enrolment grants nothing — it lets this daemon reach the device that asked — so it needs no
+    // `pairing.use` and no step-up. The device here holds the default, `fleet.use` only, and has NOT
+    // confirmed with its passkey: it still gets alerts. This used to be the declared B3 GAP.
     const world = await daemon('push-unconfirmed');
     const browser = await pair(world, 'Pixel 8');
     world.stepUp.confirmed = false;
@@ -359,18 +374,16 @@ describe('push enrolment over the real route surface', () => {
       prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
     });
 
-    const refused = await world.surface.dispatch(
+    const enrolled = await world.surface.dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', device: browser.device, body }),
     );
-    world.stepUp.confirmed = true;
     const listed = await world.surface.dispatch(
       request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
 
-    should(refused.status).equal(403);
-    should(JSON.parse(refused.body).code).equal('grant_step_up_required');
-    should(world.pushService.received).be.empty();
-    should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).be.empty();
+    should(enrolled.status).equal(201);
+    should(world.pushService.received).have.length(1);
+    should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).have.length(1);
   });
 
   it('should refuse the host’s own token an enrolment, having no browser to enrol', async () => {
