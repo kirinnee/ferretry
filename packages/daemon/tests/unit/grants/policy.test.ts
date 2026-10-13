@@ -244,7 +244,10 @@ describe('the per-capability decision matrix', () => {
         for (const grants of [undefined, DEFAULT_CAPABILITY_GRANTS, SHUT]) {
           for (const stepUp of [true, false]) {
             for (const governed of [true, false]) {
-              seen.add(decideCapability({ capability, axis }, evaluation({ grants, stepUp, governed })).refusal);
+              for (const device of [undefined, DEFAULT_CAPABILITY_GRANTS, SHUT]) {
+                const context = evaluation({ grants, stepUp, governed, ...(device === undefined ? {} : { device }) });
+                seen.add(decideCapability({ capability, axis }, context).refusal);
+              }
             }
           }
         }

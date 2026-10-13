@@ -8,6 +8,7 @@ import {
   DaemonIdSchema,
   DaemonNameSchema,
   DEVICE_IDLE_EXPIRY_DAYS,
+  FULL_DEVICE_GRANTS,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   type PairedDevice,
@@ -17,6 +18,7 @@ import {
   PairingCodeMintResponseSchema,
   PairingCodeSchema,
   type PairingCodeStatusResponse,
+  type PairingGrantSet,
   type PairingId,
   PairingIdSchema,
   type PairingReach,
@@ -177,6 +179,11 @@ interface ActivePairing {
   readonly pairingId: PairingId;
   readonly code: PairingCode;
   readonly expiresAtMs: number;
+  /**
+   * What the device that redeems this code will hold — chosen at the mint and kept HERE, with the code,
+   * so the link carries nothing extra and a redemption cannot ask for more than was minted.
+   */
+  readonly grants: PairingGrantSet;
   attempts: number;
   /**
    * WRONG GUESSES THAT ARRIVED OVER A RENDEZVOUS, counted apart from `attempts` on purpose.
@@ -375,7 +382,7 @@ export class PairingService {
    * grant AND a live passkey step-up from the device already paired. The code itself is single-use and
    * short-lived, so there is no machine-level precondition left for this method to check.
    */
-  mint(): PairingCodeMintResponse {
+  mint(grants: PairingGrantSet = 'default'): PairingCodeMintResponse {
     if (this.active !== undefined) this.expire(this.active);
     while (this.observations.size >= OBSERVATION_LIMIT) {
       const oldest = this.observations.keys().next().value;
@@ -386,7 +393,7 @@ export class PairingService {
     const code = PairingCodeSchema.parse(this.options.cryptography.pairingCode());
     const expiresAtMs = this.options.clock.now() + PAIRING_CODE_TTL_SECONDS * 1_000;
     const expiresAt = instant(expiresAtMs);
-    this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false };
+    this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false, grants };
     this.observations.set(pairingId, { pairingId, status: 'pending', expiresAt });
 
     return PairingCodeMintResponseSchema.parse({
@@ -397,6 +404,7 @@ export class PairingService {
       daemonId: this.daemonId,
       daemonName: this.daemonName,
       ...this.#link(code),
+      grants,
     });
   }
 
@@ -576,10 +584,11 @@ export class PairingService {
    * by the caller (`DeviceGrantService`); this only records it.
    */
   async setDeviceGrants(id: string, grants: CapabilityGrants): Promise<boolean> {
-    const record = this.options.credentials.get(id);
-    if (record === undefined) return false;
+    if (this.options.credentials.get(id) === undefined) return false;
     if (!(await this.options.devices.setGrants(id, grants))) return false;
-    this.options.credentials.refresh({ ...record, grants });
+    // The LATEST record, re-read after the write: a sighting that landed meanwhile must survive too.
+    const latest = this.options.credentials.get(id);
+    if (latest !== undefined) this.options.credentials.refresh({ ...latest, grants });
     return true;
   }
 
@@ -702,8 +711,9 @@ export class PairingService {
       createdAt,
       lastSeenAt: createdAt,
       publicKey,
-      // Least privilege: a device starts able to read the fleet and chat, and nothing more (B5).
-      grants: DEFAULT_DEVICE_GRANTS,
+      // Least privilege: a device starts able to read the fleet and chat, and nothing more (B5) — unless
+      // the code was minted `--full` at the machine.
+      grants: active.grants === 'full' ? FULL_DEVICE_GRANTS : DEFAULT_DEVICE_GRANTS,
     };
 
     try {

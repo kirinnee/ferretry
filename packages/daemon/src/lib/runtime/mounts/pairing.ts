@@ -56,6 +56,7 @@ import {
   PairingCodeMintResponseSchema,
   type PairingCodeStatusResponse,
   PairingCodeStatusResponseSchema,
+  type PairingGrantSet,
   type PairingId,
   PairingIdSchema,
   STEP_UP_REQUIRED_CODE,
@@ -77,8 +78,8 @@ import {
 import { GrantError } from '../../grants/index.ts';
 
 export interface PairingSubsystem {
-  /** A live code, replacing any code still outstanding. */
-  mint(): PairingCodeMintResponse;
+  /** A live code, replacing any code still outstanding, for a device that will hold `grants`. */
+  mint(grants: PairingGrantSet): PairingCodeMintResponse;
   status(pairingId: PairingId): PairingCodeStatusResponse | undefined;
   /** Ends a minted code early. `undefined` when this daemon never minted that id. */
   revoke(pairingId: PairingId): PairingCodeStatusResponse | undefined;
@@ -174,9 +175,18 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
-      handle: async ({ request }) => {
-        await parseOptionalBody(request, PairingCodeMintRequestSchema);
-        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint()), 201);
+      handle: async context => {
+        const body = await parseOptionalBody(context.request, PairingCodeMintRequestSchema);
+        const grants = body?.grants ?? 'default';
+        // A `full` code gives the next device every capability, which no remote device holds to give —
+        // so it is minted only AT THE MACHINE, by the one rule every host-locality decision reads.
+        if (grants === 'full' && !arrivedOnHost(context.request, context.credential?.tokenClass === 'admin'))
+          return errorResponse(
+            403,
+            'a code that gives a new device every capability can only be minted at the machine itself — run `pair --full` there',
+            'grant_forbidden',
+          );
+        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint(grants)), 201);
       },
     },
     {

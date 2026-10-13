@@ -4,6 +4,7 @@ import {
   type PairedDevice,
   type PairingCodeMintResponse,
   type PairingCodeStatusResponse,
+  type PairingGrantSet,
   type PairingId,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -53,8 +54,12 @@ class FakePairing implements PairingSubsystem {
   /** How many codes the subsystem was actually asked for, so a refusal at the boundary is visible. */
   mints = 0;
 
-  mint(): PairingCodeMintResponse {
+  /** What each mint asked a redeeming device to hold. */
+  readonly grantSets: PairingGrantSet[] = [];
+
+  mint(grants: PairingGrantSet): PairingCodeMintResponse {
     this.mints += 1;
+    this.grantSets.push(grants);
     return minted;
   }
 
@@ -332,6 +337,8 @@ describe('pairing routes', () => {
       devices: [device(deviceOneId, 'Pixel 8'), device(deviceTwoId, 'iPad')],
       hostLocal: true,
       thisDeviceId: deviceOneId,
+      // At the machine every axis may be given to a device.
+      mayWiden: DEFAULT_CAPABILITY_GRANTS,
     });
     // The host's admin credential is not a paired device, so there is no grant of its own to mark.
     should(jsonBody(fromHostCli).thisDeviceId).be.undefined();
@@ -374,6 +381,8 @@ describe('pairing routes', () => {
       devices: [device(deviceOneId, 'Pixel 8')],
       hostLocal: true,
       thisDeviceId: deviceOneId,
+      // At the machine every axis may be given to a device.
+      mayWiden: DEFAULT_CAPABILITY_GRANTS,
     });
     should(subject.revokedDevices).deepEqual([deviceTwoId]);
     // Already gone is a 404 rather than a cheerful success: "revoked" and "there was nothing here"
@@ -415,5 +424,34 @@ describe('pairing routes', () => {
 
     // Assert
     should([minting.status, listing.status]).deepEqual([403, 403]);
+  });
+
+  it('should mint a full-access code only at the machine, and a default one otherwise', async () => {
+    // `fy pair --full`: the redeeming device gets every capability, which no remote device holds to
+    // give — so only a caller that arrived on the host may ask for one. The rule is `arrivedOnHost`.
+    // Arrange
+    const subject = new FakePairing();
+    const surface = await mount(subject, true, { held: () => true });
+    const full = JSON.stringify({ grants: 'full' });
+
+    // Act
+    const atHost = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin, body: full }),
+    );
+    const remote = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false, body: full }),
+    );
+    // A loopback peer without the host proof (a local proxy) is not the machine either.
+    const proxied = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: true, body: full }),
+    );
+    const plain = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false }),
+    );
+
+    // Assert
+    should([atHost.status, remote.status, proxied.status, plain.status]).deepEqual([201, 403, 403, 201]);
+    should(jsonBody(remote).code).equal('grant_forbidden');
+    should(subject.grantSets).deepEqual(['full', 'default']);
   });
 });

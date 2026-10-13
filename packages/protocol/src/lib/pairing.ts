@@ -213,8 +213,26 @@ export const PairingResponseSchema = z.strictObject({
 });
 export type PairingResponse = z.infer<typeof PairingResponseSchema>;
 
-/** Minting is intentionally bodyless: the redeeming device supplies its own bounded name. */
-export const PairingCodeMintRequestSchema = z.strictObject({});
+/**
+ * What a device that redeems this code will hold (`docs/pairing.md`, "What a new device may do").
+ *
+ * - `default` — `DEFAULT_DEVICE_GRANTS`, `fleet.use` only: least privilege, widened later per device.
+ * - `full` — every capability on both axes (`fy pair --full`), for the owner's own browser, which would
+ *   otherwise need a grant per capability. The daemon-wide document still applies on top, and every
+ *   dangerous act still needs the passkey step-up. Minting one is HOST-ONLY (`arrivedOnHost`): a remote
+ *   device could otherwise mint a code that gives a new device more than it holds itself.
+ *
+ * It travels with the CODE, held by the daemon. The QR and the link carry nothing extra, so the fragment
+ * stays the one-version `v1` shape and a code says nothing about what it grants to whoever reads it.
+ */
+export const PAIRING_GRANT_SETS = ['default', 'full'] as const;
+export type PairingGrantSet = (typeof PAIRING_GRANT_SETS)[number];
+export const PairingGrantSetSchema = z.enum(PAIRING_GRANT_SETS);
+
+/** Minting names no device — the redeeming device supplies its own bounded name — only what it will hold. */
+export const PairingCodeMintRequestSchema = z.strictObject({
+  grants: PairingGrantSetSchema.optional(),
+});
 export type PairingCodeMintRequest = z.infer<typeof PairingCodeMintRequestSchema>;
 
 /**
@@ -296,6 +314,12 @@ const mintedFields = z.strictObject({
    * before any daemon writes it.
    */
   discoveredRelayUrl: SocketEndpointSchema.optional(),
+  /**
+   * What the device that redeems this code will hold. Host-facing, like the field above, so a screen
+   * can say "this code gives full access" beside it; absent from a daemon that predates the choice,
+   * which is read as `default`.
+   */
+  grants: PairingGrantSetSchema.optional(),
 });
 type MintedFields = z.infer<typeof mintedFields>;
 

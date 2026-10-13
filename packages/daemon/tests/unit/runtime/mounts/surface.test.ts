@@ -474,7 +474,8 @@ describe('the mounted daemon surface', () => {
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
-      5; // the passkey step-up: this device's passkeys, registration and step-up, each with its options
+      5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options
+      1; // one device's own grants, changed (B5)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes });
     should(
@@ -499,6 +500,8 @@ describe('the mounted daemon surface', () => {
       // that returns a device token or its digest — the list is a projection with no field for one.
       'GET /v1/pair/devices',
       'DELETE /v1/pair/devices/:deviceId',
+      // One device's own grants (B5): widen at the machine, or from a device holding what it grants.
+      'PATCH /v1/pair/devices/:deviceId/grants',
       // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
       // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
       // list is a projection with no field for one.
