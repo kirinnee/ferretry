@@ -148,8 +148,7 @@ function ScanGate({
 }
 
 export function MachineFirstRun(props: MachineFirstRunProps) {
-  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, now } =
-    props;
+  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, now } = props;
   const access = useSetupAccess({ connection, createClient, ...(now === undefined ? {} : { now }) });
   const { changes } = access;
   const [scan, setScan] = useState<FleetSetupScan | null>(null);

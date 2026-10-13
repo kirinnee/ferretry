@@ -251,7 +251,9 @@ describe('ComponentsTab — delete (E21)', () => {
   });
 
   it('keeps the page when the daemon refuses the delete', async () => {
-    const machine = scriptedMachine({ stage: new FyHttpError('This change conflicts with the setup.', 409, 'fleet_change_conflict') });
+    const machine = scriptedMachine({
+      stage: new FyHttpError('This change conflicts with the setup.', 409, 'fleet_change_conflict'),
+    });
     const root = await open(machine);
     await toDetail(root, 'mcp', 'mcp/notes');
     await click(root, '[data-component-delete]');

@@ -185,7 +185,12 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
 }
 
 const governance = (confirmChange: boolean): CallerGovernance =>
-  ({ governed: confirmChange, passwordSet: true, confirmChange, decide: () => ({ allowed: true, refusal: 'granted' }) }) as never;
+  ({
+    governed: confirmChange,
+    passwordSet: true,
+    confirmChange,
+    decide: () => ({ allowed: true, refusal: 'granted' }),
+  }) as never;
 
 const refusal = async (work: Promise<unknown>, code: string): Promise<FleetCatalogRefusal> => {
   const error = await work.then(
@@ -245,7 +250,11 @@ describe('the catalogue reads', () => {
     const [lockedView, confirming] = [await service.machine(locked), await service.machine(governance(true))];
 
     // Assert — the confirmation is a fact about the machine, so it is reported even while locked.
-    should(lockedView.authority).deepEqual({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' });
+    should(lockedView.authority).deepEqual({
+      mayApply: false,
+      applyRefusal: 'locked',
+      confirmation: 'operator-password',
+    });
     should(confirming.authority).deepEqual({
       mayApply: true,
       applyRefusal: 'granted',

@@ -58,10 +58,10 @@ export const startCredentialSignIn = async (
   unlock?: string,
 ): Promise<CredentialLoginFlow> =>
   await client.request(FLEET_LOGIN_PATH, HarnessLoginFlowSchema, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
-      body: JSON.stringify(HarnessLoginStartRequestSchema.parse(request)),
-    });
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    body: JSON.stringify(HarnessLoginStartRequestSchema.parse(request)),
+  });
 
 /** Re-reads one live credential sign-in. Polled, because the person is acting somewhere this browser cannot see. */
 export const readCredentialSignIn = async (
@@ -78,9 +78,9 @@ export const cancelCredentialSignIn = async (
   unlock?: string,
 ): Promise<CredentialLoginFlow> =>
   await client.request(flowPath(flowId), HarnessLoginFlowSchema, {
-      method: 'DELETE',
-      headers: unlockHeaders(unlock),
-    });
+    method: 'DELETE',
+    headers: unlockHeaders(unlock),
+  });
 
 /**
  * Forwards the one value a person brings back.

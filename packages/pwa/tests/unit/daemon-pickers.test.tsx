@@ -1404,7 +1404,12 @@ describe('DaemonAccountPicker', () => {
    */
   it('counts only the harness rows on screen, while still disclosing the whole-fleet scope', async () => {
     const wholeFleet = {
-      health: new Map([account().credentialId, codex.credentialId, 'login-claude-auto-three'].map(id => [id, healthRow({ credentialId: id })])),
+      health: new Map(
+        [account().credentialId, codex.credentialId, 'login-claude-auto-three'].map(id => [
+          id,
+          healthRow({ credentialId: id }),
+        ]),
+      ),
       error: null,
     };
     const store = new DaemonAccountPickerStore({

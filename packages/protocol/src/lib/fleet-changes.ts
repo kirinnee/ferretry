@@ -252,7 +252,6 @@ export const FleetSharedHistorySummarySchema = z.strictObject({
 });
 export type FleetSharedHistorySummary = z.infer<typeof FleetSharedHistorySummarySchema>;
 
-
 /** Residue a committed apply left behind. Never a failure, but it does need clearing. */
 const residueShape = {
   /**

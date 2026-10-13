@@ -658,20 +658,14 @@ describe('Add runtime: Name', () => {
         ...READS(),
         'POST /v1/fleet/proposals': (call: Call) =>
           refuse
-            ? new FyHttpError(
-                'This change conflicts with the setup on this machine.',
-                409,
-                'fleet_change_conflict',
-              )
+            ? new FyHttpError('This change conflicts with the setup on this machine.', 409, 'fleet_change_conflict')
             : stagedFrom(call),
         [APPLY]: APPLIED,
       },
     });
     await click(view.container, '[data-change-submit]');
     await waitFor(view.container, '[data-change-refusal]');
-    expect(text(view.container, '[data-change-refusal]')).toBe(
-      'This change conflicts with the setup on this machine.',
-    );
+    expect(text(view.container, '[data-change-refusal]')).toBe('This change conflicts with the setup on this machine.');
     expect(view.container.querySelector('[data-add-runtime-step="name"]')).not.toBeNull();
     expect(draftOf(view.container).made).toBeNull();
     refuse = false;

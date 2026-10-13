@@ -216,5 +216,4 @@ describe('redactProposal', () => {
     // credential for this shape to have disclosed the existence of.
     should(actual).not.have.property('approval');
   });
-
 });

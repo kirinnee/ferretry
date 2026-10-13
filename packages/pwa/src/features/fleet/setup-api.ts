@@ -48,4 +48,3 @@ export const installFleetTools = async (
 /** The Clone bundle a source machine exports: no credential, no history. */
 export const readFleetExport = async (client: FleetClient, unlock?: string): Promise<FleetCloneBundle> =>
   await client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, { headers: unlockHeaders(unlock) });
-

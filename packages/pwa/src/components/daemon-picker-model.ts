@@ -187,8 +187,7 @@ export const sameHarnessAccountOptions = (
  */
 export const sessionCapableAccountOptions = (
   options: readonly AccountPickerOption[] | null,
-): readonly AccountPickerOption[] | null =>
-  options === null ? null : options.filter(option => option.agent);
+): readonly AccountPickerOption[] | null => (options === null ? null : options.filter(option => option.agent));
 
 /**
  * The account a new-session form fills in before anybody chooses: the first one

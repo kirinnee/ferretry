@@ -55,10 +55,7 @@ export const readFleetComponents = async (client: FleetClient, unlock?: string):
   await client.request(FLEET_COMPONENTS_PATH, FleetComponentCatalogSchema, { headers: unlockHeaders(unlock) });
 
 /** Every profile with its layers, its stack per harness and its conflicts. */
-export const readFleetProfiles = async (
-  client: FleetClient,
-  unlock?: string,
-): Promise<FleetLayeredProfileCatalog> =>
+export const readFleetProfiles = async (client: FleetClient, unlock?: string): Promise<FleetLayeredProfileCatalog> =>
   await client.request(FLEET_PROFILES_PATH, FleetLayeredProfileCatalogSchema, {
     headers: unlockHeaders(unlock),
   });
@@ -99,11 +96,15 @@ export const applyFleetChange = async (
   request: FleetProposalApplyRequest = {},
   unlock?: string,
 ): Promise<FleetAccountChangeOutcome> =>
-  await client.request(`${FLEET_PROPOSALS_PATH}/${encodeURIComponent(changeId)}/apply`, FleetAccountChangeOutcomeSchema, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
-    body: JSON.stringify(FleetProposalApplyRequestSchema.parse(request)),
-  });
+  await client.request(
+    `${FLEET_PROPOSALS_PATH}/${encodeURIComponent(changeId)}/apply`,
+    FleetAccountChangeOutcomeSchema,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+      body: JSON.stringify(FleetProposalApplyRequestSchema.parse(request)),
+    },
+  );
 
 /**
  * A profile's layers before it is named or saved, resolved per harness exactly as a saved one is, with

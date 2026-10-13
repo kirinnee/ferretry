@@ -151,11 +151,7 @@ describe('applyAccountChange', () => {
   });
 
   it('a refused change is one sentence in the daemon’s own words, with its code', async () => {
-    const off = new FyHttpError(
-      'This change conflicts with the setup on this machine.',
-      409,
-      'fleet_change_conflict',
-    );
+    const off = new FyHttpError('This change conflicts with the setup on this machine.', 409, 'fleet_change_conflict');
     expect(await applyAccountChange(scriptedClient({ '/v1/fleet/proposals': off }), CHANGE, attempt())).toEqual({
       kind: 'refused',
       sentence: 'This change conflicts with the setup on this machine.',

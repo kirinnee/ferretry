@@ -588,10 +588,7 @@ const roster = (catalog: DaemonAccountPickerPort['catalog'] = async () => ({ acc
   let probes = 0;
   const snapshot = {
     health: new Map([
-      [
-        atomi.credentialId,
-        pickerHealth(atomi.credentialId, 'ready', { lastCheckedAt: new Date(1).toISOString() }),
-      ],
+      [atomi.credentialId, pickerHealth(atomi.credentialId, 'ready', { lastCheckedAt: new Date(1).toISOString() })],
     ]),
     error: null,
   };

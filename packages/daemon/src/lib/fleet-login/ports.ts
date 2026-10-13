@@ -71,4 +71,3 @@ export type HarnessLoginSpawn = (spec: HarnessLoginChildSpec) => HarnessLoginChi
 export interface HarnessLoginTimer {
   after(milliseconds: number, run: () => void): () => void;
 }
-

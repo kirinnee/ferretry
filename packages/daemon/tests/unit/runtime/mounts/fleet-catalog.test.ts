@@ -181,9 +181,7 @@ describe('the fleet catalogue mount', () => {
     const body = { layers: ['instructions/main', 'profile/ghost'], editing: 'work' };
 
     // Act
-    const previewed = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/profiles/preview', JSON.stringify(body)),
-    );
+    const previewed = await dispatcher(subsystem).dispatch(post('/v1/fleet/profiles/preview', JSON.stringify(body)));
     const bad = await dispatcher(subsystem).dispatch(
       post('/v1/fleet/profiles/preview', JSON.stringify({ layers: 'instructions/main' })),
     );
@@ -237,7 +235,10 @@ describe('the fleet catalogue mount', () => {
         throw new FleetCatalogRefusal('fleet_change_unknown', 'no change by that id');
       },
       apply: async () => {
-        throw new FleetCatalogRefusal('fleet_change_stale', 'the configuration changed after this change was previewed');
+        throw new FleetCatalogRefusal(
+          'fleet_change_stale',
+          'the configuration changed after this change was previewed',
+        );
       },
     });
 

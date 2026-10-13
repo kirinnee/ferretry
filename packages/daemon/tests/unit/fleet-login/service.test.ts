@@ -337,7 +337,10 @@ describe('starting a harness login', () => {
 
     // Act
     const actual = await refusalOf(async () =>
-      subject.service.start({ credentialId: ENVIRONMENT_CREDENTIAL, operatorPassword: 'the operator password' }, BROWSER),
+      subject.service.start(
+        { credentialId: ENVIRONMENT_CREDENTIAL, operatorPassword: 'the operator password' },
+        BROWSER,
+      ),
     );
 
     // Assert
@@ -455,7 +458,9 @@ describe('the per-change confirmation', () => {
 
     // Assert
     should(actual.code).equal('fleet_login_unauthorized');
-    should(actual.message).equal(`that is not this machine's operator password, so "${CLAUDE_CREDENTIAL}" was not signed in`);
+    should(actual.message).equal(
+      `that is not this machine's operator password, so "${CLAUDE_CREDENTIAL}" was not signed in`,
+    );
   });
 
   it('should name the host remedy when the shared attempt budget is spent', async () => {
@@ -515,7 +520,9 @@ describe('the per-change confirmation', () => {
     const subject = fixture({ confirmChange: async () => ({ kind: 'refused', reason: 'wrong-password' }) });
 
     // Act
-    await refusalOf(async () => subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'no' }, BROWSER));
+    await refusalOf(async () =>
+      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'no' }, BROWSER),
+    );
     await subject.settle();
 
     // Assert

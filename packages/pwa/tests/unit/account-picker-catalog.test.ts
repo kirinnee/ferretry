@@ -10,13 +10,7 @@ import {
   recentProjectPaths,
 } from '../../src/lib/account-picker-catalog.ts';
 import { sessionView } from '../support/sessions.ts';
-import {
-  credentialList,
-  credentialStatus,
-  credentialView,
-  runtimeCatalog,
-  runtimeView,
-} from './picker-support.ts';
+import { credentialList, credentialStatus, credentialView, runtimeCatalog, runtimeView } from './picker-support.ts';
 
 const runtimes = runtimeCatalog(
   runtimeView({ wrapper: 'claude-auto-a', name: 'Claude Atelier' }),
@@ -191,7 +185,10 @@ describe('readAccountPickerHealth', () => {
     expect(fixture.paths).toEqual(['/v1/fleet/credentials']);
     expect(fixture.methods).toEqual([undefined]);
     expect(result.error).toBeNull();
-    expect(result.health.get('login-claude-auto-a')).toMatchObject({ credentialId: 'login-claude-auto-a', word: 'ready' });
+    expect(result.health.get('login-claude-auto-a')).toMatchObject({
+      credentialId: 'login-claude-auto-a',
+      word: 'ready',
+    });
     expect(result.health.get('login-codex-auto-b')?.word).toBe('needs_sign_in');
   });
 

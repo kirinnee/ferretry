@@ -1,5 +1,10 @@
 import { type FleetManifest, manifestRuntimes, wrapperNameOf } from '@ferretry/fleet';
-import type { AccountUsage, FleetCredentialList, FleetCredentialUsageWindow, FleetCredentialView } from '@ferretry/protocol';
+import type {
+  AccountUsage,
+  FleetCredentialList,
+  FleetCredentialUsageWindow,
+  FleetCredentialView,
+} from '@ferretry/protocol';
 import type { UsageSourcePort } from './types.ts';
 
 /**

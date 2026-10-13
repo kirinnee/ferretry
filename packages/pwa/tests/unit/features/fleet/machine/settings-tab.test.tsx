@@ -290,7 +290,6 @@ describe('MachineSettingsTab', () => {
     });
   });
 
-
   it('states the machine facts', async () => {
     await withTab({}, async ({ q }) => {
       const facts = must(q('[data-setup-section="facts"]'), 'facts');

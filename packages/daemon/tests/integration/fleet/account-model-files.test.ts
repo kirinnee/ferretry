@@ -13,7 +13,12 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseAccountModel, RETIRED_FLEET_CONFIG_SENTENCE, RetiredFleetConfigError, renderConfig } from '@ferretry/fleet';
+import {
+  parseAccountModel,
+  RETIRED_FLEET_CONFIG_SENTENCE,
+  RetiredFleetConfigError,
+  renderConfig,
+} from '@ferretry/fleet';
 import should from 'should';
 import {
   documentRevision,
@@ -124,23 +129,26 @@ describe('reading the account model from disk', () => {
     ['no version', 'agents: []\n'],
     ['empty', ''],
     ['an empty mapping', '{}\n'],
-  ])('should refuse a configuration in the retired format (%s) and leave it byte-for-byte untouched', async (_, text) => {
-    // Arrange
-    const root = await temporary();
-    const file = path.join(root, 'config.yaml');
-    await writeFile(file, text);
+  ])(
+    'should refuse a configuration in the retired format (%s) and leave it byte-for-byte untouched',
+    async (_, text) => {
+      // Arrange
+      const root = await temporary();
+      const file = path.join(root, 'config.yaml');
+      await writeFile(file, text);
 
-    // Act
-    const error = await readAccountDocument(file).then(
-      () => undefined,
-      (thrown: unknown) => thrown,
-    );
+      // Act
+      const error = await readAccountDocument(file).then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
 
-    // Assert — refused rather than converted, with the sentence that says how to set the machine up again.
-    should(error).be.instanceOf(RetiredFleetConfigError);
-    should((error as Error).message).equal(RETIRED_FLEET_CONFIG_SENTENCE(file));
-    should(await readFile(file, 'utf8')).equal(text);
-  });
+      // Assert — refused rather than converted, with the sentence that says how to set the machine up again.
+      should(error).be.instanceOf(RetiredFleetConfigError);
+      should((error as Error).message).equal(RETIRED_FLEET_CONFIG_SENTENCE(file));
+      should(await readFile(file, 'utf8')).equal(text);
+    },
+  );
 
   it('should throw for a configuration that exists and cannot be read', async () => {
     // Arrange

@@ -14,11 +14,7 @@ import {
   FleetWriteOperationSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import {
-  applyFailureSummary,
-  applyResultSummary,
-  operationSummary,
-} from '../../../src/lib/fleet/wire.ts';
+import { applyFailureSummary, applyResultSummary, operationSummary } from '../../../src/lib/fleet/wire.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 

@@ -165,8 +165,13 @@ describe('FleetApplyOutcomeSchema', () => {
   it('should refuse the retired host-preparation outcome, which nothing produces any more', () => {
     // Act + Assert — the scaffold that reported it is gone, so the wire no longer describes it.
     should(
-      FleetApplyOutcomeSchema.safeParse({ outcome: 'initialized', created: [], kept: [], directories: [], pathEntry: 'x' })
-        .success,
+      FleetApplyOutcomeSchema.safeParse({
+        outcome: 'initialized',
+        created: [],
+        kept: [],
+        directories: [],
+        pathEntry: 'x',
+      }).success,
     ).be.false();
   });
 });

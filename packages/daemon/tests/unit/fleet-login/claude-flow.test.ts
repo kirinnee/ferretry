@@ -41,7 +41,11 @@ const BASE = {
 
 const awaiting: ClaudeLoginStage = { stage: 'awaiting-code', verificationUrl: CLAUDE_URL };
 const complete: ClaudeLoginStage = { stage: 'complete' };
-const failed: ClaudeLoginStage = { stage: 'failed', reason: 'the child exited', remedy: 'run `fy credential signin claude-kirin`' };
+const failed: ClaudeLoginStage = {
+  stage: 'failed',
+  reason: 'the child exited',
+  remedy: 'run `fy credential signin claude-kirin`',
+};
 
 describe('Claude’s own login argv', () => {
   it('should launch the subcommand verified to work with piped stdio, not the slash command', () => {

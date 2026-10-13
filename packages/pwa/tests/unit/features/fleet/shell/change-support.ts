@@ -32,7 +32,6 @@ export const machineAnswer = (overrides: Partial<FleetMachineAuthority> = {}): F
   authority: authority(overrides),
 });
 
-
 export const STAGED: FleetAccountChangeView = {
   id: CHANGE_ID,
   revision: 'absent',

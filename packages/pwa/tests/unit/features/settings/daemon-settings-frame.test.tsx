@@ -15,7 +15,10 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
-import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from '../../../../src/features/settings/daemon-settings-frame.tsx';
+import {
+  DaemonSettingsFrame,
+  type DaemonSettingsTabDefinition,
+} from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
@@ -119,4 +122,3 @@ describe('daemon settings panel rail', () => {
     run(() => view.unmount());
   });
 });
-

@@ -207,101 +207,100 @@ export function DaemonSettingsFrame({
   onRemoveDaemon,
 }: DaemonSettingsFrameProps) {
   const tabs = useMemo<readonly DaemonSettingsTabDefinition[]>(
-    () =>
-      [
-        {
-          id: 'warden',
-          label: 'Warden',
-          description: 'Supervision, account failover, and policy for this daemon.',
-          Surface: ({ connection: activeConnection }) => (
-            <WardenSettingsTab
-              connection={activeConnection}
-              readStatus={readWardenStatus}
-              createWardenClient={createWardenClient}
-            />
-          ),
-        },
-        {
-          id: 'secrets',
-          label: 'Secrets',
-          description: 'Credentials agents can use without ever holding one.',
-          Surface: ({ connection: activeConnection }) => (
-            <SecretsSurface
-              connection={activeConnection}
-              {...(createSecretClient ? { createClient: createSecretClient } : {})}
-            />
-          ),
-        },
-        {
-          /**
-           * Adding a device, immediately after the two panels that own this machine's own configuration.
-           *
-           * It is here rather than in a global Settings section because a pairing code belongs to ONE
-           * machine: the code, the device list and every revoke are read from this tab's connection, so a
-           * reader can never revoke a device on the daemon they just switched away from.
-           */
-          id: 'devices',
-          label: 'Add a device',
-          description: 'Pair another phone or browser with this machine, and revoke one.',
-          Surface: ({ connection: activeConnection }) => (
-            <AddDeviceSurface
-              connection={activeConnection}
-              {...(createPairingClient ? { createClient: createPairingClient } : {})}
-            />
-          ),
-        },
-        {
-          /**
-           * The operator's limits, second, because it is the panel that explains why another panel's
-           * control is refused. A reader who meets a disabled control in Warden or Fleet is sent here,
-           * so it must not be buried after the tabs that send them.
-           */
-          id: 'grants',
-          label: 'What devices may do',
-          description: 'Per-capability limits for callers that are not on this machine.',
-          Surface: ({ connection: activeConnection }) => (
-            <GrantsSurface
-              connection={activeConnection}
-              {...(createGrantClient ? { createClient: createGrantClient } : {})}
-            />
-          ),
-        },
-        // A product-owned Doctor surface belongs with the daemon configuration,
-        // before the connection carrier and browser-local pairing diagnostics.
-        ...additionalTabs,
-        {
-          id: 'carrier',
-          label: 'Carrier',
-          description: 'The measured path this daemon is using right now.',
-          Surface: () => <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />,
-        },
-        {
-          id: 'host-checks',
-          label: 'Host checks',
-          description: 'Reachability and this browser’s pairing for this daemon.',
-          Surface: () => {
-            if (connectionRecord && probeDaemon && onRenameDaemon && onRemoveDaemon)
-              return (
-                <DaemonHostChecks
-                  connection={connectionRecord}
-                  probeDaemon={probeDaemon}
-                  carrier={carrier}
-                  onRenameDaemon={onRenameDaemon}
-                  onRemoveDaemon={onRemoveDaemon}
-                />
-              );
+    () => [
+      {
+        id: 'warden',
+        label: 'Warden',
+        description: 'Supervision, account failover, and policy for this daemon.',
+        Surface: ({ connection: activeConnection }) => (
+          <WardenSettingsTab
+            connection={activeConnection}
+            readStatus={readWardenStatus}
+            createWardenClient={createWardenClient}
+          />
+        ),
+      },
+      {
+        id: 'secrets',
+        label: 'Secrets',
+        description: 'Credentials agents can use without ever holding one.',
+        Surface: ({ connection: activeConnection }) => (
+          <SecretsSurface
+            connection={activeConnection}
+            {...(createSecretClient ? { createClient: createSecretClient } : {})}
+          />
+        ),
+      },
+      {
+        /**
+         * Adding a device, immediately after the two panels that own this machine's own configuration.
+         *
+         * It is here rather than in a global Settings section because a pairing code belongs to ONE
+         * machine: the code, the device list and every revoke are read from this tab's connection, so a
+         * reader can never revoke a device on the daemon they just switched away from.
+         */
+        id: 'devices',
+        label: 'Add a device',
+        description: 'Pair another phone or browser with this machine, and revoke one.',
+        Surface: ({ connection: activeConnection }) => (
+          <AddDeviceSurface
+            connection={activeConnection}
+            {...(createPairingClient ? { createClient: createPairingClient } : {})}
+          />
+        ),
+      },
+      {
+        /**
+         * The operator's limits, second, because it is the panel that explains why another panel's
+         * control is refused. A reader who meets a disabled control in Warden or Fleet is sent here,
+         * so it must not be buried after the tabs that send them.
+         */
+        id: 'grants',
+        label: 'What devices may do',
+        description: 'Per-capability limits for callers that are not on this machine.',
+        Surface: ({ connection: activeConnection }) => (
+          <GrantsSurface
+            connection={activeConnection}
+            {...(createGrantClient ? { createClient: createGrantClient } : {})}
+          />
+        ),
+      },
+      // A product-owned Doctor surface belongs with the daemon configuration,
+      // before the connection carrier and browser-local pairing diagnostics.
+      ...additionalTabs,
+      {
+        id: 'carrier',
+        label: 'Carrier',
+        description: 'The measured path this daemon is using right now.',
+        Surface: () => <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />,
+      },
+      {
+        id: 'host-checks',
+        label: 'Host checks',
+        description: 'Reachability and this browser’s pairing for this daemon.',
+        Surface: () => {
+          if (connectionRecord && probeDaemon && onRenameDaemon && onRemoveDaemon)
             return (
-              <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
-                <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
-                <p className="mb-0 mt-1 text-cell leading-base text-muted">
-                  This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or
-                  offer pairing changes.
-                </p>
-              </section>
+              <DaemonHostChecks
+                connection={connectionRecord}
+                probeDaemon={probeDaemon}
+                carrier={carrier}
+                onRenameDaemon={onRenameDaemon}
+                onRemoveDaemon={onRemoveDaemon}
+              />
             );
-          },
+          return (
+            <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
+              <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
+              <p className="mb-0 mt-1 text-cell leading-base text-muted">
+                This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or
+                offer pairing changes.
+              </p>
+            </section>
+          );
         },
-      ],
+      },
+    ],
     [
       additionalTabs,
       carrier,

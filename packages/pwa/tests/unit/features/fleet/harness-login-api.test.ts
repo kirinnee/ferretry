@@ -59,7 +59,11 @@ describe('signing in a credential', () => {
   it('reads, cancels and submits on the flow path, carrying the unlock on every call', async () => {
     const flow = claudeFlow('awaiting-code');
     const cases: readonly (readonly [unknown, (client: FleetClient) => Promise<unknown>, string | undefined])[] = [
-      [flow, async client => await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, TOKEN), 'POST'],
+      [
+        flow,
+        async client => await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, TOKEN),
+        'POST',
+      ],
       [flow, async client => await readCredentialSignIn(client, flow.flowId, TOKEN), undefined],
       [flow, async client => await cancelCredentialSignIn(client, flow.flowId, TOKEN), 'DELETE'],
       [

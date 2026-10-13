@@ -143,7 +143,6 @@ describe('CodexLoginPanel', () => {
 
     expect(copied).toEqual([CODEX_URL, CODEX_CODE]);
   });
-
 });
 
 describe('CodexLoginPanel when the one-time code expired', () => {

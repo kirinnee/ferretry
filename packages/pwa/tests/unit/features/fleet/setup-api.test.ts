@@ -74,17 +74,11 @@ describe('the setup wire client', () => {
     const bundle = clientFor(BUNDLE);
 
     // Act
-    const answers = [
-      await readFleetSetupScan(scan.client),
-      await readFleetExport(bundle.client),
-    ];
+    const answers = [await readFleetSetupScan(scan.client), await readFleetExport(bundle.client)];
 
     // Assert
     expect(answers).toEqual([SCAN, BUNDLE]);
-    expect([scan, bundle].map(read => read.calls[0]?.path)).toEqual([
-      FLEET_SETUP_SCAN_PATH,
-      FLEET_EXPORT_PATH,
-    ]);
+    expect([scan, bundle].map(read => read.calls[0]?.path)).toEqual([FLEET_SETUP_SCAN_PATH, FLEET_EXPORT_PATH]);
     expect([scan, bundle].map(read => read.calls[0]?.init?.method)).toEqual([undefined, undefined]);
     expect([scan, bundle].map(read => headerOf(read.calls[0], OPERATOR_UNLOCK_HEADER))).toEqual([undefined, undefined]);
   });

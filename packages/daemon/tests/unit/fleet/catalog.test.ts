@@ -962,7 +962,11 @@ describe('runtimeCatalog', () => {
     const actual = runtimeCatalog(modelOf(), withReadFacts({ runtimeIds: { 'agent-claude': 'rt_0001' } }));
 
     // Assert — a runtime whose apply never landed has no id yet, so its name stands in.
-    should(runtimeNamed(actual, 'agent-claude')).containDeep({ id: 'rt_0001', name: 'agent-claude', wrapper: 'agent-claude' });
+    should(runtimeNamed(actual, 'agent-claude')).containDeep({
+      id: 'rt_0001',
+      name: 'agent-claude',
+      wrapper: 'agent-claude',
+    });
     should(runtimeNamed(actual, 'helper')).containDeep({ id: 'helper', name: 'helper', wrapper: 'helper' });
     FleetRuntimeCatalogSchema.parse(actual);
   });

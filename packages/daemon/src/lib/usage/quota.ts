@@ -13,7 +13,7 @@ import type { AccountAuthMode, SessionQuota } from './types.ts';
 export function authFailureRemedy(authMode?: AccountAuthMode): string {
   if (authMode === 'oauth') return "sign this runtime's login in again with `fy credential signin <login>`";
   if (authMode === 'api-key') return "replace the secret this runtime's login reads with `fy secret set <NAME>`";
-  return "for a login from the environment replace its secret with `fy secret set <NAME>`; for any other login run `fy credential signin <login>`";
+  return 'for a login from the environment replace its secret with `fy secret set <NAME>`; for any other login run `fy credential signin <login>`';
 }
 
 const percent = (value: unknown): number | undefined =>

@@ -58,7 +58,6 @@ const usageRow = (overrides: Partial<AccountUsageRow> = {}): AccountUsageRow => 
   ...overrides,
 });
 
-
 describe('accountPickerOptions', () => {
   it('joins quota by wrapper and health by the login it uses, and preserves the daemon order', () => {
     const usage = [usageRow({ agent: 'claude-auto-atelier', fiveHourPercent: 21, atLimit: false })];
@@ -353,10 +352,7 @@ describe('sessionAccountLabel', () => {
 
 describe('hintedAccountOption', () => {
   const options = accountPickerOptions(
-    [
-      claudeAccount(),
-      codexAccount({ available: false, unavailableReason: 'Sign in to launch' }),
-    ],
+    [claudeAccount(), codexAccount({ available: false, unavailableReason: 'Sign in to launch' })],
     [],
     null,
   );

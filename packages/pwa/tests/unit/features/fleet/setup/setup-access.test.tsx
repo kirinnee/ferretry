@@ -21,7 +21,8 @@ const PASSWORD_FIRST = 'Type this machine’s operator password to make this cha
 const NO_ANSWER = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
 
 const LOCKED = machineAnswer({ mayApply: false, applyRefusal: 'locked' });
-const unlockedAnswer = (call: Call) => (call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN ? machineAnswer() : LOCKED);
+const unlockedAnswer = (call: Call) =>
+  call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN ? machineAnswer() : LOCKED;
 
 interface Probe {
   current: SetupAccess | null;

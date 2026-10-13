@@ -384,7 +384,9 @@ export function AccountPickerRow(option: AccountFieldOption, state: { readonly s
             around its separators, so it breaks between fields instead of through
             the middle of an identifier. */}
         <span className={cn(IDENTITY_LINE_CLASS, 'break-words sm:truncate')} data-picker-identity="wrapper">
-          {[label.id, fleetHarnessLabel(account.kind), account.agent ? 'agent' : null].filter(part => part !== null).join(' · ')}
+          {[label.id, fleetHarnessLabel(account.kind), account.agent ? 'agent' : null]
+            .filter(part => part !== null)
+            .join(' · ')}
         </span>
         {option.disabledReason === undefined ? null : (
           <span className="text-meta text-warn">{option.disabledReason}</span>
@@ -905,7 +907,8 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
 export const checkedAmongOffered = (
   offered: readonly AccountPickerOption[] | null,
   health: ReadonlyMap<string, PickerAccountHealth> | null,
-): number => (offered === null || health === null ? 0 : offered.filter(option => health.has(option.credentialId)).length);
+): number =>
+  offered === null || health === null ? 0 : offered.filter(option => health.has(option.credentialId)).length;
 
 /**
  * The field a write surface mounts.

@@ -596,7 +596,6 @@ describe('CredentialsTab · signing a login in from its page', () => {
     expect(c.querySelector('[data-credential-actions]')).toBeNull();
     expect(text(c, '[data-credential-sign-in="start"] [data-change-submit]')).toBe('Sign in to Claude Code');
 
-
     await click(c.querySelector('[data-credential-sign-in="start"] [data-change-submit]'), 'Sign in to Claude Code');
     expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude-work' });
     await type(must(c.querySelector<HTMLTextAreaElement>('textarea'), 'the code field'), 'a-code');

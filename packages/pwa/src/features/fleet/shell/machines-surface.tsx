@@ -63,9 +63,7 @@ export function EmptyMachineTab({ tab, machineName }: { readonly tab: MachineTab
         {definition.label}
       </h3>
       <p className="mb-0 mt-1 text-cell leading-base text-muted">{definition.description}</p>
-      <p className="mb-0 mt-3 text-cell leading-base text-muted">
-        Nothing is shown here yet for {machineName}.
-      </p>
+      <p className="mb-0 mt-3 text-cell leading-base text-muted">Nothing is shown here yet for {machineName}.</p>
     </section>
   );
 }

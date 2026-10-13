@@ -5,7 +5,6 @@ import type { ClaudeLoginFlow, CodexLoginFlow, HarnessLoginSubmission } from '..
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
-
 const CLAUDE_URL =
   'https://claude.com/cai/oauth/authorize?code=true&response_type=code&code_challenge_method=S256&state=abc';
 const CODEX_URL = 'https://auth.openai.com/codex/device';
@@ -289,7 +288,9 @@ describe('harness-login schemas', () => {
     // Assert
     should(byCredential).deepEqual({ credentialId: 'claude-work', operatorPassword: 'the operator password' });
     assertRejects([
-      rejects('no credential', harnessLogin.HarnessLoginStartRequestSchema, { operatorPassword: 'the operator password' }),
+      rejects('no credential', harnessLogin.HarnessLoginStartRequestSchema, {
+        operatorPassword: 'the operator password',
+      }),
       rejects('a credential id that is not a slug', harnessLogin.HarnessLoginStartRequestSchema, {
         credentialId: 'Claude Work',
       }),

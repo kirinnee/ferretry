@@ -6650,7 +6650,7 @@ if (host) {
         <SessionSearchHarness />
       ) : window.location.hash === '#browser-full-viewport' ? (
         <BrowserFullViewportHarness />
-            ) : pickerFrame !== undefined ? (
+      ) : pickerFrame !== undefined ? (
         <PickerFrameHarness frame={pickerFrame} />
       ) : projectsFrame !== undefined ? (
         <ProjectsFrameHarness frame={projectsFrame} />
