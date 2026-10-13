@@ -18,7 +18,11 @@ export type InstallPhase =
   | { readonly kind: 'choose' }
   | { readonly kind: 'running'; readonly harnesses: readonly SetupHarness[] }
   | { readonly kind: 'done'; readonly installed: readonly SetupHarness[] }
-  | { readonly kind: 'failed'; readonly harnesses: readonly SetupHarness[]; readonly failures: readonly InstallFailure[] };
+  | {
+      readonly kind: 'failed';
+      readonly harnesses: readonly SetupHarness[];
+      readonly failures: readonly InstallFailure[];
+    };
 
 export interface InstallFailure {
   readonly harness: SetupHarness;
@@ -53,7 +57,11 @@ export const phaseAfter = (
       : [],
   );
   if (failures.length > 0) return { kind: 'failed', harnesses, failures };
-  return { kind: 'done', installed: outcomes.map(outcome => outcome.harness) };
+  // A tool that was already there is not news: only the ones this request installed are named.
+  return {
+    kind: 'done',
+    installed: outcomes.filter(outcome => outcome.outcome === 'installed').map(outcome => outcome.harness),
+  };
 };
 
 /** "Installed Claude Code." */

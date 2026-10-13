@@ -108,8 +108,9 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Sixty-five. MACHINES owes six at each viewport — its section, four tab switches and the Machines list the
- * switcher opens — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
+ * Seventy-three. MACHINES owes ten at each viewport — its section, four tab switches, the Machines list the
+ * switcher opens, and four Settings-tab flows (Import again found + names, Clone source, Install) — and the
+ * breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
  * and twenty-four at `desktop`. Twenty-four at both viewports —
  * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
  * surface: each step is a different layout, the model step is a card per model beside a custom-value
@@ -134,7 +135,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 65;
+const SETTINGS_SIDEWAYS_CHECKS = 73;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1684,18 +1685,53 @@ try {
 
           // MACHINES (account model, O1): the section, each of its five tabs, and the Machines list the
           // switcher opens. Six checks per viewport. The tab row is five equal columns, which is the
-          // shape most likely to widen a 390px phone once a label is longer than its cell.
+          // shape most likely to widen a 390px phone once a label is longer than its cell. A tab is waited
+          // for by its PANEL, so a tab that a unit has filled is walked exactly like an empty frame.
           await selectSettingsSection('machines');
           const machinesSurface = settingsPage.locator('[data-machines-surface="harness-daemon"]');
-          await machinesSurface.locator('[data-machine-tab-empty="runtimes"]').waitFor({ state: 'visible' });
+          await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
           for (const tab of ['credentials', 'profiles', 'components', 'settings'] as const) {
             await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
-            await machinesSurface.locator(`[data-machine-tab-empty="${tab}"]`).waitFor({ state: 'visible' });
+            await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
             await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
           }
+          await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
           const machinesTarget = join(outDir, `settings-machines-${viewport.name}.png`);
           await page.screenshot({ path: machinesTarget });
           process.stdout.write(`📸 Settings Machines ${viewport.name} -> ${machinesTarget}\n`);
+
+          // THE SETTINGS TAB'S FLOWS (U19): four more checks per viewport, one per layout that differs —
+          // Import again's "Found on" list with its long values, its Name step with a duplicate card, the
+          // Clone source list with both disabled reasons (E27), and Install with its exact command.
+          const machineFrame = async (what: string, file: string): Promise<void> => {
+            const target = join(outDir, `settings-machines-${file}-${viewport.name}.png`);
+            await page.screenshot({ path: target });
+            process.stdout.write(`📸 Settings Machines ${what} ${viewport.name} -> ${target}\n`);
+            await assertNoSidewaysScroll(page, `the Machines ${what} at ${viewport.name}`);
+          };
+          const backToSettingsTab = async (): Promise<void> => {
+            await machinesSurface.locator('[data-machine-tab="settings"]').click();
+            await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
+          };
+          await machinesSurface.locator('[data-settings-action="import"]').click();
+          await machinesSurface.locator('[data-first-run-step="claude"]').waitFor({ state: 'visible' });
+          await machineFrame('Import again found list', 'import-found');
+          await machinesSurface.locator('[data-harness-import]').click();
+          await machinesSurface.locator('[data-first-run-step="codex"]').waitFor({ state: 'visible' });
+          await machinesSurface.locator('[data-step-next]').click();
+          await machinesSurface.locator('[data-first-run-step="updates"]').waitFor({ state: 'visible' });
+          await machinesSurface.locator('[data-step-next]').click();
+          await machinesSurface.locator('[data-first-run-step="names"]').waitFor({ state: 'visible' });
+          await machineFrame('Import again names', 'import-names');
+          await backToSettingsTab();
+          await machinesSurface.locator('[data-settings-action="clone"]').click();
+          await machinesSurface.locator('[data-clone-source-reason]').nth(1).waitFor({ state: 'visible' });
+          await machineFrame('Clone source', 'clone-source');
+          await backToSettingsTab();
+          await machinesSurface.locator('[data-tool-install="codex"]').click();
+          await machinesSurface.locator('[data-install-flow="codex"]').waitFor({ state: 'visible' });
+          await machineFrame('Install Codex', 'install');
+          await backToSettingsTab();
           await machinesSurface.locator('[data-machine-switcher]').click();
           await machinesSurface.locator('[data-machines-list]').waitFor({ state: 'visible' });
           await assertNoSidewaysScroll(page, `the Machines list at ${viewport.name}`);

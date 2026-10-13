@@ -71,12 +71,20 @@ export function SetupCommand({ children }: { readonly children: string }) {
   );
 }
 
-export function SetupBadges({ badges }: { readonly badges: readonly { readonly text: string; readonly tone: RowTone }[] }) {
+export function SetupBadges({
+  badges,
+}: {
+  readonly badges: readonly { readonly text: string; readonly tone: RowTone }[];
+}) {
   if (badges.length === 0) return null;
   return (
     <span className="flex flex-wrap gap-1">
       {badges.map(badge => (
-        <Badge key={badge.text} tone={badge.tone === 'err' ? 'err' : badge.tone}>
+        <Badge
+          key={badge.text}
+          tone={badge.tone === 'err' ? 'err' : badge.tone}
+          className="max-w-full !whitespace-normal [overflow-wrap:anywhere]"
+        >
           {badge.text}
         </Badge>
       ))}
@@ -99,12 +107,16 @@ export function SetupRow({ title, detail, label, status, statusLabel, children, 
   return (
     <div className="kt-panel flex min-w-0 items-start gap-3 p-panel" data-setup-row={name}>
       {status === undefined ? null : (
-        <AccountStatus word={status} {...(statusLabel === undefined ? {} : { label: statusLabel })} className="pt-0.5" />
+        <AccountStatus
+          word={status}
+          {...(statusLabel === undefined ? {} : { label: statusLabel })}
+          className="pt-0.5"
+        />
       )}
       {label === undefined ? null : <span className="w-24 shrink-0 text-meta text-muted">{label}</span>}
       <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="break-words text-row font-semibold text-fg">{title}</span>
-        {detail === undefined ? null : <span className="break-words text-cell text-muted">{detail}</span>}
+        <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{title}</span>
+        {detail === undefined ? null : <span className="[overflow-wrap:anywhere] text-cell text-muted">{detail}</span>}
       </span>
       {children}
     </div>
@@ -168,9 +180,9 @@ function ChoiceList<T extends string>({
               {isChecked(option) ? <Check size={12} /> : null}
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="break-words text-row font-semibold text-fg">{option.title}</span>
+              <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{option.title}</span>
               {option.detail === undefined ? null : (
-                <span className="break-words text-cell text-muted">{option.detail}</span>
+                <span className="[overflow-wrap:anywhere] text-cell text-muted">{option.detail}</span>
               )}
               {option.extra}
             </span>

@@ -46,7 +46,7 @@ import {
   updateTitle,
 } from './first-run-model.ts';
 import type { InstallPhase } from './install-model.ts';
-import { machineItemHash } from "./settings-route.ts";
+import { machineItemHash } from './settings-route.ts';
 import { type SetupAccess, useSetupAccess } from './setup-access.ts';
 import { CheckChoices, SetupBadges, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
 import { countWords, listWords, SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
@@ -295,8 +295,8 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
       return (
         <div className="flex min-w-0 flex-col gap-3" data-first-run-step="updates">
           <p className="m-0 text-cell leading-base text-fg">
-            Some of your setup on {machineName} changed since the last import. Pick what to update. Nothing is
-            updated unless you tick it.
+            Some of your setup on {machineName} changed since the last import. Pick what to update. Nothing is updated
+            unless you tick it.
           </p>
           <CheckChoices
             legend="What to update"
@@ -339,7 +339,11 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
           const problem = problems[card.harness];
           const fieldId = `first-run-name-${card.harness}`;
           return (
-            <div key={card.harness} className="kt-panel flex min-w-0 flex-col gap-3 p-panel" data-name-card={card.harness}>
+            <div
+              key={card.harness}
+              className="kt-panel flex min-w-0 flex-col gap-3 p-panel"
+              data-name-card={card.harness}
+            >
               <p className="m-0 text-row font-semibold text-fg">{SETUP_HARNESS_NAMES[card.harness]}</p>
               {card.duplicate === undefined ? null : (
                 <>
@@ -370,7 +374,9 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
                     data-name-input={card.harness}
                     aria-invalid={problem !== undefined}
                     value={cardName(card, answers)}
-                    onChange={event => answer({ names: { ...answers.names, [card.harness]: event.target.value.trim() } })}
+                    onChange={event =>
+                      answer({ names: { ...answers.names, [card.harness]: event.target.value.trim() } })
+                    }
                   />
                   {problem === undefined ? (
                     <span className="text-meta text-muted">Letters, digits and dashes.</span>
@@ -449,7 +455,7 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
               detail={
                 row.detail === undefined && row.badges.length === 0 ? undefined : (
                   <span className="flex min-w-0 flex-col gap-1">
-                    {row.detail === undefined ? null : <span className="break-words">{row.detail}</span>}
+                    {row.detail === undefined ? null : <span className="[overflow-wrap:anywhere]">{row.detail}</span>}
                     <SetupBadges badges={row.badges} />
                   </span>
                 )
@@ -464,12 +470,18 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
         ))}
         <p className="m-0 text-meta leading-base text-muted">
           Importing copies your setup into Ferretry. {name} on {machineName} keeps working as before.
-          {harness === 'claude' ? ' Ferretry and your own claude share this login: signing out in one signs out both.' : ''}
+          {harness === 'claude'
+            ? ' Ferretry and your own claude share this login: signing out in one signs out both.'
+            : ''}
         </p>
         <Foot>
-          <Button type="button" data-harness-skip="" onClick={() => {
-            choose(harness, 'skip');
-          }}>
+          <Button
+            type="button"
+            data-harness-skip=""
+            onClick={() => {
+              choose(harness, 'skip');
+            }}
+          >
             Skip {name}
           </Button>
           <Button
@@ -562,13 +574,13 @@ function DoneStep({
       {needsSignIn.length === 0 ? null : (
         <SetupNote tone="warn" name="sign-in-later" title="Sign in before you launch">
           <span>
-            {listWords(needsSignIn.map(runtime => runtime.name))} {needsSignIn.length === 1 ? 'uses a login' : 'use logins'}{' '}
-            that needs sign-in.
+            {listWords(needsSignIn.map(runtime => runtime.name))}{' '}
+            {needsSignIn.length === 1 ? 'uses a login' : 'use logins'} that needs sign-in.
           </span>
           {needsSignIn.map(runtime => (
             <a
               key={runtime.name}
-              href={machineItemHash(machineName, "credentials", runtime.credential.id)}
+              href={machineItemHash(machineName, 'credentials', runtime.credential.id)}
               className="inline-flex items-center gap-1 font-semibold text-accent underline"
               data-first-run-sign-in={runtime.credential.id}
             >

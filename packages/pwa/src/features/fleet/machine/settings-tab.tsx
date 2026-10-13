@@ -76,8 +76,8 @@ function NavRow({
       className="kt-panel flex min-h-control w-full min-w-0 items-center gap-3 p-panel text-left transition-colors hover:border-accent"
     >
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="break-words text-row font-semibold text-fg">{title}</span>
-        <span className="break-words text-cell text-muted">{detail}</span>
+        <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{title}</span>
+        <span className="[overflow-wrap:anywhere] text-cell text-muted">{detail}</span>
       </span>
       <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
     </button>
@@ -170,9 +170,11 @@ function useMigrationEntry(machine: FleetMachineView | null, access: SetupAccess
   useEffect(() => {
     if (!oldFormat || !ready) return;
     let live = true;
-    void latest.current.read((client, unlock) => readFleetMigration(client, unlock)).then(answer => {
-      if (live && answer.kind === 'done') setView(answer.value);
-    });
+    void latest.current
+      .read((client, unlock) => readFleetMigration(client, unlock))
+      .then(answer => {
+        if (live && answer.kind === 'done') setView(answer.value);
+      });
     return () => {
       live = false;
     };
@@ -191,10 +193,9 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const flow: SettingsFlow | null = route.flow;
 
   if (flow === 'setup' || flow === 'import')
-    return (
-      <MachineFirstRun key={flow} {...props} {...clock} mode={flow} onDone={toRuntimes} onLeave={leave} />
-    );
-  if (flow === 'clone') return <CloneMachine {...props} {...clock} sources={sources} onDone={toRuntimes} onLeave={leave} />;
+    return <MachineFirstRun key={flow} {...props} {...clock} mode={flow} onDone={toRuntimes} onLeave={leave} />;
+  if (flow === 'clone')
+    return <CloneMachine {...props} {...clock} sources={sources} onDone={toRuntimes} onLeave={leave} />;
   if (flow === 'migrate') return <MigrateMachine {...props} {...clock} onDone={toRuntimes} onLeave={leave} />;
   if (flow === 'install-claude' || flow === 'install-codex')
     return (

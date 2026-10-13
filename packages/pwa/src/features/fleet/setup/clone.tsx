@@ -91,7 +91,9 @@ export function CloneMachine(props: CloneMachineProps) {
   const sourceKey = sources.map(record => record.daemonId).join(' ');
   useEffect(() => {
     let live = true;
-    for (const record of listed.current.filter(candidate => sourceKey.split(" ").includes(String(candidate.daemonId)))) {
+    for (const record of listed.current.filter(candidate =>
+      sourceKey.split(' ').includes(String(candidate.daemonId)),
+    )) {
       void readMachineReach(() => createClient(record)).then(next => {
         if (live) setReach(current => new Map(current).set(record.daemonId, next));
       });
@@ -122,15 +124,17 @@ export function CloneMachine(props: CloneMachineProps) {
   const readSource = (password?: string): void => {
     setSourceIssue(null);
     setReading(true);
-    void source.read((client, unlock) => readFleetExport(client, unlock), password).then(answer => {
-      setReading(false);
-      if (answer.kind === 'refused') {
-        if (!answer.passwordRejected) setSourceIssue(answer.sentence);
-        return;
-      }
-      setBundle(answer.value);
-      setStepper(current => stepForward(withSteps(current, steps)));
-    });
+    void source
+      .read((client, unlock) => readFleetExport(client, unlock), password)
+      .then(answer => {
+        setReading(false);
+        if (answer.kind === 'refused') {
+          if (!answer.passwordRejected) setSourceIssue(answer.sentence);
+          return;
+        }
+        setBundle(answer.value);
+        setStepper(current => stepForward(withSteps(current, steps)));
+      });
   };
 
   const copy = (password: string | undefined): void => {
@@ -303,7 +307,11 @@ export function CloneMachine(props: CloneMachineProps) {
             </SetupNote>
           )}
           {preview.notCopied.length === 0 ? null : (
-            <SetupNote tone="warn" name="files-not-copied" title={`${countWords(preview.notCopied.length, 'file')} can’t be copied`}>
+            <SetupNote
+              tone="warn"
+              name="files-not-copied"
+              title={`${countWords(preview.notCopied.length, 'file')} can’t be copied`}
+            >
               {preview.notCopied.map(entry => (
                 <span key={entry.path} className="break-all">
                   {entry.path}: {entry.reason}
@@ -396,8 +404,9 @@ function DoneStep({
               className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent"
             >
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="break-words text-row font-semibold text-fg">
-                  {SETUP_HARNESS_NAMES[slot.harness]} · <span className="font-mono">{slot.email ?? slot.label ?? slot.id}</span>
+                <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">
+                  {SETUP_HARNESS_NAMES[slot.harness]} ·{' '}
+                  <span className="font-mono">{slot.email ?? slot.label ?? slot.id}</span>
                 </span>
                 <span className="text-cell text-muted">
                   Empty slot · used by {countWords(slot.usedBy.length, 'runtime')}
@@ -409,11 +418,17 @@ function DoneStep({
               <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
             </a>
           ))}
-          <p className="m-0 text-meta text-muted">Sign in once per slot. Every runtime that uses it is fixed together.</p>
+          <p className="m-0 text-meta text-muted">
+            Sign in once per slot. Every runtime that uses it is fixed together.
+          </p>
         </SetupSection>
       )}
       {result.preview.checkPaths.length === 0 ? null : (
-        <SetupNote tone="warn" name="check-paths-after" title={`Check ${countWords(result.preview.checkPaths.length, 'path')} on ${machineName}`}>
+        <SetupNote
+          tone="warn"
+          name="check-paths-after"
+          title={`Check ${countWords(result.preview.checkPaths.length, 'path')} on ${machineName}`}
+        >
           <span>
             {listWords(result.preview.checkPaths.map(check => check.title))} point at folders on {result.source}.
           </span>
