@@ -143,7 +143,11 @@ import {
 import { accountsRoster } from '../src/features/fleet/accounts-model.ts';
 import { accountsSettingsTab } from '../src/features/fleet/accounts-page.tsx';
 import { type AccountsReadState, AccountsSurface } from '../src/features/fleet/accounts-surface.tsx';
-import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
+import {
+  FleetConfigurationSurface,
+  type FleetClientFactory,
+  fleetSettingsTab,
+} from '../src/features/fleet/fleet-configuration-surface.tsx';
 import {
   FLEET_STEP_IDS,
   type FleetInstructionsControl,
@@ -1566,6 +1570,17 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       createGrantClient={HARNESS_GRANT_CLIENT}
       createPairingClient={HARNESS_PAIRING_CLIENT}
       daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
+      createMachineClient={HARNESS_MACHINE_CLIENT}
+      // A stand-in router: the path picks the daemon, the hash is kept on THIS page's address, so a
+      // Machines tab or switch stays inside the preview instead of loading a route the harness lacks.
+      onNavigate={to => {
+        const target = new URL(to, window.location.href);
+        const id = decodeURIComponent(target.pathname.split('/')[2] ?? '');
+        const next = connections.find(connection => String(connection.daemonId) === id);
+        if (next) setActiveDaemonId(next.daemonId);
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${target.hash}`);
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      }}
       onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
         setConnections(current =>
@@ -2107,6 +2122,28 @@ const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
  * The unreachable pairing THROWS, so the "limits unavailable" panel is reviewable: a failed read must
  * never render as five allowed rows, and that is exactly the state a screenshot has to prove.
  */
+/**
+ * The Machines section's one read, `GET /v1/fleet/machine`, answered locally: the unreachable pairing is
+ * offline, the first is set up with a long name the switcher must truncate, the rest are not set up.
+ */
+const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  const setUp = connection.daemonId === daemon.daemonId;
+  return {
+    request: (async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
+      schema.parse({
+        name: 'studio-mac',
+        format: setUp ? 'version-2' : 'none',
+        setUp,
+        agentPermissions: 'auto',
+        tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
+        runtimeCount: setUp ? 5 : 0,
+        runningSessions: 0,
+        changes: { available: true },
+      })) as Awaited<ReturnType<FleetClientFactory>>['request'],
+  };
+};
+
 const HARNESS_GRANT_CLIENT: GrantClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   let view = HARNESS_GRANTS_LOCKED;

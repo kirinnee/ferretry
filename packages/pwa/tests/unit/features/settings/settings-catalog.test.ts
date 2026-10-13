@@ -38,12 +38,13 @@ describe('shared settings catalog', () => {
     }
   });
 
-  test('groups every control exactly once under the three stable logical sections', () => {
-    expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'daemons']);
-    expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Daemons']);
+  test('groups every control exactly once under the four stable logical sections', () => {
+    expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'daemons', 'machines']);
+    expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Daemons', 'Machines']);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
       ['text-size', 'theme', 'density', 'chat-width'],
       ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
+      [],
       [],
     ]);
 
@@ -61,6 +62,7 @@ describe('shared settings catalog', () => {
     expect(isSettingsSectionId('appearance')).toBe(true);
     expect(isSettingsSectionId('behaviour')).toBe(true);
     expect(isSettingsSectionId('daemons')).toBe(true);
+    expect(isSettingsSectionId('machines')).toBe(true);
     expect(isSettingsSectionId('notifications')).toBe(false);
     expect(isSettingsSectionId(null)).toBe(false);
     expect(isSettingsSectionId(undefined)).toBe(false);
@@ -120,6 +122,16 @@ describe('shared settings catalog', () => {
       item => item.settingId === 'dictation',
     );
     expect(entry?.description).toContain('Push-to-talk shortcut: Alt + Shift + V');
+  });
+
+  test('finds Machines by the account model’s words and the old ones, on the daemon being searched', () => {
+    const machines = SETTINGS_LINKS.find(link => link.id === 'machines');
+    expect(machines?.href(beta)).toBe('/d/daemon-beta/settings#machines');
+    for (const query of ['runtime', 'credential', 'profile', 'component', 'login', 'accounts']) {
+      expect(settingsPaletteEntries(alpha, query).find(item => item.id === 'setting-link-machines')?.href).toBe(
+        '/d/daemon-alpha/settings#machines',
+      );
+    }
   });
 
   test('keeps link-row destinations bound to the daemon being searched', () => {

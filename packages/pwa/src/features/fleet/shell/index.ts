@@ -1,3 +1,8 @@
-// Account-model seed, created empty by U0 and filled by U16 (docs/design/account-model.md §13.2).
-// It exists so the barrel line and registration that reach it are already in place.
-export {};
+// The Machines shell (docs/design/account-model.md §4.1, §4.2): the switcher, the five tabs, the
+// stepper every flow renders inside, and the four status shapes. U17–U19 fill the tabs.
+export * from './account-status.tsx';
+export * from './machine-reach.ts';
+export * from './machine-route.ts';
+export * from './machine-stepper.tsx';
+export * from './machines-surface.tsx';
+export * from './stepper-model.ts';
