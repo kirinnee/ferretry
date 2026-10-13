@@ -7,7 +7,6 @@ import {
   type PairedDevicesView,
   type PairingCodeMintResponse,
   type PairingId,
-  pairedDeviceGrantsPath,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -154,7 +153,7 @@ describe('the pairing routes', () => {
 
     // Assert
     should(view).deepEqual(widened);
-    should(calls[0]?.path).equal(pairedDeviceGrantsPath(DEVICE_ID));
+    should(calls[0]?.path).equal(`/v1/pair/devices/${DEVICE_ID}/grants`);
     should(calls[0]?.init?.method).equal('PATCH');
     should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({ terminal: { use: true } });
   });

@@ -574,11 +574,6 @@ export const PairedDevicesViewSchema = z.strictObject({
 });
 export type PairedDevicesView = z.infer<typeof PairedDevicesViewSchema>;
 
-/** Where one device's grants are changed. The id is a protocol id, so it needs no further escaping. */
-export function pairedDeviceGrantsPath(deviceId: string): string {
-  return `/v1/pair/devices/${encodeURIComponent(deviceId)}/grants`;
-}
-
 /**
  * A change to ONE device's grants — `PATCH /v1/pair/devices/:deviceId/grants`.
  *

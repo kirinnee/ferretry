@@ -10,7 +10,6 @@ import {
   type PairingCodeMintResponse,
   type PairingId,
   type PairingInvitationLink,
-  pairedDeviceGrantsPath,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { ReactTestRenderer } from 'react-test-renderer';
@@ -821,7 +820,7 @@ describe('AddDeviceSurface', () => {
     );
 
     // Assert
-    should(calls).containEql(`PATCH ${pairedDeviceGrantsPath(DEVICE_ID)}`);
+    should(calls).containEql(`PATCH /v1/pair/devices/${DEVICE_ID}/grants`);
     should(patches).deepEqual([{ deviceId: DEVICE_ID, body: { terminal: { use: true, configure: true } } }]);
     should(
       marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked'],
@@ -924,7 +923,7 @@ describe('AddDeviceSurface', () => {
     await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
 
     // Assert
-    should(seen).deepEqual(['GET /v1/pair/devices', `PATCH ${pairedDeviceGrantsPath(DEVICE_ID)}`]);
+    should(seen).deepEqual(['GET /v1/pair/devices', `PATCH /v1/pair/devices/${DEVICE_ID}/grants`]);
     should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(true);
   });
 

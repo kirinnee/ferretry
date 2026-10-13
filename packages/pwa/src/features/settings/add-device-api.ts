@@ -31,7 +31,6 @@ import {
   type PairingCodeStatusResponse,
   PairingCodeStatusResponseSchema,
   type PairingId,
-  pairedDeviceGrantsPath,
 } from '@ferretry/protocol';
 
 /** The only client capability this surface uses. */
@@ -124,7 +123,7 @@ export async function changeDeviceGrants(
   deviceId: string,
   patch: DeviceGrantsPatch,
 ): Promise<PairedDevicesView> {
-  return await client.request(pairedDeviceGrantsPath(deviceId), PairedDevicesViewSchema, {
+  return await client.request(`${PAIRED_DEVICES_PATH}/${encodeURIComponent(deviceId)}/grants`, PairedDevicesViewSchema, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(DeviceGrantsPatchSchema.parse(patch)),

@@ -3,7 +3,6 @@ import {
   DeviceGrantsPatchSchema,
   type PairedDevicesView,
   PairedDevicesViewSchema,
-  pairedDeviceGrantsPath,
 } from '@ferretry/protocol';
 import type { DeviceApiClient, IDeviceGateway } from './ports.ts';
 
@@ -23,10 +22,14 @@ export class ProtocolDeviceGateway implements IDeviceGateway {
   }
 
   async changeGrants(deviceId: string, patch: DeviceGrantsPatch): Promise<PairedDevicesView> {
-    return await this.client.request(pairedDeviceGrantsPath(deviceId), PairedDevicesViewSchema, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(DeviceGrantsPatchSchema.parse(patch)),
-    });
+    return await this.client.request(
+      `${PAIRED_DEVICES_PATH}/${encodeURIComponent(deviceId)}/grants`,
+      PairedDevicesViewSchema,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(DeviceGrantsPatchSchema.parse(patch)),
+      },
+    );
   }
 }
