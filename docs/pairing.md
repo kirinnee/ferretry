@@ -336,8 +336,19 @@ row states what its revoke will do before the press.
 - **A device's first passkey has a ten-minute window.** It can be added only in the ten minutes after
   pairing (B2), so a newly paired device with no passkey for the machine sees one dismissible line
   pointing at Settings → Security → Add a passkey. A device that misses the window cannot step up
-  until it pairs again; until then it keeps only the uses
+  until the owner re-opens it at the machine (below) or it pairs again; until then it keeps only the uses
   that need no step-up ([design/zero-trust.md](design/zero-trust.md) B2).
+
+**Recovering a device that cannot add a passkey: `fy passkey window <device>`.** A device that missed its
+first ten-minute window, or lost the authenticator that held its passkey, cannot step up again — and a
+browser cannot re-open its own window, because no browser is ever "at the machine". The owner does it at
+the machine: `fy passkey window <device>` takes a paired device's id, or its name when exactly one device
+has that name, and calls `POST /v1/passkeys/registration-window` with the host's admin token over loopback.
+Anybody else is refused (`403 step_up_not_at_machine`), an unknown device is `404 step_up_unknown_device`,
+and the window is ten minutes, admits ONE passkey and is audited. The device then opens Settings →
+Security → Add a passkey inside it. Nothing here pairs the device again, so its grant and its other
+sessions are untouched.
+
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first
