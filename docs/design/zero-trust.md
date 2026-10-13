@@ -282,6 +282,24 @@ Parts of one id arrive in sequence order; parts of different ids may interleave.
 up to **32 MiB**; a request beyond that is answered `413` and a response beyond it `502` with a
 typed error, never truncated. Credit (§8) bounds what is in flight.
 
+### A9. Version skew says which side to update
+
+Pages ships the app on every merge to `main`, while a daemon updates when its owner upgrades it, so
+for a while an updated app meets an old `fyd` and an old (cached) app meets an updated one. Neither
+case may surface as a generic connection error. Each is **one plain sentence naming the side to
+update and how**:
+
+| who is newer | what is observed                                                                                                    | the sentence the person reads                                                                                                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the app      | the daemon closes the handshake with `4426`, or answers a direct socket upgrade with no session, or `hs2` says `/1` | "This machine is running an older Ferretry than this app. Update it on the machine (`brew upgrade --cask ferretry`, `nix profile upgrade`, your apt or dnf upgrade, or the install script again), run `fy daemon restart`, then pair again." |
+| the daemon   | an old app's plain-HTTP request carrying an `fy_device_` bearer token, or an old `hs1` naming `/1`                  | "This app is older than the machine it is talking to. Reload the page (or reopen the installed app) to update it, then pair again."                                                                                                          |
+
+The second row is the daemon's job, because an old app cannot learn new words: an HTTP request with
+a bearer that looks like a pre-key device token is answered `426 Upgrade Required` with that sentence
+as the error message (which the old app already renders as text), and an `hs1` naming `/1` is closed
+with `4426` and the same sentence as the close reason. The upgrade commands are written once, in
+`@ferretry/protocol`, so the CLI, the daemon and the app cannot name different ones.
+
 ## B. Passkey step-up and least privilege
 
 ### B1. Which acts need a step-up
@@ -329,6 +347,26 @@ challenge is single-use and bound to one device and `appSession`).
 - Verification is WebCrypto only: a minimal CBOR reader (attestation object, COSE key) and DER →
   raw conversion for ES256 are written here rather than imported, because the verifier is ~300 lines
   with a fixed input shape and every dependency on this path is attack surface.
+
+**A passkey belongs to one app origin.** WebAuthn binds a credential to its relying-party id, which
+is the host of the page that created it: a passkey made in the hosted app (`ferretry.pages.dev`)
+cannot be used by a self-hosted copy (`ferretry.example.com`), a local development server
+(`localhost`) or a preview deploy, and vice versa — browsers refuse to offer it, by design. So:
+
+- each app origin a person uses has **its own device key and its own passkey**. That is already true
+  of the device key (IndexedDB is per origin), so an app at a second origin is simply a second paired
+  device and registers its own passkey within its pairing window;
+- the daemon accepts an assertion only for an origin in `corsOrigins`, and checks `rpIdHash` against
+  **that** origin's host — a self-hosted app works once its origin is added there, exactly as its
+  requests already need;
+- `localhost` is a valid relying-party id for development (browsers treat it as a secure context);
+  a plain-HTTP LAN origin (`http://192.168.…`) is not, so WebAuthn is unavailable there and the app
+  says so.
+
+When the browser has no passkey for this origin — or the origin cannot hold one — the step-up prompt
+says it plainly: "This copy of the app at ‹origin› has no passkey for this machine. Add one from a
+device that already has access, or pair this device again at the machine." Never a raw
+`NotAllowedError`.
 
 **Who may register a passkey**, because a thief holding an unlocked, open app must not be able to add
 their own: (a) a device with **no passkey yet, within 10 minutes of pairing** — the moment the owner
