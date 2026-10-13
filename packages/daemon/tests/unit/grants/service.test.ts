@@ -18,7 +18,13 @@ interface World {
 }
 
 function world(
-  options: { grants?: CapabilityGrants; broken?: boolean; auditFails?: boolean; clientName?: string } = {},
+  options: {
+    grants?: CapabilityGrants;
+    broken?: boolean;
+    auditFails?: boolean;
+    clientName?: string;
+    changed?: () => void;
+  } = {},
 ): World {
   let recorded = options.grants ?? DEFAULT_CAPABILITY_GRANTS;
   let written: CapabilityGrants | undefined;
@@ -44,6 +50,7 @@ function world(
       recent: async limit => ({ entries: [...audit].reverse().slice(0, limit), unreadable: 2, truncated: true }),
     },
     clientName: options.clientName ?? 'fy',
+    ...(options.changed === undefined ? {} : { changed: options.changed }),
   });
   return { service, audit, written: () => written };
 }
@@ -181,6 +188,23 @@ describe('the decision for each kind of caller', () => {
       'step-up-required',
     );
     should(service.view(remoteWarden)).containDeep({ governed: true, hostLocal: false, steppedUp: false });
+  });
+});
+
+describe('telling open streams the answer moved', () => {
+  it('should say so after a refresh, after a change, and after a refresh that failed', async () => {
+    // Arrange
+    let told = 0;
+    const context = world({ changed: () => (told += 1) });
+    const broken = world({ broken: true, changed: () => (told += 10) });
+
+    // Act
+    await context.service.refresh();
+    await context.service.patch({ fleet: { use: false } }, host);
+    await broken.service.refresh().catch(() => undefined);
+
+    // Assert
+    should(told).equal(12);
   });
 });
 

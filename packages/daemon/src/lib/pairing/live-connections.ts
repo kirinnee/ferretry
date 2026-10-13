@@ -30,10 +30,21 @@ export interface DeviceConnectionTracker {
   /**
    * Registers one live connection, authorized for `deviceId`, with the way to end it.
    *
-   * Returns the release the transport calls when the connection ends on its own. A connection for a
-   * device that was already unpaired is ended before this returns.
+   * `appSession` names the running copy of the app the connection belongs to, when a session proved
+   * one, and `recheck` asks the connection to re-ask whether it is still allowed (see {@link
+   * LiveDeviceConnections.recheckAll}). Returns the release the transport calls when the connection
+   * ends on its own. A connection for a device that was already unpaired is ended before this returns.
    */
-  track(deviceId: string, end: () => void): () => void;
+  track(deviceId: string, end: () => void, appSession?: string, recheck?: () => void): () => void;
+}
+
+/**
+ * Told when a running copy of the app gains and loses a live connection, so what is bound to that
+ * copy — a passkey step-up — can end when the page does, whatever the page's code kept.
+ */
+export interface AppSessionObserver {
+  /** One connection of this copy opened. Returns the call for when it ends. */
+  open(subject: { readonly deviceId: string; readonly appSession: string }): () => void;
 }
 
 /** What a revocation asks of the registry. */
@@ -45,8 +56,11 @@ export interface DeviceConnectionRevoker {
 export class LiveDeviceConnections implements DeviceConnectionTracker, DeviceConnectionRevoker {
   readonly #live = new Map<string, Set<() => void>>();
   readonly #unpaired = new Set<string>();
+  readonly #rechecks = new Set<() => void>();
 
-  track(deviceId: string, end: () => void): () => void {
+  constructor(private readonly appSessions?: AppSessionObserver) {}
+
+  track(deviceId: string, end: () => void, appSession?: string, recheck?: () => void): () => void {
     if (this.#unpaired.has(deviceId)) {
       end();
       return () => undefined;
@@ -56,10 +70,33 @@ export class LiveDeviceConnections implements DeviceConnectionTracker, DeviceCon
     const entry = (): void => end();
     ends.add(entry);
     this.#live.set(deviceId, ends);
+    const closeAppSession =
+      appSession === undefined || this.appSessions === undefined
+        ? () => undefined
+        : this.appSessions.open({ deviceId, appSession });
+    // Wrapped for the same reason as `entry`.
+    const recheckEntry = recheck === undefined ? undefined : (): void => recheck();
+    if (recheckEntry !== undefined) this.#rechecks.add(recheckEntry);
     return () => {
+      if (recheckEntry !== undefined) this.#rechecks.delete(recheckEntry);
       ends.delete(entry);
       if (ends.size === 0 && this.#live.get(deviceId) === ends) this.#live.delete(deviceId);
+      closeAppSession();
     };
+  }
+
+  /**
+   * Asks every live connection whether what it carries is still allowed — after a grant changed, so
+   * a narrowing reaches the streams that were authorized before it rather than only the next one.
+   */
+  recheckAll(): void {
+    for (const recheck of [...this.#rechecks]) {
+      try {
+        recheck();
+      } catch {
+        // One transport failing to re-ask must not stop the others from being asked.
+      }
+    }
   }
 
   endDevice(deviceId: string): number {

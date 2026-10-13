@@ -200,7 +200,7 @@ describe('a live event stream carried by a rendezvous', () => {
       relayHost: 'relay.example',
       socket: sent.socket,
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
-      sockets: async request => await socketDispatcher(events).upgrade(request),
+      sockets: socketDispatcher(events),
       devices: {
         deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
         seen: () => undefined,
@@ -321,7 +321,7 @@ describe('a live event stream carried by a rendezvous', () => {
       relayHost: 'relay.example',
       socket: sent.socket,
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
-      sockets: async request => await socketDispatcher(events).upgrade(request),
+      sockets: socketDispatcher(events),
       devices: {
         deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
         seen: () => undefined,

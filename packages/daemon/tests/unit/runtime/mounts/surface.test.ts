@@ -12,6 +12,7 @@ import {
   type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
+import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
@@ -65,6 +66,23 @@ const pairingSubsystem = (): PairingSubsystem => ({
   revokeDevice: async () => false,
 });
 
+// A REAL step-up service over in-memory fakes, so the inventory mounts the very type production does.
+const stepUpSubsystem = (): StepUpService =>
+  new StepUpService({
+    store: { list: async () => [], add: async () => {}, updateSignCount: async () => {}, forgetDevice: async () => {} },
+    verifier: {
+      verifyRegistration: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
+      verifyAssertion: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
+    },
+    registry: new StepUpRegistry(),
+    challenges: new ChallengeLedger(),
+    random: { bytes: length => new Uint8Array(length) },
+    clock: { nowMs: () => 1_700_000_000_000 },
+    devices: { device: async () => undefined },
+    allowedOrigins: () => [],
+    relyingPartyName: 'Ferretry',
+  });
+
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
   doctor: {
@@ -86,6 +104,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  stepUp: stepUpSubsystem(),
   // A VALUE, not a subsystem, and the only field here that is one: the set is resolved once at boot and
   // the pairing service is handed the very same array. Non-empty on purpose — an empty one would let
   // `PairingResponseSchema`'s default stand in for a carried-through set.
@@ -454,7 +473,8 @@ describe('the mounted daemon surface', () => {
       2 + // the account model's credential list and its Check now
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
-      3; // the setup scan, tool install and the clone export
+      3 + // the setup scan, tool install and the clone export
+      5; // the passkey step-up: this device's passkeys, registration and step-up, each with its options
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes });
     should(
@@ -486,6 +506,13 @@ describe('the mounted daemon surface', () => {
       'GET /v1/push/subscriptions',
       'POST /v1/push/subscriptions',
       'DELETE /v1/push/subscriptions/:pushId',
+      // The passkey step-up. NOTE WHAT IS ABSENT: no route returns a challenge after it is issued, a
+      // public key or a held step-up — the daemon remembers the step-up, and the browser holds nothing.
+      'GET /v1/passkeys',
+      'POST /v1/passkeys/options',
+      'POST /v1/passkeys',
+      'POST /v1/step-up/options',
+      'POST /v1/step-up',
       // The grant surface. NOTE WHAT IS ABSENT: there is no password to set and nothing to unlock — a
       // governed change is held behind the passkey step-up, so these three are the whole surface.
       'GET /v1/grants',

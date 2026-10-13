@@ -1338,3 +1338,160 @@ describe('the carrier router defaults', () => {
     }
   });
 });
+
+describe('the carrier router meeting a passkey step-up', () => {
+  const REQUIRED = { code: 'grant_step_up_required', message: 'Confirm with your passkey.' };
+
+  /** A router whose daemon answers by `respond`, with `stepUp` as the only thing that can ask a person. */
+  const steppedRouter = async (
+    respond: (attempt: number) => { status: number; body: unknown } | { status: number; body: string },
+    stepUp?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>,
+  ) => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
+    let attempts = 0;
+    const carriers = carriersFor(identity, directOnly, {
+      respond: () => {
+        attempts += 1;
+        return respond(attempts);
+      },
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: carriers.dial,
+      heartbeat: () => () => undefined,
+      network: unreachable,
+      ...(stepUp === undefined ? {} : { stepUp }),
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    return { router, daemon, attempts: () => attempts };
+  };
+
+  it('should send the same request again exactly once after the person confirms', async () => {
+    // Arrange — refused the first time, accepted the second.
+    const asked: string[] = [];
+    const { router, daemon, attempts } = await steppedRouter(
+      attempt => (attempt === 1 ? { status: 403, body: REQUIRED } : { status: 200, body: { ok: true } }),
+      async connection => {
+        asked.push(connection.daemonId);
+        return true;
+      },
+    );
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet/import`, { method: 'POST', body: '{"a":1}' });
+
+    // Assert
+    should(response.status).equal(200);
+    should(await response.json()).eql({ ok: true });
+    should(asked).eql([daemon.daemonId]);
+    should(attempts()).equal(2);
+  });
+
+  it('should not send a third time when the retry is refused again', async () => {
+    // Arrange — a step-up the daemon still does not accept.
+    const { router, attempts } = await steppedRouter(
+      () => ({ status: 403, body: REQUIRED }),
+      async () => true,
+    );
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet/import`, { method: 'POST', body: '{}' });
+
+    // Assert — the second refusal goes to the caller; nothing loops.
+    should(response.status).equal(403);
+    should(attempts()).equal(2);
+  });
+
+  it('should return the original refusal, body still readable, when the prompt is dismissed', async () => {
+    // Arrange
+    const { router, attempts } = await steppedRouter(
+      () => ({ status: 403, body: REQUIRED }),
+      async () => false,
+    );
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+
+    // Assert — the daemon's refusal, unchanged, and the request was not repeated.
+    should(response.status).equal(403);
+    should(await response.json()).eql(REQUIRED);
+    should(attempts()).equal(1);
+  });
+
+  it('should not ask when the 403 carries any other code', async () => {
+    // Arrange
+    let asked = 0;
+    const { router, attempts } = await steppedRouter(
+      () => ({ status: 403, body: { code: 'grant_denied', message: 'No.' } }),
+      async () => {
+        asked += 1;
+        return true;
+      },
+    );
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+
+    // Assert
+    should(response.status).equal(403);
+    should(await response.json()).eql({ code: 'grant_denied', message: 'No.' });
+    should(asked).equal(0);
+    should(attempts()).equal(1);
+  });
+
+  it('should not ask for a 403 whose body is not JSON', async () => {
+    // Arrange
+    let asked = 0;
+    const { router, attempts } = await steppedRouter(
+      () => ({ status: 403, body: 'Forbidden, plain text' }),
+      async () => {
+        asked += 1;
+        return true;
+      },
+    );
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+
+    // Assert
+    should(response.status).equal(403);
+    should(await response.text()).equal('Forbidden, plain text');
+    should(asked).equal(0);
+    should(attempts()).equal(1);
+  });
+
+  it('should not ask for a JSON null body, or for any status but 403', async () => {
+    // Arrange
+    let asked = 0;
+    const stepUp = async (): Promise<boolean> => {
+      asked += 1;
+      return true;
+    };
+    const nullBody = await steppedRouter(() => ({ status: 403, body: 'null' }), stepUp);
+    const notForbidden = await steppedRouter(() => ({ status: 401, body: REQUIRED }), stepUp);
+
+    // Act
+    const first = await nullBody.router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+    const second = await notForbidden.router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+
+    // Assert
+    should([first.status, second.status]).eql([403, 401]);
+    should(asked).equal(0);
+    should(nullBody.attempts() + notForbidden.attempts()).equal(2);
+  });
+
+  it('should hand the refusal back unchanged when nothing is able to ask', async () => {
+    // Arrange — no stepUp option at all.
+    const { router, attempts } = await steppedRouter(() => ({ status: 403, body: REQUIRED }));
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+
+    // Assert
+    should(response.status).equal(403);
+    should(await response.json()).eql(REQUIRED);
+    should(attempts()).equal(1);
+  });
+});

@@ -137,7 +137,7 @@ function carrier(
       requests.push(request);
       return (await options.answer?.(request)) ?? { status: 200, headers: new Map(), body: '{"ok":true}' };
     },
-    sockets: async () => ({ outcome: 'unclaimed' }),
+    sockets: { upgrade: async () => ({ outcome: 'unclaimed' }), reauthorize: () => true },
     devices: {
       deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
       seen: () => undefined,

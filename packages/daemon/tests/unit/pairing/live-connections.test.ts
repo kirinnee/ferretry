@@ -72,6 +72,40 @@ describe('LiveDeviceConnections', () => {
     should(ended).deepEqual(['terminal']);
   });
 
+  it('should ask every live connection again, skip released ones, and survive one that throws', () => {
+    // Arrange
+    const live = new LiveDeviceConnections();
+    const asked: string[] = [];
+    live.track(
+      'phone',
+      () => undefined,
+      undefined,
+      () => {
+        throw new Error('this transport could not re-ask');
+      },
+    );
+    live.track(
+      'phone',
+      () => undefined,
+      undefined,
+      () => asked.push('terminal'),
+    );
+    const release = live.track(
+      'laptop',
+      () => undefined,
+      undefined,
+      () => asked.push('gone'),
+    );
+    live.track('laptop', () => undefined);
+    release();
+
+    // Act
+    live.recheckAll();
+
+    // Assert
+    should(asked).deepEqual(['terminal']);
+  });
+
   it('should close with a code the peer receives intact', () => {
     should(DEVICE_UNPAIRED_CLOSE).deepEqual({ code: 1008, reason: 'this device is no longer paired' });
   });

@@ -158,7 +158,10 @@ class RelayBridge {
     identity: Awaited<ReturnType<typeof newDaemonIdentity>>,
     dispatch: RelayApiDispatch,
     pairing: RelayPairingRedeemer = { redeemInSession: async () => ({ kind: 'refused' }) },
-    sockets: RelayLinkDependencies['sockets'] = async () => ({ outcome: 'unclaimed' }),
+    sockets: RelayLinkDependencies['sockets'] = {
+      upgrade: async () => ({ outcome: 'unclaimed' }),
+      reauthorize: () => true,
+    },
   ): Promise<void> {
     await this.rendezvous.fetch(
       new Request(`${RELAY_URL}/v1/rendezvous/${identity.daemonId}/daemon`, { headers: { Upgrade: 'websocket' } }),

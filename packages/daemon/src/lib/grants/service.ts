@@ -47,6 +47,11 @@ export interface CapabilityGrantDeps {
   readonly audit: GrantAuditPort;
   /** The command a human actually types, so a refusal names it rather than inventing one. */
   readonly clientName: string;
+  /**
+   * Told every time the enforced answer moves — a change, a refresh, a failed refresh — so streams
+   * authorized under the old answer are asked again instead of running on it.
+   */
+  readonly changed?: () => void;
 }
 
 /**
@@ -98,8 +103,10 @@ export class CapabilityGrantService implements CapabilityGuard {
       const [grants, written] = await Promise.all([this.deps.document.read(), this.deps.document.written()]);
       this.grants = grants;
       this.writtenDown = written;
+      this.deps.changed?.();
     } catch (error) {
       this.grants = undefined;
+      this.deps.changed?.();
       throw new GrantError(
         'unavailable',
         `this daemon could not read its capability grants, so every governed capability is refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -216,6 +223,7 @@ export class CapabilityGrantService implements CapabilityGuard {
     const changes = grantChanges(current, next);
     await this.deps.document.write(next);
     this.grants = next;
+    this.deps.changed?.();
     // AFTER the write, so a record can never claim a change that did not reach the document. A failing
     // audit is not swallowed: a change nobody can see afterwards is the state this exists to prevent.
     await this.deps.audit.record({

@@ -141,6 +141,25 @@ describe('ApiSocketDispatcher', () => {
     should(host.outcome).equal('accepted');
   });
 
+  it('should answer again for an open stream without accepting anything', () => {
+    // Arrange
+    let accepted = 0;
+    const route = streamRoute();
+    const counting = {
+      ...route,
+      accept: async (context: Parameters<typeof route.accept>[0]) => {
+        accepted += 1;
+        return await route.accept(context);
+      },
+    };
+    const dispatcher = dispatcherFor(counting);
+
+    // Act + Assert — still allowed for its own caller, never for an anonymous one.
+    should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', headers: human }))).be.true();
+    should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream' }))).be.false();
+    should(accepted).equal(0);
+  });
+
   it('should refuse an unauthenticated upgrade before the route is ever accepted', async () => {
     // The whole point of deciding this on the handshake: an anonymous peer must never hold a socket,
     // not even briefly, and must never learn which sockets exist by watching how one dies.

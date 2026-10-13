@@ -131,9 +131,9 @@ export class DirectSession implements SocketHandler {
       // Seen on the way through: a device's proof is registered here first, which is the moment this
       // socket stops being an unproven one.
       connections: {
-        track: (deviceId, end) => {
+        track: (deviceId, end, appSession, recheck) => {
           onProved();
-          return deps.connections.track(deviceId, end);
+          return deps.connections.track(deviceId, end, appSession, recheck);
         },
       },
       ...(arrival === undefined ? {} : { arrival }),

@@ -3,7 +3,7 @@
  *
  * Every call takes a client rather than building one: a passkey belongs to ONE machine, and one browser
  * can be paired to several. Nothing here is cached and nothing is logged — a challenge is single-use,
- * but there is still no reason for one to sit in a console.
+ * but there is still no reason for one to sit in a log.
  *
  * The app's own origin is sent with each options request because it IS the relying party: the daemon
  * checks it against the origins it serves and answers with the matching relying-party id, so a copy of
