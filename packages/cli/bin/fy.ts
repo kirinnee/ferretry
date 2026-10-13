@@ -16,15 +16,15 @@ import {
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
+  FileConversationLeaseStore,
   FileFleetConfigSource,
   FileFleetProvisioner,
   FileFleetScaffolder,
-  FileConversationLeaseStore,
   FileSeedProvenanceStore,
   FileSharedHistoryFileSystem,
   fetchQuota,
-  harnessKeychainAccount,
   HostProcessStarts,
+  harnessKeychainAccount,
   PlatformFleetCredentialStore,
   ProcessFleetLoginPort,
   ProcessFleetTokenRefreshPort,
@@ -72,6 +72,7 @@ import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
 import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
+import { createStatuslineController } from '../src/adapters/statusline/index.ts';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
@@ -131,7 +132,6 @@ import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
-import { registerSetupCommands } from '../src/lib/setup/commands';
 import {
   AnswerQuestionController,
   InterruptSessionController,
@@ -147,6 +147,7 @@ import {
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
+import { registerSetupCommands } from '../src/lib/setup/commands';
 import { StateHomeClaimService } from '../src/lib/state-home/claim';
 import { StateHomeController } from '../src/lib/state-home/controller';
 import { registerStatuslineCommands } from '../src/lib/statusline/commands';
@@ -661,7 +662,16 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program }) => registerCredentialCommands(program),
   ({ program }) => registerProfileCommands(program),
   ({ program }) => registerComponentCommands(program),
-  ({ program }) => registerStatuslineCommands(program),
+  ({ program, world }) =>
+    registerStatuslineCommands(
+      program,
+      createStatuslineController({
+        environment: world.environment,
+        homeDirectory: resolveUserHome(world.environment),
+        product: PRODUCT_NAME,
+        io: world.io,
+      }),
+    ),
   // `fy history claim`, which a wrapper runs before `exec` so a conversation has one live writer (§9.3).
   ({ program, world }) =>
     registerHistoryCommands(
