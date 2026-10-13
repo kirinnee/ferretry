@@ -507,26 +507,26 @@ describe('the relay carrier block', () => {
   });
 });
 
-describe('the fleet preparation block', () => {
-  it('should prepare the default accounts unless the operator said otherwise', () => {
-    // Assert — ON by default, and that default is the feature: a machine with a harness installed and
-    // no declared account could serve this whole API and start no session.
-    should(defaultDaemonConfig().fleet).deepEqual({ prepareDefaults: true });
-    should(parseDaemonConfig({}).fleet).deepEqual({ prepareDefaults: true });
-    should(defaultDaemonConfigDocument().fleet).deepEqual({ prepareDefaults: true });
+describe('the retired fleet block', () => {
+  it('should no longer carry a fleet block, because starting a daemon imports nothing', () => {
+    // Assert — there is nothing left to switch, so nothing to default and nothing a first boot writes.
+    should(defaultDaemonConfig()).not.have.property('fleet');
+    should(defaultDaemonConfigDocument()).not.have.property('fleet');
+    should(defaultDaemonConfig().retiredFleetBlock).equal(false);
   });
 
-  it('should honour an explicit false, including on a document that says nothing else', () => {
-    // Assert — read from the document on every start rather than from an "already prepared" marker,
-    // so somebody who does not want a daemon writing into their home is obeyed on the FIRST start.
-    should(parseDaemonConfig({ fleet: { prepareDefaults: false } }).fleet).deepEqual({ prepareDefaults: false });
-  });
+  it('should still boot an old document that carries one, in any shape, and remember to say so', () => {
+    // Act — every earlier boot wrote `{ prepareDefaults: true }` itself; a hand-edited one may say anything.
+    const written = parseDaemonConfig({ fleet: { prepareDefaults: true } });
+    const optedOut = parseDaemonConfig({ fleet: { prepareDefaults: false } });
+    const misspelled = parseDaemonConfig({ fleet: { prepareDefault: 'no' } });
 
-  it('should refuse a key nothing reads rather than accept a silent typo', () => {
-    // Assert — strict, like every other block here: a misspelled opt-out that parsed would leave
-    // somebody believing they had turned this off.
-    should(() => parseDaemonConfig({ fleet: { prepareDefault: false } })).throw();
-    should(() => parseDaemonConfig({ fleet: { prepareDefaults: 'no' } })).throw();
+    // Assert
+    should(written.retiredFleetBlock).equal(true);
+    should(optedOut.retiredFleetBlock).equal(true);
+    should(misspelled.retiredFleetBlock).equal(true);
+    should(written).not.have.property('fleet');
+    should(parseDaemonConfig({}).retiredFleetBlock).equal(false);
   });
 });
 

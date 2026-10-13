@@ -30,10 +30,7 @@ import type { ApiRoute } from '../../api/route.ts';
 import { FleetSetupRefusal, type FleetSetupService } from '../../fleet/setup-service.ts';
 
 /** First-run scan, tool install and the clone export. */
-export type FleetSetupSubsystem = Pick<
-  FleetSetupService,
-  'scan' | 'installTools' | 'exportBundle' | 'executors' | 'firstRunAtBoot'
->;
+export type FleetSetupSubsystem = Pick<FleetSetupService, 'scan' | 'installTools' | 'exportBundle' | 'executors'>;
 
 /** `403` for a caller who could not confirm; `409` for every other refusal, as the fleet's own answer. */
 function refusal(error: FleetSetupRefusal): ApiError {

@@ -29,7 +29,6 @@ import should from 'should';
 import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
 import { type AccountDocumentReading, FleetCatalogRefusal } from '../../../src/lib/fleet/catalog-service.ts';
 import {
-  bootFirstRunSentence,
   CLONE_BUNDLE_MAX_BYTES,
   createFleetSetupSubsystem,
   FleetSetupRefusal,
@@ -296,86 +295,6 @@ async function importOnce(
 
 const configOf = (documents: readonly FleetDocumentWrite[]): string =>
   documents.find(document => document.path === '/state/fleet/config.yaml')?.content ?? '';
-
-// ── Boot ─────────────────────────────────────────────────────────────────────────────────────────
-
-describe('the first run a booting daemon reports', () => {
-  it('should say each ending in its own sentence', () => {
-    should(bootFirstRunSentence({ kind: 'imported', summary: 'studio is ready.' })).equal(
-      'first run: studio is ready.',
-    );
-    should(bootFirstRunSentence({ kind: 'skipped', reason: 'Nothing was found to import.' })).equal(
-      'first run: nothing was imported, because nothing was found to import.',
-    );
-    should(bootFirstRunSentence({ kind: 'skipped', reason: '' })).equal('first run: nothing was imported, because ');
-    should(bootFirstRunSentence({ kind: 'failed', reason: 'disk full' })).equal(
-      "first run: importing this machine's own setup failed, so it has no runtimes yet: disk full",
-    );
-  });
-});
-
-describe('firstRunAtBoot', () => {
-  it('should import the host setup on a machine with no fleet, sharing the login in place', async () => {
-    // Arrange
-    const { service, applied, secrets } = world();
-
-    // Act
-    const result = await service.firstRunAtBoot();
-
-    // Assert
-    should(result).deepEqual({
-      kind: 'imported',
-      summary: 'studio is ready · 1 runtime created: claude-default.',
-    });
-    should(applied).have.length(1);
-    const config = configOf(applied[0]?.documents ?? []);
-    should(config).containEql('store: host');
-    should(config).not.containEql(SECRET_VALUE);
-    should([...secrets.values()]).deepEqual([SECRET_VALUE]);
-  });
-
-  it('should skip a configuration in the old account format with the sentence that names the fix, writing nothing', async () => {
-    const { service, state, applied } = world();
-    const retired = new RetiredFleetConfigError('/state/fleet/config.yaml');
-    state.documentError = retired;
-    should(await service.firstRunAtBoot()).deepEqual({ kind: 'skipped', reason: retired.message });
-    should(retired.message).containEql('/state/fleet/config.yaml');
-    should(applied).have.length(0);
-  });
-
-  it('should report any other unreadable configuration as a failure, never a throw', async () => {
-    const { service, state, applied } = world();
-    state.documentError = new Error('bad yaml');
-    should(await service.firstRunAtBoot()).deepEqual({ kind: 'failed', reason: 'bad yaml' });
-    should(applied).have.length(0);
-  });
-
-  it('should leave a machine that already has a fleet configuration alone', async () => {
-    const { service, state } = world();
-    state.reading = { format: 'version-2', model: parseAccountModel({ version: 2 }), revision: 'r' };
-    should(await service.firstRunAtBoot()).deepEqual({
-      kind: 'skipped',
-      reason: 'this machine already has a fleet configuration, so it was left as it is',
-    });
-  });
-
-  it('should skip a host with no harness at all, because there is nothing to import', async () => {
-    const { service, state } = world();
-    state.scans = [claudeScan({ command: undefined as never }), codexScan()].map(scan => {
-      const { command: _none, ...rest } = scan;
-      return rest;
-    });
-    should(await service.firstRunAtBoot()).deepEqual({ kind: 'skipped', reason: 'Nothing was found to import.' });
-  });
-
-  it('should report a failed apply as a value, never a throw', async () => {
-    const { service, state } = world();
-    state.apply = async () => {
-      throw new Error('disk full');
-    };
-    should(await service.firstRunAtBoot()).deepEqual({ kind: 'failed', reason: 'disk full' });
-  });
-});
 
 // ── Scan ─────────────────────────────────────────────────────────────────────────────────────────
 

@@ -154,6 +154,8 @@ export interface DaemonControllerDeps {
    * `FirstPasswordOffer` for why it can never block a start.
    */
   readonly firstPassword: IFirstPasswordOffer;
+  /** The one line a start ends with when this machine is not set up yet. See `MachineSetupNotice`. */
+  readonly setupNotice: IMachineSetupNotice;
   readonly readiness?: ReadinessPolicy;
   readonly shutdown?: ShutdownPolicy;
 }
@@ -161,6 +163,11 @@ export interface DaemonControllerDeps {
 /** Offering to set this machine's first operator password. Satisfied by `FirstPasswordOffer`. */
 interface IFirstPasswordOffer {
   offer(): Promise<void>;
+}
+
+/** Saying, once, that this machine is not set up yet. Satisfied by `MachineSetupNotice`. */
+interface IMachineSetupNotice {
+  say(): Promise<void>;
 }
 
 /**
@@ -216,6 +223,7 @@ export class DaemonController {
   async start(): Promise<void> {
     await this.#serialized('start', () => this.#start());
     await this.deps.firstPassword.offer();
+    await this.deps.setupNotice.say();
   }
 
   async stop(): Promise<void> {

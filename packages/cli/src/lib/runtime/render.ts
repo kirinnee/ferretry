@@ -12,7 +12,7 @@ const login = (runtime: FleetRuntimeView): string => {
 /** The Runtimes tab in a terminal. */
 export function renderRuntimeList(catalog: FleetRuntimeCatalog, binaryName: string): string {
   if (catalog.runtimes.length === 0) {
-    return `No runtimes yet. Set this machine up with \`${binaryName} setup\`, or add one with \`${binaryName} runtime add\`.`;
+    return `No runtimes yet. Set this machine up with \`${binaryName} daemon setup\`, or add one with \`${binaryName} runtime add\`.`;
   }
   const lines: string[] = [];
   for (const runtime of catalog.runtimes) {

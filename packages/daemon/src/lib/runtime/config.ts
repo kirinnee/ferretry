@@ -105,38 +105,26 @@ export const DaemonRelayConfigSchema = z
 export type DaemonRelayConfig = z.output<typeof DaemonRelayConfigSchema>;
 
 /**
- * What STARTING this daemon is allowed to set up on the host's behalf.
- *
- * ON BY DEFAULT, and that default is the feature. A machine with a harness installed and no fleet
- * configuration could serve this daemon's whole API and start no session. So a start with no
- * `config.yaml` runs the first run — the import of this machine's own Claude Code and Codex setup —
- * and the boot trail says what it imported.
- *
- * AN EXPLICIT `false` IS HONOURED ON EVERY START, INCLUDING THE FIRST. There is no "already prepared"
- * marker to consult and deliberately so: the flag is read from the document each boot, so somebody
- * who does not want a daemon writing into their home writes it once and it is true from then on,
- * rather than being true only after the write they were trying to prevent has happened.
- *
- * TURNING IT OFF LATER REMOVES NOTHING. Runtimes already imported stay declared, because deleting one
- * is an edit to the fleet configuration and this key is not one.
- */
-export const DaemonFleetConfigSchema = z
-  .strictObject({
-    /** Run the first run at boot: import this machine's own setup when it has no fleet configuration. */
-    prepareDefaults: z.boolean().default(true),
-  })
-  .prefault({});
-
-export type DaemonFleetConfig = z.output<typeof DaemonFleetConfigSchema>;
-
-/**
  * What the boot trail says, once, when `config/daemon.json` still carries the retired `accountModel`
  * switch. The key is TOLERATED rather than refused — a document an operator wrote must not stop a boot
  * over a setting that no longer does anything — and dropped from the configuration this daemon reads.
- * It is the one retired key with that tolerance; any other unknown key is still refused.
+ * It and {@link RETIRED_FLEET_BLOCK_NOTICE} are the two retired keys with that tolerance; any other
+ * unknown key is still refused.
  */
 export const RETIRED_ACCOUNT_MODEL_NOTICE =
   'config/daemon.json still has an accountModel setting; it is no longer read — the account model is always on. Delete the key.';
+
+/**
+ * What the boot trail says, once, when `config/daemon.json` still carries the retired `fleet` block
+ * (`fleet.prepareDefaults`, which switched the boot-time import on and off).
+ *
+ * STARTING A DAEMON NEVER IMPORTS ANYTHING NOW: a fresh machine is "not set up" until somebody chooses,
+ * in the app or with `fy daemon setup`, so there is nothing left for the key to switch. Earlier boots
+ * wrote `{ "prepareDefaults": true }` into every fresh state home themselves, which is why the block is
+ * tolerated in ANY shape rather than refused: a document this daemon once wrote must not stop it booting.
+ */
+export const RETIRED_FLEET_BLOCK_NOTICE =
+  'config/daemon.json still has a fleet.prepareDefaults setting; it is no longer read — starting the daemon never imports anything, so set this machine up from the app or with `fy daemon setup`. Delete the key.';
 
 /**
  * What the operator has agreed the UI may do on this machine, per capability and per axis.
@@ -257,8 +245,8 @@ export const DaemonConfigDocumentSchema = z
      * end.
      */
     harness: HarnessDiscoveryDocumentSchema,
-    /** What starting this daemon may set up on the host's behalf. See {@link DaemonFleetConfigSchema}. */
-    fleet: DaemonFleetConfigSchema,
+    /** RETIRED and ignored: tolerated so an old document still boots. See {@link RETIRED_FLEET_BLOCK_NOTICE}. */
+    fleet: z.unknown().optional(),
     /** RETIRED and ignored: tolerated so an old document still boots. See {@link RETIRED_ACCOUNT_MODEL_NOTICE}. */
     accountModel: z.unknown().optional(),
     /**
@@ -383,7 +371,7 @@ function recordedAdvertisement(config: DaemonConfig): { readonly operatorPublicU
  * bind rather than off the document, which is what makes an explicit bind carrier a decision rather
  * than a decoration: the two spellings would otherwise agree everywhere except at the socket.
  */
-export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(({ accountModel, ...value }) => {
+export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(({ accountModel, fleet, ...value }) => {
   const declared = resolveDaemonCarriers({
     host: value.host,
     port: value.port,
@@ -404,6 +392,8 @@ export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(({ accoun
     ...derivedAddresses({ host, port, ...operatorPublicUrl(value.publicUrl) }),
     /** The document still carries the retired `accountModel` key, so the boot says so once. */
     retiredAccountModel: accountModel !== undefined,
+    /** The document still carries the retired `fleet` block, so the boot says so once. */
+    retiredFleetBlock: fleet !== undefined,
   };
 });
 
