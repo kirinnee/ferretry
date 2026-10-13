@@ -163,6 +163,7 @@ function deps(layout: DaemonLayout, out: string[], serving: HealthView | undefin
       setExitCode: () => {},
     },
     firstPassword: { offer: () => Promise.resolve() },
+    setupNotice: { say: () => Promise.resolve() },
   };
 }
 

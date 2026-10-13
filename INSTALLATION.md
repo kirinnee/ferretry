@@ -139,7 +139,7 @@ fyd --version
 
 ## First run
 
-Five commands take you from a fresh install to a phone watching an agent work. Install `claude`
+A few commands take you from a fresh install to a phone watching an agent work. Install `claude`
 (Claude Code) or `codex` first, and `tmux`, which runs each session.
 
 1. **Start the daemon.**
@@ -148,11 +148,9 @@ Five commands take you from a fresh install to a phone watching an agent work. I
    fy daemon start
    ```
 
-   If `claude` or `codex` is on your `PATH`, this first start also sets the machine up from them: it
-   imports your own instructions, settings, MCP servers and skills, shares your existing login in
-   place (it is never copied), and creates one **runtime** for each, `claude-default` and
-   `codex-default`. `fy runtimes` lists them. `fy doctor` checks what else the host is missing, and
-   says what each missing program stops.
+   Starting the daemon sets nothing up by itself. A new machine is **not set up** until you choose
+   what to bring in, and the start ends with one line saying so. `fy doctor` checks what else the
+   host is missing, and says what each missing program stops.
 
 2. **Answer the password question.** At a terminal, the first start offers to set an **operator
    password**. It is not your system or `sudo` password; it is a Ferretry-only secret. Using this
@@ -165,7 +163,24 @@ Five commands take you from a fresh install to a phone watching an agent work. I
    fy daemon password set
    ```
 
-3. **Check the logins.**
+3. **Set the machine up.** Ferretry asks, one question at a time, whether to use what it found:
+
+   > We found Claude Code on _this machine_. Use your login and setup? **Import** · **Skip**
+
+   Import brings in your own instructions, settings, MCP servers and skills, shares your existing
+   login in place (it is never copied), and creates one **runtime** for each tool you import,
+   `claude-default` and `codex-default`. Skip both and nothing is set up; you can come back any time.
+
+   Answer it in whichever place suits you:
+   - **In the app.** Pair your phone (step 5) and the app opens these questions by itself. A tool
+     that is installed but not signed in offers **Sign in now** right there.
+   - **In the terminal.** `fy daemon setup` asks the same questions.
+   - **In a script**, with no questions: `fy daemon import claude` or `fy daemon import codex`. Add
+     `--name <runtime>` to name the runtime yourself.
+
+   `fy runtimes` lists what was made.
+
+4. **Check the logins.**
 
    ```bash
    fy credentials
@@ -180,7 +195,7 @@ Five commands take you from a fresh install to a phone watching an agent work. I
    `fy credential signin <id>`. That one sign-in covers every runtime that uses the login. You can
    do the same from the browser: Settings → **Machines** → your machine → **Credentials**.
 
-4. **Pair your phone.**
+5. **Pair your phone.**
 
    ```bash
    fy pair
@@ -188,9 +203,10 @@ Five commands take you from a fresh install to a phone watching an agent work. I
 
    Scan the QR code with your phone's camera. The code lasts two minutes and works once. The phone
    does not need to reach this machine directly: when it cannot, it pairs through Ferretry's hosted
-   relay, which never sees the code or anything you send.
+   relay, which never sees the code or anything you send. If the machine is not set up yet, the app
+   asks step 3's questions as soon as the phone is paired.
 
-5. **Start a session** on an agent runtime (the ones the first run made are):
+6. **Start a session** on an agent runtime (the ones the setup made are):
 
    ```bash
    fy start --agent claude-default "your task"

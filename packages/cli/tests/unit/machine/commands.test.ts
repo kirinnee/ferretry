@@ -34,7 +34,7 @@ describe('renderMachine', () => {
       .match(/Agent permissions: auto/)
       .and.match(/Claude Code: installed \(\/usr\/bin\/claude\)/)
       .and.match(/Codex: not installed/);
-    should(text).not.match(/fz setup/);
+    should(text).not.match(/fz daemon setup/);
   });
 
   it('should say when it is not set up yet', () => {
@@ -51,7 +51,7 @@ describe('renderMachine', () => {
       .match(/Setup: not set up yet\n/)
       .and.match(/skip \(agents are never asked\)/)
       .and.match(/Claude Code: installed\n/);
-    should(fresh).match(/Set it up with `fz setup`\./);
+    should(fresh).match(/Set it up with `fz daemon setup`, or pair a phone and finish in the app\./);
   });
 });
 

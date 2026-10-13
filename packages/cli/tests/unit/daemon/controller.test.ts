@@ -30,6 +30,7 @@ import {
   installedDaemon,
   layout,
   RecordingFirstPassword,
+  RecordingSetupNotice,
   runningReport,
   SteppingClock,
   stoppedReport,
@@ -106,6 +107,7 @@ function harness(options: {
     clock,
     out,
     firstPassword,
+    setupNotice: new RecordingSetupNotice(),
     readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
@@ -438,6 +440,25 @@ describe('daemon start', () => {
 
     // Assert
     should(firstPassword.offers).equal(0);
+  });
+
+  it('should end a start with the not-set-up line, after the password offer and outside every claim', async () => {
+    // Arrange — both write into the LOCK's own trail, which is the only way to state ordering.
+    const lifecycle = new FakeLifecycleLock();
+    const notice = new RecordingSetupNotice(lifecycle.trail);
+    const started = harness({
+      probes: [undefined, health()],
+      serviceFallback: stoppedReport,
+      lifecycle,
+      overrides: { firstPassword: new RecordingFirstPassword(lifecycle.trail), setupNotice: notice },
+    });
+
+    // Act
+    await started.controller.start();
+
+    // Assert — the last thing a start says, once.
+    should(notice.says).equal(1);
+    should(lifecycle.trail.slice(-2)).deepEqual(['offer:first-password', 'say:setup-notice']);
   });
 });
 
@@ -1611,6 +1632,7 @@ describe('daemon controller defaults', () => {
       clock: new SteppingClock(),
       out: new CapturedOutput(),
       firstPassword: new RecordingFirstPassword(),
+      setupNotice: new RecordingSetupNotice(),
     });
 
     // Act

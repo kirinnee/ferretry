@@ -94,6 +94,11 @@ export interface MachinesSurfaceProps {
   readonly onOpen: (daemonId: DaemonId, tab: MachineTabId) => void;
   /** The existing pairing flow. */
   readonly onAddMachine: () => void;
+  /**
+   * Open this machine's first run. Called by itself, once per visit, the first time the machine answers
+   * that it is not set up — so nobody has to hunt for a button (docs/design/account-model.md §4.3).
+   */
+  readonly onSetUp?: (daemonId: DaemonId) => void;
   readonly createClient: FleetClientFactory;
   readonly tabs?: MachineTabSurfaces;
 }
@@ -105,6 +110,7 @@ export function MachinesSurface({
   unknownMachine,
   onOpen,
   onAddMachine,
+  onSetUp,
   createClient,
   tabs = {},
 }: MachinesSurfaceProps) {
@@ -130,6 +136,18 @@ export function MachinesSurface({
     const pairing = latest.current.find(candidate => candidate.daemonId === daemonId);
     if (pairing) check(pairing);
   }, [check, daemonId]);
+
+  // A machine that is not set up opens its first run by itself — ONCE per visit, so leaving the flow, or
+  // finishing it with nothing chosen, lands on the tabs instead of going round again. Landing on
+  // Machines again later offers it again.
+  const offered = useRef(false);
+  const answered = reach.get(daemonId);
+  const notSetUp = answered?.kind === 'online' && answered.machine.setUp === false;
+  useEffect(() => {
+    if (!notSetUp || offered.current || onSetUp === undefined) return;
+    offered.current = true;
+    onSetUp(daemonId);
+  }, [daemonId, notSetUp, onSetUp]);
 
   if (record === undefined)
     return (

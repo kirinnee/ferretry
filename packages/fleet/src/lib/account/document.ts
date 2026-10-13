@@ -20,7 +20,7 @@ import { type AccountModel, parseAccountModel } from './schema.ts';
  * is, that it is no longer read, and how to get a working machine back.
  */
 export const RETIRED_FLEET_CONFIG_SENTENCE = (path: string): string =>
-  `${path} uses the old account format, which this Ferretry no longer reads. Move it aside (for example rename it to config.yaml.old) and restart the daemon; the first run then sets this machine up again from its own Claude Code and Codex.`;
+  `${path} uses the old account format, which this Ferretry no longer reads. Move it aside (for example rename it to config.yaml.old), then set this machine up again from the app or with \`fy daemon setup\`.`;
 
 /** A `config.yaml` written in the retired account format; its message is {@link RETIRED_FLEET_CONFIG_SENTENCE}. */
 export class RetiredFleetConfigError extends Error {

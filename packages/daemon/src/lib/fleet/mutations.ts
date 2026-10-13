@@ -356,11 +356,26 @@ function applyAccountChange(
     case 'credential.add': {
       assertFreeRuntimeName(change.id, id => model.credentials[id] !== undefined, 'login', facts.machineName);
       assertLabelFree(model, change.id, change.harness, change.label);
+      const store = change.store ?? 'ferretry';
+      if (store === 'host') {
+        // One pointer at the person's own login is all there is to point at: the import reuses it.
+        const existing = Object.entries(model.credentials).find(
+          ([, credential]) => credential.harness === change.harness && credential.store === 'host',
+        )?.[0];
+        if (existing !== undefined)
+          refuse(`${existing} is already your own ${HARNESS_DISPLAY_NAMES[change.harness]} login on this machine`);
+      }
       draft.credentials[change.id] = {
         harness: change.harness,
-        store: 'ferretry',
+        store,
         ...(change.label === undefined ? {} : { label: change.label }),
       };
+      if (store === 'host') {
+        consequences.push(
+          `It is your own ${HARNESS_DISPLAY_NAMES[change.harness]} login, shared with ${change.harness} in your terminal: signing in here signs that in too.`,
+        );
+        return `Add your own ${HARNESS_DISPLAY_NAMES[change.harness]} login as ${change.id}`;
+      }
       consequences.push('It starts as an empty login that needs sign-in.');
       return `Add a ${HARNESS_DISPLAY_NAMES[change.harness]} login ${change.id}`;
     }

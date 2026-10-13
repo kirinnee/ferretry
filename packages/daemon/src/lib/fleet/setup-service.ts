@@ -22,8 +22,13 @@
  * ## A configuration in the old account format
  *
  * Is refused as unreadable, never converted and never touched: the scan and the import say so with the
- * sentence that tells a person to move it aside and restart, and the first run at boot skips with it.
- * Installing a tool writes no configuration, so it asks only for the operator password.
+ * sentence that tells a person to move it aside and set the machine up again. Installing a tool
+ * writes no configuration, so it asks only for the operator password.
+ *
+ * ## Nothing is imported at boot
+ *
+ * A fresh machine is "not set up" until somebody chooses: the app opens the first run when it finds
+ * one, and `fy daemon setup` asks the same questions in a terminal. Starting the daemon imports nothing.
  *
  * ## Nothing here leaves on a timer
  *
@@ -54,7 +59,6 @@ import {
   parseCloneBundle,
   parseSettings,
   planClone,
-  RetiredFleetConfigError,
   renderConfig,
   planImport,
   EMPTY_RUNTIME_IDS,
@@ -203,23 +207,6 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
     ...(typeof raw.profile === 'string' ? { profile: raw.profile } : {}),
   };
 }
-
-// ── The first run at boot ────────────────────────────────────────────────────────────────────────
-
-/** How the first run at boot ended. Every ending is a value: a boot never refuses over it. */
-export type BootFirstRun =
-  | { readonly kind: 'skipped'; readonly reason: string }
-  | { readonly kind: 'imported'; readonly summary: string }
-  | { readonly kind: 'failed'; readonly reason: string };
-
-/** What a boot says about its first run. Built from the verdict, so no value can reach it. */
-export function bootFirstRunSentence(result: BootFirstRun): string {
-  if (result.kind === 'imported') return `first run: ${result.summary}`;
-  if (result.kind === 'skipped') return `first run: nothing was imported, because ${lowerFirst(result.reason)}`;
-  return `first run: importing this machine's own setup failed, so it has no runtimes yet: ${result.reason}`;
-}
-
-const lowerFirst = (text: string): string => (text === '' ? text : `${text[0]?.toLowerCase() ?? ''}${text.slice(1)}`);
 
 // ── What a staged import or clone holds ──────────────────────────────────────────────────────────
 
@@ -750,37 +737,6 @@ export class FleetSetupService {
       if (body !== undefined) skillFrontmatter[item] = skillFrontmatterKeys(body);
     }
     return { instructions, settings, hooks, skillFrontmatter };
-  }
-
-  // ── The first run at boot ──────────────────────────────────────────────────────────────────────
-
-  /**
-   * The first run a booting daemon gives a host with no fleet: import every installed harness under
-   * the suggested names. A configuration in the old account format is skipped with the sentence that
-   * says how to set the machine up again, and is left exactly as it is.
-   */
-  async firstRunAtBoot(): Promise<BootFirstRun> {
-    try {
-      let reading: Awaited<ReturnType<SetupCatalogDeps['document']>>;
-      try {
-        reading = await this.deps.catalog.document();
-      } catch (error) {
-        if (error instanceof RetiredFleetConfigError) return { kind: 'skipped', reason: error.message };
-        throw error;
-      }
-      if (reading.format !== 'none') {
-        return { kind: 'skipped', reason: 'this machine already has a fleet configuration, so it was left as it is' };
-      }
-      const change: SetupChange = { kind: 'setup.import' };
-      const composed = await this.#composeImport(change);
-      this.#described.set(change, composed.fingerprint);
-      return { kind: 'imported', summary: await this.#execute(change, composed) };
-    } catch (error) {
-      if (error instanceof FleetCatalogRefusal && error.code === 'fleet_change_refused') {
-        return { kind: 'skipped', reason: error.message };
-      }
-      return { kind: 'failed', reason: errorMessage(error) };
-    }
   }
 
   // ── Reading ────────────────────────────────────────────────────────────────────────────────────
