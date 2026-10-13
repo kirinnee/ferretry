@@ -1,0 +1,4500 @@
+<title>Ferretry Runtimes Prototype</title>
+<link
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650&family=JetBrains+Mono:wght@400;500&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --bg: #fbfbfc;
+    --surface: #ffffff;
+    --surface-2: #f5f5f7;
+    --surface-3: #ededf1;
+    --fg: #17171b;
+    --fg-soft: #45454e;
+    --fg-muted: #6e6e77;
+    --border: #e7e7ec;
+    --border-strong: #868689;
+    --accent: #4f52d6;
+    --accent-fg: #ffffff;
+    --accent-soft: #eeeffc;
+    --accent-border: #d6d8f5;
+    --ok: #3d7b50;
+    --ok-bg: #eef4f0;
+    --ok-border: #cfe2d6;
+    --warn: #8a6420;
+    --warn-bg: #f7f1e6;
+    --warn-border: #e7dac0;
+    --danger: #b03a3a;
+    --danger-bg: #f9eded;
+    --danger-border: #ecd0d0;
+    --shadow: 0 1px 2px rgba(23, 23, 27, 0.05), 0 18px 40px -18px rgba(23, 23, 27, 0.22);
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      --bg: #0b0b0d;
+      --surface: #141417;
+      --surface-2: #1a1a1e;
+      --surface-3: #232329;
+      --fg: #f2f2f4;
+      --fg-soft: #c9c9d1;
+      --fg-muted: #8e8e98;
+      --border: #2a2a30;
+      --border-strong: #5a5a63;
+      --accent: #8f93ee;
+      --accent-fg: #0b0b0e;
+      --accent-soft: #1b1b2b;
+      --accent-border: #34345c;
+      --ok: #6fae82;
+      --ok-bg: #14241a;
+      --ok-border: #234630;
+      --warn: #d6a85a;
+      --warn-bg: #2a2114;
+      --warn-border: #4a3a1e;
+      --danger: #e07c7c;
+      --danger-bg: #2a1515;
+      --danger-border: #4d2626;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme='dark'] {
+    --bg: #0b0b0d;
+    --surface: #141417;
+    --surface-2: #1a1a1e;
+    --surface-3: #232329;
+    --fg: #f2f2f4;
+    --fg-soft: #c9c9d1;
+    --fg-muted: #8e8e98;
+    --border: #2a2a30;
+    --border-strong: #5a5a63;
+    --accent: #8f93ee;
+    --accent-fg: #0b0b0e;
+    --accent-soft: #1b1b2b;
+    --accent-border: #34345c;
+    --ok: #6fae82;
+    --ok-bg: #14241a;
+    --ok-border: #234630;
+    --warn: #d6a85a;
+    --warn-bg: #2a2114;
+    --warn-border: #4a3a1e;
+    --danger: #e07c7c;
+    --danger-bg: #2a1515;
+    --danger-border: #4d2626;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 400 12.5px/1.5 var(--sans);
+    padding-inline: 16px;
+    padding-block: 28px 56px;
+    -webkit-font-smoothing: antialiased;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  .mono {
+    font-family: var(--mono);
+    font-size: 0.94em;
+    letter-spacing: -0.01em;
+  }
+  .lbl {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+  .muted {
+    color: var(--fg-muted);
+  }
+  .soft {
+    color: var(--fg-soft);
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- page layout ---------- */
+  .wrap {
+    max-width: 1160px;
+    margin-inline: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 392px;
+    gap: 48px;
+    align-items: start;
+  }
+  .cat {
+    order: 1;
+    min-width: 0;
+  }
+  .stage {
+    order: 2;
+    position: sticky;
+    top: max(16px, env(safe-area-inset-top, 0px));
+  }
+  @media (max-width: 900px) {
+    .wrap {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 32px;
+    }
+    .stage {
+      order: 1;
+      position: static;
+    }
+    .cat {
+      order: 2;
+    }
+    .phone {
+      width: 100%;
+    }
+  }
+
+  /* ---------- catalogue ---------- */
+  .cat h1 {
+    font-size: 18px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .cat .lede {
+    font-size: 13.5px;
+    color: var(--fg-soft);
+    margin: 0 0 4px;
+    max-width: 60ch;
+  }
+  .cat .sample {
+    color: var(--fg-muted);
+    margin: 0 0 14px;
+    max-width: 60ch;
+  }
+  .cat-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--fg-soft);
+  }
+  .seg button + button {
+    border-left: 1px solid var(--border);
+  }
+  .seg button[aria-pressed='true'] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    color: var(--fg-soft);
+    margin: 0 0 22px;
+    padding: 0;
+    list-style: none;
+  }
+  .legend li {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+  }
+  .cat-group {
+    margin-bottom: 20px;
+  }
+  .cat-group h2 {
+    margin: 0 0 6px;
+  }
+  .cases {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .case {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 8px 7px 12px;
+    border-top: 1px solid var(--border);
+  }
+  .case:first-child {
+    border-top: 0;
+  }
+  .case .cid {
+    color: var(--fg-muted);
+    font-size: 11.5px;
+  }
+  .case .ct {
+    color: var(--fg-soft);
+    min-width: 0;
+  }
+  .case .cbtns {
+    display: flex;
+    gap: 6px;
+  }
+  .case.on {
+    background: var(--accent-soft);
+  }
+  .case.on .cid,
+  .case.on .ct {
+    color: var(--fg);
+  }
+  .case.on .cid {
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  /* ---------- phone ---------- */
+  .now {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    margin: 0 0 8px;
+    min-height: 18px;
+    color: var(--fg-muted);
+  }
+  .now b {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .phone {
+    width: 392px;
+    max-width: 100%;
+    height: min(780px, calc(100vh - 64px));
+    min-height: 560px;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 26px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .p-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 14px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .msw {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .msw.static {
+    background: transparent;
+    border-color: transparent;
+    padding-inline: 0;
+  }
+  .msw .caret {
+    color: var(--fg-muted);
+    font-family: var(--sans);
+  }
+  .p-top .where {
+    color: var(--fg-muted);
+    font-size: 11.5px;
+  }
+  .p-head {
+    padding: 12px 16px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .p-head .hrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 22px;
+  }
+  .back {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    padding: 2px 4px 2px 0;
+    font-weight: 500;
+    font-size: 12.5px;
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
+  }
+  .back:disabled {
+    color: var(--fg-muted);
+    opacity: 0.5;
+  }
+  .p-title {
+    font-size: 18px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin: 4px 0 0;
+    line-height: 1.25;
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+  }
+  .p-title:focus {
+    outline: none;
+  }
+  .p-sub {
+    color: var(--fg-muted);
+    margin: 2px 0 0;
+  }
+  .p-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overscroll-behavior: contain;
+  }
+  .p-foot {
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    padding: 4px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .tab {
+    border: 0;
+    background: transparent;
+    padding: 6px 2px 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    color: var(--fg-muted);
+    font-size: 10.5px;
+    border-radius: 6px;
+  }
+  .tab svg {
+    width: 18px;
+    height: 18px;
+  }
+  .tab[aria-current='page'] {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .toast {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 72px;
+    background: var(--fg);
+    color: var(--bg);
+    border-radius: 6px;
+    padding: 9px 12px;
+    font-size: 12.5px;
+    box-shadow: var(--shadow);
+    z-index: 3;
+  }
+  .toast.raised {
+    bottom: 96px;
+  }
+
+  /* stepper header */
+  .sh {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .sh-step {
+    color: var(--fg-muted);
+    font-size: 11.5px;
+    text-align: center;
+    flex: 1;
+  }
+  .sh-x {
+    border: 0;
+    background: transparent;
+    color: var(--fg-soft);
+    padding: 2px 0 2px 4px;
+  }
+  .prog {
+    display: flex;
+    gap: 4px;
+    margin-top: 10px;
+  }
+  .prog span {
+    flex: 1;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--surface-3);
+  }
+  .prog span.done {
+    background: var(--accent-border);
+  }
+  .prog span.cur {
+    background: var(--accent);
+  }
+
+  /* ---------- building blocks ---------- */
+  .sec {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .sec-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  h2.h {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+  }
+  p {
+    margin: 0;
+  }
+  .p {
+    color: var(--fg-soft);
+    max-width: 60ch;
+  }
+  .list {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .list > * + * {
+    border-top: 1px solid var(--border);
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    padding: 10px 12px;
+    color: var(--fg);
+  }
+  button.row:hover {
+    background: var(--surface-2);
+  }
+  .row .main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .row .t {
+    font-size: 13.5px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  .row .s {
+    color: var(--fg-muted);
+    overflow-wrap: anywhere;
+  }
+  .row .chev {
+    color: var(--fg-muted);
+    align-self: center;
+    font-size: 16px;
+  }
+  .row .k {
+    width: 92px;
+    flex: none;
+    color: var(--fg-muted);
+  }
+  .item-note {
+    padding: 7px 12px 9px 34px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: center;
+  }
+  .addrow {
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .addrow .plus {
+    width: 18px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.2;
+  }
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--fg-soft);
+    border-radius: 4px;
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+  .badge.ok {
+    background: var(--ok-bg);
+    border-color: var(--ok-border);
+    color: var(--ok);
+  }
+  .badge.warn {
+    background: var(--warn-bg);
+    border-color: var(--warn-border);
+    color: var(--warn);
+    white-space: normal;
+  }
+  .badge.danger {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+    color: var(--danger);
+  }
+  .badge.accent {
+    background: var(--accent-soft);
+    border-color: var(--accent-border);
+    color: var(--accent);
+  }
+  .ic {
+    width: 11px;
+    height: 11px;
+    flex: none;
+    vertical-align: -1px;
+  }
+  .st {
+    display: inline-block;
+    width: 14px;
+    text-align: center;
+    flex: none;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .st-ok {
+    color: var(--ok);
+  }
+  .st-warn {
+    color: var(--warn);
+  }
+  .st-danger {
+    color: var(--danger);
+  }
+  .st-muted {
+    color: var(--fg-muted);
+  }
+  .stl {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+  }
+  .spin {
+    display: inline-block;
+    animation: spin 1.4s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .note {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--fg-soft);
+  }
+  .note b {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .note.ok {
+    background: var(--ok-bg);
+    border-color: var(--ok-border);
+  }
+  .note.ok b {
+    color: var(--ok);
+  }
+  .note.warn {
+    background: var(--warn-bg);
+    border-color: var(--warn-border);
+  }
+  .note.warn b {
+    color: var(--warn);
+  }
+  .note.danger {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+  }
+  .note.danger b {
+    color: var(--danger);
+  }
+  .note.info {
+    background: var(--accent-soft);
+    border-color: var(--accent-border);
+  }
+  .note .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .btn {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-weight: 500;
+    font-size: 13px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--fg);
+    text-align: center;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+  }
+  .btn.primary:hover:not(:disabled) {
+    background: var(--accent);
+    filter: brightness(1.07);
+  }
+  .btn.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: var(--surface);
+  }
+  .btn.danger:hover:not(:disabled) {
+    background: var(--danger);
+    filter: brightness(1.07);
+  }
+  .btn.quiet {
+    border-color: var(--border);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+  }
+  .btn.sm {
+    padding: 3px 10px;
+    font-size: 12px;
+  }
+  .btn.block {
+    width: 100%;
+  }
+  .link {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: var(--accent);
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .btns .btn {
+    flex: 1 1 auto;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .field label {
+    font-weight: 500;
+    color: var(--fg-soft);
+  }
+  .inp {
+    width: 100%;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--surface);
+    padding: 8px 10px;
+    font-size: 13.5px;
+  }
+  .inp.mono {
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  textarea.inp {
+    min-height: 110px;
+    resize: vertical;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .inp[aria-invalid='true'] {
+    border-color: var(--danger);
+  }
+  .err {
+    color: var(--danger);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: center;
+  }
+  .hint {
+    color: var(--fg-muted);
+  }
+
+  .opt {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    cursor: pointer;
+    background: var(--surface);
+  }
+  .opt input {
+    margin: 2px 0 0;
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
+    flex: none;
+  }
+  .opt.on {
+    background: var(--accent-soft);
+  }
+  .opt.off {
+    cursor: not-allowed;
+  }
+  .opt.off .t,
+  .opt.off .s {
+    color: var(--fg-muted);
+  }
+  .opt-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .opt .t {
+    font-size: 13.5px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  .opt .s {
+    color: var(--fg-muted);
+    overflow-wrap: anywhere;
+  }
+  .opt .why {
+    color: var(--fg-soft);
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  pre.code {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 10px;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--fg);
+  }
+  pre.code.wrapc {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .usage {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .bar {
+    display: grid;
+    grid-template-columns: 34px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .bar-l {
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+  .bar-t {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--surface-3);
+    overflow: hidden;
+  }
+  .bar-t span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .bar-t.hi span {
+    background: var(--warn);
+  }
+  .bar-v {
+    color: var(--fg-soft);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .layer {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    align-items: start;
+  }
+  .layer:first-child {
+    border-top: 0;
+  }
+  .layer .n {
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    padding-top: 2px;
+  }
+  .layer .t {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  .layer .s {
+    color: var(--fg-muted);
+  }
+  .layer.locked {
+    background: var(--surface-2);
+  }
+  .stack-cap {
+    display: flex;
+    justify-content: space-between;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+  .conf {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .conf li {
+    border: 1px solid var(--warn-border);
+    background: var(--warn-bg);
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: var(--fg-soft);
+  }
+  .conf li .key {
+    font-family: var(--mono);
+    color: var(--fg);
+    font-size: 11.5px;
+  }
+  .conf li .win {
+    color: var(--fg);
+    font-weight: 500;
+  }
+
+  .kv {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 12px;
+    margin: 0;
+  }
+  .kv dt {
+    color: var(--fg-muted);
+  }
+  .kv dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .models {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .models li {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 12px;
+    border-top: 1px solid var(--border);
+  }
+  .models li:first-child {
+    border-top: 0;
+  }
+  .models s {
+    color: var(--fg-muted);
+  }
+  .empty {
+    border: 1px dashed var(--border-strong);
+    border-radius: 6px;
+    padding: 22px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+    background: var(--surface);
+  }
+  .empty h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .order {
+    display: flex;
+    gap: 4px;
+  }
+  .order button {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 4px;
+    width: 26px;
+    height: 24px;
+    color: var(--fg-soft);
+    padding: 0;
+  }
+  .order button:disabled {
+    opacity: 0.35;
+  }
+  .spot {
+    animation: spot 1.6s ease-out 1;
+  }
+  @keyframes spot {
+    0% {
+      box-shadow: 0 0 0 3px var(--accent);
+    }
+    100% {
+      box-shadow: 0 0 0 3px transparent;
+    }
+  }
+  .fade-in {
+    animation: fin 0.4s ease-out 1;
+  }
+  @keyframes fin {
+    from {
+      opacity: 0.25;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
+  }
+</style>
+
+<div class="wrap">
+  <section class="cat" aria-labelledby="cat-title">
+    <h1 id="cat-title">Ferretry Runtimes Prototype</h1>
+    <p class="lede">Click through the agreed design. Every edge case is reachable from the list.</p>
+    <p class="sample">
+      All content is sample data: <span class="mono">you@example.com</span>, <span class="mono">studio-mac</span> and
+      <span class="mono">work-linux</span> are made up. Nothing here talks to a real machine.
+    </p>
+    <div class="cat-tools">
+      <button class="btn primary sm" id="reset-fresh" type="button">Reset to fresh machine</button>
+      <button class="btn sm" id="reset-setup" type="button">Load a set-up machine</button>
+      <span class="seg" role="group" aria-label="Theme">
+        <button type="button" id="theme-system" data-theme-set="system" aria-pressed="true">System</button>
+        <button type="button" id="theme-light" data-theme-set="light" aria-pressed="false">Light</button>
+        <button type="button" id="theme-dark" data-theme-set="dark" aria-pressed="false">Dark</button>
+      </span>
+    </div>
+    <ul class="legend" aria-label="Status shapes">
+      <li><span class="st st-ok">●</span>Ready</li>
+      <li><span class="st st-warn">◐</span>Refresh due</li>
+      <li><span class="st st-danger">○</span>Needs sign-in</li>
+      <li><span class="st st-muted">◌</span>Checking</li>
+    </ul>
+    <div id="catalogue"></div>
+  </section>
+
+  <section class="stage" aria-label="Prototype phone">
+    <p class="now" id="now" aria-live="polite"></p>
+    <div class="phone" id="phone"></div>
+  </section>
+</div>
+
+<script>
+  'use strict';
+  /* =====================================================================
+   Vocabulary and constants
+   ===================================================================== */
+  const HN = { claude: 'Claude Code', codex: 'Codex' }; // harness names
+  const HS = { claude: 'Claude', codex: 'Codex' }; // short form ("Claude settings")
+  const MODELS = { claude: ['Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'], codex: ['GPT-6'] };
+  const ALL_MODELS = ['Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5', 'GPT-6'];
+  const VERSIONS = { claude: '2.4.1', codex: '0.61.0' };
+  const TYPES = {
+    instructions: { one: 'Instructions', many: 'Instructions', desc: 'What every session should know and follow.' },
+    mcp: { one: 'MCP server', many: 'MCP servers', desc: 'Tools the agent can call.' },
+    skills: { one: 'Skills', many: 'Skills', desc: 'Reusable how-tos the agent loads when needed.' },
+    settings: { one: 'Settings', many: 'Settings', desc: 'Harness settings. Flags and environment live here.' },
+    hooks: { one: 'Hooks', many: 'Hooks', desc: 'Commands that run when the harness does something.' },
+    modelset: { one: 'Model set', many: 'Model sets', desc: 'Named models plus a default.' },
+  };
+  const TYPE_ORDER = ['instructions', 'mcp', 'skills', 'settings', 'hooks', 'modelset'];
+  const BUILD_TYPES = ['instructions', 'mcp', 'skills', 'settings', 'modelset'];
+  const ST = {
+    ready: ['●', 'ok', 'Ready'],
+    refresh: ['◐', 'warn', 'Refresh due'],
+    signin: ['○', 'danger', 'Needs sign-in'],
+    checking: ['◌', 'muted', 'Checking'],
+  };
+  const LOCK =
+    '<svg class="ic" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5.5" width="8" height="5.5" rx="1" fill="currentColor"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
+  const WARN =
+    '<svg class="ic" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 11.5 10.8H.5Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 4.6v3" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="9.1" r=".7" fill="currentColor"/></svg>';
+  const TAB_ICONS = {
+    runtimes:
+      '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6 4.5v9l7-4.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+    creds:
+      '<svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="6.5" cy="9" r="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.5 9H16M13.5 9v2.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+    profiles:
+      '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 6.5 9 3.5l6 3-6 3zM3 9.5l6 3 6-3M3 12.5l6 3 6-3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+    comptypes:
+      '<svg viewBox="0 0 18 18" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="10" y="3" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="3" y="10" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="10" y="10" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+    settings:
+      '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="5" r="1.6" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="9" r="1.6" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="13" r="1.6" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/></svg>',
+  };
+  const TABS = [
+    ['runtimes', 'Runtimes'],
+    ['creds', 'Credentials'],
+    ['profiles', 'Profiles'],
+    ['comptypes', 'Components'],
+    ['settings', 'Settings'],
+  ];
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* =====================================================================
+   Small helpers
+   ===================================================================== */
+  let seq = 0;
+  const nid = p => p + '_' + ++seq;
+  const esc = s =>
+    String(s ?? '').replace(
+      /[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+    );
+  const find = (arr, id) => arr.find(x => x.id === id);
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
+  const listWords = arr =>
+    arr.length <= 1 ? arr[0] || '' : arr.slice(0, -1).join(', ') + ' and ' + arr[arr.length - 1];
+  const $ = sel => document.querySelector(sel);
+  function uniqName(base, taken) {
+    if (!taken.has(base)) return base;
+    let i = 2;
+    while (taken.has(base + '-' + i)) i++;
+    return base + '-' + i;
+  }
+  function slug(s) {
+    return String(s)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+  function runtimeNameError(m, name, exceptId) {
+    if (!name) return { msg: 'Give the runtime a name.' };
+    if (!/^[A-Za-z0-9-]+$/.test(name))
+      return {
+        msg: 'Use only letters, digits and dashes.',
+        suggest: uniqName(slug(name) || 'runtime', new Set(m.runtimes.filter(r => r.id !== exceptId).map(r => r.name))),
+      };
+    if (m.runtimes.some(r => r.name === name && r.id !== exceptId))
+      return {
+        msg: name + ' is already a runtime on ' + m.name + '.',
+        suggest: uniqName(name, new Set(m.runtimes.map(r => r.name))),
+      };
+    return null;
+  }
+
+  /* =====================================================================
+   Sample data
+   ===================================================================== */
+  const INSTR =
+    '# How I work\n- Run the tests before saying a change is done.\n- Keep commits small, with messages that say why.\n- Ask before deleting anything outside the repo.\n- My notes live in /Users/you/Notes.';
+  function C(id, type, name, props) {
+    return Object.assign(
+      {
+        id,
+        type,
+        name,
+        harness: 'generic',
+        body: '',
+        keys: {},
+        items: [],
+        warn: [],
+        secrets: [],
+        models: [],
+        def: '',
+        partial: '',
+        partialWhy: '',
+        checkPath: '',
+        source: '',
+      },
+      props || {},
+    );
+  }
+  function machineShell(name, os, installed) {
+    return {
+      name,
+      os,
+      online: true,
+      lastSeen: '',
+      installed: { ...installed },
+      setup: false,
+      creds: [],
+      comps: [],
+      profiles: [],
+      runtimes: [],
+      perm: 'auto',
+      permPrev: null,
+      running: 2,
+      pkg: 'brew',
+      fr: {
+        signed: { claude: 'yes', codex: 'yes' },
+        config: { claude: true, codex: true },
+        secrets: false,
+        uvx: false,
+        same: true,
+        fails: false,
+      },
+    };
+  }
+  function studioFresh() {
+    return machineShell('studio-mac', 'macOS · Mac Studio', { claude: VERSIONS.claude, codex: VERSIONS.codex });
+  }
+  function studioSetUp() {
+    const m = studioFresh();
+    m.setup = true;
+    m.creds = [
+      {
+        id: 'cr1',
+        harness: 'claude',
+        email: 'you@example.com',
+        label: 'personal',
+        status: 'ready',
+        cli: true,
+        imported: true,
+        usage: [38, '2h 10m', 61, 'Fri'],
+      },
+      {
+        id: 'cr2',
+        harness: 'codex',
+        email: 'you@example.com',
+        label: '',
+        status: 'ready',
+        cli: true,
+        imported: true,
+        usage: [12, '3h 40m', 27, 'Mon'],
+      },
+      {
+        id: 'cr3',
+        harness: 'claude',
+        email: 'you@example.com',
+        label: 'work',
+        status: 'refresh',
+        cli: false,
+        usage: [71, '48m', 83, 'Thu'],
+      },
+    ];
+    m.comps = [
+      C('i1', 'instructions', 'Main instructions', { source: 'CLAUDE.md and AGENTS.md', body: INSTR, imported: true }),
+      C('m1', 'mcp', 'github', { body: 'npx -y @modelcontextprotocol/server-github' }),
+      C('m2', 'mcp', 'linear', { body: 'npx -y mcp-remote https://mcp.linear.app/sse' }),
+      C('m3', 'mcp', 'notes', { body: 'uvx notes-mcp --vault /Users/you/Notes' }),
+      C('s1', 'skills', 'My skills', {
+        items: ['release-notes', 'pr-review', 'changelog', 'db-migrate', 'incident-summary'],
+        partial: 'Codex',
+        partialWhy: 'release-notes limits which tools it may use. Codex ignores that limit and loads the rest.',
+      }),
+      C('st1', 'settings', 'Claude settings', {
+        harness: 'claude',
+        keys: { 'permissions.defaultMode': 'plan', 'env.LOG_LEVEL': 'info', statusLine: 'on' },
+        secrets: ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN'],
+      }),
+      C('st2', 'settings', 'Codex settings', {
+        harness: 'codex',
+        keys: { approval_policy: 'on-request', sandbox_mode: 'workspace-write' },
+      }),
+      C('st3', 'settings', 'Strict review', { harness: 'claude', keys: { 'permissions.defaultMode': 'default' } }),
+      C('st4', 'settings', 'Agent settings', {
+        harness: 'claude',
+        keys: { 'permissions.defaultMode': 'acceptEdits', 'env.LOG_LEVEL': 'debug' },
+      }),
+      C('h1', 'hooks', 'Format on save', {
+        harness: 'claude',
+        body: 'PostToolUse  Edit|Write\n  /Users/you/bin/fmt-hook.sh',
+      }),
+      C('ms1', 'modelset', 'Claude models', {
+        harness: 'claude',
+        models: ['Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'],
+        def: 'Sonnet 5.5',
+      }),
+      C('ms2', 'modelset', 'Heavy', { harness: 'claude', models: ['Opus 5.5', 'Sonnet 5.5'], def: 'Opus 5.5' }),
+      C('ms3', 'modelset', 'Codex models', { harness: 'codex', models: ['GPT-6'], def: 'GPT-6' }),
+      C('ms4', 'modelset', 'Mixed', { harness: 'generic', models: ['GPT-6', 'Opus 5.5', 'Sonnet 5.5'], def: 'GPT-6' }),
+    ];
+    m.profiles = [
+      {
+        id: 'p1',
+        name: 'Default',
+        layers: ['i1', 'm1', 'm2', 'm3', 's1', 'st1', 'st2', 'h1', 'ms1', 'ms3'].map(c => ({ c })),
+      },
+      { id: 'p2', name: 'Agent', layers: [{ c: 'st4' }, { c: 'ms2' }] },
+      { id: 'p3', name: 'Review', layers: [{ p: 'p1' }, { c: 'st3' }] },
+      { id: 'p4', name: 'Claude hooks', layers: [{ c: 'h1' }, { c: 'st3' }] },
+      { id: 'p5', name: 'Agent work', layers: [{ p: 'p1' }, { p: 'p2' }] },
+    ];
+    m.runtimes = [
+      { id: 'r1', name: 'claude-default', credId: 'cr1', profileId: 'p1', agent: false },
+      { id: 'r2', name: 'codex-default', credId: 'cr2', profileId: 'p1', agent: false },
+      { id: 'r3', name: 'claude-agent', credId: 'cr1', profileId: 'p5', agent: true },
+      { id: 'r4', name: 'claude-review', credId: 'cr1', profileId: 'p3', agent: false },
+      { id: 'r5', name: 'claude-work', credId: 'cr3', profileId: 'p1', agent: false },
+    ];
+    return m;
+  }
+  function workLinux() {
+    const m = machineShell('work-linux', 'Ubuntu 26.04 · ThinkPad', { claude: VERSIONS.claude, codex: null });
+    m.setup = true;
+    m.running = 0;
+    m.pkg = 'npm';
+    m.creds = [
+      {
+        id: 'w_cr1',
+        harness: 'claude',
+        email: 'you@example.com',
+        label: '',
+        status: 'ready',
+        cli: true,
+        usage: [9, '4h 30m', 22, 'Tue'],
+      },
+    ];
+    m.comps = [
+      C('w_i1', 'instructions', 'Work instructions', {
+        body: '# Team rules\n- Use the team PR template.\n- Never push to main.',
+      }),
+      C('w_ms1', 'modelset', 'Claude models', {
+        harness: 'claude',
+        models: ['Sonnet 5.5', 'Haiku 5.5'],
+        def: 'Sonnet 5.5',
+      }),
+    ];
+    m.profiles = [{ id: 'w_p1', name: 'Default', layers: [{ c: 'w_i1' }, { c: 'w_ms1' }] }];
+    m.runtimes = [{ id: 'w_r1', name: 'claude-default', credId: 'w_cr1', profileId: 'w_p1', agent: false }];
+    return m;
+  }
+
+  /* =====================================================================
+   Model: layering, conflicts, usage
+   ===================================================================== */
+  function flattenLayers(m, layers, ownName, seen) {
+    const out = [];
+    for (const l of layers) {
+      if (l.p) {
+        if (seen.has(l.p)) continue;
+        const p = find(m.profiles, l.p);
+        if (!p) continue;
+        out.push(...flattenLayers(m, p.layers, p.name, new Set([...seen, l.p])));
+      } else {
+        const c = find(m.comps, l.c);
+        if (c) out.push({ c, from: ownName });
+      }
+    }
+    const last = new Map();
+    out.forEach((x, i) => last.set(x.c.id, i));
+    return out.filter((x, i) => last.get(x.c.id) === i); // a repeated part counts at its newest position
+  }
+  function flattenProfile(m, pid) {
+    const p = find(m.profiles, pid);
+    return p ? flattenLayers(m, p.layers, p.name, new Set([pid])) : [];
+  }
+  const appliesTo = (c, h) => c.harness === 'generic' || c.harness === h;
+  const keysOf = c => (c.type === 'modelset' ? { model: c.def } : c.keys || {});
+  function conflicts(flat) {
+    const by = new Map();
+    for (const x of flat)
+      for (const [k, v] of Object.entries(keysOf(x.c))) {
+        const id = x.c.harness + '|' + k;
+        if (!by.has(id)) by.set(id, []);
+        by.get(id).push({ k, h: x.c.harness, v, from: x.from, comp: x.c.name });
+      }
+    const res = [];
+    for (const arr of by.values()) {
+      if (arr.length < 2) continue;
+      const win = arr[arr.length - 1];
+      const losers = arr.slice(0, -1).filter(a => a.v !== win.v);
+      if (losers.length) res.push({ win, losers });
+    }
+    return res;
+  }
+  function srcLabel(a, all) {
+    return all.every(b => b.from === a.from) ? a.comp : a.from;
+  }
+  function conflictsHtml(list) {
+    if (!list.length) return '<p class="hint">No conflicts. Nothing in a newer layer replaces an older one.</p>';
+    return (
+      '<ul class="conf">' +
+      list
+        .map(({ win, losers }) => {
+          const all = [win, ...losers];
+          const key = win.k + (win.h !== 'generic' ? ' · ' + HN[win.h] : '');
+          return `<li><span class="key">${esc(key)}</span>: <span class="win">${esc(win.v)}</span> (from ${esc(srcLabel(win, all))}) overrides ${losers.map(l => `${esc(l.v)} (from ${esc(srcLabel(l, all))})`).join(', ')}</li>`;
+        })
+        .join('') +
+      '</ul>'
+    );
+  }
+  function effModels(m, r) {
+    const c = find(m.creds, r.credId);
+    const flat = flattenProfile(m, r.profileId).filter(x => appliesTo(x.c, c.harness));
+    const ms = [...flat].reverse().find(x => x.c.type === 'modelset');
+    if (!ms) return { set: null, models: [], def: null };
+    const avail = MODELS[c.harness];
+    const models = ms.c.models.map(n => ({ n, ok: avail.includes(n) }));
+    const def = avail.includes(ms.c.def) ? ms.c.def : (models.find(x => x.ok) || {}).n || null;
+    return { set: ms.c, from: ms.from, models, def, fellBack: def !== ms.c.def };
+  }
+  function includesProfile(m, pid, target, seen = new Set()) {
+    if (pid === target) return true;
+    if (seen.has(pid)) return false;
+    seen.add(pid);
+    const p = find(m.profiles, pid);
+    return !!p && p.layers.some(l => l.p && includesProfile(m, l.p, target, seen));
+  }
+  function compUse(m, cid) {
+    const profs = m.profiles.filter(p => flattenProfile(m, p.id).some(x => x.c.id === cid));
+    const direct = m.profiles.filter(p => p.layers.some(l => l.c === cid));
+    const rts = m.runtimes.filter(r => profs.some(p => p.id === r.profileId));
+    return { profs, direct, rts };
+  }
+  function profileUse(m, pid) {
+    const parents = m.profiles.filter(p => p.id !== pid && includesProfile(m, p.id, pid));
+    const directParents = m.profiles.filter(p => p.layers.some(l => l.p === pid));
+    const directRts = m.runtimes.filter(r => r.profileId === pid);
+    const rts = m.runtimes.filter(r => r.profileId === pid || parents.some(p => p.id === r.profileId));
+    return { parents, directParents, directRts, rts };
+  }
+  function compat(m, pid, h) {
+    const flat = flattenProfile(m, pid);
+    if (!flat.length) return { ok: true, notes: [] };
+    const mine = flat.filter(x => appliesTo(x.c, h));
+    const other = flat.filter(x => !appliesTo(x.c, h));
+    const oh = h === 'claude' ? 'codex' : 'claude';
+    if (!mine.length) return { ok: false, why: `Only ${HS[oh]} settings. Nothing here applies on ${HN[h]}.` };
+    const notes = [];
+    if (other.length) notes.push(`${HS[oh]} settings will be skipped on ${HN[h]}`);
+    if (mine.some(x => x.c.partial === HS[h])) notes.push(`Partly supported on ${HN[h]}`);
+    return { ok: true, notes };
+  }
+  function fixedLayer(m, h) {
+    if (h === 'claude')
+      return [
+        {
+          k: 'permissions.defaultMode',
+          v: m.perm === 'auto' ? 'auto' : 'bypassPermissions',
+          why: 'Agent permissions: ' + permName(m.perm),
+        },
+        { k: 'trust prompt', v: 'off', why: 'Agents never stop to ask whether to trust a folder' },
+        { k: 'onboarding', v: 'done', why: 'No first-run screens' },
+      ];
+    return [
+      {
+        k: 'approval_policy',
+        v: m.perm === 'auto' ? 'on-request' : 'never',
+        why: 'Agent permissions: ' + permName(m.perm),
+      },
+      { k: 'trust prompt', v: 'off', why: 'Agents never stop to ask whether to trust a folder' },
+    ];
+  }
+  const permName = p => (p === 'auto' ? 'Auto mode' : 'Skip all permission checks');
+  function credName(c) {
+    return c.email + (c.label ? ' (' + c.label + ')' : '');
+  }
+  function credRuntimes(m, cid) {
+    return m.runtimes.filter(r => r.credId === cid);
+  }
+
+  /* =====================================================================
+   State
+   ===================================================================== */
+  let S;
+  function reset() {
+    seq = 0;
+    S = {
+      machine: 'studio-mac',
+      machines: { 'studio-mac': studioFresh(), 'work-linux': workLinux() },
+      nav: [{ v: 'runtimes' }],
+      flows: [],
+      ui: { si: {} },
+      toast: '',
+      active: null,
+      spot: null,
+    };
+    S.flows = [newFr()];
+  }
+  const M = () => S.machines[S.machine];
+  function newFr(extra) {
+    return Object.assign(
+      {
+        type: 'fr',
+        at: 'tools',
+        inst: { sel: { claude: true, codex: true }, pass: '', phase: null, tried: false },
+        res: { claude: null, codex: null },
+        si: {},
+        names: {},
+        make: {},
+        made: [],
+        created: [],
+      },
+      extra || {},
+    );
+  }
+  function newAddrt(extra) {
+    return Object.assign(
+      {
+        type: 'addrt',
+        at: 'cred',
+        credId: null,
+        profileId: null,
+        name: '',
+        agent: false,
+        dupOk: false,
+        created: [],
+        made: null,
+      },
+      extra || {},
+    );
+  }
+  function newBuild(extra) {
+    return Object.assign(
+      {
+        type: 'build',
+        at: 'base',
+        editId: null,
+        bases: [],
+        picks: { instructions: [], mcp: [], skills: [], settings: [], modelset: [], hooks: [] },
+        nf: null,
+        name: '',
+        created: [],
+      },
+      extra || {},
+    );
+  }
+  function newAddLogin(extra) {
+    return Object.assign(
+      {
+        type: 'addlogin',
+        at: 'tool',
+        harness: null,
+        fixed: false,
+        si: { opened: false, code: '' },
+        credId: null,
+        needLabel: false,
+        labelNew: '',
+        labelOld: '',
+        created: [],
+      },
+      extra || {},
+    );
+  }
+  function newClone(extra) {
+    return Object.assign(
+      { type: 'clone', at: 'source', src: null, mode: 'alongside', result: null, created: [] },
+      extra || {},
+    );
+  }
+  function newInstall(h) {
+    return {
+      type: 'install',
+      at: 'install',
+      harness: h,
+      inst: { sel: { [h]: true }, pass: '', phase: null, tried: false },
+      created: [],
+    };
+  }
+
+  function toast(msg) {
+    S.toast = msg;
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => {
+      S.toast = '';
+      render();
+    }, 3200);
+  }
+  function later(ms, fn) {
+    setTimeout(
+      () => {
+        fn();
+        render();
+      },
+      reduceMotion ? Math.min(ms, 250) : ms,
+    );
+  }
+
+  /* =====================================================================
+   Import (first run)
+   ===================================================================== */
+  function getOrMake(m, type, name, harness, props) {
+    let c = m.comps.find(x => x.type === type && x.name === name);
+    if (!c) {
+      c = C(nid('c'), type, name, Object.assign({ harness }, props));
+      m.comps.push(c);
+    }
+    return c;
+  }
+  function getProfile(m, name) {
+    let p = m.profiles.find(x => x.name === name);
+    if (!p) {
+      p = { id: nid('p'), name, layers: [] };
+      m.profiles.push(p);
+    }
+    return p;
+  }
+  function doImport(fl, m, h) {
+    const f = m.fr;
+    const status = f.signed[h] === 'yes' ? 'ready' : f.signed[h] === 'refresh' ? 'refresh' : 'signin';
+    let cred = m.creds.find(c => c.harness === h && c.imported);
+    if (!cred) {
+      cred = {
+        id: nid('cr'),
+        harness: h,
+        email: 'you@example.com',
+        label: '',
+        status,
+        cli: true,
+        imported: true,
+        usage: h === 'claude' ? [38, '2h 10m', 61, 'Fri'] : [12, '3h 40m', 27, 'Mon'],
+      };
+      m.creds.push(cred);
+    }
+    const notes = [];
+    let prof,
+      what = [];
+    if (f.config[h]) {
+      prof = getProfile(m, 'Default');
+      const add = c => {
+        if (!prof.layers.some(l => l.c === c.id)) prof.layers.push({ c: c.id });
+      };
+      // instructions: one shared copy when the two files match, otherwise one per tool
+      const first = m.comps.find(c => c.type === 'instructions' && c.imported);
+      if (first && first.importedFrom !== h) {
+        if (f.same) {
+          first.harness = 'generic';
+          first.source = 'CLAUDE.md and AGENTS.md';
+          add(first);
+          notes.push({
+            k: 'ok',
+            t: 'Your CLAUDE.md and AGENTS.md match, so both tools share one copy of your instructions.',
+          });
+        } else {
+          first.harness = first.importedFrom;
+          first.name = HS[first.importedFrom] + ' instructions';
+          const ic = getOrMake(m, 'instructions', HS[h] + ' instructions', h, {
+            source: h === 'claude' ? 'CLAUDE.md' : 'AGENTS.md',
+            body:
+              h === 'codex'
+                ? '# Codex\n- Run `make check` before finishing.\n- Explain each change in the final message.'
+                : INSTR,
+            imported: true,
+            importedFrom: h,
+          });
+          add(ic);
+          notes.push({
+            k: 'info',
+            t: 'Your CLAUDE.md and AGENTS.md are different, so each tool keeps its own instructions.',
+          });
+        }
+      } else if (!first) {
+        const ic = getOrMake(m, 'instructions', 'Main instructions', 'generic', {
+          source: h === 'claude' ? 'CLAUDE.md' : 'AGENTS.md',
+          body: INSTR,
+          imported: true,
+          importedFrom: h,
+        });
+        add(ic);
+      }
+      what.push('your instructions');
+      // MCP servers
+      const servers =
+        h === 'claude'
+          ? [
+              ['github', 'npx -y @modelcontextprotocol/server-github'],
+              ['linear', 'npx -y mcp-remote https://mcp.linear.app/sse'],
+              ['notes', 'uvx notes-mcp --vault /Users/you/Notes'],
+            ]
+          : [
+              ['github', 'npx -y @modelcontextprotocol/server-github'],
+              ['linear', 'npx -y mcp-remote https://mcp.linear.app/sse'],
+            ];
+      for (const [n, cmd] of servers) {
+        const c = getOrMake(m, 'mcp', n, 'generic', { body: cmd });
+        if (n === 'notes' && f.uvx && !c.warn.includes('Command not found: uvx')) c.warn.push('Command not found: uvx');
+        add(c);
+      }
+      // skills
+      const sk = getOrMake(m, 'skills', 'My skills', 'generic', {
+        items:
+          h === 'claude'
+            ? ['release-notes', 'pr-review', 'changelog', 'db-migrate', 'incident-summary']
+            : ['pr-review', 'changelog'],
+      });
+      if (h === 'claude') {
+        sk.items = Array.from(
+          new Set(['release-notes', 'pr-review', 'changelog', 'db-migrate', 'incident-summary', ...sk.items]),
+        );
+        sk.partial = 'Codex';
+        sk.partialWhy = 'release-notes limits which tools it may use. Codex ignores that limit and loads the rest.';
+      }
+      add(sk);
+      // settings (+ hooks on Claude)
+      const st = getOrMake(m, 'settings', HS[h] + ' settings', h, {
+        keys:
+          h === 'claude'
+            ? { model: 'opus', 'env.LOG_LEVEL': 'info', statusLine: 'on' }
+            : { approval_policy: 'on-request', sandbox_mode: 'workspace-write' },
+      });
+      if (h === 'claude' && f.secrets) {
+        st.secrets = ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN'];
+        notes.push({
+          k: 'info',
+          t: "Your settings had 2 values that look like secrets (ANTHROPIC_API_KEY, GITHUB_TOKEN). They went into Ferretry's secret store and are never shown.",
+        });
+      }
+      add(st);
+      if (h === 'claude')
+        add(
+          getOrMake(m, 'hooks', 'Format on save', 'claude', {
+            body: 'PostToolUse  Edit|Write\n  /Users/you/bin/fmt-hook.sh',
+          }),
+        );
+      add(
+        getOrMake(
+          m,
+          'modelset',
+          HS[h] + ' models',
+          h,
+          h === 'claude'
+            ? { models: ['Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'], def: 'Opus 5.5' }
+            : { models: ['GPT-6'], def: 'GPT-6' },
+        ),
+      );
+      what.push('settings', plural(servers.length, 'MCP server'), plural(h === 'claude' ? 5 : 2, 'skill'));
+      if (h === 'claude' && f.uvx)
+        notes.push({
+          k: 'warn',
+          t:
+            'The notes MCP server came in with a warning: Command not found: uvx. Install uv on ' +
+            m.name +
+            ' to use it.',
+        });
+    } else {
+      prof = getProfile(m, 'Starter');
+      const ms = getOrMake(
+        m,
+        'modelset',
+        HS[h] + ' models',
+        h,
+        h === 'claude'
+          ? { models: ['Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'], def: 'Opus 5.5' }
+          : { models: ['GPT-6'], def: 'GPT-6' },
+      );
+      if (!prof.layers.some(l => l.c === ms.id)) prof.layers.push({ c: ms.id });
+      notes.push({
+        k: 'info',
+        t: 'No instructions, settings, MCP servers or skills were found, so Ferretry made a plain Starter profile. You can add to it later.',
+      });
+    }
+    if (status === 'refresh')
+      notes.push({ k: 'warn', t: 'Your sign-in is due for a refresh. Ferretry renews it the first time you launch.' });
+    if (status === 'signin')
+      notes.push({ k: 'danger', t: 'You are not signed in yet. Sign in from Credentials before you launch.' });
+    fl.res[h] = { credId: cred.id, profileId: prof.id, what, notes };
+    fl.names[h] = fl.names[h] || uniqName(h + '-' + slug(prof.name), new Set(m.runtimes.map(r => r.name)));
+    fl.make[h] = !m.runtimes.some(r => r.credId === cred.id && r.profileId === prof.id);
+  }
+
+  /* =====================================================================
+   Clone
+   ===================================================================== */
+  function clonePreview(src, tgt) {
+    const comps = src.comps.filter(c => c.type !== 'modelset');
+    const sets = src.comps.filter(c => c.type === 'modelset');
+    const usedCreds = src.creds.filter(c => src.runtimes.some(r => r.credId === c.id));
+    const paths = src.comps.filter(c => /\/(Users|home)\//.test(c.body));
+    const missing = ['claude', 'codex'].filter(
+      h => !tgt.installed[h] && src.runtimes.some(r => (find(src.creds, r.credId) || {}).harness === h),
+    );
+    return { comps, sets, usedCreds, paths, missing };
+  }
+  function doClone(src, tgt, mode) {
+    if (mode === 'replace') {
+      tgt.comps = [];
+      tgt.profiles = [];
+      tgt.runtimes = [];
+    }
+    const cmap = {},
+      pmap = {},
+      crmap = {};
+    const res = { comps: 0, sets: 0, profiles: 0, runtimes: 0, slots: [], paths: [], renamed: 0 };
+    for (const c of src.comps) {
+      const taken = new Set(tgt.comps.filter(x => x.type === c.type).map(x => x.name));
+      const n = Object.assign(JSON.parse(JSON.stringify(c)), {
+        id: nid('c'),
+        name: uniqName(c.name, taken),
+        imported: false,
+      });
+      if (n.name !== c.name) res.renamed++;
+      n.warn = n.warn.filter(w => !w.startsWith('Command not found'));
+      if (/\/(Users|home)\//.test(n.body)) {
+        n.checkPath = tgt.name;
+        res.paths.push(n.name);
+      }
+      cmap[c.id] = n.id;
+      tgt.comps.push(n);
+      c.type === 'modelset' ? res.sets++ : res.comps++;
+    }
+    for (const p of src.profiles) {
+      const name = uniqName(p.name, new Set(tgt.profiles.map(x => x.name)));
+      if (name !== p.name) res.renamed++;
+      pmap[p.id] = nid('p');
+      tgt.profiles.push({ id: pmap[p.id], name, layers: [] });
+      res.profiles++;
+    }
+    for (const p of src.profiles)
+      find(tgt.profiles, pmap[p.id]).layers = p.layers.map(l => (l.p ? { p: pmap[l.p] } : { c: cmap[l.c] }));
+    for (const r of src.runtimes) {
+      if (!crmap[r.credId]) {
+        const c = find(src.creds, r.credId);
+        const slot = {
+          id: nid('cr'),
+          harness: c.harness,
+          email: c.email,
+          label: c.label,
+          status: 'signin',
+          slot: true,
+          from: src.name,
+          cli: false,
+          usage: [5, '4h 51m', 14, 'Sun'],
+        };
+        tgt.creds.push(slot);
+        crmap[r.credId] = slot.id;
+        res.slots.push(slot.id);
+      }
+      const name = uniqName(r.name, new Set(tgt.runtimes.map(x => x.name)));
+      if (name !== r.name) res.renamed++;
+      tgt.runtimes.push({ id: nid('r'), name, credId: crmap[r.credId], profileId: pmap[r.profileId], agent: r.agent });
+      res.runtimes++;
+    }
+    tgt.setup = true;
+    return res;
+  }
+
+  /* =====================================================================
+   Rendering helpers
+   ===================================================================== */
+  const stG = s =>
+    `<span class="st st-${ST[s][1]}" aria-hidden="true">${s === 'checking' ? '<span class="spin">◌</span>' : ST[s][0]}</span>`;
+  const stL = s => `<span class="stl st-${ST[s][1]}">${stG(s)}${ST[s][2]}</span>`;
+  const badge = (t, k) => `<span class="badge ${k || ''}">${t}</span>`;
+  function harnessBadge(c) {
+    if (c.harness === 'generic') return badge('Claude Code and Codex');
+    return badge(HN[c.harness] + ' only', 'accent');
+  }
+  function compBadges(c, m) {
+    const b = [harnessBadge(c)];
+    if (c.partial) b.push(badge('Partly supported on ' + c.partial, 'warn'));
+    for (const w of c.warn) b.push(badge(WARN + esc(w), 'warn'));
+    if (c.checkPath && c.checkPath === m.name) b.push(badge(WARN + 'Check this path on ' + esc(m.name), 'warn'));
+    if (c.secrets && c.secrets.length) b.push(badge(LOCK + plural(c.secrets.length, 'secret') + ' stored'));
+    return `<span class="badges">${b.join('')}</span>`;
+  }
+  function usageHtml(c) {
+    if (c.status !== 'ready' || !c.usage) return '';
+    const [h, hr, w, wr] = c.usage;
+    const bar = (l, p, r) =>
+      `<div class="bar"><span class="bar-l">${l}</span><span class="bar-t${p >= 80 ? ' hi' : ''}" role="img" aria-label="${l}: ${p}% used"><span style="width:${p}%"></span></span><span class="bar-v">${p}% · resets ${r}</span></div>`;
+    return `<div class="usage">${bar('5h', h, hr)}${bar('Week', w, wr)}</div>`;
+  }
+  function sec(title, inner, extra) {
+    return `<div class="sec"${extra || ''}><div class="sec-h"><span class="lbl">${title}</span></div>${inner}</div>`;
+  }
+  function note(k, html, acts, attrs) {
+    return `<div class="note ${k}"${attrs || ''}>${html}${acts ? `<div class="acts">${acts}</div>` : ''}</div>`;
+  }
+  function opt({ type = 'radio', name, id, checked, disabled, title, sub, extra = '', data = '' }) {
+    return `<label class="opt${checked ? ' on' : ''}${disabled ? ' off' : ''}" for="${id}"><input type="${type}" name="${name}" id="${id}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''} ${data}><span class="opt-main"><span class="t">${title}</span>${sub ? `<span class="s">${sub}</span>` : ''}${extra}</span></label>`;
+  }
+  const btn = (label, a, attrs = '', cls = '') =>
+    `<button type="button" class="btn ${cls}" data-a="${a}" ${attrs}>${label}</button>`;
+  const chev = '<span class="chev" aria-hidden="true">›</span>';
+  function credRowInner(m, c, opts = {}) {
+    const used = credRuntimes(m, c.id).length;
+    const bits = [];
+    if (opts.harness) bits.push(HN[c.harness]);
+    bits.push(ST[c.status][2]);
+    bits.push(used ? 'Used by ' + plural(used, 'runtime') : 'Not used yet');
+    return `${stG(c.status)}<span class="main"><span class="t"><span class="mono">${esc(c.email)}</span></span><span class="badges">${c.label ? badge(esc(c.label), 'accent') : ''}${c.slot ? badge('Copied slot from ' + esc(c.from)) : ''}${c.cli ? badge('Shared with ' + (c.harness === 'claude' ? 'claude' : 'codex') + ' in your terminal') : ''}</span><span class="s">${bits.join(' · ')}</span>${opts.usage ? usageHtml(c) : ''}</span>`;
+  }
+  function stackHtml(m, layers, opts = {}) {
+    // layers listed oldest to newest; shown newest on top
+    if (!layers.length) return '<p class="hint">No layers yet.</p>';
+    const rows = layers
+      .map((l, i) => {
+        if (l.p) {
+          const p = find(m.profiles, l.p);
+          const n = p ? flattenProfile(m, p.id).length : 0;
+          return `<div class="layer"><span class="n">${i + 1}</span><span><span class="t">Profile · ${esc(p ? p.name : '?')}</span><br><span class="s">${plural(n, 'part')}, used as a base</span></span></div>`;
+        }
+        const c = find(m.comps, l.c);
+        if (!c) return '';
+        return `<div class="layer"><span class="n">${i + 1}</span><span><span class="t">${TYPES[c.type].one} · ${esc(c.name)}</span>${compBadges(c, m)}</span></div>`;
+      })
+      .reverse();
+    const fixed = opts.fixed
+      ? opts.fixed
+          .map(
+            f =>
+              `<div class="layer locked"><span class="n">${LOCK}</span><span><span class="t">Fixed layer · <span class="mono">${esc(f.k)}</span> = <span class="mono">${esc(f.v)}</span></span><br><span class="s">${esc(f.why)}</span></span></div>`,
+          )
+          .join('')
+      : '';
+    return `<div class="stack-cap"><span>Newest on top · newer layer wins</span></div><div class="stack">${fixed}${rows.join('')}</div>`;
+  }
+  function signinHtml(prefix, h, st, finishLabel) {
+    st = st || {};
+    const code = st.code || '';
+    return `<div class="note info" data-spot="signin">
+    <b>Sign in to ${HN[h]}</b>
+    <ol class="p" style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px">
+      <li>Open the sign-in page and approve Ferretry.<div style="margin-top:6px">${
+        st.opened
+          ? `<span class="hint">Opened <span class="mono">${h === 'claude' ? 'claude.ai/oauth/authorize' : 'auth.openai.com/authorize'}</span> in a new tab. (Prototype: nothing opens.)</span>`
+          : btn('Open sign-in page', 'si-open', `data-x="${prefix}"`, 'sm')
+      }</div></li>
+      <li><label for="${prefix}-code">Paste the code it shows you.</label>
+        <input class="inp mono" id="${prefix}-code" autocomplete="off" placeholder="e.g. 4821-KQ7M" value="${esc(code)}" data-in="si-code" data-x="${prefix}" style="margin-top:6px">
+        <span class="hint">Prototype: any 4 or more characters work.</span></li>
+    </ol>
+    <div class="acts">${btn(finishLabel || 'Finish sign-in', 'si-finish', `data-x="${prefix}"${code.trim().length >= 4 ? '' : ' disabled'}`, 'primary sm')}</div>
+  </div>`;
+  }
+  function installHtml(m, st, prefix, hs) {
+    const cmd = h =>
+      m.pkg === 'brew'
+        ? `brew install --cask ${h === 'claude' ? 'claude-code' : 'codex'}`
+        : `npm install -g ${h === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;
+    const sel = hs.filter(h => st.sel[h]);
+    if (st.phase === 'running')
+      return note(
+        '',
+        `<b>${stG('checking')} Installing ${listWords(sel.map(h => HN[h]))} on ${esc(m.name)}…</b><pre class="code">${sel.map(cmd).join('\n')}</pre>`,
+      );
+    if (st.phase === 'done')
+      return note(
+        'ok',
+        `<b>Installed ${listWords(st.did.map(h => HN[h] + ' ' + VERSIONS[h]))}.</b><span>Next, Ferretry looks for your existing setup.</span>`,
+      );
+    if (st.phase === 'failed')
+      return note(
+        'danger',
+        `<b>Couldn't install on ${esc(m.name)}</b>
+      <span>npm needs admin rights to install tools for every user, and the operator account on ${esc(m.name)} isn't an admin.</span>
+      <span>Run this yourself in a terminal on ${esc(m.name)}, then tap Retry:</span>
+      <pre class="code">sudo npm install -g ${sel.map(h => (h === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex')).join(' ')}</pre>`,
+        btn('Retry', 'inst-retry', `data-x="${prefix}"`, 'primary sm') +
+          btn('Skip, continue without them', 'inst-skip', `data-x="${prefix}"`, 'sm'),
+        ' data-spot="fail"',
+      );
+    const rows = hs
+      .map(h =>
+        opt({
+          type: 'checkbox',
+          name: prefix + '-sel',
+          id: `${prefix}-sel-${h}`,
+          checked: st.sel[h],
+          title: 'Install ' + HN[h],
+          sub: 'Ferretry will run:',
+          extra: `<pre class="code">${cmd(h)}</pre>`,
+          data: `data-in="inst-sel" data-x="${prefix}" data-h="${h}"`,
+        }),
+      )
+      .join('');
+    return `<div class="sec"><div class="list">${rows}</div>
+    <div class="field"><label for="${prefix}-pass">${esc(m.name)} operator password</label>
+      <input class="inp" type="password" id="${prefix}-pass" autocomplete="off" value="${esc(st.pass)}" data-in="inst-pass" data-x="${prefix}">
+      <span class="hint">You're on a phone, so ${esc(m.name)} needs its operator password before it installs anything. It is used once and not stored.</span></div>
+    <div class="btns">${btn(sel.length ? 'Install ' + plural(sel.length, 'tool') : 'Pick a tool to install', 'inst-go', `data-x="${prefix}"${sel.length && st.pass ? '' : ' disabled'}`, 'primary')}</div></div>`;
+  }
+
+  /* =====================================================================
+   Views (no flow open)
+   ===================================================================== */
+  const V = {};
+  function offlineBanner(m) {
+    if (m.online) return '';
+    return note(
+      'warn',
+      `<b>${esc(m.name)} is asleep or offline</b><span>You're seeing what Ferretry last saw. Changes wait until it's back.</span>`,
+      btn('Check again', 'wake', '', 'sm'),
+    );
+  }
+  V.runtimes = (p, m) => {
+    const head = offlineBanner(m);
+    if (!m.runtimes.length)
+      return {
+        title: 'Runtimes',
+        tabs: true,
+        body:
+          head +
+          `<div class="empty"><h2>No runtimes on ${esc(m.name)} yet</h2><p class="p">A runtime is a login plus a profile. It's the thing you launch.</p>${btn('Add your first runtime', 'start-addrt', 'id="add-first-runtime"', 'primary')}</div>`,
+      };
+    const rows = m.runtimes
+      .map(r => {
+        const c = find(m.creds, r.credId),
+          pr = find(m.profiles, r.profileId),
+          em = effModels(m, r);
+        const missing = !m.installed[c.harness];
+        return `<div><button class="row" data-a="go" data-v="runtime" data-x="${r.id}">${stG(c.status)}<span class="main"><span class="t mono">${esc(r.name)}</span><span class="s"><span class="mono">${esc(c.email)}</span>${c.label ? ' (' + esc(c.label) + ')' : ''} · ${esc(pr ? pr.name : '?')} profile · ${esc(em.def || 'No model')}</span>${r.agent ? `<span class="badges">${badge('Agent', 'accent')}</span>` : ''}</span>${chev}</button>${missing ? `<div class="item-note" data-spot="missing">${WARN}<span>${HN[c.harness]} isn't installed here</span> · <button class="link" type="button" data-a="start-install" data-h="${c.harness}">Install</button></div>` : ''}</div>`;
+      })
+      .join('');
+    return {
+      title: 'Runtimes',
+      sub: plural(m.runtimes.length, 'runtime') + ' on ' + m.name,
+      tabs: true,
+      body:
+        head +
+        `<div class="btns">${btn('+ Add runtime', 'start-addrt', 'id="add-runtime"', 'primary')}</div><div class="list">${rows}</div>`,
+    };
+  };
+  V.runtime = (p, m) => {
+    const r = find(m.runtimes, p.id);
+    if (!r) return V.runtimes({}, m);
+    const c = find(m.creds, r.credId),
+      pr = find(m.profiles, r.profileId),
+      em = effModels(m, r);
+    const missing = !m.installed[c.harness];
+    const parts = [];
+    if (missing)
+      parts.push(
+        note(
+          'warn',
+          `<b>${HN[c.harness]} isn't installed here</b><span>Install it on ${esc(m.name)} to launch this runtime.</span>`,
+          btn('Install ' + HN[c.harness], 'start-install', `data-h="${c.harness}"`, 'sm'),
+        ),
+      );
+    if (c.status === 'signin')
+      parts.push(
+        note(
+          'danger',
+          `<b>${stG('signin')} This login needs sign-in</b><span>Sign in once and every runtime that uses it can launch.</span>`,
+          btn('Sign in', 'go', `data-v="cred" data-x="${c.id}"`, 'sm primary'),
+        ),
+      );
+    if (c.status === 'refresh')
+      parts.push(
+        note(
+          'warn',
+          `<b>${stG('refresh')} Refresh due</b><span>Ferretry renews the sign-in when you launch. Nothing to do.</span>`,
+        ),
+      );
+    parts.push(
+      sec(
+        'Credential',
+        `<div class="list"><button class="row" data-a="go" data-v="cred" data-x="${c.id}">${credRowInner(m, c, { harness: true })}${chev}</button></div>`,
+      ),
+    );
+    const flat = flattenProfile(m, r.profileId);
+    const skipped = flat.filter(x => !appliesTo(x.c, c.harness));
+    parts.push(
+      sec(
+        'Profile',
+        `<div class="list"><button class="row" data-a="go" data-v="profile" data-x="${pr.id}"><span class="st" aria-hidden="true"></span><span class="main"><span class="t">${esc(pr.name)}</span><span class="s">${plural(pr.layers.length, 'layer')} · ${plural(flat.length, 'part')}${skipped.length ? ` · ${skipped.length} skipped on ${HN[c.harness]}` : ''}</span></span>${chev}</button></div>${stackHtml(m, pr.layers)}`,
+      ),
+    );
+    if (em.set) {
+      parts.push(
+        sec(
+          'Model set',
+          `<div class="list"><ul class="models">${em.models.map(x => `<li>${x.ok ? `<span>${esc(x.n)}</span>` : `<span><s>${esc(x.n)}</s></span>`}<span class="${x.ok ? 'muted' : 'st-danger'}">${!x.ok ? 'Not available on this login' : x.n === em.def ? 'Default' : ''}</span></li>`).join('')}</ul></div>
+      <p class="hint">From <b>${esc(em.set.name)}</b> in ${esc(em.from)}.${em.fellBack ? ` Its default, ${esc(em.set.def)}, isn't available on this login, so this runtime starts on ${esc(em.def || 'nothing')}, the first one that is.` : ''}</p>`,
+          ' data-spot="models"',
+        ),
+      );
+    } else
+      parts.push(
+        sec('Model set', '<p class="hint">No model set in this profile. The harness picks its own default.</p>'),
+      );
+    if (r.agent) {
+      const fx = fixedLayer(m, c.harness);
+      const userKeys = {};
+      flat
+        .filter(x => appliesTo(x.c, c.harness))
+        .forEach(x =>
+          Object.entries(keysOf(x.c)).forEach(([k, v]) => {
+            userKeys[k] = { v, from: x.c.name };
+          }),
+        );
+      const over = fx.filter(f => userKeys[f.k] && userKeys[f.k].v !== f.v);
+      parts.push(
+        sec(
+          LOCK + ' Fixed layer',
+          `<p class="p">Ferretry launches <span class="mono">${esc(r.name)}</span> as an agent, so it adds a locked layer last. You can't edit it here.</p>
+      <div class="stack">${fx.map(f => `<div class="layer locked"><span class="n">${LOCK}</span><span><span class="t"><span class="mono">${esc(f.k)}</span> = <span class="mono">${esc(f.v)}</span></span><br><span class="s">${esc(f.why)}</span></span></div>`).join('')}</div>
+      ${over.length ? `<div class="list">${over.map(f => `<div class="row"><span class="st st-muted">${LOCK}</span><span class="main"><span class="t"><s class="muted mono">${esc(f.k)} = ${esc(userKeys[f.k].v)}</s></span><span class="s">From your ${esc(userKeys[f.k].from)} · Overridden for agents by Ferretry</span></span></div>`).join('')}</div>` : ''}`,
+          ' data-spot="fixed"',
+        ),
+      );
+    }
+    const canLaunch = !missing && c.status !== 'signin' && m.online;
+    return {
+      title: r.name,
+      titleMono: true,
+      sub: ST[c.status][2] + (r.agent ? ' · Agent runtime' : ''),
+      back: true,
+      body: offlineBanner(m) + parts.join(''),
+      foot: btn(
+        canLaunch
+          ? 'Launch ' + esc(r.name)
+          : missing
+            ? 'Install ' + HN[c.harness] + ' to launch'
+            : c.status === 'signin'
+              ? 'Sign in to launch'
+              : 'Waiting for ' + esc(m.name),
+        'launch',
+        `id="launch-runtime" data-x="${r.id}"${canLaunch ? '' : ' disabled'}`,
+        'primary block',
+      ),
+    };
+  };
+  V.creds = (p, m) => {
+    if (!m.creds.length)
+      return {
+        title: 'Credentials',
+        tabs: true,
+        body: `<div class="empty"><h2>No logins on ${esc(m.name)}</h2><p class="p">A credential is one login to Claude Code or Codex. It belongs to this machine.</p>${btn('Add a login', 'start-addlogin', 'id="add-login-empty"', 'primary')}</div>`,
+      };
+    const groups = ['claude', 'codex']
+      .map(h => {
+        const list = m.creds.filter(c => c.harness === h);
+        if (!list.length) return '';
+        return sec(
+          HN[h],
+          `<div class="list">${list.map(c => `<button class="row" data-a="go" data-v="cred" data-x="${c.id}">${credRowInner(m, c, { usage: true })}${chev}</button>`).join('')}</div>`,
+        );
+      })
+      .join('');
+    const dupes = ['claude', 'codex'].some(h => {
+      const e = m.creds.filter(c => c.harness === h).map(c => c.email);
+      return new Set(e).size !== e.length;
+    });
+    return {
+      title: 'Credentials',
+      sub: plural(m.creds.length, 'login') + ' on ' + m.name,
+      tabs: true,
+      body:
+        offlineBanner(m) +
+        `<div class="btns">${btn('+ Add a login', 'start-addlogin', 'id="add-login"', 'primary')}</div>` +
+        groups +
+        (dupes
+          ? `<p class="hint">Two logins share an email, so each has a label you chose. Change a label from the login's page.</p>`
+          : ''),
+    };
+  };
+  V.cred = (p, m) => {
+    const c = find(m.creds, p.id);
+    if (!c) return V.creds({}, m);
+    const rts = credRuntimes(m, c.id);
+    const parts = [];
+    const explain = {
+      ready: 'Ready. Checked a few minutes ago.',
+      refresh: 'Refresh due. Ferretry renews it the next time a runtime uses it.',
+      signin: c.slot
+        ? `Empty slot. It was copied from ${c.from} without the login itself. Sign in once and every runtime that uses it can launch.`
+        : "Needs sign-in. Runtimes that use this login can't launch.",
+      checking: 'Checking with ' + HN[c.harness] + '…',
+    }[c.status];
+    parts.push(
+      `<div class="sec"><div class="stl st-${ST[c.status][1]}" style="font-size:13.5px">${stG(c.status)}${ST[c.status][2]}</div><p class="p">${esc(explain)}</p>${usageHtml(c)}</div>`,
+    );
+    const fx = S.ui.fixed && S.ui.fixed.cid === c.id ? S.ui.fixed : null;
+    if (fx) {
+      parts.push(
+        note(
+          'ok',
+          `<b>Signed in. ${plural(fx.rids.length, 'runtime')} can launch now.</b><div class="list">${fx.rids
+            .map((rid, i) => {
+              const r = find(m.runtimes, rid);
+              const on = i < fx.shown;
+              return `<div class="row${on ? ' fade-in' : ''}">${stG(on ? 'ready' : 'signin')}<span class="main"><span class="t mono">${esc(r.name)}</span><span class="s">${on ? 'Ready' : 'Needs sign-in'}</span></span></div>`;
+            })
+            .join('')}</div>`,
+          '',
+          ' data-spot="fixed"',
+        ),
+      );
+    }
+    if (c.status === 'signin')
+      parts.push(
+        signinHtml(
+          'cred-' + c.id,
+          c.harness,
+          S.ui.si['cred-' + c.id],
+          rts.length > 1 ? `Finish sign-in for ${rts.length} runtimes` : 'Finish sign-in',
+        ),
+      );
+    parts.push(
+      `<div class="field"><label for="cred-label-${c.id}">Label</label><input class="inp" id="cred-label-${c.id}" value="${esc(c.label)}" placeholder="e.g. personal or work" data-in="cred-label" data-x="${c.id}"><span class="hint">Only you see this. It tells logins with the same email apart.</span></div>`,
+    );
+    parts.push(
+      sec(
+        'Used by',
+        rts.length
+          ? `<div class="list">${rts.map(r => `<button class="row" data-a="go" data-v="runtime" data-x="${r.id}">${stG(c.status)}<span class="main"><span class="t mono">${esc(r.name)}</span><span class="s">${esc((find(m.profiles, r.profileId) || {}).name)} profile</span></span>${chev}</button>`).join('')}</div>`
+          : '<p class="hint">No runtime uses this login yet.</p>',
+      ),
+    );
+    if (S.ui.signout === c.id) {
+      const cons = [];
+      if (c.cli) cons.push(`This also signs out ${c.harness} in your terminal on ${esc(m.name)}.`);
+      cons.push(rts.length ? plural(rts.length, 'runtime') + ' will need sign-in.' : 'No runtime uses it.');
+      parts.push(
+        note(
+          'danger',
+          `<b>Sign out of ${esc(credName(c))}?</b><span>${cons.join(' ')}</span>`,
+          btn('Sign out', 'signout-do', `id="signout-confirm" data-x="${c.id}"`, 'danger sm') +
+            btn('Keep signed in', 'signout-cancel', '', 'sm'),
+          ' data-spot="signout"',
+        ),
+      );
+    }
+    const actions = [];
+    if (c.status !== 'signin')
+      actions.push(
+        btn(
+          c.status === 'checking' ? 'Checking…' : 'Check now',
+          'cred-check',
+          `id="cred-check" data-x="${c.id}"${c.status === 'checking' ? ' disabled' : ''}`,
+        ),
+      );
+    if (c.status !== 'signin' && S.ui.signout !== c.id)
+      actions.push(btn('Sign out…', 'signout-ask', `id="cred-signout" data-x="${c.id}"`, 'quiet'));
+    return {
+      title: HN[c.harness] + ' login',
+      sub: credName(c),
+      back: true,
+      body: offlineBanner(m) + parts.join(''),
+      foot: actions.length ? `<div class="btns">${actions.join('')}</div>` : '',
+    };
+  };
+  V.profiles = (p, m) => {
+    if (!m.profiles.length)
+      return {
+        title: 'Profiles',
+        tabs: true,
+        body: `<div class="empty"><h2>No profiles yet</h2><p class="p">A profile is a stack of layers: other profiles and components. The newer layer wins.</p>${btn('Build a profile', 'start-build', 'id="build-profile-empty"', 'primary')}</div>`,
+      };
+    const rows = m.profiles
+      .map(pr => {
+        const u = profileUse(m, pr.id);
+        return `<button class="row" data-a="go" data-v="profile" data-x="${pr.id}"><span class="main"><span class="t">${esc(pr.name)}</span><span class="s">${plural(pr.layers.length, 'layer')} · used by ${plural(u.rts.length, 'runtime')}${u.parents.length ? ' · base for ' + plural(u.parents.length, 'profile') : ''}</span></span>${chev}</button>`;
+      })
+      .join('');
+    return {
+      title: 'Profiles',
+      sub: plural(m.profiles.length, 'profile'),
+      tabs: true,
+      body:
+        offlineBanner(m) +
+        `<div class="btns">${btn('+ Build a new profile', 'start-build', 'id="build-profile"', 'primary')}</div><div class="list">${rows}</div>`,
+    };
+  };
+  V.profile = (p, m) => {
+    const pr = find(m.profiles, p.id);
+    if (!pr) return V.profiles({}, m);
+    const u = profileUse(m, pr.id);
+    const parts = [];
+    parts.push(sec('Layers', stackHtml(m, pr.layers)));
+    parts.push(sec('Conflicts', conflictsHtml(conflicts(flattenProfile(m, pr.id)))));
+    parts.push(
+      sec(
+        'Where it is used',
+        u.rts.length || u.parents.length
+          ? `<div class="list">${u.parents.map(x => `<button class="row" data-a="go" data-v="profile" data-x="${x.id}"><span class="main"><span class="t">Profile · ${esc(x.name)}</span><span class="s">Builds on ${esc(pr.name)}</span></span>${chev}</button>`).join('')}${u.rts.map(r => `<button class="row" data-a="go" data-v="runtime" data-x="${r.id}"><span class="main"><span class="t mono">${esc(r.name)}</span><span class="s">Runtime${r.profileId !== pr.id ? ' · through ' + esc(find(m.profiles, r.profileId).name) : ''}</span></span>${chev}</button>`).join('')}</div>`
+          : '<p class="hint">Nothing uses this profile yet.</p>',
+      ),
+    );
+    parts.push(deletePanel(m, 'profile', pr.id));
+    return {
+      title: pr.name,
+      sub: 'Profile · ' + plural(pr.layers.length, 'layer'),
+      back: true,
+      body: offlineBanner(m) + parts.join(''),
+      foot: `<div class="btns">${btn('Edit layers', 'start-build-edit', `id="profile-edit" data-x="${pr.id}"`, 'primary')}${S.ui.del && S.ui.del.id === pr.id ? '' : btn('Delete profile…', 'del-ask', `id="profile-delete" data-kind="profile" data-x="${pr.id}"`, 'quiet')}</div>`,
+    };
+  };
+  V.comptypes = (p, m) => {
+    const rows = TYPE_ORDER.map(t => {
+      const n = m.comps.filter(c => c.type === t).length;
+      return `<button class="row" data-a="go" data-v="complist" data-x="${t}"><span class="main"><span class="t">${TYPES[t].many}</span><span class="s">${TYPES[t].desc}</span></span><span class="muted num" style="align-self:center">${n}</span>${chev}</button>`;
+    }).join('');
+    return {
+      title: 'Components',
+      sub: 'Saved once, reused in any profile',
+      tabs: true,
+      body:
+        offlineBanner(m) +
+        `<p class="p">Instructions, MCP servers and skills are adapted to each harness. Settings and hooks belong to one harness.</p><div class="list">${rows}</div>`,
+    };
+  };
+  V.complist = (p, m) => {
+    const list = m.comps.filter(c => c.type === p.id);
+    const rows = list
+      .map(c => {
+        const u = compUse(m, c.id);
+        return `<button class="row" data-a="go" data-v="comp" data-x="${c.id}"><span class="main"><span class="t${c.type === 'mcp' ? ' mono' : ''}">${esc(c.name)}</span>${compBadges(c, m)}<span class="s">Used by ${plural(u.profs.length, 'profile')}, ${plural(u.rts.length, 'runtime')}</span></span>${chev}</button>`;
+      })
+      .join('');
+    return {
+      title: TYPES[p.id].many,
+      sub: TYPES[p.id].desc,
+      back: true,
+      body:
+        offlineBanner(m) +
+        `<div class="btns">${btn('+ New ' + TYPES[p.id].one.toLowerCase(), 'go', `id="comp-new" data-v="compnew" data-x="${p.id}"`, 'primary')}</div>` +
+        (list.length ? `<div class="list">${rows}</div>` : `<p class="hint">None saved yet.</p>`),
+    };
+  };
+  function compContent(c, m) {
+    if (c.type === 'skills')
+      return `<div class="list">${c.items.map(i => `<div class="row"><span class="main"><span class="t mono">${esc(i)}</span>${c.partial && i === 'release-notes' ? `<span class="badges">${badge('Partly supported on ' + c.partial, 'warn')}</span>` : ''}</span></div>`).join('')}</div>`;
+    if (c.type === 'settings')
+      return `<div class="list"><div class="row"><dl class="kv">${Object.entries(c.keys)
+        .map(([k, v]) => `<dt class="mono">${esc(k)}</dt><dd class="mono">${esc(v)}</dd>`)
+        .join(
+          '',
+        )}${c.secrets.map(s => `<dt class="mono">env.${esc(s)}</dt><dd>${LOCK} In Ferretry's secret store · never shown</dd>`).join('')}</dl></div></div>`;
+    if (c.type === 'modelset')
+      return `<div class="list"><ul class="models">${c.models.map(x => `<li><span>${esc(x)}</span><span class="muted">${x === c.def ? 'Default' : ''}</span></li>`).join('')}</ul></div>`;
+    return `<pre class="code wrapc">${esc(c.body)}</pre>`;
+  }
+  V.comp = (p, m) => {
+    const c = find(m.comps, p.id);
+    if (!c) return V.comptypes({}, m);
+    const u = compUse(m, c.id);
+    const parts = [];
+    parts.push(
+      `<div class="sec">${compBadges(c, m)}${c.source ? `<p class="hint">Imported from ${esc(c.source)}.</p>` : ''}</div>`,
+    );
+    if (c.harness === 'generic' && c.type !== 'modelset')
+      parts.push(`<p class="p">Ferretry adapts this for each harness, so it works in Claude Code and Codex.</p>`);
+    if (c.partial)
+      parts.push(
+        note(
+          'warn',
+          `<b>Partly supported on ${esc(c.partial)}</b><span>${esc(c.partialWhy)}</span>`,
+          '',
+          ' data-spot="partial"',
+        ),
+      );
+    for (const w of c.warn)
+      parts.push(
+        note(
+          'warn',
+          `<b>${esc(w)}</b><span>It was imported anyway. Install the missing command on ${esc(m.name)} and it starts working.</span>`,
+          '',
+          ' data-spot="warn"',
+        ),
+      );
+    if (c.checkPath === m.name)
+      parts.push(
+        note(
+          'warn',
+          `<b>Check this path on ${esc(m.name)}</b><span>This was copied from another machine and points at a folder there. Edit it if the folder lives somewhere else on ${esc(m.name)}.</span>`,
+          btn('Edit path', 'go', `data-v="compedit" data-x="${c.id}"`, 'sm'),
+          ' data-spot="path"',
+        ),
+      );
+    parts.push(sec(c.type === 'mcp' ? 'Command' : 'Content', compContent(c, m)));
+    parts.push(
+      sec(
+        'Used by',
+        `<p class="p">Used by ${plural(u.profs.length, 'profile')} and ${plural(u.rts.length, 'runtime')}.</p>${u.profs.length ? `<div class="list">${u.profs.map(x => `<button class="row" data-a="go" data-v="profile" data-x="${x.id}"><span class="main"><span class="t">${esc(x.name)}</span><span class="s">${u.direct.includes(x) ? 'Has it as a layer' : 'Gets it through a base profile'}</span></span>${chev}</button>`).join('')}</div>` : ''}`,
+      ),
+    );
+    parts.push(deletePanel(m, 'comp', c.id));
+    return {
+      title: c.name,
+      titleMono: c.type === 'mcp',
+      sub: TYPES[c.type].one,
+      back: true,
+      body: offlineBanner(m) + parts.join(''),
+      foot: `<div class="btns">${btn('Edit', 'go', `id="comp-edit" data-v="compedit" data-x="${c.id}"`, 'primary')}${S.ui.del && S.ui.del.id === c.id ? '' : btn('Delete…', 'del-ask', `id="comp-delete" data-kind="comp" data-x="${c.id}"`, 'quiet')}</div>`,
+    };
+  };
+  function deletePanel(m, kind, id) {
+    const d = S.ui.del;
+    if (!d || d.id !== id) return '';
+    const name = kind === 'comp' ? find(m.comps, id).name : find(m.profiles, id).name;
+    if (kind === 'comp') {
+      const u = compUse(m, id);
+      if (u.direct.length)
+        return note(
+          'danger',
+          `<b>${esc(name)} is in use, so it can't be deleted</b><span>It is a layer in:</span><div class="list">${u.direct.map(p => `<div class="row"><span class="main"><span class="t">Profile · ${esc(p.name)}</span></span></div>`).join('')}</div><span>${u.rts.length ? `Through those, ${plural(u.rts.length, 'runtime')} use${u.rts.length === 1 ? 's' : ''} it: ${u.rts.map(r => `<span class="mono">${esc(r.name)}</span>`).join(', ')}.` : ''}</span>`,
+          btn('Remove from those first', 'del-detach', `id="del-detach" data-kind="comp" data-x="${id}"`, 'sm') +
+            btn('Keep it', 'del-cancel', '', 'sm'),
+          ' data-spot="del"',
+        );
+      return note(
+        'danger',
+        `<b>Delete ${esc(name)}?</b><span>${d.detached ? 'Removed from ' + listWords(d.detached) + '. ' : ''}Nothing uses it now. This can't be undone.</span>`,
+        btn('Delete ' + esc(name), 'del-do', `id="del-confirm" data-kind="comp" data-x="${id}"`, 'danger sm') +
+          btn('Keep it', 'del-cancel', '', 'sm'),
+        ' data-spot="del"',
+      );
+    }
+    const u = profileUse(m, id);
+    if (u.directParents.length)
+      return note(
+        'danger',
+        `<b>${esc(name)} is in use, so it can't be deleted</b><span>It is the base of ${listWords(u.directParents.map(p => esc(p.name)))}${u.directRts.length ? ', and these runtimes use it: ' + u.directRts.map(r => `<span class="mono">${esc(r.name)}</span>`).join(', ') : ''}.</span>`,
+        btn('Remove from those first', 'del-detach', `id="del-detach" data-kind="profile" data-x="${id}"`, 'sm') +
+          btn('Keep it', 'del-cancel', '', 'sm'),
+        ' data-spot="del"',
+      );
+    if (u.directRts.length) {
+      const others = m.profiles.filter(p => p.id !== id && !includesProfile(m, p.id, id));
+      d.sw = d.sw || {};
+      return note(
+        'danger',
+        `<b>Pick another profile for ${u.directRts.length === 1 ? 'this runtime' : 'these runtimes'} first</b><span>A runtime always needs a profile.${d.detached ? ' Already removed from ' + listWords(d.detached) + '.' : ''}</span>${u.directRts
+          .map(r => {
+            d.sw[r.id] = d.sw[r.id] || (others[0] || {}).id;
+            return `<div class="field"><label for="sw-${r.id}" class="mono">${esc(r.name)}</label><select class="inp" id="sw-${r.id}" data-in="del-sw" data-x="${r.id}">${others.map(o => `<option value="${o.id}"${d.sw[r.id] === o.id ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select></div>`;
+          })
+          .join('')}`,
+        btn(
+          `Switch ${plural(u.directRts.length, 'runtime')} and delete ${esc(name)}`,
+          'del-do',
+          `id="del-confirm" data-kind="profile" data-x="${id}"${others.length ? '' : ' disabled'}`,
+          'danger sm',
+        ) + btn('Keep it', 'del-cancel', '', 'sm'),
+        ' data-spot="del"',
+      );
+    }
+    return note(
+      'danger',
+      `<b>Delete ${esc(name)}?</b><span>${d.detached ? 'Removed from ' + listWords(d.detached) + '. ' : ''}Nothing uses it now. Its components stay saved. This can't be undone.</span>`,
+      btn('Delete ' + esc(name), 'del-do', `id="del-confirm" data-kind="profile" data-x="${id}"`, 'danger sm') +
+        btn('Keep it', 'del-cancel', '', 'sm'),
+      ' data-spot="del"',
+    );
+  }
+  function compForm(prefix, d, type, m) {
+    const f = [];
+    f.push(
+      `<div class="field"><label for="${prefix}-name">Name</label><input class="inp${type === 'mcp' ? ' mono' : ''}" id="${prefix}-name" value="${esc(d.name)}" data-in="draft" data-p="${prefix}" data-f="name" autocomplete="off">${d.nameErr ? `<span class="err">${esc(d.nameErr)}</span>` : ''}</div>`,
+    );
+    if (type === 'settings' || type === 'hooks')
+      f.push(
+        `<div class="field"><label for="${prefix}-h">Harness</label><select class="inp" id="${prefix}-h" data-in="draft" data-p="${prefix}" data-f="harness"><option value="claude"${d.harness === 'claude' ? ' selected' : ''}>Claude Code</option><option value="codex"${d.harness === 'codex' ? ' selected' : ''}>Codex</option></select></div>`,
+      );
+    if (type === 'modelset') {
+      f.push(
+        `<div class="sec"><span class="lbl">Models</span><div class="list">${ALL_MODELS.map((x, i) => opt({ type: 'checkbox', name: prefix + '-m', id: `${prefix}-m-${i}`, checked: d.models.includes(x), title: esc(x), sub: MODELS.claude.includes(x) ? 'Claude Code' : 'Codex', data: `data-in="draft-model" data-p="${prefix}" data-m="${esc(x)}"` })).join('')}</div></div>`,
+      );
+      f.push(
+        `<div class="field"><label for="${prefix}-def">Default</label><select class="inp" id="${prefix}-def" data-in="draft" data-p="${prefix}" data-f="def">${d.models.map(x => `<option${x === d.def ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></div>`,
+      );
+    } else if (type === 'skills') {
+      f.push(
+        `<div class="field"><label for="${prefix}-body">Skills, one per line</label><textarea class="inp" id="${prefix}-body" data-in="draft" data-p="${prefix}" data-f="body">${esc(d.body)}</textarea></div>`,
+      );
+    } else if (type === 'settings') {
+      f.push(
+        `<div class="field"><label for="${prefix}-body">Settings, one <span class="mono">key = value</span> per line</label><textarea class="inp" id="${prefix}-body" data-in="draft" data-p="${prefix}" data-f="body">${esc(d.body)}</textarea><span class="hint">Flags and environment go here too, e.g. <span class="mono">env.LOG_LEVEL = debug</span>. Secret values go in the secret store, not here.</span></div>`,
+      );
+    } else {
+      f.push(
+        `<div class="field"><label for="${prefix}-body">${type === 'mcp' ? 'Command' : type === 'hooks' ? 'Hook' : 'Instructions'}</label><textarea class="inp" id="${prefix}-body" data-in="draft" data-p="${prefix}" data-f="body">${esc(d.body)}</textarea></div>`,
+      );
+    }
+    return f.join('');
+  }
+  function draftFromComp(c) {
+    return {
+      id: c.id,
+      type: c.type,
+      name: c.name,
+      harness: c.harness,
+      models: [...c.models],
+      def: c.def,
+      body:
+        c.type === 'skills'
+          ? c.items.join('\n')
+          : c.type === 'settings'
+            ? Object.entries(c.keys)
+                .map(([k, v]) => k + ' = ' + v)
+                .join('\n')
+            : c.body,
+    };
+  }
+  function blankDraft(type) {
+    return {
+      type,
+      name: '',
+      harness: type === 'settings' || type === 'hooks' ? 'claude' : 'generic',
+      models: ['Sonnet 5.5'],
+      def: 'Sonnet 5.5',
+      body: '',
+    };
+  }
+  function applyDraft(c, d) {
+    c.name = d.name.trim();
+    if (d.type === 'settings' || d.type === 'hooks') c.harness = d.harness;
+    if (d.type === 'modelset') {
+      c.models = [...d.models];
+      c.def = d.models.includes(d.def) ? d.def : d.models[0];
+      c.harness = d.models.every(x => MODELS.claude.includes(x))
+        ? 'claude'
+        : d.models.every(x => MODELS.codex.includes(x))
+          ? 'codex'
+          : 'generic';
+    } else if (d.type === 'skills')
+      c.items = d.body
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean);
+    else if (d.type === 'settings') {
+      c.keys = {};
+      d.body.split('\n').forEach(line => {
+        const i = line.indexOf('=');
+        if (i > 0) c.keys[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+      });
+    } else c.body = d.body;
+    if (c.checkPath && !/\/(Users|home)\/you\//.test(c.body)) c.checkPath = '';
+    return c;
+  }
+  function draftError(m, d, exceptId) {
+    if (!d.name.trim()) return 'Give it a name.';
+    if (m.comps.some(c => c.type === d.type && c.name === d.name.trim() && c.id !== exceptId))
+      return 'You already have one called ' + d.name.trim() + '.';
+    if (d.type === 'modelset' && !d.models.length) return 'Pick at least one model.';
+    return '';
+  }
+  V.compedit = (p, m) => {
+    const c = find(m.comps, p.id);
+    if (!c) return V.comptypes({}, m);
+    if (!S.ui.edit || S.ui.edit.id !== c.id) S.ui.edit = draftFromComp(c);
+    const u = compUse(m, c.id);
+    const d = S.ui.edit;
+    const warn =
+      u.profs.length > 1 || u.rts.length > 1
+        ? note(
+            'warn',
+            `<b>Used by ${plural(u.profs.length, 'profile')} and ${plural(u.rts.length, 'runtime')}</b><span>Saving changes it everywhere. Running sessions keep the old version until restarted.</span>`,
+            '',
+            ' data-spot="used"',
+          )
+        : '';
+    return {
+      title: 'Edit ' + c.name,
+      sub: TYPES[c.type].one,
+      back: true,
+      body: warn + compForm('ce', d, c.type, m),
+      foot: `<div class="btns">${btn('Cancel', 'nav-back', 'id="comp-edit-cancel"')}${btn(u.profs.length > 1 || u.rts.length > 1 ? 'Save for all' : 'Save', 'comp-save', `id="comp-edit-save" data-x="${c.id}"${draftError(m, d, c.id) ? ' disabled' : ''}`, 'primary')}</div>`,
+    };
+  };
+  V.compnew = (p, m) => {
+    if (!S.ui.newc || S.ui.newc.type !== p.id) S.ui.newc = blankDraft(p.id);
+    const d = S.ui.newc;
+    return {
+      title: 'New ' + TYPES[p.id].one.toLowerCase(),
+      back: true,
+      body: compForm('cn', d, p.id, m),
+      foot: `<div class="btns">${btn('Cancel', 'nav-back', 'id="comp-new-cancel"')}${btn('Save', 'comp-create', `id="comp-new-save" data-x="${p.id}"${draftError(m, d) ? ' disabled' : ''}`, 'primary')}</div>`,
+    };
+  };
+  V.settings = (p, m) => {
+    const parts = [];
+    const changed = m.permPrev && m.permPrev !== m.perm;
+    parts.push(
+      sec(
+        'Agent permissions',
+        `<div class="list" role="radiogroup" aria-label="Agent permissions">
+      ${opt({ name: 'perm', id: 'perm-auto', checked: m.perm === 'auto', title: 'Auto mode', sub: 'Agents work on their own and stop to ask before anything that looks risky.', data: 'data-in="perm" data-x="auto"' })}
+      ${opt({ name: 'perm', id: 'perm-skip', checked: m.perm === 'skip', title: 'Skip all permission checks', sub: `Agents never stop to ask. They can change any file and run any command on ${esc(m.name)}.`, data: 'data-in="perm" data-x="skip"' })}
+    </div>
+    ${changed && m.running ? note('warn', `<b>Applies to new sessions.</b><span>${plural(m.running, 'running session')} keep${m.running === 1 ? 's' : ''} the old mode (${permName(m.permPrev)}) until restarted.</span>`, '', ' data-spot="perm"') : `<p class="hint" data-spot="perm">Applies to new sessions. Agent runtimes get this through Ferretry's fixed layer.</p>`}`,
+      ),
+    );
+    parts.push(
+      sec(
+        'Tools on ' + esc(m.name),
+        `<div class="list">${['claude', 'codex'].map(h => `<div class="row">${stG(m.installed[h] ? 'ready' : 'signin')}<span class="main"><span class="t">${HN[h]}</span><span class="s">${m.installed[h] ? 'Installed · ' + m.installed[h] : 'Not installed'}</span></span>${m.installed[h] ? '' : btn('Install', 'start-install', `id="install-${h}" data-h="${h}"`, 'sm')}</div>`).join('')}</div>`,
+      ),
+    );
+    parts.push(
+      sec(
+        'Setup',
+        `<div class="list">
+      <button class="row" data-a="start-clone" id="clone-start"><span class="main"><span class="t">Clone from another machine</span><span class="s">Copy components, model sets, profiles and runtimes once. Logins and history stay behind.</span></span>${chev}</button>
+      <button class="row" data-a="start-import" id="import-again"><span class="main"><span class="t">Import again</span><span class="s">Read Claude Code and Codex on ${esc(m.name)} again and add anything new.</span></span>${chev}</button>
+    </div>`,
+      ),
+    );
+    parts.push(
+      sec(
+        'Machine',
+        `<dl class="kv"><dt>Name</dt><dd class="mono">${esc(m.name)}</dd><dt>System</dt><dd>${esc(m.os)}</dd><dt>Status</dt><dd>${m.online ? stL('ready').replace('Ready', 'Online') : '<span class="stl st-danger">' + stG('signin') + 'Offline</span>'}</dd></dl>`,
+      ),
+    );
+    return { title: 'Settings', sub: 'For ' + m.name, tabs: true, body: offlineBanner(m) + parts.join('') };
+  };
+  V.machines = (p, m) => {
+    const rows = Object.values(S.machines)
+      .map(
+        x =>
+          `<button class="row" data-a="switch" data-x="${x.name}">${x.online ? stG('ready') : stG('signin')}<span class="main"><span class="t mono">${esc(x.name)}</span><span class="s">${x.online ? 'Online' : 'Offline · last seen 40m ago'} · ${esc(x.os)} · ${x.setup ? plural(x.runtimes.length, 'runtime') : 'Not set up yet'}</span></span>${x.name === S.machine ? badge('Current', 'accent') : chev}</button>`,
+      )
+      .join('');
+    return {
+      title: 'Machines',
+      back: true,
+      noSwitch: true,
+      body: `<div class="list">${rows}<button class="row addrow" data-a="go" data-v="addmachine" id="add-machine"><span class="plus" aria-hidden="true">+</span><span class="main"><span class="t">Add machine</span></span>${chev}</button></div><p class="hint">Each machine keeps its own credentials, components, profiles and runtimes.</p>`,
+    };
+  };
+  V.addmachine = () => ({
+    title: 'Add machine',
+    back: true,
+    noSwitch: true,
+    body: `<p class="p">Install Ferretry on the other machine, then run this there:</p><pre class="code">fy pair</pre><p class="p">It shows a code. Enter it here.</p><div class="field"><label for="pair-code">Pairing code</label><input class="inp mono" id="pair-code" autocomplete="off" placeholder="e.g. 7Q4-K2M"></div><p class="hint">Prototype: pairing is out of scope here. Use the two sample machines.</p>`,
+  });
+
+  /* =====================================================================
+   Flows (steppers)
+   ===================================================================== */
+  const F = {};
+  const FLOW_TITLE = {
+    fr: 'Set up',
+    addrt: 'Add a runtime',
+    build: 'Build a profile',
+    addlogin: 'Add a login',
+    clone: 'Clone from another machine',
+    install: 'Install',
+  };
+  function flowSteps(fl, m) {
+    switch (fl.type) {
+      case 'fr':
+        return [
+          'tools',
+          'claude',
+          'codex',
+          ...((fl.res.claude === 'skipped' || !fl.res.claude) && (fl.res.codex === 'skipped' || !fl.res.codex)
+            ? []
+            : ['names']),
+          'done',
+        ];
+      case 'addrt':
+        return ['cred', 'profile', 'name', 'done'];
+      case 'build':
+        return ['base', ...BUILD_TYPES, 'review', 'name'];
+      case 'addlogin':
+        return [...(fl.fixed ? [] : ['tool']), 'signin', ...(fl.needLabel ? ['label'] : [])];
+      case 'clone': {
+        const tgt = m;
+        return [
+          'source',
+          'preview',
+          ...((fl.at === 'conflict' || fl.at === 'done' ? fl.hadSetup : tgt.runtimes.length || tgt.profiles.length)
+            ? ['conflict']
+            : []),
+          'done',
+        ];
+      }
+      case 'install':
+        return ['install'];
+    }
+  }
+  const STEP_LABEL = {
+    tools: 'Check tools',
+    claude: 'Claude Code',
+    codex: 'Codex',
+    names: 'Name runtimes',
+    done: 'Done',
+    cred: 'Credential',
+    profile: 'Profile',
+    name: 'Name',
+    base: 'Start from',
+    instructions: 'Instructions',
+    mcp: 'MCP',
+    skills: 'Skills',
+    settings: 'Settings',
+    modelset: 'Model set',
+    review: 'Review layers',
+    tool: 'Choose tool',
+    signin: 'Sign in',
+    label: 'Label',
+    source: 'Source',
+    preview: 'Preview',
+    conflict: 'Existing setup',
+    install: 'Install',
+  };
+  function flowHead(fl, m) {
+    const steps = flowSteps(fl, m);
+    const i = steps.indexOf(fl.at);
+    const backHidden = fl.at === 'done' || fl.confirm;
+    const title =
+      fl.type === 'fr'
+        ? 'Set up ' + m.name
+        : fl.type === 'build' && fl.editId
+          ? 'Edit ' + find(m.profiles, fl.editId).name
+          : fl.type === 'install'
+            ? 'Install ' + HN[fl.harness]
+            : FLOW_TITLE[fl.type];
+    return `<div class="sh">
+      <button class="back" type="button" data-a="fback" id="step-back"${backHidden ? ' hidden' : ''}>‹ Back</button>
+      <span class="sh-step">${STEP_LABEL[fl.at]} · ${i + 1} of ${steps.length}</span>
+      <button class="sh-x" type="button" data-a="fcancel" id="step-cancel"${fl.at === 'done' || fl.confirm ? ' hidden' : ''}>Cancel</button>
+    </div>
+    <div class="prog" aria-hidden="true">${steps.map((s, j) => `<span class="${j < i ? 'done' : j === i ? 'cur' : ''}"></span>`).join('')}</div>
+    <h1 class="p-title" id="p-title" tabindex="-1">${esc(title)}</h1>`;
+  }
+  function confirmHtml(fl, m) {
+    const saved = fl.created.length
+      ? `<span>Saved for reuse:</span><div class="list">${fl.created.map(x => `<div class="row"><span class="main"><span class="t">${esc(x)}</span></span></div>`).join('')}</div>`
+      : '';
+    const what = {
+      fr: [
+        'Leave setup?',
+        'Anything you already imported stays. You can finish from Settings, Import again.',
+        'Leave setup',
+      ],
+      addrt: ['Stop adding a runtime?', 'No runtime is created.', 'Stop, add no runtime'],
+      build: [
+        'Stop building this profile?',
+        fl.editId ? 'Your changes to the layers are not saved.' : 'No profile is created.',
+        'Stop, discard profile',
+      ],
+      addlogin: [
+        'Stop adding a login?',
+        fl.credId ? 'The login you signed in with is kept.' : 'No login is added.',
+        'Stop',
+      ],
+      clone: ['Stop cloning?', 'Nothing is copied.', 'Stop, copy nothing'],
+      install: ['Stop installing?', 'Nothing is installed.', 'Stop'],
+    }[fl.type];
+    return note(
+      'warn',
+      `<b>${what[0]}</b><span>${what[1]}</span>${saved}`,
+      btn(what[2], 'fstop', 'id="confirm-stop"', 'danger sm') +
+        btn('Keep going', 'fkeep', 'id="confirm-keep"', 'sm primary'),
+    );
+  }
+
+  /* ---- First run ---- */
+  F.fr = (fl, m) => {
+    if (!m.online)
+      return {
+        body: note(
+          'warn',
+          `<b>${stG('signin')} ${esc(m.name)} is asleep or offline</b><span>Setup is paused. Your progress is kept. Wake ${esc(m.name)} and tap Retry.</span>`,
+          btn(
+            fl.waking ? 'Checking…' : 'Retry',
+            'wake',
+            `id="offline-retry"${fl.waking ? ' disabled' : ''}`,
+            'primary sm',
+          ),
+          ' data-spot="offline"',
+        ),
+        foot: '',
+      };
+    const at = fl.at;
+    if (at === 'tools') {
+      const missing = ['claude', 'codex'].filter(h => !m.installed[h]);
+      const rows = ['claude', 'codex']
+        .map(
+          h =>
+            `<div class="row">${stG(m.installed[h] ? 'ready' : 'signin')}<span class="main"><span class="t">${HN[h]}</span><span class="s">${m.installed[h] ? 'Installed · ' + m.installed[h] : 'Not installed'}</span></span></div>`,
+        )
+        .join('');
+      let extra = '';
+      if (missing.length && fl.inst.phase !== 'skipped')
+        extra = sec("Install what's missing", installHtml(m, fl.inst, 'fr-inst', missing));
+      else if (fl.inst.phase === 'done') extra = installHtml(m, fl.inst, 'fr-inst', []);
+      else if (missing.length)
+        extra = `<p class="hint">Skipped. You can install ${listWords(missing.map(h => HN[h]))} later in Settings.</p>`;
+      const busy = fl.inst.phase === 'running';
+      const canGo = !busy && (missing.length === 0 || fl.inst.phase === 'skipped' || fl.inst.phase === 'failed-skip');
+      return {
+        body: `<p class="p">Ferretry runs Claude Code and Codex on ${esc(m.name)}. First it checks they're installed.</p><div class="list">${rows}</div>${extra}`,
+        foot: `<div class="btns">${missing.length && fl.inst.phase !== 'skipped' && fl.inst.phase !== 'failed' && !busy ? btn('Skip, continue without them', 'inst-skip', 'id="fr-skip-install" data-x="fr-inst"') : ''}${btn('Continue', 'fnext', `id="step-next"${canGo ? '' : ' disabled'}`, 'primary')}</div>`,
+      };
+    }
+    if (at === 'claude' || at === 'codex') return frImport(fl, m, at);
+    if (at === 'names') {
+      const hs = ['claude', 'codex'].filter(h => fl.res[h] && fl.res[h] !== 'skipped');
+      const taken = new Set(m.runtimes.map(r => r.name));
+      let ok = true,
+        count = 0;
+      const cards = hs
+        .map(h => {
+          const r = fl.res[h],
+            c = find(m.creds, r.credId),
+            pr = find(m.profiles, r.profileId);
+          const dup = m.runtimes.find(x => x.credId === c.id && x.profileId === pr.id);
+          const name = fl.names[h] || '';
+          let err = fl.make[h] ? runtimeNameError(m, name) : null;
+          const other = hs.find(o => o !== h && fl.make[o] && fl.names[o] === name);
+          if (!err && other && fl.make[h])
+            err = { msg: 'Both runtimes have this name.', suggest: uniqName(name, new Set([...taken, name])) };
+          if (err) ok = false;
+          if (fl.make[h]) count++;
+          return `<div class="list"><div class="row">${stG(c.status)}<span class="main"><span class="t">${HN[h]}</span><span class="s"><span class="mono">${esc(c.email)}</span> · ${esc(pr.name)} profile</span></span></div>
+        ${dup ? `<div class="row"><span class="main">${note('warn', `<b><span class="mono">${esc(dup.name)}</span> already uses this login and profile.</b>`)}${opt({ type: 'checkbox', name: 'fr-make-' + h, id: 'fr-make-' + h, checked: fl.make[h], title: 'Add another anyway', data: `data-in="fr-make" data-h="${h}"` })}</span></div>` : ''}
+        ${fl.make[h] ? `<div class="row"><span class="main field"><label for="fr-name-${h}">Runtime name</label><input class="inp mono" id="fr-name-${h}" value="${esc(name)}" data-in="fr-name" data-h="${h}" autocomplete="off" aria-invalid="${!!err}">${err ? `<span class="err">${esc(err.msg)}${err.suggest ? ` <button class="link" type="button" data-a="fr-suggest" data-h="${h}" data-x="${esc(err.suggest)}">Use ${esc(err.suggest)}</button>` : ''}</span>` : '<span class="hint">Letters, digits and dashes.</span>'}</span></div>` : ''}</div>`;
+        })
+        .join('');
+      return {
+        body: `<p class="p">A runtime is a login plus a profile. It's what you launch. Name each one.</p>${cards}`,
+        foot: btn(
+          count ? 'Create ' + plural(count, 'runtime') : 'Continue without runtimes',
+          'fr-create',
+          `id="step-next"${ok ? '' : ' disabled'}`,
+          'primary block',
+        ),
+      };
+    }
+    // done
+    const made = fl.made.map(id => find(m.runtimes, id)).filter(Boolean);
+    const anyImported = ['claude', 'codex'].some(h => fl.res[h] && fl.res[h] !== 'skipped');
+    if (!made.length && anyImported)
+      return {
+        body: note(
+          'ok',
+          `<b>Import finished</b><span>No new runtimes were added. Your existing runtimes are unchanged.</span>`,
+        ),
+        foot: btn('Go to Runtimes', 'fr-finish', 'id="step-next"', 'primary block'),
+      };
+    if (!made.length)
+      return {
+        body: `<div class="empty"><h2>Nothing was imported</h2><p class="p">That's fine. You can add a runtime any time, or import later from Settings.</p></div>`,
+        foot: btn('Go to Runtimes', 'fr-finish', 'id="step-next"', 'primary block'),
+      };
+    return {
+      body:
+        note('ok', `<b>${esc(m.name)} is ready</b><span>${plural(made.length, 'runtime')} created.</span>`) +
+        `<div class="list">${made
+          .map(r => {
+            const c = find(m.creds, r.credId);
+            return `<div class="row">${stG(c.status)}<span class="main"><span class="t mono">${esc(r.name)}</span><span class="s"><span class="mono">${esc(c.email)}</span> · ${esc(find(m.profiles, r.profileId).name)} profile · ${esc(effModels(m, r).def || '')}</span></span></div>`;
+          })
+          .join('')}</div>`,
+      foot: btn('Go to Runtimes', 'fr-finish', 'id="step-next"', 'primary block'),
+    };
+  };
+  function frImport(fl, m, h) {
+    const oh = h === 'claude' ? 'codex' : 'claude';
+    if (!m.installed[h])
+      return {
+        body: `<div class="note"><span>${HN[h]} isn't installed · Install later in Settings</span></div>`,
+        foot: btn('Continue', 'fnext', 'id="step-next"', 'primary block'),
+      };
+    const res = fl.res[h];
+    if (res === 'skipped')
+      return {
+        body: `<div class="note"><span>Skipped ${HN[h]}. You can import it later from Settings.</span><div class="acts">${btn('Import ' + HN[h] + ' instead', 'fr-unskip', `data-h="${h}"`, 'sm')}</div></div>`,
+        foot: btn('Continue', 'fnext', 'id="step-next"', 'primary block'),
+      };
+    if (res) {
+      const c = find(m.creds, res.credId),
+        pr = find(m.profiles, res.profileId);
+      const notes = res.notes
+        .map(n =>
+          note(
+            n.k,
+            `<span>${esc(n.t)}</span>`,
+            '',
+            n.t.includes('uvx')
+              ? ' data-spot="mcp"'
+              : n.t.includes('secret')
+                ? ' data-spot="settings"'
+                : n.t.includes('instructions')
+                  ? ' data-spot="instr"'
+                  : '',
+          ),
+        )
+        .join('');
+      return {
+        body:
+          note('ok', `<b>Imported from ${HN[h]}</b>`) +
+          `<div class="list">
+        <div class="row">${stG(c.status)}<span class="main"><span class="t">Login · <span class="mono">${esc(c.email)}</span></span><span class="s">${ST[c.status][2]}</span></span></div>
+        <div class="row"><span class="st" aria-hidden="true"></span><span class="main"><span class="t">${esc(pr.name)} profile</span><span class="s">${res.what.length ? 'Now has ' + listWords(res.what) + '.' : 'A plain starting point with a model set.'}</span></span></div>
+      </div>${notes}`,
+        foot: btn('Continue', 'fnext', 'id="step-next"', 'primary block'),
+      };
+    }
+    const f = m.fr;
+    const signed = f.signed[h];
+    const file = h === 'claude' ? 'CLAUDE.md' : 'AGENTS.md';
+    const rows = [];
+    rows.push(
+      `<div class="row"><span class="k">Account</span><span class="main">${signed === 'yes' ? `<span class="stl st-ok">${stG('ready')}Signed in</span><span class="s mono">${'you@example.com'}</span>` : signed === 'refresh' ? `<span class="stl st-warn">${stG('refresh')}Signed in · refresh due</span><span class="s"><span class="mono">you@example.com</span> · it renews on first use</span>` : `<span class="stl st-danger">${stG('signin')}Not signed in</span><span class="s">Your setup can still be imported.</span>`}</span></div>`,
+    );
+    if (f.config[h]) {
+      const otherDone = fl.res[oh] && fl.res[oh] !== 'skipped' && m.fr.config[oh];
+      rows.push(
+        `<div class="row" data-spot="instr"><span class="k">Instructions</span><span class="main"><span class="t mono">${file}</span><span class="s">${h === 'claude' ? '2.1 KB' : f.same ? '2.1 KB' : '1.4 KB'}</span>${otherDone ? (f.same ? `<span class="badges">${badge('Same as your CLAUDE.md · one shared copy', 'ok')}</span>` : `<span class="badges">${badge('Different from your CLAUDE.md · kept separately', 'accent')}</span>`) : ''}</span></div>`,
+      );
+      rows.push(
+        `<div class="row" data-spot="settings"><span class="k">Settings</span><span class="main"><span class="t mono">${h === 'claude' ? 'settings.json' : 'config.toml'}</span><span class="s">${h === 'claude' ? '6 settings, 1 hook' : '4 settings'}</span>${h === 'claude' && f.secrets ? `<span class="badges">${badge(LOCK + '2 secret values · go to the secret store, never shown', 'warn')}</span>` : ''}</span></div>`,
+      );
+      rows.push(
+        `<div class="row" data-spot="mcp"><span class="k">MCP servers</span><span class="main"><span class="t">${h === 'claude' ? '3' : '2'}</span><span class="s mono">${h === 'claude' ? 'github, linear, notes' : 'github, linear'}</span>${h === 'claude' && f.uvx ? `<span class="badges">${badge(WARN + 'notes · Command not found: uvx', 'warn')}</span>` : ''}</span></div>`,
+      );
+      rows.push(
+        `<div class="row"><span class="k">Skills</span><span class="main"><span class="t">${h === 'claude' ? '5' : '2'}</span><span class="s mono">${h === 'claude' ? 'release-notes, pr-review, changelog, db-migrate, incident-summary' : 'pr-review, changelog'}</span></span></div>`,
+      );
+    } else {
+      rows.push(
+        `<div class="row"><span class="k">Setup</span><span class="main"><span class="t">Nothing found</span><span class="s">No ${file}, settings, MCP servers or skills. Ferretry will make a plain Starter profile you can add to later.</span></span></div>`,
+      );
+    }
+    const si = signed === 'no' ? signinHtml('fr-' + h, h, fl.si[h], 'Finish sign-in') : '';
+    return {
+      body: `<p class="p">Ferretry found ${HN[h]} on ${esc(m.name)}. Import it to use your login and setup from here.</p>
+      <div class="sec"><span class="lbl">Found on ${esc(m.name)}</span><div class="list">${rows.join('')}</div></div>${si}
+      <p class="hint">Importing copies your setup into Ferretry. ${HN[h]} on ${esc(m.name)} keeps working as before.</p>`,
+      foot: `<div class="btns">${btn('Skip ' + HN[h], 'fr-skip', `id="fr-skip" data-h="${h}"`)}${btn(signed === 'no' ? 'Import, sign in later' : 'Import from ' + HN[h], 'fr-import', `id="fr-import" data-h="${h}"`, 'primary')}</div>`,
+    };
+  }
+
+  /* ---- Add runtime ---- */
+  F.addrt = (fl, m) => {
+    if (!m.online) return pausedBody(fl, m);
+    const at = fl.at;
+    if (at === 'cred') {
+      if (!m.creds.length)
+        return {
+          body: `<div class="empty" data-spot="empty"><h2>Add a login first</h2><p class="p">A runtime needs a login to Claude Code or Codex. You don't have one on ${esc(m.name)} yet. Pick which one to sign in to.</p>
+        <div class="list" style="width:100%">${['claude', 'codex'].map(h => `<button class="row" data-a="start-addlogin" data-h="${h}" id="addrt-login-${h}"${m.installed[h] ? '' : ' disabled'}><span class="main"><span class="t">Sign in to ${HN[h]}</span><span class="s">${m.installed[h] ? 'Installed on ' + esc(m.name) : 'Not installed on ' + esc(m.name) + ' · install it in Settings'}</span></span>${chev}</button>`).join('')}</div></div>`,
+          foot: btn('Next', 'fnext', 'id="step-next" disabled', 'primary block'),
+        };
+      const rows = ['claude', 'codex']
+        .flatMap(h => m.creds.filter(c => c.harness === h))
+        .map(c =>
+          opt({
+            name: 'addrt-cred',
+            id: 'addrt-cred-' + c.id,
+            checked: fl.credId === c.id,
+            title: `<span class="mono">${esc(c.email)}</span>${c.label ? ' ' + badge(esc(c.label), 'accent') : ''}`,
+            sub: `${HN[c.harness]} · ${stG(c.status)} ${ST[c.status][2]} · used by ${plural(credRuntimes(m, c.id).length, 'runtime')}${m.installed[c.harness] ? '' : ' · ' + HN[c.harness] + " isn't installed here"}`,
+            data: `data-in="addrt-cred" data-x="${c.id}"`,
+          }),
+        )
+        .join('');
+      const sel = fl.credId && find(m.creds, fl.credId);
+      const si =
+        sel && sel.status === 'signin' ? signinHtml('addrt', sel.harness, S.ui.si.addrt, 'Finish sign-in') : '';
+      return {
+        body: `<p class="p">Which login should this runtime use?</p><div class="list">${rows}<button class="row addrow" data-a="start-addlogin" id="addrt-new-login"><span class="plus" aria-hidden="true">+</span><span class="main"><span class="t">Add a new login</span></span>${chev}</button></div>${si}`,
+        foot: btn(
+          sel && sel.status === 'signin' ? 'Next, sign in later' : 'Next',
+          'fnext',
+          `id="step-next"${sel ? '' : ' disabled'}`,
+          'primary block',
+        ),
+      };
+    }
+    if (at === 'profile') {
+      const c = find(m.creds, fl.credId);
+      const rows = m.profiles
+        .map(p => {
+          const k = compat(m, p.id, c.harness);
+          const flat = flattenProfile(m, p.id);
+          return opt({
+            name: 'addrt-profile',
+            id: 'addrt-profile-' + p.id,
+            checked: fl.profileId === p.id,
+            disabled: !k.ok,
+            title: esc(p.name),
+            sub: `${plural(p.layers.length, 'layer')} · ${plural(flat.length, 'part')}`,
+            extra: !k.ok
+              ? `<span class="why" data-spot="p-${p.id}">${LOCK}${esc(k.why)}</span>`
+              : k.notes.length
+                ? `<span class="badges" data-spot="p-${p.id}">${k.notes.map(n => badge(esc(n), 'warn')).join('')}</span>`
+                : '',
+            data: `data-in="addrt-profile" data-x="${p.id}"`,
+          });
+        })
+        .join('');
+      const dup = fl.profileId && m.runtimes.find(r => r.credId === fl.credId && r.profileId === fl.profileId);
+      const dupHtml = dup
+        ? note(
+            'warn',
+            `<b><span class="mono">${esc(dup.name)}</span> already uses this login and profile.</b><span>Add another anyway?</span>`,
+            fl.dupOk
+              ? `<span class="stl st-ok">${stG('ready')}OK, you'll get a second one</span>`
+              : btn('Add another anyway', 'dup-ok', 'id="dup-ok"', 'sm') +
+                  btn('Pick a different profile', 'dup-no', 'id="dup-no"', 'sm'),
+            ' data-spot="dup"',
+          )
+        : '';
+      return {
+        body: `<p class="p">Which profile should it use with <span class="mono">${esc(c.email)}</span> on ${HN[c.harness]}?</p><div class="list">${rows}<button class="row addrow" data-a="start-build" id="addrt-new-profile"><span class="plus" aria-hidden="true">+</span><span class="main"><span class="t">Build a new profile</span></span>${chev}</button></div>${dupHtml}`,
+        foot: btn(
+          'Next',
+          'fnext',
+          `id="step-next"${fl.profileId && (!dup || fl.dupOk) ? '' : ' disabled'}`,
+          'primary block',
+        ),
+      };
+    }
+    if (at === 'name') {
+      const c = find(m.creds, fl.credId),
+        pr = find(m.profiles, fl.profileId);
+      const err = runtimeNameError(m, fl.name);
+      return {
+        body: `<div class="list"><div class="row">${stG(c.status)}<span class="main"><span class="t mono">${esc(c.email)}</span><span class="s">${HN[c.harness]} · ${esc(pr.name)} profile</span></span></div></div>
+      <div class="field" data-spot="name"><label for="addrt-name">Runtime name</label><input class="inp mono" id="addrt-name" value="${esc(fl.name)}" autocomplete="off" data-in="addrt-name" aria-invalid="${!!err}">
+      ${err ? `<span class="err">${esc(err.msg)}${err.suggest ? ` <button class="link" type="button" data-a="addrt-suggest" data-x="${esc(err.suggest)}" id="addrt-use-suggest">Use ${esc(err.suggest)}</button>` : ''}</span>` : '<span class="hint">Letters, digits and dashes. You type this to launch it.</span>'}</div>
+      <div class="list">${opt({ type: 'checkbox', name: 'addrt-agent', id: 'addrt-agent', checked: fl.agent, title: 'Ferretry launches this as an agent', sub: "Adds Ferretry's fixed layer last: no trust or onboarding prompts, and the machine's agent permissions.", data: 'data-in="addrt-agent"' })}</div>`,
+        foot: btn('Create runtime', 'addrt-create', `id="step-next"${err ? ' disabled' : ''}`, 'primary block'),
+      };
+    }
+    const r = find(m.runtimes, fl.made);
+    const c = find(m.creds, r.credId);
+    return {
+      body:
+        note(
+          'ok',
+          `<b><span class="mono">${esc(r.name)}</span> is ready to launch</b><span>${HN[c.harness]} · <span class="mono">${esc(c.email)}</span> · ${esc(find(m.profiles, r.profileId).name)} profile${c.status === 'signin' ? '. Sign in before you launch.' : '.'}</span>`,
+        ) + (fl.created.length ? `<p class="hint">Also saved for reuse: ${esc(fl.created.join(', '))}.</p>` : ''),
+      foot: `<div class="btns">${btn('Back to Runtimes', 'addrt-finish', 'id="addrt-done-list"')}${btn('Open ' + esc(r.name), 'addrt-finish', `id="addrt-done-open" data-x="${r.id}"`, 'primary')}</div>`,
+    };
+  };
+  function pausedBody(fl, m) {
+    return {
+      body: note(
+        'warn',
+        `<b>${stG('signin')} ${esc(m.name)} is asleep or offline</b><span>Paused. Your progress is kept.</span>`,
+        btn(fl.waking ? 'Checking…' : 'Retry', 'wake', `${fl.waking ? 'disabled' : ''}`, 'primary sm'),
+      ),
+      foot: '',
+    };
+  }
+
+  /* ---- Build profile ---- */
+  F.build = (fl, m) => {
+    const at = fl.at;
+    if (at === 'base') {
+      const rows = m.profiles
+        .map(p => {
+          const self = fl.editId && (p.id === fl.editId || includesProfile(m, p.id, fl.editId));
+          const on = fl.bases.includes(p.id);
+          return opt({
+            type: 'checkbox',
+            name: 'b-base',
+            id: 'b-base-' + p.id,
+            checked: on,
+            disabled: self,
+            title: esc(p.name),
+            sub: plural(flattenProfile(m, p.id).length, 'part'),
+            extra: self ? `<span class="why" data-spot="loop">${LOCK}Would include itself</span>` : '',
+            data: `data-in="b-base" data-x="${p.id}"`,
+          });
+        })
+        .join('');
+      const order = fl.bases.length
+        ? `<div class="sec"><span class="lbl">Layer order · later wins</span><div class="stack">${fl.bases.map((pid, i) => `<div class="layer"><span class="n">${i + 1}</span><span style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="t">${esc(find(m.profiles, pid).name)}${i === fl.bases.length - 1 && fl.bases.length > 1 ? ' <span class="muted">· wins</span>' : ''}</span><span class="order"><button type="button" data-a="b-move" data-x="${i}" data-d="-1" aria-label="Move ${esc(find(m.profiles, pid).name)} earlier"${i === 0 ? ' disabled' : ''}>↑</button><button type="button" data-a="b-move" data-x="${i}" data-d="1" aria-label="Move ${esc(find(m.profiles, pid).name)} later"${i === fl.bases.length - 1 ? ' disabled' : ''}>↓</button></span></span></div>`).join('')}</div></div>`
+        : '';
+      return {
+        body: `<p class="p">Start from existing profiles, or from nothing. When two layers set the same thing, the later one wins.</p>${m.profiles.length ? `<div class="list">${rows}</div>` : '<p class="hint">No profiles yet. Start from nothing.</p>'}${order}`,
+        foot: btn(fl.bases.length ? 'Next' : 'Next, start from nothing', 'fnext', 'id="step-next"', 'primary block'),
+      };
+    }
+    if (BUILD_TYPES.includes(at)) {
+      const t = at,
+        list = m.comps.filter(c => c.type === t);
+      const multi = t !== 'modelset';
+      const picks = fl.picks[t];
+      const rows = list
+        .map(c =>
+          opt({
+            type: multi ? 'checkbox' : 'radio',
+            name: 'b-' + t,
+            id: `b-${t}-${c.id}`,
+            checked: picks.includes(c.id),
+            title: `<span class="${t === 'mcp' ? 'mono' : ''}">${esc(c.name)}</span>`,
+            extra: compBadges(c, m),
+            data: `data-in="b-pick" data-t="${t}" data-x="${c.id}"`,
+          }),
+        )
+        .join('');
+      const none = multi
+        ? ''
+        : opt({
+            name: 'b-' + t,
+            id: `b-${t}-none`,
+            checked: !picks.length,
+            title: 'No model set',
+            sub: 'Use the one from a base layer, or the harness default.',
+            data: `data-in="b-pick" data-t="${t}" data-x=""`,
+          });
+      const form =
+        fl.nf && fl.nf.type === t
+          ? `<div class="note info"><b>New ${TYPES[t].one.toLowerCase()}</b>${compForm('bn', fl.nf, t, m)}<div class="acts">${btn('Save and use it', 'b-new-save', `id="b-new-save"${draftError(m, fl.nf) ? ' disabled' : ''}`, 'primary sm')}${btn('Cancel', 'b-new-cancel', 'id="b-new-cancel"', 'sm')}</div></div>`
+          : '';
+      const help = {
+        instructions: 'What should every session know?',
+        mcp: 'Which tools can the agent call?',
+        skills: 'Which skills should it have?',
+        settings: 'Any harness settings? Flags and environment live here.',
+        modelset: 'Which models, and which one by default?',
+      }[t];
+      return {
+        body: `<p class="p">${help} Pick existing, create new, or skip.</p><div class="list">${none}${rows}${form ? '' : `<button class="row addrow" data-a="b-new" data-t="${t}" id="b-new-${t}"><span class="plus" aria-hidden="true">+</span><span class="main"><span class="t">Create new ${TYPES[t].one.toLowerCase()}</span></span>${chev}</button>`}</div>${form}`,
+        foot: btn(
+          picks.length ? 'Next' : 'Skip, add no ' + TYPES[t].many.toLowerCase(),
+          'fnext',
+          `id="step-next"${form ? ' disabled' : ''}`,
+          'primary block',
+        ),
+      };
+    }
+    if (at === 'review') {
+      const layers = draftLayers(fl);
+      const own = fl.name || (fl.editId ? find(m.profiles, fl.editId).name : 'this profile');
+      const conf = conflicts(flattenLayers(m, layers, own, new Set(fl.editId ? [fl.editId] : [])));
+      if (!layers.length)
+        return {
+          body: note(
+            'warn',
+            `<b>This profile has no layers yet</b><span>Go back and pick a starting profile or at least one part.</span>`,
+          ),
+          foot: btn('Next', 'fnext', 'id="step-next" disabled', 'primary block'),
+        };
+      return {
+        body: `<p class="p">This is the stack, newest on top. A newer layer wins when two set the same thing.</p>${stackHtml(m, layers)}${sec('Conflicts', conflictsHtml(conf), ' data-spot="conf"')}`,
+        foot: btn('Next', 'fnext', `id="step-next"${layers.length ? '' : ' disabled'}`, 'primary block'),
+      };
+    }
+    // name
+    const err = !fl.name.trim()
+      ? 'Give the profile a name.'
+      : m.profiles.some(p => p.name === fl.name.trim() && p.id !== fl.editId)
+        ? 'You already have a profile called ' + fl.name.trim() + '.'
+        : '';
+    return {
+      body: `<div class="field"><label for="build-name">Profile name</label><input class="inp" id="build-name" value="${esc(fl.name)}" autocomplete="off" data-in="build-name" aria-invalid="${!!err && !!fl.name}">${err && fl.name ? `<span class="err">${esc(err)}</span>` : '<span class="hint">For example Review, Agent or Docs.</span>'}</div>
+      <p class="hint">${plural(draftLayers(fl).length, 'layer')}. ${S.flows.length > 1 && S.flows[S.flows.length - 2].type === 'addrt' ? 'You go back to choosing a profile, with this one picked.' : ''}</p>`,
+      foot: btn(
+        fl.editId ? 'Save changes' : 'Save profile',
+        'b-save',
+        `id="step-next"${err ? ' disabled' : ''}`,
+        'primary block',
+      ),
+    };
+  };
+  function draftLayers(fl) {
+    return [
+      ...fl.bases.map(p => ({ p })),
+      ...['instructions', 'mcp', 'skills', 'settings', 'hooks', 'modelset'].flatMap(t => fl.picks[t].map(c => ({ c }))),
+    ];
+  }
+
+  /* ---- Add a login ---- */
+  F.addlogin = (fl, m) => {
+    if (fl.at === 'tool') {
+      return {
+        body: `<p class="p">Which tool do you want to sign in to on ${esc(m.name)}?</p><div class="list">${['claude', 'codex'].map(h => opt({ name: 'al-tool', id: 'al-tool-' + h, checked: fl.harness === h, disabled: !m.installed[h], title: HN[h], sub: m.installed[h] ? 'Installed · ' + m.installed[h] : 'Not installed on ' + esc(m.name) + ' · install it in Settings', data: `data-in="al-tool" data-x="${h}"` })).join('')}</div>`,
+        foot: btn('Next', 'fnext', `id="step-next"${fl.harness ? '' : ' disabled'}`, 'primary block'),
+      };
+    }
+    if (fl.at === 'signin') {
+      if (fl.credId)
+        return {
+          body: note('ok', `<b>Signed in to ${HN[fl.harness]} as <span class="mono">you@example.com</span></b>`),
+          foot: btn('Next', 'fnext', 'id="step-next"', 'primary block'),
+        };
+      return {
+        body:
+          `<p class="p">Sign in to ${HN[fl.harness]}. The login is kept on ${esc(m.name)}.</p>` +
+          signinHtml('al', fl.harness, fl.si, 'Finish sign-in'),
+        foot: '',
+      };
+    }
+    // label
+    const other = m.creds.find(c => c.harness === fl.harness && c.email === 'you@example.com' && c.id !== fl.credId);
+    const ok = fl.labelNew.trim() && fl.labelOld.trim() && fl.labelNew.trim() !== fl.labelOld.trim();
+    return {
+      body: `<p class="p">You already have a ${HN[fl.harness]} login for <span class="mono">you@example.com</span>. Label both so you can tell them apart.</p>
+      <div class="field"><label for="al-label-old">Label for the login you already had</label><input class="inp" id="al-label-old" value="${esc(fl.labelOld)}" placeholder="e.g. personal" data-in="al-label" data-f="labelOld" autocomplete="off"><span class="hint">Used by ${plural(credRuntimes(m, other.id).length, 'runtime')}.</span></div>
+      <div class="field"><label for="al-label-new">Label for the new login</label><input class="inp" id="al-label-new" value="${esc(fl.labelNew)}" placeholder="e.g. work" data-in="al-label" data-f="labelNew" autocomplete="off">${fl.labelNew && fl.labelNew.trim() === fl.labelOld.trim() ? '<span class="err">Use two different labels.</span>' : ''}</div>`,
+      foot: btn('Save labels', 'al-finish', `id="step-next"${ok ? '' : ' disabled'}`, 'primary block'),
+    };
+  };
+
+  /* ---- Clone ---- */
+  F.clone = (fl, m) => {
+    if (fl.at === 'source') {
+      const others = Object.values(S.machines).filter(x => x.name !== m.name);
+      return {
+        body: `<p class="p">Copy setup from which machine into <span class="mono">${esc(m.name)}</span>?</p><div class="list">${others.map(x => opt({ name: 'clone-src', id: 'clone-src-' + x.name, checked: fl.src === x.name, disabled: !x.online || !x.setup, title: `<span class="mono">${esc(x.name)}</span>`, sub: `${esc(x.os)} · ${plural(x.runtimes.length, 'runtime')}`, extra: !x.online ? `<span class="why" data-spot="offline">${stG('signin')}${esc(x.name)} is asleep or offline. Wake it to copy from it.</span>` : !x.setup ? '<span class="why">Not set up yet. Nothing to copy.</span>' : '', data: `data-in="clone-src" data-x="${x.name}"` })).join('')}</div>`,
+        foot: btn(
+          'Next',
+          'fnext',
+          `id="step-next"${fl.src && S.machines[fl.src].online ? '' : ' disabled'}`,
+          'primary block',
+        ),
+      };
+    }
+    const src = S.machines[fl.src];
+    if (fl.at === 'preview') {
+      const pv = clonePreview(src, m);
+      return {
+        body: `<p class="p">This is a one-time copy. Later changes on <span class="mono">${esc(src.name)}</span> don't follow.</p>
+      ${sec(
+        'Copies',
+        `<div class="list">
+        <div class="row">${stG('ready')}<span class="main"><span class="t">${plural(pv.comps.length, 'component')}</span><span class="s">Instructions, MCP servers, skills, settings and hooks</span></span></div>
+        <div class="row">${stG('ready')}<span class="main"><span class="t">${plural(pv.sets.length, 'model set')}</span></span></div>
+        <div class="row">${stG('ready')}<span class="main"><span class="t">${plural(src.profiles.length, 'profile')}</span></span></div>
+        <div class="row">${stG('ready')}<span class="main"><span class="t">${plural(src.runtimes.length, 'runtime')}</span></span></div></div>`,
+      )}
+      ${sec(
+        "Doesn't copy",
+        `<div class="list">
+        <div class="row">${stG('signin')}<span class="main"><span class="t">${plural(pv.usedCreds.length, 'login')}</span><span class="s">Each becomes an empty slot on ${esc(m.name)} that needs sign-in. Runtimes keep pointing at their slot.</span></span></div>
+        <div class="row">${stG('signin')}<span class="main"><span class="t">History</span><span class="s">Past sessions stay on ${esc(src.name)}.</span></span></div></div>`,
+      )}
+      ${pv.paths.length ? sec('Check after copying', `<div class="list">${pv.paths.map(c => `<div class="row"><span class="st st-warn">${WARN}</span><span class="main"><span class="t">${esc(c.name)}</span><span class="s mono">${esc((c.body.match(/\/(Users|home)\/[^\s]*/) || [''])[0])}</span><span class="badges">${badge('Check this path on ' + esc(m.name), 'warn')}</span></span></div>`).join('')}</div>`, ' data-spot="paths"') : ''}
+      ${pv.missing.length ? note('warn', `<span>${listWords(pv.missing.map(h => HN[h]))} isn't installed on ${esc(m.name)}. Its runtimes are copied and wait until you install it.</span>`) : ''}`,
+        foot: btn('Next', 'fnext', 'id="step-next"', 'primary block'),
+      };
+    }
+    if (fl.at === 'conflict') {
+      return {
+        body: `<p class="p"><span class="mono">${esc(m.name)}</span> already has ${plural(m.profiles.length, 'profile')} and ${plural(m.runtimes.length, 'runtime')}. What should happen to them?</p>
+      <div class="list" role="radiogroup" aria-label="Existing setup" data-spot="conflict">
+        ${opt({ name: 'clone-mode', id: 'clone-mode-alongside', checked: fl.mode === 'alongside', title: 'Add alongside (rename clashes)', sub: `Keep what's here. Copies with the same name get -2, e.g. <span class="mono">claude-default-2</span>.`, data: 'data-in="clone-mode" data-x="alongside"' })}
+        ${opt({ name: 'clone-mode', id: 'clone-mode-replace', checked: fl.mode === 'replace', title: 'Replace', sub: `Delete ${esc(m.name)}'s components, profiles and runtimes first. Its logins stay.`, data: 'data-in="clone-mode" data-x="replace"' })}
+      </div>`,
+        foot: btn(
+          fl.mode === 'replace' ? 'Replace and copy' : 'Copy alongside',
+          'clone-do',
+          'id="step-next"',
+          fl.mode === 'replace' ? 'danger block' : 'primary block',
+        ),
+      };
+    }
+    // done
+    const r = fl.result;
+    const slots = r.slots.map(id => find(m.creds, id)).filter(Boolean);
+    const bigSlot = slots.slice().sort((a, b) => credRuntimes(m, b.id).length - credRuntimes(m, a.id).length)[0];
+    return {
+      body:
+        note(
+          'ok',
+          `<b>Copied from ${esc(src.name)}</b><span>${plural(r.comps, 'component')}, ${plural(r.sets, 'model set')}, ${plural(r.profiles, 'profile')} and ${plural(r.runtimes, 'runtime')}.${r.renamed ? ' ' + plural(r.renamed, 'name') + ' got -2 to avoid a clash.' : ''}</span>`,
+        ) +
+        sec(
+          'Sign in to use them',
+          `<div class="list">${slots.map(c => `<button class="row" data-a="go-after-clone" data-x="${c.id}">${stG('signin')}<span class="main"><span class="t">${HN[c.harness]} · <span class="mono">${esc(c.email)}</span>${c.label ? ' ' + badge(esc(c.label), 'accent') : ''}</span><span class="s">Empty slot · used by ${plural(credRuntimes(m, c.id).length, 'runtime')}${m.installed[c.harness] ? '' : ' · ' + HN[c.harness] + " isn't installed here"}</span></span>${chev}</button>`).join('')}</div><p class="hint">Sign in once per slot. Every runtime that uses it is fixed together.</p>`,
+        ) +
+        (r.paths.length
+          ? note(
+              'warn',
+              `<b>Check ${plural(r.paths.length, 'path')} on ${esc(m.name)}</b><span>${esc(listWords(r.paths))} point at folders on ${esc(src.name)}.</span>`,
+            )
+          : ''),
+      foot: `<div class="btns">${btn('Go to Runtimes', 'clone-finish', 'id="clone-done-list"')}${bigSlot ? btn(`Sign in once for ${plural(credRuntimes(m, bigSlot.id).length, 'runtime')}`, 'go-after-clone', `id="clone-done-signin" data-x="${bigSlot.id}"`, 'primary') : ''}</div>`,
+    };
+  };
+
+  /* ---- Install (from Settings or a runtime) ---- */
+  F.install = (fl, m) => {
+    if (!m.online) return pausedBody(fl, m);
+    if (fl.inst.phase === 'done')
+      return {
+        body: installHtml(m, fl.inst, 'in', [fl.harness]),
+        foot: btn('Done', 'install-finish', 'id="step-next"', 'primary block'),
+      };
+    return {
+      body: `<p class="p">${HN[fl.harness]} isn't installed on ${esc(m.name)}. Ferretry can install it.</p>${installHtml(m, fl.inst, 'in', [fl.harness])}`,
+      foot: '',
+    };
+  };
+
+  /* =====================================================================
+   Actions
+   ===================================================================== */
+  const A = {};
+  const IN = {};
+  const curFlow = () => S.flows[S.flows.length - 1];
+  function go(v, p) {
+    S.nav.push({ v, p });
+    S.ui.del = null;
+    S.ui.signout = null;
+  }
+  function tab(v) {
+    S.nav = [{ v }];
+    S.ui.del = null;
+    S.ui.signout = null;
+    S.ui.fixed = null;
+  }
+  A.go = d => go(d.v, { id: d.x });
+  A['nav-back'] = () => {
+    if (S.nav.length > 1) S.nav.pop();
+    S.ui.del = null;
+    S.ui.signout = null;
+    S.ui.edit = null;
+    S.ui.newc = null;
+  };
+  A.tab = d => tab(d.x);
+  A.machines = () => go('machines');
+  A.switch = d => {
+    S.machine = d.x;
+    S.flows = [];
+    tab('runtimes');
+    const m = M();
+    if (!m.setup) S.flows = [newFr()];
+  };
+  A.wake = () => {
+    const fl = curFlow();
+    if (fl) fl.waking = true;
+    later(900, () => {
+      M().online = true;
+      if (fl) fl.waking = false;
+      toast(M().name + ' is back online.');
+    });
+  };
+  A.launch = d => {
+    const r = find(M().runtimes, d.x);
+    M().running++;
+    toast('Started a ' + r.name + ' session on ' + M().name + '.');
+  };
+
+  /* flows: generic */
+  function pushFlow(f) {
+    S.flows.push(f);
+  }
+  function stepMove(fl, dir) {
+    const steps = flowSteps(fl, M());
+    const i = steps.indexOf(fl.at);
+    fl.at = steps[Math.max(0, Math.min(steps.length - 1, i + dir))];
+  }
+  A.fback = () => {
+    const fl = curFlow(),
+      m = M();
+    const steps = flowSteps(fl, m);
+    if (steps.indexOf(fl.at) > 0) {
+      stepMove(fl, -1);
+      return;
+    }
+    if (S.flows.length > 1) {
+      popFlow();
+      return;
+    } // sub-stepper: Back returns to the parent step
+    if (fl.type === 'fr' && !fl.fromSettings) {
+      fl.confirm = true;
+      return;
+    }
+    if (fl.type === 'fr' || fl.type === 'install' || fl.type === 'clone') {
+      S.flows.pop();
+      return;
+    }
+    fl.confirm = true;
+  };
+  A.fcancel = () => {
+    curFlow().confirm = true;
+  };
+  A.fkeep = () => {
+    curFlow().confirm = false;
+  };
+  A.fstop = () => {
+    const fl = curFlow();
+    const saved = fl.created.slice();
+    // anything created inside a sub-flow belongs to the parent's "saved for reuse" too
+    S.flows.pop();
+    const parent = curFlow();
+    if (parent) parent.created.push(...saved);
+    if (fl.type === 'fr') {
+      M().setup = true;
+      tab('runtimes');
+    }
+    toast(saved.length ? 'Stopped. Saved for reuse: ' + saved.join(', ') + '.' : 'Stopped. Nothing was created.');
+  };
+  function popFlow(result) {
+    const fl = S.flows.pop();
+    const parent = curFlow();
+    if (parent) parent.created.push(...fl.created);
+    return { fl, parent };
+  }
+  A.fnext = () => {
+    const fl = curFlow(),
+      m = M();
+    if (fl.type === 'fr' && fl.at === 'codex') {
+      // skip naming when nothing was imported
+      const steps = flowSteps(fl, m);
+      fl.at = steps[steps.indexOf('codex') + 1];
+      return;
+    }
+    if (fl.type === 'addrt' && fl.at === 'profile' && !fl.name) {
+      const c = find(m.creds, fl.credId),
+        p = find(m.profiles, fl.profileId);
+      fl.name = uniqName(c.harness + '-' + (slug(p.name) || 'runtime'), new Set(m.runtimes.map(r => r.name)));
+    }
+    if (fl.type === 'addlogin' && fl.at === 'signin' && !fl.needLabel) {
+      finishAddLogin(fl);
+      return;
+    }
+    stepMove(fl, 1);
+  };
+
+  /* sign-in panels */
+  A['si-open'] = d => {
+    const st = siState(d.x);
+    st.opened = true;
+  };
+  IN['si-code'] = (v, d) => {
+    siState(d.x).code = v;
+  };
+  function siState(prefix) {
+    if (prefix === 'al') return curFlow().si;
+    if (prefix.startsWith('fr-')) {
+      const fl = curFlow();
+      fl.si[prefix.slice(3)] = fl.si[prefix.slice(3)] || {};
+      return fl.si[prefix.slice(3)];
+    }
+    S.ui.si[prefix] = S.ui.si[prefix] || {};
+    return S.ui.si[prefix];
+  }
+  A['si-finish'] = d => {
+    const m = M(),
+      p = d.x;
+    if (p.startsWith('cred-')) {
+      const c = find(m.creds, p.slice(5));
+      const rids = credRuntimes(m, c.id).map(r => r.id);
+      c.status = 'ready';
+      c.slot = false;
+      S.ui.si[p] = {};
+      if (rids.length) {
+        S.ui.fixed = { cid: c.id, rids, shown: reduceMotion ? rids.length : 0 };
+        S.spot = 'fixed';
+        if (!reduceMotion)
+          rids.forEach((_, i) =>
+            later(450 * (i + 1), () => {
+              if (S.ui.fixed && S.ui.fixed.cid === c.id) S.ui.fixed.shown = i + 1;
+            }),
+          );
+      }
+      return;
+    }
+    if (p.startsWith('fr-')) {
+      m.fr.signed[p.slice(3)] = 'yes';
+      toast('Signed in to ' + HN[p.slice(3)] + '.');
+      return;
+    }
+    if (p === 'addrt') {
+      const c = find(m.creds, curFlow().credId);
+      c.status = 'ready';
+      S.ui.si.addrt = {};
+      toast('Signed in. ' + plural(credRuntimes(m, c.id).length, 'runtime') + ' using this login can launch now.');
+      return;
+    }
+    if (p === 'al') {
+      const fl = curFlow();
+      const exists = m.creds.find(c => c.harness === fl.harness && c.email === 'you@example.com');
+      const c = {
+        id: nid('cr'),
+        harness: fl.harness,
+        email: 'you@example.com',
+        label: '',
+        status: 'ready',
+        cli: false,
+        usage: [0, '5h 0m', 3, 'Sun'],
+      };
+      m.creds.push(c);
+      fl.credId = c.id;
+      fl.created.push(HN[fl.harness] + ' login you@example.com');
+      if (exists) {
+        fl.needLabel = true;
+        fl.labelOld = exists.label || 'personal';
+        fl.labelNew = exists.label === 'work' ? 'side' : 'work';
+        fl.at = 'label';
+      }
+    }
+  };
+  function finishAddLogin(fl) {
+    const m = M();
+    const c = find(m.creds, fl.credId);
+    if (fl.needLabel) {
+      const other = m.creds.find(x => x.harness === fl.harness && x.email === c.email && x.id !== c.id);
+      other.label = fl.labelOld.trim();
+      c.label = fl.labelNew.trim();
+      fl.created = fl.created.map(x =>
+        x === HN[fl.harness] + ' login you@example.com'
+          ? HN[fl.harness] + ' login you@example.com (' + c.label + ')'
+          : x,
+      );
+    }
+    const { parent } = popFlow();
+    if (parent && parent.type === 'addrt') {
+      parent.credId = c.id;
+      toast('Login added and picked. Saved for reuse.');
+    } else {
+      go('cred', { id: c.id });
+      toast('Login added.');
+    }
+  }
+  A['al-finish'] = () => finishAddLogin(curFlow());
+  IN['al-tool'] = (v, d) => {
+    curFlow().harness = d.x;
+  };
+  IN['al-label'] = (v, d) => {
+    curFlow()[d.f] = v;
+  };
+
+  /* install */
+  function instState(prefix) {
+    return curFlow().inst;
+  }
+  IN['inst-sel'] = (v, d) => {
+    instState(d.x).sel[d.h] = v;
+  };
+  IN['inst-pass'] = (v, d) => {
+    instState(d.x).pass = v;
+  };
+  A['inst-go'] = d => runInstall(curFlow());
+  A['inst-retry'] = d => {
+    const st = curFlow().inst;
+    st.tried = true;
+    runInstall(curFlow());
+  };
+  A['inst-skip'] = d => {
+    const fl = curFlow();
+    if (fl.type === 'install') {
+      S.flows.pop();
+      return;
+    }
+    fl.inst.phase = 'skipped';
+  };
+  function runInstall(fl) {
+    const m = M(),
+      st = fl.inst;
+    const hs = Object.keys(st.sel).filter(h => st.sel[h] && !m.installed[h]);
+    st.phase = 'running';
+    later(1400, () => {
+      if (m.fr.fails && !st.tried) {
+        st.phase = 'failed';
+        S.spot = 'fail';
+        return;
+      }
+      hs.forEach(h => {
+        m.installed[h] = VERSIONS[h];
+        m.fr.signed[h] = 'no';
+        m.fr.config[h] = false;
+      });
+      st.did = hs;
+      st.phase = 'done';
+      st.pass = '';
+    });
+  }
+  A['start-install'] = d => {
+    pushFlow(newInstall(d.h));
+  };
+  A['install-finish'] = () => {
+    const fl = curFlow();
+    S.flows.pop();
+    toast(HN[fl.harness] + ' is installed on ' + M().name + '.');
+  };
+
+  /* first run */
+  A['fr-import'] = d => doImport(curFlow(), M(), d.h);
+  A['fr-skip'] = d => {
+    curFlow().res[d.h] = 'skipped';
+  };
+  A['fr-unskip'] = d => {
+    curFlow().res[d.h] = null;
+  };
+  IN['fr-name'] = (v, d) => {
+    curFlow().names[d.h] = v.trim();
+  };
+  IN['fr-make'] = (v, d) => {
+    curFlow().make[d.h] = v;
+  };
+  A['fr-suggest'] = d => {
+    curFlow().names[d.h] = d.x;
+  };
+  A['fr-create'] = () => {
+    const fl = curFlow(),
+      m = M();
+    for (const h of ['claude', 'codex']) {
+      const r = fl.res[h];
+      if (!r || r === 'skipped' || !fl.make[h]) continue;
+      const rt = { id: nid('r'), name: fl.names[h], credId: r.credId, profileId: r.profileId, agent: false };
+      m.runtimes.push(rt);
+      fl.made.push(rt.id);
+    }
+    fl.at = 'done';
+  };
+  A['fr-finish'] = () => {
+    S.flows.pop();
+    M().setup = true;
+    tab('runtimes');
+  };
+  A['start-import'] = () => {
+    const f = newFr({ fromSettings: true });
+    pushFlow(f);
+  };
+
+  /* add runtime */
+  A['start-addrt'] = () => pushFlow(newAddrt());
+  IN['addrt-cred'] = (v, d) => {
+    const fl = curFlow();
+    if (fl.credId !== d.x) {
+      fl.credId = d.x;
+      fl.profileId = null;
+      fl.dupOk = false;
+      fl.name = '';
+    }
+  };
+  IN['addrt-profile'] = (v, d) => {
+    const fl = curFlow();
+    fl.profileId = d.x;
+    fl.dupOk = false;
+    fl.name = '';
+  };
+  A['dup-ok'] = () => {
+    curFlow().dupOk = true;
+  };
+  A['dup-no'] = () => {
+    curFlow().profileId = null;
+  };
+  IN['addrt-name'] = v => {
+    curFlow().name = v.trim();
+  };
+  IN['addrt-agent'] = v => {
+    curFlow().agent = v;
+  };
+  A['addrt-suggest'] = d => {
+    curFlow().name = d.x;
+  };
+  A['addrt-create'] = () => {
+    const fl = curFlow(),
+      m = M();
+    const r = { id: nid('r'), name: fl.name, credId: fl.credId, profileId: fl.profileId, agent: fl.agent };
+    m.runtimes.push(r);
+    fl.made = r.id;
+    fl.at = 'done';
+  };
+  A['addrt-finish'] = d => {
+    S.flows.pop();
+    tab('runtimes');
+    if (d.x) go('runtime', { id: d.x });
+  };
+  A['start-addlogin'] = d => pushFlow(newAddLogin(d.h ? { harness: d.h, fixed: true, at: 'signin' } : {}));
+
+  /* build profile */
+  A['start-build'] = () => pushFlow(newBuild());
+  A['start-build-edit'] = d => {
+    const m = M(),
+      p = find(m.profiles, d.x);
+    const f = newBuild({ editId: p.id, name: p.name });
+    for (const l of p.layers) {
+      if (l.p) f.bases.push(l.p);
+      else {
+        const c = find(m.comps, l.c);
+        if (c) f.picks[c.type].push(c.id);
+      }
+    }
+    pushFlow(f);
+  };
+  IN['b-base'] = (v, d) => {
+    const fl = curFlow();
+    fl.bases = v ? [...fl.bases, d.x] : fl.bases.filter(x => x !== d.x);
+  };
+  A['b-move'] = d => {
+    const fl = curFlow(),
+      i = +d.x,
+      j = i + +d.d;
+    const b = fl.bases.slice();
+    [b[i], b[j]] = [b[j], b[i]];
+    fl.bases = b;
+  };
+  IN['b-pick'] = (v, d) => {
+    const fl = curFlow(),
+      t = d.t;
+    if (t === 'modelset') fl.picks[t] = d.x ? [d.x] : [];
+    else fl.picks[t] = v ? [...fl.picks[t], d.x] : fl.picks[t].filter(x => x !== d.x);
+  };
+  A['b-new'] = d => {
+    curFlow().nf = blankDraft(d.t);
+  };
+  A['b-new-cancel'] = () => {
+    curFlow().nf = null;
+  };
+  A['b-new-save'] = () => {
+    const fl = curFlow(),
+      m = M(),
+      d = fl.nf;
+    const c = applyDraft(C(nid('c'), d.type, d.name, {}), d);
+    m.comps.push(c);
+    if (d.type === 'modelset') fl.picks.modelset = [c.id];
+    else fl.picks[d.type].push(c.id);
+    fl.created.push(TYPES[d.type].one + ' ' + c.name);
+    fl.nf = null;
+    toast('Saved for reuse: ' + c.name + '.');
+  };
+  IN['build-name'] = v => {
+    curFlow().name = v;
+  };
+  A['b-save'] = () => {
+    const fl = curFlow(),
+      m = M();
+    let p;
+    if (fl.editId) {
+      p = find(m.profiles, fl.editId);
+      p.name = fl.name.trim();
+      p.layers = draftLayers(fl);
+    } else {
+      p = { id: nid('p'), name: fl.name.trim(), layers: draftLayers(fl) };
+      m.profiles.push(p);
+      fl.created.push('Profile ' + p.name);
+    }
+    const { parent } = popFlow();
+    if (parent && parent.type === 'addrt') {
+      parent.profileId = p.id;
+      parent.dupOk = false;
+      parent.name = '';
+      toast('Profile ' + p.name + ' saved and picked.');
+    } else if (fl.editId) toast('Saved. New sessions use the new layers.');
+    else {
+      go('profile', { id: p.id });
+      toast('Profile ' + p.name + ' saved.');
+    }
+  };
+
+  /* drafts */
+  function draftFor(prefix) {
+    return prefix === 'bn' ? curFlow().nf : prefix === 'ce' ? S.ui.edit : S.ui.newc;
+  }
+  IN.draft = (v, d) => {
+    const dr = draftFor(d.p);
+    dr[d.f] = v;
+  };
+  IN['draft-model'] = (v, d) => {
+    const dr = draftFor(d.p);
+    dr.models = v ? ALL_MODELS.filter(x => dr.models.includes(x) || x === d.m) : dr.models.filter(x => x !== d.m);
+    if (!dr.models.includes(dr.def)) dr.def = dr.models[0] || '';
+  };
+  A['comp-save'] = d => {
+    const m = M(),
+      c = find(m.comps, d.x);
+    applyDraft(c, S.ui.edit);
+    S.ui.edit = null;
+    S.nav.pop();
+    toast('Saved. New sessions use the new version.');
+  };
+  A['comp-create'] = d => {
+    const m = M(),
+      dr = S.ui.newc;
+    const c = applyDraft(C(nid('c'), dr.type, dr.name, {}), dr);
+    m.comps.push(c);
+    S.ui.newc = null;
+    S.nav.pop();
+    go('comp', { id: c.id });
+    toast('Saved. Add it to a profile to use it.');
+  };
+
+  /* delete */
+  A['del-ask'] = d => {
+    S.ui.del = { kind: d.kind, id: d.x };
+    S.spot = 'del';
+  };
+  A['del-cancel'] = () => {
+    S.ui.del = null;
+  };
+  A['del-detach'] = d => {
+    const m = M();
+    const names = [];
+    if (d.kind === 'comp')
+      m.profiles.forEach(p => {
+        if (p.layers.some(l => l.c === d.x)) {
+          p.layers = p.layers.filter(l => l.c !== d.x);
+          names.push(p.name);
+        }
+      });
+    else
+      m.profiles.forEach(p => {
+        if (p.layers.some(l => l.p === d.x)) {
+          p.layers = p.layers.filter(l => l.p !== d.x);
+          names.push(p.name);
+        }
+      });
+    S.ui.del.detached = names;
+  };
+  IN['del-sw'] = (v, d) => {
+    S.ui.del.sw[d.x] = v;
+  };
+  A['del-do'] = d => {
+    const m = M();
+    if (d.kind === 'comp') {
+      const c = find(m.comps, d.x);
+      m.comps = m.comps.filter(x => x.id !== d.x);
+      toast('Deleted ' + c.name + '.');
+    } else {
+      const p = find(m.profiles, d.x);
+      const sw = (S.ui.del && S.ui.del.sw) || {};
+      m.runtimes.forEach(r => {
+        if (r.profileId === d.x && sw[r.id]) r.profileId = sw[r.id];
+      });
+      m.profiles = m.profiles.filter(x => x.id !== d.x);
+      toast('Deleted profile ' + p.name + '.');
+    }
+    S.ui.del = null;
+    S.nav.pop();
+  };
+
+  /* credentials */
+  IN['cred-label'] = (v, d) => {
+    find(M().creds, d.x).label = v.trim();
+  };
+  A['cred-check'] = d => {
+    const c = find(M().creds, d.x);
+    const was = c.status;
+    c.status = 'checking';
+    later(1100, () => {
+      c.status = 'ready';
+      if (!c.usage) c.usage = [20, '3h 5m', 40, 'Sat'];
+      toast(was === 'refresh' ? 'Checked. Ferretry renewed the sign-in.' : 'Checked. The login works.');
+    });
+  };
+  A['signout-ask'] = d => {
+    S.ui.signout = d.x;
+    S.spot = 'signout';
+  };
+  A['signout-cancel'] = () => {
+    S.ui.signout = null;
+  };
+  A['signout-do'] = d => {
+    const m = M(),
+      c = find(m.creds, d.x);
+    c.status = 'signin';
+    S.ui.signout = null;
+    S.ui.fixed = null;
+    toast('Signed out. ' + plural(credRuntimes(m, c.id).length, 'runtime') + ' need sign-in.');
+  };
+
+  /* settings + clone */
+  IN.perm = (v, d) => {
+    const m = M();
+    if (!m.permPrev) m.permPrev = m.perm;
+    m.perm = d.x;
+    if (m.perm === m.permPrev) m.permPrev = null;
+  };
+  A['start-clone'] = () => pushFlow(newClone());
+  IN['clone-src'] = (v, d) => {
+    curFlow().src = d.x;
+  };
+  IN['clone-mode'] = (v, d) => {
+    curFlow().mode = d.x;
+  };
+  A['clone-do'] = () => {
+    const fl = curFlow(),
+      m = M();
+    fl.hadSetup = true;
+    fl.result = doClone(S.machines[fl.src], m, fl.mode);
+    fl.at = 'done';
+  };
+
+  A['clone-finish'] = () => {
+    S.flows.pop();
+    tab('runtimes');
+  };
+  A['go-after-clone'] = d => {
+    S.flows.pop();
+    tab('creds');
+    go('cred', { id: d.x });
+    S.spot = 'signin';
+  };
+
+  /* preview step for clone has no conflicts page when the target is empty: run the copy on Next */
+  const _fnext = A.fnext;
+  A.fnext = () => {
+    const fl = curFlow(),
+      m = M();
+    if (fl && fl.type === 'clone' && fl.at === 'preview') {
+      if (m.runtimes.length || m.profiles.length) {
+        fl.hadSetup = true;
+        fl.at = 'conflict';
+        return;
+      }
+      fl.hadSetup = false;
+      fl.result = doClone(S.machines[fl.src], m, 'alongside');
+      fl.at = 'done';
+      return;
+    }
+    _fnext();
+  };
+
+  /* =====================================================================
+   Render
+   ===================================================================== */
+  let lastKey = '';
+  function render() {
+    const m = M();
+    const fl = curFlow();
+    let scr, key;
+    if (fl) {
+      scr = F[fl.type](fl, m);
+      key = fl.type + ':' + fl.at + ':' + S.flows.length;
+    } else {
+      const t = S.nav[S.nav.length - 1];
+      scr = V[t.v](t.p || {}, m);
+      key = t.v + ':' + ((t.p || {}).id || '') + ':' + S.nav.length;
+    }
+
+    // remember focus and scroll
+    const ae = document.activeElement;
+    const focusId = ae && ae.id && ae.closest && ae.closest('#phone') ? ae.id : null;
+    let sel = null;
+    try {
+      if (focusId && ae.selectionStart != null) sel = [ae.selectionStart, ae.selectionEnd];
+    } catch (e) {}
+    const oldBody = $('#p-body');
+    const oldScroll = oldBody ? oldBody.scrollTop : 0;
+
+    const topbar =
+      fl || scr.noSwitch
+        ? `<span class="msw static">${m.online ? stG('ready') : stG('signin')}${esc(m.name)}</span><span class="where">${fl ? 'Changes apply to this machine' : 'All machines'}</span>`
+        : `<button class="msw" type="button" data-a="machines" id="machine-switcher" aria-label="Machine: ${esc(m.name)}. Switch machine">${m.online ? stG('ready') : stG('signin')}${esc(m.name)}<span class="caret" aria-hidden="true">▾</span></button><span class="where">${m.online ? 'Online' : 'Offline'}</span>`;
+    const head = fl
+      ? flowHead(fl, m)
+      : `${S.nav.length > 1 ? '<div class="hrow"><button class="back" type="button" data-a="nav-back" id="nav-back">‹ Back</button></div>' : ''}<h1 class="p-title${scr.titleMono ? ' mono' : ''}" id="p-title" tabindex="-1">${esc(scr.title)}</h1>${scr.sub ? `<p class="p-sub">${esc(scr.sub)}</p>` : ''}`;
+    const body = fl && fl.confirm ? confirmHtml(fl, m) : scr.body;
+    const foot = fl && fl.confirm ? '' : scr.foot;
+    const curTab = S.nav[0].v;
+    const tabs =
+      !fl && scr.tabs
+        ? `<nav class="tabs" aria-label="${esc(m.name)}">${TABS.map(([v, l]) => `<button class="tab" type="button" data-a="tab" data-x="${v}" id="tab-${v}"${curTab === v ? ' aria-current="page"' : ''}>${TAB_ICONS[v]}<span>${l}</span></button>`).join('')}</nav>`
+        : '';
+    $('#phone').innerHTML =
+      `<div class="p-top">${topbar}</div><div class="p-head">${head}</div><div class="p-body" id="p-body" data-key="${esc(key)}">${body}</div>${foot ? `<div class="p-foot">${foot}</div>` : ''}${tabs}${S.toast ? `<div class="toast${foot ? ' raised' : ''}" role="status">${esc(S.toast)}</div>` : ''}`;
+
+    const nb = $('#p-body');
+    if (key === lastKey) nb.scrollTop = oldScroll;
+    if (focusId) {
+      const n = document.getElementById(focusId);
+      if (n && !n.disabled) {
+        n.focus({ preventScroll: true });
+        if (sel && n.setSelectionRange)
+          try {
+            n.setSelectionRange(sel[0], sel[1]);
+          } catch (e) {}
+      } else if (key !== lastKey) $('#p-title').focus({ preventScroll: true });
+    }
+    if (S.spot) {
+      const el = nb.querySelector(`[data-spot="${S.spot}"]`);
+      if (el) {
+        nb.scrollTop = Math.max(0, el.getBoundingClientRect().top - nb.getBoundingClientRect().top + nb.scrollTop - 12);
+        el.classList.add('spot');
+      }
+      S.spot = null;
+    }
+    lastKey = key;
+  }
+
+  /* =====================================================================
+   Edge-case catalogue
+   ===================================================================== */
+  function fresh(o = {}) {
+    reset();
+    const m = M();
+    if (o.installed) m.installed = Object.assign({ claude: null, codex: null }, o.installed);
+    if (o.pkg) m.pkg = o.pkg;
+    if (o.fr) Object.assign(m.fr, o.fr);
+    return m;
+  }
+  function setUp() {
+    reset();
+    S.machines['studio-mac'] = studioSetUp();
+    S.flows = [];
+    S.nav = [{ v: 'runtimes' }];
+    return M();
+  }
+  function frAt(at, extra) {
+    const f = newFr(extra);
+    f.at = at;
+    S.flows = [f];
+    return f;
+  }
+  const CASES = [
+    [
+      'First run',
+      [
+        [
+          'E1',
+          'Neither harness installed: install from the phone',
+          () => {
+            fresh({ installed: {} });
+            frAt('tools');
+          },
+        ],
+        [
+          'E2',
+          'Install fails: needs admin, run it yourself, Retry',
+          () => {
+            const m = fresh({ installed: {}, pkg: 'npm', fr: { fails: true } });
+            const f = frAt('tools');
+            f.inst.pass = 'sample-password';
+            f.inst.phase = 'failed';
+            S.spot = 'fail';
+          },
+        ],
+        [
+          'E3',
+          'Only Claude installed: quiet Codex step',
+          () => {
+            const m = fresh({ installed: { claude: VERSIONS.claude } });
+            const f = frAt('claude');
+            doImport(f, m, 'claude');
+            f.at = 'codex';
+          },
+        ],
+        [
+          'E4',
+          'Installed but not signed in: sign in inline',
+          () => {
+            fresh({ fr: { signed: { claude: 'no', codex: 'yes' } } });
+            frAt('claude');
+            S.spot = 'signin';
+          },
+        ],
+        [
+          'E5',
+          'Signed in, no config: plain Starter profile',
+          () => {
+            fresh({ fr: { config: { claude: false, codex: false } } });
+            frAt('claude');
+          },
+        ],
+        [
+          'E6',
+          'Token needs refresh: import anyway, Refresh due',
+          () => {
+            fresh({ fr: { signed: { claude: 'refresh', codex: 'yes' } } });
+            frAt('claude');
+          },
+        ],
+        [
+          'E7',
+          'Secret-looking values go to the secret store',
+          () => {
+            fresh({ fr: { secrets: true } });
+            frAt('claude');
+            S.spot = 'settings';
+          },
+        ],
+        [
+          'E8',
+          'MCP command missing: "Command not found: uvx"',
+          () => {
+            fresh({ fr: { uvx: true } });
+            frAt('claude');
+            S.spot = 'mcp';
+          },
+        ],
+        [
+          'E9',
+          'CLAUDE.md and AGENTS.md identical: one shared copy',
+          () => {
+            const m = fresh({ fr: { same: true } });
+            const f = frAt('claude');
+            doImport(f, m, 'claude');
+            f.at = 'codex';
+            S.spot = 'instr';
+          },
+          [
+            'Different',
+            () => {
+              const m = fresh({ fr: { same: false } });
+              const f = frAt('claude');
+              doImport(f, m, 'claude');
+              f.at = 'codex';
+              S.spot = 'instr';
+            },
+          ],
+        ],
+        [
+          'E10',
+          'Skipped everything: empty Runtimes page',
+          () => {
+            const m = fresh();
+            m.setup = true;
+            S.flows = [];
+          },
+        ],
+        [
+          'E11',
+          'Machine goes offline mid-stepper: paused, Retry',
+          () => {
+            const m = fresh();
+            const f = frAt('claude');
+            doImport(f, m, 'claude');
+            f.at = 'codex';
+            m.online = false;
+          },
+        ],
+      ],
+    ],
+    [
+      'Add runtime',
+      [
+        [
+          'E12',
+          'No credentials yet: Step 1 opens "Add a login"',
+          () => {
+            const m = fresh();
+            m.setup = true;
+            S.flows = [newAddrt()];
+          },
+        ],
+        [
+          'E13',
+          'Chosen login needs sign-in: sign in inline',
+          () => {
+            const m = setUp();
+            find(m.creds, 'cr3').status = 'signin';
+            S.flows = [newAddrt({ credId: 'cr3' })];
+            S.spot = 'signin';
+          },
+        ],
+        [
+          'E14',
+          'Claude-only parts on a Codex login',
+          () => {
+            setUp();
+            S.flows = [newAddrt({ credId: 'cr2', at: 'profile' })];
+            S.spot = 'p-p4';
+          },
+        ],
+        [
+          'E15',
+          'Same login and profile already a runtime',
+          () => {
+            setUp();
+            S.flows = [newAddrt({ credId: 'cr1', profileId: 'p1', at: 'profile' })];
+            S.spot = 'dup';
+          },
+        ],
+        [
+          'E16',
+          'Name clash or invalid name: suggestion',
+          () => {
+            setUp();
+            S.flows = [newAddrt({ credId: 'cr1', profileId: 'p2', at: 'name', name: 'claude-default' })];
+          },
+        ],
+        [
+          'E17',
+          'Cancel mid-way: profile made in the flow is kept',
+          () => {
+            const m = setUp();
+            m.profiles.push({ id: 'p_quick', name: 'Quick fixes', layers: [{ c: 'i1' }, { c: 'ms2' }] });
+            S.flows = [
+              newAddrt({
+                credId: 'cr1',
+                profileId: 'p_quick',
+                at: 'name',
+                name: 'claude-quick-fixes',
+                created: ['Profile Quick fixes'],
+                confirm: true,
+              }),
+            ];
+          },
+        ],
+      ],
+    ],
+    [
+      'Profiles & components',
+      [
+        [
+          'E18',
+          'Layer conflicts: which layer wins',
+          () => {
+            setUp();
+            S.nav = [{ v: 'profiles' }];
+            const f = newBuild({ bases: ['p1', 'p2'], at: 'review' });
+            S.flows = [f];
+            S.spot = 'conf';
+          },
+        ],
+        [
+          'E19',
+          'Loop: a profile built from itself is disabled',
+          () => {
+            setUp();
+            S.nav = [{ v: 'profiles' }, { v: 'profile', p: { id: 'p1' } }];
+            A['start-build-edit']({ x: 'p1' });
+            S.spot = 'loop';
+          },
+        ],
+        [
+          'E20',
+          'Editing a component used elsewhere',
+          () => {
+            setUp();
+            S.nav = [
+              { v: 'comptypes' },
+              { v: 'complist', p: { id: 'instructions' } },
+              { v: 'comp', p: { id: 'i1' } },
+              { v: 'compedit', p: { id: 'i1' } },
+            ];
+          },
+        ],
+        [
+          'E21',
+          'Deleting a component in use is blocked',
+          () => {
+            setUp();
+            S.nav = [{ v: 'comptypes' }, { v: 'complist', p: { id: 'mcp' } }, { v: 'comp', p: { id: 'm1' } }];
+            S.ui.del = { kind: 'comp', id: 'm1' };
+            S.spot = 'del';
+          },
+          [
+            'Profile',
+            () => {
+              setUp();
+              S.nav = [{ v: 'profiles' }, { v: 'profile', p: { id: 'p1' } }];
+              S.ui.del = { kind: 'profile', id: 'p1' };
+              S.spot = 'del';
+            },
+          ],
+        ],
+        [
+          'E22',
+          'Generic component: "Partly supported on Codex"',
+          () => {
+            setUp();
+            S.nav = [{ v: 'comptypes' }, { v: 'complist', p: { id: 'skills' } }, { v: 'comp', p: { id: 's1' } }];
+            S.spot = 'partial';
+          },
+        ],
+        [
+          'E23',
+          'Model not available on this login',
+          () => {
+            const m = setUp();
+            m.profiles.push({ id: 'p6', name: 'Mixed models', layers: [{ c: 'i1' }, { c: 'ms4' }] });
+            m.runtimes.push({ id: 'r6', name: 'claude-mixed', credId: 'cr1', profileId: 'p6', agent: false });
+            S.nav = [{ v: 'runtimes' }, { v: 'runtime', p: { id: 'r6' } }];
+            S.spot = 'models';
+          },
+        ],
+        [
+          'E24',
+          'User settings vs the fixed agent layer',
+          () => {
+            setUp();
+            S.nav = [{ v: 'runtimes' }, { v: 'runtime', p: { id: 'r3' } }];
+            S.spot = 'fixed';
+          },
+        ],
+      ],
+    ],
+    [
+      'Credentials',
+      [
+        [
+          'E25',
+          'Sign out of a login shared with the terminal',
+          () => {
+            setUp();
+            S.nav = [{ v: 'creds' }, { v: 'cred', p: { id: 'cr1' } }];
+            S.ui.signout = 'cr1';
+            S.spot = 'signout';
+          },
+        ],
+        [
+          'E26',
+          'Two logins, same email: your own labels',
+          () => {
+            setUp();
+            S.nav = [{ v: 'creds' }];
+          },
+          [
+            'Add one',
+            () => {
+              setUp();
+              S.nav = [{ v: 'creds' }];
+              S.flows = [newAddLogin({ harness: 'claude', fixed: true, at: 'signin', si: { opened: true, code: '' } })];
+            },
+          ],
+        ],
+      ],
+    ],
+    [
+      'Machines',
+      [
+        [
+          'E27',
+          'Clone source is offline: disabled with reason',
+          () => {
+            setUp();
+            S.machines['work-linux'].online = false;
+            S.nav = [{ v: 'settings' }];
+            S.flows = [newClone()];
+            S.spot = 'offline';
+          },
+        ],
+        [
+          'E28',
+          'Target already set up: alongside or replace',
+          () => {
+            setUp();
+            S.machine = 'work-linux';
+            S.nav = [{ v: 'settings' }];
+            S.flows = [newClone({ src: 'studio-mac', at: 'conflict', hadSetup: true })];
+          },
+        ],
+        [
+          'E29',
+          'Target lacks a harness: "Codex isn\'t installed here"',
+          () => {
+            setUp();
+            S.machine = 'work-linux';
+            doClone(S.machines['studio-mac'], S.machines['work-linux'], 'alongside');
+            S.nav = [{ v: 'runtimes' }];
+            S.spot = 'missing';
+          },
+        ],
+        [
+          'E30',
+          'Copied path flagged "Check this path on work-linux"',
+          () => {
+            setUp();
+            S.machine = 'work-linux';
+            S.nav = [{ v: 'settings' }];
+            S.flows = [newClone({ src: 'studio-mac', at: 'preview' })];
+            S.spot = 'paths';
+          },
+        ],
+        [
+          'E31',
+          'One slot, three runtimes: sign in once',
+          () => {
+            setUp();
+            S.machine = 'work-linux';
+            const res = doClone(S.machines['studio-mac'], S.machines['work-linux'], 'alongside');
+            const m = M();
+            const slot = res.slots
+              .map(id => find(m.creds, id))
+              .sort((a, b) => credRuntimes(m, b.id).length - credRuntimes(m, a.id).length)[0];
+            S.nav = [{ v: 'creds' }, { v: 'cred', p: { id: slot.id } }];
+            S.ui.si['cred-' + slot.id] = { opened: true, code: '' };
+            S.spot = 'signin';
+          },
+        ],
+        [
+          'E32',
+          'Agent permissions changed while sessions run',
+          () => {
+            const m = setUp();
+            m.permPrev = 'auto';
+            m.perm = 'skip';
+            S.nav = [{ v: 'settings' }];
+            S.spot = 'perm';
+          },
+        ],
+      ],
+    ],
+  ];
+  const CASE_BY_ID = {};
+  function renderCatalogue() {
+    $('#catalogue').innerHTML = CASES.map(
+      ([g, rows]) =>
+        `<div class="cat-group"><h2 class="lbl">${g}</h2><div class="cases">${rows
+          .map(([id, title, fn, alt]) => {
+            CASE_BY_ID[id] = fn;
+            if (alt) CASE_BY_ID[id + '-alt'] = alt[1];
+            return `<div class="case" id="case-${id}"><span class="cid mono">${id}</span><span class="ct">${esc(title)}</span><span class="cbtns">${alt ? `<button class="btn sm quiet" type="button" id="show-${id}-alt" data-show="${id}-alt" aria-label="Show ${id}, ${esc(alt[0])}">${esc(alt[0])}</button>` : ''}<button class="btn sm" type="button" id="show-${id}" data-show="${id}" aria-label="Show ${id}">Show</button></span></div>`;
+          })
+          .join('')}</div></div>`,
+    ).join('');
+  }
+  function showCase(key) {
+    CASE_BY_ID[key]();
+    S.active = key;
+    const id = key.replace('-alt', '');
+    document.querySelectorAll('.case').forEach(el => el.classList.toggle('on', el.id === 'case-' + id));
+    const row = CASES.flatMap(g => g[1]).find(r => r[0] === id);
+    $('#now').innerHTML =
+      `<b class="mono">${id}</b><span>${esc(row[1])}${key.endsWith('-alt') ? ' · ' + esc(row[3][0]) : ''}</span>`;
+    lastKey = '';
+    render();
+    if (window.matchMedia('(max-width: 900px)').matches)
+      $('#phone').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  /* =====================================================================
+   Wiring
+   ===================================================================== */
+  document.addEventListener('click', e => {
+    const show = e.target.closest('[data-show]');
+    if (show) {
+      showCase(show.dataset.show);
+      return;
+    }
+    const th = e.target.closest('[data-theme-set]');
+    if (th) {
+      const v = th.dataset.themeSet;
+      if (v === 'system') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', v);
+      document.querySelectorAll('[data-theme-set]').forEach(b => b.setAttribute('aria-pressed', String(b === th)));
+      return;
+    }
+    const el = e.target.closest('[data-a]');
+    if (!el || el.disabled || !el.closest('#phone')) return;
+    const fn = A[el.dataset.a];
+    if (fn) {
+      fn(el.dataset, el);
+      render();
+    }
+  });
+  function onInput(e) {
+    const el = e.target;
+    if (!el.dataset || !el.dataset.in || !el.closest('#phone')) return;
+    const isCheck = el.type === 'checkbox' || el.type === 'radio';
+    if ((e.type === 'change') !== (isCheck || el.tagName === 'SELECT')) return;
+    IN[el.dataset.in](isCheck ? el.checked : el.value, el.dataset, el);
+    render();
+  }
+  document.addEventListener('input', onInput);
+  document.addEventListener('change', onInput);
+  $('#reset-fresh').addEventListener('click', () => {
+    reset();
+    S.active = null;
+    document.querySelectorAll('.case').forEach(el => el.classList.remove('on'));
+    $('#now').textContent = 'Fresh machine: first-run setup';
+    lastKey = '';
+    render();
+  });
+  $('#reset-setup').addEventListener('click', () => {
+    setUp();
+    document.querySelectorAll('.case').forEach(el => el.classList.remove('on'));
+    $('#now').textContent = 'Set-up machine: studio-mac with 5 runtimes';
+    lastKey = '';
+    render();
+  });
+
+  renderCatalogue();
+  reset();
+  $('#now').textContent = 'Fresh machine: first-run setup';
+  render();
+</script>

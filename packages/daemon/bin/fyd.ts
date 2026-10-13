@@ -277,7 +277,10 @@ import {
   fleetPreparationRefusal,
   fleetPreparedDisclosure,
 } from '../src/lib/fleet/boot-preparation.ts';
+import { createFleetCredentialsSubsystem } from '../src/lib/fleet/credentials-service.ts';
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
+import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
+import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
   SessionForkFacade,
@@ -305,7 +308,6 @@ import {
   type AssigneeObservation,
   type AttentionActor,
   AttentionService,
-  accountLaunchability,
   advertisesForeignAddress,
   answerArguments,
   authorizeSessionCommand,
@@ -326,7 +328,6 @@ import {
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
-  type CoreAccount,
   childGrantRequester,
   chooseRelayCarrierSources,
   combinedReferences,
@@ -564,7 +565,6 @@ import {
   UnknownPeerRefused,
   type UsageFeedPort,
   unreadableManifestPreflight,
-  unrunnableAccountRefusal,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
@@ -575,6 +575,7 @@ import {
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
+import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
@@ -588,6 +589,12 @@ import {
   WorkspaceFacetContributor,
 } from '../src/lib/transfer/index.ts';
 import { daemonVersion } from '../src/lib/version.ts';
+// Account-model seeds (docs/design/account-model.md §13.2) that nothing here constructs yet. Each is
+// loaded so it is reachable from the first commit; the unit that fills one replaces its line with the
+// construction it needs: U8 the conversation lease, U11 the tool installer and its package adapter.
+import '../src/adapters/process/package-install.ts';
+import '../src/lib/fleet/tool-install.ts';
+import '../src/lib/session/conversation-lease.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -1380,47 +1387,6 @@ function harnessDeclarations(config: DaemonConfig, userHome: string): HarnessDis
   });
 }
 
-/**
- * The account this start names, or a refusal that says which half of the resolution failed.
- *
- * THE LAUNCHABILITY RULE IS THE DOMAIN'S, not a second copy written here. `fyd --check` and the boot
- * preflight report on whether a harness could serve, and they answer that question by asking this
- * same `accountLaunchability`. Two spellings of "could a start run this?" would eventually disagree,
- * and the disagreement would be a preflight that promises a harness a start then refuses.
- */
-async function resolveStartAccount(
-  accounts: AccountInventoryPort,
-  requested: string,
-  executables: ExecutableResolverPort,
-): Promise<{ readonly account: CoreAccount; readonly executable: string }> {
-  // A manifest this daemon cannot read refuses the START, rather than answering it with an empty
-  // fleet and the unknown-agent message that empty fleet would earn. The caller asked for an account
-  // that may well be published; what this daemon has is no way to tell.
-  const published = await accounts.accounts().catch((error: unknown) => {
-    if (error instanceof FleetManifestUnreadableError)
-      throw new SessionControlError('unavailable', fleetManifestRefusal(error, CLIENT_NAME));
-    throw error;
-  });
-  // The wrapper NAME first, then the opaque id: `fy start claude-auto-loge` names the wrapper a human
-  // types, and the recommender answers with account ids, so both must resolve.
-  const account = published.find(row => row.agent === requested) ?? published.find(row => row.id === requested);
-  if (account === undefined)
-    throw new SessionControlError(
-      'unknown_agent',
-      `no account in the fleet manifest is published as ${JSON.stringify(requested)}`,
-    );
-  // Refused HERE, where the published accounts are in hand, rather than left to the launch: the
-  // launch's own authorization sees only a path, so it can say the path is wrong but not which
-  // account would have worked — and the account `fy fleet ls` lists first is one it refuses.
-  const unrunnable = unrunnableAccountRefusal(account, published, defaultSessionLifecycleSettings, CLIENT_NAME);
-  if (unrunnable !== undefined) throw new SessionControlError('invalid', unrunnable);
-  const launchability = accountLaunchability(account, executables);
-  // Both halves are `unavailable` to a caller: the account exists and cannot serve. Which half is
-  // the operator's business, and it is the reason the rule reports the two separately.
-  if (launchability.kind !== 'launchable') throw new SessionControlError('unavailable', launchability.reason);
-  return { account, executable: launchability.executable };
-}
-
 /** How each allocation refusal is answered. A taken callsign is a conflict a human can resolve by
  *  choosing another name; an exhausted pool is the daemon having nothing left to offer; a claim store
  *  the daemon cannot read or write is a server-side unavailable condition the caller may retry once it
@@ -1600,7 +1566,7 @@ function createSessionControlSubsystem(
           );
         return { role: request.boardAccess, capability: boardCapability };
       })();
-      const { account, executable } = await resolveStartAccount(accounts, request.agent, executables);
+      const { account, executable } = await resolveStartAccount(accounts, request.agent, executables, CLIENT_NAME);
       // Canonicalized HERE rather than only inside the lifecycle, because the transcript path below
       // is derived from it. The lifecycle resolves it again over an already-canonical value, and a
       // directory the agent could not have started in is refused as an invalid request — which is
@@ -2954,14 +2920,17 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
 
   const migrate = async (id: SessionId, request: MigrateSessionRequest): Promise<SessionView> => {
     const { config, state, tmuxSession } = await subject(id);
-    const { account, executable } = await resolveStartAccount(parts.accounts, request.agent, parts.executables).catch(
-      (error: unknown) => {
-        if (!(error instanceof SessionControlError)) throw error;
-        const failure = MIGRATE_RESOLUTION_REFUSALS[error.failure];
-        if (failure === undefined) throw error;
-        throw new SessionMigrateError(failure, error.message);
-      },
-    );
+    const { account, executable } = await resolveStartAccount(
+      parts.accounts,
+      request.agent,
+      parts.executables,
+      CLIENT_NAME,
+    ).catch((error: unknown) => {
+      if (!(error instanceof SessionControlError)) throw error;
+      const failure = MIGRATE_RESOLUTION_REFUSALS[error.failure];
+      if (failure === undefined) throw error;
+      throw new SessionMigrateError(failure, error.message);
+    });
     // SAME-KIND, ENFORCED HERE — the first thing decided once both families are known, and before any
     // other work at all. Everything below it either reads the host or writes the session: the planner,
     // the transcript capture that inspects the target's harness home, the report, the restamp and the
@@ -3401,7 +3370,7 @@ export function createSessionHandoverSubsystem(
       },
       accounts: {
         resolve: async (agent, model) => {
-          const { account } = await resolveStartAccount(wiring.accounts, agent, wiring.executables);
+          const { account } = await resolveStartAccount(wiring.accounts, agent, wiring.executables, CLIENT_NAME);
           // The SAME planner the start and the migration use, so the model a handover records and the
           // window it is measured against come from one decision rather than two that can disagree.
           const planned = wiring.planner.plan({
@@ -5803,7 +5772,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         attachmentOriginals,
         transcriptSources,
         gateway,
-        accounts: async agent => await resolveStartAccount(accounts, agent, executables),
+        accounts: async agent => await resolveStartAccount(accounts, agent, executables, CLIENT_NAME),
         planner,
         harness: harnessService,
         catalog: codexRuntimeModels,
@@ -5856,6 +5825,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // report different quota for the same account on the same host.
         fleet,
         harnessLogin,
+        fleetCredentials: createFleetCredentialsSubsystem(),
+        fleetCatalog: createFleetCatalogSubsystem(),
+        fleetSetup: createFleetSetupSubsystem(),
         /**
          * How much of this machine the managed fleet may take.
          *
