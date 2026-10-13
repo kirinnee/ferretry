@@ -25,9 +25,9 @@ whose purpose is to be redirected into a file is a flag that puts it there.`;
 /**
  * Mounts `fy pair` onto the program.
  *
- * A single verb rather than a group. Listing and revoking paired devices is the other half of this
- * subsystem and belongs with the daemon's device registry, which serves no route yet; a `pair ls` that
- * could only ever answer "nothing" would read as a fact rather than as a missing feature.
+ * A single verb rather than a group. Listing paired devices and changing what each may do is the other
+ * half of this subsystem and lives under `fy device` (`../device/commands.ts`), which reads
+ * `GET /v1/pair/devices`.
  */
 export function registerPairCommands(program: Command, controller: PairController): void {
   program
