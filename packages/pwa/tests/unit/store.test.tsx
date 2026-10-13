@@ -18,6 +18,7 @@ import {
   StoreProvider,
   useAppStore,
   useConnectionSnapshot,
+  useDaemonClient,
 } from '../../src/lib/store.tsx';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, mount, must } from '../support/dom.ts';
@@ -1126,5 +1127,50 @@ describe('StoreProvider', () => {
 
     await view.unmount();
     expect(secondLog).toEqual({ subscribes: 1, unsubscribes: 1 });
+  });
+});
+
+describe('useDaemonClient', () => {
+  /** Calls the hook and hands back what it answers for one daemon. */
+  function ClientProbe({ onClient }: { readonly onClient: (client: Promise<FyApiClient>) => void }) {
+    const createClient = useDaemonClient();
+    onClient(createClient(alpha));
+    return null;
+  }
+
+  it('hands a screen the store pool’s client, so it rides the carrier rather than the plain network', async () => {
+    const pooled = client('pooled');
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => pooled,
+      fetcher: async () => Response.json({}),
+    });
+    let answered: Promise<FyApiClient> | undefined;
+    const view = await mount(
+      <StoreProvider store={store}>
+        <ClientProbe onClient={value => (answered = value)} />
+      </StoreProvider>,
+    );
+    expect(await answered).toBe(pooled);
+    expect(await store.clients.client(alpha)).toBe(pooled);
+    await view.unmount();
+  });
+
+  it('refuses outside the app store rather than building a client pointed at nothing', async () => {
+    let answered: Promise<unknown> | undefined;
+    // Settled into a value at once: the refusal happens during render, before anything else could
+    // attach a handler, and an unwatched rejection fails the whole file.
+    const view = await mount(
+      <ClientProbe
+        onClient={value => {
+          answered = value.then(
+            () => undefined,
+            (reason: unknown) => reason,
+          );
+        }}
+      />,
+    );
+    expect(((await answered) as Error).message).toBe('no daemon client exists outside the app store');
+    await view.unmount();
   });
 });
