@@ -80,9 +80,8 @@ const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /**
  * The Projects hub states, each on a page of its own.
  *
- * A page rather than an element inside the gallery for the reason the fleet
- * frames already document: the hub is taller than a phone, and an element
- * capture inside a scroller clips to the wrong region. Every one of these is a
+ * A page rather than an element inside the gallery: the hub is taller than a
+ * phone, and an element capture inside a scroller clips to the wrong region. Every one of these is a
  * state the shipped component can really be in — `ProjectsHub` takes plain
  * values, so nothing here is posed.
  */
@@ -108,19 +107,21 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and seventeen. MACHINES owes thirty-two at each viewport — its section, four tab switches, the
- * Machines list the switcher opens, ten Runtimes and Credentials pages, twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps,
- * a component with every badge, two edit forms) and four Settings-tab flows (Import again found + names,
- * Clone source, Install) — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
- * and twenty-four at `desktop`. Twenty-four at both viewports —
- * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
- * surface: each step is a different layout, the model step is a card per model beside a custom-value
- * row, and the recap is a two-column definition list. Capturing only the first would have proved that
- * the harness question fits a phone and nothing at all about the six screens after it. The sixteen
- * are three Settings sections (Appearance, Behaviour, Daemons), the healthy daemon's ten panels, the unreachable
- * daemon's Warden and Carrier, and the one-daemon route — plus THREE MOBILE-ONLY open bottom sheets,
- * which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry is
- * the product's, not an omission.
+ * One hundred and five: thirty-seven MACHINES frames at each viewport, plus seventeen other frames at
+ * `mobile` and fourteen at `desktop` (37 + 37 + 17 + 14).
+ *
+ * MACHINES, thirty-seven per viewport: its section, four tab switches, four Settings-tab flows (Import
+ * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
+ * Credentials pages, two Add a login steps, twelve Profiles and Components pages (a layer stack, a delete
+ * card, two stepper steps, a component with every badge, two edit forms), and three other-machine states
+ * (offline, not set up, its first run). Each of these is also a Machines geometry check, below.
+ *
+ * The rest, fourteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
+ * healthy daemon's Warden and its seven other panels, the unreachable daemon's Warden and Carrier, and the
+ * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
+ * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
+ * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
+ * is the product's, not an omission.
  *
  * Every call site lives in the Settings block, so a `--settings-only` run and a full gallery run owe
  * the same tally — there is no mode reaching Settings in which this number quietly drops.
@@ -136,7 +137,16 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 117;
+const SETTINGS_SIDEWAYS_CHECKS = 105;
+
+/**
+ * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
+ * Machines frame, at each viewport — the same thirty-seven as above (the section itself is measured once
+ * its Runtimes tab has loaded), so 37 + 37. Same tripwire as the number above, for the same reason — a check
+ * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
+ * edits this, and the pull request says which frames the gate covers.
+ */
+const MACHINES_GEOMETRY_CHECKS = 74;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -267,7 +277,7 @@ const SECTIONS = [
 /**
  * The picker frames, each on a page of its own.
  *
- * Same reason as the fleet frames one level down, plus one of its own: the list
+ * Same reason as the Projects frames above, plus one of its own: the list
  * only exists while the field has FOCUS, and it paints outside the field's box.
  * Inside the gallery an element capture clips it and a full-page stitch repaints
  * the sticky app bar over it, so a page with no scrolling ancestor and no sticky
@@ -277,44 +287,6 @@ const PICKER_FRAMES = ['account', 'account-checked', 'account-failed', 'project'
 
 /** The touch floor the whole control family holds itself to, asserted rather than eyeballed. */
 const TOUCH_TARGET_MINIMUM = 44;
-
-/**
- * The fleet cockpit frames, captured on their own page rather than inside the gallery.
- *
- * The failed apply is in the list on purpose: a gallery of happy paths proves nothing about the one
- * screen a person actually reads while something is wrong.
- */
-const ACCOUNT_STEPS = [
-  'harness',
-  'identity',
-  'credential',
-  'models',
-  'instructions',
-  'skills',
-  'settings',
-  'review',
-] as const;
-
-const FLEET_FRAMES = [
-  'cockpit',
-  'cockpit-staged',
-  'states',
-  'accounts',
-  'preview',
-  'failed-apply',
-  'create',
-  'layer',
-  // The daemon this browser could not reach, which used to render an operator-password field and a
-  // Confirm-and-Apply in front of a limiter nothing could ask a question of. A screen whose every
-  // control is gone is exactly the kind of change a capture is the only honest review of.
-  'unreachable',
-  // Preparing a host, which is one action and the list it will write. Captured beside `preview` on
-  // purpose: the difference between the two frames IS the ceremony this change removes.
-  'first-run',
-  // The operator-password prompt, open, driven by clicking the real control. It is the one modal both this
-  // panel and the grants surface raise, and a phone is where it has to work.
-  'unlock',
-] as const;
 
 /**
  * A software keyboard, told the truth.
@@ -456,6 +428,304 @@ const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> 
     );
   sidewaysChecks += 1;
   process.stdout.write(`🧭 no sideways scroll: ${where}\n`);
+};
+
+/**
+ * THE MACHINES SECTION HAS ONE LEFT EDGE, and the tab bar fits, checked rather than eyeballed.
+ *
+ * "Be careful of margins" was the owner's ask, and the defect it named is one a sideways-scroll check
+ * cannot see: the section heading, its sentence and the machine switcher sat 4px right of the tab bar
+ * and every card under it, because two stray `px-1`s indented text that nothing else was indented by.
+ * Every box still fitted the phone, so every gate was green. So this reads where things START.
+ *
+ * WHAT "STARTS" MEANS. A card — anything that paints its own border or background — starts at its
+ * border box, because that edge is what the eye lines up. Anything else starts where its CONTENT does
+ * (border box plus padding), because an unpainted box is invisible and only its text is seen: that is
+ * exactly how a `px-1` header hid its indent. The section's own left edge is the reference.
+ *
+ * WHICH THINGS. The outermost visible thing on each line: walking down from the section, a card, a
+ * control, a list, a heading, a paragraph or a bare run of text is collected and not descended into —
+ * a card's inside belongs to its own padding, which is asserted separately. A collected thing that is
+ * not at the edge is allowed only if something else on the same line sits to its left (a Close button
+ * beside a heading, a label beside its icon). Anything left of the edge, right of the section's right
+ * edge, or indented with nothing beside it is a failure, named.
+ *
+ * AND BETWEEN THEM: every top-level panel card is padded by `--pad-panel`, and a card or a control
+ * stacked under another top-level thing is at least `--gap-xs` from it — nothing flush. Text under text
+ * is left to its line height, which is the type scale's business rather than a margin.
+ *
+ * THE TAB BAR, while it is shown: no label wider than its button, the label inside the button's padding,
+ * adjacent tabs at least `--gap-xs` apart, every tab inside the row, the row not scrolling, exactly one
+ * tab marked current, and — hovered — an unselected tab still not painted like the selected one. That
+ * last one is the double-active tab U19 shipped a capture of.
+ *
+ * Transitions are FINISHED first, which is also what the captures do (`animations: 'disabled'`): a tab
+ * mid-fade is a timing artefact of the capture, measured, not a layout — `transition-colors` holds the
+ * tab just left in its selected colours for 150ms, and a capture taken in that window shows two
+ * selected tabs. Settled is the state a person looks at.
+ *
+ * Counted and asserted like the sideways checks, against `MACHINES_GEOMETRY_CHECKS`.
+ */
+let machinesGeometryChecks = 0;
+
+const settleTransitions = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    for (const animation of document.getAnimations()) animation.finish();
+  });
+};
+
+const assertMachinesGeometry = async (page: Page, where: string): Promise<void> => {
+  await settleTransitions(page);
+  const tabs = page.locator('[data-machines-surface] [data-machine-tab]');
+  // The hover half needs a real pointer over a real unselected tab, so it is driven before the read.
+  let hovered: string | null = null;
+  if ((await tabs.count()) > 0) {
+    const unselected = page.locator('[data-machines-surface] [data-machine-tab]:not([aria-current])').first();
+    hovered = await unselected.getAttribute('data-machine-tab');
+    await unselected.hover();
+    await settleTransitions(page);
+  }
+  const problems = await page.evaluate(hoveredTab => {
+    const found: string[] = [];
+    const section = document.querySelector('[data-settings-section="machines"]');
+    if (section === null) return ['the Machines section is not on screen'];
+    const root = getComputedStyle(document.documentElement);
+    const token = (name: string): number => Number.parseFloat(root.getPropertyValue(name));
+    const padPanel = token('--pad-panel');
+    const gapXs = token('--gap-xs');
+    const sectionBox = section.getBoundingClientRect();
+    const edge = sectionBox.left;
+    const right = sectionBox.right;
+    const describe = (element: Element): string => {
+      const hooks = [...element.attributes]
+        .filter(attribute => attribute.name.startsWith('data-'))
+        .map(attribute => `[${attribute.name}${attribute.value === '' ? '' : `="${attribute.value}"`}]`)
+        .slice(0, 2)
+        .join('');
+      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      return `${element.tagName.toLowerCase()}${hooks}${text === '' ? '' : ` "${text}"`}`;
+    };
+    // A colour nobody can see paints nothing: a ghost button's transparent border is not an edge.
+    const seen = (colour: string): boolean => {
+      const alpha = /rgba?\([^)]*?,\s*[^,]+,\s*[^,]+,\s*([\d.]+)\)/.exec(colour);
+      return colour !== 'transparent' && (alpha === null || Number.parseFloat(alpha[1] ?? '1') > 0);
+    };
+    const painted = (style: CSSStyleDeclaration): boolean =>
+      (Number.parseFloat(style.borderLeftWidth) > 0 &&
+        style.borderLeftStyle !== 'none' &&
+        seen(style.borderLeftColor)) ||
+      seen(style.backgroundColor);
+    const visible = (element: Element): boolean => {
+      const box = element.getBoundingClientRect();
+      if (box.width <= 1 || box.height <= 1) return false;
+      const style = getComputedStyle(element);
+      return style.visibility !== 'hidden' && style.position !== 'absolute' && style.position !== 'fixed';
+    };
+    const LEAVES = new Set([
+      'H1',
+      'H2',
+      'H3',
+      'H4',
+      'H5',
+      'H6',
+      'P',
+      'UL',
+      'OL',
+      'DL',
+      'TABLE',
+      'PRE',
+      'BUTTON',
+      'A',
+      'INPUT',
+      'SELECT',
+      'TEXTAREA',
+      'LABEL',
+      'NAV',
+      'FIELDSET',
+      'SVG',
+      'IMG',
+      'DETAILS',
+    ]);
+    const ownText = (element: Element): boolean =>
+      [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '');
+    interface Item {
+      readonly element: Element;
+      readonly start: number;
+      readonly box: DOMRect;
+      readonly card: boolean;
+    }
+    const items: Item[] = [];
+    // `bleed`: inside a card, a painted band that spans the card edge to edge (a header strip, a row
+    // divider) is part of the card's surface rather than content, so its content is what is inset.
+    const walk = (element: Element, into: Item[], bleed?: number): void => {
+      for (const child of element.children) {
+        if (!visible(child)) {
+          // display: contents and zero-size wrappers still hold visible children.
+          if (getComputedStyle(child).display === 'contents' || child.getBoundingClientRect().width > 1)
+            walk(child, into, bleed);
+          continue;
+        }
+        const style = getComputedStyle(child);
+        const card = painted(style);
+        const box = child.getBoundingClientRect();
+        if (card && bleed !== undefined && Math.abs(box.left - bleed) <= 0.5) {
+          walk(child, into, bleed + Number.parseFloat(style.borderLeftWidth));
+          continue;
+        }
+        if (card || LEAVES.has(child.tagName.toUpperCase()) || ownText(child)) {
+          // A bulleted list starts at its box: the bullet hangs in the list's padding by design.
+          const marked = ['UL', 'OL'].includes(child.tagName.toUpperCase()) && style.listStyleType !== 'none';
+          const start =
+            card || marked
+              ? box.left
+              : box.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft);
+          into.push({ element: child, start, box, card });
+          continue;
+        }
+        walk(child, into, bleed);
+      }
+    };
+    walk(section, items);
+    if (items.length === 0) found.push('nothing visible was found in the Machines section');
+    const overlapsVertically = (a: DOMRect, b: DOMRect): boolean =>
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+    for (const item of items) {
+      if (item.start < edge - 0.5)
+        found.push(`${describe(item.element)} starts ${(edge - item.start).toFixed(1)}px LEFT of the section's edge`);
+      else if (item.start > edge + 0.5) {
+        const beside = items.some(
+          other => other !== item && overlapsVertically(other.box, item.box) && other.box.right <= item.box.left + 0.5,
+        );
+        if (!beside)
+          found.push(
+            `${describe(item.element)} starts ${(item.start - edge).toFixed(1)}px right of the section's edge ` +
+              'with nothing beside it — one left edge for the whole section',
+          );
+      }
+      if (item.box.right > right + 0.5)
+        found.push(
+          `${describe(item.element)} ends ${(item.box.right - right).toFixed(1)}px past the section's right edge`,
+        );
+    }
+    // EVERY panel card in the section, nested ones included (a list of cards is the commonest nesting):
+    // its content starts `--pad-panel` in. The INSET, not the padding property — a list card pads its
+    // rows rather than itself, and what a reader sees is where the card's content starts.
+    for (const panel of section.querySelectorAll('.kt-panel')) {
+      if (!visible(panel)) continue;
+      const inner = panel.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(panel).borderLeftWidth);
+      const content: Item[] = [];
+      walk(panel, content, inner);
+      if (content.length === 0) continue;
+      const inset = Math.min(...content.map(entry => entry.start)) - inner;
+      if (Math.abs(inset - padPanel) > 0.5)
+        found.push(
+          `${describe(panel)} is a panel whose content starts ${inset.toFixed(1)}px in, not --pad-panel (${padPanel}px)`,
+        );
+    }
+    // And no card or button is flush under the thing before it, at any depth: the nearest previous
+    // sibling of it or of an ancestor (a card in a list is an `li`'s child) is at least `--gap-xs` above.
+    for (const block of section.querySelectorAll('.kt-panel, .kt-btn, button, a[data-variant]')) {
+      if (!visible(block)) continue;
+      const top = block.getBoundingClientRect();
+      for (let node: Element | null = block; node !== null && node !== section; node = node.parentElement) {
+        let previous = node.previousElementSibling;
+        while (previous !== null && !visible(previous)) previous = previous.previousElementSibling;
+        if (previous === null) continue;
+        const before = previous.getBoundingClientRect();
+        const stacked =
+          before.bottom <= top.top + 0.5 && Math.min(before.right, top.right) - Math.max(before.left, top.left) > 1;
+        // A row of a divided list (`divide-y`) is flush with a rule between, which is the separation.
+        const divided = Number.parseFloat(getComputedStyle(node).borderTopWidth) > 0;
+        if (stacked && !divided && top.top - before.bottom < gapXs - 0.5)
+          found.push(
+            `${describe(block)} is ${(top.top - before.bottom).toFixed(1)}px under ${describe(previous)} — ` +
+              `closer than --gap-xs (${gapXs}px)`,
+          );
+        break;
+      }
+    }
+    const blocks = (item: Item): boolean =>
+      item.card || ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(item.element.tagName.toUpperCase());
+    for (const item of items) {
+      if (!blocks(item)) continue;
+      // The nearest thing above it that shares its columns.
+      const above = items
+        .filter(
+          other =>
+            other !== item &&
+            other.box.bottom <= item.box.top + 0.5 &&
+            Math.min(other.box.right, item.box.right) - Math.max(other.box.left, item.box.left) > 1,
+        )
+        .sort((a, b) => b.box.bottom - a.box.bottom)[0];
+      if (above !== undefined && item.box.top - above.box.bottom < gapXs - 0.5)
+        found.push(
+          `${describe(item.element)} is ${(item.box.top - above.box.bottom).toFixed(1)}px under ` +
+            `${describe(above.element)} — closer than --gap-xs (${gapXs}px)`,
+        );
+    }
+
+    const row = section.querySelector('[data-machine-tabs] ul');
+    if (row !== null) {
+      if (row.scrollWidth > row.clientWidth + 0.5)
+        found.push(`the tab row scrolls: ${row.scrollWidth}px of tabs in a ${row.clientWidth}px row`);
+      const rowBox = row.getBoundingClientRect();
+      const buttons = [...row.querySelectorAll('[data-machine-tab]')];
+      if (buttons.length !== 5) found.push(`the tab row has ${buttons.length} tabs instead of 5`);
+      const current = buttons.filter(button => button.getAttribute('aria-current') === 'page');
+      if (current.length !== 1) found.push(`${current.length} tabs are marked current instead of one`);
+      const cells = buttons.map(button => button.getBoundingClientRect());
+      buttons.forEach((button, index) => {
+        const name = button.getAttribute('data-machine-tab');
+        const box = cells[index] as DOMRect;
+        if (button.scrollWidth > button.clientWidth)
+          found.push(`the ${name} tab's content is ${button.scrollWidth}px in a ${button.clientWidth}px button`);
+        if (box.left < rowBox.left - 0.5 || box.right > rowBox.right + 0.5)
+          found.push(`the ${name} tab is clipped by its row`);
+        const style = getComputedStyle(button);
+        const inner = {
+          left: box.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft),
+          right: box.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight),
+        };
+        const label = button.querySelector('span');
+        const range = document.createRange();
+        if (label !== null) range.selectNodeContents(label);
+        const text = label === null ? null : range.getBoundingClientRect();
+        if (text === null) found.push(`the ${name} tab has no label`);
+        else if (text.left < inner.left - 0.5 || text.right > inner.right + 0.5)
+          found.push(
+            `the ${name} tab's label (${text.left.toFixed(1)}–${text.right.toFixed(1)}px) reaches into its ` +
+              `padding (${inner.left.toFixed(1)}–${inner.right.toFixed(1)}px)`,
+          );
+        const next = cells[index + 1];
+        if (next !== undefined && next.left - box.right < gapXs - 0.5)
+          found.push(
+            `the ${name} tab is ${(next.left - box.right).toFixed(1)}px from the next — under --gap-xs (${gapXs}px)`,
+          );
+      });
+      const look = (button: Element): string => {
+        const style = getComputedStyle(button);
+        return `${style.borderTopColor} ${style.backgroundColor} ${style.color}`;
+      };
+      const selected = current[0];
+      if (selected !== undefined)
+        for (const button of buttons)
+          if (button !== selected) {
+            const a = getComputedStyle(button);
+            const b = getComputedStyle(selected);
+            if (a.borderTopColor === b.borderTopColor || a.color === b.color || a.backgroundColor === b.backgroundColor)
+              found.push(
+                `the ${button.getAttribute('data-machine-tab')} tab${
+                  button.getAttribute('data-machine-tab') === hoveredTab ? ', hovered,' : ''
+                } shares a colour with the selected tab (${look(button)} vs ${look(selected)}) — two tabs read as selected`,
+              );
+          }
+    }
+    return found;
+  }, hovered);
+  if (hovered !== null) await page.mouse.move(0, 0);
+  if (problems.length > 0) fail(`${where}: the Machines layout is off\n${problems.map(p => `   ${p}`).join('\n')}`);
+  machinesGeometryChecks += 1;
+  process.stdout.write(`📐 one left edge${hovered === null ? '' : ', tab bar fits'}: ${where}\n`);
 };
 
 function run(command: string, args: readonly string[]): void {
@@ -1236,19 +1506,6 @@ try {
             await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'hidden' });
             process.stdout.write(`📸 Unified browser controls menu -> ${unifiedMenuTarget}\n`);
 
-            // BOTH SIGN-INS, at the state worth reviewing: the one where a person has to act.
-            //
-            // It used to be a click-through journey against one generic panel. There are two panels
-            // now — one per harness — and the shapes they differ in are exactly what a capture has to
-            // show: Claude's paste field, and Codex's device code with NO field at all. Driving them
-            // through clicks would only re-render the same two states the fixtures already mount, so
-            // the capture reads them directly and stays honest about what it is proving.
-            const remoteLogin = page.locator('[data-harness="remote-login"]');
-            await remoteLogin.getByText('Paste the code Claude showed you').waitFor({ state: 'visible' });
-            await remoteLogin.locator('[data-codex-login-user-code]').waitFor({ state: 'visible' });
-            const loginTarget = join(outDir, `harness-login-${viewport.name}.png`);
-            await captureElement(page, remoteLogin, loginTarget);
-            process.stdout.write(`📸 harness login -> ${loginTarget}\n`);
             const learningTarget = join(outDir, `learning-${viewport.name}.png`);
             await captureElement(page, page.getByLabel('Learning proposals'), learningTarget);
             process.stdout.write(`📸 learning -> ${learningTarget}\n`);
@@ -1483,12 +1740,13 @@ try {
           // The fixture is only evidence about the real frame if it carries the
           // panels the composition root supplies. It once carried six of the
           // production eight, so the row that overflowed a desktop could not be
-          // seen here at all. Count the rail's rows, which exist in the document
-          // at both widths, rather than the sheet's, which are rendered only
-          // once that sheet has been opened.
+          // seen here at all. Eight now: the app's nine less Model pricing, which
+          // this fixture has never mounted. Count the
+          // rail's rows, which exist in the document at both widths, rather than
+          // the sheet's, which are rendered only once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 11)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 11`);
+          if (daemonPanels !== 8)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 8 it mounts`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -1503,28 +1761,14 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 11)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 11`);
-            // Eleven rows, one of them a LEVEL DOWN, is the longest list any sheet in Settings presents
-            // — and the indented row is the widest of them, because it starts further in. If one of
-            // these sheets is going to be the one that widens a phone, it is this one.
+            if (openPanelChoices !== 8)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 8 it mounts`);
+            // Eight rows is the longest list any sheet in Settings presents. If one of these sheets is
+            // going to be the one that widens a phone, it is this one.
             await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
             const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
             await page.screenshot({ path: panelPickerOpenTarget });
             process.stdout.write(`📸 Settings daemon panel picker open -> ${panelPickerOpenTarget}\n`);
-
-            // THE LEVEL, ON A PHONE. A phone has no rail, so the sheet IS where the hierarchy has to
-            // be legible — and the pair is eleven rows down, past the fold of a 390x844 shot. The
-            // capture above is the sheet's resting state and cannot show them; this one scrolls to
-            // the two rows the whole change is about. No extra sideways check: it is the same sheet,
-            // already measured, at a different scroll offset.
-            await panelPicker
-              .locator('[data-daemon-panel-choice]')
-              .filter({ has: page.getByText('Accounts', { exact: true }) })
-              .scrollIntoViewIfNeeded();
-            const nestedPanelTarget = join(outDir, 'settings-daemon-panel-picker-nested-mobile.png');
-            await page.screenshot({ path: nestedPanelTarget });
-            process.stdout.write(`📸 Settings daemon panel picker (Fleet › Accounts) -> ${nestedPanelTarget}\n`);
 
             await page.keyboard.press('Escape');
             await panelPicker.waitFor({ state: 'hidden' });
@@ -1543,11 +1787,10 @@ try {
 
           // Every panel the daemon owns, in the order the frame lists them.
           for (const [label, slug, ready] of [
-            // Both of these wait for SETTLED content, not for a spinner or a
-            // refusal: the harness daemon answers `/v1/secrets` and
-            // `/v1/fleet/environment` in the page, so a capture that still showed
-            // "Reading…" or "Failed to fetch" would be a regression to review,
-            // not a state to accept.
+            // Each waits for SETTLED content, not for a spinner or a refusal:
+            // the harness daemon answers `/v1/secrets` in the page, so a capture
+            // that still showed "Reading…" or "Failed to fetch" would be a
+            // regression to review, not a state to accept.
             ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
             // The live panel, inside the frame, because that is where a reader meets it. The gallery
             // cards prove the individual states; this proves it is reachable and fits both widths.
@@ -1555,14 +1798,8 @@ try {
             // Adding a device, in the frame, where a reader meets it. The gallery cards below prove the
             // individual states; this proves it is reachable, daemon-scoped and fits both widths.
             ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
-            ['Environment', 'environment', '[aria-label="Target environment entries"]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
-            ['Fleet', 'fleet', '[data-fleet-configuration]'],
-            // FLEET'S CHILD, captured directly after its parent so the two frames read as the pair
-            // they are. This is the one panel whose rail row is a level down, so its capture is also
-            // the evidence for the indent — the rail is in the shot beside the panel it opens.
-            ['Accounts', 'accounts', '[data-accounts-surface="ready"]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {
@@ -1603,44 +1840,6 @@ try {
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
-
-            // THE NEW-ACCOUNT SEQUENCE, one check per step.
-            //
-            // It is reached by a click rather than by a route, so a gate that only visited panels never
-            // saw it — and it is the Settings surface a person spends longest in. Driving the real
-            // control is also the only way to reach the states: the step is a value the surface holds,
-            // and there is no address that opens it half way through.
-            if (slug === 'fleet') {
-              await wardenFrame.locator('[data-fleet-start-create]').click();
-              const sequence = wardenFrame.locator('[data-fleet-account-stepper]');
-              await sequence.waitFor({ state: 'visible' });
-              for (const step of ACCOUNT_STEPS) {
-                await sequence.locator(`[data-fleet-step-question="${step}"]`).waitFor({ state: 'visible' });
-                // The login name is the ONE thing the host cannot answer, and every step after it is
-                // unreachable until it is there. Typed rather than skipped, because a sequence walked
-                // with an empty draft would be measuring the refusal, not the screen.
-                if (step === 'identity') {
-                  await sequence
-                    .getByRole('textbox', { name: 'Name the login this account signs in as' })
-                    .fill('atelier');
-                  // BOTH modes, because that is the WIDEST this sequence ever gets: the mode question
-                  // is a multi-select, so ticking the second one adds a second group control (on a
-                  // fleet that declares a slot no mode derives), a second derived wrapper line, a
-                  // second recap row and the shared-document warning on the instructions step. A walk
-                  // that only ever saw one account would measure the narrow half of the control and
-                  // report it as the whole thing.
-                  await sequence.locator('[data-fleet-check="interactive"]').click();
-                }
-                await assertNoSidewaysScroll(page, `the new-account "${step}" step at ${viewport.name}`);
-                const stepTarget = join(outDir, `settings-fleet-new-account-${step}-${viewport.name}.png`);
-                await page.screenshot({ path: stepTarget });
-                process.stdout.write(`📸 Settings new account ${step} ${viewport.name} -> ${stepTarget}\n`);
-                if (step !== 'review') await sequence.getByRole('button', { name: 'Next' }).click();
-              }
-              // Put the panel back the way the next iteration expects to find it.
-              await sequence.getByRole('button', { name: 'Discard draft' }).click();
-              await wardenFrame.locator('[data-fleet-start-create]').waitFor({ state: 'visible' });
-            }
           }
 
           await selectDaemon('Travel laptop');
@@ -1685,28 +1884,37 @@ try {
           process.stdout.write(`📸 Settings removal disclosure ${viewport.name} -> ${removalTarget}\n`);
 
           // MACHINES (account model, O1): the section, each of its five tabs, and the Machines list the
-          // switcher opens. Six checks per viewport. The tab row is five equal columns, which is the
+          // switcher opens. The tab row is five equal columns, which is the
           // shape most likely to widen a 390px phone once a label is longer than its cell. A tab is waited
           // for by its PANEL, so a tab that a unit has filled is walked exactly like an empty frame.
+          //
+          // EVERY MACHINES FRAME IS ALSO A GEOMETRY CHECK (`assertMachinesGeometry`), and every capture here
+          // is taken with transitions finished. The tabs fade their colours, and a capture taken the instant
+          // a tab is clicked shows the one just left still selected: measured, 12 of 12 such captures carried
+          // the old tab's accent label, and 0 of 12 with `animations: 'disabled'`.
+          const settledShot = (target: string) => page.screenshot({ path: target, animations: 'disabled' });
           await selectSettingsSection('machines');
           const machinesSurface = settingsPage.locator('[data-machines-surface="harness-daemon"]');
           await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
+          await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
           for (const tab of ['credentials', 'profiles', 'components', 'settings'] as const) {
             await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
             await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
             await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
+            await assertMachinesGeometry(page, `the Machines ${tab} tab at ${viewport.name}`);
           }
           await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
           const machinesTarget = join(outDir, `settings-machines-${viewport.name}.png`);
-          await page.screenshot({ path: machinesTarget });
+          await settledShot(machinesTarget);
           process.stdout.write(`📸 Settings Machines ${viewport.name} -> ${machinesTarget}\n`);
 
           // THE SETTINGS TAB'S FLOWS (U19): four more checks per viewport, one per layout that differs —
           // Import again's "Found on" list with its long values, its Name step with a duplicate card, the
           // Clone source list with both disabled reasons (E27), and Install with its exact command.
           const machineFrame = async (what: string, file: string): Promise<void> => {
+            await assertMachinesGeometry(page, `the Machines ${what} at ${viewport.name}`);
             const target = join(outDir, `settings-machines-${file}-${viewport.name}.png`);
-            await page.screenshot({ path: target });
+            await settledShot(target);
             process.stdout.write(`📸 Settings Machines ${what} ${viewport.name} -> ${target}\n`);
             await assertNoSidewaysScroll(page, `the Machines ${what} at ${viewport.name}`);
           };
@@ -1739,8 +1947,9 @@ try {
           await machinesSurface.locator('[data-machine-switcher]').click();
           await machinesSurface.locator('[data-machines-list]').waitFor({ state: 'visible' });
           await assertNoSidewaysScroll(page, `the Machines list at ${viewport.name}`);
+          await assertMachinesGeometry(page, `the Machines list at ${viewport.name}`);
           const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
-          await page.screenshot({ path: machinesListTarget });
+          await settledShot(machinesListTarget);
           process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
 
           // RUNTIMES AND CREDENTIALS (account model U17): ten pages per viewport — the two lists, a runtime
@@ -1752,8 +1961,9 @@ try {
           // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
           const accountShot = async (name: string, label: string): Promise<void> => {
             await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
+            await assertMachinesGeometry(page, `the Machines ${label} at ${viewport.name}`);
             const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
-            await page.screenshot({ path: target });
+            await settledShot(target);
             process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
           };
           await machinesSurface.locator('[data-machines-list] button:has-text("Close")').click();
@@ -1801,6 +2011,19 @@ try {
           await accountShot('credential-sign-out', 'sign-out confirmation');
           await credentialsPanel.locator('[data-sign-out-keep]').click();
           await credentialsPanel.locator('[data-page-back]').click();
+          // ADD A LOGIN (U21): which tool, then the sign-in it starts. A stepper is the screen a person
+          // spends longest in, and these two were the only Credentials steps never measured.
+          await credentialsPanel.locator('[data-add-login]').first().click();
+          await credentialsPanel.locator('[data-add-login-step="tool"]').waitFor({ state: 'visible' });
+          await accountShot('add-login-tool', 'Add a login tool step');
+          await credentialsPanel.locator('[data-add-login-tool] input:not([disabled])').first().check();
+          await credentialsPanel.locator('[data-step-next]').click();
+          await credentialsPanel.locator('[data-add-login-step="start"]').waitFor({ state: 'visible' });
+          await accountShot('add-login-start', 'Add a login sign-in step');
+          await credentialsPanel.locator('[data-stepper-cancel]').click();
+          const stopAddLogin = credentialsPanel.locator('[data-stepper-stop]');
+          if ((await stopAddLogin.count()) > 0) await stopAddLogin.click();
+          await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
 
           await machinesSurface.locator('[data-machine-tab="profiles"]').click();
           const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
@@ -1862,6 +2085,27 @@ try {
           await componentsPanel.locator('[data-component-hidden]').waitFor({ state: 'visible' });
           await accountShot('component-settings-edit', 'settings edit with a hidden value');
 
+          // THE OTHER MACHINES (U21): one asleep or offline, and one not set up with the first run it
+          // links to. These are the states a person meets on a second machine, and each is its own
+          // layout — a status card above the tab panel, a set-up card instead of a list, and a stepper.
+          const openMachine = async (daemonId: string): Promise<Locator> => {
+            await settingsPage.locator('[data-machine-switcher]').click();
+            await settingsPage.locator('[data-machines-list]').waitFor({ state: 'visible' });
+            await settingsPage.locator(`[data-machine-choice="${daemonId}"]`).click();
+            const surface = settingsPage.locator(`[data-machines-surface="${daemonId}"]`);
+            await surface.waitFor({ state: 'visible' });
+            return surface;
+          };
+          const offlineSurface = await openMachine('unreachable-daemon');
+          await offlineSurface.locator('[data-machine-offline]').waitFor({ state: 'visible' });
+          await accountShot('offline', 'offline machine');
+          const newMachine = await openMachine('checking-daemon');
+          await newMachine.locator('[data-runtimes-not-set-up]').waitFor({ state: 'visible' });
+          await accountShot('not-set-up', 'machine not set up');
+          await newMachine.locator('[data-runtimes-not-set-up] a').click();
+          await newMachine.locator('[data-first-run-step]').first().waitFor({ state: 'visible' });
+          await accountShot('first-run', 'first run');
+
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh
           // one-daemon browser would and proves the empty space is intentional.
@@ -1893,12 +2137,9 @@ try {
           await page.screenshot({ path: oneDaemonTarget });
           process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);
 
-          // The rest of this pass still belongs to the full gallery.
-          await page.goto(server.url.toString());
-          const accountsPageTarget = join(outDir, `accounts-page-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Accounts page preview'), accountsPageTarget);
-          process.stdout.write(`📸 Accounts page -> ${accountsPageTarget}\n`);
+          // The rest of this pass belongs to the full gallery.
           if (SETTINGS_ONLY) continue;
+          await page.goto(server.url.toString());
           const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
           await captureElement(page, page.getByLabel('Learning header'), learningHeaderTarget);
           process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
@@ -2420,84 +2661,6 @@ try {
           await page.getByLabel('Expand browser to fill the viewport').waitFor({ state: 'visible' });
 
           /**
-           * The five fleet frames, each on a page of its own.
-           *
-           * Three of them are taller than a desktop viewport, and an element capture of a tall card
-           * inside the gallery's scroller clips to the wrong region — the first pass produced a fleet
-           * "preview" image showing the secrets cards. On a page that starts at the top with no sticky
-           * chrome, an element capture is exact.
-           */
-          for (const frame of FLEET_FRAMES) {
-            await page.goto(`${server.url}#fleet-${frame}`);
-            await page.reload();
-            await page.locator(`#harness-fleet-${frame}-page`).waitFor({ state: 'visible' });
-            // The two-column live-versus-proposed layout only exists while a change is staged, and
-            // staging it is an interaction. Driving the real clicks is the only way to capture that
-            // layout without inventing a state the surface cannot actually be in.
-            if (frame === 'cockpit-staged') {
-              await page.getByRole('button', { name: 'Edit' }).first().click();
-              await page.locator('[data-fleet-layer-form]').waitFor({ state: 'visible' });
-              await page.getByRole('button', { name: 'Preview this change' }).click();
-              const staged = page.locator('[data-fleet-proposal-id]');
-              if ((await staged.count()) === 0) {
-                const refused = await page.locator('[data-fleet-refusal] pre').allInnerTexts();
-                process.stdout.write(`   staging did not land: ${refused.join(' | ') || 'no refusal shown'}\n`);
-              }
-              await staged.waitFor({ state: 'visible' });
-            }
-            // The prompt only exists while it is raised, and raising it is a click on the action itself.
-            if (frame === 'unlock') {
-              await page.getByRole('button', { name: 'Apply this change' }).click();
-              await page.locator('[role="dialog"]').waitFor({ state: 'visible' });
-            }
-            const fleetTarget = join(outDir, `${viewport.name}-fleet-${frame}.png`);
-            // A full-page capture of a page carrying ONE frame: Chrome captures beyond the viewport
-            // itself, so a frame taller than the screen is whole rather than stitched by hand.
-            // The REQUIRED evidence is the viewport itself — exactly 390x844 or 1440x900, the screen a
-            // person is actually holding. The full-page shot beside it supplements that; it never
-            // replaces it, because a frame that only reads well when unrolled to 2000px is not a
-            // frame that works on a phone.
-            // Back to the top: the interaction above scrolls, and a viewport capture is supposed to show
-            // what a person sees when the screen opens.
-            // Blur first: the surface moves focus to the panel it just opened, and the browser scrolls a
-            // focused element into view, so scrolling alone would be undone.
-            // The create frame is the A2 evidence: it has to be captured WITH keyboard focus on the
-            // harness radio, because the defect was that focus was not locatable there at all.
-            if (frame === 'create') {
-              await page
-                .locator('[data-fleet-choice-selected="true"] input')
-                .first()
-                .evaluate(node => {
-                  (node as HTMLElement).focus();
-                  node.matches(':focus-visible');
-                });
-              await page.keyboard.press('ArrowRight');
-              await page.keyboard.press('ArrowLeft');
-            }
-            await page.evaluate(frameName => {
-              if (frameName === 'create') return;
-              (document.activeElement as HTMLElement | null)?.blur();
-              window.scrollTo(0, 0);
-              // The scroller may be an element rather than the document, so reset every one of them.
-              for (const node of document.querySelectorAll('*')) node.scrollTop = 0;
-            }, frame as string);
-            await page.waitForTimeout(60);
-            const viewportTarget = join(outDir, `${viewport.name}-fleet-${frame}-viewport.png`);
-            await page.screenshot({ path: viewportTarget });
-            // Production deliberately locks html/body to one viewport. Keep that lock for the
-            // required viewport evidence above, then release only the standalone harness document
-            // before the supplemental full-page shot. Otherwise Chromium measures the overflowing
-            // frame's full height but paints only the first viewport, leaving the rest black.
-            await page.evaluate(() => {
-              document.documentElement.style.height = 'auto';
-              document.documentElement.style.overflow = 'auto';
-              document.body.style.height = 'auto';
-              document.body.style.overflow = 'auto';
-            });
-            await page.screenshot({ path: fleetTarget, fullPage: true });
-            process.stdout.write(`📸 ${viewport.name} fleet ${frame} -> ${viewportTarget} + ${fleetTarget}\n`);
-          }
-          /**
            * THE PICKERS, EACH ON ITS OWN PAGE, WITH THE LIST ACTUALLY OPEN.
            *
            * Every state here is reached by driving the real control — click the field, type into it,
@@ -2806,9 +2969,20 @@ try {
             : `a narrow mode reached the Settings block and left it part-way, which means it no longer ` +
               `skips Settings cleanly`),
       );
+    const owedGeometry = WALKS_SETTINGS ? MACHINES_GEOMETRY_CHECKS : 0;
+    if (machinesGeometryChecks !== owedGeometry)
+      fail(
+        `the run made ${machinesGeometryChecks} Machines geometry checks instead of the ${owedGeometry} this mode ` +
+          `owes — a Machines frame was added, removed or skipped, so either restore the call site or update ` +
+          `MACHINES_GEOMETRY_CHECKS and say in the pull request which frames the gate covers now`,
+      );
     if (WALKS_SETTINGS)
       process.stdout.write(
         `✅ settings sideways-scroll checks: ${sidewaysChecks}/${SETTINGS_SIDEWAYS_CHECKS} in ${SCHEME}\n`,
+      );
+    if (WALKS_SETTINGS)
+      process.stdout.write(
+        `✅ machines geometry checks: ${machinesGeometryChecks}/${MACHINES_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
   } finally {
     await browser.close();

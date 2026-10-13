@@ -220,6 +220,8 @@ export const profileCatalog = (profiles?: readonly FleetLayeredProfileView[]): F
 
 export const runtime = (name: string, profileName: string): FleetRuntimeView => ({
   name,
+  id: `rt-${name}`,
+  wrapper: name,
   harness: 'claude',
   credential: { id: 'personal', store: 'host' },
   profile: profileName,
@@ -255,7 +257,7 @@ export const studioMachine = (overrides: Partial<FleetMachineView> = {}): FleetM
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
   runtimeCount: 3,
   runningSessions: 0,
-  changes: { available: true },
+  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
   ...overrides,
 });
 

@@ -139,6 +139,6 @@ describe('fleetManifestRefusal', () => {
     should(refusal).containEql(SOURCE);
     should(refusal).containEql('unrecognized key');
     should(refusal).match(/Every session start will be refused/u);
-    should(refusal).match(/`fy fleet apply`/u);
+    should(refusal).match(/`fy runtimes`/u);
   });
 });

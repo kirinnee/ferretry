@@ -2,10 +2,8 @@ import { describe, it } from 'bun:test';
 import {
   type FleetApplyCommittedState,
   FleetApplyFailureError,
-  type FleetApplyPreview,
   type FleetApplyResult,
   type FleetManifest,
-  type FleetScaffold,
   type FleetWriteOperation,
   type SharedHistoryPreview,
 } from '@ferretry/fleet';
@@ -13,20 +11,10 @@ import {
   FleetApplyOutcomeSchema,
   FleetApplyResultSchema,
   FleetManifestSummarySchema,
-  FleetPlanSummarySchema,
   FleetWriteOperationSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import {
-  applyFailureSummary,
-  applyResultSummary,
-  committedSummary,
-  historySummary,
-  manifestSummary,
-  operationSummary,
-  planSummary,
-  scaffoldSummary,
-} from '../../../src/lib/fleet/wire.ts';
+import { applyFailureSummary, applyResultSummary, operationSummary } from '../../../src/lib/fleet/wire.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -155,10 +143,35 @@ describe('operationSummary', () => {
   });
 });
 
-describe('manifestSummary', () => {
+/** A history step that failed after the commit, carrying the fleet that landed. */
+const committedFailure = (committed: FleetApplyCommittedState): FleetApplyFailureError =>
+  new FleetApplyFailureError({
+    kind: 'history-failed-after-commit',
+    failedHarness: 'codex',
+    reason: 'the pool is not writable',
+    committed,
+  });
+
+const committedOf = (fleet: FleetManifest): FleetApplyCommittedState => ({
+  accountCount: 1,
+  operationCount: 6,
+  manifestPath: '/state/fleet/manifest.json',
+  manifest: fleet,
+  prunedWrappers: [],
+  sharedHistory: [],
+});
+
+/** The manifest a committed-with-history-failure outcome carries. */
+const landedManifest = (fleet: FleetManifest) => {
+  const actual = applyFailureSummary(committedFailure(committedOf(fleet)));
+  if (actual.outcome !== 'committed-with-history-failure') throw new Error('expected a committed outcome');
+  return actual.committed.manifest;
+};
+
+describe('the manifest a committed apply reports', () => {
   it('should carry every model, available and not, through the shared contract', () => {
     // Act
-    const actual = manifestSummary(manifest());
+    const actual = landedManifest(manifest());
 
     // Assert — parsed, so the projection is proven against the schema its consumers read.
     should(FleetManifestSummarySchema.safeParse(actual).success).be.true();
@@ -171,70 +184,27 @@ describe('manifestSummary', () => {
   it('should omit a display name a model does not have', () => {
     // Arrange
     const source = manifest();
+    const [account] = source.accounts;
+    if (account === undefined) throw new Error('the fixture declares one account');
     const bare: FleetManifest = {
       ...source,
-      accounts: [{ ...source.accounts[0]!, models: [{ id: 'opus', available: true }] }],
+      accounts: [
+        {
+          ...account,
+          models: [
+            { id: 'opus', available: true },
+            { id: 'retired', available: false, unavailableReason: 'gone' },
+          ],
+        },
+      ],
     };
 
     // Act
-    const actual = manifestSummary(bare);
+    const actual = landedManifest(bare);
 
     // Assert
     should(Object.hasOwn(actual.accounts[0]?.models[0] ?? {}, 'displayName')).be.false();
-  });
-});
-
-describe('historySummary', () => {
-  it('should report what each harness would move, per harness', () => {
-    // Act
-    const actual = historySummary([history()]);
-
-    // Assert
-    should(actual).deepEqual([
-      { kind: 'claude', pool: '/state/fleet/shared/claude', migrated: 3, conflicts: 1, links: 2 },
-    ]);
-  });
-});
-
-describe('planSummary', () => {
-  it('should describe a whole plan in the shape a reviewer reads', () => {
-    // Arrange
-    const preview: FleetApplyPreview = {
-      manifest: manifest(),
-      manifestPath: '/state/fleet/manifest.json',
-      operations: [{ kind: 'file', path: '/bin/claude-kirin', content: 'script', mode: 0o755 }],
-      sharedHistory: [history()],
-    };
-
-    // Act
-    const actual = planSummary(preview);
-
-    // Assert
-    should(FleetPlanSummarySchema.safeParse(actual).success).be.true();
-    should(actual.operations).deepEqual([{ kind: 'file', path: '/bin/claude-kirin', mode: 0o755 }]);
-    should(actual.sharedHistory).have.length(1);
-  });
-});
-
-describe('scaffoldSummary', () => {
-  it('should name the files a first run creates as objects, not bare strings', () => {
-    // Arrange
-    const scaffold: FleetScaffold = {
-      directories: ['/state/fleet', '/state/fleet/bin'],
-      directoryMode: 0o700,
-      files: [{ path: '/state/fleet/config.yaml', content: 'agents: []\n', mode: 0o600 }],
-      pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
-    };
-
-    // Act
-    const actual = scaffoldSummary(scaffold);
-
-    // Assert
-    should(actual).deepEqual({
-      directories: ['/state/fleet', '/state/fleet/bin'],
-      files: [{ path: '/state/fleet/config.yaml' }],
-      pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
-    });
+    should(Object.hasOwn(actual.accounts[0]?.models[1] ?? {}, 'displayName')).be.false();
   });
 });
 
@@ -258,6 +228,22 @@ describe('applyResultSummary', () => {
     should(Object.hasOwn(actual, 'lockResidue')).be.false();
   });
 
+  it('should report what each harness would move, per harness', () => {
+    // Act
+    const actual = applyResultSummary({
+      accountCount: 1,
+      operationCount: 4,
+      manifestPath: '/state/fleet/manifest.json',
+      prunedWrappers: [],
+      sharedHistory: [history()],
+    });
+
+    // Assert — reported, never inferred from a total; the per-change detail stays out.
+    should(actual.sharedHistory).deepEqual([
+      { kind: 'claude', pool: '/state/fleet/shared/claude', migrated: 3, conflicts: 1, links: 2 },
+    ]);
+  });
+
   it('should carry both kinds of residue when an apply left them', () => {
     // Act
     const actual = applyResultSummary({
@@ -276,26 +262,24 @@ describe('applyResultSummary', () => {
   });
 });
 
-describe('committedSummary', () => {
+describe('the committed state a history failure reports', () => {
   it('should describe the fleet that landed when only history failed afterwards', () => {
     // Arrange
     const committed: FleetApplyCommittedState = {
-      accountCount: 1,
-      operationCount: 6,
-      manifestPath: '/state/fleet/manifest.json',
-      manifest: manifest(),
-      prunedWrappers: [],
-      sharedHistory: [],
+      ...committedOf(manifest()),
+      sharedHistory: [history()],
       lockResidue: '/state/fleet/.fy-fleet-apply.lock',
     };
 
     // Act
-    const actual = committedSummary(committed);
+    const actual = applyFailureSummary(committedFailure(committed));
 
     // Assert — the manifest is carried, because "your fleet did land" is the whole point.
-    should(actual.manifest.accounts).have.length(1);
-    should(actual.manifestPath).equal('/state/fleet/manifest.json');
-    should(actual.lockResidue).equal('/state/fleet/.fy-fleet-apply.lock');
+    if (actual.outcome !== 'committed-with-history-failure') throw new Error('expected a committed outcome');
+    should(actual.committed.manifest.accounts).have.length(1);
+    should(actual.committed.manifestPath).equal('/state/fleet/manifest.json');
+    should(actual.committed.lockResidue).equal('/state/fleet/.fy-fleet-apply.lock');
+    should(actual.committed.sharedHistory).have.length(1);
   });
 });
 
@@ -364,7 +348,7 @@ describe('operationSummary for the account model', () => {
 });
 
 describe('applyFailureSummary', () => {
-  it('should report a rolled-back apply in the words the old account mount uses', () => {
+  it('should report a rolled-back apply in the words a person reads', () => {
     // Act
     const actual = applyFailureSummary(
       new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' }),

@@ -3,15 +3,14 @@
  *
  * The shell's address is `#machines/<machine>/<tab>`; a flow the Settings tab opens adds one word:
  * `#machines/<machine>/settings/setup` is the first run (the Runtimes tab links here when a machine
- * is not set up), `/import` is Import again, `/clone` is Clone from another machine, `/migrate` is the
- * move to the new account format, and `/install-claude` or `/install-codex` installs one tool. The
- * shell ignores the extra word, so it stays on the Settings tab while the tab reads the flow itself.
+ * is not set up), `/import` is Import again, `/clone` is Clone from another machine, and
+ * `/install-claude` or `/install-codex` installs one tool. The shell ignores the extra word, so it stays on the Settings tab while the tab reads the flow itself.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { MACHINES_SECTION, type MachineTabId, machineHash } from '../shell/machine-route.ts';
 
-export const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'migrate', 'install-claude', 'install-codex'] as const;
+export const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'install-claude', 'install-codex'] as const;
 
 export type SettingsFlow = (typeof SETTINGS_FLOWS)[number];
 

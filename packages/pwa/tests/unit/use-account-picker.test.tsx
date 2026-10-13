@@ -21,9 +21,9 @@ const catalog = (wrapper: string): AccountPickerCatalog => ({
     {
       id: '11111111-1111-4111-8111-111111111111',
       kind: 'claude',
-      mode: 'auto',
+      agent: true,
+      credentialId: `login-${wrapper}`,
       wrapper,
-      home: `/accounts/${wrapper}`,
       displayName: wrapper,
       defaultModel: 'opus',
       models: [{ id: 'opus', available: true }],

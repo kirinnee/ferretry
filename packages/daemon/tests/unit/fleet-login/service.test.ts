@@ -1,55 +1,33 @@
 /**
  * The daemon side of a harness login: what it refuses, what it publishes, and what it does NOT keep.
  *
- * The fixture drives real domain objects — a parsed `FleetConfig`, a parsed `FleetManifest`, the fleet's
- * own `FleetIdentityService` and `FleetLoginService` — and fakes only the three things that touch a
- * machine: the credential store, the child, and the timer. So a test here fails when the login DECISION
- * is wrong rather than when a stub drifts.
+ * A sign-in names one account-model CREDENTIAL. The fixture fakes only the things that touch a machine
+ * — the credential's resolved store, the child, the locator and the timer — so a test here fails when
+ * the login DECISION is wrong rather than when a stub drifts.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { readdir, readFile, rm, mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  type CredentialCloneOutcome,
-  type CredentialReading,
-  type FleetConfig,
-  FleetConfigSchema,
-  type FleetCredentialStore,
-  type FleetIdentityMember,
-  type FleetIdentity,
-  type FleetIdentityMemberStatus,
-  type FleetManifest,
-  FleetManifestSchema,
-  type HarnessKind,
-  type HarnessLoginDeclarations,
-  type FleetTokenRefreshResult,
-  type FleetTokenRenewal,
-} from '@ferretry/fleet';
-import type { FleetLoginReadiness, HarnessLoginSubmission } from '@ferretry/protocol';
+import type { HarnessKind } from '@ferretry/fleet';
+import type { HarnessLoginSubmission } from '@ferretry/protocol';
 import should from 'should';
 import type { ChangeConfirmation } from '../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { type CredentialSignInTarget, FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
+import type { HarnessLoginChild, HarnessLoginChildSpec } from '../../../src/lib/fleet-login/ports.ts';
 import {
-  describeSource,
   HARNESS_LOGIN_WINDOW_MINUTES,
   HarnessLoginRefusal,
   HarnessLoginService,
 } from '../../../src/lib/fleet-login/service.ts';
-import type { HarnessLoginChild, HarnessLoginChildSpec } from '../../../src/lib/fleet-login/ports.ts';
-import { type CredentialSignInTarget, FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
 import { harnessLoginRoutes } from '../../../src/lib/runtime/mounts/fleet-login.ts';
 import { jsonBody, request } from '../api/support.ts';
 import { CREDENTIALS, GOVERNED, GRANTED, human, NARROWED } from '../runtime/mounts/support.ts';
 
 const ESC = '\u001b';
 const BEL = '\u0007';
-
-const INTERACTIVE_ID = '00000000-0000-4000-8000-000000000001';
-const AUTO_ID = '00000000-0000-4000-8000-000000000002';
-const CODEX_ID = '00000000-0000-4000-8000-000000000003';
-const KEYED_ID = '00000000-0000-4000-8000-000000000004';
 
 const NOW = Date.parse('2026-08-19T10:00:00.000Z');
 
@@ -74,17 +52,12 @@ const CREDENTIAL_SHAPED_LINE = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-TE
 /** What a person pastes. Recognisable, so its absence from every answer is checkable. */
 const PASTED_CODE = 'pasted-authorization-code-TESTONLY';
 
-// One export the wrapper resolves at run time from a name that is NOT provider state, and one it
-// resolves from a name that is. Both are the shape `renderWrapperScript` emits for a configured value
-// of exactly `$NAME`, and the second is the only one that can tell a working preserve list from an
-// empty one — see the environment case below.
-// biome-ignore lint/suspicious/noTemplateCurlyInString: a generated WRAPPER, where `${…}` is shell
-const BASE_URL_EXPORT = 'export ANTHROPIC_BASE_URL="${FY_BASE}"';
-// biome-ignore lint/suspicious/noTemplateCurlyInString: a generated WRAPPER, where `${…}` is shell
-const CREDENTIAL_EXPORT = 'export OPENAI_API_KEY="${OPENAI_API_KEY}"';
+/** The one Claude credential, the one Codex credential, and one whose login lives in its environment. */
+const CLAUDE_CREDENTIAL = 'work';
+const CODEX_CREDENTIAL = 'team';
+const ENVIRONMENT_CREDENTIAL = 'envkey';
 
-/** A generated wrapper, as `renderWrapperScript` writes one. */
-const WRAPPER_SCRIPT = `${BASE_URL_EXPORT}\n${CREDENTIAL_EXPORT}\nexec claude "$@"\n`;
+const ENVIRONMENT_REASON = '"envkey" is authenticated by its environment variables, so there is nothing to sign in to';
 
 const temporaryDirectories: string[] = [];
 
@@ -92,165 +65,22 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
-const parseConfig = (input: Record<string, unknown>): FleetConfig => {
-  const parsed = FleetConfigSchema.safeParse(input);
-  if (!parsed.success) throw new Error(`fixture config invalid: ${JSON.stringify(parsed.error.issues, null, 2)}`);
-  return parsed.data;
-};
+type StoreTarget = Extract<CredentialSignInTarget, { kind: 'store' }>;
 
-const route = (id: string, wrapper: string, mode: 'interactive' | 'auto') => ({
-  id,
-  wrapper,
-  home: wrapper,
-  mode,
-  defaultModel: 'model-one',
-  models: ['model-one'],
-});
-
-/**
- * The declared fleet: one Claude identity of two lanes, one Codex identity, and one API-key account
- * whose key arrives from the secrets file.
- */
-const CONFIG = parseConfig({
-  secretsFile: '/etc/ferretry/secrets.sh',
-  // Both lanes are declared, because a route may only name a variant this fleet has.
-  variants: { default: {}, auto: {} },
-  agents: [
-    {
-      name: 'kirin',
-      kind: 'claude',
-      routes: {
-        default: route(INTERACTIVE_ID, 'claude-kirin', 'interactive'),
-        auto: route(AUTO_ID, 'claude-auto', 'auto'),
-      },
+/** A credential's store sign-in, recording what it was asked to do. */
+function storeTarget(overrides: Partial<Omit<StoreTarget, 'kind'>> = {}): StoreTarget {
+  return {
+    kind: 'store',
+    credentialId: overrides.credentialId ?? CLAUDE_CREDENTIAL,
+    harness: overrides.harness ?? 'claude',
+    environment: overrides.environment ?? {
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/fleet/credentials/work',
+      CLAUDE_CONFIG_DIR: '/fy/fleet/credentials/work/sign-in',
     },
-    { name: 'kirin', kind: 'codex', routes: { default: route(CODEX_ID, 'codex-kirin', 'interactive') } },
-    {
-      name: 'proxy',
-      kind: 'claude',
-      auth: 'api-key',
-      env: { ANTHROPIC_API_KEY: '$PROXY_KEY' },
-      routes: { default: route(KEYED_ID, 'claude-proxy', 'interactive') },
-    },
-  ],
-});
-
-const manifestAccount = (id: string, kind: HarnessKind, wrapper: string, mode: 'interactive' | 'auto') => ({
-  id,
-  kind,
-  mode,
-  wrapper: `/fleet/bin/${wrapper}`,
-  home: `/fleet/homes/${wrapper}`,
-  displayName: wrapper,
-  defaultModel: 'model-one',
-  models: [{ id: 'model-one', available: true }],
-  available: true,
-  unavailableReason: null,
-});
-
-const MANIFEST: FleetManifest = FleetManifestSchema.parse({
-  version: 1,
-  generatedAt: '2026-08-19T09:00:00.000Z',
-  accounts: [
-    manifestAccount(INTERACTIVE_ID, 'claude', 'claude-kirin', 'interactive'),
-    manifestAccount(AUTO_ID, 'claude', 'claude-auto', 'auto'),
-    manifestAccount(CODEX_ID, 'codex', 'codex-kirin', 'interactive'),
-    manifestAccount(KEYED_ID, 'claude', 'claude-proxy', 'interactive'),
-  ],
-});
-
-const ENV_ID = '00000000-0000-4000-8000-000000000005';
-const LITERAL_ID = '00000000-0000-4000-8000-000000000006';
-const BARE_ID = '00000000-0000-4000-8000-000000000007';
-const STORE_ID = '00000000-0000-4000-8000-000000000008';
-
-/**
- * A fleet declaring the three credential sources {@link CONFIG} has no account of.
- *
- * NO `secretsFile`, and that is the point of the first account: `wrappers.ts` renders a configured value
- * of exactly `$NAME` as a run-time reference, and without a declared secrets file the value comes from
- * whatever environment launched the wrapper — which is the `environment` source rather than the
- * `token-file` one {@link CONFIG} produces from the same declaration.
- */
-const SOURCES_CONFIG = parseConfig({
-  variants: { default: {} },
-  agents: [
-    {
-      name: 'envkey',
-      kind: 'claude',
-      auth: 'api-key',
-      env: { ANTHROPIC_API_KEY: '$CALLER_KEY' },
-      routes: { default: route(ENV_ID, 'claude-envkey', 'interactive') },
-    },
-    {
-      name: 'literal',
-      kind: 'claude',
-      auth: 'api-key',
-      env: { ANTHROPIC_API_KEY: 'sk-configured-TESTONLY' },
-      routes: { default: route(LITERAL_ID, 'claude-literal', 'interactive') },
-    },
-    // A profile takes the credential from this daemon's own store, so there is nothing to sign in to
-    // and the value is in neither the configuration nor the generated wrapper.
-    {
-      name: 'stored',
-      kind: 'claude',
-      auth: 'api-key',
-      env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' },
-      routes: { default: route(STORE_ID, 'claude-stored', 'interactive') },
-    },
-    // Declares that it authenticates with a key and says nowhere the key comes from: the fail-closed
-    // member, which must not be read as "the harness writes this one".
-    {
-      name: 'bare',
-      kind: 'claude',
-      auth: 'api-key',
-      routes: { default: route(BARE_ID, 'claude-bare', 'interactive') },
-    },
-  ],
-});
-
-const SOURCES_MANIFEST: FleetManifest = FleetManifestSchema.parse({
-  version: 1,
-  generatedAt: '2026-08-19T09:00:00.000Z',
-  accounts: [
-    manifestAccount(ENV_ID, 'claude', 'claude-envkey', 'interactive'),
-    manifestAccount(LITERAL_ID, 'claude', 'claude-literal', 'interactive'),
-    manifestAccount(STORE_ID, 'claude', 'claude-stored', 'interactive'),
-    manifestAccount(BARE_ID, 'claude', 'claude-bare', 'interactive'),
-  ],
-});
-
-/** A credential store that records every call and can be made to change its mind mid-flow. */
-class RecordingStore implements FleetCredentialStore {
-  readonly calls: string[] = [];
-  readonly clones: string[] = [];
-  #reading: CredentialReading = { state: 'missing' };
-
-  constructor(private readonly signedIn: Set<string> = new Set()) {}
-
-  /** What a home with no credential answers, and what it answers once the harness has written one. */
-  signIn(accountId: string): void {
-    this.signedIn.add(accountId);
-  }
-
-  fix(reading: CredentialReading): void {
-    this.#reading = reading;
-  }
-
-  async read(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialReading> {
-    this.calls.push(`read ${kind} ${member.accountId}`);
-    return this.signedIn.has(member.accountId) ? { state: 'valid', expiresAt: NOW + 3_600_000 } : this.#reading;
-  }
-
-  async clone(
-    kind: HarnessKind,
-    donor: FleetIdentityMember,
-    target: FleetIdentityMember,
-  ): Promise<CredentialCloneOutcome> {
-    this.clones.push(`clone ${kind} ${donor.accountId} -> ${target.accountId}`);
-    this.signedIn.add(target.accountId);
-    return { ok: true };
-  }
+    arguments: overrides.arguments ?? [],
+    prepare: overrides.prepare ?? (async () => undefined),
+    signedIn: overrides.signedIn ?? (async () => true),
+  };
 }
 
 /** One fake child. The test emits its output and decides when it exits. */
@@ -290,9 +120,14 @@ class FakeChild implements HarnessLoginChild {
 
 interface Fixture {
   readonly service: HarnessLoginService;
-  readonly store: RecordingStore;
   readonly children: FakeChild[];
   readonly timers: { milliseconds: number; run: () => void; disarmed: boolean }[];
+  /** Every credential id a start asked to resolve, in order. */
+  readonly resolved: string[];
+  /** Every store a start prepared, in order. */
+  readonly prepared: string[];
+  /** The credentials whose store now holds a usable login. The harness "writes" one by adding to it. */
+  readonly logins: Set<string>;
   /** Let the not-awaited login work run. Everything in the fixture is synchronous or a microtask. */
   settle(): Promise<void>;
   /** The child a flow spawned, once it has. `index` picks one out of a run of several flows. */
@@ -300,61 +135,50 @@ interface Fixture {
 }
 
 interface FixtureOptions {
-  readonly wrapperMissing?: boolean;
-  /** Replaces the wrapper read, so a test can hold the flow inside it. */
-  readonly readWrapper?: (wrapper: string) => Promise<string | undefined>;
-  /** A different declared fleet, for the credential sources {@link CONFIG} has no account of. */
-  readonly config?: FleetConfig;
-  readonly manifest?: FleetManifest;
-  readonly declarations?: HarnessLoginDeclarations;
   readonly confirmChange?: (password: string) => Promise<ChangeConfirmation>;
   readonly windowMinutes?: number;
   readonly now?: () => number;
-  readonly store?: RecordingStore;
-  /**
-   * The renewal this daemon was composed with, or nothing.
-   *
-   * ABSENT BY DEFAULT, matching the option: a daemon that was not given one refuses in words rather
-   * than 500-ing, and the default has to be the shape that proves it.
-   */
-  readonly renewal?: RecordingRenewal;
-  /** Signing in by credential id. Absent by default, matching the option. */
-  readonly credentialTargets?: { target(credentialId: string): Promise<CredentialSignInTarget> };
+  /** Replaces the default resolution, so a test can hold or break one target. */
+  readonly target?: (credentialId: string, fallback: (id: string) => CredentialSignInTarget) => CredentialSignInTarget;
   readonly locate?: (harness: HarnessKind) => string | undefined;
 }
 
-/**
- * A renewal that records what it was asked to rotate and never touches a credential.
- *
- * It stands where `FleetTokenRefreshService` does, which is the module that owns the GATE — whether a
- * rotation is safe is decided there, from a fresh read of the chosen home, and is proved in
- * `packages/fleet/tests/unit/token-refresh.test.ts`. What is proved HERE is everything around it: who
- * may ask, about what, in which order, and what a caller is told. A fake that re-implemented the gate
- * would be a second opinion about the one decision this service is not allowed to have one about.
- */
-class RecordingRenewal implements FleetTokenRenewal {
-  readonly asked: { identity: string; members: number }[] = [];
-
-  constructor(private readonly result: Omit<FleetTokenRefreshResult, 'identity'>) {}
-
-  async renew(
-    identity: FleetIdentity,
-    members: readonly FleetIdentityMemberStatus[],
-  ): Promise<FleetTokenRefreshResult> {
-    this.asked.push({ identity: identity.key, members: members.length });
-    return { identity: identity.key, ...this.result };
-  }
-}
+const LOCATED = (harness: HarnessKind): string => `/usr/local/bin/${harness}`;
 
 function fixture(options: FixtureOptions = {}): Fixture {
-  const store = options.store ?? new RecordingStore();
   const children: FakeChild[] = [];
   const timers: { milliseconds: number; run: () => void; disarmed: boolean }[] = [];
+  const resolved: string[] = [];
+  const prepared: string[] = [];
+  const logins = new Set<string>();
   let minted = 0;
 
+  const fallback = (id: string): CredentialSignInTarget => {
+    if (id === CLAUDE_CREDENTIAL) {
+      return storeTarget({
+        prepare: async () => {
+          prepared.push(id);
+        },
+        signedIn: async () => logins.has(id),
+      });
+    }
+    if (id === CODEX_CREDENTIAL) {
+      return storeTarget({
+        credentialId: id,
+        harness: 'codex',
+        environment: { CODEX_HOME: '/fy/fleet/credentials/team' },
+        arguments: ['-c', 'cli_auth_credentials_store="file"'],
+        prepare: async () => {
+          prepared.push(id);
+        },
+        signedIn: async () => logins.has(id),
+      });
+    }
+    if (id === ENVIRONMENT_CREDENTIAL) return { kind: 'refused', credentialId: id, reason: ENVIRONMENT_REASON };
+    throw new FleetCredentialRefusal('fleet_credential_unknown', `no login "${id}" exists on this machine`);
+  };
+
   const service = new HarnessLoginService({
-    fleet: { config: async () => options.config ?? CONFIG, accounts: async () => options.manifest ?? MANIFEST },
-    credentials: store,
     clock: { now: options.now ?? (() => NOW) },
     mintId: () => `flow${String(++minted).padStart(2, '0')}`,
     spawn: spec => {
@@ -362,17 +186,15 @@ function fixture(options: FixtureOptions = {}): Fixture {
       children.push(child);
       return child;
     },
-    // TWO provider credentials the caller happens to hold. The wrapper says nothing about
-    // `ANTHROPIC_API_KEY`, so it must be stripped; it deliberately reads `OPENAI_API_KEY` out of its
-    // surroundings, so that one must survive. An environment carrying only the first cannot distinguish
-    // a working preserve list from an empty one.
+    // Provider credentials and store pointers the caller happens to hold, which must never reach a
+    // child signing a DIFFERENT login in — and two names nothing strips, which must.
     environment: {
       PATH: '/usr/bin',
       ANTHROPIC_API_KEY: 'inherited-key-TESTONLY',
       OPENAI_API_KEY: 'referenced-key-TESTONLY',
+      CLAUDE_CONFIG_DIR: '/home/somebody/.claude',
       PROXY_KEY: 'proxy-key',
     },
-    readWrapper: options.readWrapper ?? (async () => (options.wrapperMissing === true ? undefined : WRAPPER_SCRIPT)),
     timer: {
       after: (milliseconds, run) => {
         const entry = { milliseconds, run, disarmed: false };
@@ -384,11 +206,14 @@ function fixture(options: FixtureOptions = {}): Fixture {
     },
     confirmChange: options.confirmChange ?? (async () => ({ kind: 'confirmed' })),
     clientName: 'fy',
-    ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
-    ...(options.credentialTargets === undefined ? {} : { credentialTargets: options.credentialTargets }),
-    ...(options.locate === undefined ? {} : { locate: options.locate }),
+    credentialTargets: {
+      target: async id => {
+        resolved.push(id);
+        return options.target === undefined ? fallback(id) : options.target(id, fallback);
+      },
+    },
+    locate: options.locate ?? LOCATED,
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
-    ...(options.declarations === undefined ? {} : { declarations: options.declarations }),
   });
 
   const settle = async (): Promise<void> => {
@@ -399,9 +224,11 @@ function fixture(options: FixtureOptions = {}): Fixture {
 
   return {
     service,
-    store,
     children,
     timers,
+    resolved,
+    prepared,
+    logins,
     settle,
     child: async (index = 0) => {
       await settle();
@@ -412,18 +239,14 @@ function fixture(options: FixtureOptions = {}): Fixture {
   };
 }
 
-/** Every string a caller could read out of this service, for the values that must appear in none. */
-async function everyAnswer(service: HarnessLoginService, flowId: string): Promise<string> {
-  const readiness = await service.readiness();
-  const status = await service.status(flowId);
-  return JSON.stringify([readiness, status]);
+/** A promise the test resolves itself, for holding the flow inside one await. */
+function held<T>(value: T): { readonly promise: Promise<T>; release(): void } {
+  let release: () => void = () => undefined;
+  const promise = new Promise<T>(resolve => {
+    release = () => resolve(value);
+  });
+  return { promise, release: () => release() };
 }
-
-const accountOf = (readiness: FleetLoginReadiness, accountId: string) => {
-  const found = readiness.identities.flatMap(identity => identity.accounts).find(row => row.accountId === accountId);
-  if (found === undefined) throw new Error(`no readiness row for ${accountId}`);
-  return found;
-};
 
 /**
  * The host's own command line: holds the admin token, arrived on loopback, ungoverned.
@@ -446,332 +269,154 @@ const refusalOf = async (work: () => Promise<unknown>): Promise<HarnessLoginRefu
   throw new Error('expected a refusal');
 };
 
-// ─── the readiness read ───────────────────────────────────────────────────────────────────────────
+// ─── the start's refusals ─────────────────────────────────────────────────────────────────────────
 
-describe('harness login readiness', () => {
-  it('should group accounts by the identity whose credential they share', async () => {
+describe('starting a harness login', () => {
+  it('should refuse when nobody can say where this caller stands, before resolving anything', async () => {
+    // Arrange
+    const subject = fixture();
+
     // Act
-    const actual = await fixture().service.readiness();
+    const actual = await refusalOf(async () => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, undefined));
+    await subject.settle();
 
     // Assert
-    should(actual.identities.map(identity => identity.identity)).deepEqual([
-      'claude:kirin',
-      'codex:kirin',
-      'claude:proxy',
-    ]);
-    should(actual.identities[0]?.accounts).have.length(2);
+    should(actual.code).equal('fleet_login_unauthorized');
+    should(actual.message).equal('this daemon cannot say whether this caller may sign this machine in');
+    should(subject.resolved).be.empty();
+    should(subject.children).be.empty();
   });
 
-  it('should offer a login to an account whose credential the harness writes', async () => {
+  it('should carry a credential refusal through as the sign-in refusal', async () => {
     // Act
-    const actual = accountOf(await fixture().service.readiness(), INTERACTIVE_ID);
+    const actual = await refusalOf(async () => fixture().service.start({ credentialId: 'ghost' }, HOST));
 
     // Assert
-    should(actual.login).deepEqual({ applies: true });
-    should(actual.source).deepEqual({ source: 'interactive-login' });
-    should(actual.credential).deepEqual({ state: 'missing' });
+    should(actual.code).equal('fleet_login_unavailable');
+    should(actual.message).equal('no login "ghost" exists on this machine');
   });
 
-  it('should offer NO login to an account whose credential comes from a token file, and say where it does come from', async () => {
-    // Act
-    const actual = accountOf(await fixture().service.readiness(), KEYED_ID);
-
-    // Assert
-    should(actual.login).deepEqual({ applies: false, because: 'credential-is-not-a-login' });
-    should(actual.source).deepEqual({
-      source: 'token-file',
-      variable: 'ANTHROPIC_API_KEY',
-      path: '/etc/ferretry/secrets.sh',
-    });
-  });
-
-  it('should not report a credential state for an account whose credential is not a login', async () => {
-    // `missing` here would tell a correctly-configured account that it is broken: whatever sits in the
-    // harness's own store is not this account's credential.
-    // Act
-    const actual = accountOf(await fixture().service.readiness(), KEYED_ID);
-
-    // Assert
-    should(actual.credential).deepEqual({ state: 'not-read' });
-  });
-
-  it('should offer NO login to any account of a harness that declares none', async () => {
+  it('should let any other resolution failure through untouched', async () => {
     // Arrange
     const subject = fixture({
-      declarations: {
-        claude: { login: true },
-        codex: { login: false, reason: 'this build of Codex authenticates from a service account' },
+      target: () => {
+        throw new Error('the configuration could not be read');
+      },
+    });
+
+    // Act / Assert
+    await should(subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST)).be.rejectedWith(
+      'the configuration could not be read',
+    );
+  });
+
+  it('should refuse a credential that has nothing to sign in to, with its reason', async () => {
+    // Arrange
+    const subject = fixture();
+
+    // Act
+    const actual = await refusalOf(async () => subject.service.start({ credentialId: ENVIRONMENT_CREDENTIAL }, HOST));
+    await subject.settle();
+
+    // Assert
+    should(actual.code).equal('fleet_login_unavailable');
+    should(actual.message).equal(ENVIRONMENT_REASON);
+    should(subject.children).be.empty();
+  });
+
+  it('should refuse a credential that has nothing to sign in to BEFORE spending a password attempt', async () => {
+    // Arrange — a governed caller that brought a password. The refusal must not cost them one of the
+    // shared attempts an unlock also spends.
+    const asked: string[] = [];
+    const subject = fixture({
+      confirmChange: async password => {
+        asked.push(password);
+        return { kind: 'confirmed' };
       },
     });
 
     // Act
-    const actual = accountOf(await subject.service.readiness(), CODEX_ID);
-
-    // Assert
-    should(actual.login).deepEqual({
-      applies: false,
-      because: 'harness-has-no-login',
-      harnessReason: 'this build of Codex authenticates from a service account',
-    });
-  });
-
-  it('should still offer a login to the other harness when one declares none', async () => {
-    // Arrange
-    const subject = fixture({
-      declarations: { claude: { login: true }, codex: { login: false, reason: 'no interactive login' } },
-    });
-
-    // Act
-    const actual = accountOf(await subject.service.readiness(), INTERACTIVE_ID);
-
-    // Assert
-    should(actual.login).deepEqual({ applies: true });
-  });
-
-  it('should carry the fleet’s own verdict rather than flattening it to “needs a login”', async () => {
-    // Arrange — one home nobody could read, which is `indeterminate` and not `login`: offering a
-    // sign-in here would overwrite a credential that may be perfectly fine.
-    const store = new RecordingStore();
-    store.fix({ state: 'unreadable', reason: 'the keychain is locked' });
-
-    // Act
-    const actual = await fixture({ store }).service.readiness();
-
-    // Assert
-    should(actual.identities[0]).have.property('verdict', 'indeterminate');
-    should(actual.identities[0])
-      .have.property('reason')
-      .match(/refusing to decide/u);
-  });
-
-  it('should report an API-key identity as needing no login at all', async () => {
-    // Act
-    const actual = await fixture().service.readiness();
-
-    // Assert
-    should(actual.identities.find(identity => identity.identity === 'claude:proxy')).have.property(
-      'verdict',
-      'no-login',
-    );
-  });
-
-  it('should read no credential for an API-key identity', async () => {
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    await subject.service.readiness();
-
-    // Assert
-    should(subject.store.calls).not.containEql(`read claude ${KEYED_ID}`);
-  });
-});
-
-// ─── refusals ─────────────────────────────────────────────────────────────────────────────────────
-
-describe('starting a harness login', () => {
-  it('should refuse an account this host does not publish', async () => {
-    // Act
     const actual = await refusalOf(async () =>
-      fixture().service.start({ accountId: '00000000-0000-4000-8000-00000000ffff' }, HOST),
+      subject.service.start(
+        { credentialId: ENVIRONMENT_CREDENTIAL, operatorPassword: 'the operator password' },
+        BROWSER,
+      ),
     );
 
     // Assert
     should(actual.code).equal('fleet_login_unavailable');
-    should(actual.message).match(/is published on this host/u);
+    should(asked).be.empty();
   });
 
-  it('should refuse an account whose credential comes from a token file, naming the file', async () => {
-    // Act
-    const actual = await refusalOf(async () => fixture().service.start({ accountId: KEYED_ID }, HOST));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unavailable');
-    should(actual.message).match(/ANTHROPIC_API_KEY in \/etc\/ferretry\/secrets\.sh/u);
-    should(actual.message).match(/nothing to sign in to/u);
-  });
-
-  it('should refuse a harness that declares no interactive login, in the harness’s own words', async () => {
-    // Arrange
-    const subject = fixture({
-      declarations: { claude: { login: true }, codex: { login: false, reason: 'Codex is provisioned centrally here' } },
-    });
-
-    // Act
-    const actual = await refusalOf(async () => subject.service.start({ accountId: CODEX_ID }, HOST));
-
-    // Assert
-    should(actual.message).match(/Codex is provisioned centrally here/u);
-  });
-
-  it('should spawn nothing when it refuses', async () => {
+  it('should refuse a second sign-in for one credential, naming the flow that holds it', async () => {
     // Arrange
     const subject = fixture();
+    const first = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
 
     // Act
-    await refusalOf(async () => subject.service.start({ accountId: KEYED_ID }, HOST));
+    const actual = await refusalOf(async () => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST));
     await subject.settle();
 
     // Assert
-    should(subject.children).be.empty();
+    should(actual.code).equal('fleet_login_in_progress');
+    should(actual.message).equal(
+      `a sign-in for "${CLAUDE_CREDENTIAL}" is already running as flow "${first.flowId}"; finish or cancel it first`,
+    );
+    should(subject.children).have.length(1);
   });
 
-  it('should refuse when nobody can say where this caller stands', async () => {
-    // Act
-    const actual = await refusalOf(async () => fixture().service.start({ accountId: INTERACTIVE_ID }, undefined));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unauthorized');
-  });
-
-  it('should refuse a second sign-in for one identity, naming the flow that holds it', async () => {
+  it('should refuse a second sign-in for one credential before spending a password attempt', async () => {
     // Arrange
-    const subject = fixture();
-    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const asked: string[] = [];
+    const subject = fixture({
+      confirmChange: async password => {
+        asked.push(password);
+        return { kind: 'confirmed' };
+      },
+    });
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'first' }, BROWSER);
 
-    // Act — the SIBLING lane, which is the same identity and therefore the same homes.
-    const actual = await refusalOf(async () => subject.service.start({ accountId: AUTO_ID }, HOST));
+    // Act
+    const actual = await refusalOf(async () =>
+      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'second' }, BROWSER),
+    );
 
     // Assert
     should(actual.code).equal('fleet_login_in_progress');
-    should(actual.message).match(/already running as flow "flow01"/u);
+    should(asked).deepEqual(['first']);
   });
 
-  it('should allow a sign-in for a DIFFERENT identity while one is running', async () => {
+  it('should allow a sign-in for a DIFFERENT credential while one is running', async () => {
     // Arrange
     const subject = fixture();
-    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
 
     // Act
-    const actual = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
 
     // Assert
     should(actual).have.property('harness', 'codex');
   });
-});
 
-// ─── every credential source that is not a login ─────────────────────────────────────────────────
-
-/**
- * One case per member of `FleetCredentialSource`, because a login control that cannot succeed is worse
- * than no control.
- *
- * `describeSource` is proved over the union on its own further down, but wording is not the property
- * here: what these establish is that {@link HarnessLoginService.start} REFUSES for each source and
- * launches nothing. A regression that made one source applicable would offer a sign-in that opens a
- * browser, writes a store nobody reads, and leaves the account exactly as it was — and the wording test
- * would still pass, because it never calls `start`.
- */
-describe('an account whose credential is not a login', () => {
-  const sources = fixture.bind(null, { config: SOURCES_CONFIG, manifest: SOURCES_MANIFEST });
-
-  it('should refuse an account whose credential comes from the environment, naming the variable', async () => {
-    // Arrange — no secrets file is declared, so the reference resolves from whatever launched the wrapper.
-    const subject = sources();
-
+  it('should name the credential on the flow, as its identity too, and no account', async () => {
     // Act
-    const actual = await refusalOf(async () => subject.service.start({ accountId: ENV_ID }, HOST));
+    const actual = await fixture().service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
 
     // Assert
-    should(actual.code).equal('fleet_login_unavailable');
-    should(actual.message).match(/ANTHROPIC_API_KEY environment variable/u);
-    should(subject.children).be.empty();
-  });
-
-  it('should refuse an account whose credential the fleet configuration carries itself', async () => {
-    // Arrange
-    const subject = sources();
-
-    // Act
-    const actual = await refusalOf(async () => subject.service.start({ accountId: LITERAL_ID }, HOST));
-
-    // Assert
-    should(actual.message).match(/as the fleet configuration sets it/u);
-    should(subject.children).be.empty();
-  });
-
-  it('should refuse an account a profile authenticates, naming the store and the secret', async () => {
-    // Arrange — the "no login wanted" answer: a sign-in here would write a store nothing reads.
-    const subject = sources();
-
-    // Act
-    const actual = await refusalOf(async () => subject.service.start({ accountId: STORE_ID }, HOST));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unavailable');
-    should(actual.message).match(/secret store \(secret WORK_KEY\)/u);
-    should(subject.children).be.empty();
-  });
-
-  /**
-   * The wire says `secret-store` and NAMES the secret, because the PWA half this narrowing was
-   * waiting for has arrived.
-   *
-   * This assertion used to expect `environment`, and its comment said so: the wire union had no
-   * `secret-store` member, so the row narrowed to something true but less useful, and "the sentence
-   * naming Ferretry's own store … arrives with the PWA half". It has. A browser can now say which
-   * store holds the credential and under which name, which is what makes the refusal actionable
-   * rather than merely correct.
-   *
-   * **A NAME, NEVER A VALUE.** `secrets` carries `WORK_KEY` — the identifier a person typed — and no
-   * route, command or error may ever carry what it resolves to. That is the use-never-read contract
-   * in `docs/secrets.md`, and it is why this assertion is `deepEqual` on the whole object rather than
-   * a membership check: a value appearing here would be a new field, and a whole-object comparison
-   * is the only shape that fails when one shows up.
-   */
-  it('should say a stored credential comes from the secret store, naming the secret but never its value', async () => {
-    // Act
-    const actual = await sources().service.readiness();
-
-    // Assert — the WHOLE object, so an added field (a value) fails rather than passing unnoticed.
-    should(accountOf(actual, STORE_ID).source).deepEqual({
-      source: 'secret-store',
-      variable: 'ANTHROPIC_API_KEY',
-      secrets: ['WORK_KEY'],
+    should(actual).deepEqual({
+      harness: 'codex',
+      flowId: 'flow01',
+      credentialId: CODEX_CREDENTIAL,
+      identity: CODEX_CREDENTIAL,
+      startedAt: '2026-08-19T10:00:00.000Z',
+      expiresAt: '2026-08-19T10:10:00.000Z',
+      state: 'starting',
     });
-    should(accountOf(actual, STORE_ID).login).have.property('applies', false);
-  });
-
-  it('should refuse an account nothing declares a credential source for, rather than offering a login', async () => {
-    // The fail-closed member. Reading `undeclared` as `interactive-login` would offer a sign-in for an
-    // API-key account, which is the one reading this union exists to prevent.
-    // Arrange
-    const subject = sources();
-
-    // Act
-    const actual = await refusalOf(async () => subject.service.start({ accountId: BARE_ID }, HOST));
-
-    // Assert
-    should(actual.message).match(/nothing in this fleet/u);
-    should(subject.children).be.empty();
-  });
-
-  it('should report each source on the readiness row, so a surface can say which one it is', async () => {
-    // Act
-    const actual = await sources().service.readiness();
-
-    // Assert
-    should([ENV_ID, LITERAL_ID, BARE_ID].map(id => accountOf(actual, id).source)).deepEqual([
-      { source: 'environment', variable: 'ANTHROPIC_API_KEY' },
-      { source: 'configured-value', variable: 'ANTHROPIC_API_KEY' },
-      { source: 'undeclared' },
-    ]);
-  });
-
-  it('should offer no sign-in on any of those rows', async () => {
-    // Act
-    const actual = await sources().service.readiness();
-
-    // Assert
-    should([ENV_ID, LITERAL_ID, BARE_ID].map(id => accountOf(actual, id).login)).deepEqual([
-      { applies: false, because: 'credential-is-not-a-login' },
-      { applies: false, because: 'credential-is-not-a-login' },
-      { applies: false, because: 'credential-is-not-a-login' },
-    ]);
+    should(actual).not.have.property('accountId');
   });
 });
 
-// ─── the operator password ────────────────────────────────────────────────────────────────────────
+// ─── the operator password, against this one sign-in ──────────────────────────────────────────────
 
 describe('the per-change confirmation', () => {
   it('should never ask a caller the operator’s grants do not govern', async () => {
@@ -785,7 +430,7 @@ describe('the per-change confirmation', () => {
     });
 
     // Act
-    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(asked).equal(0);
@@ -793,11 +438,13 @@ describe('the per-change confirmation', () => {
 
   it('should refuse a governed caller that brought no password', async () => {
     // Act
-    const actual = await refusalOf(async () => fixture().service.start({ accountId: INTERACTIVE_ID }, BROWSER));
+    const actual = await refusalOf(async () => fixture().service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER));
 
     // Assert
     should(actual.code).equal('fleet_login_unauthorized');
-    should(actual.message).match(/needs this machine's operator password, entered against this exact sign-in/u);
+    should(actual.message).equal(
+      `signing "${CLAUDE_CREDENTIAL}" in from off this host needs this machine's operator password, entered against this exact sign-in`,
+    );
   });
 
   it('should refuse a governed caller that brought the wrong password', async () => {
@@ -806,11 +453,14 @@ describe('the per-change confirmation', () => {
 
     // Act
     const actual = await refusalOf(async () =>
-      subject.service.start({ accountId: INTERACTIVE_ID, operatorPassword: 'not-it' }, BROWSER),
+      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'not-it' }, BROWSER),
     );
 
     // Assert
-    should(actual.message).match(/that is not this machine's operator password/u);
+    should(actual.code).equal('fleet_login_unauthorized');
+    should(actual.message).equal(
+      `that is not this machine's operator password, so "${CLAUDE_CREDENTIAL}" was not signed in`,
+    );
   });
 
   it('should name the host remedy when the shared attempt budget is spent', async () => {
@@ -819,10 +469,12 @@ describe('the per-change confirmation', () => {
 
     // Act
     const actual = await refusalOf(async () =>
-      subject.service.start({ accountId: INTERACTIVE_ID, operatorPassword: 'x' }, BROWSER),
+      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'x' }, BROWSER),
     );
 
     // Assert
+    should(actual.code).equal('fleet_login_unauthorized');
+    should(actual.message).match(/too many wrong operator passwords/u);
     should(actual.message).match(/fy daemon password set/u);
   });
 
@@ -832,25 +484,35 @@ describe('the per-change confirmation', () => {
 
     // Act
     const actual = await refusalOf(async () =>
-      subject.service.start({ accountId: INTERACTIVE_ID, operatorPassword: 'x' }, BROWSER),
+      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'x' }, BROWSER),
     );
 
     // Assert
-    should(actual.message).match(/has no operator password/u);
+    should(actual.message).equal(
+      `this machine has no operator password, so the confirmation for "${CLAUDE_CREDENTIAL}" could not be checked`,
+    );
   });
 
   it('should start once a governed caller proves the password', async () => {
     // Arrange
-    const subject = fixture();
+    const asked: string[] = [];
+    const subject = fixture({
+      confirmChange: async password => {
+        asked.push(password);
+        return { kind: 'confirmed' };
+      },
+    });
 
     // Act
     const actual = await subject.service.start(
-      { accountId: INTERACTIVE_ID, operatorPassword: 'the operator password' },
+      { credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' },
       BROWSER,
     );
+    await subject.child();
 
     // Assert
     should(actual).have.property('state', 'starting');
+    should(asked).deepEqual(['the operator password']);
   });
 
   it('should spawn nothing when the password is refused', async () => {
@@ -858,7 +520,9 @@ describe('the per-change confirmation', () => {
     const subject = fixture({ confirmChange: async () => ({ kind: 'refused', reason: 'wrong-password' }) });
 
     // Act
-    await refusalOf(async () => subject.service.start({ accountId: INTERACTIVE_ID, operatorPassword: 'no' }, BROWSER));
+    await refusalOf(async () =>
+      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'no' }, BROWSER),
+    );
     await subject.settle();
 
     // Assert
@@ -876,9 +540,9 @@ describe('the per-change confirmation', () => {
         return { kind: 'confirmed' };
       },
     });
-    const first = subject.service.start({ accountId: INTERACTIVE_ID, operatorPassword: 'pw' }, BROWSER);
+    const first = subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'pw' }, BROWSER);
     const second = refusalOf(async () =>
-      subject.service.start({ accountId: AUTO_ID, operatorPassword: 'pw' }, BROWSER),
+      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'pw' }, BROWSER),
     );
     await subject.settle();
     should(releases).have.length(2);
@@ -896,260 +560,44 @@ describe('the per-change confirmation', () => {
   });
 });
 
-// ─── renewing, which is the sibling of a sign-in and never one ────────────────────────────────────
-
-describe('renewing a credential', () => {
-  const RENEWED = {
-    status: 'renewed' as const,
-    accountId: INTERACTIVE_ID,
-    reason: 'the harness renewed it',
-    ran: true,
-  };
-
-  it('should renew the identity the named account belongs to, and spawn no sign-in child', async () => {
-    // Arrange — the whole point: a credential that can rotate itself costs nobody a browser approval.
-    const renewal = new RecordingRenewal(RENEWED);
-    const subject = fixture({ renewal });
-
-    // Act
-    const actual = await subject.service.renew({ accountId: AUTO_ID }, HOST);
-
-    // Assert — the account NAMED is a lane; the credential belongs to the identity, so that is what
-    // was renewed. And nothing was launched here: this service spawns children for sign-ins only.
-    should(renewal.asked).deepEqual([{ identity: 'claude:kirin', members: 2 }]);
-    should(actual).deepEqual({
-      identity: 'claude:kirin',
-      status: 'renewed',
-      accountId: INTERACTIVE_ID,
-      reason: 'the harness renewed it',
-      ran: true,
-    });
-    should(subject.children).be.empty();
-  });
-
-  it('should carry a refusal that chose no home without inventing one', async () => {
-    // Arrange — an identity that authenticates with a key has no home to name, and naming one would
-    // point a reader at an account this renewal never looked at.
-    const renewal = new RecordingRenewal({
-      status: 'not-required',
-      reason: 'this account authenticates with a key, so it has no provider token to renew',
-      ran: false,
-    });
-
-    // Act
-    const actual = await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, HOST);
-
-    // Assert
-    should(actual).not.have.property('accountId');
-    should(actual).match({ status: 'not-required', ran: false });
-  });
-
-  it('should refuse when this daemon was composed with no renewal, rather than failing', async () => {
-    // Arrange — a daemon that decided not to start harness processes for this. A 500 would read as a
-    // broken host; the refusal names the command that always works.
-    const subject = fixture();
-
-    // Act
-    const refusal = await refusalOf(async () => await subject.service.renew({ accountId: INTERACTIVE_ID }, HOST));
-
-    // Assert
-    should(refusal.code).equal('fleet_login_unavailable');
-    should(refusal.message).match(/not configured to renew credentials/u);
-    should(refusal.message).match(/fy fleet login/u);
-  });
-
-  it('should refuse an account this host does not publish', async () => {
-    // Arrange
-    const renewal = new RecordingRenewal(RENEWED);
-
-    // Act
-    const refusal = await refusalOf(
-      async () => await fixture({ renewal }).service.renew({ accountId: '00000000-0000-4000-8000-00000000ffff' }, HOST),
-    );
-
-    // Assert — refused before the renewal was reached at all.
-    should(refusal.code).equal('fleet_login_unavailable');
-    should(renewal.asked).be.empty();
-  });
-
-  it('should refuse an account whose credential is not a login, in words about renewing', async () => {
-    // Arrange — the sign-in's sentence is WRONG here. "There is no sign-in to run for this account"
-    // tells somebody a sign-in failed when none was attempted, and sends them to spend a browser
-    // approval on a credential no login could ever have written.
-    const renewal = new RecordingRenewal(RENEWED);
-
-    // Act
-    const refusal = await refusalOf(
-      async () => await fixture({ renewal }).service.renew({ accountId: KEYED_ID }, HOST),
-    );
-
-    // Assert
-    should(refusal.message).startWith('there is no credential here to renew:');
-    should(refusal.message).not.containEql('sign-in');
-    should(renewal.asked).be.empty();
-  });
-
-  it('should refuse a renewal while a sign-in holds that identity', async () => {
-    // Arrange — two writers for one home. The sign-in is mid-flight and about to write the credential
-    // this renewal would rotate, and the fleet has no cross-process lock over credential writes.
-    const renewal = new RecordingRenewal(RENEWED);
-    const subject = fixture({ renewal });
-    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-
-    // Act
-    const refusal = await refusalOf(async () => await subject.service.renew({ accountId: AUTO_ID }, HOST));
-
-    // Assert
-    should(refusal.code).equal('fleet_login_in_progress');
-    should(renewal.asked).be.empty();
-  });
-
-  it('should refuse when nobody can say where this caller stands', async () => {
-    // Arrange — the safe reading of "I cannot tell" is not "start a harness on the host".
-    const renewal = new RecordingRenewal(RENEWED);
-
-    // Act
-    const refusal = await refusalOf(
-      async () => await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, undefined),
-    );
-
-    // Assert
-    should(refusal.code).equal('fleet_login_unauthorized');
-    should(refusal.message).match(/renew this fleet’s credentials/u);
-    should(renewal.asked).be.empty();
-  });
-
-  it('should ask a governed caller for the operator password, against this one renewal', async () => {
-    // Arrange — a rotation the provider REFUSES makes the harness clear its own tokens, so a caller off
-    // this machine can leave an identity needing a person. Same gate as a start, same budget.
-    const renewal = new RecordingRenewal(RENEWED);
-
-    // Act
-    const refusal = await refusalOf(
-      async () => await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, BROWSER),
-    );
-
-    // Assert — the SENTENCE is the renewal's own. A confirmation prompt that said "sign-in" would be
-    // asking somebody to approve an act nothing was going to perform.
-    should(refusal.code).equal('fleet_login_unauthorized');
-    should(refusal.message).match(/entered against this exact renewal/u);
-    should(refusal.message).match(/^renewing "claude:kirin"/u);
-    should(renewal.asked).be.empty();
-  });
-
-  it('should say a wrong password left the credential unrenewed, never unsigned-in', async () => {
-    // Arrange
-    const renewal = new RecordingRenewal(RENEWED);
-    const subject = fixture({ renewal, confirmChange: async () => ({ kind: 'refused', reason: 'wrong-password' }) });
-
-    // Act
-    const refusal = await refusalOf(
-      async () => await subject.service.renew({ accountId: INTERACTIVE_ID, operatorPassword: 'wrong' }, BROWSER),
-    );
-
-    // Assert
-    should(refusal.message).endWith('so "claude:kirin" was not renewed');
-    should(renewal.asked).be.empty();
-  });
-
-  it('should renew once a governed caller proves the password', async () => {
-    // Arrange
-    const renewal = new RecordingRenewal(RENEWED);
-    const subject = fixture({ renewal });
-
-    // Act
-    const actual = await subject.service.renew(
-      { accountId: INTERACTIVE_ID, operatorPassword: 'the operator password' },
-      BROWSER,
-    );
-
-    // Assert
-    should(actual.status).equal('renewed');
-    should(renewal.asked).have.length(1);
-  });
-
-  it('should never ask a caller the operator’s grants do not govern', async () => {
-    // Arrange — somebody at the machine already has the machine.
-    const renewal = new RecordingRenewal(RENEWED);
-
-    // Act
-    const actual = await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, HOST);
-
-    // Assert
-    should(actual.status).equal('renewed');
-  });
-});
-
 // ─── Claude's own flow, end to end ────────────────────────────────────────────────────────────────
 
 describe('the Claude leg', () => {
-  it('should launch the clicked account’s own wrapper with Claude’s own argv', async () => {
+  it('should prepare the store, then launch the located harness with Claude’s own argv', async () => {
     // Arrange
     const subject = fixture();
 
     // Act
-    await subject.service.start({ accountId: AUTO_ID }, HOST);
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
-    // Assert — THE AUTO LANE WAS NAMED AND THE AUTO LANE IS LAUNCHED. This assertion used to demand
-    // `/fleet/bin/claude-kirin`, the interactive sibling, and that is the defect: the credential a
-    // harness writes goes into the home of the wrapper that was launched, so signing one account in
-    // authenticated a different one. An interactive lane is still preferred for an account whose own
-    // lane cannot show a browser — see the sibling case below — but preferring a wrapper was never a
-    // reason to change which account ends up holding the credential.
-    should(child.spec.command).deepEqual(['/fleet/bin/claude-auto', 'auth', 'login', '--claudeai']);
+    // Assert
+    should(subject.prepared).deepEqual([CLAUDE_CREDENTIAL]);
+    should(child.spec.command).deepEqual(['/usr/local/bin/claude', 'auth', 'login', '--claudeai']);
   });
 
-  it('should strip the caller’s own provider credential from the child’s environment', async () => {
+  it('should strip the caller’s own login from the environment, then give the child the store’s', async () => {
     // Arrange
     const subject = fixture();
 
     // Act
-    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
-    // Assert
-    should(child.spec.environment).not.have.property('ANTHROPIC_API_KEY');
-    should(child.spec.environment).have.property('PATH', '/usr/bin');
-  });
-
-  it('should keep a credential variable the wrapper deliberately reads from its surroundings', async () => {
-    // Arrange — the wrapper renders `export OPENAI_API_KEY="${OPENAI_API_KEY}"`, which is a supported
-    // and documented shape: the account's credential arrives from the environment at run time. Stripping
-    // it would break the very account somebody is trying to sign in, so the sanitizer is told to keep it.
-    // ASSERTED ON A NAME THE SANITIZER WOULD OTHERWISE REMOVE — `OPENAI_API_KEY` is in
-    // `INHERITED_HARNESS_ENV`, so this case fails if the preserve list is ever passed empty. A case
-    // asserting a name nothing strips would pass either way and prove nothing.
-    const subject = fixture();
-
-    // Act
-    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    const child = await subject.child();
-
-    // Assert
-    should(child.spec.environment).have.property('OPENAI_API_KEY', 'referenced-key-TESTONLY');
-    should(child.spec.environment).not.have.property('ANTHROPIC_API_KEY');
-  });
-
-  it('should keep everything the wrapper says nothing about, rather than launching a bare environment', async () => {
-    // A sanitizer that stripped by allowlist would take `PATH` with it, and the child would fail to find
-    // anything it execs — which looks like a harness with no login rather than a broken launch.
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    const child = await subject.child();
-
-    // Assert
-    should(child.spec.environment).have.property('PATH', '/usr/bin');
-    should(child.spec.environment).have.property('PROXY_KEY', 'proxy-key');
+    // Assert — the caller's CLAUDE_CONFIG_DIR is replaced, never kept: a sign-in started from inside an
+    // agent session must not authenticate against that session's own login.
+    should(child.spec.environment).deepEqual({
+      PATH: '/usr/bin',
+      PROXY_KEY: 'proxy-key',
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/fleet/credentials/work',
+      CLAUDE_CONFIG_DIR: '/fy/fleet/credentials/work/sign-in',
+    });
   });
 
   it('should publish the URL Claude prints and nothing else', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1160,8 +608,8 @@ describe('the Claude leg', () => {
     should(actual).deepEqual({
       harness: 'claude',
       flowId: 'flow01',
-      accountId: INTERACTIVE_ID,
-      identity: 'claude:kirin',
+      credentialId: CLAUDE_CREDENTIAL,
+      identity: CLAUDE_CREDENTIAL,
       startedAt: '2026-08-19T10:00:00.000Z',
       expiresAt: '2026-08-19T10:10:00.000Z',
       state: 'awaiting-code',
@@ -1172,7 +620,7 @@ describe('the Claude leg', () => {
   it('should write the pasted value to the child’s stdin, exactly once and with a newline', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -1187,20 +635,21 @@ describe('the Claude leg', () => {
   it('should refuse a submission before a link has been published', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    await subject.child();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child();
 
     // Act
     const actual = await subject.service.submit(started.flowId, PASTED_CODE);
 
     // Assert
     should(actual).have.property('outcome', 'refused');
+    should(child.written).be.empty();
   });
 
   it('should report `unconfirmed` when the harness had already stopped reading', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     child.reading = false;
@@ -1212,110 +661,96 @@ describe('the Claude leg', () => {
     should(actual).deepEqual({
       outcome: 'unconfirmed',
       reason:
-        'the harness was no longer reading, so nobody can say whether that code arrived; check whether this account is signed in before trying again',
+        'the harness was no longer reading, so nobody can say whether that code arrived; check whether this login is signed in before trying again',
     });
   });
 
-  it('should fan the fresh credential out to the sibling lane once the harness has written one', async () => {
+  it('should report `unconfirmed` when the child has already exited and the store is still being read', async () => {
+    // Arrange — the window between the child exiting and the store being proved: the flow still
+    // shows a link, and there is no child left to take a code.
+    const proving = held(true);
+    const subject = fixture({
+      target: (id, fallback) => {
+        const target = fallback(id) as StoreTarget;
+        return { ...target, signedIn: () => proving.promise };
+      },
+    });
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    child.exit(0);
+    await subject.settle();
+
+    // Act
+    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+    proving.release();
+    await subject.settle();
+
+    // Assert
+    should(actual).have.property('outcome', 'unconfirmed');
+    should(child.written).be.empty();
+  });
+
+  it('should complete once the store holds a usable login, and carry no per-account outcomes', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, PASTED_CODE);
 
     // Act — the harness writes its own store, then exits.
-    subject.store.signIn(INTERACTIVE_ID);
+    subject.logins.add(CLAUDE_CREDENTIAL);
     child.exit(0);
     await subject.settle();
     const actual = await subject.service.status(started.flowId);
 
     // Assert
-    should(actual).have.property('state', 'complete');
-    should(actual)
-      .have.property('accounts')
-      .deepEqual([
-        { accountId: INTERACTIVE_ID, status: 'logged-in' },
-        { accountId: AUTO_ID, status: 'synced' },
-      ]);
-    should(subject.store.clones).deepEqual([`clone claude ${INTERACTIVE_ID} -> ${AUTO_ID}`]);
-  });
-
-  it('should still sign the account in when a sibling holds a credential, because a revoked one reads as usable', async () => {
-    // Arrange — a sibling home holds something a local read calls usable. That is ALSO what a revoked
-    // token looks like from here: it has an access token and its expiry is in the future. This used to
-    // be answered with a copy and no child at all, which meant pressing Sign in on the one account the
-    // provider was rejecting reported `synced` and signed nothing in.
-    const store = new RecordingStore(new Set([AUTO_ID]));
-    const subject = fixture({ store });
-
-    // Act
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    const child = await subject.child();
-    child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
-    subject.store.signIn(INTERACTIVE_ID);
-    child.exit(0);
-    await subject.settle();
-    const actual = await subject.service.status(started.flowId);
-
-    // Assert — a sign-in was actually run, and the account somebody pressed the button on is the one
-    // reported signed in.
-    should(subject.children).have.length(1);
-    should(actual).have.property('state', 'complete');
-    should(actual)
-      .have.property('accounts')
-      .deepEqual([
-        { accountId: INTERACTIVE_ID, status: 'logged-in' },
-        { accountId: AUTO_ID, status: 'usable' },
-      ]);
-  });
-
-  it('should report the clicked account signed in, not its sibling', async () => {
-    // Arrange
-    const subject = fixture();
-    const started = await subject.service.start({ accountId: AUTO_ID }, HOST);
-    const child = await subject.child();
-    child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
-
-    // Act — the harness writes into the home of the wrapper that was launched, which is now the auto
-    // lane’s own.
-    subject.store.signIn(AUTO_ID);
-    child.exit(0);
-    await subject.settle();
-    const actual = await subject.service.status(started.flowId);
-
-    // Assert
-    should(actual)
-      .have.property('accounts')
-      .deepEqual([
-        { accountId: INTERACTIVE_ID, status: 'synced' },
-        { accountId: AUTO_ID, status: 'logged-in' },
-      ]);
-    should(subject.store.clones).deepEqual([`clone claude ${AUTO_ID} -> ${INTERACTIVE_ID}`]);
+    should(actual).deepEqual({
+      harness: 'claude',
+      flowId: 'flow01',
+      credentialId: CLAUDE_CREDENTIAL,
+      identity: CLAUDE_CREDENTIAL,
+      startedAt: '2026-08-19T10:00:00.000Z',
+      expiresAt: '2026-08-19T10:10:00.000Z',
+      state: 'complete',
+    });
+    should(actual).not.have.property('accounts');
+    should(subject.timers[0]).have.property('disarmed', true);
   });
 });
 
 // ─── Codex's own flow, end to end ─────────────────────────────────────────────────────────────────
 
 describe('the Codex leg', () => {
-  it('should launch the account’s own wrapper with the device-grant argv', async () => {
+  it('should launch the located harness with the store arguments first, then the device-grant argv', async () => {
     // Arrange
     const subject = fixture();
 
     // Act
-    await subject.service.start({ accountId: CODEX_ID }, HOST);
+    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Assert
-    should(child.spec.command).deepEqual(['/fleet/bin/codex-kirin', 'login', '--device-auth']);
+    should(child.spec.command).deepEqual([
+      '/usr/local/bin/codex',
+      '-c',
+      'cli_auth_credentials_store="file"',
+      'login',
+      '--device-auth',
+    ]);
+    // Sanitized of the caller's provider credentials, then given the store's.
+    should(child.spec.environment).deepEqual({
+      PATH: '/usr/bin',
+      PROXY_KEY: 'proxy-key',
+      CODEX_HOME: '/fy/fleet/credentials/team',
+    });
   });
 
   it('should publish nothing until BOTH the link and the code have arrived', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1335,7 +770,7 @@ describe('the Codex leg', () => {
   it('should refuse every submission, because a device grant has no return trip', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -1353,59 +788,47 @@ describe('the Codex leg', () => {
   it('should complete when the child finishes its own polling', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
     // Act
-    subject.store.signIn(CODEX_ID);
+    subject.logins.add(CODEX_CREDENTIAL);
     child.exit(0);
     await subject.settle();
     const actual = await subject.service.status(started.flowId);
 
     // Assert
-    should(actual).have.property('state', 'complete');
-    should(actual)
-      .have.property('accounts')
-      .deepEqual([{ accountId: CODEX_ID, status: 'logged-in' }]);
+    should(actual).match({ harness: 'codex', state: 'complete', credentialId: CODEX_CREDENTIAL });
+    should(actual).not.have.property('accounts');
   });
 });
 
 // ─── failing as itself ────────────────────────────────────────────────────────────────────────────
 
 describe('a login that cannot run', () => {
-  it('should refuse a missing wrapper by naming apply, and must not fall back to PATH', async () => {
+  it('should fail in words when the harness is not installed, launching nothing', async () => {
     // Arrange
-    const subject = fixture({ wrapperMissing: true });
+    const subject = fixture({ locate: () => undefined });
 
     // Act
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
-    const actual = await subject.service.status(started.flowId);
 
     // Assert
     should(subject.children).be.empty();
-    should(actual).have.property('state', 'failed');
-    should(actual)
-      .have.property('reason')
-      .match(/run `fy fleet apply` first/u);
+    should(subject.prepared).be.empty();
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the claude command is not installed on this machine, so there is nothing to sign in with',
+    });
   });
 
-  it('should end as itself when it recognised nothing it could publish', async () => {
+  it('should end as itself when it recognised nothing it could publish, naming the host command', async () => {
     // Arrange — the outcome §4.5 rule 2 demands when a third party changes its output, or when an
     // undocumented flag such as `codex login --device-auth` disappears.
-    //
-    // THIS IS ALSO THE MESSAGE A SEPARATE DEFECT ARRIVES UNDER, and the wording asserted below is the
-    // wording that misleads. A generated wrapper renders `exec <binary> <account flags> "$@"`
-    // (`packages/fleet/src/lib/wrappers.ts:259`), so an account's declared session flags precede the
-    // login subcommand; measured at codex-cli 0.145.0, `codex --full-auto login --device-auth` exits with
-    // `unexpected argument '--full-auto' found` and prints neither a URL nor a code, which lands exactly
-    // here. The reason then blames this host's codex when the cause is Ferretry's own wrapper, and the
-    // remedy it names — `fy fleet login` — composes the same flags and fails the same way. See
-    // `docs/design/harness-login.md` (GAP: the wrapper prepends session flags to a login subcommand) and
-    // `packages/fleet/tests/integration/process-login.test.ts`, which pins the composed argv.
     const subject = fixture();
-    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1415,49 +838,107 @@ describe('a login that cannot run', () => {
     const actual = await subject.service.status(started.flowId);
 
     // Assert
-    should(actual).have.property('state', 'failed');
-    should(actual)
-      .have.property('reason')
-      .match(/did not offer a sign-in that can be driven from a browser/u);
-    should(actual).have.property('remedy', 'sign this account in on the host with `fy fleet login`');
+    should(actual).match({
+      state: 'failed',
+      reason: "this host's codex did not offer a sign-in that can be driven from a browser",
+      remedy: `sign this login in on the host with \`fy credential signin ${CODEX_CREDENTIAL}\``,
+    });
   });
 
-  it('should carry the harness’s own non-zero exit through as a per-account failure', async () => {
+  it('should say so even when the child exits cleanly having offered nothing', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child();
+
+    // Act
+    child.exit(0);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: "this host's claude did not offer a sign-in that can be driven from a browser",
+    });
+  });
+
+  it('should fail with the exit code when the child exits badly after publishing', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
     // Act
-    child.exit(1);
+    child.exit(2);
     await subject.settle();
-    const actual = await subject.service.status(started.flowId);
 
-    // Assert — the flow FINISHED and every account says what happened, which carries more than a bare
-    // failed flow would: `FleetLoginService` decided these, not this mount.
-    should(actual).have.property('state', 'complete');
-    should(actual)
-      .have.property('accounts')
-      .match([{ status: 'failed', message: 'the sign-in exited with code 1' }, { status: 'failed' }]);
+    // Assert
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the sign-in exited with code 2',
+      remedy: `sign this login in on the host with \`fy credential signin ${CLAUDE_CREDENTIAL}\``,
+    });
   });
 
-  it('should report a login that exits zero but leaves nobody signed in as a failure', async () => {
+  it('should report a login that exits zero but leaves the store without a usable login as a failure', async () => {
     // Arrange — the provider approval was abandoned half way.
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
     // Act
     child.exit(0);
     await subject.settle();
-    const actual = await subject.service.status(started.flowId);
 
     // Assert
-    should(actual)
-      .have.property('accounts')
-      .match([{ status: 'failed' }, { status: 'failed' }]);
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the sign-in finished, but no usable login was written for this credential',
+    });
+  });
+
+  it('should record a preparation failure on the flow rather than reject', async () => {
+    // Arrange
+    const subject = fixture({
+      target: () =>
+        storeTarget({
+          prepare: async () => {
+            throw new Error('the store directory could not be created');
+          },
+        }),
+    });
+
+    // Act
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.children).be.empty();
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the store directory could not be created',
+    });
+  });
+
+  it('should fall back to a plain sentence for a failure with no message', async () => {
+    // Arrange
+    const subject = fixture({
+      target: () =>
+        storeTarget({
+          prepare: async () => {
+            throw new Error('');
+          },
+        }),
+    });
+
+    // Act
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({ state: 'failed', reason: 'the sign-in failed' });
   });
 });
 
@@ -1469,7 +950,7 @@ describe('a login’s lifetime', () => {
     const subject = fixture({ windowMinutes: 3 });
 
     // Act
-    const actual = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(actual.expiresAt).equal('2026-08-19T10:03:00.000Z');
@@ -1477,11 +958,8 @@ describe('a login’s lifetime', () => {
   });
 
   it('should bound a flow to the declared default window when a caller names none', async () => {
-    // Arrange
-    const subject = fixture();
-
     // Act
-    const actual = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const actual = await fixture().service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(Date.parse(actual.expiresAt) - Date.parse(actual.startedAt)).equal(HARNESS_LOGIN_WINDOW_MINUTES * 60_000);
@@ -1490,7 +968,7 @@ describe('a login’s lifetime', () => {
   it('should end a flow nobody polled, and kill its child', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act — the deadline fires with nobody reading.
@@ -1508,7 +986,7 @@ describe('a login’s lifetime', () => {
     // Arrange — a lazy check as well as a timer, because a suspended host wakes up with both.
     let now = NOW;
     const subject = fixture({ now: () => now });
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     await subject.child();
 
     // Act
@@ -1517,12 +995,29 @@ describe('a login’s lifetime', () => {
 
     // Assert
     should(actual).have.property('state', 'failed');
+    should(actual).have.property('reason', 'this sign-in ran out of time before it finished');
+  });
+
+  it('should keep the first ending when a closed window is read again', async () => {
+    // Arrange
+    let now = NOW;
+    const subject = fixture({ now: () => now });
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.child();
+    await subject.service.cancel(started.flowId);
+
+    // Act
+    now = NOW + 600_001;
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).have.property('reason', 'this sign-in was cancelled');
   });
 
   it('should cancel on request, kill the child, and disarm the deadline', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1536,25 +1031,36 @@ describe('a login’s lifetime', () => {
     should(subject.timers[0]).have.property('disarmed', true);
   });
 
-  it('should launch no child when the flow is cancelled while its wrapper is being read', async () => {
-    // Arrange — the wrapper read is held open, which is where a cancel can land between the
-    // "has this ended" check and the spawn.
-    let release: (() => void) | undefined;
-    const subject = fixture({
-      readWrapper: async () => {
-        await new Promise<void>(resolve => {
-          release = resolve;
-        });
-        return WRAPPER_SCRIPT;
-      },
-    });
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+  it('should keep a cancelled ending when the killed child exits afterwards', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+
+    // Act
+    await subject.service.cancel(started.flowId);
     await subject.settle();
-    should(release).be.a.Function();
+
+    // Assert
+    should(child.killed).be.true();
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'this sign-in was cancelled',
+    });
+  });
+
+  it('should spawn nothing when the flow is cancelled while its store is being prepared', async () => {
+    // Arrange — the preparation is held open, which is where a cancel can land between the
+    // "has this ended" check and the spawn.
+    const preparing = held(undefined);
+    const subject = fixture({ target: () => storeTarget({ prepare: () => preparing.promise }) });
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.settle();
 
     // Act
     const actual = await subject.service.cancel(started.flowId);
-    release?.();
+    preparing.release();
     await subject.settle();
 
     // Assert — a child launched now would have nobody left to kill it.
@@ -1563,23 +1069,16 @@ describe('a login’s lifetime', () => {
     should(await subject.service.status(started.flowId)).have.property('reason', 'this sign-in was cancelled');
   });
 
-  it('should launch no child when the window closes while its wrapper is being read', async () => {
+  it('should spawn nothing when the window closes while its store is being prepared', async () => {
     // Arrange
-    let release: (() => void) | undefined;
-    const subject = fixture({
-      readWrapper: async () => {
-        await new Promise<void>(resolve => {
-          release = resolve;
-        });
-        return WRAPPER_SCRIPT;
-      },
-    });
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const preparing = held(undefined);
+    const subject = fixture({ target: () => storeTarget({ prepare: () => preparing.promise }) });
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
     // Act
     subject.timers[0]?.run();
-    release?.();
+    preparing.release();
     await subject.settle();
 
     // Assert
@@ -1587,15 +1086,38 @@ describe('a login’s lifetime', () => {
     should(await subject.service.status(started.flowId)).have.property('state', 'failed');
   });
 
+  it('should keep a cancelled ending when the store is proved after the cancel', async () => {
+    // Arrange — the child exited and the store is being read when the person cancels. A usable
+    // login turning up afterwards must not overwrite the ending they chose.
+    const proving = held(true);
+    const subject = fixture({ target: () => storeTarget({ signedIn: () => proving.promise }) });
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    child.exit(0);
+    await subject.settle();
+
+    // Act
+    await subject.service.cancel(started.flowId);
+    proving.release();
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'this sign-in was cancelled',
+    });
+  });
+
   it('should let a new sign-in start once the previous one is cancelled', async () => {
     // Arrange
     const subject = fixture();
-    const first = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const first = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     await subject.service.cancel(first.flowId);
     await subject.settle();
 
     // Act
-    const actual = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(actual).have.property('flowId', 'flow02');
@@ -1604,7 +1126,7 @@ describe('a login’s lifetime', () => {
   it('should conflict rather than refuse when a cancelled flow is submitted to', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.cancel(started.flowId);
@@ -1622,22 +1144,19 @@ describe('a login’s lifetime', () => {
 
     // Assert
     should(actual.code).equal('fleet_login_unknown');
-    should(actual.message).match(/may have finished or run out of time/u);
+    should(actual.message).equal(
+      'no sign-in "flow-nobody-minted" is running on this host; it may have finished or run out of time',
+    );
   });
 
-  /**
-   * Run one whole sign-in to a settled flow, the way a person would.
-   *
-   * A flow only settles now that a child has actually run: pressing Sign in signs in, so there is no
-   * longer a shape where a flow completes with nothing launched. Retention is about settled flows, and
-   * this is the shortest honest way to make one.
-   */
+  /** Run one whole sign-in to a settled flow, the way a person would. */
   const settledFlow = async (subject: Fixture): Promise<string> => {
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    const child = await subject.child(subject.children.length);
+    const index = subject.children.length;
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child(index);
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, PASTED_CODE);
-    subject.store.signIn(INTERACTIVE_ID);
+    subject.logins.add(CLAUDE_CREDENTIAL);
     child.exit(0);
     await subject.settle();
     return started.flowId;
@@ -1645,7 +1164,7 @@ describe('a login’s lifetime', () => {
 
   it('should keep a finished flow readable so its own poller learns the outcome', async () => {
     // Arrange
-    const subject = fixture({ store: new RecordingStore(new Set([AUTO_ID])) });
+    const subject = fixture();
     const started = await settledFlow(subject);
 
     // Act — several later flows, so retention is exercised rather than assumed.
@@ -1659,43 +1178,43 @@ describe('a login’s lifetime', () => {
 
   it('should forget the oldest finished flows rather than growing without bound', async () => {
     // Arrange
-    const subject = fixture({ store: new RecordingStore(new Set([AUTO_ID])) });
-    const first = { flowId: await settledFlow(subject) };
+    const subject = fixture();
+    const first = await settledFlow(subject);
 
     // Act — ten more, all settling, which is more than the retention window.
     for (let index = 0; index < 10; index += 1) await settledFlow(subject);
 
     // Assert
-    should((await refusalOf(async () => subject.service.status(first.flowId))).code).equal('fleet_login_unknown');
+    should((await refusalOf(async () => subject.service.status(first))).code).equal('fleet_login_unknown');
   });
 });
 
 // ─── the property the whole feature rests on ──────────────────────────────────────────────────────
 
 describe('what the daemon holds', () => {
-  it('should hold no token after a successful sign-in — asserted on what is stored, not on a log line', async () => {
+  it('should hold no token after a successful sign-in — asserted on what is answered, not on a log line', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act — the child prints something shaped exactly like the credential it writes, and the person
     // brings a code back. Both then have to be absent from everything a caller can read.
     child.emit(CLAUDE_URL_LINE, CREDENTIAL_SHAPED_LINE, 'Paste code here if prompted > ');
-    await subject.service.submit(started.flowId, PASTED_CODE);
-    subject.store.signIn(INTERACTIVE_ID);
+    const submitted = await subject.service.submit(started.flowId, PASTED_CODE);
+    subject.logins.add(CLAUDE_CREDENTIAL);
     child.exit(0);
     await subject.settle();
 
     // Assert
-    const answers = await everyAnswer(subject.service, started.flowId);
+    const answers = JSON.stringify([submitted, await subject.service.status(started.flowId)]);
     should(answers).not.match(/sk-ant-oat01-TESTONLY/u);
     should(answers).not.match(/rt-TESTONLY/u);
     should(answers).not.match(/claudeAiOauth/u);
     should(answers).not.match(new RegExp(PASTED_CODE, 'u'));
   });
 
-  it('should write nothing to disk while signing an account in', async () => {
+  it('should write nothing to disk while signing a credential in', async () => {
     // Arrange — a real state home, walked before and after. The service must add no cache, no copy and
     // no journal: if a future change starts storing anything, this is the test that says so.
     const root = await mkdtemp(join(tmpdir(), 'fy-harness-login-store-'));
@@ -1705,13 +1224,13 @@ describe('what the daemon holds', () => {
     const before = await tree(root);
 
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
     child.emit(CLAUDE_URL_LINE, CREDENTIAL_SHAPED_LINE);
     await subject.service.submit(started.flowId, PASTED_CODE);
-    subject.store.signIn(INTERACTIVE_ID);
+    subject.logins.add(CLAUDE_CREDENTIAL);
     child.exit(0);
     await subject.settle();
 
@@ -1719,27 +1238,10 @@ describe('what the daemon holds', () => {
     should(await tree(root)).deepEqual(before);
   });
 
-  it('should reach the credential store only through calls that cannot yield material', async () => {
-    // Arrange — `FleetCredentialStore` has exactly two methods and neither returns bytes. The recording
-    // here is the behavioural half: every call this service made is a classification or a copy.
-    const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    const child = await subject.child();
-    child.emit(CLAUDE_URL_LINE);
-    subject.store.signIn(INTERACTIVE_ID);
-    child.exit(0);
-    await subject.settle();
-    should(started.flowId).equal('flow01');
-
-    // Assert
-    should(subject.store.calls.every(call => call.startsWith('read '))).be.true();
-    should(subject.store.clones.every(call => call.startsWith('clone '))).be.true();
-  });
-
   it('should publish no unrecognised output, even a line that looks like an answer', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1764,79 +1266,26 @@ async function tree(root: string): Promise<readonly string[]> {
   return files.sort();
 }
 
-// ─── the refusal wording ──────────────────────────────────────────────────────────────────────────
-
-describe('describeSource', () => {
-  it('should name the file and the variable for a token file', () => {
-    should(describeSource({ source: 'token-file', variable: 'ANTHROPIC_API_KEY', path: '/etc/s.sh' })).match(
-      /ANTHROPIC_API_KEY in \/etc\/s\.sh/u,
-    );
-  });
-
-  it('should name the variable for an environment credential', () => {
-    should(describeSource({ source: 'environment', variable: 'OPENAI_API_KEY' })).match(
-      /OPENAI_API_KEY environment variable/u,
-    );
-  });
-
-  it('should say the configuration carries it for a configured value', () => {
-    should(describeSource({ source: 'configured-value', variable: 'ANTHROPIC_API_KEY' })).match(
-      /as the fleet configuration sets it/u,
-    );
-  });
-
-  it('should admit that nothing declares an undeclared source', () => {
-    should(describeSource({ source: 'undeclared' })).match(/nothing in this fleet/u);
-  });
-
-  it('should name the store and the profile for a credential a profile supplies', () => {
-    should(describeSource({ source: 'secret-store', variable: 'ANTHROPIC_API_KEY', secrets: ['WORK_KEY'] })).match(
-      /a profile takes from this daemon's secret store \(secret WORK_KEY\)/u,
-    );
-  });
-
-  it('should pluralise when one variable is composed from two secrets', () => {
-    should(describeSource({ source: 'secret-store', variable: 'AUTH', secrets: ['SCHEME', 'WORK_KEY'] })).match(
-      /secrets SCHEME, WORK_KEY/u,
-    );
-  });
-
-  it('should be total over the union, including the source a refusal never describes', () => {
-    should(describeSource({ source: 'interactive-login' })).match(/written by the harness/u);
-  });
-});
-
 // ─── the routes ───────────────────────────────────────────────────────────────────────────────────
 
 describe('the harness login routes', () => {
   const dispatcherFor = (subject: Fixture, guard = GRANTED) =>
     new ApiDispatcher(new ApiRouter(harnessLoginRoutes(subject.service)), CREDENTIALS, guard);
 
-  it('should serve the readiness read to a caller with fleet.use', async () => {
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    const actual = await dispatcherFor(subject).dispatch(request({ path: '/v1/fleet/login', headers: human }));
-
-    // Assert
-    should(actual.status).equal(200);
-    should(jsonBody(actual)).have.property('identities');
-  });
+  const startRequest = (body: Record<string, unknown>, headers: Record<string, string> = human) =>
+    request({
+      method: 'POST',
+      path: '/v1/fleet/login',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
   it('should refuse a governed caller that starts a sign-in with no password', async () => {
     // Arrange
     const subject = fixture();
 
     // Act
-    const actual = await dispatcherFor(subject, GOVERNED).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/login',
-        headers: { ...human, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
-      }),
-    );
+    const actual = await dispatcherFor(subject, GOVERNED).dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }));
 
     // Assert
     should(actual.status).equal(409);
@@ -1850,33 +1299,46 @@ describe('the harness login routes', () => {
 
     // Act
     const actual = await dispatcherFor(subject, GOVERNED).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/login',
-        headers: { ...human, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID, operatorPassword: 'the operator password' }),
-      }),
+      startRequest({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' }),
     );
 
     // Assert
     should(actual.status).equal(200);
-    should(jsonBody(actual)).have.property('state', 'starting');
+    should(jsonBody(actual)).match({ state: 'starting', credentialId: CLAUDE_CREDENTIAL });
+  });
+
+  it('should answer 409 with the domain’s own code for a credential that is not a login', async () => {
+    // Arrange
+    const subject = fixture();
+
+    // Act
+    const actual = await dispatcherFor(subject).dispatch(startRequest({ credentialId: ENVIRONMENT_CREDENTIAL }));
+
+    // Assert
+    should(actual.status).equal(409);
+    should(jsonBody(actual)).match({ code: 'fleet_login_unavailable', error: ENVIRONMENT_REASON });
+  });
+
+  it('should let a failure that is not a login refusal through as a server error', async () => {
+    // Arrange
+    const subject = fixture({
+      target: () => {
+        throw new Error('the configuration could not be read');
+      },
+    });
+
+    // Act
+    const actual = await dispatcherFor(subject).dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }));
+
+    // Assert
+    should(actual.status).equal(500);
   });
 
   it('should read one flow, forward one value, and end one flow', async () => {
     // Arrange
     const subject = fixture();
     const dispatcher = dispatcherFor(subject);
-    const started = jsonBody(
-      await dispatcher.dispatch(
-        request({
-          method: 'POST',
-          path: '/v1/fleet/login',
-          headers: { ...human, 'content-type': 'application/json' },
-          body: JSON.stringify({ accountId: INTERACTIVE_ID }),
-        }),
-      ),
-    );
+    const started = jsonBody(await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL })));
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -1905,11 +1367,8 @@ describe('the harness login routes', () => {
    * The caller this whole feature exists for: a PAIRED BROWSER, which holds a device credential and
    * never the admin token.
    *
-   * Every case above presents the host's own admin bearer, which proves the route is mounted and says
-   * nothing about the credential a browser has. `minimum: 'operator'` is what admits a device — an
-   * `admin-token` minimum would 403 the browser on every one of these five paths, and a browser is
-   * always a paired device, so the feature would be reachable from nowhere but the machine it is meant
-   * to be driven from. That is not a hypothetical: it is the recorded reason the minimum is `operator`.
+   * `minimum: 'operator'` is what admits a device — an `admin-token` minimum would 403 the browser on
+   * every one of these paths, and a browser is always a paired device.
    */
   const paired = {
     ...CREDENTIALS,
@@ -1920,26 +1379,18 @@ describe('the harness login routes', () => {
   const pairedDispatcher = (subject: Fixture, guard = GRANTED) =>
     new ApiDispatcher(new ApiRouter(harnessLoginRoutes(subject.service)), paired, guard);
 
-  it('should let a paired browser reach every one of the five login paths', async () => {
+  it('should let a paired browser reach every one of the four login paths', async () => {
     // Arrange
     const subject = fixture();
     const dispatcher = pairedDispatcher(subject);
-    const started = jsonBody(
-      await dispatcher.dispatch(
-        request({
-          method: 'POST',
-          path: '/v1/fleet/login',
-          headers: { ...browser, 'content-type': 'application/json' },
-          body: JSON.stringify({ accountId: INTERACTIVE_ID }),
-        }),
-      ),
-    );
+    const start = await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }, browser));
+    const started = jsonBody(start);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
     // Act
     const statuses = [
-      await dispatcher.dispatch(request({ path: '/v1/fleet/login', headers: browser })),
+      start,
       await dispatcher.dispatch(request({ path: `/v1/fleet/login/${started.flowId}`, headers: browser })),
       await dispatcher.dispatch(
         request({
@@ -1954,31 +1405,30 @@ describe('the harness login routes', () => {
       ),
     ].map(response => response.status);
 
-    // Assert — the start above already answered, so five paths served a device credential.
+    // Assert
     should(started).have.property('state', 'starting');
     should(statuses).deepEqual([200, 200, 200, 200]);
   });
 
   it('should refuse a warden token on every login path, because a login is not a remedy', async () => {
-    // The other half of `minimum: 'operator'`, and the half a passing device case cannot show: a warden
-    // credential is scoped to what an assignment allows and re-pointing a fleet at another provider
-    // account is not one of those things.
+    // A warden credential is scoped to what an assignment allows, and re-pointing a credential at
+    // another provider account is not one of those things.
     // Arrange
     const subject = fixture();
     const dispatcher = pairedDispatcher(subject);
 
     // Act
     const statuses = [
-      await dispatcher.dispatch(request({ path: '/v1/fleet/login', headers: wardenCaller })),
+      await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }, wardenCaller)),
+      await dispatcher.dispatch(request({ path: '/v1/fleet/login/flow01', headers: wardenCaller })),
       await dispatcher.dispatch(
         request({
           method: 'POST',
-          path: '/v1/fleet/login',
+          path: '/v1/fleet/login/flow01',
           headers: { ...wardenCaller, 'content-type': 'application/json' },
-          body: JSON.stringify({ accountId: INTERACTIVE_ID }),
+          body: JSON.stringify({ code: PASTED_CODE }),
         }),
       ),
-      await dispatcher.dispatch(request({ path: '/v1/fleet/login/flow01', headers: wardenCaller })),
       await dispatcher.dispatch(request({ method: 'DELETE', path: '/v1/fleet/login/flow01', headers: wardenCaller })),
     ].map(response => response.status);
 
@@ -1992,185 +1442,60 @@ describe('the harness login routes', () => {
     const subject = fixture();
 
     // Act
-    const actual = await pairedDispatcher(subject).dispatch(request({ path: '/v1/fleet/login' }));
+    const actual = await pairedDispatcher(subject).dispatch(request({ path: '/v1/fleet/login/flow01' }));
 
     // Assert — 401, not 403: nothing presented a credential, so there is no caller to refuse.
     should(actual.status).equal(401);
   });
 
-  it('should still serve the readiness READ to a caller whose configure axis the operator switched off', async () => {
-    // The one route on this table that is `fleet.use`. An operator who turned `configure` off has said
-    // "nothing on this machine may be re-provisioned from off it", not "nobody may see which accounts
-    // need signing in" — and a surface that could not read it would have to grey a control with no
-    // sentence beside it, which is the dead end this feature removes.
+  it('should refuse a start from a caller whose configure axis the operator switched off', async () => {
     // Arrange
-    const subject = fixture({ store: new RecordingStore() });
-    const dispatcher = pairedDispatcher(subject, NARROWED);
+    const subject = fixture();
 
     // Act
-    const read = await dispatcher.dispatch(request({ path: '/v1/fleet/login', headers: browser }));
-    const start = await dispatcher.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/login',
-        headers: { ...browser, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID, operatorPassword: 'the operator password' }),
-      }),
+    const actual = await pairedDispatcher(subject, NARROWED).dispatch(
+      startRequest({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' }, browser),
     );
 
     // Assert
-    should(read.status).equal(200);
-    should(start.status).equal(403);
-    should(jsonBody(start)).have.property('code', 'grant_not_granted');
+    should(actual.status).equal(403);
+    should(jsonBody(actual)).have.property('code', 'grant_not_granted');
+    should(subject.resolved).be.empty();
     should(subject.children).be.empty();
   });
 
   it('should refuse a flow id the path cannot carry', async () => {
-    // Arrange
-    const subject = fixture();
-
     // Act
-    const actual = await dispatcherFor(subject).dispatch(request({ path: '/v1/fleet/login/%2F', headers: human }));
+    const actual = await dispatcherFor(fixture()).dispatch(request({ path: '/v1/fleet/login/%2F', headers: human }));
 
-    // Assert — 400 rather than 404: the route matched and the id in it is unusable as written, which is
-    // a different thing from "there is no such route" and sends a reader somewhere different.
+    // Assert — 400 rather than 404: the route matched and the id in it is unusable as written.
     should(actual.status).equal(400);
   });
 
   it('should answer 409 with the domain’s own code for a flow nobody minted', async () => {
-    // Arrange
-    const subject = fixture();
-
     // Act
-    const actual = await dispatcherFor(subject).dispatch(request({ path: '/v1/fleet/login/flow99', headers: human }));
+    const actual = await dispatcherFor(fixture()).dispatch(request({ path: '/v1/fleet/login/flow99', headers: human }));
 
     // Assert
     should(actual.status).equal(409);
     should(jsonBody(actual)).have.property('code', 'fleet_login_unknown');
   });
 
-  it('should renew through its own address, for the paired browser this exists for', async () => {
-    // NOT under `/v1/fleet/login/`: every path there is `:flowId`, so a literal segment beside it would
-    // be read as the id of a flow nobody minted. And the caller is a DEVICE, because a browser is
-    // always a paired one — an admin-token minimum would 403 the only surface that can press this.
-    // Arrange
-    const subject = fixture({
-      renewal: new RecordingRenewal({ status: 'renewed', accountId: INTERACTIVE_ID, ran: true }),
-    });
-
-    // Act
-    const actual = await pairedDispatcher(subject).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/renew',
-        headers: { ...browser, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
-      }),
-    );
-
-    // Assert — and no child: this route drives no sign-in.
-    should(actual.status).equal(200);
-    should(jsonBody(actual)).match({ identity: 'claude:kirin', status: 'renewed', ran: true });
-    should(subject.children).be.empty();
-  });
-
-  it('should answer 200 for a renewal that correctly fired nothing', async () => {
-    // THE CASE A REVIEWER WANTS TO MAKE AN ERROR. `not-expired` is the gate working: a rotating refresh
-    // token was not spent because the identity already holds a valid access token. A `409` here would
-    // teach every surface to show a failure for the outcome the gate exists to produce.
-    // Arrange
-    const subject = fixture({
-      renewal: new RecordingRenewal({
-        status: 'not-expired',
-        accountId: INTERACTIVE_ID,
-        reason: 'a home in this identity already holds a valid access token',
-        ran: false,
-      }),
-    });
-
-    // Act
-    const actual = await dispatcherFor(subject).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/renew',
-        headers: { ...human, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
-      }),
-    );
-
-    // Assert
-    should(actual.status).equal(200);
-    should(jsonBody(actual)).match({ status: 'not-expired', ran: false });
-  });
-
-  it('should carry the service’s own refusal code rather than a 500, when nothing was composed to renew', async () => {
-    // Arrange — the default fixture is composed with NO renewal, which is the shape the option's
-    // optionality exists to produce.
-    const subject = fixture();
-
-    // Act
-    const actual = await dispatcherFor(subject).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/renew',
-        headers: { ...human, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
-      }),
-    );
-
-    // Assert
-    should(actual.status).equal(409);
-    should(jsonBody(actual)).have.property('code', 'fleet_login_unavailable');
-  });
-
-  it('should refuse a warden token on the renew path too, and a body that names anything but an account', async () => {
-    // The renewal's half of `minimum: 'operator'`, plus the parse: a request that could name a home, a
-    // wrapper or a command is a request that could point a rotation somewhere nobody authorized.
-    // Arrange
-    const renewal = new RecordingRenewal({ status: 'renewed', accountId: INTERACTIVE_ID, ran: true });
-    const subject = fixture({ renewal });
-    const dispatcher = pairedDispatcher(subject);
-
-    // Act
-    const warden = await dispatcher.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/renew',
-        headers: { ...wardenCaller, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
-      }),
-    );
-    const overreaching = await dispatcher.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/renew',
-        headers: { ...browser, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID, home: '/home/somebody/.claude' }),
-      }),
-    );
-
-    // Assert
-    should(warden.status).equal(403);
-    should(overreaching.status).equal(400);
-    should(renewal.asked).be.empty();
-  });
-
-  it('should refuse a start body that names anything but an account', async () => {
+  it('should refuse a start body that names anything but a credential', async () => {
     // Arrange
     const subject = fixture();
+    const dispatcher = dispatcherFor(subject);
 
     // Act
-    const actual = await dispatcherFor(subject).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/fleet/login',
-        headers: { ...human, 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId: INTERACTIVE_ID, wrapper: '/usr/local/bin/anything' }),
-      }),
-    );
+    const statuses = [
+      await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL, wrapper: '/usr/local/bin/anything' })),
+      // The retired account-scoped shape: there is no account to name any more.
+      await dispatcher.dispatch(startRequest({ accountId: '00000000-0000-4000-8000-000000000001' })),
+    ].map(response => response.status);
 
     // Assert
-    should(actual.status).equal(400);
+    should(statuses).deepEqual([400, 400]);
+    should(subject.resolved).be.empty();
   });
 });
 
@@ -2187,7 +1512,7 @@ describe('a code the harness does not take', () => {
     // Arrange — the defect `docs/design/harness-login.md` §6 records: the write lands, Claude refuses the
     // code on its own output and keeps reading, and the flow used to look exactly as it did before.
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     const submitted = await subject.service.submit(started.flowId, PASTED_CODE);
@@ -2206,7 +1531,7 @@ describe('a code the harness does not take', () => {
   it('should clear the refusal when the next code is sent, and take that code', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, 'first-TESTONLY');
@@ -2224,14 +1549,14 @@ describe('a code the harness does not take', () => {
   it('should publish no child text and no code with the refusal', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, PASTED_CODE);
     child.emit(CLAUDE_INVALID_CODE_LINE);
 
     // Act
-    const actual = await everyAnswer(subject.service, started.flowId);
+    const actual = JSON.stringify(await subject.service.status(started.flowId));
 
     // Assert
     should(actual).not.containEql('Invalid code');
@@ -2241,7 +1566,7 @@ describe('a code the harness does not take', () => {
   it('should end as a rejected code, offering a fresh one, when Claude exits after taking a code', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, PASTED_CODE);
@@ -2251,19 +1576,19 @@ describe('a code the harness does not take', () => {
     await subject.settle();
     const actual = await subject.service.status(started.flowId);
 
-    // Assert — not `fy fleet login`: a fresh code is what this person needs, and they are holding a browser.
+    // Assert — not the host command: a fresh code is what this person needs, and they are holding a browser.
     should(actual).match({
       state: 'failed',
       reason: 'Claude could not sign in with that code',
       lastCode: 'rejected',
     });
-    should(actual).have.property('remedy').not.containEql('fleet login');
+    should(actual).have.property('remedy').not.containEql('credential signin');
   });
 
   it('should say the link expired when the window closes while a person holds it', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -2280,7 +1605,7 @@ describe('a code the harness does not take', () => {
   it('should say a Codex code expired — never that it was rejected — when Codex stops waiting', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -2303,7 +1628,7 @@ describe('a code the harness does not take', () => {
     // Arrange — the lazy path, because a suspended host wakes up with no timer having fired.
     let now = NOW;
     const subject = fixture({ now: () => now });
-    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -2313,419 +1638,5 @@ describe('a code the harness does not take', () => {
 
     // Assert
     should(actual).match({ state: 'failed', lastCode: 'expired' });
-  });
-});
-
-// ─── signing in by credential id ──────────────────────────────────────────────────────────────────
-
-/** A credential's store sign-in, recording what it was asked to do. */
-function storeTarget(
-  overrides: Partial<Omit<Extract<CredentialSignInTarget, { kind: 'store' }>, 'kind'>> & {
-    readonly signedInAnswer?: boolean;
-    readonly prepared?: string[];
-  } = {},
-): Extract<CredentialSignInTarget, { kind: 'store' }> {
-  const prepared = overrides.prepared ?? [];
-  return {
-    kind: 'store',
-    credentialId: overrides.credentialId ?? 'work',
-    harness: overrides.harness ?? 'claude',
-    environment: overrides.environment ?? {
-      CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/fleet/credentials/work',
-      CLAUDE_CONFIG_DIR: '/fy/fleet/credentials/work/sign-in',
-    },
-    arguments: overrides.arguments ?? [],
-    prepare:
-      overrides.prepare ??
-      (async () => {
-        prepared.push('prepared');
-      }),
-    signedIn: overrides.signedIn ?? (async () => overrides.signedInAnswer ?? true),
-  };
-}
-
-const targets = (answer: (id: string) => Promise<CredentialSignInTarget>) => ({ target: answer });
-const LOCATED = (harness: HarnessKind): string => `/usr/local/bin/${harness}`;
-
-describe('harness login by credential id', () => {
-  it('should refuse a caller whose standing cannot be decided', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
-
-    // Act
-    const actual = await refusalOf(() => subject.service.start({ credentialId: 'work' }, undefined));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unauthorized');
-    should(subject.children).have.length(0);
-  });
-
-  it('should refuse in words when this daemon was not composed to sign logins in by id', async () => {
-    // Act
-    const actual = await refusalOf(() => fixture().service.start({ credentialId: 'work' }, HOST));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unavailable');
-    should(actual.message).equal('this daemon is not configured to sign logins in by id');
-  });
-
-  it('should carry a credential refusal through as the sign-in refusal', async () => {
-    // Arrange
-    const subject = fixture({
-      credentialTargets: targets(async id => {
-        throw new FleetCredentialRefusal('fleet_credential_unknown', `no login "${id}" exists on this machine`);
-      }),
-    });
-
-    // Act
-    const actual = await refusalOf(() => subject.service.start({ credentialId: 'ghost' }, HOST));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unavailable');
-    should(actual.message).equal('no login "ghost" exists on this machine');
-  });
-
-  it('should let any other resolution failure through untouched', async () => {
-    // Arrange
-    const subject = fixture({
-      credentialTargets: targets(async () => {
-        throw new Error('the configuration could not be read');
-      }),
-    });
-
-    // Act / Assert
-    await should(subject.service.start({ credentialId: 'work' }, HOST)).be.rejectedWith(
-      'the configuration could not be read',
-    );
-  });
-
-  it('should refuse a credential that has nothing to sign in to, with its reason', async () => {
-    // Arrange
-    const subject = fixture({
-      credentialTargets: targets(async id => ({
-        kind: 'refused',
-        credentialId: id,
-        reason: '"work" is authenticated by its environment variables, so there is nothing to sign in to',
-      })),
-    });
-
-    // Act
-    const actual = await refusalOf(() => subject.service.start({ credentialId: 'work' }, HOST));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unavailable');
-    should(actual.message).equal(
-      '"work" is authenticated by its environment variables, so there is nothing to sign in to',
-    );
-  });
-
-  it('should sign a version-1 credential in through its account, naming both ids on the flow', async () => {
-    // Arrange
-    const subject = fixture({
-      credentialTargets: targets(async id => ({ kind: 'account', credentialId: id, accountId: INTERACTIVE_ID })),
-    });
-
-    // Act
-    const actual = await subject.service.start({ credentialId: 'claude-kirin' }, HOST);
-    const child = await subject.child();
-
-    // Assert
-    should(actual).match({ accountId: INTERACTIVE_ID, credentialId: 'claude-kirin', identity: 'claude:kirin' });
-    should(child.spec.command[0]).equal('/fleet/bin/claude-kirin');
-  });
-
-  it('should launch the located harness with the store environment and the store arguments first', async () => {
-    // Arrange
-    const prepared: string[] = [];
-    const subject = fixture({
-      credentialTargets: targets(async () =>
-        storeTarget({
-          harness: 'codex',
-          credentialId: 'team',
-          environment: { CODEX_HOME: '/fy/fleet/credentials/team' },
-          arguments: ['-c', 'cli_auth_credentials_store="file"'],
-          prepared,
-        }),
-      ),
-      locate: LOCATED,
-    });
-
-    // Act
-    const started = await subject.service.start({ credentialId: 'team' }, HOST);
-    const child = await subject.child();
-
-    // Assert
-    should(prepared).deepEqual(['prepared']);
-    should(child.spec.command).deepEqual([
-      '/usr/local/bin/codex',
-      '-c',
-      'cli_auth_credentials_store="file"',
-      'login',
-      '--device-auth',
-    ]);
-    // Sanitized of the caller's provider credentials, then given the store's.
-    should(child.spec.environment).deepEqual({
-      PATH: '/usr/bin',
-      PROXY_KEY: 'proxy-key',
-      CODEX_HOME: '/fy/fleet/credentials/team',
-    });
-    should(started).match({ harness: 'codex', credentialId: 'team', identity: 'credential:team' });
-    should(started).not.have.property('accountId');
-  });
-
-  it('should complete a Claude credential sign-in once the store holds a usable login', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    const child = await subject.child();
-
-    // Act
-    child.emit(CLAUDE_URL_LINE);
-    child.exit(0);
-    await subject.settle();
-    const actual = await subject.service.status(started.flowId);
-
-    // Assert
-    should(child.spec.command).deepEqual(['/usr/local/bin/claude', 'auth', 'login', '--claudeai']);
-    should(actual).match({ harness: 'claude', state: 'complete', accounts: [], credentialId: 'work' });
-    should(actual).not.have.property('accountId');
-  });
-
-  it('should fail a sign-in that exited cleanly but wrote no usable login', async () => {
-    // Arrange
-    const subject = fixture({
-      credentialTargets: targets(async () => storeTarget({ signedInAnswer: false })),
-      locate: LOCATED,
-    });
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    const child = await subject.child();
-
-    // Act
-    child.emit(CLAUDE_URL_LINE);
-    child.exit(0);
-    await subject.settle();
-
-    // Assert
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: 'the sign-in finished, but no usable login was written for this credential',
-    });
-  });
-
-  it('should fail with the exit code when the child exits badly after publishing', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    const child = await subject.child();
-
-    // Act
-    child.emit(CLAUDE_URL_LINE);
-    child.exit(2);
-    await subject.settle();
-
-    // Assert
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: 'the sign-in exited with code 2',
-    });
-  });
-
-  it('should end as the harness reads it when a submitted code was refused', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    const child = await subject.child();
-    child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
-
-    // Act
-    child.exit(1);
-    await subject.settle();
-
-    // Assert
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: 'Claude could not sign in with that code',
-      lastCode: 'rejected',
-    });
-  });
-
-  it('should say so when the harness offered nothing a browser can drive', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    const child = await subject.child();
-
-    // Act
-    child.exit(0);
-    await subject.settle();
-
-    // Assert
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: "this host's claude did not offer a sign-in that can be driven from a browser",
-    });
-  });
-
-  it('should fail in words when the harness is not installed, launching nothing', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: () => undefined });
-
-    // Act
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    await subject.settle();
-
-    // Assert
-    should(subject.children).have.length(0);
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: 'the claude command is not installed on this machine, so there is nothing to sign in with',
-    });
-  });
-
-  it('should fail in words when no locator was composed at all', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()) });
-
-    // Act
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    await subject.settle();
-
-    // Assert
-    should(await subject.service.status(started.flowId)).match({ state: 'failed' });
-  });
-
-  it('should record a preparation failure on the flow rather than reject', async () => {
-    // Arrange
-    const subject = fixture({
-      credentialTargets: targets(async () =>
-        storeTarget({
-          prepare: async () => {
-            throw new Error('the store directory could not be created');
-          },
-        }),
-      ),
-      locate: LOCATED,
-    });
-
-    // Act
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    await subject.settle();
-
-    // Assert
-    should(subject.children).have.length(0);
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: 'the store directory could not be created',
-    });
-  });
-
-  it('should fall back to a plain sentence for a failure with no message', async () => {
-    // Arrange
-    const subject = fixture({
-      credentialTargets: targets(async () =>
-        storeTarget({
-          prepare: async () => {
-            throw new Error('');
-          },
-        }),
-      ),
-      locate: LOCATED,
-    });
-
-    // Act
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    await subject.settle();
-
-    // Assert
-    should(await subject.service.status(started.flowId)).match({ state: 'failed', reason: 'the sign-in failed' });
-  });
-
-  it('should spawn nothing when the flow was cancelled while its store was being prepared', async () => {
-    // Arrange
-    let release: () => void = () => undefined;
-    const subject = fixture({
-      credentialTargets: targets(async () =>
-        storeTarget({
-          prepare: async () => {
-            await new Promise<void>(resolve => {
-              release = resolve;
-            });
-          },
-        }),
-      ),
-      locate: LOCATED,
-    });
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    await subject.settle();
-
-    // Act
-    await subject.service.cancel(started.flowId);
-    release();
-    await subject.settle();
-
-    // Assert
-    should(subject.children).have.length(0);
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: 'this sign-in was cancelled',
-    });
-  });
-
-  it('should keep a cancelled ending when the killed child exits afterwards', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
-    const started = await subject.service.start({ credentialId: 'work' }, HOST);
-    const child = await subject.child();
-    child.emit(CLAUDE_URL_LINE);
-
-    // Act
-    await subject.service.cancel(started.flowId);
-    await subject.settle();
-
-    // Assert
-    should(child.killed).be.true();
-    should(await subject.service.status(started.flowId)).match({
-      state: 'failed',
-      reason: 'this sign-in was cancelled',
-    });
-  });
-
-  it('should refuse a second sign-in of one credential while the first runs', async () => {
-    // Arrange
-    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
-    const first = await subject.service.start({ credentialId: 'work' }, HOST);
-
-    // Act
-    const actual = await refusalOf(() => subject.service.start({ credentialId: 'work' }, HOST));
-
-    // Assert
-    should(actual.code).equal('fleet_login_in_progress');
-    should(actual.message).equal(
-      `a sign-in for "credential:work" is already running as flow "${first.flowId}"; finish or cancel it first`,
-    );
-  });
-
-  it('should ask a governed caller for the operator password before launching', async () => {
-    // Arrange
-    const asked: string[] = [];
-    const subject = fixture({
-      credentialTargets: targets(async () => storeTarget()),
-      locate: LOCATED,
-      confirmChange: async password => {
-        asked.push(password);
-        return { kind: 'confirmed' };
-      },
-    });
-
-    // Act
-    const refused = await refusalOf(() => subject.service.start({ credentialId: 'work' }, BROWSER));
-    const started = await subject.service.start({ credentialId: 'work', operatorPassword: 'correct horse' }, BROWSER);
-    await subject.child();
-
-    // Assert
-    should(refused.code).equal('fleet_login_unauthorized');
-    should(asked).deepEqual(['correct horse']);
-    should(started).match({ credentialId: 'work' });
   });
 });

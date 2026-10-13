@@ -2,7 +2,7 @@
  * The renewal a session start is allowed to ask for.
  *
  * The claims: an executable this daemon does not publish costs nothing and reads no credential; the
- * account that IS published is renewed through the identity it belongs to rather than on its own; every
+ * runtime that IS published is renewed through the credential it is on rather than on its own; every
  * failure is a sentence and never a throw, because a launch must not be refused by the thing trying to
  * make it work; and only the endings somebody has to act on are said out loud.
  *
@@ -14,8 +14,6 @@ import should from 'should';
 import {
   type CredentialCloneOutcome,
   type CredentialReading,
-  type FleetConfig,
-  FleetConfigSchema,
   type FleetCredentialStore,
   type FleetIdentity,
   type FleetIdentityMember,
@@ -35,78 +33,63 @@ import {
   type LaunchRenewalSurvey,
 } from '../../../src/lib/fleet/launch-renewal.ts';
 
-const INTERACTIVE_ID = '00000000-0000-4000-8000-000000000001';
-const AUTO_ID = '00000000-0000-4000-8000-000000000002';
-const KEYED_ID = '00000000-0000-4000-8000-000000000003';
+const CODEX_A = '00000000-0000-4000-8000-0000000000c1';
+const CODEX_B = '00000000-0000-4000-8000-0000000000c2';
+const CODEX_OTHER = '00000000-0000-4000-8000-0000000000c3';
+const CLAUDE_V2 = '00000000-0000-4000-8000-0000000000c4';
+const KEYED_V2 = '00000000-0000-4000-8000-0000000000c5';
 
 const NOW = Date.parse('2026-08-19T10:00:00.000Z');
 
-const route = (id: string, wrapper: string, mode: 'interactive' | 'auto') => ({
+const published = (id: string, name: string, kind: HarnessKind, secretEnv: Record<string, string> = {}) => ({
   id,
-  wrapper,
-  home: wrapper,
-  mode,
-  defaultModel: 'model-one',
-  models: ['model-one'],
-});
-
-const parseConfig = (input: Record<string, unknown>): FleetConfig => {
-  const parsed = FleetConfigSchema.safeParse(input);
-  if (!parsed.success) throw new Error(`fixture config invalid: ${JSON.stringify(parsed.error.issues, null, 2)}`);
-  return parsed.data;
-};
-
-/** One Claude login of two accounts, plus an account whose key comes from the secrets file. */
-const CONFIG = parseConfig({
-  secretsFile: '/etc/ferretry/secrets.sh',
-  variants: { default: {}, auto: {} },
-  agents: [
-    {
-      name: 'kirin',
-      kind: 'claude',
-      routes: {
-        default: route(INTERACTIVE_ID, 'claude-kirin', 'interactive'),
-        auto: route(AUTO_ID, 'claude-auto', 'auto'),
-      },
-    },
-    {
-      name: 'proxy',
-      kind: 'claude',
-      auth: 'api-key',
-      env: { ANTHROPIC_API_KEY: '$PROXY_KEY' },
-      routes: { default: route(KEYED_ID, 'claude-proxy', 'interactive') },
-    },
-  ],
-});
-
-const manifestAccount = (id: string, wrapper: string, mode: 'interactive' | 'auto') => ({
-  id,
-  kind: 'claude' as const,
-  mode,
-  wrapper: `/fleet/bin/${wrapper}`,
-  home: `/fleet/homes/${wrapper}`,
-  displayName: wrapper,
+  kind,
+  mode: 'auto' as const,
+  wrapper: `/fleet/bin/${name}`,
+  home: `/fleet/homes/${name}`,
+  displayName: name,
   defaultModel: 'model-one',
   models: [{ id: 'model-one', available: true }],
   available: true,
   unavailableReason: null,
+  secretEnv,
+});
+const runtime = (id: string, name: string, harness: HarnessKind, credential: string) => ({
+  id,
+  name,
+  harness,
+  credential,
+  profile: 'default',
+  agent: true,
+  wrapper: `/fleet/bin/${name}`,
+  models: [{ id: 'model-one', available: true }],
+  defaultModel: 'model-one',
 });
 
+/** Two Codex runtimes on one login, one on another, a Claude runtime, and a login from the environment. */
 const MANIFEST: FleetManifest = FleetManifestSchema.parse({
   version: 1,
   generatedAt: '2026-08-19T09:00:00.000Z',
   accounts: [
-    manifestAccount(INTERACTIVE_ID, 'claude-kirin', 'interactive'),
-    manifestAccount(AUTO_ID, 'claude-auto', 'auto'),
-    manifestAccount(KEYED_ID, 'claude-proxy', 'interactive'),
+    published(CODEX_A, 'codex-a', 'codex'),
+    published(CODEX_B, 'codex-b', 'codex'),
+    published(CODEX_OTHER, 'codex-other', 'codex'),
+    published(CLAUDE_V2, 'claude-v2', 'claude'),
+    published(KEYED_V2, 'codex-keyed', 'codex', { OPENAI_API_KEY: '${secret:KEY}' }),
+  ],
+  runtimes: [
+    runtime(CODEX_A, 'codex-a', 'codex', 'work'),
+    runtime(CODEX_B, 'codex-b', 'codex', 'work'),
+    runtime(CODEX_OTHER, 'codex-other', 'codex', 'personal'),
+    runtime(CLAUDE_V2, 'claude-v2', 'claude', 'work-claude'),
+    runtime(KEYED_V2, 'codex-keyed', 'codex', 'keyed'),
   ],
 });
 
-const INTERACTIVE_WRAPPER = '/fleet/bin/claude-kirin';
+const WRAPPER = '/fleet/bin/codex-a';
 
 const reader = (overrides: Partial<LaunchRenewalFleetReader> = {}): LaunchRenewalFleetReader => ({
-  config: async () => CONFIG,
-  accounts: async () => MANIFEST,
+  manifest: async () => MANIFEST,
   ...overrides,
 });
 
@@ -162,25 +145,7 @@ const journal = (): LaunchRenewalNotices & { steps: string[]; states: string[] }
 const survey = (store: FleetCredentialStore): LaunchRenewalSurvey => new FleetIdentityService(store);
 
 describe('FleetLaunchRenewal', () => {
-  it('should renew the identity the launched wrapper belongs to, and hand over the readings it took', async () => {
-    // Arrange — the wrapper is one account; the credential belongs to the LOGIN, so that is what is
-    // renewed and both homes are the readings the gate chooses from.
-    const store = new CountingStore();
-    const renewal = new RecordingRenewal({ status: 'renewed', accountId: AUTO_ID, ran: true });
-    const subject = new FleetLaunchRenewal({ fleet: reader(), identities: survey(store), renewal });
-
-    // Act
-    const actual = await subject.decide(INTERACTIVE_WRAPPER);
-
-    // Assert
-    should(renewal.asked).deepEqual([{ identity: 'claude:kirin', members: 2 }]);
-    should(actual).deepEqual({
-      kind: 'decided',
-      result: { identity: 'claude:kirin', status: 'renewed', accountId: AUTO_ID, ran: true },
-    });
-  });
-
-  it('should find the account by the name it publishes, not only by the path the caller holds', async () => {
+  it('should find the runtime by the name it publishes, not only by the path the caller holds', async () => {
     // Arrange — a session record written before a state home moved still names the same wrapper.
     const renewal = new RecordingRenewal({ status: 'renewed', ran: true });
     const subject = new FleetLaunchRenewal({
@@ -190,10 +155,10 @@ describe('FleetLaunchRenewal', () => {
     });
 
     // Act
-    await subject.decide('/somewhere/else/bin/claude-auto');
+    await subject.decide('/somewhere/else/bin/codex-a');
 
     // Assert
-    should(renewal.asked).deepEqual([{ identity: 'claude:kirin', members: 2 }]);
+    should(renewal.asked).deepEqual([{ identity: 'credential:work', members: 2 }]);
   });
 
   it('should have no opinion about an executable this daemon does not publish, and read no credential', async () => {
@@ -213,28 +178,13 @@ describe('FleetLaunchRenewal', () => {
     should(renewal.asked).be.empty();
   });
 
-  it('should never read a credential for an account that authenticates with a key', async () => {
-    // Arrange — an API-key identity has no provider token to renew, and looking would be work invented
-    // on every single launch of the commonest kind of proxy account.
-    const store = new CountingStore();
-    const renewal = new RecordingRenewal({ status: 'not-required', ran: false });
-    const subject = new FleetLaunchRenewal({ fleet: reader(), identities: survey(store), renewal });
-
-    // Act
-    const actual = await subject.decide('/fleet/bin/claude-proxy');
-
-    // Assert
-    should(store.reads).be.empty();
-    should(actual).match({ kind: 'decided' });
-  });
-
   it('should answer a sentence rather than throwing when the fleet itself cannot be read', async () => {
-    // Arrange — a configuration that will not parse is a broken fleet and not a broken session.
+    // Arrange — a manifest that will not parse is a broken fleet and not a broken session.
     const renewal = new RecordingRenewal({ status: 'renewed', ran: true });
     const subject = new FleetLaunchRenewal({
       fleet: reader({
-        config: async () => {
-          throw new Error('config/fleet.yaml is not valid YAML');
+        manifest: async () => {
+          throw new Error('manifest.json is not valid JSON');
         },
       }),
       identities: survey(new CountingStore()),
@@ -242,10 +192,10 @@ describe('FleetLaunchRenewal', () => {
     });
 
     // Act
-    const actual = await subject.decide(INTERACTIVE_WRAPPER);
+    const actual = await subject.decide(WRAPPER);
 
     // Assert
-    should(actual).deepEqual({ kind: 'undecided', reason: 'config/fleet.yaml is not valid YAML' });
+    should(actual).deepEqual({ kind: 'undecided', reason: 'manifest.json is not valid JSON' });
     should(renewal.asked).be.empty();
   });
 
@@ -258,7 +208,7 @@ describe('FleetLaunchRenewal', () => {
     });
 
     // Act
-    const actual = await subject.decide(INTERACTIVE_WRAPPER);
+    const actual = await subject.decide(WRAPPER);
 
     // Assert
     should(actual).deepEqual({ kind: 'undecided', reason: 'the harness could not be started' });
@@ -279,13 +229,13 @@ describe('FleetLaunchRenewal', () => {
     });
 
     // Act
-    const withoutMessage = await blank.decide(INTERACTIVE_WRAPPER);
-    const withAString = await thrownString.decide(INTERACTIVE_WRAPPER);
+    const withoutMessage = await blank.decide(WRAPPER);
+    const withAString = await thrownString.decide(WRAPPER);
 
     // Assert
     should(withoutMessage).deepEqual({
       kind: 'undecided',
-      reason: '“claude:kirin” could not be renewed before this launch',
+      reason: '“credential:work” could not be renewed before this launch',
     });
     should(withAString).deepEqual({ kind: 'undecided', reason: 'tmux went away' });
   });
@@ -303,7 +253,7 @@ describe('FleetLaunchRenewal', () => {
     });
 
     // Act
-    const actual = await subject.decide(INTERACTIVE_WRAPPER);
+    const actual = await subject.decide(WRAPPER);
 
     // Assert
     should(actual).deepEqual({ kind: 'undecided', reason: 'this host’s keychain is locked' });
@@ -326,18 +276,18 @@ describe('what a launch-time renewal says out loud', () => {
     // Arrange
     const { notices, subject } = renewing({
       status: 'renewed',
-      accountId: AUTO_ID,
+      accountId: CODEX_A,
       reason: 'the harness renewed it, and no browser was opened',
       ran: true,
     });
 
     // Act
-    await subject.beforeLaunch(INTERACTIVE_WRAPPER);
+    await subject.beforeLaunch(WRAPPER);
 
     // Assert — a milestone, because nothing needs doing about it.
     should(notices.states).be.empty();
     should(notices.steps).deepEqual([
-      `credential renewed — claude:kirin (${AUTO_ID}): renewed — the harness renewed it, and no browser was opened`,
+      `credential renewed — credential:work (${CODEX_A}): renewed — the harness renewed it, and no browser was opened`,
     ]);
   });
 
@@ -350,7 +300,7 @@ describe('what a launch-time renewal says out loud', () => {
       const { notices, subject } = renewing({ status, reason: 'nothing to do here', ran: false });
 
       // Act
-      await subject.beforeLaunch(INTERACTIVE_WRAPPER);
+      await subject.beforeLaunch(WRAPPER);
 
       // Assert
       should(notices.steps).be.empty();
@@ -364,11 +314,11 @@ describe('what a launch-time renewal says out loud', () => {
       const { notices, subject } = renewing({ status, ran: status === 'failed' });
 
       // Act
-      await subject.beforeLaunch(INTERACTIVE_WRAPPER);
+      await subject.beforeLaunch(WRAPPER);
 
       // Assert — no home was chosen in these fixtures, so no account is named and none is invented.
       should(notices.steps).be.empty();
-      should(notices.states).deepEqual([`a session started on claude:kirin: ${status}`]);
+      should(notices.states).deepEqual([`a session started on credential:work: ${status}`]);
     }
   });
 
@@ -389,7 +339,7 @@ describe('what a launch-time renewal says out loud', () => {
     const notices = journal();
     const subject = new FleetLaunchRenewal({
       fleet: reader({
-        accounts: async () => {
+        manifest: async () => {
           throw new Error('the fleet manifest has not been written yet');
         },
       }),
@@ -399,7 +349,7 @@ describe('what a launch-time renewal says out loud', () => {
     });
 
     // Act
-    await subject.beforeLaunch(INTERACTIVE_WRAPPER);
+    await subject.beforeLaunch(WRAPPER);
 
     // Assert
     should(notices.states).deepEqual([
@@ -417,66 +367,19 @@ describe('what a launch-time renewal says out loud', () => {
     });
 
     // Act
-    await subject.beforeLaunch(INTERACTIVE_WRAPPER);
+    await subject.beforeLaunch(WRAPPER);
 
     // Assert
     should(renewal.asked).have.length(1);
   });
 });
 
-describe('FleetLaunchRenewal for version-2 runtimes', () => {
-  const CODEX_A = '00000000-0000-4000-8000-0000000000c1';
-  const CODEX_B = '00000000-0000-4000-8000-0000000000c2';
-  const CODEX_OTHER = '00000000-0000-4000-8000-0000000000c3';
-  const CLAUDE_V2 = '00000000-0000-4000-8000-0000000000c4';
-  const KEYED_V2 = '00000000-0000-4000-8000-0000000000c5';
-
-  const published = (id: string, name: string, kind: HarnessKind, secretEnv: Record<string, string> = {}) => ({
-    ...manifestAccount(id, name, 'auto'),
-    kind,
-    secretEnv,
-  });
-  const runtime = (id: string, name: string, harness: HarnessKind, credential: string) => ({
-    id,
-    name,
-    harness,
-    credential,
-    profile: 'default',
-    agent: true,
-    wrapper: `/fleet/bin/${name}`,
-    models: [{ id: 'model-one', available: true }],
-    defaultModel: 'model-one',
-  });
-  const V2: FleetManifest = FleetManifestSchema.parse({
-    version: 1,
-    generatedAt: '2026-08-19T09:00:00.000Z',
-    accounts: [
-      published(CODEX_A, 'codex-a', 'codex'),
-      published(CODEX_B, 'codex-b', 'codex'),
-      published(CODEX_OTHER, 'codex-other', 'codex'),
-      published(CLAUDE_V2, 'claude-v2', 'claude'),
-      published(KEYED_V2, 'codex-keyed', 'codex', { OPENAI_API_KEY: '${secret:KEY}' }),
-    ],
-    runtimes: [
-      runtime(CODEX_A, 'codex-a', 'codex', 'work'),
-      runtime(CODEX_B, 'codex-b', 'codex', 'work'),
-      runtime(CODEX_OTHER, 'codex-other', 'codex', 'personal'),
-      runtime(CLAUDE_V2, 'claude-v2', 'claude', 'work-claude'),
-      runtime(KEYED_V2, 'codex-keyed', 'codex', 'keyed'),
-    ],
-  });
-  const v2Reader = (): LaunchRenewalFleetReader => ({
-    config: async () => {
-      throw new Error('a version-2 runtime must not need the configuration');
-    },
-    accounts: async () => V2,
-  });
-
+describe('FleetLaunchRenewal per credential', () => {
   it('should renew per credential: every runtime on that login, and no other', async () => {
     // Arrange
     const store = new CountingStore();
     const renewal = new RecordingRenewal({ status: 'renewed', accountId: CODEX_A, ran: true });
-    const subject = new FleetLaunchRenewal({ fleet: v2Reader(), identities: survey(store), renewal });
+    const subject = new FleetLaunchRenewal({ fleet: reader(), identities: survey(store), renewal });
 
     // Act
     const actual = await subject.decide('/fleet/bin/codex-b');
@@ -491,7 +394,7 @@ describe('FleetLaunchRenewal for version-2 runtimes', () => {
     // Arrange
     const store = new CountingStore();
     const renewal = new RecordingRenewal({ status: 'renewed', ran: true });
-    const subject = new FleetLaunchRenewal({ fleet: v2Reader(), identities: survey(store), renewal });
+    const subject = new FleetLaunchRenewal({ fleet: reader(), identities: survey(store), renewal });
 
     // Act
     const actual = await subject.decide('/fleet/bin/claude-v2');
@@ -502,11 +405,41 @@ describe('FleetLaunchRenewal for version-2 runtimes', () => {
     should(renewal.asked).be.empty();
   });
 
+  it('should have no opinion about a published executable with no runtime row', async () => {
+    // Arrange — an account row the runtimes do not name is not this fleet's to renew.
+    const store = new CountingStore();
+    const renewal = new RecordingRenewal({ status: 'renewed', ran: true });
+    const subject = new FleetLaunchRenewal({
+      fleet: reader({ manifest: async () => ({ ...MANIFEST, runtimes: undefined }) }),
+      identities: survey(store),
+      renewal,
+    });
+
+    // Act
+    const actual = await subject.decide(WRAPPER);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'not-a-fleet-account' });
+    should(store.reads).be.empty();
+  });
+
+  it('should have no opinion when no manifest has been published', async () => {
+    // Act
+    const actual = await new FleetLaunchRenewal({
+      fleet: reader({ manifest: async () => undefined }),
+      identities: survey(new CountingStore()),
+      renewal: new RecordingRenewal({ status: 'renewed', ran: true }),
+    }).decide(WRAPPER);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'not-a-fleet-account' });
+  });
+
   it('should treat a credential authenticated by the environment as having no token to renew', async () => {
     // Arrange
     const store = new CountingStore();
     const renewal = new RecordingRenewal({ status: 'not-required', ran: false });
-    const subject = new FleetLaunchRenewal({ fleet: v2Reader(), identities: survey(store), renewal });
+    const subject = new FleetLaunchRenewal({ fleet: reader(), identities: survey(store), renewal });
 
     // Act
     await subject.decide('/fleet/bin/codex-keyed');

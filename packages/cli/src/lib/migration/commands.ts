@@ -5,9 +5,9 @@ import type { MigrationCommandOptions, MigrationController } from './controller.
 export function registerMigrationCommands(program: Command, controller: MigrationController): void {
   program
     .command('migrate')
-    .description('continue a session on another same-kind fleet account')
+    .description('continue a session on another same-kind runtime')
     .argument('<id>', 'session id or callsign')
-    .requiredOption('-a, --agent <agent>', 'the fleet account to move the session onto')
+    .requiredOption('-a, --agent <agent>', 'the runtime to move the session onto')
     .option('--model <model>', "override the model; defaults to the target account's configured model")
     .option(
       '--allow-context-downgrade',

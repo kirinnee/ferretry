@@ -8,7 +8,7 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import {
   AddRuntime,
   type AddRuntimeDraft,
@@ -47,7 +47,7 @@ import {
   withStatus,
 } from '../account-support.ts';
 
-const APPLY = `POST /v1/fleet/changes/${CHANGE_ID}/apply`;
+const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
 
 const credentialsOf = (...items: ReturnType<typeof credential>[]): FleetCredentialList =>
   FleetCredentialListSchema.parse({ format: 2, machine: 'studio-mac', credentials: items });
@@ -335,7 +335,7 @@ describe('Add runtime: no logins (E12)', () => {
       reloads,
       routes: {
         ...READS(NO_LOGINS),
-        'POST /v1/fleet/changes': (call: Call) => stagedFrom(call),
+        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
         [APPLY]: APPLIED,
         'POST /v1/fleet/login': claudeFlow('awaiting-code', 'claude'),
         'GET /v1/fleet/login/flow-1': claudeFlow('complete', 'claude'),
@@ -349,7 +349,7 @@ describe('Add runtime: no logins (E12)', () => {
     );
     await click(view.container, '[data-change-submit]');
     await waitFor(view.container, '[data-add-login-step="signed-in"]');
-    expect(calls.find(call => call.path === '/v1/fleet/changes')?.body).toEqual({
+    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
       change: { kind: 'credential.add', id: 'claude', harness: 'claude' },
     });
     await click(view.container, '[data-step-next]');
@@ -605,13 +605,13 @@ describe('Add runtime: Name', () => {
       draft: { ...nameStep.draft, addAnother: true },
       calls,
       reloads,
-      routes: { ...READS(), 'POST /v1/fleet/changes': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
+      routes: { ...READS(), 'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
     });
     await click(view.container, '[data-add-runtime-agent] input');
     expect(draftOf(view.container).agent).toBe(true);
     await click(view.container, '[data-change-submit]');
     await waitFor(view.container, '[data-add-runtime-step="done"]');
-    expect(calls.find(call => call.path === '/v1/fleet/changes')?.body).toEqual({
+    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
       change: {
         kind: 'runtime.put',
         name: 'claude-claude-hooks',
@@ -633,11 +633,11 @@ describe('Add runtime: Name', () => {
     const view = await mountHost({
       ...nameStep,
       calls,
-      routes: { ...READS(), 'POST /v1/fleet/changes': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
+      routes: { ...READS(), 'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
     });
     await click(view.container, '[data-change-submit]');
     await waitFor(view.container, '[data-add-runtime-step="done"]');
-    expect(calls.find(call => call.path === '/v1/fleet/changes')?.body).toEqual({
+    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
       change: {
         kind: 'runtime.put',
         name: 'claude-claude-hooks',
@@ -656,22 +656,16 @@ describe('Add runtime: Name', () => {
       ...nameStep,
       routes: {
         ...READS(),
-        'POST /v1/fleet/changes': (call: Call) =>
+        'POST /v1/fleet/proposals': (call: Call) =>
           refuse
-            ? new FyHttpError(
-                'Account setup changes are switched off on this machine for now.',
-                409,
-                'fleet_change_disabled',
-              )
+            ? new FyHttpError('This change conflicts with the setup on this machine.', 409, 'fleet_change_conflict')
             : stagedFrom(call),
         [APPLY]: APPLIED,
       },
     });
     await click(view.container, '[data-change-submit]');
     await waitFor(view.container, '[data-change-refusal]');
-    expect(text(view.container, '[data-change-refusal]')).toBe(
-      'Account setup changes are switched off on this machine for now.',
-    );
+    expect(text(view.container, '[data-change-refusal]')).toBe('This change conflicts with the setup on this machine.');
     expect(view.container.querySelector('[data-add-runtime-step="name"]')).not.toBeNull();
     expect(draftOf(view.container).made).toBeNull();
     refuse = false;

@@ -19,7 +19,7 @@ import {
   FleetCredentialViewSchema,
   OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
-import type { FleetClient } from './fleet-api.ts';
+import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_CREDENTIALS_PATH = '/v1/fleet/credentials';
 

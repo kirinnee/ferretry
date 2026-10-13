@@ -9,9 +9,9 @@ import {
   ABSENT_DOCUMENT_REVISION,
   claudeStatuslineCommand,
   type FleetLayout,
+  parseAccountConfigText,
   parseAccountModel,
   parseRuntimeIds,
-  readFleetDocument,
   type RuntimeIds,
   runtimeIdsPath,
   SharedHistoryMigration,
@@ -20,10 +20,8 @@ import { FileFleetProvisioner, FileSharedHistoryFileSystem } from '@ferretry/fle
 import { SessionStateSchema } from '@ferretry/protocol';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ACCOUNT_MODEL_DISABLED_SENTENCE, accountModelWritesRefusal } from '../../lib/fleet/account-model-switch.ts';
 import type { AccountDocumentReading, FleetCatalogServiceDeps } from '../../lib/fleet/catalog-service.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
-import type { DaemonConfigStore } from '../../lib/runtime/config.ts';
 
 /** The largest component document the catalogue reads; a larger one is reported as unreadable. */
 const MAX_COMPONENT_BYTES = 1024 * 1024;
@@ -33,8 +31,9 @@ const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException | u
 const digest = (bytes: Uint8Array): string => new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
 
 /**
- * The machine's configuration, whichever version it is: a version-1 document through its conversion,
- * and no document as an empty model. Throws when the file exists and cannot be read or parsed.
+ * The machine's configuration, and no document as an empty model. Throws when the file exists and
+ * cannot be read or parsed — and `RetiredFleetConfigError` when it is still in the old account format,
+ * which is refused rather than converted, and left exactly as it is.
  */
 export async function readAccountDocument(path: string): Promise<AccountDocumentReading> {
   let raw: Uint8Array;
@@ -46,10 +45,8 @@ export async function readAccountDocument(path: string): Promise<AccountDocument
     }
     throw error;
   }
-  const document = readFleetDocument(Bun.YAML.parse(new TextDecoder().decode(raw)) ?? {});
-  return document.version === 2
-    ? { format: 'version-2', model: document.model, revision: digest(raw) }
-    : { format: 'version-1', model: document.conversion.model, revision: digest(raw) };
+  const model = parseAccountConfigText(new TextDecoder().decode(raw), path);
+  return { format: 'version-2', model, revision: digest(raw) };
 }
 
 /** One component document's text, or `undefined` when it is absent, not a file, too large or unreadable. */
@@ -78,8 +75,6 @@ export interface FileFleetCatalogOptions {
   readonly paths: Pick<FoundationPaths, 'home' | 'fleet' | 'fleetManifest'>;
   readonly userHome: string;
   readonly hostCodexHome?: string;
-  /** The daemon configuration, read on every write so the switch takes effect without a restart. */
-  readonly daemonConfig: Pick<DaemonConfigStore, 'peek'>;
   /** Every session's state document, raw. */
   sessionStates(): Promise<readonly unknown[]>;
   readonly credentials: FleetCatalogServiceDeps['credentials'];
@@ -93,8 +88,8 @@ export interface FileFleetCatalogOptions {
 /**
  * The catalogue's collaborators over this machine's files.
  *
- * Its own provisioner, over the same two writable roots the old account mount declares: the apply
- * claim is a file beside the manifest, so two provisioners in one daemon still apply one at a time.
+ * Its own provisioner, over this daemon's state home and the user's home: the apply claim is a file
+ * beside the manifest, so two provisioners in one daemon still apply one at a time.
  */
 export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps {
   const { paths, userHome } = options;
@@ -126,12 +121,6 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     readAsset: readComponentText,
     documentRevision,
     ids,
-    // An unreadable daemon configuration refuses: a write must never go ahead because nobody could
-    // tell whether it was switched on.
-    writesRefusal: async () => {
-      const peeked = await options.daemonConfig.peek().catch(() => undefined);
-      return peeked === undefined ? ACCOUNT_MODEL_DISABLED_SENTENCE : accountModelWritesRefusal(peeked.config);
-    },
     locate: options.locate,
     commandExists: command => Bun.which(command) !== null,
     sessionStatuses: async () =>

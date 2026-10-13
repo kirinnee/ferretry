@@ -29,8 +29,6 @@
     "./features/pairing-screen": "./src/features/pairing/pairing-screen.tsx",
     "./features/task-dag-graph": "./src/features/tasks/task-dag-graph.tsx",
     "./features/warden-config-card": "./src/features/warden/warden-config-card.tsx",
-    "./features/accounts-page": "./src/features/fleet/accounts-page.tsx",
-    "./features/accounts-surface": "./src/features/fleet/accounts-surface.tsx",
     "./session-screens.css": "./src/components/session-screens.css"
   },
   "types": "./src/lib/index.ts",

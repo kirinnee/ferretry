@@ -9,9 +9,9 @@
  *
  * Getting there is three decisions, all of them here and all of them pure:
  *
- * 1. **Group.** Accounts sharing a provider login form an identity. The grouping is read from the
- *    configuration's declared `identity`, never inferred from a name infix — the tool this replaces
- *    inferred it, so renaming a wrapper silently moved it to another provider account.
+ * 1. **Group.** Accounts sharing a provider login form an identity. The caller builds the group from
+ *    what it declares — never from a name infix, which would let renaming a wrapper silently move it
+ *    to another provider account.
  * 2. **Classify.** Each member's credential is `valid`, `refreshable`, `missing`, or `unreadable`.
  * 3. **Pick a donor and clone it.** The freshest usable credential is copied onto the siblings that
  *    need one. Only an identity with no usable credential anywhere needs a human.
@@ -36,9 +36,7 @@
  * takes material a caller already holds and returns a verdict; the material itself stays behind
  * {@link FleetCredentialStore}, in an adapter, and never reaches a log line.
  */
-import type { FleetConfig } from './config.ts';
-import type { AccountMode, FleetManifest, FleetManifestAccount, HarnessKind } from './manifest.ts';
-import { groupByIdentity, resolveAccounts } from './profiles.ts';
+import type { AccountMode, FleetManifestAccount, HarnessKind } from './manifest.ts';
 
 /**
  * How close to expiry an access token still counts as expired.
@@ -198,19 +196,6 @@ export interface FleetIdentity {
   readonly members: readonly FleetIdentityMember[];
 }
 
-/** Two accounts claim one provider login but disagree about how it authenticates. */
-export class MixedIdentityAuthError extends Error {
-  constructor(
-    readonly identityKey: string,
-    readonly modes: readonly string[],
-  ) {
-    super(
-      `identity "${identityKey}" mixes authentication modes (${modes.join(', ')}) — give the accounts distinct "identity" values`,
-    );
-    this.name = 'MixedIdentityAuthError';
-  }
-}
-
 /**
  * One published account, as the shape a credential store reads and writes.
  *
@@ -227,78 +212,6 @@ export const fleetIdentityMemberOf = (account: FleetManifestAccount): FleetIdent
   available: account.available,
   unavailableReason: account.unavailableReason,
 });
-
-/**
- * Join the declared configuration to the published manifest and return the provider logins this host
- * has.
- *
- * The configuration owns `identity` and `auth`; the manifest owns where each account actually lives.
- * Neither alone is enough, and neither is guessed from the other. A published account the
- * configuration no longer mentions becomes its own single-member identity, so a stale manifest can
- * cost a human one extra approval but can never move a credential between provider accounts.
- *
- * Throws {@link MixedIdentityAuthError} rather than choosing a reading when two accounts claim one
- * identity and disagree about `auth`: cloning across that boundary is exactly the mistake that has no
- * safe default.
- */
-export function buildFleetIdentities(config: FleetConfig, manifest: FleetManifest): readonly FleetIdentity[] {
-  const published = new Map(manifest.accounts.map(account => [account.id, account]));
-  const claimed = new Set<string>();
-  const identities: FleetIdentity[] = [];
-
-  for (const [key, group] of groupByIdentity(resolveAccounts(config))) {
-    // Checked across the whole declared group, not just its published members: an identity that
-    // disagrees with itself about `auth` is a contradiction whether or not every lane made it into
-    // the manifest, and there is no safe way to pick one reading.
-    const modes = [...new Set(group.map(resolved => resolved.auth))];
-    if (modes.length > 1) throw new MixedIdentityAuthError(key, modes);
-
-    const matched = group.flatMap(resolved => {
-      const account = published.get(resolved.id);
-      return account === undefined ? [] : [{ resolved, account }];
-    });
-    const first = matched[0];
-    // Declared but never provisioned: the configuration names these accounts and the manifest has
-    // none of them, so there is no home to read and nothing to log in.
-    if (first === undefined) continue;
-
-    for (const { resolved } of matched) claimed.add(resolved.id);
-    identities.push({
-      key,
-      kind: first.resolved.kind,
-      identity: first.resolved.identity,
-      auth: first.resolved.auth,
-      declared: true,
-      members: matched.map(({ account }) => fleetIdentityMemberOf(account)),
-    });
-  }
-
-  for (const account of manifest.accounts) {
-    if (claimed.has(account.id)) continue;
-    identities.push({
-      key: `account:${account.id}`,
-      kind: account.kind,
-      identity: account.id,
-      auth: 'oauth',
-      declared: false,
-      members: [fleetIdentityMemberOf(account)],
-    });
-  }
-
-  return identities;
-}
-
-/**
- * Which provider login each published account shares, as a lookup keyed on the manifest account.
- *
- * The grouping every consumer that must not ask a provider the same question twice needs. An account
- * the configuration no longer declares gets a key of its own, so a stale manifest can cost an extra
- * provider call but can never make two unrelated accounts share one reading.
- */
-export function accountIdentityKeys(config: FleetConfig): (account: FleetManifestAccount) => string {
-  const declared = new Map(resolveAccounts(config).map(account => [account.id, `${account.kind}:${account.identity}`]));
-  return account => declared.get(account.id) ?? `account:${account.id}`;
-}
 
 /** One member with what was found in its home. */
 export interface FleetIdentityMemberStatus {
@@ -373,8 +286,8 @@ export function pickDonor(members: readonly FleetIdentityMemberStatus[]): FleetI
  *
  * The old reasoning — "a browser approval is interactive" — is sound, and it is about which WRAPPER
  * can talk to a person. It was never a licence to decide WHICH ACCOUNT keeps the credential. That
- * fact belongs to the request: see `accountIds` on the login request in {@link ./login.ts}, which
- * names the accounts whose own homes are read and proved before any of them is reported signed in.
+ * fact belongs to the request, which names the accounts whose own homes are read and proved before
+ * any of them is reported signed in.
  *
  * ## The rule
  *
@@ -560,35 +473,4 @@ export class FleetIdentityService {
  */
 export function failureMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.length > 0 ? error.message : fallback;
-}
-
-/**
- * Identities containing any of `accountIds`, in survey order.
- *
- * Naming one account selects its whole identity, because the credential is shared: there is no such
- * thing as logging half an identity in, and pretending otherwise would leave siblings signed out with
- * nothing said. An id no identity claims is an error rather than an empty selection.
- */
-export function selectIdentities(
-  identities: readonly FleetIdentity[],
-  accountIds: readonly string[],
-): readonly FleetIdentity[] {
-  const owners = new Map<string, string>();
-  for (const identity of identities) {
-    for (const member of identity.members) owners.set(member.accountId, identity.key);
-  }
-  const wanted = new Set<string>();
-  for (const accountId of accountIds) {
-    const key = owners.get(accountId);
-    if (key === undefined) throw new UnknownIdentityAccountError(accountId);
-    wanted.add(key);
-  }
-  return identities.filter(identity => wanted.has(identity.key));
-}
-
-export class UnknownIdentityAccountError extends Error {
-  constructor(readonly accountId: string) {
-    super(`unknown fleet account "${accountId}"`);
-    this.name = 'UnknownIdentityAccountError';
-  }
 }

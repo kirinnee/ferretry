@@ -1,8 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import {
-  buildFleetIdentities,
   type CredentialCloneOutcome,
   type CredentialMaterial,
   type CredentialReading,
@@ -18,12 +16,10 @@ import {
   type FleetIdentityMemberStatus,
   FleetIdentityService,
   failureMessage,
-  MixedIdentityAuthError,
+  fleetIdentityMemberOf,
   pickDonor,
-  selectIdentities,
-  UnknownIdentityAccountError,
 } from '../../src/lib/identity.ts';
-import type { FleetManifest, FleetManifestAccount, HarnessKind } from '../../src/lib/manifest.ts';
+import type { FleetManifestAccount, HarnessKind } from '../../src/lib/manifest.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
 const ID_TWO = '00000000-0000-4000-8000-000000000002';
@@ -31,15 +27,6 @@ const ID_THREE = '00000000-0000-4000-8000-000000000003';
 
 const NOW = 1_800_000_000_000;
 const HOUR = 3_600_000;
-
-/** Parse rather than hand-build, so every test runs against configuration a user could write. */
-const parse = (input: Record<string, unknown>): FleetConfig => {
-  const parsed = FleetConfigSchema.safeParse(input);
-  if (!parsed.success) {
-    throw new Error(`fixture is not valid configuration: ${JSON.stringify(parsed.error.issues, null, 2)}`);
-  }
-  return parsed.data;
-};
 
 const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
   secretEnv: {},
@@ -54,12 +41,6 @@ const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAc
   available: true,
   unavailableReason: null,
   ...overrides,
-});
-
-const manifest = (accounts: readonly FleetManifestAccount[]): FleetManifest => ({
-  version: 1,
-  generatedAt: '2027-01-15T08:00:00.000Z',
-  accounts,
 });
 
 const member = (overrides: Partial<FleetIdentityMember> = {}): FleetIdentityMember => ({
@@ -320,141 +301,6 @@ describe('classifyCredential', () => {
     should(classifyCredential('claude', claude, NOW).state).equal('valid');
     should(classifyCredential('codex', codex, NOW).state).equal('valid');
     should(classifyCredential('codex', claude, NOW).state).equal('missing');
-  });
-});
-
-describe('buildFleetIdentities', () => {
-  const twoLaneConfig = (overrides: Record<string, unknown> = {}): FleetConfig =>
-    parse({
-      variants: { default: {}, auto: { mode: 'auto' } },
-      agents: [
-        {
-          name: 'kirin',
-          kind: 'claude',
-          routes: {
-            default: { id: ID_ONE, wrapper: 'claude-kirin', home: '/homes/one', defaultModel: 'm', models: ['m'] },
-            auto: { id: ID_TWO, wrapper: 'claude-auto-kirin', home: '/homes/two', defaultModel: 'm', models: ['m'] },
-          },
-          ...overrides,
-        },
-      ],
-    });
-
-  it('should group the lanes of one declared identity into a single provider login', () => {
-    // Arrange
-    const config = twoLaneConfig();
-    const published = manifest([
-      account({ id: ID_ONE, home: '/homes/one' }),
-      account({ id: ID_TWO, home: '/homes/two', wrapper: 'claude-auto-kirin', mode: 'auto' }),
-    ]);
-
-    // Act
-    const actual = buildFleetIdentities(config, published);
-
-    // Assert
-    should(actual).have.length(1);
-    should(actual[0]?.key).equal('claude:kirin');
-    should(actual[0]?.declared).be.true();
-    should(actual[0]?.members.map(entry => entry.accountId)).deepEqual([ID_ONE, ID_TWO]);
-  });
-
-  it('should read auth from the configuration rather than guessing it', () => {
-    const actual = buildFleetIdentities(twoLaneConfig({ auth: 'api-key' }), manifest([account({ id: ID_ONE })]));
-    should(actual[0]?.auth).equal('api-key');
-  });
-
-  it('should join two agents that declare a shared identity', () => {
-    // Arrange
-    const config = parse({
-      agents: [
-        {
-          name: 'kirin',
-          kind: 'claude',
-          routes: { default: { id: ID_ONE, wrapper: 'a', home: '/one', defaultModel: 'm', models: ['m'] } },
-        },
-        {
-          name: 'f5',
-          kind: 'claude',
-          identity: 'kirin',
-          routes: { default: { id: ID_TWO, wrapper: 'b', home: '/two', defaultModel: 'm', models: ['m'] } },
-        },
-      ],
-    });
-
-    // Act
-    const actual = buildFleetIdentities(config, manifest([account({ id: ID_ONE }), account({ id: ID_TWO })]));
-
-    // Assert — one browser approval, not two.
-    should(actual).have.length(1);
-    should(actual[0]?.members).have.length(2);
-  });
-
-  it('should refuse an identity whose accounts disagree about how they authenticate', () => {
-    // Arrange
-    const config = parse({
-      agents: [
-        {
-          name: 'kirin',
-          kind: 'claude',
-          auth: 'oauth',
-          routes: { default: { id: ID_ONE, wrapper: 'a', home: '/one', defaultModel: 'm', models: ['m'] } },
-        },
-        {
-          name: 'f5',
-          kind: 'claude',
-          identity: 'kirin',
-          auth: 'api-key',
-          routes: { default: { id: ID_TWO, wrapper: 'b', home: '/two', defaultModel: 'm', models: ['m'] } },
-        },
-      ],
-    });
-
-    // Act / Assert — there is no safe reading to pick, so it refuses instead of choosing.
-    should(() => buildFleetIdentities(config, manifest([account({ id: ID_ONE })]))).throw(MixedIdentityAuthError);
-  });
-
-  it('should refuse a contradictory identity even when only one of its lanes was provisioned', () => {
-    // Arrange
-    const config = parse({
-      agents: [
-        {
-          name: 'kirin',
-          kind: 'claude',
-          auth: 'oauth',
-          routes: { default: { id: ID_ONE, wrapper: 'a', home: '/one', defaultModel: 'm', models: ['m'] } },
-        },
-        {
-          name: 'f5',
-          kind: 'claude',
-          identity: 'kirin',
-          auth: 'api-key',
-          routes: { default: { id: ID_TWO, wrapper: 'b', home: '/two', defaultModel: 'm', models: ['m'] } },
-        },
-      ],
-    });
-
-    // Act / Assert
-    should(() => buildFleetIdentities(config, manifest([]))).throw(/mixes authentication modes/u);
-  });
-
-  it('should skip a declared identity the manifest never published', () => {
-    should(buildFleetIdentities(twoLaneConfig(), manifest([]))).deepEqual([]);
-  });
-
-  it('should make a published account the configuration lost its own identity of one', () => {
-    // Arrange — a manifest outlives the configuration that produced it.
-    const config = twoLaneConfig();
-    const published = manifest([account({ id: ID_ONE }), account({ id: ID_THREE, home: '/homes/three' })]);
-
-    // Act
-    const actual = buildFleetIdentities(config, published);
-
-    // Assert — the stranger shares with nothing, so no credential can move between accounts.
-    should(actual.map(entry => entry.key)).deepEqual(['claude:kirin', `account:${ID_THREE}`]);
-    const stranger = actual[1];
-    should(stranger?.declared).be.false();
-    should(stranger?.auth).equal('oauth');
-    should(stranger?.members).have.length(1);
   });
 });
 
@@ -808,31 +654,12 @@ describe('failureMessage', () => {
   });
 });
 
-describe('selectIdentities', () => {
-  const identities = [
-    identity({ key: 'claude:kirin', members: [member({ accountId: ID_ONE }), member({ accountId: ID_TWO })] }),
-    identity({ key: 'codex:kirin', kind: 'codex', members: [member({ accountId: ID_THREE })] }),
-  ];
-
-  it('should select the whole identity a named account belongs to', () => {
-    // Act — the credential is shared, so half an identity is not a thing you can log in.
-    const actual = selectIdentities(identities, [ID_ONE]);
+describe('fleetIdentityMemberOf', () => {
+  it('should carry every field a credential store or a login needs from a published account', () => {
+    // Act
+    const actual = fleetIdentityMemberOf(account({ available: false, unavailableReason: 'paused' }));
 
     // Assert
-    should(actual).have.length(1);
-    should(actual[0]?.members.map(entry => entry.accountId)).deepEqual([ID_ONE, ID_TWO]);
-  });
-
-  it('should select each named identity once, in survey order', () => {
-    should(selectIdentities(identities, [ID_THREE, ID_TWO, ID_ONE]).map(entry => entry.key)).deepEqual([
-      'claude:kirin',
-      'codex:kirin',
-    ]);
-  });
-
-  it('should refuse an account no identity claims rather than selecting nothing', () => {
-    should(() => selectIdentities(identities, ['00000000-0000-4000-8000-000000000009'])).throw(
-      UnknownIdentityAccountError,
-    );
+    should(actual).deepEqual(member({ available: false, unavailableReason: 'paused' }));
   });
 });

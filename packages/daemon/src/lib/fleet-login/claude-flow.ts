@@ -30,9 +30,9 @@
  * stdio, so the daemon-side flow uses it. **The CLI path is not changed** — it keeps inheriting a
  * terminal and stays the fallback for everything this flow cannot do.
  *
- * `--claudeai` is explicit rather than left to the default: an account declared `auth: 'oauth'` is a
+ * `--claudeai` is explicit rather than left to the default: a credential signed in here is a
  * subscription account, and `--console` is the API-billing login, which is a different credential for a
- * kind of account this flow never applies to.
+ * kind of login this flow never applies to.
  *
  * ## Everything here is PURE
  *
@@ -43,12 +43,12 @@
  * and the service performs it, which is what makes "the submitted value is write-only" a property of
  * the shape rather than a rule somebody has to remember.
  */
-import type { ClaudeLoginFlow, FleetLoginAccountOutcome, HarnessLoginLastCode } from '@ferretry/protocol';
+import type { ClaudeLoginFlow, HarnessLoginLastCode } from '@ferretry/protocol';
 import { HarnessLoginVerificationUrlSchema } from '@ferretry/protocol';
 import { stripTerminalEscapes, verificationUrlIn } from './output.ts';
 import type { HarnessLoginFlowBase, HarnessLoginSubmitDecision } from './ports.ts';
 
-/** What to run after the account's own wrapper path. */
+/** What to run after the harness command (and the credential's own arguments). */
 export const CLAUDE_LOGIN_ARGV: readonly string[] = ['auth', 'login', '--claudeai'];
 
 /**
@@ -80,7 +80,7 @@ export type ClaudeLoginStage =
        */
       readonly codeSent?: true;
     }
-  | { readonly stage: 'complete'; readonly accounts: readonly FleetLoginAccountOutcome[] }
+  | { readonly stage: 'complete' }
   | ClaudeLoginFailure;
 
 /** How a Claude login ended badly. `lastCode` is set only when the code itself is why. */
@@ -200,7 +200,7 @@ export function claudeProjection(base: HarnessLoginFlowBase, stage: ClaudeLoginS
     };
   }
   if (stage.stage === 'complete') {
-    return { harness: 'claude', ...base, state: 'complete', accounts: stage.accounts };
+    return { harness: 'claude', ...base, state: 'complete' };
   }
   if (stage.stage === 'failed') {
     return {

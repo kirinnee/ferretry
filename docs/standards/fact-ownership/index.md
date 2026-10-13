@@ -35,7 +35,7 @@ permission, a QR code that scans and does nothing.
 The repository knew this before it had a name for it.
 [Contracts](../contracts/README.md#workspace-cli-and-release-contracts) records the state-home
 disagreement shipping **three times in the same shape** — `logs/`, the daemon's own `start()`, and
-`fy fleet init`, the last of which permanently refused a fleet an owner had just provisioned — and
+an early fleet scaffold (since deleted), the last of which permanently refused a fleet an owner had just provisioned — and
 says of all three:
 
 > Every one of them passed its own tests, because each writer owned its own fixture.
@@ -152,10 +152,10 @@ and a script is the more expensive of the two to keep honest.
 A schema may accept a key this build does not act on. It must **say so mechanically**, in output an
 operator sees, not in a comment.
 
-`packages/fleet/src/lib/capabilities.ts` is the model. `unimplementedCapabilities(config)` compares
-each entry against the schema's own default and refuses `fy fleet apply` with the list, so a
-configuration that merely carries defaults is unaffected and one that _asks_ for something is answered.
-Its own docblock states the rule better than an abstraction would:
+The fleet package's `unimplementedCapabilities(config)` was the model (it went away with the version-1
+configuration it guarded). It compared each entry against the schema's own default and refused the apply
+with the list, so a configuration that merely carried defaults was unaffected and one that _asked_ for
+something was answered. Its own docblock stated the rule better than an abstraction would:
 
 > Accepting a key is not the same as honouring it, and the difference used to be invisible — a fleet
 > could be told to pool its sessions across accounts, apply cleanly, and pool nothing, with no line of

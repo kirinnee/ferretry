@@ -1,7 +1,6 @@
 /**
- * The wire contract for a machine's setup (docs/design/account-model.md §4.3, §4.7, §7, §10.3): the
- * first-run scan, installing a harness tool, the Clone export, and migrating a machine that still has
- * the old account format.
+ * The wire contract for a machine's setup (docs/design/account-model.md §4.3, §4.7, §7): the
+ * first-run scan, installing a harness tool, and the Clone export.
  *
  * - `GET /v1/fleet/setup/scan` — what the first run (and Import again) would find: each tool, each
  *   harness's login state, instructions, settings, MCP servers and skills, the secret-looking keys BY
@@ -11,8 +10,6 @@
  *   scan showed. From off the machine it needs the operator password, used once and not stored.
  * - `GET /v1/fleet/export` — the Clone bundle: components, model sets, profiles and runtimes, and each
  *   login the runtimes use as a DESCRIPTOR (harness, label, email). No credential and no history.
- * - `GET /v1/fleet/migration` / `POST /v1/fleet/migration/apply` — the migration's dry run, then the
- *   migration of exactly the dry run that was shown, named by its digest.
  *
  * The import itself and the clone are reviewed changes (`setup.import`, `clone.import` in
  * `fleet-catalog.ts`): staged, previewed and applied like every other change to a machine.
@@ -202,63 +199,8 @@ export const FleetCloneBundleSchema = z.strictObject({
 });
 export type FleetCloneBundle = z.infer<typeof FleetCloneBundleSchema>;
 
-// ── Migration ────────────────────────────────────────────────────────────────────────────────────
-
-export const FleetMigrationViewSchema = z.strictObject({
-  status: z.enum(['no-fleet', 'version-1', 'in-progress', 'version-2']),
-  /** The dry run, always shown before a migration (§10.3 step 1). Present on a version-1 machine. */
-  dryRun: z
-    .strictObject({
-      /** What `POST /v1/fleet/migration/apply` must name: a migration only ever runs a plan somebody saw. */
-      digest: NonEmptyStringSchema,
-      lines: z.array(z.string()).readonly(),
-      /** Why it cannot run yet (a live session, an unreadable copy). Empty when it can. */
-      blockers: z.array(NonEmptyStringSchema).readonly(),
-    })
-    .optional(),
-  /** A half-done migration's digest: approving it finishes that one. */
-  inProgress: z.strictObject({ digest: NonEmptyStringSchema, startedAt: InstantSchema }).optional(),
-  /** Whether a migration may run now, and why not when it may not. */
-  migrate: FleetCatalogActSchema,
-});
-export type FleetMigrationView = z.infer<typeof FleetMigrationViewSchema>;
-
-export const FleetMigrationApplyRequestSchema = z.strictObject({
-  digest: NonEmptyStringSchema,
-  operatorPassword: OperatorPasswordSchema.optional(),
-});
-export type FleetMigrationApplyRequest = z.infer<typeof FleetMigrationApplyRequestSchema>;
-
-export const FleetMigrationOutcomeSchema = z.discriminatedUnion('outcome', [
-  z.strictObject({
-    outcome: z.literal('migrated'),
-    resumed: z.boolean(),
-    credentials: z
-      .array(
-        z.strictObject({
-          id: NonEmptyStringSchema,
-          harness: HarnessKindSchema,
-          store: z.enum(['host', 'ferretry', 'environment']),
-          retired: NonNegativeIntegerSchema,
-        }),
-      )
-      .readonly(),
-    runtimes: z
-      .array(z.strictObject({ name: NonEmptyStringSchema, formerName: NonEmptyStringSchema.optional() }))
-      .readonly(),
-  }),
-  z.strictObject({ outcome: z.literal('refused'), reasons: z.array(NonEmptyStringSchema).readonly() }),
-  z.strictObject({
-    outcome: z.literal('rolled-back'),
-    reason: NonEmptyStringSchema,
-    unrestored: z.array(NonEmptyStringSchema).readonly(),
-  }),
-]);
-export type FleetMigrationOutcome = z.infer<typeof FleetMigrationOutcomeSchema>;
-
 /** Every refusal the setup surface answers with, so a client branches on cause. */
 export const FLEET_SETUP_REFUSAL_CODES = [
-  'fleet_setup_disabled',
   'fleet_setup_unreadable',
   'fleet_setup_refused',
   'fleet_setup_unauthorized',

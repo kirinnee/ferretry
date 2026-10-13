@@ -1,12 +1,11 @@
 import '../support/dom.ts';
 
 import { describe, expect, it } from 'bun:test';
-import type { FleetManifestSummary } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { SessionCard, SessionRow } from '../../src/components/session-dashboard-rows.tsx';
 import { RosterSessionHeader, SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
-import type { AccountPickerHealthCatalog } from '../../src/lib/account-picker-catalog.ts';
+import type { AccountPickerHealthCatalog, PickerAccount } from '../../src/lib/account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { mount } from '../support/dom.ts';
@@ -20,14 +19,14 @@ import { type SessionFixtureOverrides, sessionView } from '../support/sessions.t
  * no longer holds.
  */
 
-type Account = FleetManifestSummary['accounts'][number];
+type Account = PickerAccount;
 
 const account = (wrapper: string, displayName: string): Account => ({
   id: `${wrapper}-id`,
   kind: 'claude',
-  mode: 'auto',
+  agent: true,
+  credentialId: `login-${wrapper}`,
   wrapper,
-  home: `/accounts/${wrapper}`,
   displayName,
   defaultModel: 'opus',
   models: [{ id: 'opus', available: true }],

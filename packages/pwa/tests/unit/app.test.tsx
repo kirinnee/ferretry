@@ -359,7 +359,7 @@ interface ShellOptions {
   readonly wardenVerdicts?: () => Promise<WardenVerdictsView>;
   /** The durable project registry this daemon answers `/v1/projects` with. */
   readonly projects?: readonly ProjectInfo[];
-  /** The roster `GET /v1/fleet/accounts` answers with. */
+  /** The runtimes `GET /v1/fleet/runtimes` answers with. */
   readonly accounts?: readonly unknown[];
 }
 
@@ -505,7 +505,8 @@ const appStore = async (
         }),
         request: async (path: string, schema: unknown, _init: RequestInit, timeout?: number) => {
           healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
-          if (path === '/v1/fleet/accounts' && options.accounts !== undefined) return { accounts: options.accounts };
+          if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
+            return { format: 'version-2', runtimes: options.accounts };
           return path === '/v1/doctor' ? doctorReport : {};
         },
       } as unknown as FyApiClient;
@@ -1861,22 +1862,13 @@ describe('AppShell', () => {
   /**
    * A NEW-SESSION PAGE LOAD READS THE STORED VERDICTS AND TRIGGERS NO CHECK.
    *
-   * This block used to assert that `/v1/fleet/health` was never fetched at all, and that was the right
-   * assertion at the time: reading health LAUNCHED every account's agent and asked a model to answer a
-   * sentinel, so a page load reaching it would have spent real money on a host the reader is not
-   * sitting at.
+   * The page hydrates the runtimes and every login's stored status (`GET /v1/fleet/credentials`, a store
+   * read the daemon answers without calling a provider), so each row shows its health without anybody
+   * pressing anything. What it must never do on mount is CHECK: `POST /v1/fleet/credentials/:id/check`
+   * is reached only from the Check now control.
    *
-   * That probe is deleted. `GET /v1/fleet/health` is now a stored-snapshot read the daemon answers
-   * from its own file, and the page hydrates it deliberately so every account row shows its verdict
-   * without anybody pressing anything. The property worth keeping was never "health is not fetched" —
-   * it was "a page load must not spend". So this now pins the two paths apart: the SNAPSHOT is read,
-   * and `POST /v1/fleet/health/check`, the one call that collects, is not reached on mount.
-   *
-   * WHAT THIS TEST CANNOT PROVE, and must not be mistaken for. It observes HTTP only. It cannot see a
-   * process spawn, a wrapper launch or an inference request, so it is NOT the guard against a spend
-   * regression. That guard is `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`, the
-   * journey named "what an unattended fleet pass may spend", which boots a real `fyd` and watches for
-   * a wrapper launch. If this assertion and that journey ever disagree, the journey is right.
+   * WHAT THIS TEST CANNOT PROVE: it observes HTTP only, so it is not the guard against a spend
+   * regression. That guard is `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`.
    */
   it('mounts both daemon pickers for a new session, reading stored health and checking nothing', async () => {
     const { healthReads, view } = await renderShell('/d/alpha/new', [alpha.daemonId]);
@@ -1885,9 +1877,9 @@ describe('AppShell', () => {
       expect(view.container.querySelector('#fy-new-session-agent')?.getAttribute('role')).toBe('combobox');
       expect(view.container.querySelector('#fy-new-session-cwd')?.getAttribute('role')).toBe('combobox');
       const paths = healthReads.map(read => read.path);
-      expect(paths).toContain('/v1/fleet/accounts');
-      expect(paths).toContain('/v1/fleet/health');
-      expect(paths).not.toContain('/v1/fleet/health/check');
+      expect(paths).toContain('/v1/fleet/runtimes');
+      expect(paths).toContain('/v1/fleet/credentials');
+      expect(paths.filter(path => path.endsWith('/check'))).toEqual([]);
     } finally {
       await view.unmount();
     }
@@ -1896,15 +1888,23 @@ describe('AppShell', () => {
   describe('a Launch link to the New session page', () => {
     const pickerAccount = (wrapper: string, available = true) => ({
       id: `${wrapper}-id`,
-      kind: 'claude',
-      mode: 'auto',
+      name: wrapper,
       wrapper,
-      home: `/homes/${wrapper}`,
-      displayName: wrapper,
-      defaultModel: null,
-      models: [],
-      available,
-      unavailableReason: available ? null : 'wrapper missing on this host',
+      harness: 'claude',
+      credential: { id: `login-${wrapper}`, store: 'host' },
+      profile: 'Default',
+      agent: true,
+      stack: {
+        harness: 'claude',
+        available: { available: true },
+        applied: [],
+        skipped: [],
+        conflicts: [],
+        partial: [],
+      },
+      modelSet: { source: 'harness-default' },
+      launch: available ? { available: true } : { available: false, reason: 'Sign in to launch' },
+      sameAs: [],
     });
     const roster = [pickerAccount('claude-auto-first'), pickerAccount('claude-auto-named')];
 

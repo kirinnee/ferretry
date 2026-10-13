@@ -1,56 +1,43 @@
 /**
- * The fleet as a place that names secrets, so an account whose credential is missing is a line on a
+ * The account model as a place that names secrets, so a login whose secret is missing is a line on a
  * screen before it is a session that dies at start.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type FleetConfig, FleetConfigSchema } from '@ferretry/fleet';
+import { type AccountModel, parseAccountConfigText } from '@ferretry/fleet';
 import { FleetSecretReferences } from '../../../src/lib/fleet/secret-references.ts';
 
-const ID_ONE = '00000000-0000-4000-8000-000000000001';
+const PATH = '/state/fleet/config.yaml';
 
-const declared = (input: Record<string, unknown>): FleetConfig => FleetConfigSchema.parse(input);
-
-const withProfile = (env: Record<string, string>): FleetConfig =>
-  declared({
-    profiles: { work: { env } },
-    agents: [
-      {
-        name: 'kirin',
-        kind: 'claude',
-        auth: 'api-key',
-        profiles: ['work'],
-        routes: {
-          default: {
-            id: ID_ONE,
-            wrapper: 'claude-kirin',
-            home: 'claude-kirin',
-            defaultModel: 'model-one',
-            models: ['model-one'],
-          },
-        },
-      },
-    ],
-  });
+const declared = (env: Record<string, string>): AccountModel =>
+  parseAccountConfigText(
+    [
+      'version: 2',
+      'machine: {}',
+      'credentials:',
+      '  claude-work:',
+      '    harness: claude',
+      '    store: environment',
+      '    env:',
+      ...Object.entries(env).map(([name, value]) => `      ${name}: ${JSON.stringify(value)}`),
+      '',
+    ].join('\n'),
+    PATH,
+  );
 
 describe('FleetSecretReferences', () => {
-  it('should name each account that reaches for a secret, and the profile that set it', async () => {
+  it('should name each login that reaches for a secret, and the variable that does', async () => {
     // Arrange
-    const subject = new FleetSecretReferences(async () => withProfile({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}' }));
+    const subject = new FleetSecretReferences(async () => declared({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}' }));
 
     // Act
     const actual = await subject.references();
 
     // Assert — the origin is somewhere a person can go and edit, not just a package name.
-    should(actual).deepEqual([
-      {
-        name: 'WORK_KEY',
-        origin: 'fleet account claude-kirin → ANTHROPIC_API_KEY, set by the profile "work"',
-      },
-    ]);
+    should(actual).deepEqual([{ name: 'WORK_KEY', origin: 'credential claude-work env ANTHROPIC_API_KEY' }]);
   });
 
-  it('should contribute nothing on a host that has no fleet, which is not a failure', async () => {
+  it('should contribute nothing on a machine that has no account model, which is not a failure', async () => {
     // Act
     const actual = await new FleetSecretReferences(async () => undefined).references();
 
@@ -58,10 +45,10 @@ describe('FleetSecretReferences', () => {
     should(actual).deepEqual([]);
   });
 
-  it('should contribute nothing for a fleet that uses no profile', async () => {
+  it('should contribute nothing for a login whose environment names no secret', async () => {
     // Act
     const actual = await new FleetSecretReferences(async () =>
-      withProfile({ ANTHROPIC_BASE_URL: 'https://example.invalid' }),
+      declared({ ANTHROPIC_API_KEY: 'sk-literal-value-for-a-test' }),
     ).references();
 
     // Assert

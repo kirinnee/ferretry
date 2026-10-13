@@ -1,175 +1,45 @@
 /**
- * ACCOUNT HEALTH, IN WORDS. One projection, so every surface says the same thing.
+ * A RUNTIME'S HEALTH, IN WORDS: the status of the login it uses, as one row prints it.
  *
- * The daemon publishes a verdict and a reason CODE. The words are here, once, and
- * both the picker row and the Fleet surface read them — because the two screens
- * showing the same account must not describe it differently, and a second copy
- * table is how that happens.
+ * The daemon publishes the login's status word (`ready`, `refresh_due`, `needs_sign_in`, `checking`)
+ * WITH its own label and one sentence saying why, so this module adds no copy of its own for them. What
+ * it owns is the time clause beside the word and the tone, because those are a row's layout rather than
+ * a fact about the login.
  *
- * ## The three sentences that must never merge
+ * ## The two sentences that must never merge
  *
- *   - `Unknown · Never checked`  — nobody has looked. `lastCheckedAt` is `null`.
- *   - `Unknown · Checked 1m ago` — somebody looked and could not tell.
- *   - `Needs re-login`          — somebody looked and the credential is dead.
+ *   - `Never checked`    — nobody has looked. `lastCheckedAt` is absent.
+ *   - `Checked 1m ago`   — somebody looked.
  *
- * Each is one collapsed branch away from telling a person their working fleet is
- * broken, or their broken fleet is fine.
- *
- * ## Why `Needs credential` exists beside `Needs re-login`
- *
- * An account authenticated by an environment variable or a token file CANNOT be
- * fixed by signing in: the harness reads that value and never consults its own
- * credential store, so a sign-in button would open a browser, write a store
- * nobody reads, and change nothing. Offering it is worse than offering nothing.
- * {@link accountHealthOffersSignIn} is what a surface asks before drawing one.
- *
- * ## The 403 row
- *
- * `usage_scope_unavailable` is HEALTHY. The token lacks `user:profile`, which is
- * permanent and expected for an inference-scoped token, and it says nothing about
- * whether the account works — only that its quota cannot be read. So the verdict
- * is healthy and the QUOTA is what goes unknown. A quota bar must not be drawn at
- * 0 % for it; `QuotaReadout`'s `showUnknown` is how the rows already avoid that.
- *
- * ## What a surface with ONE line may leave out
- *
- * `quiet` and `detailIsImplied` are offers, not instructions. They exist because
- * the fleet roster spent three of every row's four lines on `Unknown · Never
- * checked · Nothing has checked this account yet.` — the same nothing, three
- * times, on every account — which is what turned a list of accounts into a wall.
- * Neither flag can hide a bad verdict: `quiet` is true only where nobody has
- * looked, and `detailIsImplied` only where the reason repeats its own headline.
- * Each surface decides for itself whether to take the offer.
- *
- * Pure. No clock of its own: `now` is passed in, so a relative label is
- * deterministic in a test and can tick in the client without anything claiming a
- * fresh check happened.
+ * Pure. No clock of its own: `now` is passed in, so a relative label is deterministic in a test and can
+ * tick in the client without anything claiming a fresh check happened.
  */
 
-import type { PickerAccountHealth, PickerHealthReason, PickerHealthVerdict } from './account-picker-catalog.ts';
+import type { FleetCredentialStatusWord } from '@ferretry/protocol';
+import type { PickerAccountHealth } from './account-picker-catalog.ts';
 
-/** The tone a row paints itself with. Four, one per verdict — and `Ready` borrows `ok`; see {@link isReady}. */
+/** The tone a row paints itself with. */
 export type AccountHealthTone = 'ok' | 'bad' | 'warn' | 'muted';
 
 export interface AccountHealthView {
-  /** The headline: `Healthy`, `Ready`, `Needs re-login`, `Needs credential`, `Unknown`. */
+  /** The headline, in the daemon's own words: `Ready`, `Refresh due`, `Needs sign-in`, `Checking`. */
   readonly label: string;
-  /** The instant clause beside it: `Checked 4m ago`, `Never checked`, `Confirmed 8m ago`. */
+  /** The instant clause beside it: `Checked 4m ago`, `Never checked`. */
   readonly checked: string;
-  /** The reason, in words. Always present: a bare verdict is not actionable. */
+  /** Why, in the daemon's own sentence. Always present: a bare word is not actionable. */
   readonly detail: string;
-  /** A second clause when the newest attempt failed but the conclusion still stands. */
+  /** A second clause when the newest check could not conclude, so the word rests on older evidence. */
   readonly secondary?: string;
   readonly tone: AccountHealthTone;
-  /** Whether a sign-in control can possibly help. See the module note. */
+  /** Whether a sign-in control could possibly help. */
   readonly offersSignIn: boolean;
-  /**
-   * Nothing has been established about this account at all, so a surface with one line to spend may
-   * spend it on something else.
-   *
-   * NOT a fifth verdict and not a licence to hide a bad one. It is true for exactly one state —
-   * nobody has looked — and that state's three sentences say the same nothing three times over.
-   * A surface that prints them is spending its whole row telling somebody that nothing happened,
-   * which is what the owner was looking at when they said the roster was the page. Whether to take
-   * the offer is the surface's own call: a chooser where "nobody checked this" changes which account
-   * you pick should still say so.
-   */
-  readonly quiet: boolean;
-  /**
-   * The reason says nothing the label has not already said, so a one-line surface may drop it.
-   *
-   * Per REASON rather than per verdict, because the pair that must survive is `Healthy` beside
-   * "quota is not measurable": those are two facts and dropping the second reads an unmeasurable
-   * account as a broken one. Only the reasons that RESTATE their own headline are implied.
-   */
-  readonly detailIsImplied: boolean;
 }
 
-const VERDICT_LABEL: Readonly<Record<PickerHealthVerdict, string>> = {
-  healthy: 'Healthy',
-  needs_relogin: 'Needs re-login',
-  needs_credentials: 'Needs credential',
-  unknown: 'Unknown',
-};
-
-const VERDICT_TONE: Readonly<Record<PickerHealthVerdict, AccountHealthTone>> = {
-  healthy: 'ok',
-  needs_relogin: 'bad',
-  needs_credentials: 'bad',
-  unknown: 'warn',
-};
-
-/**
- * A credential whose access token aged out beside a good refresh token: `Ready`, not `Unknown`.
- *
- * THE VERDICT STAYS `unknown` — nothing has proved the provider still accepts it, so it is never
- * called `Healthy` — but it is also exactly what a first run leaves on every account, because the
- * host's own login is copied and the copied access token is nearly always already past its short
- * life. Shown as `Unknown` in the warning tone, a new user's whole fleet read as broken over a
- * login that was fine: the harness renews such a token by itself the first time the account is
- * used. So it gets its own headline and the calm tone, and the terminal says the same words
- * (`packages/cli/src/lib/fleet/render.ts`, `READY`).
- */
-const isReady = (health: PickerAccountHealth): boolean =>
-  health.verdict === 'unknown' && health.reason === 'oauth_refreshable';
-
-/**
- * Why, in one clause each.
- *
- * Every reason has words. A reason with no sentence would render as a bare
- * verdict, and "Unknown" with nothing after it is the state this whole feature
- * exists to stop showing people.
- */
-const REASON_DETAIL: Readonly<Record<PickerHealthReason, string>> = {
-  provider_accepted: 'The provider accepted this account’s credential.',
-  usage_scope_unavailable: 'Accepted, but this token cannot read usage, so quota is not measurable.',
-  oauth_credential_missing: 'There is no credential in this account’s home.',
-  oauth_access_expired: 'The access token expired and there is nothing to renew it with.',
-  oauth_token_rejected: 'The provider rejected this token.',
-  static_credential_missing: 'The credential this account is configured to use is not there.',
-  static_credential_rejected: 'The provider rejected the credential this account is configured to use.',
-  never_checked: 'Nothing has checked this account yet.',
-  credential_unreadable: 'The credential could not be read, so nothing is known either way.',
-  oauth_refreshable: 'Renews itself the first time it’s used.',
-  oauth_rejection_unconfirmed:
-    'The OAuth check was refused, but Ferretry could not tell whether the provider rejected this login or this client. This result does not mean you need to sign in again.',
-  codex_liveness_unproven: 'Codex has no free way to prove a sign-in, so this is not a verdict about it.',
-  check_timeout: 'The last check timed out.',
-  provider_unavailable: 'The provider could not be reached.',
-  provider_not_asked: 'Signed in on this host. The provider has not confirmed it.',
-  credential_changed_during_check: 'The credential changed while the check was running, so its result was discarded.',
-  account_unavailable: 'This account is published as unavailable, so nothing was checked.',
-  stale: 'The last result is too old to trust.',
-};
-
-/**
- * Which reasons only restate their own verdict.
- *
- * Annotated over every reason rather than derived from the words, so a reason added tomorrow is a
- * compile error here instead of a sentence that silently stops being printed. Exactly two qualify:
- * "the provider accepted this credential" IS `Healthy`, and "nothing has checked this account yet"
- * IS `Unknown · Never checked`. Everything else — a 403 that cannot read usage, a Codex that has no
- * free proof, a check that timed out — carries a fact the headline does not.
- */
-const REASON_IS_IMPLIED: Readonly<Record<PickerHealthReason, boolean>> = {
-  provider_accepted: true,
-  never_checked: true,
-  usage_scope_unavailable: false,
-  oauth_credential_missing: false,
-  oauth_access_expired: false,
-  oauth_token_rejected: false,
-  static_credential_missing: false,
-  static_credential_rejected: false,
-  credential_unreadable: false,
-  oauth_refreshable: false,
-  oauth_rejection_unconfirmed: false,
-  codex_liveness_unproven: false,
-  check_timeout: false,
-  provider_unavailable: false,
-  provider_not_asked: false,
-  credential_changed_during_check: false,
-  account_unavailable: false,
-  stale: false,
+const WORD_TONE: Readonly<Record<FleetCredentialStatusWord, AccountHealthTone>> = {
+  ready: 'ok',
+  refresh_due: 'warn',
+  needs_sign_in: 'bad',
+  checking: 'muted',
 };
 
 /** Whole units, coarsest that fits. A reader wants "4m ago", never a millisecond count. */
@@ -187,71 +57,33 @@ export function absoluteInstantLabel(instant: number): string {
   return new Date(instant).toISOString();
 }
 
-/** Whether a sign-in control could possibly fix this. See the module note on `Needs credential`. */
-export function accountHealthOffersSignIn(health: PickerAccountHealth): boolean {
-  return health.verdict === 'needs_relogin';
+/** When the login was last checked, as epoch milliseconds, or `null` when nobody has. */
+export function lastCheckedAt(health: PickerAccountHealth): number | null {
+  if (health.lastCheckedAt === undefined) return null;
+  const at = Date.parse(health.lastCheckedAt);
+  return Number.isNaN(at) ? null : at;
 }
 
-/**
- * One account's health as the words a row prints.
- *
- * The `checked` clause is chosen from what is actually known rather than from the
- * verdict, and the three cases are the three sentences in the module note:
- *
- *   - never checked      -> `Never checked`, and no time is invented
- *   - conclusion is live -> `Confirmed 8m ago`, dated from the EVIDENCE, because
- *     that is when the claim was last true rather than when a request last ran
- *   - no conclusion      -> `Checked 1m ago`, dated from the check
- *
- * `secondary` appears only when both are true at once: there is a conclusion, and
- * the newest attempt to re-prove it failed. Hiding that is how a fleet reads
- * healthy while every provider call is failing.
- */
+/** One runtime's login status as the words a row prints. */
 export function accountHealthView(health: PickerAccountHealth, now: number): AccountHealthView {
-  const detail =
-    // A stale row's own reason says only "too old"; the reader also wants to know WHAT went stale,
-    // because a bare Unknown there looks exactly like an account nobody ever checked.
-    health.staleVerdict === undefined
-      ? REASON_DETAIL[health.reason]
-      : `${REASON_DETAIL.stale} It last read ${VERDICT_LABEL[health.staleVerdict].toLowerCase()}.`;
-  const ready = isReady(health);
-  // Not for `Ready`: an aged-out access token is exactly what the free check cannot use, so that check
-  // is inconclusive by construction, and saying so beside "renews itself" read as a second fault.
-  const secondary =
-    !ready && health.lastCheckInconclusive && health.verdictAt !== null && health.lastCheckedAt !== null
-      ? `The check ${relativeInstantLabel(health.lastCheckedAt, now)} was inconclusive.`
-      : undefined;
+  const checkedAt = lastCheckedAt(health);
   return {
-    label: ready ? 'Ready' : VERDICT_LABEL[health.verdict],
-    checked: checkedClause(health, now),
-    detail,
-    ...(secondary === undefined ? {} : { secondary }),
-    tone: ready ? 'ok' : VERDICT_TONE[health.verdict],
-    offersSignIn: accountHealthOffersSignIn(health),
-    // A verdict AND its reason, both: `unknown` on its own is a real state somebody looked at and
-    // could not conclude, which is a different row from one nobody has opened yet.
-    quiet: health.verdict === 'unknown' && health.reason === 'never_checked',
-    // A row that went stale says WHAT went stale, so its detail is never the reason's own sentence.
-    detailIsImplied: health.staleVerdict === undefined && REASON_IS_IMPLIED[health.reason],
+    label: health.label,
+    checked: checkedAt === null ? 'Never checked' : `Checked ${relativeInstantLabel(checkedAt, now)}`,
+    detail: health.explanation,
+    ...(health.lastCheckInconclusive && checkedAt !== null
+      ? { secondary: `The check ${relativeInstantLabel(checkedAt, now)} was inconclusive.` }
+      : {}),
+    tone: WORD_TONE[health.word],
+    offersSignIn: health.word === 'needs_sign_in',
   };
 }
 
-function checkedClause(health: PickerAccountHealth, now: number): string {
-  if (health.lastCheckedAt === null) return 'Never checked';
-  // `Ready` is never "Confirmed": nothing has confirmed it, which is the one thing its headline admits.
-  if (!isReady(health) && health.verdictAt !== null && health.lastCheckInconclusive) {
-    return `Confirmed ${relativeInstantLabel(health.verdictAt, now)}`;
-  }
-  return `Checked ${relativeInstantLabel(health.lastCheckedAt, now)}`;
-}
-
-/** The row for an account the daemon published no health for at all: unread, not unhealthy. */
+/** The row for a runtime whose login the daemon published no status for at all: unread, not unhealthy. */
 export const UNREAD_ACCOUNT_HEALTH: AccountHealthView = Object.freeze({
   label: 'Unknown',
   checked: 'Never checked',
-  detail: REASON_DETAIL.never_checked,
+  detail: 'This machine has not said how this login is doing yet.',
   tone: 'muted' as const,
   offersSignIn: false,
-  quiet: true,
-  detailIsImplied: true,
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import {
   type MachineData,
   machineDetailFromHash,
@@ -87,7 +87,7 @@ describe('readMachineData', () => {
     await expect(
       readMachineData(
         async () =>
-          scripted({ ...READS(), 'GET /v1/fleet/profile-stacks': boom, 'GET /v1/fleet/components': new Error('x') }),
+          scripted({ ...READS(), 'GET /v1/fleet/profiles': boom, 'GET /v1/fleet/components': new Error('x') }),
         STUDIO,
       ),
     ).rejects.toBe(boom);

@@ -1,49 +1,52 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { ResolvedAccount, ResolvedCommand } from '../../src/lib/profiles.ts';
+import type { HarnessKind } from '../../src/lib/manifest.ts';
 import {
-  FIRST_RUN_SEED_TOGGLE,
-  MANAGED_MARKER,
-  UnknownCommandTargetError,
   envReferenceName,
+  MANAGED_MARKER,
+  type ResolvedCommand,
+  type RuntimeWrapperInput,
   renderCommandScript,
-  renderWrapperScript,
-  resolveCommandTargets,
+  renderRuntimeWrapperScript,
   shellPath,
   shellQuote,
 } from '../../src/lib/wrappers.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
-const ID_TWO = '00000000-0000-4000-8000-000000000002';
 
 /** A placeholder token name. No test in this file ever supplies a credential value. */
 const TOKEN_NAME = 'PROVIDER_TOKEN_PLACEHOLDER';
 
-const account = (overrides: Partial<ResolvedAccount> = {}): ResolvedAccount => ({
-  id: ID_ONE,
-  kind: 'claude',
-  mode: 'auto',
-  wrapper: 'claude-auto-kirin',
-  home: '$HOME/.state/fleet/homes/auto-kirin',
-  displayName: 'Kirin (auto)',
-  agent: 'kirin',
-  variant: 'auto',
-  identity: 'kirin',
-  auth: 'oauth',
-  available: true,
-  unavailableReason: null,
-  defaultModel: 'model-one',
-  models: [{ id: 'model-one', available: true }],
-  env: {},
-  flags: [],
-  settings: [],
-  memory: undefined,
-  skills: undefined,
-  hooks: undefined,
-  hooksDir: undefined,
-  mcp: undefined,
-  ...overrides,
-});
+/** The facts these cases vary about one runtime; everything else is a fixed agent runtime. */
+interface RuntimeFacts {
+  readonly id?: string;
+  readonly wrapper?: string;
+  readonly kind?: HarnessKind;
+  readonly home?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly flags?: readonly string[];
+}
+
+const account = (overrides: RuntimeFacts = {}): RuntimeWrapperInput => {
+  const harness = overrides.kind ?? 'claude';
+  return {
+    name: overrides.wrapper ?? 'claude-auto-kirin',
+    id: overrides.id ?? ID_ONE,
+    harness,
+    agent: true,
+    configDirectory: overrides.home ?? '$HOME/.state/fleet/homes/auto-kirin',
+    env: overrides.env ?? {},
+    args: overrides.flags ?? [],
+    seedFirstRun: harness === 'claude',
+    fyCommand: 'fy',
+  };
+};
+
+/** The runtime renderer, with the secrets file a case names. */
+const render = (input: RuntimeWrapperInput, options: { readonly secretsFile?: string } = {}): string =>
+  renderRuntimeWrapperScript({ ...input, secretsFile: options.secretsFile });
+
+const FIRST_RUN_SEED_TOGGLE = 'FY_SEED_FIRST_RUN';
 
 const command = (overrides: Partial<ResolvedCommand> = {}): ResolvedCommand => ({
   wrapper: 'crc-claude-auto-kirin',
@@ -121,35 +124,20 @@ describe('shellPath', () => {
   });
 });
 
-describe('renderWrapperScript', () => {
+describe('renderRuntimeWrapperScript', () => {
   it('should bind the harness to its declared home and exec the harness binary', () => {
     // Arrange
     const subject = account();
 
     // Act
-    const actual = renderWrapperScript(subject);
+    const actual = render(subject);
 
     // Assert
     should(actual.startsWith('#!/bin/sh\n')).be.true();
     should(actual).containEql(MANAGED_MARKER);
-    should(actual).containEql(`# account ${ID_ONE} (claude, auto)`);
+    should(actual).containEql(`# runtime claude-auto-kirin ${ID_ONE} (claude, agent)`);
     should(actual).containEql('export CLAUDE_CONFIG_DIR="$HOME/.state/fleet/homes/auto-kirin"');
     should(actual.trimEnd().endsWith('exec claude "$@"')).be.true();
-  });
-
-  it('should clear an inherited Claude secure-storage pointer before exporting anything', () => {
-    // Arrange — a version-1 account keeps its login in its own config directory.
-    const subject = account({ env: { LOG_LEVEL: 'debug' } });
-
-    // Act
-    const actual = renderWrapperScript(subject);
-
-    // Assert
-    const lines = actual.split('\n');
-    const unset = lines.indexOf('unset CLAUDE_SECURESTORAGE_CONFIG_DIR');
-    should(unset).be.greaterThan(lines.indexOf('export CLAUDE_CONFIG_DIR="$HOME/.state/fleet/homes/auto-kirin"'));
-    should(unset).be.lessThan(lines.indexOf("export LOG_LEVEL='debug'"));
-    should(renderWrapperScript(account({ kind: 'codex', home: '/state/codex' }))).not.containEql('unset');
   });
 
   it('should use the codex home variable and binary for a codex account', () => {
@@ -157,7 +145,7 @@ describe('renderWrapperScript', () => {
     const subject = account({ kind: 'codex', home: '/state/fleet/homes/loge', flags: ['--full-auto'] });
 
     // Act
-    const actual = renderWrapperScript(subject);
+    const actual = render(subject);
 
     // Assert
     should(actual).containEql(`export CODEX_HOME='/state/fleet/homes/loge'`);
@@ -170,8 +158,8 @@ describe('renderWrapperScript', () => {
     const subject = account();
 
     // Act
-    const withSecrets = renderWrapperScript(subject, { secretsFile: '~/.config/fy/provider-env' });
-    const without = renderWrapperScript(subject);
+    const withSecrets = render(subject, { secretsFile: '~/.config/fy/provider-env' });
+    const without = render(subject);
 
     // Assert
     should(withSecrets).containEql('if [ -r "$HOME/.config/fy/provider-env" ]; then');
@@ -187,7 +175,7 @@ describe('renderWrapperScript', () => {
     const subject = account();
 
     // Act
-    const actual = renderWrapperScript(subject, { secretsFile: '/etc/fy/provider-env' });
+    const actual = render(subject, { secretsFile: '/etc/fy/provider-env' });
 
     // Assert
     should(actual).containEql(`if [ -r '/etc/fy/provider-env' ]; then`);
@@ -198,7 +186,7 @@ describe('renderWrapperScript', () => {
     const subject = account({ env: { ANTHROPIC_AUTH_TOKEN: `$${TOKEN_NAME}` } });
 
     // Act
-    const actual = renderWrapperScript(subject, { secretsFile: '~/.config/fy/provider-env' });
+    const actual = render(subject, { secretsFile: '~/.config/fy/provider-env' });
 
     // Assert
     should(actual).containEql(`export ANTHROPIC_AUTH_TOKEN="\${${TOKEN_NAME}}"`);
@@ -211,10 +199,10 @@ describe('renderWrapperScript', () => {
     const braced = account({ env: { TOKEN: `\${${TOKEN_NAME}}` } });
 
     // Act
-    const actual = renderWrapperScript(braced);
+    const actual = render(braced);
 
     // Assert
-    should(actual).equal(renderWrapperScript(bare));
+    should(actual).equal(render(bare));
   });
 
   it('should guard each referenced variable once, naming the configured secrets file', () => {
@@ -224,25 +212,13 @@ describe('renderWrapperScript', () => {
     });
 
     // Act
-    const actual = renderWrapperScript(subject, { secretsFile: '~/.config/fy/provider-env' });
+    const actual = render(subject, { secretsFile: '~/.config/fy/provider-env' });
 
     // Assert
     should(actual).containEql(
       `: "\${${TOKEN_NAME}:?ferretry: ${TOKEN_NAME} is not set — expected it from ~/.config/fy/provider-env}"`,
     );
     should(actual.match(/:\?ferretry:/g)?.length).equal(1);
-  });
-
-  it('should omit the guards when the caller opts out', () => {
-    // Arrange
-    const subject = account({ env: { TOKEN: `$${TOKEN_NAME}` } });
-
-    // Act
-    const actual = renderWrapperScript(subject, { guardEnvReferences: false });
-
-    // Assert
-    should(actual).not.containEql(':?ferretry:');
-    should(actual).containEql(`export TOKEN="\${${TOKEN_NAME}}"`);
   });
 
   it('should quote a literal environment value so no part of it can be interpreted', () => {
@@ -252,7 +228,7 @@ describe('renderWrapperScript', () => {
     });
 
     // Act
-    const actual = renderWrapperScript(subject);
+    const actual = render(subject);
 
     // Assert
     should(actual).containEql(`export PROMPT='$(id -u)'`);
@@ -266,7 +242,7 @@ describe('renderWrapperScript', () => {
     const subject = account({ env: { TOKEN: `$${TOKEN_NAME}` } });
 
     // Act
-    const actual = renderWrapperScript(subject, { secretsFile: '~/.secrets' });
+    const actual = render(subject, { secretsFile: '~/.secrets' });
 
     // Assert
     should(actual.indexOf('. "$HOME/.secrets"')).be.below(actual.indexOf('export TOKEN='));
@@ -278,7 +254,7 @@ describe('renderWrapperScript', () => {
     const subject = account({ flags: ['--dangerously-skip-permissions', '--model', 'model one'] });
 
     // Act
-    const actual = renderWrapperScript(subject);
+    const actual = render(subject);
 
     // Assert
     should(
@@ -292,10 +268,10 @@ describe('renderWrapperScript', () => {
     const second = account({ env: { MIKE: '3', ZULU: '1', ALPHA: '2' } });
 
     // Act
-    const actual = renderWrapperScript(first);
+    const actual = render(first);
 
     // Assert
-    should(actual).equal(renderWrapperScript(second));
+    should(actual).equal(render(second));
     should(actual.indexOf('export ALPHA=')).be.below(actual.indexOf('export MIKE='));
     should(actual.indexOf('export MIKE=')).be.below(actual.indexOf('export ZULU='));
   });
@@ -305,7 +281,7 @@ describe('renderWrapperScript', () => {
     const subject = account({ wrapper: 'codex-auto-kirin', kind: 'claude' });
 
     // Act
-    const actual = renderWrapperScript(subject);
+    const actual = render(subject);
 
     // Assert
     should(actual).containEql('export CLAUDE_CONFIG_DIR=');
@@ -346,36 +322,12 @@ describe('renderCommandScript', () => {
   });
 });
 
-describe('resolveCommandTargets', () => {
-  it('should locate each target through the account id, not the wrapper name', () => {
-    // Arrange
-    const accounts = [account(), account({ id: ID_TWO, wrapper: 'claude-atomi' })];
-    const commands = [command({ target: ID_TWO })];
-
-    // Act
-    const actual = resolveCommandTargets(commands, accounts, '/state/fleet/bin');
-
-    // Assert
-    should(actual.length).equal(1);
-    should(actual[0]?.targetWrapper).equal('claude-atomi');
-  });
-
-  it('should refuse a command whose target account does not exist', () => {
-    // Arrange
-    const commands = [command({ target: ID_TWO })];
-
-    // Act + Assert
-    should(() => resolveCommandTargets(commands, [account()], '/state/fleet/bin')).throw(UnknownCommandTargetError);
-    should(() => resolveCommandTargets(commands, [account()], '/state/fleet/bin')).throw(/unknown account/);
-  });
-});
-
 describe('first-run seeding', () => {
   const claude = (env: Record<string, string> = {}) => account({ kind: 'claude', env });
 
   it('should seed the prompts that stall a launch nobody is watching', () => {
     // Act
-    const actual = renderWrapperScript(claude());
+    const actual = render(claude());
 
     // Assert — the four flags the harness gates its one-time prompts on.
     should(actual).containEql('hasTrustDialogAccepted');
@@ -386,7 +338,7 @@ describe('first-run seeding', () => {
 
   it('should seed on every launch rather than trusting a write made once', () => {
     // Act
-    const actual = renderWrapperScript(claude());
+    const actual = render(claude());
 
     // Assert — it is in the wrapper, before the exec, so it re-asserts every invocation.
     const seedAt = actual.indexOf('hasTrustDialogAccepted');
@@ -397,7 +349,7 @@ describe('first-run seeding', () => {
 
   it('should write the browser default only when it has never been chosen', () => {
     // Act
-    const actual = renderWrapperScript(claude());
+    const actual = render(claude());
 
     // Assert — a home where somebody deliberately chose true must not be silently turned off.
     should(actual).containEql('if .claudeInChromeDefaultEnabled == null then');
@@ -405,7 +357,7 @@ describe('first-run seeding', () => {
 
   it('should offer a way to launch without it', () => {
     // Act
-    const actual = renderWrapperScript(claude());
+    const actual = render(claude());
 
     // Assert
     should(actual).containEql(FIRST_RUN_SEED_TOGGLE);
@@ -414,7 +366,7 @@ describe('first-run seeding', () => {
 
   it('should say so out loud when it cannot seed, rather than skipping in silence', () => {
     // Act
-    const actual = renderWrapperScript(claude());
+    const actual = render(claude());
 
     // Assert — a launch that may stall for an unexplained reason is what this exists to prevent.
     should(actual).containEql('command -v jq');
@@ -423,7 +375,7 @@ describe('first-run seeding', () => {
 
   it('should approve the key the account itself exports', () => {
     // Act — the harness asks about a custom API key and defaults to No, blocking a headless session.
-    const actual = renderWrapperScript(claude({ ANTHROPIC_API_KEY: '$FY_TOKEN' }));
+    const actual = render(claude({ ANTHROPIC_API_KEY: '$FY_TOKEN' }));
 
     // Assert
     should(actual).containEql('customApiKeyResponses');
@@ -431,7 +383,7 @@ describe('first-run seeding', () => {
 
   it('should pass the key through the environment, never through a process listing', () => {
     // Act
-    const actual = renderWrapperScript(claude({ ANTHROPIC_API_KEY: '$FY_TOKEN' }));
+    const actual = render(claude({ ANTHROPIC_API_KEY: '$FY_TOKEN' }));
 
     // Assert — `jq --arg` would put a key fragment in argv, where any `ps` can read it.
     should(actual).containEql('$ENV.FY_SEED_KEY');
@@ -440,7 +392,7 @@ describe('first-run seeding', () => {
 
   it('should seed after the exports, because it reads what they decided', () => {
     // Act
-    const actual = renderWrapperScript(claude({ ANTHROPIC_API_KEY: 'placeholder' }));
+    const actual = render(claude({ ANTHROPIC_API_KEY: 'placeholder' }));
 
     // Assert
     should(actual.indexOf('export ANTHROPIC_API_KEY')).be.lessThan(actual.indexOf('customApiKeyResponses'));
@@ -448,7 +400,7 @@ describe('first-run seeding', () => {
 
   it('should leave a Codex wrapper alone — it has no such prompts', () => {
     // Act
-    const actual = renderWrapperScript(account({ kind: 'codex', env: {} }));
+    const actual = render(account({ kind: 'codex', env: {} }));
 
     // Assert
     should(actual).not.containEql('hasTrustDialogAccepted');
@@ -466,7 +418,7 @@ describe('first-run seeding', () => {
 describe('an account whose profile takes a variable from the secret store', () => {
   it('should never export the value, because there is none in the script to export', () => {
     // Act
-    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
+    const actual = render(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
 
     // Assert
     should(actual).not.containEql('export ANTHROPIC_API_KEY');
@@ -475,7 +427,7 @@ describe('an account whose profile takes a variable from the secret store', () =
 
   it('should require the variable, naming the secret and what to run', () => {
     // Act
-    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
+    const actual = render(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
 
     // Assert
     should(actual).containEql(
@@ -485,7 +437,7 @@ describe('an account whose profile takes a variable from the secret store', () =
 
   it('should name every secret one variable composes, and offer the first as the one to set', () => {
     // Act
-    const actual = renderWrapperScript(account({ env: { AUTH_HEADER: '${secret:SCHEME} ${secret:WORK_KEY}' } }));
+    const actual = render(account({ env: { AUTH_HEADER: '${secret:SCHEME} ${secret:WORK_KEY}' } }));
 
     // Assert
     should(actual).containEql('(secrets SCHEME, WORK_KEY)');
@@ -494,7 +446,7 @@ describe('an account whose profile takes a variable from the secret store', () =
 
   it('should require it before the home is bound, so nothing runs on a missing credential', () => {
     // Act
-    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
+    const actual = render(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
 
     // Assert
     should(actual.indexOf('${ANTHROPIC_API_KEY:?')).be.lessThan(actual.indexOf('export CLAUDE_CONFIG_DIR'));
@@ -502,7 +454,7 @@ describe('an account whose profile takes a variable from the secret store', () =
 
   it('should still export the literal variables beside it', () => {
     // Act
-    const actual = renderWrapperScript(
+    const actual = render(
       account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', ANTHROPIC_BASE_URL: 'https://example.invalid' } }),
     );
 
@@ -512,9 +464,7 @@ describe('an account whose profile takes a variable from the secret store', () =
 
   it('should keep an environment reference beside it a reference, with its own guard', () => {
     // Act
-    const actual = renderWrapperScript(
-      account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', OTHER: `$${TOKEN_NAME}` } }),
-    );
+    const actual = render(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', OTHER: `$${TOKEN_NAME}` } }));
 
     // Assert
     should(actual).containEql(`export OTHER="\${${TOKEN_NAME}}"`);
@@ -522,23 +472,12 @@ describe('an account whose profile takes a variable from the secret store', () =
     should(actual).containEql(`Ferretry's secret store`);
   });
 
-  it('should emit no requirement at all when guards are turned off', () => {
-    // Act
-    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }), {
-      guardEnvReferences: false,
-    });
-
-    // Assert — still no export, because the absence of the value is not a guard setting.
-    should(actual).not.containEql(':?ferretry');
-    should(actual).not.containEql('export ANTHROPIC_API_KEY');
-  });
-
   it('should leave a wrapper that binds no secret byte-identical to what it always was', () => {
     // Arrange
     const plain = account({ env: { ANTHROPIC_BASE_URL: 'https://example.invalid', OTHER: `$${TOKEN_NAME}` } });
 
     // Act
-    const actual = renderWrapperScript(plain);
+    const actual = render(plain);
 
     // Assert — the two rendering rules that existed before, unchanged and in the same order.
     should(actual).containEql(

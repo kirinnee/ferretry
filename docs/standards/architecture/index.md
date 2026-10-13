@@ -40,7 +40,7 @@ packages/
 ├── cli/        the fy binary — commander composition root, three-layer dirs (real today)
 ├── protocol/   zod schemas + typed client SDK shared by cli & pwa
 ├── daemon/     the per-host daemon (fyd)
-├── fleet/      fleet provisioning library + subcommands
+├── fleet/      the account model library: runtimes, credentials, profiles
 └── pwa/        the installable web app
 ```
 

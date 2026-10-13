@@ -7,10 +7,9 @@
  * 1. **Does this harness do an interactive login?** Declared here. A harness that authenticates by
  *    some other means never offers one, and nothing infers the answer from a kind, a binary name or
  *    the presence of a `login` subcommand.
- * 2. **Does this ACCOUNT's credential come from a login?** That is
- *    {@link ./credential-source.ts}, and it is a different question with a different answer: a
- *    harness that logs in perfectly well still has nothing to log in when the account's key arrives
- *    from a file or the environment.
+ * 2. **Does this CREDENTIAL come from a login?** That is its `store` (`./account/schema.ts`), and it
+ *    is a different question with a different answer: a harness that logs in perfectly well still has
+ *    nothing to log in when the credential is kept in the environment.
  * 3. **How does the login actually run?** That is per harness and it lives with each harness's own
  *    flow, never here. Claude prints a URL and reads a pasted code from stdin; Codex completes a
  *    device grant at the provider and needs no return trip. Those are two programs, two output

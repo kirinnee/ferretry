@@ -7,6 +7,7 @@ import type {
 } from '../../src/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
+import { healthMap, pickerAccount, pickerHealth } from './picker-support.ts';
 
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
@@ -27,35 +28,11 @@ const laptopOverRelay = daemonConnection({
 });
 
 const catalog = (wrapper: string): AccountPickerCatalog => ({
-  accounts: [
-    {
-      id: wrapper.startsWith('claude')
-        ? '11111111-1111-4111-8111-111111111111'
-        : '22222222-2222-4222-8222-222222222222',
-      kind: wrapper.startsWith('claude') ? 'claude' : 'codex',
-      mode: 'auto',
-      wrapper,
-      home: `/accounts/${wrapper}`,
-      displayName: wrapper,
-      defaultModel: 'model',
-      models: [{ id: 'model', available: true }],
-      available: true,
-      unavailableReason: null,
-    },
-  ],
+  accounts: [pickerAccount({ wrapper, defaultModel: 'model', models: [{ id: 'model', available: true }] })],
 });
 
-const healthRow: PickerAccountHealth = {
-  accountId: '11111111-1111-4111-8111-111111111111',
-  kind: 'claude',
-  verdict: 'healthy',
-  reason: 'provider_accepted',
-  evidence: 'anthropic_usage',
-  lastCheckedAt: 1,
-  verdictAt: 1,
-  lastCheckInconclusive: false,
-};
-const healthy: AccountPickerHealthCatalog = { health: new Map([[healthRow.accountId, healthRow]]), error: null };
+const healthRow: PickerAccountHealth = pickerHealth('login-claude-auto-a');
+const healthy: AccountPickerHealthCatalog = { health: healthMap(healthRow), error: null };
 
 const portFor = (answers: Map<string, () => Promise<AccountPickerCatalog>>): DaemonAccountPickerPort => ({
   catalog: async daemon => {
@@ -241,7 +218,7 @@ describe('DaemonAccountPickerStore', () => {
     });
 
     await store.checkHealth(laptopOverRelay);
-    expect(store.sliceFor(laptopOverRelay).health?.get(healthRow.accountId)?.verdict).toBe('healthy');
+    expect(store.sliceFor(laptopOverRelay).health?.get(healthRow.credentialId)?.word).toBe('ready');
     const stale = store.hydrate(laptopOverRelay);
 
     // A MOVED base URL is a re-pair, so it reads as unread: no generation, no roster, and — the point
@@ -340,7 +317,7 @@ describe('DaemonAccountPickerStore', () => {
       healthStatus: 'error',
       healthError: 'the daemon returned ambiguous health rows',
     });
-    expect(store.sliceFor(laptop).health?.get(healthRow.accountId)?.verdict).toBe('healthy');
+    expect(store.sliceFor(laptop).health?.get(healthRow.credentialId)?.word).toBe('ready');
   });
 
   it('reaches the collecting check only from an explicit press, once hydration has settled', async () => {

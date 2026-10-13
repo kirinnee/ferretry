@@ -3,14 +3,14 @@ import { OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useMemo } from 'react';
 import { z } from 'zod';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { type SetupAccess, useSetupAccess } from '../../../../../src/features/fleet/setup/setup-access.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   type Call,
+  machineAnswer,
   NOW,
   PASSWORD,
-  permissions,
   STUDIO,
   scriptedClient,
   UNLOCK_TOKEN,
@@ -20,8 +20,9 @@ import {
 const PASSWORD_FIRST = 'Type this machine’s operator password to make this change.';
 const NO_ANSWER = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
 
-const LOCKED = permissions({ mayApply: false, applyRefusal: 'locked' });
-const unlockedAnswer = (call: Call) => (call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN ? permissions() : LOCKED);
+const LOCKED = machineAnswer({ mayApply: false, applyRefusal: 'locked' });
+const unlockedAnswer = (call: Call) =>
+  call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN ? machineAnswer() : LOCKED;
 
 interface Probe {
   current: SetupAccess | null;
@@ -67,7 +68,7 @@ const hookView = async (client: FleetClient, now: () => number = NOW) => {
 describe('useSetupAccess', () => {
   it('reads with no unlock header when the machine is open', async () => {
     const calls: Call[] = [];
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions(), '/v1/probe': { ok: true } }, calls);
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer(), '/v1/probe': { ok: true } }, calls);
     const { view, access, locked } = await hookView(client);
     try {
       expect(locked()).toBe('false');
@@ -81,7 +82,7 @@ describe('useSetupAccess', () => {
       });
       expect(result).toEqual({ kind: 'done', value: 42 });
       expect(unlockSeen).toBeUndefined();
-      expect(calls.map(call => call.path)).toEqual(['/v1/fleet/permissions']);
+      expect(calls.map(call => call.path)).toEqual(['/v1/fleet/machine']);
     } finally {
       await view.unmount();
     }
@@ -89,7 +90,7 @@ describe('useSetupAccess', () => {
 
   it('refuses a locked read until the operator password is typed', async () => {
     const calls: Call[] = [];
-    const client = scriptedClient({ '/v1/fleet/permissions': LOCKED, '/v1/grants/unlock': UNLOCKED }, calls);
+    const client = scriptedClient({ '/v1/fleet/machine': LOCKED, '/v1/grants/unlock': UNLOCKED }, calls);
     const { view, access, locked, refusal } = await hookView(client);
     try {
       expect(locked()).toBe('true');
@@ -103,7 +104,7 @@ describe('useSetupAccess', () => {
       expect(result).toMatchObject({ kind: 'refused', sentence: PASSWORD_FIRST, passwordRejected: false });
       expect(worked).toBe(false);
       expect(refusal()).toBe(PASSWORD_FIRST);
-      expect(calls.map(call => call.path)).toEqual(['/v1/fleet/permissions']);
+      expect(calls.map(call => call.path)).toEqual(['/v1/fleet/machine']);
     } finally {
       await view.unmount();
     }
@@ -113,7 +114,7 @@ describe('useSetupAccess', () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': unlockedAnswer,
+        '/v1/fleet/machine': unlockedAnswer,
         '/v1/grants/unlock': UNLOCKED,
         '/v1/fleet/setup/scan': { ok: true },
       },
@@ -169,7 +170,7 @@ describe('useSetupAccess', () => {
 
   it('says a wrong password was rejected and keeps the browser locked', async () => {
     const wrong = new FyHttpError('That password was not right.', 401, 'grant_wrong_password');
-    const client = scriptedClient({ '/v1/fleet/permissions': LOCKED, '/v1/grants/unlock': wrong });
+    const client = scriptedClient({ '/v1/fleet/machine': LOCKED, '/v1/grants/unlock': wrong });
     const { view, access, locked } = await hookView(client);
     try {
       let result: unknown;
@@ -186,7 +187,7 @@ describe('useSetupAccess', () => {
   it('asks for the password again once the unlock has expired', async () => {
     let clock = NOW();
     // The machine stays locked even with the unlock, so only the unlock's own expiry decides.
-    const client = scriptedClient({ '/v1/fleet/permissions': LOCKED, '/v1/grants/unlock': UNLOCKED });
+    const client = scriptedClient({ '/v1/fleet/machine': LOCKED, '/v1/grants/unlock': UNLOCKED });
     const { view, access, locked } = await hookView(client, () => clock);
     try {
       await interact(async () => {
@@ -205,7 +206,7 @@ describe('useSetupAccess', () => {
   });
 
   it('words a read that throws a non-HTTP error as the machine not answering', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const { view, access } = await hookView(client);
     try {
       let result: unknown;
@@ -221,7 +222,7 @@ describe('useSetupAccess', () => {
   });
 
   it('words a read the daemon refused with the daemon’s own sentence', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const { view, access } = await hookView(client);
     try {
       let result: unknown;
@@ -237,7 +238,7 @@ describe('useSetupAccess', () => {
   });
 
   it('hands an act nothing extra on an open machine', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const { view, access } = await hookView(client);
     try {
       let seen: unknown;
@@ -256,7 +257,7 @@ describe('useSetupAccess', () => {
   });
 
   it('refuses an act that owes the operator password until it is typed', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions({ confirmation: 'operator-password' }) });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer({ confirmation: 'operator-password' }) });
     const { view, access } = await hookView(client);
     try {
       let worked = false;
@@ -274,7 +275,7 @@ describe('useSetupAccess', () => {
   });
 
   it('hands the typed operator password to an act that confirms', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions({ confirmation: 'operator-password' }) });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer({ confirmation: 'operator-password' }) });
     const { view, access, refusal } = await hookView(client);
     try {
       let seen: unknown;
@@ -295,7 +296,7 @@ describe('useSetupAccess', () => {
 
   it('hands a locked act both the minted unlock and no confirmation', async () => {
     const calls: Call[] = [];
-    const client = scriptedClient({ '/v1/fleet/permissions': unlockedAnswer, '/v1/grants/unlock': UNLOCKED }, calls);
+    const client = scriptedClient({ '/v1/fleet/machine': unlockedAnswer, '/v1/grants/unlock': UNLOCKED }, calls);
     const { view, access, locked } = await hookView(client);
     try {
       let seen: unknown;
@@ -312,7 +313,7 @@ describe('useSetupAccess', () => {
   });
 
   it('shows the refusal of an act’s own work through changes.refusal', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const { view, access, refusal } = await hookView(client);
     try {
       let result: unknown;
@@ -329,7 +330,7 @@ describe('useSetupAccess', () => {
   });
 
   it('shows the machine not answering when an act throws a non-HTTP error', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const { view, access, refusal } = await hookView(client);
     try {
       await interact(async () => {

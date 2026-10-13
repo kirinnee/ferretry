@@ -71,7 +71,7 @@ export function sanitizeHarnessEnv(
   return sanitized;
 }
 
-/** An `export NAME="${REF}"` line as {@link renderWrapperScript} writes it, capturing `REF`. */
+/** An `export NAME="${REF}"` line as {@link renderRuntimeWrapperScript} writes it, capturing `REF`. */
 const EXPORTED_REFERENCE = /^\s*export\s+[A-Za-z_][A-Za-z0-9_]*="\$\{([A-Za-z_][A-Za-z0-9_]*)\}"\s*$/;
 
 /**

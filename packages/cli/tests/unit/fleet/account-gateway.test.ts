@@ -2,12 +2,8 @@ import { describe, it } from 'bun:test';
 import { OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
 import should from 'should';
 import type { z } from 'zod';
-import {
-  MIGRATION_TIMEOUT_MS,
-  ProtocolAccountGateway,
-  TOOL_INSTALL_TIMEOUT_MS,
-} from '../../../src/lib/fleet/account-gateway.ts';
-import { bundle, changeView, committed, credential, flow, machine, permissions, scan } from './account-fakes.ts';
+import { ProtocolAccountGateway, TOOL_INSTALL_TIMEOUT_MS } from '../../../src/lib/fleet/account-gateway.ts';
+import { bundle, changeView, committed, credential, flow, machine, scan } from './account-fakes.ts';
 
 interface Sent {
   readonly path: string;
@@ -31,7 +27,7 @@ const body = (sent: Sent | undefined): unknown => JSON.parse(String(sent?.init?.
 const headers = (sent: Sent | undefined): Record<string, string> =>
   (sent?.init?.headers ?? {}) as Record<string, string>;
 
-const flowAnswer = flow({ state: 'complete', accounts: [] });
+const flowAnswer = flow({ state: 'complete' });
 
 describe('ProtocolAccountGateway', () => {
   it('should read the catalogue routes', async () => {
@@ -39,10 +35,9 @@ describe('ProtocolAccountGateway', () => {
     const fake = client({
       '/v1/fleet/machine': machine(),
       '/v1/fleet/components': { format: 'version-2', kinds: [] },
-      '/v1/fleet/profile-stacks': { format: 'version-2', profiles: [] },
+      '/v1/fleet/profiles': { format: 'version-2', profiles: [] },
       '/v1/fleet/runtimes': { format: 'version-2', runtimes: [] },
       '/v1/fleet/credentials': { format: 2, machine: 'studio', credentials: [] },
-      '/v1/fleet/permissions': permissions(),
     });
     const gateway = new ProtocolAccountGateway(fake);
 
@@ -52,16 +47,14 @@ describe('ProtocolAccountGateway', () => {
     await gateway.profiles();
     await gateway.runtimes();
     await gateway.credentials();
-    await gateway.permissions();
 
     // Assert
     should(fake.sent.map(sent => sent.path)).eql([
       '/v1/fleet/machine',
       '/v1/fleet/components',
-      '/v1/fleet/profile-stacks',
+      '/v1/fleet/profiles',
       '/v1/fleet/runtimes',
       '/v1/fleet/credentials',
-      '/v1/fleet/permissions',
     ]);
   });
 
@@ -82,8 +75,8 @@ describe('ProtocolAccountGateway', () => {
     // Arrange
     const change = { kind: 'runtime.remove', name: 'old' } as const;
     const fake = client({
-      '/v1/fleet/changes': changeView(change),
-      '/v1/fleet/changes/fy_fprop_AAAAAAAAAAAAAAAAAAAAAA/apply': committed(),
+      '/v1/fleet/proposals': changeView(change),
+      '/v1/fleet/proposals/fy_fprop_AAAAAAAAAAAAAAAAAAAAAA/apply': committed(),
       '/v1/fleet/credentials/claude%20you/check': credential(),
     });
     const gateway = new ProtocolAccountGateway(fake);
@@ -103,14 +96,12 @@ describe('ProtocolAccountGateway', () => {
     should(headers(fake.sent[2])).not.have.property(OPERATOR_UNLOCK_HEADER);
   });
 
-  it('should speak the setup and migration routes, with longer patience for the slow ones', async () => {
+  it('should speak the setup routes, with longer patience for the slow ones', async () => {
     // Arrange
     const fake = client({
       '/v1/fleet/setup/scan': scan(),
       '/v1/fleet/machine/tools/install': { outcomes: [{ harness: 'codex', outcome: 'already-installed' }] },
       '/v1/fleet/export': bundle(),
-      '/v1/fleet/migration': { status: 'version-2', migrate: { available: true } },
-      '/v1/fleet/migration/apply': { outcome: 'refused', reasons: ['busy'] },
     });
     const gateway = new ProtocolAccountGateway(fake);
 
@@ -118,15 +109,11 @@ describe('ProtocolAccountGateway', () => {
     await gateway.scan({ unlock: 'u' });
     await gateway.installTools(['codex'], { password: 'operator-password-1' });
     await gateway.exportBundle({});
-    await gateway.migration({});
-    await gateway.migrate('digest-1', {});
 
     // Assert
     should(fake.sent[0]?.init?.method).equal('GET');
     should(body(fake.sent[1])).eql({ harnesses: ['codex'], operatorPassword: 'operator-password-1' });
     should(fake.sent[1]?.timeoutMs).equal(TOOL_INSTALL_TIMEOUT_MS);
-    should(body(fake.sent[4])).eql({ digest: 'digest-1' });
-    should(fake.sent[4]?.timeoutMs).equal(MIGRATION_TIMEOUT_MS);
   });
 
   it('should start, read, answer and cancel a sign-in by credential', async () => {

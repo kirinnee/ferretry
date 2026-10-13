@@ -8,9 +8,6 @@ import type {
   FleetCredentialView,
   FleetLayeredProfileCatalog,
   FleetMachineView,
-  FleetMigrationOutcome,
-  FleetMigrationView,
-  FleetPermissions,
   FleetRuntimeCatalog,
   FleetSetupScan,
   FleetToolInstallResult,
@@ -20,7 +17,7 @@ import type {
 
 /**
  * The ports the account-model commands (`setup`, `machine`, `runtime`, `credential`, `profile`,
- * `component`, `fleet migrate`) share (docs/design/account-model.md §6.2).
+ * `component`) share (docs/design/account-model.md §6.2).
  *
  * EVERY WRITE GOES THROUGH THE DAEMON. This terminal never edits a configuration file: it names one
  * change, the daemon derives the next setup and previews it, and a second explicit call applies
@@ -49,8 +46,6 @@ export interface IAccountGateway {
   profiles(): Promise<FleetLayeredProfileCatalog>;
   runtimes(): Promise<FleetRuntimeCatalog>;
   credentials(): Promise<FleetCredentialList>;
-  /** Whether this caller may apply a change, and whether applying asks for the operator password. */
-  permissions(): Promise<FleetPermissions>;
   /** Trade the operator password for a short-lived unlock. */
   unlock(password: string): Promise<string>;
   check(credentialId: string, authority: AccountAuthority): Promise<FleetCredentialView>;
@@ -59,8 +54,6 @@ export interface IAccountGateway {
   scan(authority: AccountAuthority): Promise<FleetSetupScan>;
   installTools(harnesses: readonly AccountHarness[], authority: AccountAuthority): Promise<FleetToolInstallResult>;
   exportBundle(authority: AccountAuthority): Promise<FleetCloneBundle>;
-  migration(authority: AccountAuthority): Promise<FleetMigrationView>;
-  migrate(digest: string, authority: AccountAuthority): Promise<FleetMigrationOutcome>;
   startSignIn(credentialId: string, authority: AccountAuthority): Promise<HarnessLoginFlow>;
   signInStatus(flowId: string, authority: AccountAuthority): Promise<HarnessLoginFlow>;
   submitSignInCode(flowId: string, code: string, authority: AccountAuthority): Promise<HarnessLoginSubmission>;

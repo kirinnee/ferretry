@@ -18,13 +18,6 @@ import {
   FleetLayeredProfileCatalogSchema,
   type FleetMachineView,
   FleetMachineViewSchema,
-  FleetMigrationApplyRequestSchema,
-  type FleetMigrationOutcome,
-  FleetMigrationOutcomeSchema,
-  type FleetMigrationView,
-  FleetMigrationViewSchema,
-  type FleetPermissions,
-  FleetPermissionsSchema,
   FleetProposalApplyRequestSchema,
   type FleetRuntimeCatalog,
   FleetRuntimeCatalogSchema,
@@ -48,15 +41,13 @@ import type { FleetApiClient } from './ports.ts';
 
 const FLEET_MACHINE_PATH = '/v1/fleet/machine';
 const FLEET_COMPONENTS_PATH = '/v1/fleet/components';
-const FLEET_PROFILE_STACKS_PATH = '/v1/fleet/profile-stacks';
+const FLEET_PROFILES_PATH = '/v1/fleet/profiles';
 const FLEET_RUNTIMES_PATH = '/v1/fleet/runtimes';
 const FLEET_CREDENTIALS_PATH = '/v1/fleet/credentials';
-const FLEET_PERMISSIONS_PATH = '/v1/fleet/permissions';
-const FLEET_CHANGES_PATH = '/v1/fleet/changes';
+const FLEET_PROPOSALS_PATH = '/v1/fleet/proposals';
 const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
 const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
 const FLEET_EXPORT_PATH = '/v1/fleet/export';
-const FLEET_MIGRATION_PATH = '/v1/fleet/migration';
 const FLEET_LOGIN_PATH = '/v1/fleet/login';
 const GRANT_UNLOCK_PATH = '/v1/grants/unlock';
 
@@ -65,9 +56,6 @@ const GRANT_UNLOCK_PATH = '/v1/grants/unlock';
  * the client's ordinary patience for nothing; this gets ten.
  */
 export const TOOL_INSTALL_TIMEOUT_MS = 10 * 60_000;
-
-/** A migration moves every runtime's state and verifies it before retiring anything. */
-export const MIGRATION_TIMEOUT_MS = 5 * 60_000;
 
 const segment = (value: string): string => encodeURIComponent(value);
 
@@ -90,7 +78,7 @@ export class ProtocolAccountGateway implements IAccountGateway {
   }
 
   async profiles(): Promise<FleetLayeredProfileCatalog> {
-    return await this.client.request(FLEET_PROFILE_STACKS_PATH, FleetLayeredProfileCatalogSchema);
+    return await this.client.request(FLEET_PROFILES_PATH, FleetLayeredProfileCatalogSchema);
   }
 
   async runtimes(): Promise<FleetRuntimeCatalog> {
@@ -99,10 +87,6 @@ export class ProtocolAccountGateway implements IAccountGateway {
 
   async credentials(): Promise<FleetCredentialList> {
     return await this.client.request(FLEET_CREDENTIALS_PATH, FleetCredentialListSchema);
-  }
-
-  async permissions(): Promise<FleetPermissions> {
-    return await this.client.request(FLEET_PERMISSIONS_PATH, FleetPermissionsSchema);
   }
 
   async unlock(password: string): Promise<string> {
@@ -124,7 +108,7 @@ export class ProtocolAccountGateway implements IAccountGateway {
 
   async stage(change: FleetAccountChange, authority: AccountAuthority): Promise<FleetAccountChangeView> {
     return await this.client.request(
-      FLEET_CHANGES_PATH,
+      FLEET_PROPOSALS_PATH,
       FleetAccountChangeViewSchema,
       post(FleetAccountChangeRequestSchema.parse({ change }), authority),
     );
@@ -132,7 +116,7 @@ export class ProtocolAccountGateway implements IAccountGateway {
 
   async apply(changeId: string, authority: AccountAuthority): Promise<FleetAccountChangeOutcome> {
     return await this.client.request(
-      `${FLEET_CHANGES_PATH}/${segment(changeId)}/apply`,
+      `${FLEET_PROPOSALS_PATH}/${segment(changeId)}/apply`,
       FleetAccountChangeOutcomeSchema,
       post(FleetProposalApplyRequestSchema.parse(withPassword({}, authority)), authority),
     );
@@ -156,19 +140,6 @@ export class ProtocolAccountGateway implements IAccountGateway {
 
   async exportBundle(authority: AccountAuthority): Promise<FleetCloneBundle> {
     return await this.client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, get(authority));
-  }
-
-  async migration(authority: AccountAuthority): Promise<FleetMigrationView> {
-    return await this.client.request(FLEET_MIGRATION_PATH, FleetMigrationViewSchema, get(authority));
-  }
-
-  async migrate(digest: string, authority: AccountAuthority): Promise<FleetMigrationOutcome> {
-    return await this.client.request(
-      `${FLEET_MIGRATION_PATH}/apply`,
-      FleetMigrationOutcomeSchema,
-      post(FleetMigrationApplyRequestSchema.parse(withPassword({ digest }, authority)), authority),
-      MIGRATION_TIMEOUT_MS,
-    );
   }
 
   async startSignIn(credentialId: string, authority: AccountAuthority): Promise<HarnessLoginFlow> {

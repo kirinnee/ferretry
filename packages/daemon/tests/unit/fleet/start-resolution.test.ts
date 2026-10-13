@@ -92,7 +92,7 @@ describe('resolveStartAccount', () => {
     // Assert
     should(error.failure).equal('unavailable');
     should(error.message).match(/manifest\.json is present but cannot be read: bad row/u);
-    should(error.message).match(/run `fy fleet apply`/u);
+    should(error.message).match(/`fy runtimes` lists them/u);
   });
 
   it('should rethrow any other inventory failure unchanged', async () => {

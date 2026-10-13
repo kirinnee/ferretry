@@ -8,17 +8,19 @@
 import { describe, it } from 'bun:test';
 import {
   type AccountModel,
-  type FleetApplyPlan,
   FleetApplyFailureError,
+  type FleetApplyPlan,
   type FleetDocumentWrite,
   type FleetLayout,
   parseAccountModel,
+  RETIRED_FLEET_CONFIG_SENTENCE,
+  RetiredFleetConfigError,
 } from '@ferretry/fleet';
 import {
   FleetAccountChangeOutcomeSchema,
   FleetAccountChangeViewSchema,
-  type FleetCredentialView,
   FleetComponentCatalogSchema,
+  type FleetCredentialView,
   FleetLayeredProfileCatalogSchema,
   FleetMachineViewSchema,
   FleetRuntimeCatalogSchema,
@@ -27,14 +29,13 @@ import {
 import should from 'should';
 import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
-import { ACCOUNT_MODEL_DISABLED_SENTENCE } from '../../../src/lib/fleet/account-model-switch.ts';
 import {
   type AccountDocumentReading,
   countRunningSessions,
   FleetCatalogRefusal,
   FleetCatalogService,
   type FleetCatalogServiceDeps,
-  VERSION_ONE_WRITES_SENTENCE,
+  machineAuthority,
 } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
 
@@ -117,7 +118,6 @@ interface World {
   readonly applied: { plan: FleetApplyPlan; documents: readonly FleetDocumentWrite[] }[];
   readonly state: {
     reading: AccountDocumentReading;
-    disabled: string | undefined;
     statuses: SessionStatus[];
     confirmation: ChangeConfirmation;
     credentials: () => Promise<FleetCredentialView[]>;
@@ -133,7 +133,6 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
   let ids = 0;
   const state: World['state'] = {
     reading: { format: 'version-2', model: MODEL(), revision: 'rev-1' },
-    disabled: undefined,
     statuses: ['running', 'completed', 'thinking'],
     confirmation: { kind: 'confirmed' },
     credentials: async () => [credentialRow('codex-slot')],
@@ -156,7 +155,6 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
     readAsset: async path => ASSETS[path],
     documentRevision: async path => (ASSETS[path] === undefined ? 'absent' : `digest:${path}`),
     ids: async () => undefined,
-    writesRefusal: async () => state.disabled,
     locate: harness => (harness === 'claude' ? '/usr/bin/claude' : undefined),
     commandExists: () => false,
     sessionStatuses: async () => state.statuses,
@@ -187,7 +185,12 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
 }
 
 const governance = (confirmChange: boolean): CallerGovernance =>
-  ({ governed: confirmChange, passwordSet: true, confirmChange, decide: () => ({ allowed: true }) }) as never;
+  ({
+    governed: confirmChange,
+    passwordSet: true,
+    confirmChange,
+    decide: () => ({ allowed: true, refusal: 'granted' }),
+  }) as never;
 
 const refusal = async (work: Promise<unknown>, code: string): Promise<FleetCatalogRefusal> => {
   const error = await work.then(
@@ -218,34 +221,95 @@ describe('countRunningSessions', () => {
 });
 
 describe('the catalogue reads', () => {
-  it('should answer the machine with its tools, running sessions and that it accepts changes', async () => {
+  it('should answer the machine with its tools, running sessions and what this caller may do', async () => {
     // Arrange
     const { service } = world();
 
     // Act
-    const machine = FleetMachineViewSchema.parse(await service.machine());
+    const machine = FleetMachineViewSchema.parse(await service.machine(governance(false)));
 
     // Assert
     should(machine.name).equal('studio');
     should(machine.format).equal('version-2');
     should(machine.runningSessions).equal(2);
-    should(machine.changes).deepEqual({ available: true });
+    should(machine.authority).deepEqual({ mayApply: true, applyRefusal: 'granted', confirmation: 'none' });
     should(machine.tools.map(tool => tool.installed)).deepEqual([true, false]);
   });
 
-  it('should say why changes are refused: the switch first, then the old format', async () => {
+  it('should say a locked caller may not apply, and that a confirming caller owes the operator password', async () => {
     // Arrange
-    const off = world();
-    off.state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    const legacy = world();
-    legacy.state.reading = { ...legacy.state.reading, format: 'version-1' };
+    const { service } = world();
+    const locked = {
+      governed: true,
+      passwordSet: true,
+      confirmChange: true,
+      decide: () => ({ allowed: false, refusal: 'locked' }),
+    } as never as CallerGovernance;
 
     // Act
-    const [disabled, oldFormat] = [await off.service.machine(), await legacy.service.machine()];
+    const [lockedView, confirming] = [await service.machine(locked), await service.machine(governance(true))];
+
+    // Assert — the confirmation is a fact about the machine, so it is reported even while locked.
+    should(lockedView.authority).deepEqual({
+      mayApply: false,
+      applyRefusal: 'locked',
+      confirmation: 'operator-password',
+    });
+    should(confirming.authority).deepEqual({
+      mayApply: true,
+      applyRefusal: 'granted',
+      confirmation: 'operator-password',
+    });
+  });
+
+  it('should read the configure axis of fleet when it decides authority', () => {
+    // Arrange
+    const demands: unknown[] = [];
+    const recording = {
+      governed: true,
+      passwordSet: true,
+      confirmChange: false,
+      decide: (demand: unknown) => {
+        demands.push(demand);
+        return { allowed: true, refusal: 'granted' };
+      },
+    } as never as CallerGovernance;
+
+    // Act
+    machineAuthority(recording);
 
     // Assert
-    should(disabled.changes).deepEqual({ available: false, reason: ACCOUNT_MODEL_DISABLED_SENTENCE });
-    should(oldFormat.changes).deepEqual({ available: false, reason: VERSION_ONE_WRITES_SENTENCE });
+    should(demands).deepEqual([{ capability: 'fleet', axis: 'configure' }]);
+  });
+
+  it('should never read an absent governance as an open Apply', async () => {
+    // Arrange
+    const { service } = world();
+
+    // Act
+    const [direct, viaMachine] = [machineAuthority(undefined), (await service.machine(undefined)).authority];
+
+    // Assert
+    should(direct).deepEqual({ mayApply: false, applyRefusal: 'undetermined', confirmation: 'none' });
+    should(viaMachine).deepEqual(direct);
+  });
+
+  it('should name each runtime by its ids.json id, and by its name before any apply published one', async () => {
+    // Arrange
+    const published = world({
+      ids: async () => ({ version: 1, runtimes: { 'claude-default': { id: 'rt-claude-0001' } } }) as never,
+    });
+    const fresh = world();
+
+    // Act
+    const [withIds, withoutIds] = [await published.service.runtimes(), await fresh.service.runtimes()];
+
+    // Assert
+    should(withIds.runtimes.map(runtime => [runtime.id, runtime.wrapper])).deepEqual([
+      ['rt-claude-0001', 'claude-default'],
+      ['codex-default', 'codex-default'],
+    ]);
+    should(withoutIds.runtimes.map(runtime => runtime.id)).deepEqual(['claude-default', 'codex-default']);
   });
 
   it('should read component bodies so a missing MCP command is a warning, and skip a body that does not parse', async () => {
@@ -293,25 +357,26 @@ describe('the catalogue reads', () => {
     // Assert
     should(error.message).equal("this machine's fleet configuration could not be read: bad indentation");
   });
+  it('should surface a config.yaml in the retired format as unreadable, naming the sentence that says what to do', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.documentError = new RetiredFleetConfigError('/state/fleet/config.yaml');
+
+    // Act
+    const [machine, staged] = [
+      await refusal(service.machine(governance(false)), 'fleet_catalog_unreadable'),
+      await refusal(service.propose(ADD_INSTRUCTIONS), 'fleet_catalog_unreadable'),
+    ];
+
+    // Assert — refused rather than converted, and nothing was staged against it.
+    should(machine.message).equal(
+      `this machine's fleet configuration could not be read: ${RETIRED_FLEET_CONFIG_SENTENCE('/state/fleet/config.yaml')}`,
+    );
+    should(staged.message).equal(machine.message);
+  });
 });
 
 describe('staging a change', () => {
-  it('should refuse while the switch is off, and on a version-1 machine', async () => {
-    // Arrange
-    const off = world();
-    off.state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    const legacy = world();
-    legacy.state.reading = { ...legacy.state.reading, format: 'version-1' };
-
-    // Act
-    const disabled = await refusal(off.service.propose(ADD_INSTRUCTIONS), 'fleet_change_disabled');
-    const oldFormat = await refusal(legacy.service.propose(ADD_INSTRUCTIONS), 'fleet_change_refused');
-
-    // Assert
-    should(disabled.message).equal(ACCOUNT_MODEL_DISABLED_SENTENCE);
-    should(oldFormat.message).equal(VERSION_ONE_WRITES_SENTENCE);
-  });
-
   it('should stage a new component with its file and the configuration, each expecting what it was composed against', async () => {
     // Arrange
     const { service } = world();
@@ -486,16 +551,12 @@ describe('applying a change', () => {
     should(outcome.outcome).equal('applied');
   });
 
-  it('should put a change back when the switch went off or the configuration moved after it was staged', async () => {
+  it('should put a change back when the configuration moved after it was staged', async () => {
     // Arrange
     const { service, state, applied } = world();
     const staged = await service.propose(ADD_INSTRUCTIONS);
 
     // Act & Assert
-    state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    await refusal(service.apply(staged.id, {}, governance(false)), 'fleet_change_disabled');
-    should((await service.read(staged.id)).state).equal('pending');
-    state.disabled = undefined;
     state.reading = { ...state.reading, revision: 'rev-2' };
     const stale = await refusal(service.apply(staged.id, {}, governance(false)), 'fleet_change_stale');
     should(stale.message).match(/changed on this machine after this change was previewed/u);

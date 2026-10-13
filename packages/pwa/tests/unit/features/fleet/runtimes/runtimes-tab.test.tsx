@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetRuntimeCatalog, FleetRuntimeView } from '@ferretry/protocol';
 import { FleetRuntimeCatalogSchema } from '@ferretry/protocol';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { ProfileBuilder } from '../../../../../src/features/fleet/runtimes/add-runtime.tsx';
 import {
   createRuntimesTab,
@@ -23,7 +23,7 @@ import {
   stagedFrom,
 } from '../account-support.ts';
 
-const APPLY = `POST /v1/fleet/changes/${CHANGE_ID}/apply`;
+const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
 
 afterEach(() => {
   window.location.hash = '';
@@ -218,7 +218,7 @@ describe('Add runtime from the tab', () => {
       routes: {
         ...reads(),
         'GET /v1/fleet/runtimes': () => catalog(created ? [...RUNTIMES.runtimes, made] : RUNTIMES.runtimes),
-        'POST /v1/fleet/changes': (call: Call) => stagedFrom(call),
+        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
         [APPLY]: () => {
           created = true;
           return APPLIED;
@@ -242,7 +242,7 @@ describe('Add runtime from the tab', () => {
           reads_ += 1;
           return reads_ === 1 ? RUNTIMES : new Error('gone');
         },
-        'POST /v1/fleet/changes': (call: Call) => stagedFrom(call),
+        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
         [APPLY]: APPLIED,
       },
     });

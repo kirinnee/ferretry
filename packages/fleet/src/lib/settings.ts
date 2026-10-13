@@ -2,7 +2,7 @@
  * Layered harness settings — parse, deep-merge, serialize.
  *
  * A profile may declare settings as a stack: file references (a shared template) with inline
- * objects layered on top. Composition concatenates those stacks (see `profiles.ts`), so by the time
+ * objects layered on top. Layering concatenates those stacks (see `./account/layering.ts`), so by the time
  * they reach here the ordering is already the contract: later layers win.
  *
  * Reading a referenced file is IO and therefore an adapter's job. This module takes the *contents*

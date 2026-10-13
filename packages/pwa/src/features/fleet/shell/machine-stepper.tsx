@@ -77,7 +77,14 @@ export function MachineStepper({
     >
       <div className="flex min-h-control items-center gap-2">
         {final || state.confirming ? null : (
-          <Button type="button" variant="ghost" size="sm" data-stepper-back="" onClick={back}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="kt-btn--flush-start"
+            data-stepper-back=""
+            onClick={back}
+          >
             ‹ Back
           </Button>
         )}

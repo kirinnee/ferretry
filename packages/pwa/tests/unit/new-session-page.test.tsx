@@ -13,6 +13,7 @@ import { type DaemonUsageSlice, DaemonUsageStore, daemonUsagePort } from '../../
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
+import { pickerHealth } from './picker-support.ts';
 
 const connection = daemonConnection({
   daemonId: 'daemon/a',
@@ -183,14 +184,14 @@ const workstation = daemonConnection({
 const studio: PickerAccount = {
   id: '11111111-1111-4111-8111-111111111111',
   kind: 'claude',
-  mode: 'auto',
+  agent: true,
+  credentialId: 'login-claude-auto-studio',
   wrapper: 'claude-auto-studio',
-  home: '/homes/claude-auto-studio',
   displayName: 'Studio Claude',
   defaultModel: 'claude-opus-5',
   models: [
     { id: 'claude-opus-5', available: true },
-    { id: 'claude-haiku-4-5', available: false, unavailableReason: 'this account is not entitled to it' },
+    { id: 'claude-haiku-4-5', available: false },
   ],
   available: true,
   unavailableReason: null,
@@ -199,9 +200,9 @@ const studio: PickerAccount = {
 const atelier: PickerAccount = {
   id: '22222222-2222-4222-8222-222222222222',
   kind: 'codex',
-  mode: 'auto',
+  agent: true,
+  credentialId: 'login-codex-auto-atelier',
   wrapper: 'codex-auto-atelier',
-  home: '/homes/codex-auto-atelier',
   displayName: 'Atelier Codex',
   defaultModel: 'gpt-5.6-terra',
   models: [{ id: 'gpt-5.6-terra', available: true }],
@@ -213,9 +214,9 @@ const atelier: PickerAccount = {
 const warehouse: PickerAccount = {
   id: '33333333-3333-4333-8333-333333333333',
   kind: 'claude',
-  mode: 'auto',
+  agent: true,
+  credentialId: 'login-claude-auto-warehouse',
   wrapper: 'claude-auto-warehouse',
-  home: '/homes/claude-auto-warehouse',
   displayName: 'Warehouse Claude',
   defaultModel: 'claude-opus-5',
   models: [{ id: 'claude-opus-5', available: true }],
@@ -230,9 +231,9 @@ const warehouse: PickerAccount = {
 const terminal: PickerAccount = {
   id: '77777777-7777-4777-8777-777777777777',
   kind: 'claude',
-  mode: 'interactive',
+  agent: false,
+  credentialId: 'login-claude-default',
   wrapper: 'claude-default',
-  home: '/homes/claude-default',
   displayName: 'Claude (default)',
   defaultModel: 'claude-opus-5',
   models: [{ id: 'claude-opus-5', available: true }],
@@ -267,9 +268,9 @@ const registeredRows = {
 const warehouseStudio: PickerAccount = {
   id: '66666666-6666-4666-8666-666666666666',
   kind: 'claude',
-  mode: 'auto',
+  agent: true,
+  credentialId: 'login-claude-auto-studio',
   wrapper: 'claude-auto-studio',
-  home: '/homes/claude-auto-studio',
   displayName: 'Warehouse Studio',
   defaultModel: 'claude-sonnet-5',
   models: [{ id: 'claude-sonnet-5', available: true }],
@@ -356,17 +357,8 @@ const wire = (options: WiredOptions = {}) => {
       return {
         health: new Map([
           [
-            studio.id,
-            {
-              accountId: studio.id,
-              kind: 'claude' as const,
-              verdict: 'healthy' as const,
-              reason: 'provider_accepted' as const,
-              evidence: 'anthropic_usage' as const,
-              lastCheckedAt: 5,
-              verdictAt: 5,
-              lastCheckInconclusive: false,
-            },
+            studio.credentialId,
+            pickerHealth(studio.credentialId, 'ready', { lastCheckedAt: new Date(5).toISOString() }),
           ],
         ]),
         error: null,
@@ -463,7 +455,8 @@ const panelState = (): string | null =>
 
 const panelText = (): string => root().querySelector('[data-picker-state]')?.textContent ?? '';
 
-const NO_ACCOUNTS_SENTENCE = 'No account on this daemon can run sessions yet. Add one in Settings, under Fleet.';
+const NO_ACCOUNTS_SENTENCE =
+  'No runtime on this machine can run sessions yet. Add an agent runtime in Settings › Machines.';
 
 const noAccountsText = (): string =>
   must(root().querySelector('[data-new-session-no-accounts] p'), 'the no-accounts sentence').textContent ?? '';
@@ -661,7 +654,8 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(root().querySelector('#fy-new-session-agent') === null).toBeTrue();
     expect(noAccountsText()).toBe(NO_ACCOUNTS_SENTENCE);
     await press(namedButton('Open Settings'));
-    expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings']);
+    // No machine name was handed in, so the link names the machine the way the switcher does.
+    expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings#machines/https%3A%2F%2Fdaemon.example.test/runtimes']);
 
     await openList('fy-new-session-cwd');
     expect(panelState()).toBe('empty');
@@ -969,7 +963,7 @@ describe('NewSessionPage with the daemon pickers', () => {
   });
 
   it('pre-fills past an account the daemon says is unavailable', async () => {
-    const down: PickerAccount = { ...studio, available: false, unavailableReason: 'wrapper missing on this host' };
+    const down: PickerAccount = { ...studio, available: false };
     const { props } = wire({ accounts: [terminal, down, atelier] });
     await show(props);
 
@@ -978,7 +972,7 @@ describe('NewSessionPage with the daemon pickers', () => {
 
   it('says in one sentence that no account can run a session when the only one is the terminal account', async () => {
     const { props, recorder } = wire({ accounts: [terminal] });
-    await show(props);
+    await show({ ...props, machineName: 'studio-mac' });
 
     // Not an empty dropdown: the box is replaced by the sentence and a way forward.
     expect(root().querySelector('#fy-new-session-agent') === null).toBeTrue();
@@ -993,7 +987,8 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(namedButton('Create session').hasAttribute('data-variant')).toBeFalse();
 
     await press(namedButton('Open Settings'));
-    expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings']);
+    // Straight to this machine's Runtimes tab, where an agent runtime is added.
+    expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings#machines/studio-mac/runtimes']);
     expect(recorder.starts).toEqual([]);
   });
 });
@@ -1019,7 +1014,7 @@ describe('NewSessionPage initialAgent', () => {
   });
 
   it('ignores a runtime the roster does not offer, an unavailable one, and the terminal account', async () => {
-    const down: PickerAccount = { ...atelier, available: false, unavailableReason: 'wrapper missing on this host' };
+    const down: PickerAccount = { ...atelier, available: false };
     for (const [accounts, hint] of [
       [[terminal, studio, atelier], 'claude-auto-nobody'],
       [[terminal, studio, down], 'codex-auto-atelier'],

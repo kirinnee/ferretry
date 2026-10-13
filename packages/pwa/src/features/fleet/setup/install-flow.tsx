@@ -70,7 +70,6 @@ export function InstallTool(props: InstallToolProps) {
       return (
         <ChangeApplyPanel
           machineName={machineName}
-          changes={null}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}

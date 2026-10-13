@@ -68,7 +68,7 @@ import {
   scanCodexRefreshEvidence,
 } from '../lib/token-refresh.ts';
 import { HARNESS_BINARIES, HARNESS_HOME_ENV } from '../lib/wrappers.ts';
-import type { FleetBinaryLookup } from './process-login.ts';
+import type { FleetBinaryLookup } from './wrapper-source.ts';
 
 /** A started renewal. Deliberately offers no way to read what the child printed. */
 export interface FleetTokenRefreshProcess {
@@ -142,7 +142,7 @@ export class ProcessFleetTokenRefreshPort implements FleetTokenRefreshPort {
     if (executable === undefined) {
       return {
         outcome: 'unavailable',
-        reason: `the "${binary}" CLI is not on this host, so its credential cannot be renewed here — install it, or renew this account on a host that has it and copy the credential across with "fy fleet login --sync-only"`,
+        reason: `the "${binary}" CLI is not on this host, so its credential cannot be renewed here — install it, or sign this credential in again from a host that has it`,
       };
     }
     const environment = {

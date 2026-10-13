@@ -6,7 +6,7 @@ import type { AccountInventoryPort, CoreAccount, FileSystemPort } from '../../li
  * The fleet's `ids.json` (docs/design/account-model.md R6), read so a start can resolve a runtime by
  * a name it had before.
  *
- * Absent answers `undefined` — a version-1 fleet has none, and nothing about it is wrong. Present
+ * Absent answers `undefined` — a machine no apply has published to has none, and nothing about it is wrong. Present
  * and unreadable THROWS, naming the file, so the start that needed it refuses rather than reporting
  * a runtime that exists as one that does not.
  */

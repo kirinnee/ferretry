@@ -13,19 +13,16 @@ import {
   APPLY_PATH,
   type Call,
   FRESH_MACHINE,
+  machineAnswer,
   machineView,
-  migrationView,
   NOTHING_INSTALLED,
   NOW,
-  permissions,
   runtimes,
   runtimeView,
   STAGED,
   STUDIO,
-  SWITCHED_OFF,
   scan,
   scriptedClient,
-  UNLOCKED,
   WORK,
 } from '../setup/setup-support.ts';
 
@@ -66,7 +63,7 @@ const props = (
   calls: Call[],
   retried: { count: number },
 ): MachineSettingsTabProps & { readonly browser: Window } => {
-  const client = scriptedClient({ '/v1/fleet/permissions': permissions(), ...setup.answers }, calls);
+  const client = scriptedClient({ '/v1/fleet/machine': machineAnswer(), ...setup.answers }, calls);
   return {
     connection: STUDIO,
     machineName: 'studio-mac',
@@ -189,7 +186,7 @@ describe('MachineSettingsTab', () => {
     await withTab(
       {
         answers: {
-          '/v1/fleet/changes': STAGED,
+          '/v1/fleet/proposals': STAGED,
           [APPLY_PATH]: OUTCOME,
         },
       },
@@ -197,7 +194,7 @@ describe('MachineSettingsTab', () => {
         await click(q('[data-setup-choice="skip"] input'), 'skip radio');
         await click(q('[data-change-submit]'), 'save');
         const staged = must(
-          calls.find(call => call.path === '/v1/fleet/changes'),
+          calls.find(call => call.path === '/v1/fleet/proposals'),
           'the staged change call',
         );
         expect(JSON.stringify(staged.body)).toContain('"kind":"machine.settings"');
@@ -209,28 +206,11 @@ describe('MachineSettingsTab', () => {
   });
 
   it('a refused Save says why and does not ask the shell to check again', async () => {
-    await withTab({ answers: { '/v1/fleet/changes': new Error('unreachable') } }, async ({ q, retried }) => {
+    await withTab({ answers: { '/v1/fleet/proposals': new Error('unreachable') } }, async ({ q, retried }) => {
       await click(q('[data-setup-choice="skip"] input'), 'skip radio');
       await click(q('[data-change-submit]'), 'save');
       expect(q('[data-change-refusal]')?.textContent).toContain('didn’t answer');
       expect(retried.count).toBe(0);
-    });
-  });
-
-  it('a machine that is switched off shows its one sentence in place of Save', async () => {
-    await withTab({ machine: machineView({ changes: SWITCHED_OFF }) }, async ({ q, container }) => {
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      expect(q('[data-change-submit]')).toBeNull();
-      expect(q('[data-change-unavailable]')?.textContent).toBe(SWITCHED_OFF.reason);
-      expect(q('[data-agent-permissions-undo]')?.textContent).toBe('Keep Auto mode');
-      expect(q('[data-machine-changes-off]')?.textContent).toBe(SWITCHED_OFF.reason);
-      expect(container.textContent).toContain(SWITCHED_OFF.reason);
-    });
-  });
-
-  it('does not say the machine is switched off when it accepts changes', async () => {
-    await withTab({}, async ({ q }) => {
-      expect(q('[data-machine-changes-off]')).toBeNull();
     });
   });
 
@@ -310,92 +290,6 @@ describe('MachineSettingsTab', () => {
     });
   });
 
-  it('offers the move to the new format only on a version-1 machine that can be moved', async () => {
-    const oldMachine = machineView({ format: 'version-1' });
-    await withTab(
-      { machine: oldMachine, answers: { '/v1/fleet/migration': migrationView() } },
-      async ({ q, browser, calls }) => {
-        expect(calls.some(call => call.path === '/v1/fleet/migration')).toBe(true);
-        const row = must(q('[data-settings-action="migrate"]'), 'migrate row');
-        expect(row.textContent).toContain('Move to the new account format');
-        expect(row.textContent).toContain('Nothing moves until you approve it.');
-        await click(row, 'migrate');
-        expect(browser.location.hash).toBe('#machines/studio-mac/settings/migrate');
-        expect(q('[data-migration-step="dry-run"]')).not.toBeNull();
-      },
-    );
-  });
-
-  it('shows no migration row when the machine cannot be moved, cannot be read, or is already new', async () => {
-    const oldMachine = machineView({ format: 'version-1' });
-    await withTab({ machine: oldMachine, answers: {} }, async ({ q, calls }) => {
-      expect(calls.some(call => call.path === '/v1/fleet/migration')).toBe(true);
-      expect(q('[data-settings-action="migrate"]')).toBeNull();
-    });
-    await withTab(
-      {
-        machine: oldMachine,
-        answers: {
-          '/v1/fleet/migration': migrationView({ migrate: { available: false, reason: 'The account model is off.' } }),
-        },
-      },
-      async ({ q }) => {
-        expect(q('[data-settings-action="migrate"]')).toBeNull();
-      },
-    );
-    await withTab({ answers: { '/v1/fleet/migration': migrationView() } }, async ({ q, calls }) => {
-      expect(calls.some(call => call.path === '/v1/fleet/migration')).toBe(false);
-      expect(q('[data-settings-action="migrate"]')).toBeNull();
-    });
-  });
-
-  it('reads nothing about migration while this browser is locked out of the machine', async () => {
-    await withTab(
-      {
-        machine: machineView({ format: 'version-1' }),
-        answers: {
-          '/v1/fleet/permissions': permissions({ mayApply: false, applyRefusal: 'locked' }),
-          '/v1/grants/unlock': UNLOCKED,
-          '/v1/fleet/migration': migrationView(),
-        },
-      },
-      async ({ q, calls }) => {
-        expect(calls.some(call => call.path === '/v1/fleet/migration')).toBe(false);
-        expect(q('[data-settings-action="migrate"]')).toBeNull();
-      },
-    );
-  });
-
-  it('ignores a migration answer that arrives after the tab is gone', async () => {
-    const calls: Call[] = [];
-    const retried = { count: 0 };
-    let release: () => void = () => undefined;
-    const held = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    const tabProps = props({ machine: machineView({ format: 'version-1' }) }, calls, retried);
-    const slow = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
-      '/v1/fleet/migration': () => migrationView(),
-    });
-    const view = await mount(
-      <MachineSettingsTab
-        {...tabProps}
-        createClient={async () => ({
-          request: async (path, schema, init) => {
-            if (path === '/v1/fleet/migration') await held;
-            return await slow.request(path, schema, init);
-          },
-        })}
-      />,
-    );
-    await settle();
-    await view.unmount();
-    release();
-    await settle();
-    expect(view.container.querySelector('[data-settings-action="migrate"]')).toBeNull();
-  });
-
   it('states the machine facts', async () => {
     await withTab({}, async ({ q }) => {
       const facts = must(q('[data-setup-section="facts"]'), 'facts');
@@ -411,22 +305,17 @@ describe('MachineSettingsTab', () => {
       expect(facts.textContent).toContain('RuntimesNot set up yet');
       expect(facts.textContent).toContain('FormatNot set up yet');
     });
-    await withTab({ machine: machineView({ format: 'version-1' }) }, async ({ q }) => {
-      expect(must(q('[data-setup-section="facts"]'), 'facts').textContent).toContain('FormatThe old account format');
-    });
   });
 
   it('renders each flow the address names, and leaving one returns to the tab', async () => {
     const answers = {
       '/v1/fleet/setup/scan': NOTHING_INSTALLED,
       '/v1/fleet/runtimes': runtimes([runtimeView('claude-default')]),
-      '/v1/fleet/migration': migrationView(),
     };
     const flows: readonly [string, string][] = [
       ['setup', '[data-first-run-step="tools"]'],
       ['import', '[data-first-run-step]'],
       ['clone', '[data-clone-step="source"]'],
-      ['migrate', '[data-migration-step="dry-run"]'],
       ['install-claude', '[data-install-flow="claude"]'],
       ['install-codex', '[data-install-flow="codex"]'],
     ];
@@ -448,7 +337,7 @@ describe('MachineSettingsSurface', () => {
       selectedDaemonId: STUDIO.daemonId,
     });
     const store = { connections } as unknown as AppStore;
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const saved = window.location.hash;
     window.location.hash = '#machines/studio-mac/settings/clone';
     const view = await mount(
@@ -483,7 +372,7 @@ describe('MachineSettingsSurface', () => {
       selectedDaemonId: STUDIO.daemonId,
     });
     const store = { connections } as unknown as AppStore;
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const saved = window.location.hash;
     window.location.hash = '#machines/studio-mac/settings';
     const view = await mount(

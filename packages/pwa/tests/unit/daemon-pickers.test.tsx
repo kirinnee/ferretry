@@ -33,6 +33,7 @@ import type { DaemonFleetSlice } from '../../src/lib/fleet-store.ts';
 import type { DaemonProjectsSlice } from '../../src/lib/projects-store.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
+import { pickerHealth } from './picker-support.ts';
 
 // ─── fixtures ────────────────────────────────────────────────────────────────
 
@@ -50,22 +51,21 @@ const workstation = daemonConnection({
 const account = (overrides: Partial<PickerAccount> = {}): PickerAccount => ({
   id: '11111111-1111-4111-8111-111111111111',
   kind: 'claude',
-  mode: 'auto',
+  agent: true,
   wrapper: 'claude-auto-studio',
-  home: '/homes/claude-auto-studio',
   displayName: 'Studio Claude',
   defaultModel: 'claude-opus-5',
   models: [{ id: 'claude-opus-5', available: true }],
   available: true,
   unavailableReason: null,
   ...overrides,
+  credentialId: overrides.credentialId ?? `login-${overrides.wrapper ?? 'claude-auto-studio'}`,
 });
 
 const codex = account({
   id: '22222222-2222-4222-8222-222222222222',
   kind: 'codex',
   wrapper: 'codex-auto-atelier',
-  home: '/homes/codex-auto-atelier',
   displayName: 'Atelier Codex',
   defaultModel: 'gpt-5.6-terra',
   models: [{ id: 'gpt-5.6-terra', available: true }],
@@ -74,7 +74,6 @@ const codex = account({
 const archived = account({
   id: '33333333-3333-4333-8333-333333333333',
   wrapper: 'claude-auto-archive',
-  home: '/homes/claude-auto-archive',
   displayName: 'Archive Claude',
   defaultModel: null,
   models: [],
@@ -483,36 +482,30 @@ describe('accountEmptyCopy', () => {
  */
 const NOW = Date.parse('2026-08-24T12:00:00.000Z');
 
-const healthRow = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth => ({
-  accountId: account().id,
-  kind: 'claude',
-  verdict: 'healthy',
-  reason: 'provider_accepted',
-  evidence: 'anthropic_usage',
-  lastCheckedAt: NOW - 240_000,
-  verdictAt: NOW - 240_000,
-  lastCheckInconclusive: false,
-  ...overrides,
-});
+const healthRow = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth =>
+  pickerHealth(overrides.credentialId ?? account().credentialId, overrides.word ?? 'ready', {
+    lastCheckedAt: new Date(NOW - 240_000).toISOString(),
+    ...overrides,
+  });
 
 describe('checkedAmongOffered', () => {
   const options = must(accountFieldOptions(accountPickerOptions([account(), codex], usage, null), NOW), 'options').map(
     option => option.account,
   );
-  const health = (...ids: readonly string[]) => new Map(ids.map(id => [id, healthRow({ accountId: id })]));
+  const health = (...ids: readonly string[]) => new Map(ids.map(id => [id, healthRow({ credentialId: id })]));
 
   it('counts only the rows this field offers', () => {
     const codexOnly = [must(options[1], 'the codex option')];
 
     // The probe checked both; a Codex-only list may claim only its own row.
-    expect(checkedAmongOffered(options, health(account().id, codex.id))).toBe(2);
-    expect(checkedAmongOffered(codexOnly, health(account().id, codex.id))).toBe(1);
-    expect(checkedAmongOffered(codexOnly, health(account().id))).toBe(0);
+    expect(checkedAmongOffered(options, health(account().credentialId, codex.credentialId))).toBe(2);
+    expect(checkedAmongOffered(codexOnly, health(account().credentialId, codex.credentialId))).toBe(1);
+    expect(checkedAmongOffered(codexOnly, health(account().credentialId))).toBe(0);
   });
 
   it('is zero when nothing has been checked or nothing is offered', () => {
     expect(checkedAmongOffered(options, null)).toBe(0);
-    expect(checkedAmongOffered(null, health(account().id))).toBe(0);
+    expect(checkedAmongOffered(null, health(account().credentialId))).toBe(0);
   });
 });
 
@@ -536,11 +529,11 @@ const accountField = async (
 };
 
 describe('the account row', () => {
-  it('leads with the display name and names the wrapper, harness and mode beneath it', async () => {
+  it('leads with the display name and names the wrapper, harness and agent flag beneath it', async () => {
     await accountField([account()]);
 
     expect(rowText(0)).toContain('Studio Claude');
-    expect(rowText(0)).toContain('claude-auto-studio · Claude · auto');
+    expect(rowText(0)).toContain('claude-auto-studio · Claude · agent');
   });
 
   it('renders a real quota reading and never a confident zero for a wrapper with none', async () => {
@@ -559,12 +552,12 @@ describe('the account row', () => {
     // Two absences that must not merge: NO ROW means nobody has looked, while a row that SAYS unknown
     // has its own reason. This is the first.
     expect(rowText(0)).toContain('never checked');
-    expect(rowText(0)).not.toContain('healthy');
+    expect(rowText(0)).not.toContain('ready');
   });
 
   it('prints the verdict AND when it was established, because the time is part of the claim', async () => {
     // Arrange
-    const health = new Map([[account().id, healthRow()]]);
+    const health = new Map([[account().credentialId, healthRow()]]);
 
     // Act
     await accountField([account()], health);
@@ -572,73 +565,45 @@ describe('the account row', () => {
     // Assert — "healthy" with no instant is a claim with no expiry, and the host's evidence has a
     // fifteen-minute horizon. The exact UTC instant reaches the machine-readable attribute so the
     // relative label can tick without anything claiming a fresh check happened.
-    expect(rowText(0)).toContain('healthy');
+    expect(rowText(0)).toContain('ready');
     expect(rowText(0)).toContain('checked 4m ago');
     expect(must(rows()[0], 'row 0').querySelector('time')?.getAttribute('datetime')).toBe(
       new Date(NOW - 240_000).toISOString(),
     );
   });
 
-  it('tells the four health verdicts apart, and never sends a static credential to a login', async () => {
+  it('tells the login status words apart, and offers sign-in words only where they apply', async () => {
     // Arrange
     const health = new Map([
-      [account().id, healthRow()],
-      [
-        codex.id,
-        healthRow({
-          accountId: codex.id,
-          kind: 'codex',
-          verdict: 'needs_relogin',
-          reason: 'oauth_token_rejected',
-        }),
-      ],
-      [
-        archived.id,
-        healthRow({
-          accountId: archived.id,
-          verdict: 'needs_credentials',
-          reason: 'static_credential_rejected',
-        }),
-      ],
+      [account().credentialId, healthRow()],
+      [codex.credentialId, healthRow({ credentialId: codex.credentialId, word: 'needs_sign_in' })],
+      [archived.credentialId, healthRow({ credentialId: archived.credentialId, word: 'refresh_due' })],
     ]);
 
     // Act
     await accountField([account(), codex, archived], health);
 
-    // Assert — `needs credential` is not a politer `needs re-login`. The third account authenticates
-    // from an environment variable, so a sign-in cannot fix it and must not be implied.
-    expect(rowText(0)).toContain('healthy');
-    expect(rowText(1)).toContain('needs re-login');
-    expect(rowText(2)).toContain('needs credential');
-    expect(rowText(2)).not.toContain('re-login');
-    expect(must(rows()[1], 'row 1').querySelector('[title*="rejected this token"]')).not.toBeNull();
+    // Assert — the words are the daemon's own, so this row and the Credentials tab cannot disagree.
+    expect(rowText(0)).toContain('ready');
+    expect(rowText(1)).toContain('needs sign-in');
+    expect(rowText(2)).toContain('refresh due');
+    expect(must(rows()[1], 'row 1').querySelector('[title*="can’t launch"]')).not.toBeNull();
   });
 
-  it('calls a 403 healthy and says the QUOTA is the unknown thing', async () => {
-    // Arrange — the rule the whole feature turns on.
-    const health = new Map([[account().id, healthRow({ reason: 'usage_scope_unavailable' })]]);
-
-    // Act
-    await accountField([account()], health);
-
-    // Assert
-    expect(rowText(0)).toContain('healthy');
-    expect(rowText(0)).not.toContain('re-login');
-    expect(must(rows()[0], 'row 0').querySelector('[title*="quota is not measurable"]')).not.toBeNull();
-  });
-
-  it('reports a live conclusion as CONFIRMED when the newest check failed', async () => {
+  it('says when the newest check could not conclude', async () => {
     // Arrange
     const health = new Map([
-      [account().id, healthRow({ lastCheckedAt: NOW - 60_000, verdictAt: NOW - 480_000, lastCheckInconclusive: true })],
+      [
+        account().credentialId,
+        healthRow({ lastCheckedAt: new Date(NOW - 60_000).toISOString(), lastCheckInconclusive: true }),
+      ],
     ]);
 
     // Act
     await accountField([account()], health);
 
-    // Assert — dated from the evidence, because that is when the claim was last true. Hiding the
-    // failed attempt is how a fleet reads healthy while every provider call is failing.
-    expect(rowText(0)).toContain('confirmed 8m ago');
+    // Assert
+    expect(rowText(0)).toContain('checked 1m ago');
     expect(must(rows()[0], 'row 0').querySelector('[title*="inconclusive"]')).not.toBeNull();
   });
 
@@ -838,7 +803,7 @@ describe('AccountPickerField', () => {
   it('names the harness when the FILTER emptied the list, not the host', async () => {
     const store = new DaemonAccountPickerStore({
       catalog: async () => ({
-        accounts: [account(), account({ id: 'other', wrapper: 'claude-auto-two', home: '/h2' })],
+        accounts: [account(), account({ id: 'other', wrapper: 'claude-auto-two' })],
       }),
       health: async () => ({ health: new Map(), error: null }),
       checkHealth: async () => ({ health: new Map(), error: null }),
@@ -1251,7 +1216,7 @@ describe('DaemonAccountPicker', () => {
       catalog: async () => ({ accounts: [account()] }),
       health: async () => {
         snapshotReads += 1;
-        return { health: new Map([[account().id, healthRow()]]), error: null };
+        return { health: new Map([[account().credentialId, healthRow()]]), error: null };
       },
       checkHealth: async () => {
         collections += 1;
@@ -1280,7 +1245,7 @@ describe('DaemonAccountPicker', () => {
     expect(rowText(0)).toContain('Studio Claude');
     expect(rowText(0)).toContain('5h 37%');
     // The verdict is on the row WITHOUT anybody pressing anything, which is the human's whole ask.
-    expect(rowText(0)).toContain('healthy');
+    expect(rowText(0)).toContain('ready');
     expect(rowText(0)).toContain('checked 4m ago');
     expect(snapshotReads).toBe(1);
     expect(collections).toBe(0);
@@ -1392,7 +1357,7 @@ describe('DaemonAccountPicker', () => {
       health: async () => ({ health: new Map(), error: null }),
       checkHealth: async () => {
         collections += 1;
-        return { health: new Map([[account().id, healthRow()]]), error: null };
+        return { health: new Map([[account().credentialId, healthRow()]]), error: null };
       },
     });
 
@@ -1426,7 +1391,7 @@ describe('DaemonAccountPicker', () => {
     // The verdict reaches the ROWS through the same subscription, with no second
     // one anywhere: this is what the connected shape buys.
     await openList();
-    expect(rowText(0)).toContain('healthy');
+    expect(rowText(0)).toContain('ready');
     // And the account the collection did not cover stays uncovered rather than inheriting a verdict.
     expect(rowText(1)).toContain('never checked');
   });
@@ -1439,12 +1404,17 @@ describe('DaemonAccountPicker', () => {
    */
   it('counts only the harness rows on screen, while still disclosing the whole-fleet scope', async () => {
     const wholeFleet = {
-      health: new Map([account().id, codex.id, 'third'].map(id => [id, healthRow({ accountId: id })])),
+      health: new Map(
+        [account().credentialId, codex.credentialId, 'login-claude-auto-three'].map(id => [
+          id,
+          healthRow({ credentialId: id }),
+        ]),
+      ),
       error: null,
     };
     const store = new DaemonAccountPickerStore({
       catalog: async () => ({
-        accounts: [account(), codex, account({ id: 'third', wrapper: 'claude-auto-three', home: '/h3' })],
+        accounts: [account(), codex, account({ id: 'third', wrapper: 'claude-auto-three' })],
       }),
       // Every published account came back — three of them.
       health: async () => wholeFleet,
@@ -1477,7 +1447,7 @@ describe('DaemonAccountPicker', () => {
     await openList();
     expect(rows()).toHaveLength(1);
     expect(rowText(0)).toContain('Atelier Codex');
-    expect(rowText(0)).toContain('healthy');
+    expect(rowText(0)).toContain('ready');
   });
 
   it('keeps a refused probe out of the roster and says so without disabling anything', async () => {
@@ -1586,7 +1556,6 @@ describe('DaemonProjectPicker', () => {
 const unnamed = account({
   id: '44444444-4444-4444-8444-444444444444',
   wrapper: 'claude-auto-bare',
-  home: '/homes/claude-auto-bare',
   displayName: 'claude-auto-bare',
 });
 
@@ -1675,11 +1644,18 @@ describe('the closed account box', () => {
     expect(input().hasAttribute('aria-describedby')).toBeFalse();
   });
 
-  it('drops the redundant id from a row too, keeping harness and mode', async () => {
+  it('drops the redundant id from a row too, keeping harness and agent flag', async () => {
     await accountField([unnamed]);
 
     const line = must(find('[data-picker-identity="wrapper"]'), 'the identity line');
-    expect(line.textContent).toBe('Claude · auto');
+    expect(line.textContent).toBe('Claude · agent');
+  });
+
+  it('says nothing about an agent flag a runtime does not have', async () => {
+    await accountField([{ ...unnamed, agent: false }]);
+
+    const line = must(find('[data-picker-identity="wrapper"]'), 'the identity line');
+    expect(line.textContent).toBe('Claude');
   });
 });
 

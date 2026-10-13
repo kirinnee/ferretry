@@ -10,7 +10,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import type { FleetBinaryLookup } from '../../src/adapters/process-login.ts';
+import type { FleetBinaryLookup } from '../../src/adapters/wrapper-source.ts';
 import type { FleetTokenRefreshProcess, FleetTokenRefreshSpawn } from '../../src/adapters/process-token-refresh.ts';
 import {
   FLEET_TOKEN_REFRESH_POLL_MS,

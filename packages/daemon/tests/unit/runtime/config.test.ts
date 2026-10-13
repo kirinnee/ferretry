@@ -530,17 +530,23 @@ describe('the fleet preparation block', () => {
   });
 });
 
-describe('the account model switch', () => {
-  it('should leave account-model writes off unless the operator switched them on', () => {
-    // Assert — off by default: a version-2 config.yaml is unreadable to every version-1 reader still shipped.
-    should(defaultDaemonConfig().accountModel).deepEqual({ enabled: false });
-    should(defaultDaemonConfigDocument().accountModel).deepEqual({ enabled: false });
-    should(parseDaemonConfig({ accountModel: { enabled: true } }).accountModel).deepEqual({ enabled: true });
+describe('the retired account model setting', () => {
+  it('should no longer carry an accountModel setting', () => {
+    // Assert — the account model is always on, so there is nothing to default.
+    should(defaultDaemonConfig()).not.have.property('accountModel');
+    should(defaultDaemonConfigDocument()).not.have.property('accountModel');
+    should(defaultDaemonConfig().retiredAccountModel).equal(false);
   });
 
-  it('should refuse a key nothing reads', () => {
+  it('should still boot an old document that carries one, and remember to say so', () => {
+    // Act — any shape: the key is not read, only noticed.
+    const enabled = parseDaemonConfig({ accountModel: { enabled: true } });
+    const misspelled = parseDaemonConfig({ accountModel: { enable: 'yes' } });
+
     // Assert
-    should(() => parseDaemonConfig({ accountModel: { enable: true } })).throw();
-    should(() => parseDaemonConfig({ accountModel: { enabled: 'yes' } })).throw();
+    should(enabled.retiredAccountModel).equal(true);
+    should(misspelled.retiredAccountModel).equal(true);
+    should(enabled).not.have.property('accountModel');
+    should(parseDaemonConfig({}).retiredAccountModel).equal(false);
   });
 });

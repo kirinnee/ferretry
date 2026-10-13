@@ -8,8 +8,6 @@ import {
   type FleetCredentialView,
   type FleetMachineView,
   FleetMachineViewSchema,
-  type FleetMigrationView,
-  FleetMigrationViewSchema,
   type FleetRuntimeCatalog,
   FleetRuntimeCatalogSchema,
   type FleetRuntimeView,
@@ -21,11 +19,11 @@ import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 export {
   APPLY_PATH,
   type Call,
-  permissions,
-  scriptedClient,
+  machineAnswer,
   STAGED,
-  UNLOCKED,
+  scriptedClient,
   UNLOCK_TOKEN,
+  UNLOCKED,
 } from '../shell/change-support.ts';
 
 export const NOW = () => Date.parse('2026-10-13T08:00:00.000Z');
@@ -55,16 +53,11 @@ export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMac
     ],
     runtimeCount: 2,
     runningSessions: 0,
-    changes: { available: true },
+    authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
     ...overrides,
   });
 
 export const FRESH_MACHINE = machineView({ format: 'none', setUp: false, runtimeCount: 0 });
-
-export const SWITCHED_OFF = {
-  available: false,
-  reason: 'Account setup changes are switched off on this machine for now.',
-} as const;
 
 const claudeScan = {
   harness: 'claude',
@@ -145,6 +138,8 @@ export const NOTHING_INSTALLED = scan({
 
 export const runtimeView = (name: string, overrides: Partial<FleetRuntimeView> = {}): FleetRuntimeView => ({
   name,
+  id: `rt-${name}`,
+  wrapper: name,
   harness: 'claude',
   credential: { id: 'claude-host', store: 'host', status: 'ready' },
   profile: 'default',
@@ -213,14 +208,6 @@ export const bundle = (overrides: Partial<FleetCloneBundle> = {}): FleetCloneBun
     },
     files: [{ path: 'components/instructions/default.md', content: 'Read /Users/me/notes.md first.' }],
     notCopied: [],
-    ...overrides,
-  });
-
-export const migrationView = (overrides: Partial<FleetMigrationView> = {}): FleetMigrationView =>
-  FleetMigrationViewSchema.parse({
-    status: 'version-1',
-    dryRun: { digest: 'sha256-abc', lines: ['Login claude-work moves to the shared store.'], blockers: [] },
-    migrate: { available: true },
     ...overrides,
   });
 

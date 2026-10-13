@@ -1,43 +1,7 @@
 #!/usr/bin/env bun
-import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import {
-  buildFleetHealthCollector,
-  buildFleetIdentities,
-  buildFleetScaffold,
-  buildFleetUsageCollector,
-  defaultFleetHarness,
-  FleetIdentityService,
-  FleetLoginService,
-  FleetPlan,
-  FleetTokenRefreshService,
-  fleetScaffoldIds,
-  SharedHistoryMigration,
-} from '@ferretry/fleet';
-import {
-  AnthropicUsageProbe,
-  FileConversationLeaseStore,
-  FileFleetConfigSource,
-  FileFleetProvisioner,
-  FileFleetScaffolder,
-  FileSeedProvenanceStore,
-  FileSharedHistoryFileSystem,
-  fetchQuota,
-  HostProcessStarts,
-  harnessKeychainAccount,
-  PlatformFleetCredentialStore,
-  ProcessFleetLoginPort,
-  ProcessFleetTokenRefreshPort,
-  readFleetWrapperScript,
-  resolveUserHome,
-  SpawnCredentialCommand,
-  StoreCredentialClassifier,
-  seedProvenancePath,
-  spawnFleetLoginProcess,
-  spawnFleetTokenRefreshProcess,
-  whichHarnessBinary,
-} from '@ferretry/fleet/adapters';
+import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
@@ -60,9 +24,6 @@ import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
-import { SystemFleetClock } from '../src/adapters/fleet/clock';
-import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
-import { SystemUsageClock } from '../src/adapters/fleet/usage-probe';
 import { StdinOperatorPassword } from '../src/adapters/grants/stdin-operator-password';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
@@ -81,7 +42,6 @@ import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-comm
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
-import { type TerminalSurface, terminalFleetPresentation } from '../src/adapters/terminal/palette';
 import { InquirerPrompt, type IPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
@@ -104,9 +64,9 @@ import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { ProtocolAccountGateway } from '../src/lib/fleet/account-gateway';
 import { registerAccountModelCommands } from '../src/lib/fleet/account-model';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
-import { FleetController } from '../src/lib/fleet/controller';
-import { ProtocolFleetSharingGateway, ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
-import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
+import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
+import { resolveFleetLayout } from '../src/lib/fleet/layout';
+import { RecommendController } from '../src/lib/fleet/recommend';
 import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
@@ -221,17 +181,6 @@ export interface CliWorld {
   readonly homeDirectory: string;
   /** The process environment, injected so tests never depend on the ambient one. */
   readonly environment: Record<string, string | undefined>;
-  /**
-   * What stdout is: a terminal or not, and how wide.
-   *
-   * Captured here rather than read where a report is rendered, for the same reason `environment` is:
-   * an in-process journey must not inherit the ambient terminal, or the same command would produce a
-   * differently wrapped, differently coloured report on every developer's screen and in CI.
-   *
-   * NOT `interactive`, which is stdin AND stdout together — a report is written to stdout alone, and
-   * `fy fleet health < /dev/null` is still being read by somebody.
-   */
-  readonly stdout: TerminalSurface;
 }
 
 /** The real production world: the shipped IO adapters. */
@@ -245,11 +194,6 @@ export function buildWorld(): CliWorld {
     cwd: process.cwd(),
     homeDirectory: resolveUserHome(),
     environment: process.env,
-    stdout: {
-      terminal: Boolean(process.stdout.isTTY),
-      columns: process.stdout.columns,
-      noColor: process.env.NO_COLOR,
-    },
   };
 }
 
@@ -650,9 +594,17 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       // checkout being destroyed.
       new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive, world.cwd),
     ),
-  ({ program, world, client }) => registerFleetCommands(program, buildFleetController(world, client)),
+  ({ program, world, client }) =>
+    registerFleetCommands(
+      program,
+      new RecommendController({
+        recommendations: new ProtocolRecommendationGateway(client),
+        out: world.io,
+        binaryName: BINARY_NAME,
+      }),
+    ),
   // The account model's command groups (docs/design/account-model.md §6.2): setup, machine, runtimes,
-  // credentials, profiles, components and `fleet migrate`. Every write goes through the daemon's
+  // credentials, profiles and components. Every write goes through the daemon's
   // reviewed changes, so nothing here touches a configuration file.
   ({ program, world, client }) =>
     registerAccountModelCommands(program, {
@@ -755,195 +707,6 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       }),
     ),
 ];
-
-/**
- * Builds the fleet controller.
- *
- * Provisioning is local, so this group is wired from `@ferretry/fleet` rather than the daemon — only
- * `recommend` takes the protocol client. The layout is resolved from the environment here and shared
- * by every verb, so `apply` and `usage` can never disagree about where the manifest lives.
- */
-function buildFleetController(world: CliWorld, client: SharedDaemonClient): FleetController {
-  const layout = resolveFleetLayout({
-    stateHome: world.environment.FY_HOME,
-    userHome: resolveUserHome(world.environment),
-    product: PRODUCT_NAME,
-  });
-  // THE REPORTED BUG. Both writers below create state inside the daemon's home — `init` writes
-  // `fleet/config.yaml` and the asset tree, `apply` writes `fleet/{homes,bin,manifest.json}` — and
-  // neither claimed the layout, so a home they had just provisioned reached the daemon as a
-  // non-empty directory with no marker. The daemon then refused it as foreign, permanently, and the
-  // only move an owner had was to delete the installation they had just set up. Claiming here is
-  // what makes `fy` before `fyd` work the same as `fyd` before `fy`.
-  const claims = buildStateHomeClaims();
-  const claimStateHome = async (): Promise<void> => {
-    await claims.claim(layout.stateHome);
-  };
-  const configured = world.environment.FY_FLEET_CONFIG?.trim() ?? '';
-  const configPath = configured === '' ? defaultConfigPath(layout) : configured;
-  const fleetWriteRoots = [layout.fleetDirectory, layout.userHome];
-  // The one place allowed to read the platform and the environment: the store itself takes both as
-  // values, which is what lets a test drive the macOS path on a host that is not macOS.
-  const credentialStore = new PlatformFleetCredentialStore({
-    platform: process.platform,
-    command: new SpawnCredentialCommand(),
-    now: () => Date.now(),
-    keychainAccount: harnessKeychainAccount([world.environment.USER, world.environment.LOGNAME]),
-    // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item therefore
-    // carries no suffix. The fleet layout is the single owner of that fact.
-    defaultClaudeHome: layout.defaultHomeDirectories.claude,
-  });
-  const identityService = new FleetIdentityService(credentialStore);
-  const provisioner = new FileFleetProvisioner(
-    fleetWriteRoots,
-    new SharedHistoryMigration(new FileSharedHistoryFileSystem(fleetWriteRoots)),
-  );
-  return new FleetController({
-    config: new FileFleetConfigSource(configPath),
-    manifests: new FileFleetManifestSource(layout.manifestPath),
-    // Scaffolding seeds the configuration `apply` will actually read, so both take the same path.
-    scaffolder: {
-      scaffold: async options => {
-        const firstAccount =
-          options.firstAccount === 'detected'
-            ? defaultFleetHarness(
-                (['claude', 'codex'] as const).flatMap(kind =>
-                  Bun.which(kind, { PATH: world.environment.PATH ?? '' }) === null
-                    ? []
-                    : [{ kind, launchable: [kind] }],
-                ),
-              )
-            : options.firstAccount;
-        if (options.firstAccount === 'detected' && firstAccount === undefined) {
-          throw new Error(
-            `no launchable Claude or Codex CLI was found on this host — install one, or choose explicitly with "${BINARY_NAME} fleet init --first-account=claude"`,
-          );
-        }
-        // Before the scaffolder writes a single byte: a refusal here must leave the directory
-        // exactly as it was found, and a scaffold has no undo.
-        await claimStateHome();
-        return await new FileFleetScaffolder([layout.fleetDirectory]).scaffold(
-          buildFleetScaffold({
-            layout,
-            configPath,
-            ids: fleetScaffoldIds(() => randomUUID()),
-            // A ONE-ELEMENT SET: `--first-account` names one harness by hand, and the shared scaffold
-            // takes the set so a daemon preparing every harness it found reaches the same declaration
-            // rather than a second one shaped for many.
-            ...(firstAccount === undefined ? {} : { firstAccounts: [firstAccount] }),
-          }),
-        );
-      },
-    },
-    planner: {
-      build: (config, generatedAt) => new FleetPlan().build(config, layout, generatedAt),
-    },
-    // Account/default homes may live under the user's home; history still names every exact home in
-    // its request, and both adapters independently reject anything outside these declared roots.
-    //
-    // `apply` claims first; `preview` does not, because a dry run writes nothing and must stay
-    // answerable on a home this client would refuse to provision — that report is exactly how
-    // somebody diagnoses the refusal.
-    applier: {
-      preview: plan => provisioner.preview(plan),
-      apply: async plan => {
-        await claimStateHome();
-        return await provisioner.apply(plan);
-      },
-    },
-    // Built per invocation from the loaded configuration, so `usage.concurrency`,
-    // `usage.atLimitPercent` and `usage.timeout` are honoured instead of parsed and dropped. The
-    // timeout goes to the probe rather than the collector because only the probe can actually cancel
-    // a provider call; the daemon's fleet mount passes the same value at its own construction.
-    // The same collector the daemon builds, from the same factory, over the same probe: two call
-    // sites assembling their own is how `fy fleet usage` and GET /v1/fleet/usage come to disagree about
-    // whether an account has quota left. The credential store is shared with login, so the token a
-    // probe uses is the one a login wrote.
-    usage: {
-      forConfig: config =>
-        buildFleetUsageCollector(
-          config,
-          new AnthropicUsageProbe({
-            fetch: fetchQuota,
-            timeoutMs: config.usage.timeout * 1_000,
-            credentials: credentialStore,
-          }),
-          new SystemUsageClock(),
-        ),
-    },
-    // ACCOUNT HEALTH, AND IT SPENDS NOTHING. This used to launch every account's wrapper and ask a
-    // model to answer a sentinel — a real billable turn per account, every time somebody ran the
-    // command. It is now the free evidence: one read-only `GET /api/oauth/usage` per credential,
-    // through the SAME collector and the SAME probe the line above builds, plus a local credential
-    // classification. Reusing the usage collector is what makes "one free GET" true rather than
-    // aspirational — a second collector here would be a second round of provider calls.
-    //
-    // No persistence, deliberately. This process answers the question it was asked and exits; a head
-    // store here would be a second owner of a fact the daemon already keeps, and the two would
-    // disagree about when an account was last checked.
-    health: {
-      forConfig: config =>
-        buildFleetHealthCollector(
-          config,
-          buildFleetUsageCollector(
-            config,
-            new AnthropicUsageProbe({
-              fetch: fetchQuota,
-              timeoutMs: config.usage.timeout * 1_000,
-              credentials: credentialStore,
-            }),
-            new SystemUsageClock(),
-          ),
-          new StoreCredentialClassifier({ credentials: credentialStore, now: () => Date.now() }),
-          new SystemUsageClock(),
-          // WRITTEN BY A DAEMON, READ HERE. This terminal never seeds anything, so it only ever
-          // reads the document — and it reads it through the same store the daemon writes with,
-          // because two spellings of one file format is how a terminal and a browser end up
-          // disagreeing about whose credential an account is holding.
-          new FileSeedProvenanceStore(seedProvenancePath(layout.fleetDirectory)),
-        ),
-    },
-    // One credential store for both verbs: `--status` reads through it and a login copies through it,
-    // so what a report says a home holds is the same reading a copy decides on.
-    identities: {
-      identities: (config, manifest) => buildFleetIdentities(config, manifest),
-      survey: async identities => await identityService.survey(identities),
-    },
-    logins: new FleetLoginService({
-      identities: identityService,
-      loginPort: new ProcessFleetLoginPort({
-        spawn: spawnFleetLoginProcess,
-        environment: world.environment,
-        readWrapper: readFleetWrapperScript,
-        which: whichHarnessBinary,
-      }),
-      // Wired here and not inside the login service, because this is the surface where starting a
-      // harness is unremarkable: a human typed a fleet command in a terminal. The renewal reads
-      // through the same credential store as the login, so the reading that authorises a rotation is
-      // the reading a copy would have decided on.
-      renewal: new FleetTokenRefreshService({
-        store: credentialStore,
-        port: new ProcessFleetTokenRefreshPort({
-          spawn: spawnFleetTokenRefreshProcess,
-          environment: world.environment,
-          which: whichHarnessBinary,
-        }),
-      }),
-    }),
-    clock: new SystemFleetClock(),
-    recommendations: new ProtocolRecommendationGateway(client),
-    // The same shared client, and therefore the same daemon this invocation already resolved: a
-    // loopback daemon's owner-only token file, or the explicit FY_TOKEN a remote one demands. There
-    // is no second selection mechanism and no registry that turns a name into a credential — FY_HOME
-    // picks which local daemon, FY_URL plus FY_TOKEN picks a remote one, exactly as every other verb.
-    sharing: new ProtocolFleetSharingGateway(client),
-    out: world.io,
-    // `fy fleet health` colours by severity, and chalk decides per call whether this run may emit an
-    // escape code at all — so `NO_COLOR`, a pipe and a redirect get the identical plain report.
-    presentation: terminalFleetPresentation(world.stdout),
-    binaryName: BINARY_NAME,
-  });
-}
 
 /**
  * The session command group's collaborators.

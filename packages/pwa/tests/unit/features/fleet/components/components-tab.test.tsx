@@ -13,14 +13,13 @@ import {
   models,
   notes,
   studioCatalog,
-  studioMachine,
 } from './catalog-fixture.ts';
 import {
-  type Machine,
-  followHash,
-  mountSettled,
   choose,
   click,
+  followHash,
+  type Machine,
+  mountSettled,
   scriptedMachine,
   stagedChanges,
   submit,
@@ -251,26 +250,15 @@ describe('ComponentsTab — delete (E21)', () => {
     expect(text(root, '[data-change-submit]')).toBe('Delete notes');
   });
 
-  it('shows the refusal in one sentence while the machine accepts no changes', async () => {
-    const machine = scriptedMachine();
-    const root = await open(machine, {
-      machine: studioMachine({
-        changes: { available: false, reason: 'Account setup changes are switched off on this machine.' },
-      }),
-    });
-    await toDetail(root, 'mcp', 'mcp/notes');
-    await click(root, '[data-component-delete]');
-    expect(text(root, '[data-change-unavailable]')).toBe('Account setup changes are switched off on this machine.');
-    expect(root.querySelector('[data-change-submit]')).toBeNull();
-  });
-
   it('keeps the page when the daemon refuses the delete', async () => {
-    const machine = scriptedMachine({ stage: new FyHttpError('switched off', 409, 'fleet_change_disabled') });
+    const machine = scriptedMachine({
+      stage: new FyHttpError('This change conflicts with the setup.', 409, 'fleet_change_conflict'),
+    });
     const root = await open(machine);
     await toDetail(root, 'mcp', 'mcp/notes');
     await click(root, '[data-component-delete]');
     await submit(root);
-    expect(text(root, '[data-change-refusal]')).toContain('switched off');
+    expect(text(root, '[data-change-refusal]')).toContain('conflicts with the setup');
     expect(text(root, 'h3')).toBe('notes');
   });
 });

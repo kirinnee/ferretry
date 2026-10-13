@@ -69,7 +69,9 @@ const profile = {
 } satisfies FleetLayeredProfileView;
 
 const runtime = {
+  id: '00000000-0000-4000-8000-000000000001',
   name: 'claude-default',
+  wrapper: 'claude-default',
   harness: 'claude',
   credential: { id: 'claude-you', store: 'host', status: 'ready' },
   profile: 'default',
@@ -127,7 +129,7 @@ const view = {
 const cases: readonly SchemaCase[] = [
   { name: 'FleetComponentNameSchema', schema: catalog.FleetComponentNameSchema, value: 'main notes' },
   { name: 'FleetComponentKindSchema', schema: catalog.FleetComponentKindSchema, value: 'modelSets' },
-  { name: 'FleetCatalogFormatSchema', schema: catalog.FleetCatalogFormatSchema, value: 'version-1' },
+  { name: 'FleetCatalogFormatSchema', schema: catalog.FleetCatalogFormatSchema, value: 'none' },
   { name: 'FleetCatalogActSchema', schema: catalog.FleetCatalogActSchema, value: { available: true } },
   {
     name: 'FleetMachineToolSchema',
@@ -145,8 +147,13 @@ const cases: readonly SchemaCase[] = [
       tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
       runtimeCount: 0,
       runningSessions: 2,
-      changes: { available: false, reason: 'The new account model is not switched on for this machine yet.' },
+      authority: { mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' },
     },
+  },
+  {
+    name: 'FleetMachineAuthoritySchema',
+    schema: catalog.FleetMachineAuthoritySchema,
+    value: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
   },
   { name: 'FleetEnvEntrySchema', schema: catalog.FleetEnvEntrySchema, value: { name: 'API_KEY', hidden: true } },
   { name: 'FleetComponentDetailSchema', schema: catalog.FleetComponentDetailSchema, value: component.detail },

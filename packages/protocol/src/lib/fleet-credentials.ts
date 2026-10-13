@@ -146,12 +146,11 @@ export type FleetCredentialView = z.infer<typeof FleetCredentialViewSchema>;
 /**
  * Every credential on this machine.
  *
- * `format` is the config document's version. A version-1 machine is read through the in-memory
- * conversion (§10.4): each credential is one old `<kind>:<identity>` group, read from the freshest
- * copy its runtimes hold, until the machine is migrated.
+ * `format` is the config document's version, which is always the account model: a machine whose
+ * config.yaml is still the old account format is refused as unreadable rather than listed.
  */
 export const FleetCredentialListSchema = z.strictObject({
-  format: z.union([z.literal(1), z.literal(2)]),
+  format: z.literal(2),
   /** This machine's name, as the sign-out sentence names it. */
   machine: NonEmptyStringSchema,
   credentials: z.array(FleetCredentialViewSchema).readonly(),

@@ -20,8 +20,8 @@ const account = (overrides: Partial<AccountUsage> = {}): AccountUsage => ({
 
 describe('authFailureRemedy', () => {
   it.each([
-    { authMode: 'oauth' as const, expected: 'fy fleet login' },
-    { authMode: 'api-key' as const, expected: 'API key' },
+    { authMode: 'oauth' as const, expected: 'fy credential signin' },
+    { authMode: 'api-key' as const, expected: 'fy secret set' },
   ])('names the achievable remedy for a $authMode account', ({ authMode, expected }) => {
     // Arrange / Act
     const remedy = authFailureRemedy(authMode);
@@ -35,8 +35,8 @@ describe('authFailureRemedy', () => {
     const remedy = authFailureRemedy();
 
     // Assert
-    should(remedy).containEql('fy fleet apply');
-    should(remedy).containEql('fy fleet login');
+    should(remedy).containEql('fy secret set');
+    should(remedy).containEql('fy credential signin');
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * Materialisation — a version-2 fleet as the writes `fy fleet apply` performs
+ * Materialisation — a version-2 fleet as the writes an apply performs
  * (docs/design/account-model.md §5.4, §8, R6, H1).
  *
  * Every runtime becomes two things: a hidden config directory, `<homes>/<runtime id>` (the internal
@@ -7,7 +7,7 @@
  * decides both, as one pure plan the existing provisioner writes inside its rollback boundary:
  *
  * - **ids** — `ids.json` is planned here and written by the same apply, so a runtime and its id land
- *   together. A migrated runtime keeps its old config directory (`ids.json` `home`).
+ *   together. A runtime whose `ids.json` entry names a `home` keeps that config directory.
  * - **credential** — Claude reaches its store through `CLAUDE_SECURESTORAGE_CONFIG_DIR` (`""` for the
  *   person's own login); Codex through its `auth.json`, a link to the one canonical file. A Claude
  *   credential is never linked (§8.1.1). The person's real `HOME` is kept, and a profile that tried to
@@ -421,7 +421,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
   const manifest = buildFleetManifest({
     generatedAt: input.generatedAt,
-    // Version 1's account rows, published beside the runtimes until every reader moves to them (§10.4).
+    // The launch inventory: one row per runtime, the contract every launch reads — start resolution,
+    // the boot preflight, doctor and the launch environment's secret variables. A row is a runtime
+    // seen as something to launch (its wrapper, config directory, mode and availability);
+    // `runtimes` below says what the runtime IS in the account model's words.
     accounts: planned.map(runtime => {
       const reason =
         runtime.blocked ??

@@ -3,9 +3,7 @@
  * harness, each with its status, its usage and who uses it — and each login's own page, where it is
  * signed in, labelled, checked or signed out.
  *
- * One page is one login (§4.1 rule 1). Every write is a reviewed change through the shared apply path,
- * so while this machine does not accept account changes the page says so in one sentence and shows
- * everything else as it is.
+ * One page is one login (§4.1 rule 1). Every write is a reviewed change through the shared apply path.
  */
 
 import type { FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
@@ -16,7 +14,7 @@ import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { checkFleetCredential } from '../credentials-api.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from '../runtimes/machine-data.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
@@ -108,7 +106,6 @@ interface CredentialPageProps {
 function CredentialPage({
   credential,
   data,
-  machine,
   machineName,
   online,
   connection,
@@ -180,7 +177,14 @@ function CredentialPage({
   return (
     <section className="flex min-w-0 flex-col gap-4" data-credential-page={credential.id}>
       <div>
-        <Button type="button" variant="ghost" size="sm" data-page-back="" onClick={onBack}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="kt-btn--flush-start"
+          data-page-back=""
+          onClick={onBack}
+        >
           <ChevronLeft size={16} aria-hidden="true" />
           Credentials
         </Button>
@@ -266,7 +270,6 @@ function CredentialPage({
         {label.trim() === (credential.label ?? '') ? null : (
           <ChangeApplyPanel
             machineName={machineName}
-            changes={machine?.changes ?? null}
             authority={changes.authority}
             busy={changes.busy}
             refusal={changes.refusal}
@@ -310,7 +313,6 @@ function CredentialPage({
               <p className="m-0 text-row font-semibold text-fg">{credential.signOut.sentence}</p>
               <ChangeApplyPanel
                 machineName={machineName}
-                changes={machine?.changes ?? null}
                 authority={changes.authority}
                 busy={changes.busy}
                 busyLabel="Signing out…"
@@ -330,7 +332,6 @@ function CredentialPage({
               {credential.checkNow.available ? (
                 <ChangeApplyPanel
                   machineName={machineName}
-                  changes={null}
                   authority={changes.authority}
                   busy={checking || changes.busy}
                   busyLabel="Checking…"

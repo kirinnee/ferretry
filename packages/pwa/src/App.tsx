@@ -28,13 +28,11 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
-import { accountsSettingsTab } from './features/fleet/accounts-page.tsx';
 import { ComponentsTab } from './features/fleet/components/components-tab.tsx';
-import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
+import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.tsx';
 import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
-import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
@@ -53,6 +51,7 @@ import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
+import { daemonDisplayName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
@@ -543,10 +542,12 @@ const launchHint = (search: string): { readonly initialAgent?: string } => {
 function NewSessionRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
+  const record = useConnectionSnapshot().connections.find(candidate => candidate.daemonId === connection.daemonId);
   return (
     <NewSessionPage
       accounts={store.accountPicker}
       connection={connection}
+      machineName={record === undefined ? connection.baseUrl : daemonDisplayName(record)}
       fleet={store.fleet}
       projects={store.projects}
       startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
@@ -1007,14 +1008,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       pricingSettingsTab(createDaemonClient),
-      // FLEET AND ITS CHILD, in that order and adjacent, because they are the two halves of one
-      // subject: Fleet writes the wrappers, Accounts is where a login is signed in. The RELATION is
-      // declared by `accountsSettingsTab` itself (`parentId: 'fleet'`) rather than by this order, so
-      // reordering this array cannot make the rail draw a level that is not there — see
-      // `orderedDaemonPanels`. No navigator is threaded any more: the two steps that used to link out
-      // to an accounts ROUTE now ask the frame to show the sibling panel.
-      fleetSettingsTab(createDaemonClient),
-      accountsSettingsTab(createDaemonClient),
     ],
     [createDaemonClient, store.clients],
   );

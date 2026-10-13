@@ -625,8 +625,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   /**
    * A root is inside itself. `path.relative(root, root)` is the empty string, so requiring a
-   * non-empty result rejected the one directory every first run has to create — the fleet root — and
-   * `fy fleet init` followed by `fy fleet apply` failed on any fresh host, even with `agents: []`.
+   * non-empty result rejected the one directory every first run has to create — the fleet root — so
+   * the first apply on any fresh host failed, even for an empty fleet.
    * The empty string satisfies every escape test below on its own; only the length check excluded it.
    */
   private async assertWritablePath(target: string, followFinalComponent = false): Promise<void> {

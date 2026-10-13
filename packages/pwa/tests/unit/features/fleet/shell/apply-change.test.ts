@@ -15,8 +15,8 @@ import { daemonId } from '../../../../../src/lib/daemon-connection.ts';
 import {
   APPLY_PATH,
   type Call,
+  machineAnswer,
   OUTCOME,
-  permissions,
   STAGED,
   scriptedClient,
   UNLOCK_TOKEN,
@@ -26,7 +26,7 @@ import {
 const HERE = daemonId('studio');
 const CHANGE = { kind: 'machine.settings', agentPermissions: 'skip' } as const;
 const NOW = () => Date.parse('2026-10-13T08:00:00.000Z');
-const ROUTES = { '/v1/fleet/changes': STAGED, [APPLY_PATH]: OUTCOME, '/v1/grants/unlock': UNLOCKED };
+const ROUTES = { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME, '/v1/grants/unlock': UNLOCKED };
 
 const attempt = (overrides: Partial<ChangeAttempt> = {}): ChangeAttempt => ({
   daemonId: HERE,
@@ -40,21 +40,37 @@ const paths = (calls: readonly Call[]): string[] => calls.map(call => call.path)
 describe('readChangeAuthority', () => {
   it('reads what this browser may change, and calls a failed read unreadable', async () => {
     const calls: Call[] = [];
-    expect(await readChangeAuthority(scriptedClient({ '/v1/fleet/permissions': permissions() }, calls))).toEqual({
+    expect(await readChangeAuthority(scriptedClient({ '/v1/fleet/machine': machineAnswer() }, calls))).toEqual({
       kind: 'open',
     });
     expect(
       await readChangeAuthority(
-        scriptedClient({ '/v1/fleet/permissions': permissions({ confirmation: 'operator-password' }) }, calls),
+        scriptedClient({ '/v1/fleet/machine': machineAnswer({ confirmation: 'operator-password' }) }, calls),
         UNLOCK_TOKEN,
       ),
     ).toEqual({ kind: 'confirm' });
     expect(calls[1]?.headers[OPERATOR_UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
     expect(
       await readChangeAuthority(
-        scriptedClient({ '/v1/fleet/permissions': permissions({ mayApply: false, applyRefusal: 'locked' }) }),
+        scriptedClient({ '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'locked' }) }),
       ),
     ).toEqual({ kind: 'locked', alsoConfirms: false });
+    expect(
+      await readChangeAuthority(
+        scriptedClient({
+          '/v1/fleet/machine': machineAnswer({
+            mayApply: false,
+            applyRefusal: 'locked',
+            confirmation: 'operator-password',
+          }),
+        }),
+      ),
+    ).toEqual({ kind: 'locked', alsoConfirms: true });
+    expect(
+      await readChangeAuthority(
+        scriptedClient({ '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'not-granted' }) }),
+      ),
+    ).toEqual({ kind: 'refused', refusal: 'not-granted' });
     expect(await readChangeAuthority(scriptedClient({}))).toEqual({ kind: 'unreadable' });
   });
 
@@ -71,7 +87,7 @@ describe('applyAccountChange', () => {
     const calls: Call[] = [];
     const result = await applyAccountChange(scriptedClient(ROUTES, calls), CHANGE, attempt());
     expect(result).toEqual({ kind: 'applied', staged: STAGED, outcome: OUTCOME, held: null });
-    expect(paths(calls)).toEqual(['/v1/fleet/changes', APPLY_PATH]);
+    expect(paths(calls)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
     expect(calls[0]?.body).toEqual({ change: CHANGE });
     expect(calls[1]?.body).toEqual({});
   });
@@ -84,7 +100,7 @@ describe('applyAccountChange', () => {
       attempt({ authority: { kind: 'confirm' }, operatorPassword: 'correct-horse-battery' }),
     );
     expect(result.kind).toBe('applied');
-    expect(paths(calls)).toEqual(['/v1/fleet/changes', APPLY_PATH]);
+    expect(paths(calls)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
     expect(calls[1]?.body).toEqual({ operatorPassword: 'correct-horse-battery' });
   });
 
@@ -97,7 +113,7 @@ describe('applyAccountChange', () => {
     );
     const held = { daemonId: HERE, token: UNLOCK_TOKEN, expiresAtMs: Date.parse(UNLOCKED.expiresAt) };
     expect(result).toEqual({ kind: 'applied', staged: STAGED, outcome: OUTCOME, held });
-    expect(paths(calls)).toEqual(['/v1/grants/unlock', '/v1/fleet/changes', APPLY_PATH]);
+    expect(paths(calls)).toEqual(['/v1/grants/unlock', '/v1/fleet/proposals', APPLY_PATH]);
     expect(calls[0]?.body).toEqual({ password: 'correct-horse-battery' });
     expect(calls[1]?.headers[OPERATOR_UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
     expect(calls[2]?.headers[OPERATOR_UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
@@ -112,7 +128,7 @@ describe('applyAccountChange', () => {
       attempt({ authority: { kind: 'locked', alsoConfirms: false }, held }),
     );
     expect(next.kind).toBe('applied');
-    expect(paths(again)).toEqual(['/v1/fleet/changes', APPLY_PATH]);
+    expect(paths(again)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
     expect(again[1]?.body).toEqual({});
   });
 
@@ -131,19 +147,15 @@ describe('applyAccountChange', () => {
       await applyAccountChange(scriptedClient(ROUTES, calls), CHANGE, attempt({ authority: { kind: 'confirm' } })),
     ).toEqual({ kind: 'refused', sentence, passwordRejected: false, held: null });
     // Staging needed no password, so it went out; the apply did not.
-    expect(paths(calls)).toEqual(['/v1/fleet/changes']);
+    expect(paths(calls)).toEqual(['/v1/fleet/proposals']);
   });
 
-  it('a switched-off account model is one sentence in the daemon’s own words, with its code', async () => {
-    const off = new FyHttpError(
-      'Account setup changes are switched off on this machine for now.',
-      409,
-      'fleet_change_disabled',
-    );
-    expect(await applyAccountChange(scriptedClient({ '/v1/fleet/changes': off }), CHANGE, attempt())).toEqual({
+  it('a refused change is one sentence in the daemon’s own words, with its code', async () => {
+    const off = new FyHttpError('This change conflicts with the setup on this machine.', 409, 'fleet_change_conflict');
+    expect(await applyAccountChange(scriptedClient({ '/v1/fleet/proposals': off }), CHANGE, attempt())).toEqual({
       kind: 'refused',
-      sentence: 'Account setup changes are switched off on this machine for now.',
-      code: 'fleet_change_disabled',
+      sentence: 'This change conflicts with the setup on this machine.',
+      code: 'fleet_change_conflict',
       passwordRejected: false,
       held: null,
     });
@@ -211,7 +223,7 @@ describe('stage then apply, separately', () => {
     const stage = await stageAccountChange(client, CHANGE, attempt());
     expect(stage).toEqual({ kind: 'staged', staged: STAGED, held: null });
     expect(await applyStagedChange(client, STAGED, attempt())).toMatchObject({ kind: 'applied', outcome: OUTCOME });
-    expect(paths(calls)).toEqual(['/v1/fleet/changes', APPLY_PATH]);
+    expect(paths(calls)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
   });
 
   it('a locked stage with no password and no unlock asks for it first', async () => {

@@ -3,8 +3,7 @@ import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import type { ResolvedAccount } from '../../src/lib/profiles.ts';
-import { renderWrapperScript } from '../../src/lib/wrappers.ts';
+import { type RuntimeWrapperInput, renderRuntimeWrapperScript } from '../../src/lib/wrappers.ts';
 
 /**
  * The first-run seeding is embedded shell, and the unit tests can only prove what the *text* says.
@@ -15,31 +14,17 @@ import { renderWrapperScript } from '../../src/lib/wrappers.ts';
  * is the kind of defect that only ever appears on somebody else's machine.
  */
 
-const account = (home: string, env: Record<string, string> = {}): ResolvedAccount =>
-  ({
-    id: '00000000-0000-4000-8000-000000000001',
-    kind: 'claude',
-    mode: 'auto',
-    wrapper: 'fy-claude-work',
-    home,
-    displayName: 'Claude (work)',
-    agent: 'work',
-    variant: 'auto',
-    identity: 'work',
-    auth: 'oauth',
-    available: true,
-    unavailableReason: null,
-    defaultModel: null,
-    models: [],
-    env,
-    flags: [],
-    settings: [],
-    memory: undefined,
-    skills: undefined,
-    hooks: undefined,
-    hooksDir: undefined,
-    mcp: undefined,
-  }) as ResolvedAccount;
+const account = (home: string, env: Record<string, string> = {}): RuntimeWrapperInput => ({
+  name: 'claude-auto-work',
+  id: '00000000-0000-4000-8000-000000000001',
+  harness: 'claude',
+  agent: true,
+  configDirectory: home,
+  env,
+  args: [],
+  seedFirstRun: true,
+  fyCommand: 'fy',
+});
 
 interface Sandbox {
   readonly home: string;
@@ -65,7 +50,7 @@ const withSandbox = async (run: (sandbox: Sandbox) => Promise<void>): Promise<vo
       cwd,
       run: async (environment = {}, accountEnv = {}) => {
         const script = path.join(root, 'wrapper.sh');
-        await Bun.write(script, renderWrapperScript(account(home, accountEnv)));
+        await Bun.write(script, renderRuntimeWrapperScript(account(home, accountEnv)));
         const spawned = Bun.spawn({
           cmd: ['/bin/sh', script],
           cwd,

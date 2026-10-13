@@ -1,5 +1,5 @@
 /**
- * A profile authenticating an account, through the real composition root.
+ * A credential kept in the environment authenticating a runtime, through the real composition root.
  *
  * WHAT ONLY THIS TIER CAN PROVE. Every piece below has unit and adapter coverage of its own, and none
  * of that touches the one thing most likely to be wrong: whether `bin/fyd.ts` actually HANDS the
@@ -58,7 +58,7 @@ async function freeLoopbackPort(): Promise<number> {
  *
  * BOTH DOCUMENTS, because the two halves read different ones on purpose: the launch path reads the
  * published manifest, so a typo in the configuration cannot refuse every session, and the reference
- * listing reads the configuration, because that is the only place that knows WHICH PROFILE set a
+ * listing reads the configuration, because that is the only place that knows WHICH CREDENTIAL set a
  * variable. A fixture that wrote one of them would leave half of this untested.
  */
 async function seedProfiledFleet(home: string): Promise<string> {
@@ -108,22 +108,26 @@ async function seedProfiledFleet(home: string): Promise<string> {
   await writeFile(
     join(home, 'fleet', 'config.yaml'),
     [
-      'profiles:',
+      'version: 2',
+      'credentials:',
       '  work:',
+      '    harness: claude',
+      '    store: environment',
       '    env:',
       '      ANTHROPIC_API_KEY: "${secret:WORK_KEY}"',
-      'agents:',
-      '  - name: profiled',
-      '    kind: claude',
-      '    auth: api-key',
-      '    profiles: [work]',
-      '    routes:',
-      '      default:',
-      `        id: ${ACCOUNT}`,
-      `        wrapper: ${WRAPPER}`,
-      '        home: profiled',
-      '        defaultModel: claude-opus-5',
-      '        models: [claude-opus-5]',
+      'components:',
+      '  modelSets:',
+      '    opus:',
+      '      models: [claude-opus-5]',
+      '      default: claude-opus-5',
+      'profiles:',
+      '  default:',
+      '    layers: [modelSets/opus]',
+      'runtimes:',
+      `  ${WRAPPER}:`,
+      '    credential: work',
+      '    profile: default',
+      '    agent: true',
       '',
     ].join('\n'),
     { mode: 0o600 },
@@ -139,7 +143,7 @@ async function waitForHealth(port: number): Promise<void> {
   throw new Error('the daemon never answered its health probe');
 }
 
-describe('a fleet account a profile authenticates, on a booted daemon', () => {
+describe('a runtime an environment credential authenticates, on a booted daemon', () => {
   it('should list its missing credential before anything runs, and refuse the start that needs it', async () => {
     // Arrange
     const home = await tempDirectory('ferretry-profile-journey-');
@@ -150,7 +154,11 @@ describe('a fleet account a profile authenticates, on a booted daemon', () => {
     const opened = await world().storage.open();
     await opened.storage.close();
     await mkdir(join(home, 'config'), { recursive: true });
-    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+    await writeFile(
+      join(home, 'config', 'daemon.json'),
+      JSON.stringify({ host: '127.0.0.1', port, fleet: { prepareDefaults: false } }),
+      { mode: 0o600 },
+    );
     await seedProfiledFleet(home);
     const shutdown = new Promise<void>(resolve => {
       release = resolve;
@@ -182,11 +190,10 @@ describe('a fleet account a profile authenticates, on a booted daemon', () => {
     for (const cleanup of cleanups) await cleanup();
 
     // Assert
-    // The reference is visible with the profile that set it, so a person can fix this before a
+    // The reference is visible with the credential that set it, so a person can fix this before a
     // session dies rather than afterwards.
     const reference = before.references.find(entry => entry.name === 'WORK_KEY');
-    should(reference?.origin).match(/fleet account claude-auto-profiled → ANTHROPIC_API_KEY/u);
-    should(reference?.origin).match(/the profile "work"/u);
+    should(reference?.origin).match(/credential work env ANTHROPIC_API_KEY/u);
     should(reference?.resolved).be.false();
     // The start is refused, on this machine, naming the secret — never an empty credential and a
     // provider error minutes later.

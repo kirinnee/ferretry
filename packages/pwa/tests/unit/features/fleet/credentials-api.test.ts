@@ -7,7 +7,7 @@ import {
   FLEET_CREDENTIALS_PATH,
   readFleetCredentials,
 } from '../../../../src/features/fleet/credentials-api.ts';
-import type { FleetClient } from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
 
 interface Call {
   readonly path: string;
@@ -86,7 +86,7 @@ describe('the credentials wire client', () => {
   });
 
   it('carries the unlock on the list read too', async () => {
-    const { client, calls } = clientFor({ format: 1, machine: 'studio', credentials: [] });
+    const { client, calls } = clientFor({ format: 2, machine: 'studio', credentials: [] });
 
     await readFleetCredentials(client, TOKEN);
 

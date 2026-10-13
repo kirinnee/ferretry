@@ -20,6 +20,10 @@ export * as filesTabModel from '../components/files-tab-model.ts';
 export * from '../components/files-views.tsx';
 export * from '../components/fy-render-block.tsx';
 export * from '../components/input-waveform.tsx';
+// PR 1B — the live event feed's reconnect model and its visible state. APPENDED rather than sorted
+// into the blocks above on the lead's instruction: a second PR is landing one export into this same
+// file, and an alphabetical insertion would put the two diffs in adjacent hunks.
+export * from '../components/live-stream-indicator.tsx';
 export * from '../components/markdown.tsx';
 export * as migrateModel from '../components/migrate-model.ts';
 export * from '../components/migrate-sheet.tsx';
@@ -34,6 +38,7 @@ export * from '../components/session-dashboard.tsx';
 export * from '../components/session-dashboard-groups.tsx';
 export * as sessionDashboardModel from '../components/session-dashboard-model.ts';
 export * from '../components/session-dashboard-rows.tsx';
+export * from '../components/session-event-stream-model.ts';
 export * from '../components/session-header.tsx';
 export * from '../components/session-surface-references.tsx';
 export * from '../components/session-tasks.tsx';
@@ -62,25 +67,13 @@ export * from '../features/browser/remote-browser-viewer.tsx';
 export * from '../features/browser/unified-browser-model.ts';
 export * from '../features/browser/unified-browser-surface.tsx';
 export * from '../features/carrier/active-carrier-card.tsx';
-export * from '../features/fleet/accounts-model.ts';
-export * from '../features/fleet/accounts-page.tsx';
-export * from '../features/fleet/accounts-surface.tsx';
 export * from '../features/fleet/catalog-api.ts';
+export * from '../features/fleet/claude-login-panel.tsx';
+export * from '../features/fleet/codex-login-panel.tsx';
 export * from '../features/fleet/components/index.ts';
 export * from '../features/fleet/credentials/index.ts';
 export * from '../features/fleet/credentials-api.ts';
-export * from '../features/fleet/fleet-account-stepper.tsx';
-export * from '../features/fleet/fleet-api.ts';
-export * from '../features/fleet/fleet-change-forms.tsx';
-export * from '../features/fleet/fleet-change-model.ts';
-export * from '../features/fleet/fleet-change-review.tsx';
-export * from '../features/fleet/fleet-choice-group.tsx';
-export * from '../features/fleet/fleet-configuration-surface.tsx';
-export * from '../features/fleet/fleet-model.ts';
-export * from '../features/fleet/fleet-settings-stack.tsx';
-export * from '../features/fleet/fleet-stepper-model.ts';
-export * from '../features/fleet/claude-login-panel.tsx';
-export * from '../features/fleet/codex-login-panel.tsx';
+export * from '../features/fleet/fleet-client.ts';
 export * from '../features/fleet/harness-login-api.ts';
 export * from '../features/fleet/harness-login-model.ts';
 export * from '../features/fleet/machine/index.ts';
@@ -259,7 +252,6 @@ export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
 export * from './drafts.ts';
 export * from './event-transport.ts';
-export * from './fleet-environment.ts';
 export * from './fleet-grouping.ts';
 export * from './fleet-store.ts';
 // Namespaced, like the other `*-model` modules: the grammar's `FyRenderBlock`
@@ -326,9 +318,3 @@ export * from './tool-extract.ts';
 export * from './usage.ts';
 export * from './usage-store.ts';
 export * from './web-terminals.ts';
-
-// PR 1B — the live event feed's reconnect model and its visible state. APPENDED rather than sorted
-// into the blocks above on the lead's instruction: a second PR is landing one export into this same
-// file, and an alphabetical insertion would put the two diffs in adjacent hunks.
-export * from '../components/live-stream-indicator.tsx';
-export * from '../components/session-event-stream-model.ts';

@@ -11,7 +11,7 @@
 import type { FleetMachineView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { readFleetMachine } from '../catalog-api.ts';
-import type { FleetClient } from '../fleet-api.ts';
+import type { FleetClient } from '../fleet-client.ts';
 
 export type MachineReach =
   | { readonly kind: 'checking' }

@@ -136,7 +136,7 @@ describe('claiming a state home before writing into it', () => {
   });
 
   it('should refuse a directory Ferretry did not create, and name what it found', async () => {
-    // Arrange — the guard the client did NOT apply before this change: `fy fleet init` would happily
+    // Arrange — the guard the client did NOT apply before this change: a fleet verb would happily
     // provision a fleet into somebody's documents folder.
     const { store, claims } = service([...directories('Documents'), ...files('notes.txt')]);
 

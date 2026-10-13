@@ -18,8 +18,8 @@ function join(directory: string, name: string): string {
  * Where the fleet's directories live.
  *
  * A pure function of the environment, so the whole layout is a value a test asserts on. It is also
- * the only place the state-home default is decided — `apply` and `usage` must agree on where the
- * manifest is, and kteam's two callers each computed it separately and disagreed on one host.
+ * the only place the state-home default is decided — the statusline and the history claim must agree on where
+ * the fleet directory is, and kteam's two callers each computed it separately and disagreed on one host.
  */
 export function resolveFleetLayout(inputs: FleetLayoutInputs): FleetLayout {
   const home = inputs.userHome.trim();
@@ -37,9 +37,4 @@ export function resolveFleetLayout(inputs: FleetLayoutInputs): FleetLayout {
     manifestPath: join(fleetDirectory, 'manifest.json'),
     defaultHomeDirectories: { claude: join(home, '.claude'), codex: join(home, '.codex') },
   };
-}
-
-/** Where `fy fleet apply` reads its configuration when `--config` did not say. */
-export function defaultConfigPath(layout: FleetLayout): string {
-  return join(layout.fleetDirectory, 'config.yaml');
 }

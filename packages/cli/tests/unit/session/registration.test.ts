@@ -1,5 +1,5 @@
-import type { SendResult } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import type { SendResult } from '@ferretry/protocol';
 import { Command, CommanderError } from 'commander';
 import should from 'should';
 import { AnswerQuestionController } from '../../../src/lib/session/answer-controller.ts';
@@ -198,8 +198,8 @@ describe('registerSessionCommands · start', () => {
     should(subject.api.calls).be.empty();
   });
 
-  it('should say in its help which accounts can run a session, and that the terminal one cannot', async () => {
-    // Arrange — `fy fleet ls` lists the terminal account first, so the help is where a first guess lands.
+  it('should say in its help which runtimes can run a session, and that the terminal one cannot', async () => {
+    // Arrange — `fy runtimes` lists the terminal runtime first, so the help is where a first guess lands.
     const subject = harness();
 
     // Act
@@ -208,7 +208,7 @@ describe('registerSessionCommands · start', () => {
 
     // Assert
     should(failure).be.instanceof(CommanderError);
-    should(help).containEql('one `foo fleet ls` marks "auto", such as claude-auto-default');
+    should(help).containEql('an agent runtime (`foo runtimes`), such as claude-auto-default');
     should(help).containEql(
       '(such as claude-default) is for using the tool yourself in a terminal and cannot run sessions, in either --mode',
     );

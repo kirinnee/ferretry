@@ -1,7 +1,7 @@
 /**
  * Launching one harness login with PIPED stdio, and delivering its output as lines.
  *
- * This adapter is the whole of the property change the feature makes. `fy fleet login` inherits all
+ * This adapter is the whole of the property change the feature makes. A terminal sign-in inherits all
  * three of the child's streams and reads none of them, because an approval is something a person does in
  * that terminal. A login a browser can drive has to pipe them instead, which makes this daemon a reader
  * of harness output for the first time — so the seam is deliberately narrow:

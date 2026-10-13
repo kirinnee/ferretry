@@ -4,8 +4,8 @@
  * The alternative — save the configuration, then apply a plan rebuilt from disk — cannot honour
  * "review before anything changes", because by the time the plan is rebuilt the host has already
  * been edited, and the plan applied is not the plan approved. So a proposal holds the whole change:
- * the revision it was derived from, the one mutation asked for, the asset text it carries, the
- * candidate configuration the daemon derived, and the exact preview that was shown. Applying
+ * the revision it was derived from, the one change asked for, the candidate configuration the daemon
+ * derived, and the exact preview that was shown. Applying
  * consumes that stored value and never re-reads a request body.
  *
  * ## THIS IS A TRANSACTION AND NOT AN AUTHORITY, AND IT USED TO BE BOTH
@@ -24,9 +24,6 @@
  *
  * Pure apart from injected identity and time.
  */
-import type { FleetAssetEdit, FleetAssetRevision } from './assets.ts';
-import type { FleetMutation } from './mutations.ts';
-
 /** How many proposals one daemon will hold at once, across every client. */
 export const MAX_OPEN_PROPOSALS = 8;
 /** How many applied changes are remembered, so a repeat apply is told it already happened. */
@@ -36,27 +33,18 @@ const ID_MINT_ATTEMPTS = 4;
 /** How long a reviewed change stays applicable. Long enough to read, short enough to be current. */
 export const PROPOSAL_TTL_SECONDS = 15 * 60;
 
-/** The sentinel revision for a host that has no fleet configuration at all. */
-export const MISSING_CONFIG_REVISION = 'absent';
-
 type FleetProposalState = 'pending' | 'consumed';
 
-/**
- * One staged change. `Mutation` is the intent it was derived from: the old account surface's
- * {@link FleetMutation} by default, or the account model's own change. The store treats it as data.
- */
-export interface FleetProposalRecord<Payload, Mutation = FleetMutation> {
+/** One staged change. `Mutation` is the intent it was derived from; the store treats it as data. */
+export interface FleetProposalRecord<Payload, Mutation> {
   readonly id: string;
   readonly createdAt: number;
   readonly expiresAt: number;
-  /** Digest of the raw configuration this change was derived from, or the missing sentinel. */
+  /** Digest of the raw configuration this change was derived from, or the absent sentinel. */
   readonly revision: string;
   readonly mutation: Mutation;
-  readonly assetEdits: readonly FleetAssetEdit[];
-  /** What every edited asset looked like at review time, so a newer one refuses rather than losing. */
-  readonly assetRevisions: readonly FleetAssetRevision[];
   /**
-   * The exact artifact that produced the preview — the plan, the scaffold and the documents, built
+   * The exact artifact that produced the preview — the plan and the documents, built
    * once. Apply consumes this and never rebuilds: a rebuilt plan carries a new timestamp at
    * minimum, and may differ in any way the filesystem has changed since, so what landed would not
    * be what was reviewed.
@@ -68,14 +56,13 @@ export interface FleetProposalRecord<Payload, Mutation = FleetMutation> {
 }
 
 /** What a caller may see about a proposal. */
-export interface FleetProposalView<View, Mutation = FleetMutation> {
+interface FleetProposalView<View, Mutation> {
   readonly id: string;
   readonly revision: string;
   readonly mutation: Mutation;
   readonly summary: string;
   readonly expiresAt: string;
   readonly state: FleetProposalState;
-  readonly assetEdits: readonly { readonly path: string; readonly bytes: number }[];
   readonly preview: View;
 }
 
@@ -83,7 +70,7 @@ export interface FleetProposalView<View, Mutation = FleetMutation> {
  * Why a staged change cannot be used. EVERY MEMBER IS A FACT ABOUT THE CHANGE, never about the
  * caller — `unauthorized` used to sit here, and its removal is the whole point of this file's split.
  */
-export type FleetProposalProblem = 'unknown' | 'expired' | 'consumed' | 'exhausted';
+type FleetProposalProblem = 'unknown' | 'expired' | 'consumed' | 'exhausted';
 
 export class FleetProposalRefusal extends Error {
   constructor(
@@ -108,7 +95,7 @@ export interface FleetProposalStoreOptions {
  * client cannot keep a stale proposal alive by looking at it, and the bound on open proposals is a
  * bound on live ones rather than on ones ever created.
  */
-export class FleetProposalStore<Payload, Mutation = FleetMutation> {
+export class FleetProposalStore<Payload, Mutation> {
   readonly #proposals = new Map<string, FleetProposalRecord<Payload, Mutation>>();
   constructor(private readonly options: FleetProposalStoreOptions) {}
 
@@ -237,7 +224,7 @@ export class FleetProposalStore<Payload, Mutation = FleetMutation> {
 }
 
 /** The disclosable view of a proposal. */
-export function redactProposal<Payload, View, Mutation = FleetMutation>(
+export function redactProposal<Payload, View, Mutation>(
   record: FleetProposalRecord<Payload, Mutation>,
   viewOf: (payload: Payload) => View,
 ): FleetProposalView<View, Mutation> {
@@ -248,10 +235,6 @@ export function redactProposal<Payload, View, Mutation = FleetMutation>(
     summary: record.summary,
     expiresAt: new Date(record.expiresAt).toISOString(),
     state: record.state,
-    assetEdits: record.assetEdits.map(edit => ({
-      path: edit.path,
-      bytes: new TextEncoder().encode(edit.content).length,
-    })),
     preview: viewOf(record.payload),
   };
 }

@@ -35,7 +35,6 @@ import {
   FakeWarden,
   fleetEventSubsystem,
   grantSubsystem,
-  harnessDiscoveryReader,
   healthSubsystem,
   human,
   learningSubsystem,
@@ -96,67 +95,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     { kind: 'direct', url: 'https://workstation.example.test' },
     { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
   ],
-  fleet: {
-    accounts: async () => ({ version: 1, generatedAt: '2026-01-01T00:00:00.000Z', accounts: [] }),
-    harnesses: async () => await harnessDiscoveryReader().report(),
-    // Declared and never called: preparing the default fleet is the BOOT's step, not a route's, so a
-    // surface inventory that reached it would be evidence of exactly the mistake to avoid.
-    prepareDefaults: async () => {
-      throw new Error('preparing the default fleet is never reachable from the served surface');
-    },
-    config: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    profiles: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    environment: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    updateEnvironment: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    plan: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    usage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    health: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    checkHealth: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    apply: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    permissions: () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    assets: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    asset: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    sharing: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    propose: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    readProposal: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    applyProposal: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
   harnessLogin: {
-    readiness: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
     start: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -164,9 +103,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
     submit: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    renew: async () => {
       throw new Error('not exercised by the surface inventory');
     },
     cancel: async () => {
@@ -215,12 +151,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
     exportBundle: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    migration: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    migrate: async () => {
       throw new Error('not exercised by the surface inventory');
     },
     firstRunAtBoot: async () => {
@@ -525,15 +455,12 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      129 + // the fleet-and-session table
-      5 + // the family that drives a harness sign-in
-      1 + // the one free account-health re-check
-      1 + // the profile catalog the account stepper reads
-      1 + // POST /v1/fleet/renew
+      113 + // the session table and everything that is not the account model
+      4 + // the credential sign-in family: start, then read, answer or cancel one flow
       2 + // the account model's credential list and its Check now
-      7 + // the account model's four catalogue reads and its three change routes
+      7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
-      5; // the setup scan, tool install, the clone export and the migration's dry run and apply
+      3; // the setup scan, tool install and the clone export
     should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
@@ -587,62 +514,25 @@ describe('the mounted daemon surface', () => {
       // explicit apply; there is no route that edits the configuration directly.
       'GET /v1/fleet/machine',
       'GET /v1/fleet/components',
-      'GET /v1/fleet/profile-stacks',
-      'POST /v1/fleet/profile-stacks/preview',
+      'GET /v1/fleet/profiles',
+      'POST /v1/fleet/profiles/preview',
       'GET /v1/fleet/runtimes',
-      'POST /v1/fleet/changes',
-      'GET /v1/fleet/changes/:changeId',
-      'POST /v1/fleet/changes/:changeId/apply',
+      'POST /v1/fleet/proposals',
+      'GET /v1/fleet/proposals/:proposalId',
+      'POST /v1/fleet/proposals/:proposalId/apply',
       // A machine's setup. The import and the clone are reviewed changes above; these are the scan they
-      // start from, the export a clone carries, the tool install, and the migration — whose apply
-      // names the digest of the dry run it shows, so nothing migrates that a person did not see.
+      // start from, the export a clone carries, and the tool install.
       'GET /v1/fleet/setup/scan',
       'POST /v1/fleet/machine/tools/install',
       'GET /v1/fleet/export',
-      'GET /v1/fleet/migration',
-      'POST /v1/fleet/migration/apply',
-      'GET /v1/fleet/accounts',
-      'GET /v1/fleet/harnesses',
-      'GET /v1/fleet/config',
-      // Shapes, never values: the profiles a fleet declares, for the step that offers one.
-      'GET /v1/fleet/profiles',
-      'GET /v1/fleet/environment',
-      'PUT /v1/fleet/environment',
-      'GET /v1/fleet/plan',
-      'GET /v1/fleet/usage',
-      'GET /v1/fleet/health',
-      // The stored verdicts, and the explicit free re-check. Both are `fleet.use`: the POST records a
-      // READING, not a change — it launches nothing and writes no account — so putting it behind
-      // `fleet.configure` would gate somebody's own health check on the operator password that guards
-      // writing executables into their home.
-      'POST /v1/fleet/health/check',
-      'POST /v1/fleet/apply',
-      'GET /v1/fleet/permissions',
-      'GET /v1/fleet/sharing',
-      'GET /v1/fleet/assets',
-      'GET /v1/fleet/assets/:assetPath',
-      'POST /v1/fleet/proposals',
-      'GET /v1/fleet/proposals/:proposalId',
-      // NOTE WHAT IS ABSENT: `POST /v1/fleet/proposals/:proposalId/authorize`. It minted a single-use
-      // code the host printed and a person transcribed — a second authority system beside the
-      // capability model, with its own lifetime, its own attempt budget and its own refusal
-      // vocabulary. It went in the same change as the `fy fleet authorize` verb that dialled it,
-      // because the route-agreement allowlist may only shrink.
-      'POST /v1/fleet/proposals/:proposalId/apply',
       // Driving a harness’s own sign-in. NOTE WHAT IS ABSENT: no route here accepts or returns a
       // provider token. Two values go out — a verification URL, and for Codex a device code — and one
-      // short-lived authorization code comes in, straight to the harness child’s stdin. The readiness
-      // read is `fleet.use` like the other reads; every other route here is `fleet.configure`, because
-      // the risk is account substitution rather than disclosure.
-      'GET /v1/fleet/login',
+      // short-lived authorization code comes in, straight to the harness child’s stdin. Every route here is
+      // `fleet.configure`, because the risk is login substitution rather than disclosure.
       'POST /v1/fleet/login',
       'GET /v1/fleet/login/:flowId',
       'POST /v1/fleet/login/:flowId',
       'DELETE /v1/fleet/login/:flowId',
-      // A renewal, and NOT under `/v1/fleet/login/`: every path there is `:flowId`, so a literal
-      // segment beside it would be read as the id of a flow that does not exist. One route, because a
-      // renewal publishes nothing, is never polled and has no return trip.
-      'POST /v1/fleet/renew',
       // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
       // DELETE — an operator narrows or widens one saved document, and nothing here creates or
       // destroys a slice, because the units are transient and belong to the launches that made them.
@@ -803,7 +693,6 @@ describe('the mounted daemon surface', () => {
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
     const report = await dispatcher.dispatch(request({ path: '/v1/health', headers: human }));
     const doctor = await dispatcher.dispatch(request({ path: '/v1/doctor', headers: human }));
-    const fleetAccounts = await dispatcher.dispatch(request({ path: '/v1/fleet/accounts', headers: human }));
     const gc = await dispatcher.dispatch(request({ path: '/v1/gc', headers: human }));
     const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
     const session = await dispatcher.dispatch(request({ path: '/v1/sessions/s1', headers: human }));
@@ -870,7 +759,6 @@ describe('the mounted daemon surface', () => {
     // are reached: the daemon's own health is a mounted subsystem now, not a hardcoded literal.
     should(report.status).equal(200);
     should(doctor.status).equal(200);
-    should(fleetAccounts.status).equal(200);
     should(gc.status).equal(200);
     should(sessions.status).equal(200);
     // The id pattern is reached rather than shadowed by the deeper per-session routes below it.

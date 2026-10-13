@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { type HarnessLoginFlow, OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { CredentialSignIn } from '../../../../../src/features/fleet/credentials/credential-sign-in.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { CredentialLoginFlow } from '../../../../../src/features/fleet/harness-login-api.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
@@ -10,6 +10,7 @@ import {
   type Call,
   claudeFlow,
   credential,
+  machineWith,
   NOW,
   PASSWORD,
   READS,
@@ -40,7 +41,7 @@ const codexFlow = (state: 'awaiting-approval' | 'complete', credentialId = 'code
     expiresAt: '2026-10-13T08:10:00.000Z',
   };
   return state === 'complete'
-    ? { ...base, state, accounts: [] }
+    ? { ...base, state }
     : { ...base, state, verificationUrl: 'https://auth.openai.com/codex/device', userCode: '0IER-FFQW6' };
 };
 
@@ -307,13 +308,7 @@ describe('CredentialSignIn', () => {
 
   it('asks for the operator password when this browser owes it, and sends it with the start only', async () => {
     const { view, calls } = await open({
-      'GET /v1/fleet/permissions': {
-        mayInspect: true,
-        mayPropose: true,
-        mayApply: true,
-        applyRefusal: 'granted',
-        confirmation: 'operator-password',
-      },
+      'GET /v1/fleet/machine': machineWith({ confirmation: 'operator-password' }),
       [LOGIN]: claudeFlow('awaiting-code'),
     });
     const field = must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field');
@@ -331,13 +326,7 @@ describe('CredentialSignIn', () => {
 
   it('a password the daemon could never accept is refused before anything is started', async () => {
     const { view, calls } = await open({
-      'GET /v1/fleet/permissions': {
-        mayInspect: true,
-        mayPropose: true,
-        mayApply: true,
-        applyRefusal: 'granted',
-        confirmation: 'operator-password',
-      },
+      'GET /v1/fleet/machine': machineWith({ confirmation: 'operator-password' }),
       [LOGIN]: claudeFlow('awaiting-code'),
     });
     const field = must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field');
@@ -351,10 +340,10 @@ describe('CredentialSignIn', () => {
 
   it('a locked browser unlocks with the password and carries the unlock on every later call', async () => {
     const { view, calls, signedIn } = await open({
-      'GET /v1/fleet/permissions': (call: Call) =>
+      'GET /v1/fleet/machine': (call: Call) =>
         call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN
-          ? { mayInspect: true, mayPropose: true, mayApply: true, applyRefusal: 'granted', confirmation: 'none' }
-          : { mayInspect: true, mayPropose: true, mayApply: false, applyRefusal: 'locked', confirmation: 'none' },
+          ? machineWith({})
+          : machineWith({ mayApply: false, applyRefusal: 'locked' }),
       'POST /v1/grants/unlock': UNLOCKED,
       [LOGIN]: claudeFlow('awaiting-code'),
       [`POST ${FLOW}`]: { outcome: 'accepted', flow: claudeFlow('complete') },

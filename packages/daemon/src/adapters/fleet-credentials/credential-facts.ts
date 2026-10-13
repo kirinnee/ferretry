@@ -7,13 +7,16 @@
  * returns credential material: the email reader parses a Codex id token and keeps only its `email`
  * claim, and the document reader hands back the parsed configuration, which holds no secret value.
  */
-import { type CredentialMaterial, type FleetDocument, readFleetDocument } from '@ferretry/fleet';
+import { type AccountModel, type CredentialMaterial, parseAccountConfigText } from '@ferretry/fleet';
 import type { RolloutFile } from '@ferretry/fleet/adapters';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import type { CredentialEmailSource, CredentialHarnessRun } from '../../lib/fleet/credentials-service.ts';
 
-/** The machine's fleet document, or `undefined` when the file does not exist yet. */
-export async function readFleetDocumentFile(path: string): Promise<FleetDocument | undefined> {
+/**
+ * The machine's account model, or `undefined` when the file does not exist yet. A document in the old
+ * account format throws `RetiredFleetConfigError`, whose message says how to set the machine up again.
+ */
+export async function readAccountModelFile(path: string): Promise<AccountModel | undefined> {
   let text: string;
   try {
     text = await readFile(path, 'utf8');
@@ -21,7 +24,7 @@ export async function readFleetDocumentFile(path: string): Promise<FleetDocument
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  return readFleetDocument(Bun.YAML.parse(text) ?? {});
+  return parseAccountConfigText(text, path);
 }
 
 /** Creates a directory a sign-in writes into, readable by this user only. */

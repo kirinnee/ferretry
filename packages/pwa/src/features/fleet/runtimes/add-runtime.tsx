@@ -22,7 +22,7 @@ import { HARNESS_NAMES } from '../components/component-model.ts';
 import { ADD_LOGIN_FLOW_KIND, AddLoginStep, addLoginFlowInput } from '../credentials/add-login.tsx';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
 import { credentialEmail, HARNESSES, type HarnessKind, plural } from '../credentials/credentials-model.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
@@ -541,7 +541,6 @@ export function AddRuntime({
         </label>
         <ChangeApplyPanel
           machineName={machineName}
-          changes={machine?.changes ?? null}
           authority={changes.authority}
           busy={changes.busy}
           busyLabel="Creating…"

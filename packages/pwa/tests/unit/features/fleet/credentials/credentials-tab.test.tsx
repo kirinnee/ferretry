@@ -3,7 +3,7 @@ import type { FleetCredentialList, FleetCredentialView, FleetMachineView } from 
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLIED,
@@ -13,6 +13,7 @@ import {
   claudeFlow,
   credential,
   machine,
+  machineWith,
   NOW,
   PASSWORD,
   READS,
@@ -22,8 +23,8 @@ import {
   withStatus,
 } from '../account-support.ts';
 
-const CHANGES = 'POST /v1/fleet/changes';
-const APPLY = `POST /v1/fleet/changes/${CHANGE_ID}/apply`;
+const CHANGES = 'POST /v1/fleet/proposals';
+const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
 const LOGIN = 'POST /v1/fleet/login';
 const FLOW = '/v1/fleet/login/flow-1';
 const LIST = 'GET /v1/fleet/credentials';
@@ -442,13 +443,7 @@ describe('CredentialsTab · Check now', () => {
   it('sends the operator password with a check when this browser owes it', async () => {
     const { view, calls } = await open(
       {
-        'GET /v1/fleet/permissions': {
-          mayInspect: true,
-          mayPropose: true,
-          mayApply: true,
-          applyRefusal: 'granted',
-          confirmation: 'operator-password',
-        },
+        'GET /v1/fleet/machine': machineWith({ confirmation: 'operator-password' }),
         'POST /v1/fleet/credentials/claude-work/check': credential({ id: 'claude-work', label: 'work' }),
       },
       { hash: `${HASH}/claude-work` },
@@ -575,7 +570,7 @@ describe('CredentialsTab · Sign out', () => {
 });
 
 describe('CredentialsTab · signing a login in from its page', () => {
-  it('signs in in place even while account changes are switched off, then says which runtimes can launch', async () => {
+  it('signs an empty slot in in place, then says which runtimes can launch', async () => {
     const needs = credential({
       id: 'claude-work',
       label: 'work',
@@ -585,9 +580,6 @@ describe('CredentialsTab · signing a login in from its page', () => {
     });
     const ready = credential({ id: 'claude-work', label: 'work', usedBy: ['claude-work', 'ghost'] });
     let signedIn = false;
-    const off = machine({
-      changes: { available: false, reason: 'Account setup changes are switched off on this machine for now.' },
-    });
     const { view, calls } = await open(
       {
         [LIST]: () => listOf([signedIn ? ready : needs]),
@@ -597,18 +589,12 @@ describe('CredentialsTab · signing a login in from its page', () => {
           return { outcome: 'accepted', flow: claudeFlow('complete') };
         },
       },
-      { hash: `${HASH}/claude-work`, machine: off },
+      { hash: `${HASH}/claude-work` },
     );
     const c = view.container;
     expect(text(c, '[data-credential-status]')).toContain('Empty slot. It was copied from laptop');
     expect(c.querySelector('[data-credential-actions]')).toBeNull();
     expect(text(c, '[data-credential-sign-in="start"] [data-change-submit]')).toBe('Sign in to Claude Code');
-    expect(c.querySelector('[data-credential-sign-in="start"] [data-change-unavailable]')).toBeNull();
-
-    await type(must(c.querySelector<HTMLInputElement>('#credential-label-claude-work'), 'field'), 'office');
-    expect(text(c, '[data-credential-label] [data-change-unavailable]')).toBe(
-      'Account setup changes are switched off on this machine for now.',
-    );
 
     await click(c.querySelector('[data-credential-sign-in="start"] [data-change-submit]'), 'Sign in to Claude Code');
     expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude-work' });

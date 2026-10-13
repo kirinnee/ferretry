@@ -9,10 +9,8 @@ import type {
   FleetCredentialView,
   FleetLayeredProfileCatalog,
   FleetLayeredProfileView,
+  FleetMachineAuthority,
   FleetMachineView,
-  FleetMigrationOutcome,
-  FleetMigrationView,
-  FleetPermissions,
   FleetRuntimeCatalog,
   FleetRuntimeView,
   FleetSetupScan,
@@ -36,12 +34,10 @@ interface GatewayCall {
 }
 
 export const CHANGE_ID = 'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA';
-export const AT = '2026-10-13T00:00:00.000Z';
+const AT = '2026-10-13T00:00:00.000Z';
 export const LATER = '2026-10-13T00:10:00.000Z';
 
-export const permissions = (overrides: Partial<FleetPermissions> = {}): FleetPermissions => ({
-  mayInspect: true,
-  mayPropose: true,
+export const authorityOf = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineAuthority => ({
   mayApply: true,
   applyRefusal: 'ungated',
   confirmation: 'none',
@@ -59,7 +55,7 @@ export const machine = (overrides: Partial<FleetMachineView> = {}): FleetMachine
   ],
   runtimeCount: 2,
   runningSessions: 1,
-  changes: { available: true },
+  authority: authorityOf(),
   ...overrides,
 });
 
@@ -124,7 +120,9 @@ export const stack = (overrides: Partial<FleetStackView> = {}): FleetStackView =
 });
 
 export const runtime = (overrides: Partial<FleetRuntimeView> = {}): FleetRuntimeView => ({
+  id: '00000000-0000-4000-8000-0000000000a1',
   name: 'claude-default',
+  wrapper: 'claude-default',
   harness: 'claude',
   credential: { id: 'claude-you', store: 'host', status: 'needs_sign_in' },
   profile: 'default',
@@ -234,7 +232,6 @@ export interface FakeAnswers {
   profiles: () => FleetLayeredProfileCatalog;
   runtimes: () => FleetRuntimeCatalog;
   credentials: () => FleetCredentialList;
-  permissions: () => FleetPermissions;
   unlock: () => string;
   check: () => FleetCredentialView;
   stage: (change: FleetAccountChange) => FleetAccountChangeView;
@@ -242,8 +239,6 @@ export interface FakeAnswers {
   scan: () => FleetSetupScan;
   installTools: () => FleetToolInstallResult;
   exportBundle: () => FleetCloneBundle;
-  migration: () => FleetMigrationView;
-  migrate: () => FleetMigrationOutcome;
   startSignIn: () => HarnessLoginFlow;
   signInStatus: () => HarnessLoginFlow;
   submitSignInCode: () => HarnessLoginSubmission;
@@ -261,7 +256,6 @@ class FakeGateway implements IAccountGateway {
       profiles: () => ({ format: 'version-2', profiles: [] }),
       runtimes: () => ({ format: 'version-2', runtimes: [] }),
       credentials: () => ({ format: 2, machine: 'studio', credentials: [] }),
-      permissions: () => permissions(),
       unlock: () => 'unlock-token',
       check: () => credential(),
       stage: change => changeView(change),
@@ -269,11 +263,9 @@ class FakeGateway implements IAccountGateway {
       scan: () => scan(),
       installTools: () => ({ outcomes: [] }),
       exportBundle: () => bundle(),
-      migration: () => ({ status: 'version-2', migrate: { available: false, reason: 'Already new.' } }),
-      migrate: () => ({ outcome: 'migrated', resumed: false, credentials: [], runtimes: [] }),
-      startSignIn: () => flow({ state: 'complete', accounts: [] }),
-      signInStatus: () => flow({ state: 'complete', accounts: [] }),
-      submitSignInCode: () => ({ outcome: 'accepted', flow: flow({ state: 'complete', accounts: [] }) }),
+      startSignIn: () => flow({ state: 'complete' }),
+      signInStatus: () => flow({ state: 'complete' }),
+      submitSignInCode: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
       cancelSignIn: () => flow({ state: 'failed', reason: 'cancelled', remedy: 'retry' }),
       ...overrides,
     };
@@ -307,9 +299,6 @@ class FakeGateway implements IAccountGateway {
   credentials() {
     return this.#record('credentials', [], this.answers.credentials);
   }
-  permissions() {
-    return this.#record('permissions', [], this.answers.permissions);
-  }
   unlock(password: string) {
     return this.#record('unlock', [password], this.answers.unlock);
   }
@@ -330,12 +319,6 @@ class FakeGateway implements IAccountGateway {
   }
   exportBundle(authority: AccountAuthority) {
     return this.#record('exportBundle', [authority], this.answers.exportBundle);
-  }
-  migration(authority: AccountAuthority) {
-    return this.#record('migration', [authority], this.answers.migration);
-  }
-  migrate(digest: string, authority: AccountAuthority) {
-    return this.#record('migrate', [digest, authority], this.answers.migrate);
   }
   startSignIn(id: string, authority: AccountAuthority) {
     return this.#record('startSignIn', [id, authority], this.answers.startSignIn);

@@ -15,7 +15,7 @@ import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
-import { readFleetProfileStacks } from '../catalog-api.ts';
+import { readFleetProfiles } from '../catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
 import { readFleetExport } from '../setup-api.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -107,7 +107,7 @@ export function CloneMachine(props: CloneMachineProps) {
   latest.current = target;
   useEffect(() => {
     void latest.current
-      .read((client, unlock) => readFleetProfileStacks(client, unlock))
+      .read((client, unlock) => readFleetProfiles(client, unlock))
       .then(answer => {
         if (answer.kind === 'done') setProfiles(answer.value.profiles.length);
       });
@@ -157,7 +157,6 @@ export function CloneMachine(props: CloneMachineProps) {
     <div className="mt-4">
       <ChangeApplyPanel
         machineName={machineName}
-        changes={machine?.changes ?? null}
         authority={changes.authority}
         busy={changes.busy}
         refusal={changes.refusal}
@@ -223,7 +222,6 @@ export function CloneMachine(props: CloneMachineProps) {
           {pickedRecord !== undefined && source.locked ? (
             <ChangeApplyPanel
               machineName={daemonDisplayName(pickedRecord)}
-              changes={null}
               authority={source.changes.authority}
               busy={reading}
               refusal={source.changes.refusal}

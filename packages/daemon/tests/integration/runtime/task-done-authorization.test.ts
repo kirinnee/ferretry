@@ -1,13 +1,12 @@
 import { afterEach, describe, it } from 'bun:test';
-import { readFile, writeFile } from 'node:fs/promises';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildFleetManifest } from '@ferretry/fleet';
 import {
   ACTOR_AUTHORITY_SPLIT_SEMANTICS,
   SessionViewSchema,
-  TaskActivitySchema,
   type TaskActivity,
+  TaskActivitySchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
@@ -98,7 +97,12 @@ async function seedHome(home: string, port: number): Promise<void> {
   process.env.FY_HOME = home;
   const opened = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
   await opened.storage.close();
-  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+  // No first run: this host's own harness setup must not be imported over the fixture's manifest.
+  await writeFile(
+    join(home, 'config', 'daemon.json'),
+    JSON.stringify({ host: '127.0.0.1', port, fleet: { prepareDefaults: false } }),
+    { mode: 0o600 },
+  );
 }
 
 /** A fleet whose one account is published under a wrapper this host could actually run. */

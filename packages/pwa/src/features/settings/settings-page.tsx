@@ -25,7 +25,7 @@ import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
-import type { FleetClientFactory } from '../fleet/fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet/fleet-client.ts';
 import { DEFAULT_MACHINE_TAB, type MachineRoute, machineHash, parseMachineHash } from '../fleet/shell/machine-route.ts';
 import { MachinesSurface, type MachineTabSurfaces } from '../fleet/shell/machines-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
@@ -576,7 +576,7 @@ export function SettingsPage({
               data-settings-section={section.id}
               className="mt-3 min-w-0 md:mt-0"
             >
-              <header className="mb-3 px-1">
+              <header className="mb-3">
                 <h2
                   id={`settings-section-heading-${section.id}`}
                   className="m-0 font-display text-title font-bold tracking-display text-fg"
@@ -614,7 +614,6 @@ export function SettingsPage({
                         connection={selectedRecord}
                         connectionRecord={selectedRecord}
                         name={daemonDisplayName(selectedRecord)}
-                        connections={connections}
                         readWardenStatus={readWardenStatus}
                         createWardenClient={createWardenClient}
                         {...(createGrantClient ? { createGrantClient } : {})}

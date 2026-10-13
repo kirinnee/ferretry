@@ -1,7 +1,7 @@
 /**
- * THE PICKABLE ACCOUNT ROSTER, ONE SLICE PER PAIRED DAEMON.
+ * THE PICKABLE RUNTIME ROSTER, ONE SLICE PER PAIRED DAEMON.
  *
- * Account wrappers and explicit health checks belong to the host that reported
+ * Runtime wrappers and explicit health checks belong to the host that reported
  * them. A wrapper name is not globally meaningful, so this store has no
  * daemon-free read and fences every in-flight request across unpair/re-pair.
  *
@@ -10,15 +10,12 @@
  * not part of it, so republishing the carrier set — a relay added, reordered or
  * withdrawn — keeps the slice whole.
  *
- * AUTOMATIC HYDRATION NOW READS HEALTH BESIDE THE MANIFEST. It did not, and could
- * not: health used to mean starting every account's agent and asking a model to
- * answer a sentinel, so reading it on mount would have spent real money on a host
- * nobody was sitting at. It is now a stored verdict the daemon derived from the
- * free read-only usage GET it already makes, so `GET /v1/fleet/health` is a
- * snapshot read and hydrating it is one local HTTP call.
+ * AUTOMATIC HYDRATION READS HEALTH BESIDE THE RUNTIMES: each login's status word from
+ * `GET /v1/fleet/credentials`, a store read the daemon answers without calling any provider, so
+ * hydrating it is one local HTTP call.
  *
  * The deliberate action survives as {@link DaemonAccountPickerStore.checkHealth},
- * which asks the host to collect that free evidence NOW. It still spends nothing.
+ * which asks the host to check each login NOW.
  *
  * Quota comes from the existing cached usage store. A failed read never replaces
  * a previously proved catalog with a fabricated empty one; the slice keeps its

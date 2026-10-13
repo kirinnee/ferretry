@@ -57,13 +57,6 @@ const bundle = {
   notCopied: [{ path: '/etc/hosts', reason: 'outside the asset tree' }],
 };
 
-const migrated = {
-  outcome: 'migrated',
-  resumed: false,
-  credentials: [{ id: 'claude-you', harness: 'claude', store: 'host', retired: 0 }],
-  runtimes: [{ name: 'claude-default', formerName: 'default' }],
-};
-
 const cases: SchemaCase[] = [
   {
     name: 'FleetToolInstallPlanSchema',
@@ -110,22 +103,6 @@ const cases: SchemaCase[] = [
   { name: 'FleetCloneCredentialSchema', schema: setup.FleetCloneCredentialSchema, value: bundle.credentials[0] },
   { name: 'FleetCloneFileSchema', schema: setup.FleetCloneFileSchema, value: bundle.files[0] },
   { name: 'FleetCloneBundleSchema', schema: setup.FleetCloneBundleSchema, value: bundle },
-  {
-    name: 'FleetMigrationViewSchema',
-    schema: setup.FleetMigrationViewSchema,
-    value: {
-      status: 'version-1',
-      dryRun: { digest: 'abc123', lines: ['Moves 2 accounts.'], blockers: [] },
-      inProgress: { digest: 'abc123', startedAt: INSTANT },
-      migrate: { available: false, reason: 'A session is live.' },
-    },
-  },
-  {
-    name: 'FleetMigrationApplyRequestSchema',
-    schema: setup.FleetMigrationApplyRequestSchema,
-    value: { digest: 'abc123', operatorPassword: 'fake-password-123' },
-  },
-  { name: 'FleetMigrationOutcomeSchema', schema: setup.FleetMigrationOutcomeSchema, value: migrated },
   { name: 'FleetSetupRefusalCodeSchema', schema: setup.FleetSetupRefusalCodeSchema, value: 'fleet_setup_busy' },
 ];
 
@@ -138,7 +115,7 @@ describe('the machine setup wire contract', () => {
     assertCoversEverySchema(setup, cases);
   });
 
-  it('should accept every variant of a tool, an install outcome and a migration outcome', () => {
+  it('should accept every variant of a tool, and an install outcome', () => {
     // Arrange
     const values: SchemaCase[] = [
       { name: 'installed tool', schema: setup.FleetSetupToolSchema, value: installed },
@@ -158,21 +135,6 @@ describe('the machine setup wire contract', () => {
         value: { harness: 'codex', outcome: 'already-installed' },
       },
       {
-        name: 'refused migration',
-        schema: setup.FleetMigrationOutcomeSchema,
-        value: { outcome: 'refused', reasons: ['A session is live.'] },
-      },
-      {
-        name: 'rolled-back migration',
-        schema: setup.FleetMigrationOutcomeSchema,
-        value: { outcome: 'rolled-back', reason: 'The disk is full.', unrestored: [] },
-      },
-      {
-        name: 'a minimal migration view',
-        schema: setup.FleetMigrationViewSchema,
-        value: { status: 'no-fleet', migrate: { available: true } },
-      },
-      {
         name: 'a minimal clone credential',
         schema: setup.FleetCloneCredentialSchema,
         value: { id: 'codex-work', harness: 'codex' },
@@ -187,7 +149,6 @@ describe('the machine setup wire contract', () => {
     // Act & Assert
     should(setup.FLEET_CLONE_BUNDLE_FORMAT).equal('ferretry-clone');
     should([...setup.FLEET_SETUP_REFUSAL_CODES]).deepEqual([
-      'fleet_setup_disabled',
       'fleet_setup_unreadable',
       'fleet_setup_refused',
       'fleet_setup_unauthorized',
@@ -251,16 +212,6 @@ describe('the machine setup wire contract', () => {
       rejects('a bundle with an extra key', setup.FleetCloneBundleSchema, { ...bundle, history: [] }),
       rejects('a bundle exported at no instant', setup.FleetCloneBundleSchema, { ...bundle, exportedAt: 'yesterday' }),
       rejects('a bundle not carrying its files', setup.FleetCloneBundleSchema, { ...bundle, files: undefined }),
-      rejects('a migration view of an unknown status', setup.FleetMigrationViewSchema, {
-        status: 'half-done',
-        migrate: { available: true },
-      }),
-      rejects('a migration apply request naming no digest', setup.FleetMigrationApplyRequestSchema, {}),
-      rejects('a migration outcome of an unknown kind', setup.FleetMigrationOutcomeSchema, { outcome: 'vanished' }),
-      rejects('a migrated outcome with a credential of an unknown store', setup.FleetMigrationOutcomeSchema, {
-        ...migrated,
-        credentials: [{ id: 'x', harness: 'claude', store: 'cloud', retired: 0 }],
-      }),
       rejects('a refusal code nobody declared', setup.FleetSetupRefusalCodeSchema, 'fleet_setup_bad'),
     ]);
   });

@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { InstallTool } from '../../../../../src/features/fleet/setup/install-flow.tsx';
 import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   type Call,
+  machineAnswer,
   machineView,
   NOTHING_INSTALLED,
   NOW,
   PASSWORD,
-  permissions,
   STUDIO,
   scan,
   scriptedClient,
@@ -37,7 +37,7 @@ const type = async (input: HTMLInputElement, value: string): Promise<void> => {
   });
 };
 
-const LOCKED = permissions({ mayApply: false, applyRefusal: 'locked' });
+const LOCKED = machineAnswer({ mayApply: false, applyRefusal: 'locked' });
 
 interface Harness {
   readonly harness?: SetupHarness;
@@ -72,7 +72,7 @@ describe('InstallTool', () => {
     const watch = spies();
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         '/v1/fleet/setup/scan': NOTHING_INSTALLED,
         '/v1/fleet/machine/tools/install': {
           outcomes: [{ harness: 'claude', outcome: 'installed', command: 'npm install -g @anthropic-ai/claude-code' }],
@@ -120,7 +120,7 @@ describe('InstallTool', () => {
       release = resolve;
     });
     const client = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
+      '/v1/fleet/machine': machineAnswer(),
       '/v1/fleet/setup/scan': NOTHING_INSTALLED,
     });
     const slow: FleetClient = {
@@ -162,7 +162,7 @@ describe('InstallTool', () => {
 
   it('says it is already installed and only offers Done', async () => {
     const watch = spies();
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions(), '/v1/fleet/setup/scan': scan() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer(), '/v1/fleet/setup/scan': scan() });
     const view = await mount(element(client, watch, { harness: 'codex' }));
     try {
       await settle();
@@ -180,7 +180,7 @@ describe('InstallTool', () => {
   it('asks a locked browser for the operator password, then looks and offers the install', async () => {
     const calls: Call[] = [];
     const client = scriptedClient(
-      { '/v1/fleet/permissions': LOCKED, '/v1/grants/unlock': UNLOCKED, '/v1/fleet/setup/scan': NOTHING_INSTALLED },
+      { '/v1/fleet/machine': LOCKED, '/v1/grants/unlock': UNLOCKED, '/v1/fleet/setup/scan': NOTHING_INSTALLED },
       calls,
     );
     const view = await mount(element(client, spies()));
@@ -204,7 +204,7 @@ describe('InstallTool', () => {
 
   it('keeps the form and says so when the password is wrong, without a second failure note', async () => {
     const client = scriptedClient({
-      '/v1/fleet/permissions': LOCKED,
+      '/v1/fleet/machine': LOCKED,
       '/v1/grants/unlock': new FyHttpError('Wrong. 3 attempts remaining.', 403, 'grant_wrong_password'),
     });
     const view = await mount(element(client, spies()));
@@ -223,7 +223,7 @@ describe('InstallTool', () => {
   });
 
   it('says it could not look when the scan cannot be read', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions() });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const view = await mount(element(client, spies()));
     try {
       await settle();
@@ -241,7 +241,7 @@ describe('InstallTool', () => {
   it('pauses on an offline machine and Retry asks again', async () => {
     const watch = spies();
     const client = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
+      '/v1/fleet/machine': machineAnswer(),
       '/v1/fleet/setup/scan': NOTHING_INSTALLED,
     });
     const view = await mount(element(client, watch, { online: false }));
@@ -261,7 +261,7 @@ describe('InstallTool', () => {
   it('asks before leaving from Cancel and leaves straight away from Back', async () => {
     const watch = spies();
     const client = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
+      '/v1/fleet/machine': machineAnswer(),
       '/v1/fleet/setup/scan': NOTHING_INSTALLED,
     });
     const view = await mount(element(client, watch));

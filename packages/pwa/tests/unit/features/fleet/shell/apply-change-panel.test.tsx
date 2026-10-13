@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { ChangeResult, StageResult } from '../../../../../src/features/fleet/shell/apply-change.ts';
 import {
   type AccountChanges,
@@ -13,8 +13,8 @@ import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLY_PATH,
   type Call,
+  machineAnswer,
   OUTCOME,
-  permissions,
   STAGED,
   scriptedClient,
   UNLOCK_TOKEN,
@@ -47,50 +47,11 @@ const click = async (element: Element | null, what: string): Promise<void> => {
 };
 
 describe('ChangeApplyPanel', () => {
-  it('shows only the machine’s reason while it does not accept changes', async () => {
-    const view = await mount(
-      <ChangeApplyPanel
-        machineName="studio-mac"
-        changes={{ available: false, reason: 'Account setup changes are switched off on this machine for now.' }}
-        authority={{ kind: 'open' }}
-        busy={false}
-        refusal={null}
-        submitLabel="Create runtime"
-        onSubmit={() => undefined}
-      >
-        <button type="button" data-extra="">
-          Back to Runtimes
-        </button>
-      </ChangeApplyPanel>,
-    );
-    expect(view.container.querySelector('[data-change-unavailable]')?.textContent).toBe(
-      'Account setup changes are switched off on this machine for now.',
-    );
-    expect(view.container.querySelector('[data-change-submit]')).toBeNull();
-    expect(view.container.querySelector('[data-extra]')).not.toBeNull();
-    await view.unmount();
-
-    const bare = await mount(
-      <ChangeApplyPanel
-        machineName="studio-mac"
-        changes={{ available: false, reason: 'Off.' }}
-        authority={null}
-        busy={false}
-        refusal={null}
-        submitLabel="Go"
-        onSubmit={() => undefined}
-      />,
-    );
-    expect(bare.container.querySelector('[data-change-apply]')?.children).toHaveLength(1);
-    await bare.unmount();
-  });
-
   it('submits at once when nothing is owed, and waits while authority is being read', async () => {
     const sent: (string | undefined)[] = [];
     const reading = await mount(
       <ChangeApplyPanel
         machineName="studio-mac"
-        changes={null}
         authority={null}
         busy={false}
         refusal={null}
@@ -105,7 +66,6 @@ describe('ChangeApplyPanel', () => {
     const view = await mount(
       <ChangeApplyPanel
         machineName="studio-mac"
-        changes={{ available: true }}
         authority={{ kind: 'open' }}
         busy={false}
         refusal="The setup changed since this was staged."
@@ -129,7 +89,6 @@ describe('ChangeApplyPanel', () => {
       return (
         <ChangeApplyPanel
           machineName="studio-mac"
-          changes={{ available: true }}
           authority={{ kind: 'confirm' }}
           busy={busy}
           refusal={null}
@@ -156,7 +115,6 @@ describe('ChangeApplyPanel', () => {
     const locked = await mount(
       <ChangeApplyPanel
         machineName="studio-mac"
-        changes={null}
         authority={{ kind: 'locked', alsoConfirms: false }}
         busy
         busyLabel="Signing out…"
@@ -174,7 +132,6 @@ describe('ChangeApplyPanel', () => {
     const view = await mount(
       <ChangeApplyPanel
         machineName="studio-mac"
-        changes={{ available: true }}
         authority={{ kind: 'refused', refusal: 'not-granted' }}
         busy={false}
         refusal={null}
@@ -222,7 +179,7 @@ describe('useAccountChanges', () => {
   it('reads authority, applies a change and keeps nothing to show when it worked', async () => {
     const calls: Call[] = [];
     const client = scriptedClient(
-      { '/v1/fleet/permissions': permissions(), '/v1/fleet/changes': STAGED, [APPLY_PATH]: OUTCOME },
+      { '/v1/fleet/machine': machineAnswer(), '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
       calls,
     );
     const { view, hooks } = await hookView(async () => client);
@@ -245,8 +202,8 @@ describe('useAccountChanges', () => {
     );
     let stageAnswer: unknown = off;
     const client = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
-      '/v1/fleet/changes': () => stageAnswer,
+      '/v1/fleet/machine': machineAnswer(),
+      '/v1/fleet/proposals': () => stageAnswer,
       [APPLY_PATH]: OUTCOME,
     });
     const { view, hooks } = await hookView(async () => client);
@@ -276,12 +233,12 @@ describe('useAccountChanges', () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': (call: Call) =>
+        '/v1/fleet/machine': (call: Call) =>
           call.headers['x-ferretry-operator-unlock'] === UNLOCK_TOKEN
-            ? permissions()
-            : permissions({ mayApply: false, applyRefusal: 'locked' }),
+            ? machineAnswer()
+            : machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
         '/v1/grants/unlock': UNLOCKED,
-        '/v1/fleet/changes': STAGED,
+        '/v1/fleet/proposals': STAGED,
         [APPLY_PATH]: OUTCOME,
       },
       calls,
@@ -297,13 +254,13 @@ describe('useAccountChanges', () => {
       await hooks().apply(CHANGE);
     });
     // The held unlock rides along; nothing is minted again.
-    expect(calls.map(call => call.path)).toEqual(['/v1/fleet/changes', APPLY_PATH]);
+    expect(calls.map(call => call.path)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
     expect(calls[0]?.headers['x-ferretry-operator-unlock']).toBe(UNLOCK_TOKEN);
     await view.unmount();
   });
 
   it('authorizes a guarded act, and shows a sentence the caller worded', async () => {
-    const client = scriptedClient({ '/v1/fleet/permissions': permissions({ confirmation: 'operator-password' }) });
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer({ confirmation: 'operator-password' }) });
     const { view, hooks } = await hookView(async () => client);
     let answer: unknown;
     await interact(async () => {
@@ -334,8 +291,8 @@ describe('useAccountChanges', () => {
       release = resolve;
     });
     const client = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
-      '/v1/fleet/changes': STAGED,
+      '/v1/fleet/machine': machineAnswer(),
+      '/v1/fleet/proposals': STAGED,
       [APPLY_PATH]: OUTCOME,
     });
     const view = await mount(<HookHost connection={STUDIO} factory={() => slow} probe={probe} />);

@@ -804,12 +804,7 @@ describe('AddDeviceSurface', () => {
     // environment the sibling frame suites use.
     // Arrange, Act
     const view = await mount(
-      <DaemonSettingsFrame
-        connection={connection()}
-        connections={[connection()]}
-        name="Studio workstation"
-        createPairingClient={fakeClient({})}
-      />,
+      <DaemonSettingsFrame connection={connection()} name="Studio workstation" createPairingClient={fakeClient({})} />,
     );
     const tab = must(
       view.container.querySelector<HTMLButtonElement>('[data-daemon-panel="devices"]'),

@@ -1,8 +1,8 @@
+import { defaultFleetHarness } from '@ferretry/fleet/harness';
 import type { DoctorReport } from '@ferretry/protocol';
 import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { defaultFleetHarness } from '../fleet/fleet-model.ts';
 
 export type DoctorReportReader = (connection: DaemonConnection) => Promise<DoctorReport>;
 

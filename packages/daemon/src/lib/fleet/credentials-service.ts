@@ -22,19 +22,10 @@
  *   only because a person pressed Check now.
  * - A sign-in or a sign-out launches the harness, and only on an explicit request.
  *
- * ## One document, either version
+ * ## One document
  *
- * The machine's `config.yaml` is read through `readFleetDocument`. A version-2 document names its
- * credentials and their stores directly. A version-1 document is read through the in-memory conversion
- * (§10.4): each credential is one old `<kind>:<identity>` group, and until the machine is migrated its
- * login still lives as a COPY in each runtime's own directory. So a version-1 credential is read from
- * the FRESHEST copy its runtimes hold, and two acts are refused on it in words:
- *
- * - **Check now on a Codex group with more than one copy.** A Codex refresh spends a single-use token;
- *   refreshing one copy would sign every other copy out (§9.1).
- * - **Sign-out.** It would sign out one copy and leave the others signed in.
- *
- * A version-1 sign-in goes through the existing account flow, which already walks the whole group.
+ * The machine's `config.yaml` names its credentials and their stores directly. One still in the old
+ * account format is refused as unreadable, with the sentence that says how to set the machine up again.
  */
 import {
   type AccountModel,
@@ -42,7 +33,6 @@ import {
   CREDENTIAL_STATUS_LABELS,
   type ClaudeStoreResolution,
   CLAUDE_SECURE_STORAGE_VARIABLE,
-  CODEX_CREDENTIAL_FILE,
   CODEX_CREDENTIAL_STORE_FILE,
   CODEX_CREDENTIAL_STORE_KEY,
   type Credential,
@@ -52,8 +42,6 @@ import {
   type CredentialStorePaths,
   type CredentialSubject,
   type CredentialUsage,
-  type FleetDocument,
-  type FleetManifest,
   type FleetUsageWindow,
   type HarnessKind,
   HOST_CLAUDE_SECURE_STORAGE,
@@ -115,10 +103,8 @@ export interface CredentialHarnessRun {
 }
 
 export interface FleetCredentialCatalogDeps {
-  /** The machine's fleet document, or `undefined` when there is no fleet yet. */
-  document(): Promise<FleetDocument | undefined>;
-  /** The published manifest: where a version-1 group's copies live. */
-  manifest(): Promise<Pick<FleetManifest, 'accounts'>>;
+  /** The machine's account model, or `undefined` when there is no fleet yet. Throws when unreadable. */
+  document(): Promise<AccountModel | undefined>;
   readonly paths: CredentialStorePaths;
   /** The local classification of one store. Never material. */
   classify(resolution: StoredCredentialResolution): Promise<LocalCredentialReading>;
@@ -131,15 +117,10 @@ export interface FleetCredentialCatalogDeps {
 /** One credential, resolved against this machine. */
 export interface CredentialEntry {
   readonly id: string;
-  readonly format: 1 | 2;
   readonly credential: Credential;
   readonly resolution: CredentialStoreResolution;
   /** The runtimes that use it, by name, sorted. */
   readonly usedBy: readonly string[];
-  /** Version 1: the directories that hold a copy of this login. Version 2: none (one store). */
-  readonly copies: readonly string[];
-  /** Version 1: the account a sign-in for this group goes through. */
-  readonly signInAccount?: string;
 }
 
 /** The isolated config directory a Claude `store: ferretry` sign-in runs with, inside its store. */
@@ -151,21 +132,6 @@ const CLAUDE_ACCOUNT_FILE = '.claude.json';
 const usable = (reading: LocalCredentialReading): boolean =>
   reading.state === 'valid' || reading.state === 'refreshable';
 
-/** A version-1 copy, read as a store: the old directory IS the store Claude or Codex reads it from. */
-function legacyResolution(harness: HarnessKind, home: string): StoredCredentialResolution {
-  return harness === 'claude'
-    ? {
-        harness: 'claude',
-        store: 'ferretry',
-        // The keychain item a v1 copy lives under is named from its config directory, which is
-        // exactly how a secure-storage value names one (`keychainService(home)`).
-        secureStorage: home,
-        storageDirectory: home,
-        credentialFile: join(home, '.credentials.json'),
-      }
-    : { harness: 'codex', store: 'ferretry', canonicalFile: join(home, CODEX_CREDENTIAL_FILE) };
-}
-
 /**
  * The machine's credentials, read from its fleet document on every call.
  *
@@ -176,8 +142,8 @@ function legacyResolution(harness: HarnessKind, home: string): StoredCredentialR
 export class FleetCredentialCatalog {
   constructor(private readonly deps: FleetCredentialCatalogDeps) {}
 
-  async entries(): Promise<{ readonly format: 1 | 2; readonly entries: readonly CredentialEntry[] }> {
-    let document: FleetDocument | undefined;
+  async entries(): Promise<{ readonly format: 2; readonly entries: readonly CredentialEntry[] }> {
+    let document: AccountModel | undefined;
     try {
       document = await this.deps.document();
     } catch (error) {
@@ -188,9 +154,7 @@ export class FleetCredentialCatalog {
         }`,
       );
     }
-    if (document === undefined) return { format: 2, entries: [] };
-    if (document.version === 2) return { format: 2, entries: this.#modelEntries(document.model) };
-    return { format: 1, entries: await this.#legacyEntries(document) };
+    return { format: 2, entries: document === undefined ? [] : this.#modelEntries(document) };
   }
 
   /** One credential, or a refusal naming the id. */
@@ -205,74 +169,13 @@ export class FleetCredentialCatalog {
   #modelEntries(model: AccountModel): readonly CredentialEntry[] {
     return Object.entries(model.credentials).map(([id, credential]) => ({
       id,
-      format: 2,
       credential,
       resolution: resolveCredentialStore(id, credential, this.deps.paths),
       usedBy: Object.entries(model.runtimes)
         .filter(([, runtime]) => runtime.credential === id)
         .map(([name]) => name)
         .sort(),
-      copies: [],
     }));
-  }
-
-  async #legacyEntries(document: Extract<FleetDocument, { version: 1 }>): Promise<readonly CredentialEntry[]> {
-    const manifest = await this.deps.manifest().catch((): Pick<FleetManifest, 'accounts'> => ({ accounts: [] }));
-    const homes = new Map(manifest.accounts.map(account => [account.id, account] as const));
-    const { conversion } = document;
-    const entries: CredentialEntry[] = [];
-    for (const [id, credential] of Object.entries(conversion.model.credentials)) {
-      const origin = conversion.credentials[id];
-      const usedBy = Object.entries(conversion.runtimes)
-        .filter(([, runtime]) => origin?.routeIds.includes(runtime.routeId) === true)
-        .map(([name]) => name)
-        .sort();
-      if (credential.store === 'environment') {
-        entries.push({
-          id,
-          format: 1,
-          credential,
-          resolution: resolveCredentialStore(id, credential, this.deps.paths),
-          usedBy,
-          copies: [],
-        });
-        continue;
-      }
-      const members = (origin?.routeIds ?? []).flatMap(routeId => {
-        const account = homes.get(routeId);
-        return account === undefined ? [] : [account];
-      });
-      const copies = members.map(member => member.home);
-      const freshest = await this.#freshest(credential.harness, copies);
-      const signInAccount = (members.find(member => member.available) ?? members[0])?.id;
-      entries.push({
-        id,
-        format: 1,
-        credential,
-        resolution:
-          freshest === undefined
-            ? resolveCredentialStore(id, credential, this.deps.paths)
-            : legacyResolution(credential.harness, freshest),
-        usedBy,
-        copies,
-        ...(signInAccount === undefined ? {} : { signInAccount }),
-      });
-    }
-    return entries;
-  }
-
-  /** The copy whose login is usable and expires last; else the first copy; else none (§10.2.1). */
-  async #freshest(harness: HarnessKind, copies: readonly string[]): Promise<string | undefined> {
-    let best: { readonly home: string; readonly expiresAt: number } | undefined;
-    for (const home of copies) {
-      const reading = await this.deps
-        .classify(legacyResolution(harness, home))
-        .catch((): LocalCredentialReading => ({ state: 'unreadable' }));
-      if (!usable(reading)) continue;
-      const expiresAt = reading.expiresAt ?? 0;
-      if (best === undefined || expiresAt > best.expiresAt) best = { home, expiresAt };
-    }
-    return best?.home ?? copies[0];
   }
 
   /** Where the harness recorded this login's email, for display. */
@@ -280,8 +183,6 @@ export class FleetCredentialCatalog {
     const resolution = stored(entry.resolution);
     if (resolution === undefined) return undefined;
     if (resolution.harness === 'codex') return { harness: 'codex', resolution };
-    if (entry.format === 1)
-      return { harness: 'claude', accountFile: join(resolution.storageDirectory, CLAUDE_ACCOUNT_FILE) };
     return {
       harness: 'claude',
       accountFile:
@@ -294,9 +195,8 @@ export class FleetCredentialCatalog {
   /**
    * What a sign-in for this credential launches, or why there is none.
    *
-   * Version 1 signs in through the account flow (which walks the whole group). Version 2 launches the
-   * harness's own login with the credential's STORE in its environment, so a slot no runtime uses yet
-   * can be signed in (E12, E31):
+   * A sign-in launches the harness's own login with the credential's STORE in its environment, so a
+   * slot no runtime uses yet can be signed in (E12, E31):
    *
    * - Claude `ferretry`: `CLAUDE_SECURESTORAGE_CONFIG_DIR=<store>` and an isolated `CLAUDE_CONFIG_DIR`
    *   inside it, so the account file lands beside the login rather than in the person's own config.
@@ -308,15 +208,6 @@ export class FleetCredentialCatalog {
    * The real `HOME` is never touched: on macOS the keychain is found through it (measured).
    */
   signInTarget(entry: CredentialEntry): CredentialSignInTarget {
-    if (entry.format === 1) {
-      if (entry.credential.store === 'environment') return refusedSignIn(entry, environmentReason(entry));
-      return entry.signInAccount === undefined
-        ? refusedSignIn(
-            entry,
-            'no runtime that uses this login is published on this machine, so there is nothing to sign in through',
-          )
-        : { kind: 'account', credentialId: entry.id, accountId: entry.signInAccount };
-    }
     const resolution = entry.resolution;
     if (resolution.store === 'environment') return refusedSignIn(entry, environmentReason(entry));
     if ('unavailable' in resolution) return refusedSignIn(entry, resolution.unavailable);
@@ -341,7 +232,6 @@ export class FleetCredentialCatalog {
 
 /** What a sign-in by credential id resolves to. */
 export type CredentialSignInTarget =
-  | { readonly kind: 'account'; readonly credentialId: string; readonly accountId: string }
   | {
       readonly kind: 'store';
       readonly credentialId: string;
@@ -483,9 +373,6 @@ export function signOutSentence(
 function signOutRefusal(entry: CredentialEntry): string | undefined {
   if (entry.credential.store === 'environment') return environmentReason(entry).replace('sign in to', 'sign out of');
   if (stored(entry.resolution) === undefined) return 'this login cannot be reached on this machine';
-  if (entry.format === 1) {
-    return 'this machine still uses the old account format, where each runtime keeps its own copy of this login, so signing out here would leave the other copies signed in; migrate this machine first';
-  }
   return undefined;
 }
 
@@ -496,12 +383,6 @@ function checkAct(entry: CredentialEntry): FleetCredentialAct {
   }
   const resolution = entry.resolution;
   if ('unavailable' in resolution) return { available: false, reason: resolution.unavailable };
-  if (entry.format === 1 && entry.credential.harness === 'codex' && entry.copies.length > 1) {
-    return {
-      available: false,
-      reason: `This machine still uses the old account format, where ${plural(entry.copies.length, 'runtime keeps', 'runtimes each keep')} a copy of this login. Checking it renews one copy and signs the others out, so migrate this machine first.`,
-    };
-  }
   return { available: true };
 }
 
@@ -750,7 +631,7 @@ const subjectOf = (entry: CredentialEntry): CredentialSubject => ({ id: entry.id
 
 /** One session this daemon launched, as usage attribution reads it: who ran it and where it wrote. */
 export interface CredentialSessionRecord {
-  /** The runtime (or version-1 account) the session was started on. */
+  /** The runtime the session was started on. */
   readonly agent: string;
   readonly transcript?: { readonly home: string; readonly file?: string };
 }
@@ -767,19 +648,18 @@ export interface CredentialPassiveUsageDeps {
 
 /**
  * The transcripts of the sessions that ran on this credential (§8.2.3): a session started on one of
- * its runtimes, or — version 1 — one whose transcript lives in one of its copies. A rollout this
+ * its runtimes. A rollout this
  * daemon did not launch has no record, so it is never attributed: the shared pool mixes credentials.
  */
 export function attributedTranscripts(
-  entry: Pick<CredentialEntry, 'usedBy' | 'copies'>,
+  entry: Pick<CredentialEntry, 'usedBy'>,
   sessions: readonly CredentialSessionRecord[],
 ): readonly string[] {
   const files = new Set<string>();
   for (const session of sessions) {
     const file = session.transcript?.file;
     if (file === undefined) continue;
-    const home = session.transcript?.home ?? '';
-    if (entry.usedBy.includes(session.agent) || entry.copies.includes(home)) files.add(file);
+    if (entry.usedBy.includes(session.agent)) files.add(file);
   }
   return [...files].sort();
 }

@@ -373,14 +373,14 @@ describe('session lifecycle policy', () => {
     });
 
     it('should name the auto account, with the command to run, when the terminal account is asked for', () => {
-      // Act — the exact first-run fleet: `fy fleet ls` lists `claude-default` first.
+      // Act — a terminal runtime asked for while an agent runtime exists.
       const refusal = unrunnableAccountRefusal(interactive, [interactive, auto], SETTINGS, 'fy');
 
       // Assert
       should(refusal).equal(
         'claude-default is for using Claude yourself in a terminal, so fy cannot start sessions on it, in ' +
           'either --mode. Start it on claude-auto-default instead: `fy start --agent claude-auto-default ' +
-          '"your task"`. `fy fleet ls` marks the accounts that can run sessions "auto".',
+          '"your task"`. `fy runtimes` marks the agent runtimes, which can run sessions.',
       );
     });
 
@@ -429,8 +429,8 @@ describe('session lifecycle policy', () => {
       // Assert
       should(refusal).equal(
         'claude-default is for using Claude yourself in a terminal, so fy cannot start sessions on it, in ' +
-          'either --mode, and no account on this host can run sessions yet. Add an auto account to the fleet ' +
-          'configuration and run `fy fleet apply`; `fy fleet ls` marks those accounts "auto".',
+          'either --mode, and no runtime on this machine can run sessions yet. Add an agent runtime with ' +
+          '`fy runtime add <name> --credential <login> --profile <profile> --agent`; `fy runtimes` marks the agent runtimes.',
       );
     });
   });

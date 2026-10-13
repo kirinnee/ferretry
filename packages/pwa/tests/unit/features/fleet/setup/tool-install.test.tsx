@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { InstallPhase, MissingTool } from '../../../../../src/features/fleet/setup/install-model.ts';
 import { useSetupAccess } from '../../../../../src/features/fleet/setup/setup-access.ts';
 import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
 import { ToolInstall } from '../../../../../src/features/fleet/setup/tool-install.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
-import { type Call, NOTHING_INSTALLED, NOW, PASSWORD, permissions, STUDIO, scriptedClient } from './setup-support.ts';
+import { type Call, machineAnswer, NOTHING_INSTALLED, NOW, PASSWORD, STUDIO, scriptedClient } from './setup-support.ts';
 
 const INSTALL_PATH = '/v1/fleet/machine/tools/install';
 
@@ -111,7 +111,7 @@ describe('ToolInstall', () => {
   it('lists each runnable tool with its exact command and a tool with no package manager as a manual note', async () => {
     const { calls, seen } = fresh();
     const view = await mount(
-      <Harness answers={{ '/v1/fleet/permissions': permissions() }} calls={calls} seen={seen} tools={missing()} />,
+      <Harness answers={{ '/v1/fleet/machine': machineAnswer() }} calls={calls} seen={seen} tools={missing()} />,
     );
     try {
       await settle();
@@ -140,7 +140,7 @@ describe('ToolInstall', () => {
   it('shows only the manual note, and no install button, when nothing can be installed from here', async () => {
     const { calls, seen } = fresh();
     const view = await mount(
-      <Harness answers={{ '/v1/fleet/permissions': permissions() }} calls={calls} seen={seen} tools={manualOnly()} />,
+      <Harness answers={{ '/v1/fleet/machine': machineAnswer() }} calls={calls} seen={seen} tools={manualOnly()} />,
     );
     try {
       await settle();
@@ -155,7 +155,7 @@ describe('ToolInstall', () => {
   it('disables the button with "Pick a tool to install" once every tool is unticked, and counts the ticked ones', async () => {
     const { calls, seen } = fresh();
     const view = await mount(
-      <Harness answers={{ '/v1/fleet/permissions': permissions() }} calls={calls} seen={seen} tools={BOTH_RUNNABLE} />,
+      <Harness answers={{ '/v1/fleet/machine': machineAnswer() }} calls={calls} seen={seen} tools={BOTH_RUNNABLE} />,
     );
     try {
       await settle();
@@ -195,7 +195,7 @@ describe('ToolInstall', () => {
     const view = await mount(
       <Harness
         answers={{
-          '/v1/fleet/permissions': permissions(),
+          '/v1/fleet/machine': machineAnswer(),
           [INSTALL_PATH]: {
             outcomes: [
               { harness: 'claude', outcome: 'installed', command: 'npm install -g @anthropic-ai/claude-code' },
@@ -241,7 +241,7 @@ describe('ToolInstall', () => {
     const view = await mount(
       <Harness
         answers={{
-          '/v1/fleet/permissions': permissions(),
+          '/v1/fleet/machine': machineAnswer(),
           [INSTALL_PATH]: {
             outcomes: [
               { harness: 'claude', outcome: 'already-installed' },
@@ -271,7 +271,7 @@ describe('ToolInstall', () => {
     const view = await mount(
       <Harness
         answers={{
-          '/v1/fleet/permissions': permissions({ confirmation: 'operator-password' }),
+          '/v1/fleet/machine': machineAnswer({ confirmation: 'operator-password' }),
           [INSTALL_PATH]: { outcomes: [{ harness: 'claude', outcome: 'already-installed' }] },
         }}
         calls={calls}
@@ -304,7 +304,7 @@ describe('ToolInstall', () => {
     const view = await mount(
       <Harness
         answers={{
-          '/v1/fleet/permissions': permissions(),
+          '/v1/fleet/machine': machineAnswer(),
           [INSTALL_PATH]: () => {
             attempts += 1;
             return attempts === 1
@@ -383,7 +383,7 @@ describe('ToolInstall', () => {
     const { calls, seen } = fresh();
     const view = await mount(
       <Harness
-        answers={{ '/v1/fleet/permissions': permissions(), [INSTALL_PATH]: failure }}
+        answers={{ '/v1/fleet/machine': machineAnswer(), [INSTALL_PATH]: failure }}
         calls={calls}
         seen={seen}
         tools={missing()}
@@ -404,7 +404,7 @@ describe('ToolInstall', () => {
     const bare = fresh();
     const noSkip = await mount(
       <Harness
-        answers={{ '/v1/fleet/permissions': permissions() }}
+        answers={{ '/v1/fleet/machine': machineAnswer() }}
         calls={bare.calls}
         seen={bare.seen}
         tools={missing()}
@@ -426,7 +426,7 @@ describe('ToolInstall', () => {
     const view = await mount(
       <Harness
         answers={{
-          '/v1/fleet/permissions': permissions(),
+          '/v1/fleet/machine': machineAnswer(),
           [INSTALL_PATH]: new FyHttpError('Installing tools is switched off on this machine.', 403, 'forbidden'),
         }}
         calls={calls}
@@ -452,7 +452,7 @@ describe('ToolInstall', () => {
   it('says the machine did not answer when the request cannot reach it', async () => {
     const { calls, seen } = fresh();
     const view = await mount(
-      <Harness answers={{ '/v1/fleet/permissions': permissions() }} calls={calls} seen={seen} tools={missing()} />,
+      <Harness answers={{ '/v1/fleet/machine': machineAnswer() }} calls={calls} seen={seen} tools={missing()} />,
     );
     try {
       await settle();
@@ -468,7 +468,7 @@ describe('ToolInstall', () => {
     const { calls, seen } = fresh();
     const view = await mount(
       <Harness
-        answers={{ '/v1/fleet/permissions': permissions() }}
+        answers={{ '/v1/fleet/machine': machineAnswer() }}
         calls={calls}
         seen={seen}
         tools={BOTH_RUNNABLE}

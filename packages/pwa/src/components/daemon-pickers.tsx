@@ -42,22 +42,12 @@
 
 import { Activity, Check, FolderClock, FolderGit2, ShieldQuestion } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import {
-  type AccountPickerOption,
-  type AccountUsageRow,
-  accountLabel,
-  accountPickerOptions,
-  findAccountOption,
-  firstUsableAccountOption,
-  type ProjectPickerCatalog,
-  type ProjectPickerOption,
-  sameHarnessAccountOptions,
-  sessionCapableAccountOptions,
-} from './daemon-picker-model.ts';
-import {
-  absoluteInstantLabel,
   type AccountHealthTone,
+  absoluteInstantLabel,
   accountHealthView,
+  lastCheckedAt,
   UNREAD_ACCOUNT_HEALTH,
 } from '../lib/account-health-view.ts';
 import type { PickerAccount, PickerAccountHealth } from '../lib/account-picker-catalog.ts';
@@ -66,12 +56,24 @@ import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonFleetSlice } from '../lib/fleet-store.ts';
 import type { DaemonProjectsSlice } from '../lib/projects-store.ts';
-import { fleetHarnessLabel } from '../features/fleet/fleet-model.ts';
-import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import { PickerCombobox } from '../shell/picker-combobox.tsx';
 import type { PickerOption, PickerSource } from '../shell/picker-model.ts';
 import { Button } from '../shell/primitives.tsx';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
+import {
+  type AccountPickerOption,
+  type AccountUsageRow,
+  accountLabel,
+  accountPickerOptions,
+  findAccountOption,
+  firstUsableAccountOption,
+  fleetHarnessLabel,
+  hintedAccountOption,
+  type ProjectPickerCatalog,
+  type ProjectPickerOption,
+  sameHarnessAccountOptions,
+  sessionCapableAccountOptions,
+} from './daemon-picker-model.ts';
 
 /** The projection, wearing the control's option contract. */
 export interface AccountFieldOption extends PickerOption {
@@ -291,7 +293,7 @@ const HEALTH_TONE: Readonly<Record<AccountHealthTone, string>> = {
 
 function AccountHealthMark({ health, now }: { readonly health: PickerAccountHealth | null; readonly now: number }) {
   const view = health === null ? UNREAD_ACCOUNT_HEALTH : accountHealthView(health, now);
-  const instant = health?.lastCheckedAt ?? null;
+  const instant = health === null ? null : lastCheckedAt(health);
   const title = [view.label, view.checked, view.detail, view.secondary]
     .filter((part): part is string => part !== undefined)
     .join(' · ');
@@ -382,7 +384,9 @@ export function AccountPickerRow(option: AccountFieldOption, state: { readonly s
             around its separators, so it breaks between fields instead of through
             the middle of an identifier. */}
         <span className={cn(IDENTITY_LINE_CLASS, 'break-words sm:truncate')} data-picker-identity="wrapper">
-          {[label.id, fleetHarnessLabel(account.kind), account.mode].filter(part => part !== null).join(' · ')}
+          {[label.id, fleetHarnessLabel(account.kind), account.agent ? 'agent' : null]
+            .filter(part => part !== null)
+            .join(' · ')}
         </span>
         {option.disabledReason === undefined ? null : (
           <span className="text-meta text-warn">{option.disabledReason}</span>
@@ -903,7 +907,8 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
 export const checkedAmongOffered = (
   offered: readonly AccountPickerOption[] | null,
   health: ReadonlyMap<string, PickerAccountHealth> | null,
-): number => (offered === null || health === null ? 0 : offered.filter(option => health.has(option.id)).length);
+): number =>
+  offered === null || health === null ? 0 : offered.filter(option => health.has(option.credentialId)).length;
 
 /**
  * The field a write surface mounts.
@@ -942,7 +947,7 @@ export function DaemonAccountPicker({
   const projected = accountPickerOptions(published, usage, slice.health);
   const capable = sessionCapableOnly ? sessionCapableAccountOptions(projected) : projected;
   const scoped = harness === undefined ? capable : sameHarnessAccountOptions(capable, harness);
-  const hinted = scoped?.find(option => option.wrapper === preferred && option.available) ?? null;
+  const hinted = hintedAccountOption(scoped, preferred);
   const suggested = hinted ?? (preselect ? firstUsableAccountOption(scoped) : null);
   // Set by the first keystroke or the one pre-fill, whichever comes first, so the
   // pre-fill can never overwrite a reader's own answer — including an empty one.

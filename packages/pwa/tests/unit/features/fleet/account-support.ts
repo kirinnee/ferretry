@@ -19,7 +19,7 @@ import {
   type HarnessLoginFlow,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
-import type { FleetClient } from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
 import type { MachineData } from '../../../../src/features/fleet/runtimes/machine-data.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 
@@ -45,9 +45,13 @@ export const machine = (overrides: Partial<FleetMachineView> = {}): FleetMachine
   ],
   runtimeCount: 5,
   runningSessions: 0,
-  changes: { available: true },
+  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
   ...overrides,
 });
+
+/** The machine view with this caller's authority: where every change reads what it may do. */
+export const machineWith = (authority: Partial<FleetMachineView['authority']>): FleetMachineView =>
+  machine({ authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none', ...authority } });
 
 const status = (word: FleetCredentialView['status']['word']): FleetCredentialView['status'] => {
   const table = {
@@ -272,6 +276,8 @@ const modelSet = (models: readonly [string, boolean][], declaredDefault: string,
 });
 
 export const runtime = (overrides: Partial<FleetRuntimeView> & { name: string }): FleetRuntimeView => ({
+  id: `rt-${overrides.name}`,
+  wrapper: overrides.name,
   harness: 'claude',
   credential: { id: 'claude-personal', store: 'host', label: 'personal', status: 'ready' },
   profile: 'Default',
@@ -377,15 +383,9 @@ export const scripted = (routes: Readonly<Record<string, Route>>, calls: Call[] 
 export const READS = (data: MachineData = DATA): Record<string, Route> => ({
   'GET /v1/fleet/credentials': data.credentials,
   'GET /v1/fleet/runtimes': data.runtimes,
-  'GET /v1/fleet/profile-stacks': data.profiles,
+  'GET /v1/fleet/profiles': data.profiles,
   'GET /v1/fleet/components': data.components,
-  'GET /v1/fleet/permissions': {
-    mayInspect: true,
-    mayPropose: true,
-    mayApply: true,
-    applyRefusal: 'granted',
-    confirmation: 'none',
-  },
+  'GET /v1/fleet/machine': machine(),
 });
 
 /** A staged change, echoing what was sent. */
@@ -416,7 +416,7 @@ export const claudeFlow = (
   };
   if (state === 'awaiting-code')
     return { ...base, state, verificationUrl: 'https://claude.ai/oauth/authorize?code=true' };
-  if (state === 'complete') return { ...base, state, accounts: [] };
+  if (state === 'complete') return { ...base, state };
   if (state === 'failed') return { ...base, state, reason: 'The sign-in ended.', remedy: 'Run fy fleet login.' };
   return { ...base, state };
 };

@@ -17,17 +17,11 @@ import {
   writeOptions,
 } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError, type AccountHarness } from '../fleet/account-ports.ts';
-import { HARNESS_LABEL, indent, unavailable } from '../fleet/account-render.ts';
+import { HARNESS_LABEL, indent } from '../fleet/account-render.ts';
 
-/** The machine's facts: its tools, its Agent permissions, and whether it takes changes yet. */
+/** The machine's facts: its tools, its Agent permissions, and whether it is set up yet. */
 export function renderMachine(machine: FleetMachineView, binaryName: string): string {
-  const format =
-    machine.format === 'version-1'
-      ? 'the old account format'
-      : machine.format === 'none'
-        ? 'not set up yet'
-        : 'the account model';
-  const changes = unavailable(machine.changes);
+  const format = machine.format === 'none' ? 'not set up yet' : 'the account model';
   return [
     machine.name,
     ...indent([
@@ -39,7 +33,6 @@ export function renderMachine(machine: FleetMachineView, binaryName: string): st
         tool =>
           `  ${tool.label}: ${tool.installed ? `installed${tool.command ? ` (${tool.command})` : ''}` : 'not installed'}`,
       ),
-      ...(changes === undefined ? [] : [`Changes: ${changes}`]),
     ]),
     ...(machine.setUp ? [] : ['', `Set it up with \`${binaryName} setup\`.`]),
   ].join('\n');

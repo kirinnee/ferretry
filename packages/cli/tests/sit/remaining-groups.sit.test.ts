@@ -153,13 +153,16 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
     should(actual.err).containEql('pass only one of');
   });
 
-  it('lists the fleet verbs in its help', async () => {
+  it('lists only recommend in the fleet help', async () => {
     // Act
     const actual = await cli(['fleet', '--help']);
 
     // Assert
     should(actual.code).equal(0);
-    for (const verb of ['ls', 'apply', 'usage', 'recommend']) should(actual.out).containEql(verb);
+    should(actual.out).containEql('recommend');
+    for (const retired of ['init', 'apply', 'usage', 'health', 'sharing', 'login', 'migrate']) {
+      should(actual.out).not.match(new RegExp(`^\\s+${retired}\\b`, 'mu'));
+    }
   });
 
   it('refuses a recommendation with no task described', async () => {

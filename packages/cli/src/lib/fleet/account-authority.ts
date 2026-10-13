@@ -1,10 +1,11 @@
-import type { FleetPermissions } from '@ferretry/protocol';
+import type { FleetMachineView } from '@ferretry/protocol';
 import { type AccountAuthority, type AccountCommandDeps, AccountCommandError } from './account-ports.ts';
 
+type MachineAuthority = FleetMachineView['authority'];
 type AuthorityDeps = Pick<AccountCommandDeps, 'gateway' | 'prompt' | 'interactive' | 'readPasswordFromStdin'>;
 
 /** Why this caller may not change the machine at all, in words, per shared grant refusal. */
-const REFUSALS: Record<FleetPermissions['applyRefusal'], string> = {
+const REFUSALS: Record<MachineAuthority['applyRefusal'], string> = {
   'not-granted': "This caller is not allowed to change this machine's setup: the operator has not granted it.",
   'rate-limited': 'Too many wrong operator passwords were tried on this machine. Wait a few minutes and try again.',
   undetermined: "This machine's grant settings could not be read, so no change is allowed until they are fixed.",
@@ -25,7 +26,7 @@ export class WriteAuthority {
 
   private constructor(
     private readonly deps: AuthorityDeps,
-    private readonly permissions: FleetPermissions,
+    private readonly permissions: MachineAuthority,
     private readonly unlock: string | undefined,
     password: string | undefined,
   ) {
@@ -34,7 +35,7 @@ export class WriteAuthority {
 
   /** Read what this caller may do, and unlock now if staging needs it. Refuses with the reason. */
   static async open(deps: AuthorityDeps): Promise<WriteAuthority> {
-    const permissions = await deps.gateway.permissions();
+    const { authority: permissions } = await deps.gateway.machine();
     if (permissions.mayApply) return new WriteAuthority(deps, permissions, undefined, undefined);
     if (permissions.applyRefusal !== 'locked') throw new AccountCommandError(REFUSALS[permissions.applyRefusal]);
     const password = await readOperatorPassword(deps);

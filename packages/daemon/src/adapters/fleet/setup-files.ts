@@ -1,30 +1,14 @@
 /**
- * The files and processes a machine's setup reads (docs/design/account-model.md §4.3, §4.7, §10.3):
- * the person's own harness setup, folders read as text, the asset tree's skill items, and the
- * migration executor bound to this daemon's credential store.
+ * The files a machine's setup reads (docs/design/account-model.md §4.3, §4.7): the person's own
+ * harness setup, folders read as text, and the asset tree's skill items.
  *
- * Reads only, except the migration, which is the migration executor's own; every other write the
- * setup service makes goes through the provisioner, inside its rollback boundary.
+ * Reads only: every write the setup service makes goes through the provisioner, inside its rollback
+ * boundary.
  */
-import {
-  FileSeedProvenanceStore,
-  FleetMigration,
-  HostHarnessScanner,
-  type CredentialCommand,
-  type MigrationCredentialReader,
-  seedProvenancePath,
-  type StoredCredentialMaterialReader,
-} from '@ferretry/fleet/adapters';
-import type { SessionStatus } from '@ferretry/protocol';
+import { HostHarnessScanner, type StoredCredentialMaterialReader } from '@ferretry/fleet/adapters';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { countRunningSessions } from '../../lib/fleet/catalog-service.ts';
-import type {
-  FleetSetupServiceDeps,
-  FolderReading,
-  SetupCatalogDeps,
-  SetupModelApply,
-} from '../../lib/fleet/setup-service.ts';
+import type { FleetSetupServiceDeps, FolderReading, SetupCatalogDeps } from '../../lib/fleet/setup-service.ts';
 import type { ToolInstallService } from '../../lib/fleet/tool-install.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
@@ -106,31 +90,23 @@ export async function skillItemsIn(directory: string): Promise<readonly string[]
 export interface FileFleetSetupOptions {
   /** The catalogue's collaborators, so both surfaces read and write one machine the same way. */
   readonly catalog: SetupCatalogDeps;
-  readonly platform: string;
   /** `CLAUDE_CONFIG_DIR` / `CODEX_HOME` as this daemon inherited them. */
   readonly claudeConfigDir?: string;
   readonly codexHome?: string;
   /** The platform credential store: reads a login, never hands one out of this adapter. */
-  readonly credentials: StoredCredentialMaterialReader & MigrationCredentialReader;
-  readonly command: CredentialCommand;
-  readonly keychainAccount: string;
+  readonly credentials: StoredCredentialMaterialReader;
   readonly tools: Pick<ToolInstallService, 'plans' | 'install'>;
   /** The secret store's management side. */
   readonly secrets: {
     list(): Promise<readonly { readonly name: string }[]>;
     put(name: string, value: string): Promise<unknown>;
   };
-  /** Every session's config and state documents, raw. */
-  sessions(): Promise<readonly { readonly config: unknown; readonly state: unknown }[]>;
 }
 
 const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 
 /** The largest host document the import reads; anything larger is reported, never truncated. */
 const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** The setup service's collaborators over this machine's files. */
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
@@ -160,28 +136,6 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     },
     readFolder: readTextFolder,
     skillItems: async () => await skillItemsIn(join(layout.assetsDirectory, 'skills')),
-    migration: (apply: SetupModelApply) =>
-      new FleetMigration({
-        layout,
-        configPath: join(layout.fleetDirectory, 'config.yaml'),
-        platform: options.platform,
-        credentials: options.credentials,
-        command: options.command,
-        keychainAccount: options.keychainAccount,
-        ...(catalog.hostCodexHome === undefined ? {} : { hostCodexHome: catalog.hostCodexHome }),
-        provenance: new FileSeedProvenanceStore(seedProvenancePath(layout.fleetDirectory)),
-        sessions: {
-          live: async () =>
-            (await options.sessions()).flatMap(({ config, state }) => {
-              if (!isRecord(config) || !isRecord(state)) return [];
-              const status = state.status as SessionStatus;
-              if (typeof config.agent !== 'string' || typeof config.id !== 'string') return [];
-              return countRunningSessions([status]) === 1 ? [{ session: config.id, accountId: config.agent }] : [];
-            }),
-        },
-        apply,
-        now: () => catalog.now(),
-      }),
     digest: sha256,
   };
 }

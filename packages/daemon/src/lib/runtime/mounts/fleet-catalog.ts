@@ -13,11 +13,8 @@
  * this machine, and the design governs the whole proposal flow as configuration (§7). Applying one
  * adds the per-change operator password for a caller the boundary says owes it.
  *
- * ## Their own paths, for now
- *
- * The layered profiles are read at `/v1/fleet/profile-stacks`, and changes are staged at
- * `/v1/fleet/changes`, because the old Accounts screen still reads `/v1/fleet/profiles` and stages
- * at `/v1/fleet/proposals` until it is retired; U21 folds them together.
+ * The machine read also says what THIS caller may do (its `authority`): it reads the caller's
+ * governance, so a caller that sent its operator unlock reads its unlocked authority.
  *
  * ## `noStore` on all eight
  *
@@ -67,8 +64,8 @@ async function answer<Schema extends z.ZodType>(schema: Schema, work: () => Prom
   }
 }
 
-function changeId(context: RouteContext): string {
-  const id = decodeParameter(context.params.get('changeId') ?? '') ?? '';
+function proposalId(context: RouteContext): string {
+  const id = decodeParameter(context.params.get('proposalId') ?? '') ?? '';
   if (id === '') throw new ApiError(400, 'the change id in the path is not usable', 'bad_request');
   return id;
 }
@@ -85,7 +82,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       minimum: 'operator',
       capability: USE,
       noStore: true,
-      handle: async () => await answer(FleetMachineViewSchema, () => subsystem.machine()),
+      handle: async context => await answer(FleetMachineViewSchema, () => subsystem.machine(context.governance)),
     },
     {
       method: 'GET',
@@ -97,7 +94,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
     },
     {
       method: 'GET',
-      path: '/v1/fleet/profile-stacks',
+      path: '/v1/fleet/profiles',
       minimum: 'operator',
       capability: USE,
       noStore: true,
@@ -106,7 +103,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
     {
       // A read with a body: it resolves a draft and writes nothing, so it is `use`.
       method: 'POST',
-      path: '/v1/fleet/profile-stacks/preview',
+      path: '/v1/fleet/profiles/preview',
       minimum: 'operator',
       capability: USE,
       noStore: true,
@@ -125,7 +122,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
     },
     {
       method: 'POST',
-      path: '/v1/fleet/changes',
+      path: '/v1/fleet/proposals',
       minimum: 'operator',
       capability: CONFIGURE,
       noStore: true,
@@ -138,22 +135,22 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
     },
     {
       method: 'GET',
-      path: '/v1/fleet/changes/:changeId',
+      path: '/v1/fleet/proposals/:proposalId',
       minimum: 'operator',
       capability: CONFIGURE,
       noStore: true,
-      handle: async context => await answer(FleetAccountChangeViewSchema, () => subsystem.read(changeId(context))),
+      handle: async context => await answer(FleetAccountChangeViewSchema, () => subsystem.read(proposalId(context))),
     },
     {
       method: 'POST',
-      path: '/v1/fleet/changes/:changeId/apply',
+      path: '/v1/fleet/proposals/:proposalId/apply',
       minimum: 'operator',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {
         const body = (await parseOptionalBody(context.request, FleetProposalApplyRequestSchema)) ?? {};
         return await answer(FleetAccountChangeOutcomeSchema, () =>
-          subsystem.apply(changeId(context), body, context.governance),
+          subsystem.apply(proposalId(context), body, context.governance),
         );
       },
     },

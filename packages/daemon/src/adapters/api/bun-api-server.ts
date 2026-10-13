@@ -253,7 +253,6 @@ const CORS_REQUEST_HEADERS = new Set([
   'authorization',
   'content-type',
   'range',
-  'x-ferretry-client',
   'x-ferretry-operator-unlock',
   'x-ferretry-session-id',
   'x-fy-board-capability',

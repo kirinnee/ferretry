@@ -42,7 +42,7 @@ const MACHINE: FleetMachineView = {
   tools: [],
   runtimeCount: 1,
   runningSessions: 0,
-  changes: { available: true },
+  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
 };
 
 const VIEW: FleetAccountChangeView = {
@@ -74,15 +74,19 @@ interface Calls {
   proposed: FleetAccountChange[];
   previewed: FleetProfileDraftRequest[];
   read: string[];
+  machines: (CallerGovernance | undefined)[];
   applied: { id: string; request: FleetProposalApplyRequest; governance: CallerGovernance | undefined }[];
 }
 
 function stub(overrides: Partial<FleetCatalogSubsystem> = {}): { subsystem: FleetCatalogSubsystem; calls: Calls } {
-  const calls: Calls = { proposed: [], previewed: [], read: [], applied: [] };
+  const calls: Calls = { proposed: [], previewed: [], read: [], machines: [], applied: [] };
   return {
     calls,
     subsystem: {
-      machine: async () => MACHINE,
+      machine: async governance => {
+        calls.machines.push(governance);
+        return MACHINE;
+      },
       components: async () => ({ format: 'version-2', kinds: [] }),
       profiles: async () => ({ format: 'version-2', profiles: [] }),
       previewProfile: async request => {
@@ -123,7 +127,7 @@ describe('the fleet catalogue mount', () => {
   it('should answer all four reads through the shared schema and never let one be cached', async () => {
     // Arrange
     const { subsystem } = stub();
-    const paths = ['/v1/fleet/machine', '/v1/fleet/components', '/v1/fleet/profile-stacks', '/v1/fleet/runtimes'];
+    const paths = ['/v1/fleet/machine', '/v1/fleet/components', '/v1/fleet/profiles', '/v1/fleet/runtimes'];
 
     // Act
     const responses = await Promise.all(paths.map(async path => await dispatcher(subsystem).dispatch(get(path))));
@@ -139,17 +143,47 @@ describe('the fleet catalogue mount', () => {
     should(jsonBody(responses[0] as never)).deepEqual(MACHINE);
   });
 
+  it('should hand the machine read the caller governance, so its authority is this caller', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(get('/v1/fleet/machine'));
+
+    // Assert
+    should(response.status).equal(200);
+    should(calls.machines).have.length(1);
+    should(calls.machines[0]).not.be.undefined();
+    should(calls.machines[0]).containDeep({ confirmChange: false });
+  });
+
+  it('should no longer serve the paths the old account surface staged changes at', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const responses = await Promise.all([
+      dispatcher(subsystem).dispatch(get('/v1/fleet/profile-stacks')),
+      dispatcher(subsystem).dispatch(post('/v1/fleet/profile-stacks/preview', JSON.stringify({ layers: [] }))),
+      dispatcher(subsystem).dispatch(post('/v1/fleet/changes', JSON.stringify({ change: {} }))),
+      dispatcher(subsystem).dispatch(get(`/v1/fleet/changes/${ID}`)),
+      dispatcher(subsystem).dispatch(post(`/v1/fleet/changes/${ID}/apply`)),
+    ]);
+
+    // Assert
+    should(responses.map(response => response.status)).deepEqual([404, 404, 404, 404, 404]);
+    should(calls).deepEqual({ proposed: [], previewed: [], read: [], machines: [], applied: [] });
+  });
+
   it('should resolve a draft profile as a read: the body to the service, never cached, a bad body refused first', async () => {
     // Arrange
     const { subsystem, calls } = stub();
     const body = { layers: ['instructions/main', 'profile/ghost'], editing: 'work' };
 
     // Act
-    const previewed = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/profile-stacks/preview', JSON.stringify(body)),
-    );
+    const previewed = await dispatcher(subsystem).dispatch(post('/v1/fleet/profiles/preview', JSON.stringify(body)));
     const bad = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/profile-stacks/preview', JSON.stringify({ layers: 'instructions/main' })),
+      post('/v1/fleet/profiles/preview', JSON.stringify({ layers: 'instructions/main' })),
     );
 
     // Assert
@@ -166,8 +200,8 @@ describe('the fleet catalogue mount', () => {
     const change = { kind: 'machine.settings', agentPermissions: 'skip' };
 
     // Act
-    const staged = await dispatcher(subsystem).dispatch(post('/v1/fleet/changes', JSON.stringify({ change })));
-    const read = await dispatcher(subsystem).dispatch(get(`/v1/fleet/changes/${ID}`));
+    const staged = await dispatcher(subsystem).dispatch(post('/v1/fleet/proposals', JSON.stringify({ change })));
+    const read = await dispatcher(subsystem).dispatch(get(`/v1/fleet/proposals/${ID}`));
 
     // Assert
     should(staged.status).equal(200);
@@ -183,9 +217,9 @@ describe('the fleet catalogue mount', () => {
 
     // Act
     const confirmed = await dispatcher(subsystem).dispatch(
-      post(`/v1/fleet/changes/${ID}/apply`, JSON.stringify({ operatorPassword: 'correct horse' })),
+      post(`/v1/fleet/proposals/${ID}/apply`, JSON.stringify({ operatorPassword: 'correct horse' })),
     );
-    await dispatcher(subsystem).dispatch(post(`/v1/fleet/changes/${ID}/apply`));
+    await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
 
     // Assert
     should(confirmed.status).equal(200);
@@ -201,19 +235,22 @@ describe('the fleet catalogue mount', () => {
         throw new FleetCatalogRefusal('fleet_change_unknown', 'no change by that id');
       },
       apply: async () => {
-        throw new FleetCatalogRefusal('fleet_change_disabled', 'The new account model is not switched on.');
+        throw new FleetCatalogRefusal(
+          'fleet_change_stale',
+          'the configuration changed after this change was previewed',
+        );
       },
     });
 
     // Act
-    const unknown = await dispatcher(subsystem).dispatch(get(`/v1/fleet/changes/${ID}`));
-    const disabled = await dispatcher(subsystem).dispatch(post(`/v1/fleet/changes/${ID}/apply`));
+    const unknown = await dispatcher(subsystem).dispatch(get(`/v1/fleet/proposals/${ID}`));
+    const stale = await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
 
     // Assert
     should(unknown.status).equal(404);
     should(jsonBody(unknown)).deepEqual({ error: 'no change by that id', code: 'fleet_change_unknown' });
-    should(disabled.status).equal(409);
-    should(jsonBody(disabled).code).equal('fleet_change_disabled');
+    should(stale.status).equal(409);
+    should(jsonBody(stale).code).equal('fleet_change_stale');
   });
 
   it('should refuse a change id that cannot be decoded, and a body naming no known change, before the service', async () => {
@@ -221,9 +258,9 @@ describe('the fleet catalogue mount', () => {
     const { subsystem, calls } = stub();
 
     // Act
-    const badId = await dispatcher(subsystem).dispatch(get('/v1/fleet/changes/%E0'));
+    const badId = await dispatcher(subsystem).dispatch(get('/v1/fleet/proposals/%E0'));
     const badBody = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/changes', JSON.stringify({ change: { kind: 'config.replace', document: {} } })),
+      post('/v1/fleet/proposals', JSON.stringify({ change: { kind: 'config.replace', document: {} } })),
     );
 
     // Assert

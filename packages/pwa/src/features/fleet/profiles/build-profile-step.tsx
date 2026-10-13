@@ -26,9 +26,9 @@ import { previewFleetProfileDraft } from '../catalog-api.ts';
 import { type AccountCatalog, allComponents, useAccountCatalog } from '../components/account-catalog.ts';
 import {
   AddRow,
+  CatalogNote,
   ComponentBadges,
   Hint,
-  CatalogNote,
   PickRow,
   Prose,
   ReadFailed,
@@ -47,7 +47,7 @@ import {
   KIND_ONE,
   reuseLabel,
 } from '../components/component-model.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { currentFlow, returnToParent, type StepperState, saveForReuse, stepForward } from '../shell/stepper-model.ts';
 import { ConflictList, LayerStack } from './layer-stack.tsx';
@@ -77,7 +77,7 @@ export interface BuildProfileStepProps {
    */
   readonly onBuilt: (profileName: string, next: StepperState | null) => void;
   readonly machineName: string;
-  /** For whether this machine accepts changes now (the account model may be switched off). */
+  /** The machine the profile is built on. */
   readonly machine: FleetMachineView | null;
   readonly connection: DaemonConnection;
   readonly createClient: FleetClientFactory;
@@ -232,7 +232,7 @@ function BaseOrder({ draft, setDraft }: { draft: ProfileDraft; setDraft: (next: 
 }
 
 function PickStep(props: StepsProps & { kind: BuildKind }) {
-  const { kind, catalog, draft, setDraft, state, onChange, machineName, machine, connection, createClient } = props;
+  const { kind, catalog, draft, setDraft, state, onChange, machineName, connection, createClient } = props;
   const name = useId();
   const [form, setForm] = useState<ComponentDraft | undefined>(undefined);
   const changes = useAccountChanges({ connection, createClient });
@@ -293,7 +293,6 @@ function PickStep(props: StepsProps & { kind: BuildKind }) {
           <ComponentForm draft={form} onChange={setForm} editing={false} {...(problem ? { problem } : {})} />
           <ChangeApplyPanel
             machineName={machineName}
-            changes={machine?.changes ?? null}
             authority={changes.authority}
             busy={changes.busy}
             refusal={changes.refusal}
@@ -393,7 +392,7 @@ function ReviewStep({ catalog, draft, state, onChange, machineName, connection, 
 }
 
 function NameStep(props: StepsProps) {
-  const { catalog, draft, setDraft, state, machine, machineName, connection, createClient, editing } = props;
+  const { catalog, draft, setDraft, state, machineName, connection, createClient, editing } = props;
   const id = useId();
   const changes = useAccountChanges({ connection, createClient });
   const problem = editing === undefined ? profileNameProblem(draft.name, catalog.profiles.profiles) : undefined;
@@ -434,7 +433,6 @@ function NameStep(props: StepsProps) {
       </Hint>
       <ChangeApplyPanel
         machineName={machineName}
-        changes={machine?.changes ?? null}
         authority={changes.authority}
         busy={changes.busy}
         refusal={changes.refusal}

@@ -9,16 +9,16 @@
  * cleared before the request settles; it never reaches the hook's state.
  */
 
-import type { FleetAccountChange, FleetAccountChangeView, FleetCatalogAct } from '@ferretry/protocol';
+import type { FleetAccountChange, FleetAccountChangeView } from '@ferretry/protocol';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { grantGuidance, type HeldUnlock } from '../../../lib/grants.ts';
 import { Button } from '../../../shell/primitives.tsx';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import {
+  type Authorization,
   applyAccountChange,
   applyStagedChange,
-  type Authorization,
   authorizeChange,
   type ChangeResult,
   changeNeedsPassword,
@@ -138,8 +138,6 @@ export function useAccountChanges({ connection, createClient, now }: UseAccountC
 
 export interface ChangeApplyPanelProps {
   readonly machineName: string;
-  /** `machine.changes` from `GET /v1/fleet/machine`; while it is unavailable, its reason is all that shows. */
-  readonly changes: FleetCatalogAct | null;
   readonly authority: FleetApplyAuthority | null;
   readonly busy: boolean;
   readonly refusal: string | null;
@@ -164,7 +162,6 @@ const passwordHint = (authority: FleetApplyAuthority, machineName: string): stri
 
 export function ChangeApplyPanel({
   machineName,
-  changes,
   authority,
   busy,
   refusal,
@@ -177,16 +174,6 @@ export function ChangeApplyPanel({
 }: ChangeApplyPanelProps) {
   const [password, setPassword] = useState('');
   const fieldId = useId();
-
-  if (changes !== null && !changes.available)
-    return (
-      <div className="flex flex-col gap-2" data-change-apply="unavailable">
-        <p role="status" className="m-0 text-cell leading-base text-warn" data-change-unavailable="">
-          {changes.reason}
-        </p>
-        {children === undefined ? null : <div className="flex flex-wrap gap-2">{children}</div>}
-      </div>
-    );
 
   const refusedByGrant = authority?.kind === 'refused';
   const needsPassword = authority !== null && changeNeedsPassword(authority);
