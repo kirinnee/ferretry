@@ -61,7 +61,10 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
       const taken = new Set((await deps.gateway.credentials()).credentials.map(entry => entry.id));
       const id = options.id ?? suggestCredentialId(harness, options.label, taken);
       const flags = writeFlags(options);
+      // One authority for the add and the sign-in, so the operator password is asked for once.
+      const authority = await WriteAuthority.open(deps);
       const outcome = await runChange(deps, {
+        authority,
         change: {
           kind: 'credential.add',
           id,
@@ -76,7 +79,7 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
         deps.out.report(`Sign it in when you are ready: ${bin} credential signin ${id}`);
         return;
       }
-      await runSignIn(deps, id);
+      await runSignIn(deps, id, authority);
     },
   );
 

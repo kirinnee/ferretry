@@ -63,8 +63,9 @@ export async function installTools(
   deps: AccountCommandDeps,
   harnesses: readonly AccountHarness[],
   options: { yes?: boolean; dryRun?: boolean },
+  opened?: WriteAuthority,
 ): Promise<boolean> {
-  const authority = await WriteAuthority.open(deps);
+  const authority = opened ?? (await WriteAuthority.open(deps));
   const scan = await deps.gateway.scan(authority.current);
   const wanted = scan.tools.filter(tool => harnesses.includes(tool.harness));
   const missing = wanted.filter((tool): tool is Extract<FleetSetupTool, { installed: false }> => !tool.installed);

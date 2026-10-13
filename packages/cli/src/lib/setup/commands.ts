@@ -91,7 +91,7 @@ export async function runSetup(deps: AccountCommandDeps, flags: SetupFlags, agai
     if (missing.length > 0 && !options.dryRun) {
       const label = missing.map(harness => HARNESS_LABEL[harness]).join(' and ');
       if (await askYes(deps, `${label} ${missing.length === 1 ? 'is' : 'are'} not installed. Install now?`, assume)) {
-        await installTools(deps, missing, { yes: true });
+        await installTools(deps, missing, { yes: true }, authority);
         scan = await deps.gateway.scan(authority.current);
       }
     }
@@ -137,7 +137,7 @@ export async function runSetup(deps: AccountCommandDeps, flags: SetupFlags, agai
     ...(acceptedUpdates.length === 0 ? {} : { acceptedUpdates }),
     ...(flags.addDuplicates === true ? { addDuplicates: true } : {}),
   };
-  const outcome = await runChange(deps, { change, destructive: false, options });
+  const outcome = await runChange(deps, { change, destructive: false, options, authority });
   if (outcome !== undefined && options.json !== true) {
     deps.out.report(`See what was set up with \`${deps.binaryName} runtimes\` and \`${deps.binaryName} credentials\`.`);
   }

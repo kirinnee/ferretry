@@ -15,9 +15,12 @@ export const SIGN_IN_POLL_MS = 1_000;
  *
  * Returns whether it ended signed in. A failure sets a non-zero exit with the reason and the way back.
  */
-export async function runSignIn(deps: AccountCommandDeps, credentialId: string): Promise<boolean> {
-  const opened = await WriteAuthority.open(deps);
-  const authority = await opened.forApply();
+export async function runSignIn(
+  deps: AccountCommandDeps,
+  credentialId: string,
+  opened?: WriteAuthority,
+): Promise<boolean> {
+  const authority = await (opened ?? (await WriteAuthority.open(deps))).forApply();
   let flow = await deps.gateway.startSignIn(credentialId, authority);
   let shownApproval = false;
   let shownUrl: string | undefined;

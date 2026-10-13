@@ -12,6 +12,8 @@ export interface ChangeRequest {
    */
   readonly destructive: boolean;
   readonly options: AccountWriteOptions;
+  /** One a command already opened, so a caller off this machine is asked for the password once. */
+  readonly authority?: WriteAuthority;
 }
 
 /**
@@ -52,7 +54,7 @@ export async function runChange(
   deps: AccountCommandDeps,
   request: ChangeRequest,
 ): Promise<FleetAccountChangeOutcome | undefined> {
-  const authority = await WriteAuthority.open(deps);
+  const authority = request.authority ?? (await WriteAuthority.open(deps));
   const view = await deps.gateway.stage(request.change, authority.current);
   const json = request.options.json === true;
   if (!json) deps.out.report(renderChangeView(view));

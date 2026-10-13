@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { registerCredentialCommands, suggestCredentialId } from '../../../src/lib/credential/commands.ts';
 import { renderCredentialList } from '../../../src/lib/credential/render.ts';
-import { credential, fakeWorld, flow, runCommand } from '../fleet/account-fakes.ts';
+import { credential, fakeWorld, flow, permissions, runCommand } from '../fleet/account-fakes.ts';
 
 const needsSignIn = credential({
   id: 'codex-work',
@@ -70,6 +70,13 @@ describe('renderCredentialList', () => {
 });
 
 describe('registerCredentialCommands', () => {
+  it('should ask a caller off this machine for the operator password once, for the add and the sign-in', async () => {
+    const world = fakeWorld({ gateway: { permissions: () => permissions({ confirmation: 'operator-password' }) } });
+    await runCommand(registerCredentialCommands, world, ['credential', 'add', 'claude']);
+    should(world.prompt.secrets).have.length(1);
+    should(world.gateway.called('startSignIn')[0]?.args[1]).eql({ password: 'operator-password-1' });
+  });
+
   it('should list the logins, or print them as JSON', async () => {
     const world = fakeWorld({
       gateway: { credentials: () => ({ format: 2, machine: 'studio', credentials: [credential()] }) },
