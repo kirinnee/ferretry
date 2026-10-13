@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { PASSKEY_WINDOW_PATH } from '@ferretry/protocol';
+import { FULL_DEVICE_GRANTS, PASSKEY_WINDOW_PATH } from '@ferretry/protocol';
 import should from 'should';
 import type { z } from 'zod';
 import { PAIRED_DEVICES_PATH, ProtocolPasskeyGateway } from '../../../src/lib/passkey/gateway';
@@ -32,7 +32,9 @@ describe('protocol passkey gateway', () => {
   it('should list the paired devices and nothing else from the view', async () => {
     // Arrange
     const calls: Call[] = [];
-    const subject = new ProtocolPasskeyGateway(fakeClient({ devices: [PIXEL], hostLocal: true }, calls));
+    const subject = new ProtocolPasskeyGateway(
+      fakeClient({ devices: [PIXEL], hostLocal: true, mayWiden: FULL_DEVICE_GRANTS }, calls),
+    );
 
     // Act
     const actual = await subject.devices();
