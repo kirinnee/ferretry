@@ -53,13 +53,14 @@ import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { daemonDisplayName } from './features/settings/daemon-settings.tsx';
-import { StepUpDialog } from './features/step-up/step-up-dialog.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
+import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
+import { StepUpDialog } from './features/step-up/step-up-dialog.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
@@ -1497,6 +1498,13 @@ export function AppShell() {
             themeToggle={<ThemeToggle />}
             {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
           />
+          {pageRoute.kind === 'settings' ? null : (
+            <PasskeyNudge
+              key={String(connection.daemonId)}
+              connection={connection}
+              onOpenSecurity={() => navigate(`${daemonSettingsPath(connection.daemonId)}#security`)}
+            />
+          )}
           {/*
             The finder's touch affordance wraps the page area rather than one
             page: a phone has no Cmd/Ctrl+K, and the top bar's own Find button is

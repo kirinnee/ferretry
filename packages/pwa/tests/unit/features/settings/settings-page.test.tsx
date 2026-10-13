@@ -310,6 +310,13 @@ describe('SettingsPage sections', () => {
       'daemons',
     );
 
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#security');
+    await interact(() => window.dispatchEvent(new Event('hashchange')));
+    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
+      'daemons',
+    );
+    expect(view.container.querySelector('[data-daemon-panel="security"]')?.getAttribute('aria-selected')).toBe('true');
+
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#not-a-setting');
     await interact(() => window.dispatchEvent(new Event('hashchange')));
     expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
@@ -783,6 +790,7 @@ describe('daemon settings', () => {
       'secrets',
       'devices',
       'grants',
+      'security',
       'carrier',
       'host-checks',
     ]);
@@ -794,7 +802,7 @@ describe('daemon settings', () => {
       // read as unfinished. All of them or none of them — never some.
       expect(panel.querySelector('svg')).not.toBeNull();
     }
-    // ONE LINE PER ROW beside the panel, so ten rows share one height and one rhythm. The description
+    // ONE LINE PER ROW beside the panel, so the rows share one height and one rhythm. The description
     // is not lost — the panel one column right opens with its own, the phone sheet below still lists
     // them, and Cmd/Ctrl+K searches them — but it is not repeated in a row a reader has already left.
     expect(panels.map(panel => panel.textContent)).toEqual([
@@ -802,6 +810,7 @@ describe('daemon settings', () => {
       'Secrets',
       'Add a device',
       'What devices may do',
+      'Security',
       'Carrier',
       'Host checks',
     ]);
@@ -885,6 +894,7 @@ describe('daemon settings', () => {
       'secrets',
       'devices',
       'grants',
+      'security',
       'carrier',
       'host-checks',
     ]);
@@ -904,7 +914,7 @@ describe('daemon settings', () => {
     expect(must(choices[0], 'the Warden choice').textContent).toBe(
       'WardenSupervision, account failover, and policy for this daemon.',
     );
-    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual(['page', null, null, null, null, null]);
+    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual(['page', null, null, null, null, null, null]);
 
     await interact(() =>
       must(

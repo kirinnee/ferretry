@@ -11,6 +11,7 @@
 import type { ConnectionChoice } from '@ferretry/relay';
 import {
   CircleDollarSign,
+  Fingerprint,
   Gauge,
   KeyRound,
   Lock,
@@ -21,7 +22,7 @@ import {
   Smartphone,
   Stethoscope,
 } from 'lucide-react';
-import { type ComponentType, type ReactNode, useId, useMemo, useState } from 'react';
+import { type ComponentType, type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
@@ -37,6 +38,7 @@ import { WardenStrip } from '../warden/warden-strip.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from './daemon-settings.tsx';
 import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
+import { type PasskeyClientFactory, SecuritySurface } from './security-settings.tsx';
 
 export interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
@@ -83,6 +85,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   // A lock, because this panel is where a refused control is explained — the one glyph that reads as
   // "permission" rather than as an invented category.
   grants: <Lock size={16} aria-hidden="true" />,
+  // The fingerprint a passkey sheet shows, because this panel is where that sheet is set up.
+  security: <Fingerprint size={16} aria-hidden="true" />,
   'resource-limits': <Gauge size={16} aria-hidden="true" />,
   doctor: <Stethoscope size={16} aria-hidden="true" />,
   'model-pricing': <CircleDollarSign size={16} aria-hidden="true" />,
@@ -175,6 +179,10 @@ export interface DaemonSettingsFrameProps {
   readonly createGrantClient?: GrantClientFactory;
   /** And for pairing, so no harness screenshot can ever contain a real minted code. */
   readonly createPairingClient?: PairingClientFactory;
+  /** And for the passkey list, so no harness reads or registers a real credential. */
+  readonly createPasskeyClient?: PasskeyClientFactory;
+  /** A panel id the address asked for (`#security`); opens that panel, and again if it changes. */
+  readonly requestedPanel?: string | undefined;
   /** Fleet and later host-owned settings are supplied here, after Warden. */
   readonly additionalTabs?: readonly DaemonSettingsTabDefinition[];
   /** Measured for this exact daemon connection, never inferred from a preference. */
@@ -199,6 +207,8 @@ export function DaemonSettingsFrame({
   createSecretClient,
   createGrantClient,
   createPairingClient,
+  createPasskeyClient,
+  requestedPanel,
   additionalTabs = [],
   carrier,
   relayAdvertised = false,
@@ -265,6 +275,21 @@ export function DaemonSettingsFrame({
           />
         ),
       },
+      {
+        /**
+         * Passkeys, right after the limits panel: the confirmation a refused change asks for is made
+         * here, so it sits beside the panel that explains the refusal.
+         */
+        id: 'security',
+        label: 'Security',
+        description: 'The passkeys this device holds for this machine, and adding another.',
+        Surface: ({ connection: activeConnection }) => (
+          <SecuritySurface
+            connection={activeConnection}
+            {...(createPasskeyClient ? { createClient: createPasskeyClient } : {})}
+          />
+        ),
+      },
       // A product-owned Doctor surface belongs with the daemon configuration,
       // before the connection carrier and browser-local pairing diagnostics.
       ...additionalTabs,
@@ -307,6 +332,7 @@ export function DaemonSettingsFrame({
       connectionRecord,
       createGrantClient,
       createPairingClient,
+      createPasskeyClient,
       createSecretClient,
       createWardenClient,
       onRemoveDaemon,
@@ -321,6 +347,9 @@ export function DaemonSettingsFrame({
   // remount and show daemon B under daemon A's panel name.
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? 'warden');
   const [panelPickerOpen, setPanelPickerOpen] = useState(false);
+  useEffect(() => {
+    if (requestedPanel !== undefined && tabs.some(tab => tab.id === requestedPanel)) setActiveTab(requestedPanel);
+  }, [requestedPanel, tabs]);
   const pickerTitleId = useId();
 
   /**
