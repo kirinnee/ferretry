@@ -176,14 +176,14 @@ agents:
         id: 6f1c…-… # minted UUID, must never change
         wrapper: claude-default
         home: claude-default
-        defaultModel: claude-opus-5
-        models: [claude-opus-5]
+        defaultModel: claude-opus-5-5
+        models: [claude-opus-5-5]
       auto:
         id: 0b7e…-…
         wrapper: claude-auto-default
         home: claude-auto-default
-        defaultModel: claude-opus-5
-        models: [claude-opus-5]
+        defaultModel: claude-opus-5-5
+        models: [claude-opus-5-5]
   - name: default
     kind: codex
     routes: { default: { … }, auto: { … } } # two more UUIDs, wrappers, homes
@@ -206,10 +206,10 @@ logins:
 homes:
   claude-default:
     login: claude
-    model: claude-opus-5
+    model: claude-opus-5-5
   codex-default:
     login: codex
-    model: gpt-5.6
+    model: gpt-6-sol
 ```
 
 Everything else is derived:
@@ -246,7 +246,7 @@ homes:
     hooks: ./hooks/work.json       # optional
     agent:                         # optional per-launcher overrides (Advanced)
       addendum: ./agent-addendum.claude.md
-      model: claude-sonnet-5
+      model: claude-sonnet-5-5
       flags: [--max-turns=200]
     you: { … same shape as agent … }
 
@@ -358,15 +358,15 @@ than one daemon is connected**; with one daemon it is not rendered at all. Fleet
 │ 5h   ▓▓▓▓▓▓░░░░░░░░  38%  2h 10m   │
 │ Week ▓▓▓▓▓▓▓▓▓░░░░░  61%  Fri      │
 │ ┌────────────────────────────────┐ │
-│ │ claude-default        Opus 5 › │ │
-│ │ claude-review       Sonnet 5 › │ │
+│ │ claude-default      Opus 5.5 › │ │
+│ │ claude-review     Sonnet 5.5 › │ │
 │ └────────────────────────────────┘ │
 │                                    │
 │ CODEX · you@example.com            │
 │ ◐ Refresh due           Check now  │
 │ 5h   ▓▓░░░░░░░░░░░░  12%           │
 │ ┌────────────────────────────────┐ │
-│ │ codex-default        GPT-5.6 › │ │
+│ │ codex-default          GPT-6 › │ │
 │ └────────────────────────────────┘ │
 │                                    │
 │ ┌────────────────────────────────┐ │
