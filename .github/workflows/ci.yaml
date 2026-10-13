@@ -190,6 +190,44 @@ jobs:
           path: packages/pwa/.artifacts/safari-render/
           if-no-files-found: warn
 
+  harness-contract:
+    name: Harness Contract (${{ matrix.os }})
+    permissions:
+      contents: read
+    # The account model shares one login across many runtimes through mechanisms Claude Code and
+    # Codex never documented (design §8.5): CLAUDE_SECURESTORAGE_CONFIG_DIR and its refresh lock, a
+    # Codex auth.json rewritten in place through a link, file-only credential storage, and the
+    # trust/onboarding keys a wrapper writes. This measures each one against the PINNED harnesses
+    # (the flake's own nixpkgs) with fake credentials and a proxy that forwards nothing, so a pin
+    # bump that breaks one turns this red instead of forking somebody's login.
+    #
+    # `macos-15` is not optional: Claude's macOS keychain path is compiled out of the Linux build,
+    # so this is the only place it is measured (gap G1). Release runs only after a green CI, which
+    # is what makes this a release gate. FY_CONTRACT_KEYCHAIN lets that job write throwaway items
+    # into the runner's login keychain; the suite refuses to anywhere `CI` is not `true`.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Measure the pinned harnesses
+        env:
+          FY_CONTRACT_KEYCHAIN: ${{ startsWith(matrix.os, 'macos') && '1' || '' }}
+          FY_CONTRACT_ARTIFACTS: ${{ runner.temp }}/harness-contract
+        run: nix develop .#ci -c ./packages/fleet/tests/contract/run.sh pinned
+      - name: Upload the harness contract result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-contract-pinned-${{ matrix.os }}
+          path: ${{ runner.temp }}/harness-contract/
+          if-no-files-found: warn
+
   compile:
     name: Compile Binaries
     permissions:
