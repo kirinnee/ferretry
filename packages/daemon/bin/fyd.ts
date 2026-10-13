@@ -309,11 +309,7 @@ import {
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
-import {
-  bootFirstRunChoice,
-  bootFirstRunSentence,
-  createFleetSetupSubsystem,
-} from '../src/lib/fleet/setup-service.ts';
+import { bootFirstRunChoice, bootFirstRunSentence, createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';

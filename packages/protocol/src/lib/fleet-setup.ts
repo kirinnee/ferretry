@@ -243,7 +243,9 @@ export const FleetMigrationOutcomeSchema = z.discriminatedUnion('outcome', [
         }),
       )
       .readonly(),
-    runtimes: z.array(z.strictObject({ name: NonEmptyStringSchema, formerName: NonEmptyStringSchema.optional() })).readonly(),
+    runtimes: z
+      .array(z.strictObject({ name: NonEmptyStringSchema, formerName: NonEmptyStringSchema.optional() }))
+      .readonly(),
   }),
   z.strictObject({ outcome: z.literal('refused'), reasons: z.array(NonEmptyStringSchema).readonly() }),
   z.strictObject({

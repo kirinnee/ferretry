@@ -224,16 +224,22 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
     executors: {
-      setup: { describe: async () => {
-      throw new Error('not exercised by the surface inventory');
-    }, execute: async () => {
-      throw new Error('not exercised by the surface inventory');
-    } },
-      clone: { describe: async () => {
-      throw new Error('not exercised by the surface inventory');
-    }, execute: async () => {
-      throw new Error('not exercised by the surface inventory');
-    } },
+      setup: {
+        describe: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+        execute: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+      },
+      clone: {
+        describe: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+        execute: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+      },
     },
   },
   cgroups: {
