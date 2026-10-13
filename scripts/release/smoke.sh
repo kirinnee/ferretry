@@ -4,8 +4,9 @@ set -euo pipefail
 # Smoke-test one target's standalone binaries: run --version/--help and assert the help banner
 # names the CLI, then drive the real first-session journey with the COMPILED CLI and daemon —
 # `daemon start` through the supervisor (so the daemon gets the same minimal environment a user's
-# does), one fleet account whose wrapper runs a fake harness, a session that must reach running,
-# and a stop that must clean its pane up. No model is ever called: the harness is a shell script.
+# does), the first run importing this host's Claude Code into an agent runtime whose wrapper runs a
+# fake harness, a session that must reach running, and a stop that must clean its pane up. No model
+# is ever called: the harness is a shell script.
 #
 # Usage: smoke.sh <cli-binary> [daemon-binary]
 # The daemon binary defaults to the CLI binary's sibling with the daemon's name swapped in.
@@ -95,39 +96,24 @@ fail() {
   exit 1
 }
 
-# No default accounts (they would look for a login to copy) and no hosted relay dial.
+# The first run ON — it is the journey a new user gets — and no hosted relay dial. It imports the
+# fake `claude` on PATH from this isolated HOME; there is no Codex, so only a Claude runtime appears.
 cat >"${fy_home}/config/daemon.json" <<'CONFIG'
-{ "fleet": { "prepareDefaults": false }, "relay": { "url": "ws://127.0.0.1:1", "enabled": false } }
+{ "fleet": { "prepareDefaults": true }, "relay": { "url": "ws://127.0.0.1:1", "enabled": false } }
 CONFIG
 "${name}" daemon adopt </dev/null >/dev/null
 
 "${name}" daemon start </dev/null
 
-account="claude-auto-smoke"
-"${name}" fleet init >/dev/null
-config="${fy_home}/fleet/config.yaml"
-grep -q '^agents: \[\]$' "${config}" || fail "the starter fleet configuration has no empty agents list to fill"
-awk -v account="${account}" '
-  /^agents: \[\]$/ {
-    print "agents:"
-    print "  - name: smoke"
-    print "    kind: claude"
-    print "    auth: oauth"
-    print "    routes:"
-    print "      auto:"
-    print "        id: 5b0c7f5e-6d0a-4f53-9d43-1c9a2c7e0b11"
-    print "        wrapper: " account
-    print "        home: " account
-    print "        displayName: Claude (smoke, auto)"
-    print "        defaultModel: claude-opus-5"
-    print "        models:"
-    print "          - claude-opus-5"
-    next
-  }
-  { print }
-' "${config}" >"${config}.next"
-mv "${config}.next" "${config}"
-"${name}" fleet apply
+# The agent runtime the first run made (its runtimes are agents), by the wrapper name `start` takes.
+account=""
+for _ in $(seq 1 30); do
+  account="$("${name}" runtimes --json | jq -r '[.runtimes[] | select(.agent and .harness == "claude")][0].wrapper // empty')"
+  [ -n "${account}" ] && break
+  sleep 1
+done
+[ -n "${account}" ] || fail "the first run made no Claude agent runtime: $("${name}" runtimes 2>&1)"
+echo "✅ the first run made ${account}"
 
 cd "${root}/work"
 started="$("${name}" start --agent "${account}" --name "Smoke Session" --json "say hello")" || fail "start refused: ${started:-no output}"
