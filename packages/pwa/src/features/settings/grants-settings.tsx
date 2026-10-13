@@ -45,7 +45,7 @@ import {
 import { CircleAlert, KeyRound, Lock, LockOpen, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
-import { daemonApiClient } from '../../lib/api-client.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
@@ -593,13 +593,17 @@ const message = (cause: unknown): string => (cause instanceof Error ? cause.mess
  */
 export function GrantsSurface({
   connection,
-  createClient = daemonApiClient,
+  createClient: injectedClient,
   now = Date.now,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: GrantClientFactory;
   readonly now?: GrantClock;
 }) {
+  // The carrier-routed client unless a test or the harness hands one in: a plain-network client
+  // reaches no daemon at all, because a paired browser is answered only inside its own session.
+  const routedClient = useDaemonClient();
+  const createClient = injectedClient ?? routedClient;
   const [client, setClient] = useState<GrantClient | null>(null);
   const [loaded, setLoaded] = useState<{
     readonly daemonId: DaemonConnection['daemonId'];

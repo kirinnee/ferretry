@@ -193,7 +193,7 @@ async function pair(world: Awaited<ReturnType<typeof daemon>>, deviceName: strin
   should(minted.status).equal(201);
   const code = (JSON.parse(minted.body) as { code: string }).code;
   const redeemed = await world.pairing.redeemInSession(
-    { code, deviceName, deviceKey: DEVICE_KEY, proven: true },
+    { code, deviceName, deviceKey: DEVICE_KEY, prove: async () => true },
     { kind: 'direct', rateLimitKey: '198.51.100.7' },
   );
   should(redeemed.kind).equal('paired');

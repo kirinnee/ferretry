@@ -7,7 +7,11 @@
  */
 
 import { beforeAll, describe, it } from 'bun:test';
-import { OLDER_APP_SENTENCE, RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
+import {
+  OLDER_APP_SENTENCE,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+  RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+} from '@ferretry/protocol';
 import {
   type ChannelState,
   completeClientHandshake,
@@ -46,7 +50,12 @@ import {
   type PairingCarrier,
   type SessionPairingAttempt,
 } from '../../../src/lib/pairing/index.ts';
-import { MAX_DIRECT_SESSIONS } from '../../../src/lib/relay/direct-carrier.ts';
+import {
+  DIRECT_UPGRADE_WINDOW_MS,
+  DIRECT_UPGRADES_PER_PEER,
+  MAX_DIRECT_SESSIONS,
+  MAX_DIRECT_UNPROVEN_SESSIONS,
+} from '../../../src/lib/relay/direct-carrier.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';
 
@@ -104,7 +113,21 @@ function downstream(): Downstream {
   };
 }
 
-function carrier(options: { readonly answer?: (request: ApiRequest) => Promise<ApiResponse> } = {}) {
+interface FakeTimer {
+  readonly milliseconds: number;
+  readonly fire: () => void;
+  cancelled: boolean;
+}
+
+function carrier(
+  options: {
+    readonly answer?: (request: ApiRequest) => Promise<ApiResponse>;
+    readonly now?: () => number;
+    readonly timers?: FakeTimer[];
+    readonly connections?: LiveDeviceConnections;
+  } = {},
+) {
+  const connections = options.connections ?? new LiveDeviceConnections();
   const requests: ApiRequest[] = [];
   const pairings: Array<{ readonly attempt: SessionPairingAttempt; readonly carrier: PairingCarrier }> = [];
   const route = directCarrierSocketRoute({
@@ -125,11 +148,21 @@ function carrier(options: { readonly answer?: (request: ApiRequest) => Promise<A
         return { kind: 'refused' };
       },
     },
-    scheduler: { after: () => ({ cancel: () => undefined }) },
-    clock: { now: () => 0 },
-    connections: new LiveDeviceConnections(),
+    scheduler: {
+      after: (milliseconds, fire) => {
+        const timer: FakeTimer = { milliseconds, fire, cancelled: false };
+        options.timers?.push(timer);
+        return {
+          cancel: () => {
+            timer.cancelled = true;
+          },
+        };
+      },
+    },
+    clock: { now: options.now ?? (() => 0) },
+    connections,
   });
-  return { route, requests, pairings };
+  return { route, requests, pairings, connections };
 }
 
 /** Upgrade one socket the way the transport would, and open the handler. */
@@ -259,7 +292,7 @@ describe('the direct carrier', () => {
     should(pairings[0]?.carrier).deepEqual({ kind: 'direct', rateLimitKey: '192.0.2.4' });
     // A proof that does not cover this transcript is the session's verdict, handed on as one more way
     // to be wrong — never a different answer.
-    should(pairings[0]?.attempt.proven).be.false();
+    should(await pairings[0]?.attempt.prove()).be.false();
     should(lastControl(wire)).containDeep({ t: 'closed', code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
     should(wire.closes.at(-1)?.code).equal(RELAY_SESSION_CONCLUDED_CLOSE_CODE);
   });
@@ -345,7 +378,7 @@ describe('the direct carrier', () => {
     handler.close();
   });
 
-  it('should refuse a nested session, another daemon’s fingerprint, and a socket past the ceiling', async () => {
+  it('should refuse a nested session and another daemon’s fingerprint', async () => {
     const { route } = carrier();
     const path = `/v1/rendezvous/${identity.daemonId}/client`;
     await route
@@ -357,17 +390,136 @@ describe('the direct carrier', () => {
     await route
       .accept({ request: request({ path }), params: new Map([['daemonId', 'fy_daemon_other']]) })
       .should.be.rejectedWith({ status: 404 });
+  });
 
+  /*
+   * UNPROVEN SOCKETS ARE THE CHEAP ONES, so they have their own small cap: a stranger who can reach the
+   * listener cannot take every slot from the devices that can prove themselves.
+   */
+  it('should hold only a few unproven sockets at once, and give a slot back once, when one ends', async () => {
+    const { route } = carrier();
     const held: SocketHandler[] = [];
-    for (let index = 0; index < MAX_DIRECT_SESSIONS; index += 1) held.push((await connect(route)).handler);
-    await route
-      .accept({ request: request({ path }), params: new Map([['daemonId', identity.daemonId]]) })
-      .should.be.rejectedWith({ status: 429 });
-    // A socket that ends gives its place back, once.
+    for (let index = 0; index < MAX_DIRECT_UNPROVEN_SESSIONS; index += 1)
+      held.push((await connect(route, { clientAddress: `192.0.2.${index + 1}` })).handler);
+    await connect(route, { clientAddress: '192.0.2.200' }).should.be.rejectedWith({ status: 429 });
     held[0]?.close();
     held[0]?.close();
-    const next = await connect(route);
-    should(next.wire.binary).have.length(1);
+    const next = await connect(route, { clientAddress: '192.0.2.201' });
+    await connect(route, { clientAddress: '192.0.2.202' }).should.be.rejectedWith({ status: 429 });
     for (const handler of [...held, next.handler]) handler.close();
+  });
+
+  it('should stop counting a socket as unproven once its device has proved itself, and still cap the total', async () => {
+    const { route } = carrier();
+    const held: SocketHandler[] = [];
+    // Every proven session frees its unproven slot, so many more than the unproven cap can be open.
+    for (let index = 0; index < MAX_DIRECT_SESSIONS - MAX_DIRECT_UNPROVEN_SESSIONS; index += 1) {
+      const { handler, wire, sessionId } = await connect(route, { clientAddress: `198.51.100.${index}` });
+      const { channel, transcript } = await handshake(handler, wire, sessionId);
+      await send(handler, channel, {
+        t: 'auth',
+        protocol: SESSION_PROTOCOL_ID,
+        deviceId: DEVICE_ID,
+        appSession: APP_SESSION,
+        proof: await signDeviceProof(crypto_, deviceKey, deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION)),
+      });
+      held.push(handler);
+    }
+    for (let index = 0; index < MAX_DIRECT_UNPROVEN_SESSIONS; index += 1)
+      held.push((await connect(route, { clientAddress: `203.0.113.${index}` })).handler);
+    // Sixty-four in all: the total cap refuses the next one whatever it would have been.
+    await connect(route, { clientAddress: '203.0.113.250' }).should.be.rejectedWith({ status: 429 });
+    for (const handler of held) handler.close();
+  });
+
+  it('should admit only so many upgrades a minute from one address, and every other address as usual', async () => {
+    let now = 1_000;
+    const { route } = carrier({ now: () => now });
+    for (let index = 0; index < DIRECT_UPGRADES_PER_PEER; index += 1)
+      (await connect(route, { clientAddress: '192.0.2.9' })).handler.close();
+    // Refused BEFORE any key agreement: the cheap check comes first.
+    await connect(route, { clientAddress: '192.0.2.9' }).should.be.rejectedWith({ status: 429 });
+    (await connect(route, { clientAddress: '192.0.2.10' })).handler.close();
+    // A peer with no address shares one window rather than being waved through as nobody.
+    for (let index = 0; index < DIRECT_UPGRADES_PER_PEER; index += 1) (await connect(route)).handler.close();
+    await connect(route).should.be.rejectedWith({ status: 429 });
+    now += DIRECT_UPGRADE_WINDOW_MS;
+    (await connect(route, { clientAddress: '192.0.2.9' })).handler.close();
+  });
+
+  /*
+   * THE SLOT IS TAKEN WHEN THE UPGRADE IS ADMITTED. Counting only at attach let a burst of concurrent
+   * upgrades all pass the check; a reservation whose socket never attaches is handed back at its deadline.
+   */
+  it('should count an admitted upgrade at once, and hand its slot back if the socket never attaches', async () => {
+    const timers: FakeTimer[] = [];
+    const { route } = carrier({ timers });
+    const path = `/v1/rendezvous/${identity.daemonId}/client`;
+    const admitted = await Promise.all(
+      Array.from({ length: MAX_DIRECT_UNPROVEN_SESSIONS }, (_unused, index) =>
+        route.accept({
+          request: request({ path, clientAddress: `192.0.2.${index + 40}` }),
+          params: new Map([['daemonId', identity.daemonId]]),
+        }),
+      ),
+    );
+    should(admitted).have.length(MAX_DIRECT_UNPROVEN_SESSIONS);
+    await route
+      .accept({
+        request: request({ path, clientAddress: '192.0.2.99' }),
+        params: new Map([['daemonId', identity.daemonId]]),
+      })
+      .should.be.rejectedWith({ status: 429 });
+    // None attached. Each reservation's deadline hands its slot back, once.
+    for (const timer of timers.filter(candidate => candidate.milliseconds === 10_000)) {
+      timer.fire();
+      timer.fire();
+    }
+    (await connect(route, { clientAddress: '192.0.2.98' })).handler.close();
+  });
+});
+
+describe('a direct session ending for the reasons a relayed one does', () => {
+  /** A direct socket whose device has proved itself, and the client's view of it. */
+  async function provenDirect(options: Parameters<typeof carrier>[0] = {}) {
+    const harnessed = carrier(options);
+    const { handler, wire, sessionId } = await connect(harnessed.route, { clientAddress: '192.0.2.77' });
+    const { channel, transcript } = await handshake(handler, wire, sessionId);
+    await send(handler, channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof: await signDeviceProof(crypto_, deviceKey, deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION)),
+    });
+    return { ...harnessed, handler, wire };
+  }
+
+  it('should close the socket when its device is revoked, with the same 4403 an unknown device gets', async () => {
+    const { connections, wire } = await provenDirect();
+    should(connections.endDevice(DEVICE_ID)).equal(1);
+    should(wire.closes.at(-1)?.code).equal(RELAY_CLOSE_CODES.authRejected);
+  });
+
+  it('should end the direct and the relayed sessions of one device in the same revocation', async () => {
+    const shared = new LiveDeviceConnections();
+    let relayedEnded = 0;
+    // A relayed session registers with the same registry the direct one does.
+    shared.track(DEVICE_ID, () => {
+      relayedEnded += 1;
+    });
+    const { wire } = await provenDirect({ connections: shared });
+    should(shared.endDevice(DEVICE_ID)).equal(2);
+    should(relayedEnded).equal(1);
+    should(wire.closes.at(-1)?.code).equal(RELAY_CLOSE_CODES.authRejected);
+  });
+
+  it('should close the socket with the lease code when nobody renews', async () => {
+    const timers: FakeTimer[] = [];
+    const { wire } = await provenDirect({ timers });
+    const lease = timers.filter(timer => timer.milliseconds === 900_000 && !timer.cancelled).at(-1);
+    if (lease === undefined) throw new Error('no lease was armed');
+    lease.fire();
+    should(wire.closes.at(-1)?.code).equal(RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE);
   });
 });

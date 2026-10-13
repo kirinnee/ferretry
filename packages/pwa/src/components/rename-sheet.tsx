@@ -1,7 +1,7 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { AlertTriangle, LoaderCircle, Pencil } from 'lucide-react';
 import { type FormEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { daemonApiClient } from '../lib/api-client.ts';
+import { useDaemonClient } from '../lib/store.tsx';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
@@ -66,8 +66,12 @@ export function RenameSheet({
   open,
   onClose,
   onRenamed,
-  createClient = daemonApiClient,
+  createClient: injectedClient,
 }: RenameSheetProps) {
+  // The carrier-routed client unless a test or the harness hands one in: a plain-network client
+  // reaches no daemon at all, because a paired browser is answered only inside its own session.
+  const routedClient = useDaemonClient();
+  const createClient = injectedClient ?? routedClient;
   const { config } = view;
   const headingId = useId();
   const titleHelpId = useId();

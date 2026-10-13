@@ -176,8 +176,12 @@ WebSocket upgrade on its own listener. **One socket is one session**: on upgrade
 16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included), and
 that is the only control frame on the socket — the daemon never sends `challenge`, accepts no
 `claim`, and refuses with `4400` a client that sends any control frame at all. The session's end is
-the socket's close, with the code the session ended with. A wrong `daemonId` is `404`; at most 64
-direct sessions are carried at once and the next upgrade is `429`. Where the session ARRIVED —
+the socket's close, with the code the session ended with. A wrong `daemonId` is `404`. An upgrade is
+ADMITTED before any public-key work is done for it, and each bound answers `429`: at most 30
+upgrades a minute from one peer address, at most 8 sockets that have not yet proved a device, and at
+most 64 direct sessions in all. The slot is reserved at admission rather than at attach, so
+concurrent upgrades cannot all pass the check before one is counted, and a reservation whose socket
+never attaches is released after ten seconds. Where the session ARRIVED —
 loopback, the privileged bind, the peer address — is the listener's classification of the upgrade,
 exactly as for an HTTP request on the same listener, and nothing inside the session can move it.
 
@@ -1280,8 +1284,10 @@ same `4403`. The daemon accepts by answering, inside the channel:
 { "t": "authenticated", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>" }
 ```
 
-Both refusals and acceptance happen inside the encrypted channel, so a relay sees a session close and
-never learns which it was. The daemon resolves the claim against its **device** grants only: a host
+The proof and the acceptance travel inside the encrypted channel; the refusal is a close, and a close
+code is in the clear, so a relay sees `4403` (and later `4441`) and learns WHEN a session was refused
+— never which device, and never why. An unknown device id is verified against a fixed dummy key, so
+it costs what a known one does. The daemon resolves the claim against its **device** grants only: a host
 admin token is not resolvable here, deliberately — it is a host-local secret, and a daemon that
 honoured it over the internet would turn a leaked file into remote authority. Every request the
 session carries is attributed to that device and that `appSession`, and the daemon re-asks at the
@@ -1307,14 +1313,18 @@ proof = Ed25519-Sign( device key, "ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖
 
 An incoming record is what prompts the answer, so a background tab — whose timers a browser
 throttles — still renews in time. A valid answer re-checks that the device is still paired and not
-idle-expired, advances its `lastSeenAt`, and extends the lease 15 minutes from now; the nonce is
+idle-expired and extends the lease 15 minutes from now — but never past **12 hours** from the
+session's first proof, at which point the session ends `4441` and the client opens a fresh one; the nonce is
 single-use, and a `renewed` with no outstanding `renew` is `4400`. A lease that runs out ends the
 session with **`4441`**, which a client reads as "open a new session" and never as a revocation: a
 **read** (`GET`, `HEAD`) is asked again once on a fresh session, silently; a write is not, for the
 reason no write is replayed. `4403` stays the only code meaning "this device is no longer accepted".
-What the lease buys is that authority on any one channel is bounded to fifteen minutes past the last
-time the device key was exercised, and every renewal re-reads revocation and expiry from the
-daemon's own state.
+The daemon also compares the clock with the lease on every record it serves, so a record that
+arrives after the lease ended is never served even when the lease timer fires late, and it queues
+`renew` ahead of any payload waiting for credit. What the lease buys is that authority on any one
+channel needs a device signature at least every fifteen minutes and never outlives twelve hours, and
+every renewal re-reads revocation and expiry from the daemon's own state. Neither an auth nor a
+renewal counts as USE of the device: see `presence` below.
 
 Afterwards, any number of requests:
 
@@ -1326,11 +1336,19 @@ Afterwards, any number of requests:
   "path": "/v1/sessions",
   "query": [["sessionId", "fy_…"]],
   "headers": { "content-type": "application/json" },
-  "body": "…"
+  "body": "…",
+  "presence": true
 }
 ```
 
-`query`, `headers` and `body` are optional; `id`, `method` and `path` are not.
+`query`, `headers`, `body` and `presence` are optional; `id`, `method` and `path` are not.
+
+- **`presence`** is `true` when a person is at the device: the page is visible and was touched,
+  clicked or typed in within the last five minutes, or was opened within the last minute. It is the
+  ONLY thing that advances the device's `lastSeenAt`, and therefore its 30-day idle clock — an auth,
+  a renewal or an unmarked request never does, so a tab left open renews its session without keeping
+  the device paired forever. It is the device's own word: it answers a forgotten device, not a
+  hostile one.
 
 - **`id`** identifies the answer, and must be unique within the session. A repeat is `4400` rather
   than an overwrite: an answer that could belong to either of two requests is worse than a closed

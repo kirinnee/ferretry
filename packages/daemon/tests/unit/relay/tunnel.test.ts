@@ -10,7 +10,7 @@ import { describe, it } from 'bun:test';
 import { MAX_TUNNEL_BODY_BYTES } from '@ferretry/protocol';
 import { MAX_PLAINTEXT_BYTES, toBase64Url, utf8Bytes } from '@ferretry/relay';
 import should from 'should';
-import type { ApiResponse } from '../../../src/lib/api/http.ts';
+import { type ApiResponse, BodyTooLargeError } from '../../../src/lib/api/http.ts';
 import {
   decodeTunnelClientMessage,
   encodeTunnelMessage,
@@ -113,6 +113,15 @@ describe('the session tunnel envelope', () => {
     should(await built.text()).equal('{"name":"x"}');
     // Assert — a request with no body reads as an empty one rather than throwing on demand.
     should(await tunnelApiRequest({ method: 'GET', path: '/v1/health' }, DEVICE, 's1').text()).equal('');
+  });
+
+  it('should refuse to hand a route more of a tunnelled body than the route said it would read', async () => {
+    // A route bounds its own body; a tunnelled body is already in memory, but answering the bound the same
+    // way a socket body does keeps a route from parsing more than it ever accepts over HTTP.
+    const built = tunnelApiRequest({ method: 'POST', path: '/v1/sessions', body: '{"name":"é"}' }, DEVICE, 's1');
+
+    should(await built.text(13)).equal('{"name":"é"}');
+    await should(built.text(12)).be.rejectedWith(BodyTooLargeError);
   });
 
   it('should stamp a direct session with where its socket arrived, and a stream with its claim', () => {

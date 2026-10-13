@@ -435,6 +435,7 @@ describe('the carrier router', () => {
       answer?: Parameters<typeof autoDial>[1];
       network?: DaemonCarrierRouterOptions['network'];
       deviceKey?: DaemonCarrierRouterOptions['deviceKey'];
+      presence?: DaemonCarrierRouterOptions['presence'];
     } = {},
   ) => {
     const identity = await newDaemonIdentity();
@@ -453,6 +454,7 @@ describe('the carrier router', () => {
       dial: carriers.dial,
       heartbeat: () => () => undefined,
       network: options.network ?? unreachable,
+      ...(options.presence === undefined ? {} : { presence: options.presence }),
     });
     router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
     return { router, daemon, identity, carriers, auto: carriers.live };
@@ -464,6 +466,20 @@ describe('the carrier router', () => {
     should(carriers.hosts()).eql([DIRECT_HOST]);
     should(router.choice(daemon.daemonId)?.reason).equal('Connected over direct.');
     should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/projects', query: [['page', '2']] }]);
+  });
+
+  it('should mark a request presence only while a person is at the device', async () => {
+    // The daemon counts only a marked request as use, so a tab renewing by itself never resets the idle
+    // clock. The mark is read per request, not once per session.
+    let present = true;
+    const { router, auto } = await routerFor({ presence: () => present });
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+    present = false;
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+    should(auto.requests).eql([
+      { t: 'req', id: 1, method: 'GET', path: '/v1/projects', presence: true },
+      { t: 'req', id: 2, method: 'GET', path: '/v1/projects' },
+    ]);
   });
 
   it('should treat a status as an answer, not as a carrier failure', async () => {
@@ -1034,7 +1050,7 @@ describe('the carrier router', () => {
 });
 
 describe('the carrier router meeting a daemon from before device keys', () => {
-  const outdated = async (healthz: () => Promise<Response>) => {
+  const outdated = async (healthz: () => Promise<Response>, reach: Reach = relayOnly) => {
     const identity = await newDaemonIdentity();
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
@@ -1042,7 +1058,7 @@ describe('the carrier router meeting a daemon from before device keys', () => {
       deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
-    const carriers = carriersFor(identity, relayOnly);
+    const carriers = carriersFor(identity, reach);
     const asked: string[] = [];
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,
@@ -1058,9 +1074,25 @@ describe('the carrier router meeting a daemon from before device keys', () => {
     return { router, daemon, carriers, asked };
   };
 
-  it('should name the daemon as the side to update when its liveness route speaks an older session', async () => {
+  /*
+   * THE SIGNAL IS NOT A VERDICT. The liveness read is plaintext and unauthenticated: anybody on the
+   * direct path — or an older daemon at the same private address on another network — can answer it.
+   * So a working rendezvous still carries the request, and the sentence is only for a walk that
+   * reached nothing at all.
+   */
+  it('should keep walking past a liveness answer that looks old, and carry the request over a relay that works', async () => {
     const { router, daemon, carriers, asked } = await outdated(
       async () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 }),
+    );
+    should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
+    should(asked).eql([`${DAEMON_URL}/healthz`]);
+    should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example']);
+  });
+
+  it('should name the daemon as the side to update when nothing worked and it looked old', async () => {
+    const { router, daemon, carriers } = await outdated(
+      async () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 }),
+      () => 'refuse',
     );
     const refusal = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
       () => undefined,
@@ -1068,21 +1100,20 @@ describe('the carrier router meeting a daemon from before device keys', () => {
     );
     should(refusal).be.instanceof(DaemonOutdatedError);
     should((refusal as Error).message).equal(OLDER_DAEMON_SENTENCE);
-    should(asked).eql([`${DAEMON_URL}/healthz`]);
-    // Every carrier reaches the same old machine, so no relay is tried after it.
-    should(carriers.hosts()).eql([DIRECT_HOST]);
+    should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example']);
   });
 
   it('should say the same for a stream, which walks the same set', async () => {
     const { router, daemon } = await outdated(
       async () => new Response(JSON.stringify({ status: 'ok', sessionProtocol: 'ferretry-relay/1' }), { status: 200 }),
+      () => 'refuse',
     );
     await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
       DaemonOutdatedError,
     );
   });
 
-  it('should name the daemon as old, once, when a rendezvous session meets the previous dialect', async () => {
+  it('should name the daemon as old when every rendezvous meets the previous dialect', async () => {
     const identity = await newDaemonIdentity();
     const second: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay-two.example', operator: 'self' };
     const daemon = daemonConnection({
@@ -1117,12 +1148,37 @@ describe('the carrier router meeting a daemon from before device keys', () => {
     );
     should(request).be.instanceof(DaemonOutdatedError);
     should((request as Error).message).equal(OLDER_DAEMON_SENTENCE);
-    // The same old machine is behind every rendezvous, so the second one is never dialled.
-    should(dialled).eql([DIRECT_HOST, 'relay.example']);
+    // Every carrier is still tried: an unauthenticated refusal stops nothing.
+    should(dialled).eql([DIRECT_HOST, 'relay.example', 'relay-two.example']);
 
     await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
       DaemonOutdatedError,
     );
+  });
+
+  it('should carry on past a spoofed old-daemon refusal on one rendezvous to another that works', async () => {
+    const identity = await newDaemonIdentity();
+    const second: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay-two.example', operator: 'self' };
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY, second],
+    });
+    const older = olderDaemonDial();
+    const live = carriersFor(identity, url => (url.hostname === 'relay-two.example' ? 'live' : 'refuse'));
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      heartbeat: () => () => undefined,
+      network: unreachable,
+      // The first rendezvous — or anybody on it — sends the words an old daemon uses, before any key.
+      dial: url => (new URL(url).hostname === 'relay.example' ? older.dial() : live.dial(url)),
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
+    should(older.sockets).have.length(1);
   });
 
   it('should carry on to the relay when the liveness route names this session, fails, or says nothing usable', async () => {

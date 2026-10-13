@@ -46,6 +46,7 @@
 import {
   ACCESS_LEASE_SECONDS,
   ACCESS_RENEW_LEAD_SECONDS,
+  MAX_SESSION_SECONDS,
   MAX_TUNNEL_BODY_BYTES,
   OLDER_APP_SENTENCE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
@@ -370,6 +371,19 @@ interface IncomingBody {
 }
 
 /**
+ * A valid Ed25519 public key nobody holds the private half of here (RFC 8032, test 1), as SPKI.
+ *
+ * Verified against when a claim names an unknown device, so an unknown id and a known one cost the same.
+ */
+const UNKNOWN_DEVICE_KEY = toBase64Url(
+  Uint8Array.from([
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, 0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a,
+    0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a, 0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02,
+    0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+  ]),
+);
+
+/**
  * One record waiting for credit, and whether it is a stream's PAYLOAD.
  *
  * The flag exists for one decision and is worth the field. When a stream closes because its viewer
@@ -379,6 +393,7 @@ interface IncomingBody {
  * an answer, an acceptance or a sealed outcome that vanished would be a session that ended saying
  * something different from what happened.
  */
+
 interface PendingRecord {
   readonly plaintext: Uint8Array;
   readonly payload: boolean;
@@ -394,6 +409,8 @@ interface LinkSession {
   device: SessionDevice | undefined;
   /** When this session's authority ends unless the device renews it, and the timers that enforce it. */
   leaseExpiresAtMs: number;
+  /** When the device first proved itself here; the session cap is counted from it. */
+  provedAtMs: number | undefined;
   lease: RelayLinkTimer | undefined;
   renewal: RelayLinkTimer | undefined;
   /** The single-use nonce of the renewal this session is waiting on, if one is outstanding. */
@@ -621,6 +638,7 @@ export class RelayLink {
       transcript: undefined,
       device: undefined,
       leaseExpiresAtMs: 0,
+      provedAtMs: undefined,
       lease: undefined,
       renewal: undefined,
       renewNonce: undefined,
@@ -765,6 +783,15 @@ export class RelayLink {
       await this.#credential(session, message);
       return;
     }
+    // THE LEASE IS CHECKED HERE TOO, not only by its timer: under a starved event loop a record already
+    // queued behind a late timer would otherwise be served after the authority it needed had ended.
+    if (
+      (session.phase === 'serving' || session.phase === 'streaming') &&
+      this.deps.clock.now() >= session.leaseExpiresAtMs
+    ) {
+      this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
+      return;
+    }
     if (session.phase === 'streaming') {
       await this.#onStreamRecord(session, message);
       return;
@@ -814,8 +841,9 @@ export class RelayLink {
    *
    * A device whose key signed this session's transcript, or the session ends. The refusal is `4403`
    * and it is deliberately the same for an unknown device, a revoked one, an idle-expired one and a
-   * proof that does not verify — and not distinguishable on the wire from any other close a relay can
-   * see: an operator watching the carrier learns that a session ended, not why.
+   * proof that does not verify, and an unknown id is verified against a dummy key so it costs what a known
+   * one does. The CODE is not secret: a close travels in the clear, so a relay operator sees `4403` and
+   * `4441` and learns when a device was refused or stopped renewing — never which device, nor why.
    */
   async #authenticate(session: LinkSession, claim: RelayTunnelAuth): Promise<void> {
     if (!(await this.#prove(session, 'auth', claim))) return;
@@ -842,15 +870,17 @@ export class RelayLink {
     session.phase = 'proving';
     const transcript = session.transcript;
     const key = await this.deps.devices.deviceKey(claim.deviceId);
-    const verified =
-      key !== undefined &&
+    // An unknown id is verified too — against a fixed key nobody holds — so the refusal costs what a
+    // known id's does and the time it takes says nothing about which ids exist.
+    const checked =
       transcript !== undefined &&
       (await verifyDeviceProof(
         this.deps.crypto,
-        key,
+        key ?? UNKNOWN_DEVICE_KEY,
         claim.proof,
         deviceAuthMessage(transcript, kind, claim.deviceId, claim.appSession),
       ));
+    const verified = key !== undefined && checked;
     if (!this.#live(session)) return false;
     if (!verified) {
       this.#lastRefusal = 'a client presented a device this daemon does not accept';
@@ -865,7 +895,8 @@ export class RelayLink {
     // A device unpaired a moment ago is ended by the registry before `track` returns.
     if (!this.#live(session)) return false;
     session.device = { deviceId: claim.deviceId, appSession: claim.appSession };
-    this.deps.devices.seen(claim.deviceId);
+    // NOT `seen`: opening a session is something a background tab does by itself. The idle clock moves
+    // only on a request the page marked as a person's (`#serve`).
     this.#armLease(session);
     return true;
   }
@@ -881,12 +912,18 @@ export class RelayLink {
   #armLease(session: LinkSession): void {
     session.lease?.cancel();
     session.renewal?.cancel();
+    session.renewal = undefined;
     session.renewNonce = undefined;
-    session.leaseExpiresAtMs = this.deps.clock.now() + ACCESS_LEASE_SECONDS * 1_000;
-    session.renewal = this.deps.scheduler.after((ACCESS_LEASE_SECONDS - ACCESS_RENEW_LEAD_SECONDS) * 1_000, () =>
-      this.#askRenewal(session),
-    );
-    session.lease = this.deps.scheduler.after(ACCESS_LEASE_SECONDS * 1_000, () => {
+    const now = this.deps.clock.now();
+    session.provedAtMs ??= now;
+    // CAPPED, so silent renewal cannot keep one session alive forever. The last lease ends AT the cap
+    // and is not renewed; the browser opens a fresh session, which needs a fresh proof.
+    const capAtMs = session.provedAtMs + MAX_SESSION_SECONDS * 1_000;
+    session.leaseExpiresAtMs = Math.min(now + ACCESS_LEASE_SECONDS * 1_000, capAtMs);
+    const renewInMs = session.leaseExpiresAtMs - ACCESS_RENEW_LEAD_SECONDS * 1_000 - now;
+    if (session.leaseExpiresAtMs < capAtMs && renewInMs > 0)
+      session.renewal = this.deps.scheduler.after(renewInMs, () => this.#askRenewal(session));
+    session.lease = this.deps.scheduler.after(session.leaseExpiresAtMs - now, () => {
       if (!this.#live(session)) return;
       this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
     });
@@ -896,7 +933,7 @@ export class RelayLink {
     if (!this.#live(session) || (session.phase !== 'serving' && session.phase !== 'streaming')) return;
     const nonce = toBase64Url(this.deps.crypto.randomBytes(NONCE_BYTES));
     session.renewNonce = nonce;
-    this.#queue(session, {
+    this.#queueFirst(session, {
       t: 'renew',
       protocol: SESSION_PROTOCOL_ID,
       nonce,
@@ -929,7 +966,8 @@ export class RelayLink {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
       return;
     }
-    this.deps.devices.seen(device.deviceId);
+    // A renewal is the tab answering by itself, not a person: it extends THIS session and never the
+    // device's idle clock.
     this.#armLease(session);
   }
 
@@ -945,6 +983,8 @@ export class RelayLink {
       return;
     }
     session.answered.add(request.id);
+    // The ONE thing that keeps a device from idling out: a request the page marked as a person's.
+    if (request.presence === true) this.deps.devices.seen(session.device.deviceId);
     const first = request.body ?? '';
     if (request.more !== true) {
       await this.#dispatch(session, request, first);
@@ -1036,7 +1076,9 @@ export class RelayLink {
   async #redeemPairing(session: LinkSession, request: RelayTunnelPair): Promise<void> {
     session.phase = 'concluding';
     const transcript = session.transcript;
-    const proven =
+    // Handed over rather than run here: the pairing service runs it only after its per-peer admission,
+    // so a limited stranger cannot make this daemon verify a signature first.
+    const prove = async (): Promise<boolean> =>
       transcript !== undefined &&
       (await verifyDeviceProof(
         this.deps.crypto,
@@ -1050,7 +1092,7 @@ export class RelayLink {
         ? { kind: 'relay' }
         : { kind: 'direct', rateLimitKey: arrival.clientAddress ?? `direct-session:${session.sessionId.text}` };
     const result = await this.deps.pairing.redeemInSession(
-      { code: request.code, deviceName: request.deviceName, deviceKey: request.deviceKey, proven },
+      { code: request.code, deviceName: request.deviceName, deviceKey: request.deviceKey, prove },
       carrier,
     );
     this.#queue(
@@ -1390,6 +1432,20 @@ export class RelayLink {
    */
   #queue(session: LinkSession, message: RelayTunnelDaemonMessage, payload = false): void {
     session.waiting.push({ plaintext: encodeTunnelMessage(message), payload });
+    this.#flush(session);
+  }
+
+  /**
+   * Queue one CONTROL record ahead of everything waiting — behind only the record a seal has already
+   * captured, which is no longer the queue's to reorder.
+   *
+   * For the renewal: behind up to a window of terminal output, a slow but healthy viewer could fail to
+   * see it inside its two minutes and lose an open terminal to a lease it would gladly have renewed.
+   */
+  #queueFirst(session: LinkSession, message: RelayTunnelDaemonMessage): void {
+    const record: PendingRecord = { plaintext: encodeTunnelMessage(message), payload: false };
+    const at = session.sealing !== undefined && session.waiting[0] === session.sealing ? 1 : 0;
+    session.waiting.splice(at, 0, record);
     this.#flush(session);
   }
 

@@ -116,6 +116,9 @@ describe('migrateSessionWithDaemon', () => {
           allowContextDowngrade: false,
         },
         'request-1',
+        async () => {
+          throw new Error('no client may be built for a crossed scope');
+        },
       ),
     ).rejects.toThrow('migration scope must belong to the requested daemon');
   });

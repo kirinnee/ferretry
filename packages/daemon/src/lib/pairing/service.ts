@@ -193,15 +193,18 @@ interface ActivePairing {
  * Typed at the boundary because the session layer already parsed a record to reach here — the code and
  * name are still checked below against the pairing API's own schema, which owns their bounds.
  *
- * `proven` is the session layer's verdict on the record's PROOF: whether the device signed this
- * session's transcript with the private half of `deviceKey`. It is decided there because only the
- * session holds the transcript; it is consumed here, as one more way for an attempt to be wrong.
+ * `prove` is the session layer's check of the record's PROOF: whether the device signed this session's
+ * transcript with the private half of `deviceKey`. It is the session's because only the session holds
+ * the transcript, and it is a CALLBACK rather than a verdict so that it runs here, AFTER the cheap
+ * per-peer admission: an Ed25519 verify is the expensive part of an unauthenticated attempt, and a
+ * stranger refused by the limiter must not get the daemon to do it first. Its answer is one more way
+ * for an attempt to be wrong.
  */
 export interface SessionPairingAttempt {
   readonly code: string;
   readonly deviceName: string;
   readonly deviceKey: string;
-  readonly proven: boolean;
+  readonly prove: () => Promise<boolean>;
 }
 
 /**
@@ -325,7 +328,7 @@ export class PairingService {
   private readonly compare: (left: string, right: string) => boolean;
   private active: ActivePairing | undefined;
   private readonly observations = new Map<PairingId, PairingCodeStatusResponse>();
-  /** The latest instant each device proved its key, ahead of the hourly copy on disk. */
+  /** The latest instant a person used each device, ahead of the hourly copy on disk. */
   readonly #seen = new Map<string, number>();
   /** Devices whose `lastSeenAt` is being written right now, so a burst writes it once. */
   readonly #touching = new Set<string>();
@@ -502,7 +505,9 @@ export class PairingService {
   }
 
   /**
-   * A device just proved its key. Advances `lastSeenAt`, writing it to disk at most once an hour.
+   * A person just used this device — a request the page marked `presence`, never an auth or a silent
+   * renewal, so an unattended tab cannot keep a device alive. Advances `lastSeenAt`, writing it to disk
+   * at most once an hour.
    *
    * The in-memory instant moves every time, so idle expiry is exact; the document only moves when the
    * persisted copy is an hour stale, so a busy phone is not a disk write per request. A failed write is
@@ -597,11 +602,14 @@ export class PairingService {
    */
   async redeemInSession(attempt: SessionPairingAttempt, carrier: PairingCarrier): Promise<PairingRedemption> {
     if (carrier.kind === 'direct' && !this.rateLimiter.admit(carrier.rateLimitKey)) return REFUSED;
+    // Run for every admitted attempt, whatever its code: verifying only when the code matched would
+    // make a right code measurably slower than a wrong one.
+    const proven = await attempt.prove();
     const parsed = PairingRequestSchema.safeParse({ code: attempt.code, deviceName: attempt.deviceName });
     const candidate = parsed.success ? parsed.data.code : attempt.code;
     const active = this.active;
     const matches = this.compare(candidate, active?.code ?? DUMMY_PAIRING_CODE);
-    const keyed = attempt.proven && DeviceKeySchema.safeParse(attempt.deviceKey).success;
+    const keyed = proven && DeviceKeySchema.safeParse(attempt.deviceKey).success;
     const now = this.options.clock.now();
 
     if (active === undefined) return REFUSED;
