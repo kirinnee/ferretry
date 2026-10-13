@@ -452,12 +452,18 @@ describe('pairing routes', () => {
     const proxied = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: true, body: full }),
     );
+    // Nor is a browser ON the host with the carrier's proof (B4): only the admin token is the owner.
+    const localBrowserFull = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', ...localBrowser, body: full }),
+    );
     const plain = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false }),
     );
 
     // Assert
-    should([atHost.status, remote.status, proxied.status, plain.status]).deepEqual([201, 403, 403, 201]);
+    should([atHost.status, remote.status, proxied.status, localBrowserFull.status, plain.status]).deepEqual([
+      201, 403, 403, 403, 201,
+    ]);
     should(jsonBody(remote).code).equal('grant_forbidden');
     should(subject.grantSets).deepEqual(['full', 'default']);
   });
