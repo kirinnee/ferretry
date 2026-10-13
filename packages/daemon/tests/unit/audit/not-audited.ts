@@ -16,8 +16,10 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/fleet/profiles/preview': 'a read with a body: previews a draft and writes nothing',
   'PATCH /v1/cgroups/config': 'resource limits on the host’s own sessions; not who may reach the machine',
   'POST /v1/gc': 'scratch cleanup of state the daemon owns; reaches nobody',
-  'POST /v1/projects': 'registers a working directory; governed by filesystem.configure and listed in the project table',
-  'POST /v1/worktrees': 'creates a worktree inside a registered project; removal is the destructive half and is audited',
+  'POST /v1/projects':
+    'registers a working directory; governed by filesystem.configure and listed in the project table',
+  'POST /v1/worktrees':
+    'creates a worktree inside a registered project; removal is the destructive half and is audited',
   'POST /v1/sessions': 'starts an agent; the session list and its journal are that history',
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/resume': 'drives an existing session; its journal records it',
@@ -51,7 +53,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/analytics/pricing/sync/preview': 'a read with a body: previews a price sync',
   'POST /v1/analytics/pricing/sync/apply': 'the cost table for usage reports; reaches nobody',
   'POST /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
-  'DELETE /v1/sessions/:sessionId/terminals/:terminalId': 'closes a terminal, which removes access rather than adding it',
+  'DELETE /v1/sessions/:sessionId/terminals/:terminalId':
+    'closes a terminal, which removes access rather than adding it',
   'POST /v1/learning/proposals/:id': 'accepts or declines a learning suggestion for a skill file; reaches nobody',
   'POST /v1/learning/run': 'starts a learning pass over transcripts the daemon already holds',
   'POST /v1/recommend': 'a read with a body: recommends a model for a task',

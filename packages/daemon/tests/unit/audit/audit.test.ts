@@ -142,7 +142,9 @@ describe('audit policy', () => {
     should(payload.body).equal(
       `A device calling itself “Pixel 8” (…dddddd) was paired with workstation over the relay at ${AT}. If that was not you, remove it in Settings.`,
     );
-    should(direct.body).startWith('A device calling itself “this computer” (…dddddd) was paired with workstation on the local network');
+    should(direct.body).startWith(
+      'A device calling itself “this computer” (…dddddd) was paired with workstation on the local network',
+    );
     should(payload.eventKey).equal(`device-paired:${DEVICE_ID}`);
     should('kind' in payload).be.false();
   });
@@ -314,7 +316,9 @@ describe('audit folding and bounds', () => {
     // Arrange / Act / Assert
     should(isKeptAuditEntry({ ...refusal, outcome: 'succeeded' })).be.true();
     should(isKeptAuditEntry(refusal)).be.false();
-    should(isKeptAuditEntry({ event: 'pairing.refused', actor: { kind: 'anonymous' }, outcome: 'succeeded' })).be.false();
+    should(
+      isKeptAuditEntry({ event: 'pairing.refused', actor: { kind: 'anonymous' }, outcome: 'succeeded' }),
+    ).be.false();
   });
 
   it('should write an over-long or control-character subject as <invalid> with its length', async () => {
@@ -630,7 +634,9 @@ describe('GET /v1/audit', () => {
     const { journal, log } = auditLog();
     for (const subject of ['one', 'two', 'three'])
       await log.record({ event: 'terminal.opened', actor: { kind: 'host' }, subject, outcome: 'succeeded' });
-    const api = await dispatcher(auditRoutes({ recent: async limit => await journal.recent(limit), flush: async () => undefined }));
+    const api = await dispatcher(
+      auditRoutes({ recent: async limit => await journal.recent(limit), flush: async () => undefined }),
+    );
 
     // Act
     const page = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '2']], headers: ADMIN }));
@@ -656,7 +662,9 @@ describe('GET /v1/audit', () => {
     });
     await grants.refresh();
     const api = new ApiDispatcher(
-      new ApiRouter(auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined })),
+      new ApiRouter(
+        auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined }),
+      ),
       CREDENTIALS,
       grants,
     );
@@ -675,7 +683,9 @@ describe('GET /v1/audit', () => {
     });
     await grants.refresh();
     const api = new ApiDispatcher(
-      new ApiRouter(auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined })),
+      new ApiRouter(
+        auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined }),
+      ),
       CREDENTIALS,
       grants,
     );
@@ -1004,7 +1014,9 @@ function socketContext(params: Record<string, string>, device = true) {
   return {
     request: request({ path: '/x' }),
     params: new Map(Object.entries(params)),
-    ...(device ? { credential: { kind: 'authenticated' as const, tokenClass: 'device' as const, deviceId: DEVICE_ID } } : {}),
+    ...(device
+      ? { credential: { kind: 'authenticated' as const, tokenClass: 'device' as const, deviceId: DEVICE_ID } }
+      : {}),
   };
 }
 
@@ -1015,9 +1027,13 @@ describe('auditedSocketRoutes', () => {
     let closed = 0;
     let opened = 0;
     const table = socketTable(async () => async () => ({
-      open: async () => void (opened += 1),
+      open: async () => {
+        opened += 1;
+      },
       fromClient: frame => void received.push(frame),
-      close: () => void (closed += 1),
+      close: () => {
+        closed += 1;
+      },
     }));
     const terminal = table.wrapped[0];
 
@@ -1033,7 +1049,9 @@ describe('auditedSocketRoutes', () => {
 
     // Assert
     should([opened, closed, received.length]).deepEqual([1, 1, 3]);
-    should(records(table.journal).map(record => [record.event, record.subject, record.actor.deviceName, record.detail])).deepEqual([
+    should(
+      records(table.journal).map(record => [record.event, record.subject, record.actor.deviceName, record.detail]),
+    ).deepEqual([
       ['terminal.opened', 'term-1', 'Pixel 8', { mode: 'attach' }],
       ['terminal.input', 'term-1', 'Pixel 8', undefined],
     ]);
@@ -1051,9 +1069,9 @@ describe('auditedSocketRoutes', () => {
 
     // Assert
     await should(refused).be.rejectedWith({ status: 403 });
-    should(records(table.journal).map(record => [record.event, record.subject, record.outcome, record.actor])).deepEqual([
-      ['browser.opened', 's-1', 'refused', { kind: 'anonymous' }],
-    ]);
+    should(
+      records(table.journal).map(record => [record.event, record.subject, record.outcome, record.actor]),
+    ).deepEqual([['browser.opened', 's-1', 'refused', { kind: 'anonymous' }]]);
   });
 
   it('should pass a browser attach through without wrapping its frames, and leave the fleet feed alone', async () => {
@@ -1088,7 +1106,9 @@ describe('auditedSocketRoutes', () => {
     );
 
     // Act
-    const handler = await (await route?.accept(socketContext({ sessionId: 's', terminalId: 't' })))?.(new FakeDownstream());
+    const handler = await (
+      await route?.accept(socketContext({ sessionId: 's', terminalId: 't' }))
+    )?.(new FakeDownstream());
     handler?.fromClient(new Uint8Array([1]));
     await Bun.sleep(0);
 

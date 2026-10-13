@@ -39,7 +39,10 @@ export const browserDevicesLookedStorage = (): DevicesLookedStorage | undefined 
 };
 
 /** The stored set for one daemon, or `null` when there is none or it cannot be read. */
-export function readDevicesSeen(storage: DevicesLookedStorage | undefined, daemonId: DaemonId): ReadonlySet<string> | null {
+export function readDevicesSeen(
+  storage: DevicesLookedStorage | undefined,
+  daemonId: DaemonId,
+): ReadonlySet<string> | null {
   try {
     const raw = storage?.getItem(devicesLookedKey(daemonId)) ?? null;
     if (raw === null) return null;

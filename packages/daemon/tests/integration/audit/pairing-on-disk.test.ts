@@ -63,7 +63,10 @@ describe('a real pairing, read back off the disk', () => {
       needles.push(code);
       const wrong = `${code.slice(0, -1)}${code.endsWith('A') ? 'B' : 'A'}`;
       const name = carrier === 'direct' ? 'Pixel 8' : 'Tablet';
-      const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+      const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+        'sign',
+        'verify',
+      ])) as unknown as CryptoKeyPair;
       const deviceKey = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
       keys.push(deviceKey);
       const attempt = (value: string) =>
@@ -91,10 +94,11 @@ describe('a real pairing, read back off the disk', () => {
     // Both stores were written: the pairings to the kept one, the refusals to the general one.
     should(audited.sort()).deepEqual(['audit-kept.jsonl', 'audit.jsonl']);
     should(keys).have.length(2);
-    for (const needle of [...needles, ...keys]) should({ needle, leaked: written.includes(needle) }).deepEqual({
-      needle,
-      leaked: false,
-    });
+    for (const needle of [...needles, ...keys])
+      should({ needle, leaked: written.includes(needle) }).deepEqual({
+        needle,
+        leaked: false,
+      });
     const paired = reading.records.filter(record => record.event === 'device.paired');
     should(paired.map(record => [record.actor.deviceName, record.detail?.carrier])).deepEqual([
       ['Tablet', 'relay'],

@@ -26,7 +26,11 @@ const alpha = daemonConnection({
   baseUrl: 'https://alpha.example.test',
   deviceId: 'fy_device_id_alpha00000000000000000',
 });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'fy_device_id_beta000000000000000000' });
+const beta = daemonConnection({
+  daemonId: 'beta',
+  baseUrl: 'https://beta.example.test',
+  deviceId: 'fy_device_id_beta000000000000000000',
+});
 
 const record = (overrides: Partial<AuditRecord> = {}): AuditRecord => ({
   at: new Date(NOW - 5 * 60_000).toISOString(),
@@ -179,9 +183,7 @@ describe('Settings › Security', () => {
           })
         : { records: [record({ event: 'terminal.opened' })], unreadable: 0 },
     );
-    const shown = await mount(
-      <SecuritySurface connection={alpha} createClient={createClient} now={now} />,
-    );
+    const shown = await mount(<SecuritySurface connection={alpha} createClient={createClient} now={now} />);
     expect(shown.container.textContent).toContain('Reading this machine’s security log');
     await shown.render(<SecuritySurface connection={beta} createClient={createClient} now={now} />);
     await settled(shown.container, '[data-security-log]');
@@ -191,10 +193,7 @@ describe('Settings › Security', () => {
       'terminal.opened',
     );
     window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
-    expect(seen).toEqual([
-      { daemonId: alpha.daemonId },
-      { daemonId: beta.daemonId },
-    ]);
+    expect(seen).toEqual([{ daemonId: alpha.daemonId }, { daemonId: beta.daemonId }]);
     await shown.unmount();
   });
 

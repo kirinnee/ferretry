@@ -25,7 +25,11 @@ const MINUTE = 60_000;
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
 
 const record = (daemonId: string, label?: string): DaemonConnectionRecord => ({
-  ...daemonConnection({ daemonId, baseUrl: `https://${daemonId}.example.test`, deviceId: `fy_device_id_${daemonId.padEnd(22, "0")}` }),
+  ...daemonConnection({
+    daemonId,
+    baseUrl: `https://${daemonId}.example.test`,
+    deviceId: `fy_device_id_${daemonId.padEnd(22, '0')}`,
+  }),
   ...(label === undefined ? {} : { label }),
   pairedAt: 0,
   lastSelectedAt: 0,
@@ -422,12 +426,7 @@ describe('the new-device notice', () => {
       },
     };
     const shown = await mount(
-      <NewDeviceNotices
-        connections={[alpha]}
-        clients={recording}
-        storage={memory(seenAlpha())}
-        now={now}
-      />,
+      <NewDeviceNotices connections={[alpha]} clients={recording} storage={memory(seenAlpha())} now={now} />,
     );
     await until(
       () => shown.container.querySelector<HTMLButtonElement>('[data-new-device-remove]')?.disabled === false,

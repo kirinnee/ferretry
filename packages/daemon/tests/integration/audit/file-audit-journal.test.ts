@@ -244,7 +244,12 @@ describe('the security log on disk', () => {
     const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
     await grants.refresh();
     const api = new ApiDispatcher(
-      new ApiRouter(auditedRoutes({ log, failures: { auditWriteFailed: () => undefined }, deviceName: async () => 'Pixel 8' }, routes)),
+      new ApiRouter(
+        auditedRoutes(
+          { log, failures: { auditWriteFailed: () => undefined }, deviceName: async () => 'Pixel 8' },
+          routes,
+        ),
+      ),
       { admin: 'admin-secret', warden: 'warden-secret' },
       grants,
     );

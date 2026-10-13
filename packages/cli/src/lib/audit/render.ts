@@ -55,7 +55,7 @@ export function describeActor(actor: AuditActor): string {
 }
 
 /** The record's short facts as `key=value` pairs, in a stable order: the carrier, a count, a mode. */
-export function describeDetail(record: AuditRecord): string {
+function describeDetail(record: AuditRecord): string {
   if (record.detail === undefined) return '';
   const pairs = Object.keys(record.detail)
     .sort()

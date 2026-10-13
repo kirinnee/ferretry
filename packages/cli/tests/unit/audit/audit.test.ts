@@ -68,7 +68,9 @@ describe('audit render', () => {
     expect(describeActor({ kind: 'host' })).toBe('this computer');
     expect(describeActor({ kind: 'warden' })).toBe('a supervising agent');
     expect(describeActor({ kind: 'anonymous' })).toBe('someone who is not paired');
-    expect(describeActor({ kind: 'device', deviceId: 'dev-000001', deviceName: 'Pixel' })).toBe('device “Pixel” (…000001)');
+    expect(describeActor({ kind: 'device', deviceId: 'dev-000001', deviceName: 'Pixel' })).toBe(
+      'device “Pixel” (…000001)',
+    );
     expect(describeActor({ kind: 'device', deviceId: 'dev-000001' })).toBe('device …000001');
     expect(describeActor({ kind: 'device' })).toBe('a paired device');
   });

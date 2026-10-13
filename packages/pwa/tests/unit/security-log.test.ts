@@ -52,7 +52,11 @@ describe('security log words', () => {
   });
 
   it('never lets a chosen name read as this computer', () => {
-    const words = auditActorWords({ kind: 'device', deviceId: 'fy_device_id_abcdef123456', deviceName: 'this computer' });
+    const words = auditActorWords({
+      kind: 'device',
+      deviceId: 'fy_device_id_abcdef123456',
+      deviceName: 'this computer',
+    });
     expect(words).not.toBe(auditActorWords({ kind: 'host' }));
     expect(words).toBe('device “this computer” (…123456)');
   });
@@ -116,7 +120,10 @@ describe('devices this browser has not seen', () => {
     // A browser clock a year off changes nothing: only the createdAt values on the list are compared.
     const later: PairedDevicesView = {
       ...view,
-      devices: view.devices.map(entry => ({ ...entry, createdAt: new Date(Date.parse(entry.createdAt) + 365 * DAY).toISOString() })),
+      devices: view.devices.map(entry => ({
+        ...entry,
+        createdAt: new Date(Date.parse(entry.createdAt) + 365 * DAY).toISOString(),
+      })),
     };
     expect([...firstLookSeen(later)]).toEqual(['old']);
     expect([...firstLookSeen({ ...view, devices: [device('bad', 'x')] })]).toEqual(['bad']);
@@ -133,6 +140,8 @@ describe('devices this browser has not seen', () => {
       `A device calling itself “Pixel 8” (…123456) was paired with workstation 5 minutes ago (${absoluteWords(pixel.createdAt)}).`,
     );
     expect(newDeviceNoticeText({ ...pixel, pairedOver: 'direct' }, 'w', NOW)).toContain('on the local network');
-    expect(removedDeviceText(pixel, 'workstation')).toBe('“Pixel 8” (…123456) was removed. It can no longer reach workstation.');
+    expect(removedDeviceText(pixel, 'workstation')).toBe(
+      '“Pixel 8” (…123456) was removed. It can no longer reach workstation.',
+    );
   });
 });

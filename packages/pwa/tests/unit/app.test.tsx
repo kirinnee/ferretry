@@ -2981,7 +2981,11 @@ describe('the settings route composition', () => {
       ).click(),
     );
     await settle();
-    expect(probes().map(read => String(read.daemonId)).sort()).toEqual([ALPHA, BETA].sort());
+    expect(
+      probes()
+        .map(read => String(read.daemonId))
+        .sort(),
+    ).toEqual([ALPHA, BETA].sort());
 
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),

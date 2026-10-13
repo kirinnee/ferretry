@@ -99,7 +99,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseNames: 'name',
     detail: { action: 'put' },
   },
-  { method: 'DELETE', path: '/v1/secrets/:name', event: 'secrets.changed', subject: 'name', detail: { action: 'delete' } },
+  {
+    method: 'DELETE',
+    path: '/v1/secrets/:name',
+    event: 'secrets.changed',
+    subject: 'name',
+    detail: { action: 'delete' },
+  },
   { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
   { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
   {
@@ -157,8 +163,8 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
         // A record that throws would turn a request that already WORKED into a 500 from here, and the
         // person would retry something that happened. `AuditLog` already reports its own failures; this
         // catches what is left — a device-name lookup, a sink that is not an `AuditLog`.
-        await record(subsystem, context, rule, { status, body, subject, subjectName }).catch(
-          (error: unknown) => subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
+        await record(subsystem, context, rule, { status, body, subject, subjectName }).catch((error: unknown) =>
+          subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
         );
       }
     },

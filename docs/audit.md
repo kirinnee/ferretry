@@ -13,8 +13,8 @@ design (`docs/design/zero-trust.md` on `feat/zero-trust`). The wire contract is
     (`AUDIT_KEPT_EVENTS`: pairings, revocations, key rotations, grant, fleet, secret and security
     changes, secrets used, terminals opened and typed into).
   - `audit.jsonl` — the **general** store: everything else, refusals and failures included.
-  A stranger who can only produce refusals therefore can only rotate the general store; the history
-  of who was paired and what changed survives in the kept one.
+    A stranger who can only produce refusals therefore can only rotate the general store; the history
+    of who was paired and what changed survives in the kept one.
 - One `O_APPEND` write per record, synced, mode `0600`. Every open is `O_NOFOLLOW | O_NONBLOCK` and is
   followed by an `fstat` of the handle: anything but a regular file with exactly one link is refused,
   so a FIFO cannot hang the daemon and a hard link cannot redirect the log.
@@ -54,25 +54,25 @@ actor phrases (`this computer`, `a supervising agent`, …).
 
 ## What is recorded today
 
-| Event                  | Where it is caught                                                        |
-| ---------------------- | ------------------------------------------------------------------------- |
-| `device.paired`        | `AuditedPairingService.onGranted` — direct and relayed, with the carrier  |
-| `pairing.refused`      | `AuditedPairingService` — folded per carrier                              |
-| `pairing.code-minted`  | `POST /v1/pair/code`                                                      |
-| `pairing.code-revoked` | `DELETE /v1/pair/code/:pairingId`                                         |
-| `device.revoked`       | `DELETE /v1/pair/devices/:deviceId`                                       |
-| `push.changed`         | push subscription enrol and remove                                        |
-| `grants.changed`       | `PATCH /v1/grants`                                                        |
-| `security.changed`     | operator password set, operator unlock                                    |
+| Event                  | Where it is caught                                                                |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `device.paired`        | `AuditedPairingService.onGranted` — direct and relayed, with the carrier          |
+| `pairing.refused`      | `AuditedPairingService` — folded per carrier                                      |
+| `pairing.code-minted`  | `POST /v1/pair/code`                                                              |
+| `pairing.code-revoked` | `DELETE /v1/pair/code/:pairingId`                                                 |
+| `device.revoked`       | `DELETE /v1/pair/devices/:deviceId`                                               |
+| `push.changed`         | push subscription enrol and remove                                                |
+| `grants.changed`       | `PATCH /v1/grants`                                                                |
+| `security.changed`     | operator password set, operator unlock                                            |
 | `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install |
-| `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)        |
-| `terminal.input`       | keystroke frames on a terminal stream — counted, never their bytes        |
-| `browser.opened`       | browser sign-in window, browser control, and every browser stream attach  |
-| `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output          |
-| `secrets.changed`      | secret put and delete — the name only                                     |
-| `warden.configured`    | `PATCH /v1/warden/config`                                                 |
-| `warden.ran`           | `POST /v1/warden/run`                                                     |
-| `worktree.removed`     | `POST /v1/worktrees/remove`                                               |
+| `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                |
+| `terminal.input`       | keystroke frames on a terminal stream — counted, never their bytes                |
+| `browser.opened`       | browser sign-in window, browser control, and every browser stream attach          |
+| `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                  |
+| `secrets.changed`      | secret put and delete — the name only                                             |
+| `warden.configured`    | `PATCH /v1/warden/config`                                                         |
+| `warden.ran`           | `POST /v1/warden/run`                                                             |
+| `worktree.removed`     | `POST /v1/worktrees/remove`                                                       |
 
 Routes are recorded by decorating the finished route and socket tables (`auditedRoutes` and
 `auditedSocketRoutes` in `packages/daemon/src/lib/audit/routes.ts`), so a relayed request is recorded

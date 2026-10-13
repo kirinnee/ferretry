@@ -192,7 +192,11 @@ describe('notification policy', () => {
 
     // Assert
     should(generic).containDeep({ kind: 'question', title: 'Agent “Release agent”', tag: 'notify-session-1' });
-    should(explicit).containDeep({ kind: 'failed', title: 'Agent “Release agent”: Deploy failed', tag: 'notify-session-1' });
+    should(explicit).containDeep({
+      kind: 'failed',
+      title: 'Agent “Release agent”: Deploy failed',
+      tag: 'notify-session-1',
+    });
     should(automatic).containDeep({
       eventKey: 'attention-raised',
       kind: 'attention',
