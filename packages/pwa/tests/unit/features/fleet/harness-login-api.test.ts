@@ -9,6 +9,7 @@ import {
   readCredentialSignIn,
   startCredentialSignIn,
   submitCredentialSignInCode,
+  switchCredentialSignInToLink,
 } from '../../../../src/features/fleet/harness-login-api.ts';
 import { CLAUDE_CREDENTIAL_ID, claudeFlow } from './harness-login-support.ts';
 
@@ -71,6 +72,11 @@ describe('signing in a credential', () => {
         async client => await submitCredentialSignInCode(client, flow.flowId, 'x', TOKEN),
         'POST',
       ],
+      [
+        { outcome: 'accepted', flow },
+        async client => await switchCredentialSignInToLink(client, flow.flowId, TOKEN),
+        'POST',
+      ],
     ];
     for (const [answer, call, method] of cases) {
       const { client, calls } = clientFor(answer);
@@ -123,5 +129,17 @@ describe('signing in a credential', () => {
     const { client } = clientFor(claudeFlow('starting'));
 
     await expect(startCredentialSignIn(client, { credentialId: 'Not A Slug' })).rejects.toThrow();
+  });
+});
+
+describe('switchCredentialSignInToLink', () => {
+  it('asks the running flow for a link, in the body, with nothing else in it', async () => {
+    const { client, calls } = clientFor({ outcome: 'refused', reason: 'Claude Code has one way to sign in' });
+
+    const outcome = await switchCredentialSignInToLink(client, 'flow-one');
+
+    expect(outcome).toEqual({ outcome: 'refused', reason: 'Claude Code has one way to sign in' });
+    expect(calls[0]?.path).toBe(`${FLEET_LOGIN_PATH}/flow-one`);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ method: 'link' });
   });
 });

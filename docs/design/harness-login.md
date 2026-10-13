@@ -205,6 +205,8 @@ One flow at a time per identity, started and read over HTTP, with the harness do
 3. **The human authorises anywhere.** Their own phone, their own laptop, their own browser.
 4. **Finish.**
    - **Codex** needs no return trip: a device grant completes at the provider and the child exits.
+     When the account has device codes turned off, Codex's ordinary browser login takes over, and its
+     return trip is the ADDRESS the browser ends on — see §4.2b.
    - **Claude** has no device grant, but its login already degrades to "print a URL, read a pasted
      code from stdin" — verified by reading the binary, `claude-code` 2.1.220
      (`docs/migration/surveys/harness-login-flows.md:36-61`). The pasted callback URL is submitted
@@ -346,6 +348,64 @@ code alone would kill working accounts.
 Neither probe is built here — see §6 — and both are written down so that whoever builds one starts from
 the trap rather than from the endpoint.
 
+### 4.2b Codex's link sign-in, for accounts that turn device codes off
+
+A ChatGPT account or workspace can disable device-code sign-in. Then `codex login --device-auth` fails
+before it prints a code, and without a second way in, signing Codex in from a browser is impossible.
+The second way is Codex's own ordinary browser login, `codex login` with no flag, run by the daemon
+with piped stdio exactly as Claude's `auth login` is.
+
+**Measured, not assumed** (codex-cli 0.145.0 pinned, and 0.156.1; temporary `CODEX_HOME`; no login
+completed; full notes in the account-model measured-facts file):
+
+- It prints, on **stderr**, `Starting local login server on http://localhost:1455.` and an
+  `https://auth.openai.com/oauth/authorize?…` URL whose `redirect_uri` is
+  `http://localhost:1455/auth/callback`, with a PKCE `code_challenge` and a `state`. Parameter order
+  differs between versions, so the daemon parses the query and never matches positions.
+- Its listener binds `127.0.0.1` only. **The port is not fixed**: it first asks whatever holds 1455
+  to `/cancel` (which ends another `codex login` waiting there), falls back to **1457** when a
+  non-Codex program holds 1455, and exits with `Port 127.0.0.1:1457 is already in use` when both are
+  held. So the port is read from the printed `redirect_uri` and accepted only from {1455, 1457}.
+- A wrong `state` gets `400 State mismatch` and Codex keeps waiting; a missing or unusable code makes
+  Codex exit 1.
+- The device-disabled answer, read from the binary (no such account was available to exercise it):
+  `device code login is not enabled for this Codex server. Use the browser login or verify the server
+URL.`
+
+**The flow.** The person opens the link on their phone and signs in. The provider redirects the phone's
+browser to `http://localhost:1455/auth/callback?code=…&state=…`, which the phone cannot load — but
+its address bar holds the whole answer. They copy that address and paste it. The daemon checks it
+STRICTLY against what Codex printed (`http`, host `localhost` or `127.0.0.1`, the printed port and
+path, no userinfo or fragment, only `code`/`state`/`scope`/`iss`, each once, `state` equal, a
+`code` present), rebuilds the query from the checked values, and makes ONE `GET` to
+`127.0.0.1:<port>/auth/callback?…` on that machine — the request the browser would have made had it
+been on the host. Codex redeems the code with the verifier only it holds and writes its own login. The
+daemon redeems nothing, runs no OAuth client of its own, sends no `originator`, and follows no
+redirect.
+
+**The address is write-only**, like Claude's code: it passes from the submit body through the check to
+the delivery port, and it is never on a record, in an answer, in a refusal's words, in a log or in the
+audit journal. Every refusal describes the KIND of thing pasted ("belongs to a different sign-in
+attempt") and quotes none of it.
+
+**When it is offered.** Device code stays the default. The daemon moves a flow to the link sign-in BY
+ITSELF when Codex says it could not get a device code at all (the explicit "not enabled" answer, or a
+device request that failed with a status or a transport error before any code existed), and the wire
+says so (`deviceCode: "unavailable"`). The person can also choose it: "Device code didn't work? Sign in
+with a link instead" on the start screen, on the device-code screen (an in-flow switch, so the operator
+password the start proved is not asked again), and after a device code failed. `fy credential signin`
+asks for the address in the terminal the same way, and offers the link after a device code fails.
+
+**Governance is unchanged.** The submit — an address, or the switch — rides the existing
+`POST /v1/fleet/login/:flowId` and its `fleet`/`configure` gate, so a relayed caller presenting
+loopback is governed exactly as it is for Claude's code.
+
+**Its own failure modes**, each said in words: both ports taken ("ports 1455 and 1457 on this machine
+are already in use by another program", remedy: stop it or use a device code), the link window
+closing (`lastCode: expired`), and Codex exiting after the address was delivered (`lastCode: rejected`,
+"Codex could not finish signing in with that address"). On a desktop host Codex may also open the page
+in that machine's own browser; finishing there completes the flow directly, with nothing to paste.
+
 ### 4.3 Does a re-login flow need to reach the operator when a token expires?
 
 **Mostly no, and the mechanism people reach for does not exist for this.**
@@ -428,7 +488,9 @@ This is somebody else's flow and it will change. Being specific about the blast 
 | dependency                              | where it is                                        | if it changes                      |
 | --------------------------------------- | -------------------------------------------------- | ---------------------------------- |
 | `claude /login`, `codex login`          | `process-login.ts:24-27` (two literals, shipped)   | today's CLI login breaks too       |
-| `codex login --device-auth`             | new, this flow only                                | Codex loses the remote leg         |
+| `codex login --device-auth`             | new, this flow only                                | Codex falls back to the link leg   |
+| `codex login`'s printed authorize URL   | new, the link leg only (§4.2b)                     | the link leg publishes nothing     |
+| Codex's localhost callback (1455/1457)  | new, the link leg only (§4.2b)                     | the pasted address is refused      |
 | Claude's paste prompt and its code URL  | new, this flow only, read at `claude-code` 2.1.220 | Claude loses the remote leg        |
 | recognising a URL in the child's output | new, this flow only                                | the flow publishes nothing to open |
 

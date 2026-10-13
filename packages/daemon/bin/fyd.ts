@@ -66,6 +66,7 @@ import {
   NodeRawDeflate,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { deliverCodexCallback } from '../src/adapters/fleet-login/callback-delivery.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import {
   FileSessionForkReceiptStore,
@@ -4691,6 +4692,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     clock: millisecondClock,
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     spawn: spawnHarnessLoginChild,
+    deliverCallback: deliverCodexCallback,
     environment: process.env,
     timer: harnessLoginTimer,
     confirmChange: async password => await grants.confirmChange(password),

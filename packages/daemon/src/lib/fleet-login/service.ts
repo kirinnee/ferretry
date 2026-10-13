@@ -42,9 +42,25 @@
  *   on somebody else's output format, and one of them depends on an UNDOCUMENTED flag
  *   (`codex login --device-auth`, empty description at 0.145.0), so this is the path that keeps a
  *   third-party change from becoming an outage.
+ *
+ * ## One Codex flow, two children, in turn
+ *
+ * A Codex flow can move from a device code to Codex's link sign-in — by itself when Codex says device
+ * codes are unavailable, or when the person asks. The flow keeps its id, its window and the password its
+ * start proved; the device child is killed and the link child launched in its place. `relaunch` on the
+ * record is what tells the run loop that this exit was the switch and not the end.
+ *
+ * The link sign-in's return trip is an ADDRESS, carrying an authorization code. It goes from
+ * {@link HarnessLoginService.submit} through the Codex flow's check to the delivery port and nowhere
+ * else, exactly as Claude's code goes to stdin and nowhere else.
  */
 import { type HarnessKind, sanitizeHarnessEnv } from '@ferretry/fleet';
-import type { HarnessLoginFlow, HarnessLoginStartRequest, HarnessLoginSubmission } from '@ferretry/protocol';
+import type {
+  HarnessLoginFlow,
+  HarnessLoginStartRequest,
+  HarnessLoginSubmission,
+  HarnessLoginSubmitRequest,
+} from '@ferretry/protocol';
 import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts';
 import { type CredentialSignInTarget, FleetCredentialRefusal } from '../fleet/credentials-service.ts';
 import {
@@ -59,16 +75,26 @@ import {
   observeClaudeLine,
 } from './claude-flow.ts';
 import {
+  CODEX_LINK_LOGIN_ARGV,
+  CODEX_LINK_START,
   CODEX_LOGIN_ARGV,
   CODEX_LOGIN_START,
   type CodexLoginFailure,
   type CodexLoginStage,
+  codexAutomaticLink,
+  codexDelivering,
   codexEnding,
   codexProjection,
   decideCodexSubmit,
   observeCodexLine,
 } from './codex-flow.ts';
-import type { HarnessLoginChild, HarnessLoginFlowBase, HarnessLoginSpawn, HarnessLoginTimer } from './ports.ts';
+import type {
+  HarnessLoginCallbackDeliver,
+  HarnessLoginChild,
+  HarnessLoginFlowBase,
+  HarnessLoginSpawn,
+  HarnessLoginTimer,
+} from './ports.ts';
 
 /** Every refusal this surface answers with, so a client branches on cause rather than on prose. */
 export type HarnessLoginRefusalCode =
@@ -92,6 +118,8 @@ export interface DaemonHarnessLoginOptions {
   /** A flow handle. Supplied, so identity is never clock-derived and therefore never guessable. */
   readonly mintId: () => string;
   readonly spawn: HarnessLoginSpawn;
+  /** Delivers a checked Codex callback address to Codex's own listener on this machine. */
+  readonly deliverCallback: HarnessLoginCallbackDeliver;
   /** This process's environment, which is sanitized before any child sees it. */
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly timer: HarnessLoginTimer;
@@ -136,14 +164,28 @@ interface FlowRecord {
   disarm: (() => void) | undefined;
   /** True once a child was launched, so "nothing was recognised" is distinguishable from "never ran". */
   spawned: boolean;
+  /** The running child is being replaced (a Codex device code moving to a link), so its exit is not the end. */
+  relaunch: boolean;
 }
 
 const settled = (stage: FlowStage): boolean => stage.stage.stage === 'complete' || stage.stage.stage === 'failed';
 
+const CODEX_PUBLISHED: ReadonlySet<CodexLoginStage['stage']> = new Set([
+  'awaiting-approval',
+  'awaiting-callback',
+  'finishing',
+]);
+
 const published = (stage: FlowStage): boolean =>
-  stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : stage.stage.stage === 'awaiting-approval';
+  stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : CODEX_PUBLISHED.has(stage.stage.stage);
 
 const instant = (milliseconds: number): string => new Date(Math.trunc(milliseconds)).toISOString();
+
+/** What to run for this flow's current stage. A Codex flow in `linking` runs the link sign-in. */
+const argvFor = (stage: FlowStage): readonly string[] => {
+  if (stage.harness === 'claude') return CLAUDE_LOGIN_ARGV;
+  return stage.stage.stage === 'linking' ? CODEX_LINK_LOGIN_ARGV : CODEX_LOGIN_ARGV;
+};
 
 export class HarnessLoginService {
   readonly #flows = new Map<string, FlowRecord>();
@@ -177,10 +219,16 @@ export class HarnessLoginService {
       throw error;
     }
     if (target.kind === 'refused') throw new HarnessLoginRefusal('fleet_login_unavailable', target.reason);
+    if (target.harness === 'claude' && request.method !== undefined) {
+      throw new HarnessLoginRefusal(
+        'fleet_login_unavailable',
+        'Claude Code has one way to sign in; choosing a device code or a link applies to Codex only',
+      );
+    }
     // Every refusal the document can answer is answered before a password attempt is spent.
     this.#assertKeyFree(credentialId);
     if (governance.confirmChange) await this.#confirm(credentialId, request.operatorPassword);
-    return this.#launch(target);
+    return this.#launch(target, request.method === 'link');
   }
 
   /** This flow as it stands, expiring it first if its window has closed. */
@@ -189,20 +237,25 @@ export class HarnessLoginService {
   }
 
   /**
-   * Forward the one value a person brings back.
+   * Forward the one value a person brings back, or move a Codex device code to a link.
    *
-   * The value is passed straight to the child's stdin and to nothing else. It is not held on the record,
-   * not put in the answer, and not named in any refusal — the flow module that decides whether a write is
-   * allowed never receives it, which is what makes write-only a property of the shape.
+   * Claude's value is passed straight to the child's stdin and to nothing else. Codex's address is
+   * checked by its flow and delivered to Codex's own listener and to nothing else. Neither is held on the
+   * record, put in the answer, or named in any refusal.
    */
-  async submit(flowId: string, value: string): Promise<HarnessLoginSubmission> {
+  async submit(flowId: string, request: HarnessLoginSubmitRequest): Promise<HarnessLoginSubmission> {
     const record = this.#require(flowId);
     const stage = record.stage;
-    const decision = stage.harness === 'claude' ? decideClaudeSubmit(stage.stage) : decideCodexSubmit(stage.stage);
+    if (stage.harness === 'codex') return await this.#submitCodex(record, stage.stage, request);
+    if ('method' in request) {
+      return { outcome: 'refused', reason: 'Claude Code has one way to sign in, so there is nothing to switch to' };
+    }
+    const value = request.code;
+    const decision = decideClaudeSubmit(stage.stage);
     if (decision.decision !== 'write') return { outcome: decision.decision, reason: decision.reason };
     // Marked BEFORE the write, so a refusal Claude sends back straight away lands on top of this rather
     // than under it — and so the previous refusal is not read as a verdict on this code.
-    if (stage.harness === 'claude') record.stage = { harness: 'claude', stage: claudeCodeSent(stage.stage) };
+    record.stage = { harness: 'claude', stage: claudeCodeSent(stage.stage) };
 
     const write = record.child?.write ?? (async () => false);
     const accepted = await write(`${value}\n`);
@@ -213,6 +266,47 @@ export class HarnessLoginService {
           reason:
             'the harness was no longer reading, so nobody can say whether that code arrived; check whether this login is signed in before trying again',
         };
+  }
+
+  /** A Codex flow's submission: a switch to the link sign-in, or the address it ended on. */
+  async #submitCodex(
+    record: FlowRecord,
+    stage: CodexLoginStage,
+    request: HarnessLoginSubmitRequest,
+  ): Promise<HarnessLoginSubmission> {
+    const decision = decideCodexSubmit(stage, request);
+    if (decision.decision === 'switch') {
+      this.#switchToLink(record, CODEX_LINK_START);
+      return { outcome: 'accepted', flow: this.#projection(record) };
+    }
+    if (decision.decision !== 'deliver') return { outcome: decision.decision, reason: decision.reason };
+    // Marked BEFORE the delivery, so a second address sent while this one is in flight is refused.
+    record.stage = { harness: 'codex', stage: codexDelivering() };
+    const outcome = await this.options.deliverCallback(decision.delivery);
+    if (outcome === 'delivered') return { outcome: 'accepted', flow: this.#projection(record) };
+    if (outcome === 'refused') {
+      // Codex said it was not waiting for this and kept waiting, so the screen goes back to the paste box.
+      if (record.stage.harness === 'codex' && record.stage.stage.stage === 'finishing')
+        record.stage = { harness: 'codex', stage };
+      return {
+        outcome: 'refused',
+        reason:
+          'Codex was not waiting for that address. Use the link on this screen, then paste the address it leads to.',
+      };
+    }
+    return {
+      outcome: 'unconfirmed',
+      reason:
+        'Codex was no longer listening, so nobody can say whether that address arrived; check whether this login is signed in before trying again',
+    };
+  }
+
+  /** Replace a Codex device-code child with the link sign-in, inside this same flow. */
+  #switchToLink(record: FlowRecord, stage: CodexLoginStage): void {
+    record.stage = { harness: 'codex', stage };
+    if (record.child === undefined) return;
+    record.relaunch = true;
+    record.child.kill();
   }
 
   /** End this flow and its child. */
@@ -270,12 +364,12 @@ export class HarnessLoginService {
 
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────
 
-  #launch(target: Extract<CredentialSignInTarget, { kind: 'store' }>): HarnessLoginFlow {
+  #launch(target: Extract<CredentialSignInTarget, { kind: 'store' }>, link: boolean): HarnessLoginFlow {
     // Checked AGAIN, and this is the check that holds: `start`'s copy runs before the password is
     // proved, and that proof is an await, so two starts for one credential can both pass it. Nothing
     // between here and the record landing in `#flows` awaits, so the later of the two is refused here.
     this.#assertKeyFree(target.credentialId);
-    const record = this.#record(target.harness, target.credentialId);
+    const record = this.#record(target.harness, target.credentialId, link);
     // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the
     // login itself takes as long as a person takes. Every failure is recorded on the record, so nothing
     // here can reject into an unhandled rejection.
@@ -283,7 +377,7 @@ export class HarnessLoginService {
     return this.#projection(record);
   }
 
-  #record(harness: HarnessKind, credentialId: string): FlowRecord {
+  #record(harness: HarnessKind, credentialId: string, link: boolean): FlowRecord {
     this.#prune();
     const startedAt = this.options.clock.now();
     const window = (this.options.windowMinutes ?? HARNESS_LOGIN_WINDOW_MINUTES) * 60_000;
@@ -296,10 +390,11 @@ export class HarnessLoginService {
       stage:
         harness === 'claude'
           ? { harness: 'claude', stage: CLAUDE_LOGIN_START }
-          : { harness: 'codex', stage: CODEX_LOGIN_START },
+          : { harness: 'codex', stage: link ? CODEX_LINK_START : CODEX_LOGIN_START },
       child: undefined,
       disarm: undefined,
       spawned: false,
+      relaunch: false,
     };
     this.#flows.set(record.flowId, record);
     record.disarm = this.options.timer.after(window, () => {
@@ -326,27 +421,32 @@ export class HarnessLoginService {
       }
       await target.prepare();
       if (settled(record.stage)) return;
-      const argv = record.stage.harness === 'claude' ? CLAUDE_LOGIN_ARGV : CODEX_LOGIN_ARGV;
-      record.spawned = true;
-      const child = this.options.spawn({
-        command: [binary, ...target.arguments, ...argv],
-        environment: { ...sanitizeHarnessEnv(this.options.environment), ...target.environment },
-        onLine: line => this.#observe(record, line),
-      });
-      record.child = child;
-      const code = await child.exited;
-      record.child = undefined;
-      if (settled(record.stage)) return;
+      let code: number;
+      do {
+        record.relaunch = false;
+        record.spawned = true;
+        const child = this.options.spawn({
+          command: [binary, ...target.arguments, ...argvFor(record.stage)],
+          environment: { ...sanitizeHarnessEnv(this.options.environment), ...target.environment },
+          onLine: line => this.#observe(record, line),
+        });
+        record.child = child;
+        code = await child.exited;
+        record.child = undefined;
+        if (settled(record.stage)) return;
+      } while (record.relaunch);
+      // Asked BEFORE "was anything published": a link sign-in whose ports were taken never printed a
+      // link, and saying why is worth more than saying it offered nothing.
+      const ending = this.#ending(record.stage, { exit: code });
+      if (ending !== undefined) {
+        this.#endWith(record, ending);
+        return;
+      }
       if (!published(record.stage)) {
         this.#end(
           record,
           `this host's ${record.stage.harness} did not offer a sign-in that can be driven from a browser`,
         );
-        return;
-      }
-      const ending = this.#ending(record.stage, { exit: code });
-      if (ending !== undefined) {
-        this.#endWith(record, ending);
         return;
       }
       if (code !== 0) {
@@ -366,10 +466,14 @@ export class HarnessLoginService {
   /** Feed one raw output line to this harness's own recogniser. Unclassified lines are dropped. */
   #observe(record: FlowRecord, line: string): void {
     const stage = record.stage;
-    record.stage =
-      stage.harness === 'claude'
-        ? { harness: 'claude', stage: observeClaudeLine(stage.stage, line) }
-        : { harness: 'codex', stage: observeCodexLine(stage.stage, line) };
+    if (stage.harness === 'claude') {
+      record.stage = { harness: 'claude', stage: observeClaudeLine(stage.stage, line) };
+      return;
+    }
+    const next = observeCodexLine(stage.stage, line);
+    // Codex could not get a device code at all: move on to the link sign-in by itself.
+    if (next.stage === 'device-unavailable') this.#switchToLink(record, codexAutomaticLink());
+    else record.stage = { harness: 'codex', stage: next };
   }
 
   /** Record that the sign-in completed, unless this flow had already ended. */

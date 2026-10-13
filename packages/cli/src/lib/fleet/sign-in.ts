@@ -1,17 +1,29 @@
-import type { HarnessLoginFlow } from '@ferretry/protocol';
+import type { HarnessLoginCodexMethod, HarnessLoginFlow } from '@ferretry/protocol';
 import { WriteAuthority } from './account-authority.ts';
 import { type AccountAuthority, type AccountCommandDeps, AccountCommandError } from './account-ports.ts';
 
 /** How often a sign-in in progress is read back. */
 export const SIGN_IN_POLL_MS = 1_000;
 
+/** How one sign-in attempt ended. `failed` is not reported yet, so the caller can offer a link first. */
+type Attempt =
+  | { readonly kind: 'signed-in' }
+  | { readonly kind: 'stopped' }
+  | {
+      readonly kind: 'failed';
+      readonly flow: Extract<HarnessLoginFlow, { state: 'failed' }>;
+      readonly device: boolean;
+    };
+
 /**
  * Sign one credential in through the daemon, with this terminal as the screen.
  *
  * The daemon runs the harness's own sign-in and holds no token while it does. Claude prints a page to
  * open and then reads back the code that page shows, so this asks for it; Codex shows a page and a
- * code to type THERE, and finishes on its own. Either way the login lands in the credential's own
- * store, and the daemon checks it did.
+ * code to type THERE, and finishes on its own. When an account has Codex device codes turned off, the
+ * daemon moves to Codex's link sign-in by itself, and this asks for the address the browser ends on.
+ * When a device code fails for any other reason, this offers that link sign-in. Either way the login
+ * lands in the credential's own store, and the daemon checks it did.
  *
  * Returns whether it ended signed in. A failure sets a non-zero exit with the reason and the way back.
  */
@@ -21,16 +33,43 @@ export async function runSignIn(
   opened?: WriteAuthority,
 ): Promise<boolean> {
   const authority = await (opened ?? (await WriteAuthority.open(deps))).forApply();
-  let flow = await deps.gateway.startSignIn(credentialId, authority);
+  let attempt = await attemptSignIn(deps, credentialId, authority);
+  if (attempt.kind === 'failed' && attempt.device && deps.interactive) {
+    deps.out.warn(`The device code did not work: ${attempt.flow.reason}`);
+    const answer = (await deps.prompt.ask('Sign in with a link instead? [y/N]')).trim().toLowerCase();
+    if (answer === 'y' || answer === 'yes') attempt = await attemptSignIn(deps, credentialId, authority, 'link');
+  }
+  if (attempt.kind === 'signed-in') {
+    deps.out.success(`Signed in. ${credentialId} is ready to use.`);
+    return true;
+  }
+  if (attempt.kind === 'failed') {
+    deps.out.error(`Sign-in did not finish: ${attempt.flow.reason}`);
+    deps.out.report(attempt.flow.remedy);
+    deps.out.setExitCode(1);
+  }
+  return false;
+}
+
+/** Run one sign-in to its end, showing what it needs as it goes. */
+async function attemptSignIn(
+  deps: AccountCommandDeps,
+  credentialId: string,
+  authority: AccountAuthority,
+  method?: HarnessLoginCodexMethod,
+): Promise<Attempt> {
+  let flow = await deps.gateway.startSignIn(credentialId, authority, method);
   let shownApproval = false;
   let shownUrl: string | undefined;
+  let shownFinishing = false;
   let codeSent = false;
+  let linked = method === 'link';
   while (flow.state !== 'complete' && flow.state !== 'failed') {
     if (deps.now() >= Date.parse(flow.expiresAt)) {
       await cancelQuietly(deps, flow.flowId, authority);
       deps.out.error('Sign-in took too long and was stopped. Run it again to get a fresh link.');
       deps.out.setExitCode(1);
-      return false;
+      return { kind: 'stopped' };
     }
     if (flow.harness === 'claude' && flow.state === 'awaiting-code') {
       if (shownUrl !== flow.verificationUrl) {
@@ -41,7 +80,7 @@ export async function runSignIn(
         if (flow.lastCode === 'rejected')
           deps.out.warn('That code was not accepted. Copy the whole code and try again.');
         const next = await submitCode(deps, flow, authority);
-        if (next === undefined) return false;
+        if (next === undefined) return { kind: 'stopped' };
         codeSent = true;
         flow = next;
         continue;
@@ -52,17 +91,31 @@ export async function runSignIn(
       deps.out.report('Waiting for you to approve it there…');
       shownApproval = true;
     }
+    if (flow.harness === 'codex' && flow.state === 'awaiting-callback') {
+      linked = true;
+      if (shownUrl !== flow.verificationUrl) {
+        if (flow.deviceCode === 'unavailable')
+          deps.out.warn('This account does not allow device codes, so Codex will sign in with a link instead.');
+        deps.out.report(`Open this page on any device and sign in:\n  ${flow.verificationUrl}`);
+        deps.out.report(
+          'Afterwards the browser goes to a page that does not load (its address starts with http://localhost). That is expected: copy that page’s whole address.',
+        );
+        shownUrl = flow.verificationUrl;
+      }
+      const next = await submitAddress(deps, flow, authority);
+      if (next === undefined) return { kind: 'stopped' };
+      flow = next;
+      continue;
+    }
+    if (flow.harness === 'codex' && flow.state === 'finishing' && !shownFinishing) {
+      deps.out.report('Codex is finishing the sign-in…');
+      shownFinishing = true;
+    }
     await deps.sleep(SIGN_IN_POLL_MS);
     flow = await deps.gateway.signInStatus(flow.flowId, authority);
   }
-  if (flow.state === 'complete') {
-    deps.out.success(`Signed in. ${credentialId} is ready to use.`);
-    return true;
-  }
-  deps.out.error(`Sign-in did not finish: ${flow.reason}`);
-  deps.out.report(flow.remedy);
-  deps.out.setExitCode(1);
-  return false;
+  if (flow.state === 'complete') return { kind: 'signed-in' };
+  return { kind: 'failed', flow, device: flow.harness === 'codex' && !linked };
 }
 
 /** Ask for the code the provider's page shows, and hand it to the waiting harness. */
@@ -94,6 +147,41 @@ async function submitCode(
   deps.out.error(`The code could not be used: ${submission.reason}`);
   deps.out.setExitCode(1);
   return undefined;
+}
+
+/**
+ * Ask for the address a Codex link sign-in ended on, and hand it to Codex on the machine.
+ *
+ * An address the daemon refuses is asked for again with the reason, because the usual mistake is a
+ * partial copy. One the daemon says it cannot take any more may still have finished — Codex can also
+ * complete in a browser on the machine itself — so that is read back before it is called a failure.
+ */
+async function submitAddress(
+  deps: AccountCommandDeps,
+  flow: HarnessLoginFlow,
+  authority: AccountAuthority,
+): Promise<HarnessLoginFlow | undefined> {
+  if (!deps.interactive) {
+    await cancelQuietly(deps, flow.flowId, authority);
+    throw new AccountCommandError(
+      'This Codex sign-in needs a person to paste an address, so it cannot run without a terminal. Run it in a terminal, or sign in from the browser.',
+    );
+  }
+  const address = (await deps.prompt.ask('Paste the address of the page that did not load:')).trim();
+  if (address === '') {
+    await cancelQuietly(deps, flow.flowId, authority);
+    deps.out.error('No address was given, so the sign-in was stopped.');
+    deps.out.setExitCode(1);
+    return undefined;
+  }
+  const submission = await deps.gateway.submitSignInCode(flow.flowId, address, authority);
+  if (submission.outcome === 'accepted') return submission.flow;
+  if (submission.outcome === 'refused') {
+    deps.out.warn(submission.reason);
+    return flow;
+  }
+  if (submission.outcome === 'unconfirmed') deps.out.warn(submission.reason);
+  return await deps.gateway.signInStatus(flow.flowId, authority);
 }
 
 /** Stop a sign-in this terminal is giving up on. A failure to stop it changes nothing about the answer. */

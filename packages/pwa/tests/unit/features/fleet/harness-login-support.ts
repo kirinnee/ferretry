@@ -16,6 +16,9 @@ export const CLAUDE_URL = 'https://claude.com/cai/oauth/authorize?code=true&code
 /** Observed at codex-cli 0.145.0. */
 export const CODEX_URL = 'https://auth.openai.com/codex/device';
 export const CODEX_CODE = '0IER-FFQW6';
+/** The shape `codex login` printed at codex-cli 0.145.0, its values replaced. */
+export const CODEX_LINK_URL =
+  'https://auth.openai.com/oauth/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=fixture';
 
 export const NOW = Date.parse('2026-08-19T10:00:00.000Z');
 
@@ -48,6 +51,8 @@ export const claudeFlow = (state: ClaudeLoginFlow['state']): ClaudeLoginFlow => 
 export const codexFlow = (state: CodexLoginFlow['state']): CodexLoginFlow => {
   const base = { harness: 'codex', ...FLOW_BASE, credentialId: CODEX_CREDENTIAL_ID, identity: 'codex:studio' } as const;
   if (state === 'awaiting-approval') return { ...base, state, verificationUrl: CODEX_URL, userCode: CODEX_CODE };
+  if (state === 'awaiting-callback') return { ...base, state, verificationUrl: CODEX_LINK_URL };
+  if (state === 'finishing') return { ...base, state };
   if (state === 'complete') return { ...base, state };
   if (state === 'failed') {
     return { ...base, state, reason: 'the sign-in ran out of time', remedy: 'sign this login in on the host' };

@@ -28,6 +28,7 @@ import {
   FleetToolInstallResultSchema,
   GrantUnlockRequestSchema,
   GrantUnlockViewSchema,
+  type HarnessLoginCodexMethod,
   type HarnessLoginFlow,
   HarnessLoginFlowSchema,
   HarnessLoginStartRequestSchema,
@@ -142,11 +143,16 @@ export class ProtocolAccountGateway implements IAccountGateway {
     return await this.client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, get(authority));
   }
 
-  async startSignIn(credentialId: string, authority: AccountAuthority): Promise<HarnessLoginFlow> {
+  async startSignIn(
+    credentialId: string,
+    authority: AccountAuthority,
+    method?: HarnessLoginCodexMethod,
+  ): Promise<HarnessLoginFlow> {
+    const request = { credentialId, ...(method === undefined ? {} : { method }) };
     return await this.client.request(
       FLEET_LOGIN_PATH,
       HarnessLoginFlowSchema,
-      post(HarnessLoginStartRequestSchema.parse(withPassword({ credentialId }, authority)), authority),
+      post(HarnessLoginStartRequestSchema.parse(withPassword(request, authority)), authority),
     );
   }
 

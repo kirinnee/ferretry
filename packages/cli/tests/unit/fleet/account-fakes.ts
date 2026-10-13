@@ -16,6 +16,7 @@ import type {
   FleetSetupScan,
   FleetStackView,
   FleetToolInstallResult,
+  HarnessLoginCodexMethod,
   HarnessLoginFlow,
   HarnessLoginSubmission,
 } from '@ferretry/protocol';
@@ -320,8 +321,12 @@ class FakeGateway implements IAccountGateway {
   exportBundle(authority: AccountAuthority) {
     return this.#record('exportBundle', [authority], this.answers.exportBundle);
   }
-  startSignIn(id: string, authority: AccountAuthority) {
-    return this.#record('startSignIn', [id, authority], this.answers.startSignIn);
+  startSignIn(id: string, authority: AccountAuthority, method?: HarnessLoginCodexMethod) {
+    return this.#record(
+      'startSignIn',
+      [id, authority, ...(method === undefined ? [] : [method])],
+      this.answers.startSignIn,
+    );
   }
   signInStatus(id: string, authority: AccountAuthority) {
     return this.#record('signInStatus', [id, authority], this.answers.signInStatus);
