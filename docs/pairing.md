@@ -332,6 +332,11 @@ row states what its revoke will do before the press.
 - **A step-up bounds who acts, not what the act does.** A governed device holding a step-up may mint a code,
   open a terminal or apply a fleet change for the length of the window; the step-up says the person holding
   the device agreed recently, nothing about the act itself ([grants.md](grants.md)).
+- **A device's first passkey has a ten-minute window.** It can be added only in the ten minutes after
+  pairing (B2), so a newly paired device with no passkey for the machine sees one dismissible line
+  pointing at Settings → Security → Add a passkey. A device that misses the window cannot step up
+  until it pairs again; until then it keeps only the uses
+  that need no step-up ([design/zero-trust.md](design/zero-trust.md) B2).
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first

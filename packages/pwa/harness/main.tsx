@@ -22,6 +22,7 @@ import type {
   LearningStatus,
   PairedDevicesView,
   PairingCodeMintResponse,
+  PasskeysView,
   PinSnapshot,
   ProjectInfo,
   ProposalView,
@@ -135,8 +136,9 @@ import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import type { ProjectRegistrationStatus } from '../src/features/projects/project-registration-model.ts';
 import { ProjectsHub } from '../src/features/projects/projects-hub.tsx';
+import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
-import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
+import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
@@ -155,6 +157,7 @@ import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
+import type { PasskeyClientFactory } from '../src/features/settings/security-settings.tsx';
 import { settingsPaletteEntries } from '../src/features/settings/settings-catalog.ts';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
 import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
@@ -197,6 +200,7 @@ import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore 
 import { DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
+import type { StepUpClient } from '../src/lib/step-up-client.ts';
 import { DaemonClientProvider } from '../src/lib/store.tsx';
 import {
   BrowserRecognitionError,
@@ -797,6 +801,8 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       createWardenClient={HARNESS_WARDEN_CLIENT}
       createGrantClient={HARNESS_GRANT_CLIENT}
       createPairingClient={HARNESS_PAIRING_CLIENT}
+      createPasskeyClient={HARNESS_PASSKEY_CLIENT}
+      createSecretClient={HARNESS_SECRET_CLIENT}
       daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       createMachineClient={HARNESS_MACHINE_CLIENT}
       machineTabs={machineTabs}
@@ -1292,6 +1298,30 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
  * served harness session can put a working credential on screen or in a PNG. The unreachable pairing
  * throws, so the refusal panel is reviewable in the frame as well as in its own gallery card.
  */
+/**
+ * The passkey client the settings harness mounts. It registers nothing: the list is a frozen fixture of
+ * two passkeys, so no capture can contain a credential and no served session can open a real prompt.
+ */
+const HARNESS_PASSKEYS: PasskeysView = {
+  passkeys: [
+    { id: 'Ab'.repeat(16), origin: 'https://ferretry.example.test', createdAt: '2025-12-20T18:22:00.000Z' },
+    { id: 'Cd'.repeat(16), origin: 'https://ferretry.example.test', createdAt: '2025-12-28T09:05:00.000Z' },
+  ],
+  registration: 'stepped-up',
+  stepUpUntil: '2026-01-01T00:15:00.000Z',
+};
+
+/** The secret store's client: answers the one list the panel reads, and no write. */
+const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  return { request: (async () => SECRETS_READY) as SecretClient['request'] };
+};
+
+const HARNESS_PASSKEY_CLIENT: PasskeyClientFactory = async connection => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  return { request: (async () => HARNESS_PASSKEYS) as StepUpClient['request'] };
+};
+
 const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   let devices = HARNESS_PAIRED_DEVICES;

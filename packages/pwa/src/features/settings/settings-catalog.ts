@@ -348,6 +348,26 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     keywords: ['warden', 'failover', 'round robin', 'fallback', 'account', 'quota', 'token', 'wrapper', 'supervision'],
   },
   {
+    // Words for the passkey panel: what a person types after a prompt asks them to "confirm it's you".
+    id: 'security',
+    label: 'Security',
+    description:
+      'The passkeys this device holds for this machine, and adding another. Daemon-wide — opens this daemon’s settings.',
+    href: daemon => `${daemonSettingsPath(daemon)}#security`,
+    keywords: [
+      'passkey',
+      'passkeys',
+      'confirm',
+      'confirmation',
+      'biometric',
+      'fingerprint',
+      'face id',
+      'webauthn',
+      'step-up',
+      'security',
+    ],
+  },
+  {
     /**
      * The panel somebody looks for when the machine is on fire, reachable by the words they would
      * actually type at that moment.

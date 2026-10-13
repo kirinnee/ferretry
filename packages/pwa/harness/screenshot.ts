@@ -117,8 +117,8 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and nineteen: forty-four MACHINES frames at each viewport, plus seventeen other frames at
- * `mobile` and fourteen at `desktop` (44 + 44 + 17 + 14).
+ * One hundred and twenty-one: forty-four MACHINES frames at each viewport, plus eighteen other frames at
+ * `mobile` and fifteen at `desktop` (44 + 44 + 18 + 15).
  *
  * MACHINES, forty-four per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
@@ -128,8 +128,8 @@ const WALKS_SETTINGS = !(
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
- * The rest, fourteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its seven other panels, the unreachable daemon's Warden and Carrier, and the
+ * The rest, fifteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
+ * healthy daemon's Warden and its eight other panels (Security, the passkey panel, among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -149,7 +149,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 119;
+const SETTINGS_SIDEWAYS_CHECKS = 121;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -1814,13 +1814,13 @@ try {
           // The fixture is only evidence about the real frame if it carries the
           // panels the composition root supplies. It once carried six of the
           // production eight, so the row that overflowed a desktop could not be
-          // seen here at all. Eight now: the app's nine less Model pricing, which
+          // seen here at all. Nine now: the app's ten less Model pricing, which
           // this fixture has never mounted. Count the
           // rail's rows, which exist in the document at both widths, rather than
           // the sheet's, which are rendered only once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 8)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 8 it mounts`);
+          if (daemonPanels !== 9)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 9 it mounts`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -1835,8 +1835,8 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 8)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 8 it mounts`);
+            if (openPanelChoices !== 9)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 9 it mounts`);
             // Eight rows is the longest list any sheet in Settings presents. If one of these sheets is
             // going to be the one that widens a phone, it is this one.
             await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
@@ -1872,6 +1872,9 @@ try {
             // Adding a device, in the frame, where a reader meets it. The gallery cards below prove the
             // individual states; this proves it is reachable, daemon-scoped and fits both widths.
             ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
+            // Passkeys, daemon-scoped like the panels around it. The fixture answers GET /v1/passkeys with two
+            // frozen entries, so the capture shows a real list and the Add control, never a prompt.
+            ['Security', 'security', '[data-security-card]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
