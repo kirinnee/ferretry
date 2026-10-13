@@ -4,7 +4,13 @@ export * from './codex-usage-probe.ts';
 export * from './config-file.ts';
 export * from './credential-store.ts';
 export * from './file-provisioner.ts';
-export { FileSharedHistoryFileSystem } from './file-shared-history.ts';
+export {
+  FileConversationLeaseStore,
+  type FileConversationLeaseStoreOptions,
+  FileSharedHistoryFileSystem,
+  HostProcessStarts,
+  type ProcessStartSource,
+} from './file-shared-history.ts';
 export * from './file-scaffolder.ts';
 export * from './host-harness-scan.ts';
 export * from './migration-executor.ts';

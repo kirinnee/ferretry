@@ -5,6 +5,7 @@ import { hostname } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { FleetIdentityService, FleetTokenRefreshService, HARNESS_BINARIES, type HarnessKind } from '@ferretry/fleet';
 import {
+  FileConversationLeaseStore,
   FileFleetConfigSource,
   type FleetBinaryLookup,
   harnessKeychainAccount,
@@ -165,6 +166,7 @@ import {
   lifecycleConfigDocument,
   NodeSessionCredentialIssuer,
   NodeWorkingDirectoryResolver,
+  processIncarnationFor,
   type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
   TimeSessionIdFactory,
@@ -591,10 +593,14 @@ import {
 import { daemonVersion } from '../src/lib/version.ts';
 // Account-model seeds (docs/design/account-model.md §13.2) that nothing here constructs yet. Each is
 // loaded so it is reachable from the first commit; the unit that fills one replaces its line with the
-// construction it needs: U8 the conversation lease, U11 the tool installer and its package adapter.
+// construction it needs: U11 the tool installer and its package adapter.
 import '../src/adapters/process/package-install.ts';
 import '../src/lib/fleet/tool-install.ts';
-import '../src/lib/session/conversation-lease.ts';
+import {
+  ConversationLeases,
+  LeaseClaimingLaunchWrapper,
+  LeaseReleasingSessionExits,
+} from '../src/lib/session/conversation-lease.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -4877,6 +4883,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
     };
   };
+  /** One live writer per harness conversation (account model §9.3), over the shared pool's lease files. */
+  const conversationLeases = (storage: DaemonStorage): ConversationLeases =>
+    new ConversationLeases(new FileConversationLeaseStore(paths.fleet, processIncarnationFor()), storage, process.pid);
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -4893,6 +4902,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the two are separate records.
         credentials: sessionCredentials,
         environment: sessionEnvironments,
+        leases: conversationLeases(storage),
         // A caller that has already minted the id hands it over, so the plan and the record cannot
         // disagree about which session they describe.
         ids: id === undefined ? sessionIds : { next: () => id },
@@ -4948,7 +4958,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       lastSnapshots,
       // The SAME planner initial startup uses: a replacement pane is a new launch and must receive
       // the configuration saved immediately before it, without restarting this daemon.
-      cgroupLaunchPlanner,
+      // A revive writes the conversation again, so it claims it first, like a start (account model §9.3).
+      new LeaseClaimingLaunchWrapper(conversationLeases(storage), cgroupLaunchPlanner),
       registrar,
       undefined,
       // The SAME resolver the first launch used, for the same reason the environment above is
@@ -5166,13 +5177,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // The same private server, registration ledger and launch gate the lifecycle and the revive
           // use, so an exit is only ever proven against a pane this daemon registered and never while
           // one of its own launches is replacing it.
-          exits: new TmuxSessionExitObserver(
-            paths.home,
-            storage,
-            new DurableTerminalPaneStore(storage, stateFiles, paths),
-            launchTmuxCommands,
-            launchGate,
-            clock,
+          // Wrapped so a settled exit also frees the conversations that session held (account model §9.3).
+          exits: new LeaseReleasingSessionExits(
+            new TmuxSessionExitObserver(
+              paths.home,
+              storage,
+              new DurableTerminalPaneStore(storage, stateFiles, paths),
+              launchTmuxCommands,
+              launchGate,
+              clock,
+            ),
+            conversationLeases(storage),
           ),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
           clock,
