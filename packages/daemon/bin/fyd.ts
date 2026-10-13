@@ -5354,27 +5354,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
       });
       pairingService = new PairingService({
-          daemonId: state.daemonId,
-          daemonName: state.daemonName,
-          // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
-          // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
-          // reading its QR names the phone.
-          advertisement: config.advertisement,
-          carriers,
-          // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
-          // rendezvous from an operator's own one, and only the first is something the phone reading
-          // the QR can find for itself.
-          ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
-          clock: pairingClock,
-          cryptography,
-          devices: repository,
-          credentials,
-          // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
-          // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
-          deviceState: [push, stepUp],
-          // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
-          connections: deviceConnections,
-          idleExpiryDays: () => security.current().idleExpiryDays,
+        daemonId: state.daemonId,
+        daemonName: state.daemonName,
+        // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
+        // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
+        // reading its QR names the phone.
+        advertisement: config.advertisement,
+        carriers,
+        // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
+        // rendezvous from an operator's own one, and only the first is something the phone reading
+        // the QR can find for itself.
+        ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
+        clock: pairingClock,
+        cryptography,
+        devices: repository,
+        credentials,
+        // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
+        // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
+        deviceState: [push, stepUp],
+        // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
+        connections: deviceConnections,
+        idleExpiryDays: () => security.current().idleExpiryDays,
       });
       return {
         credentials,
