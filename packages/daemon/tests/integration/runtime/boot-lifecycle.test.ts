@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { buildFleetManifest, FleetManifestSchema, RETIRED_FLEET_CONFIG_SENTENCE } from '@ferretry/fleet';
+import { buildFleetManifest, RETIRED_FLEET_CONFIG_SENTENCE } from '@ferretry/fleet';
 import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
@@ -67,6 +67,7 @@ import {
   type ProcessObservation,
   parseSessionId,
   RETIRED_ACCOUNT_MODEL_NOTICE,
+  RETIRED_FLEET_BLOCK_NOTICE,
   type RelayAdvertisement,
   type RelayCarrierSource,
   type ResumeLauncher,
@@ -172,18 +173,9 @@ async function waitUntil(predicate: () => boolean, what: string): Promise<void> 
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/**
- * A `config/daemon.json` body for a case that is not about the first run.
- *
- * A boot imports this host's own Claude Code and Codex setup whenever the state home has no fleet
- * configuration, and that import resolves the harness through the daemon's own locator and reads
- * `CLAUDE_CONFIG_DIR` / `CODEX_HOME` from the environment — so without this, the machine running the
- * suite would decide what most of this file asserts: a developer with Claude Code installed gets a
- * runtime, a republished manifest and an extra notice that the CI runner never sees. A case that
- * declares its own `fleet` block keeps it, which is how the first-run cases below opt back in.
- */
+/** A `config/daemon.json` body. A boot imports nothing, so no case needs to opt out of an import. */
 function daemonDocument(document: Record<string, unknown>): string {
-  return JSON.stringify('fleet' in document ? document : { ...document, fleet: { prepareDefaults: false } });
+  return JSON.stringify(document);
 }
 
 /**
@@ -4357,7 +4349,7 @@ describe('daemon boot lifecycle', () => {
     const warning = said.stated.find(message => message.includes('no agent harness is ready'));
     should(warning).be.a.String();
     // A diagnosis without a remedy leaves the reader where they were.
-    should(warning).match(/run `fy setup` to import it/u);
+    should(warning).match(/run `fy daemon setup` to import it/u);
     // And it never overclaims in the other direction either.
     should(warning).match(/can serve its API but cannot start a session/u);
   });
@@ -5148,15 +5140,11 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
-   * The first run a host gets for starting a daemon, through the REAL composition root.
-   *
-   * This is the only tier that can prove the import sits INSIDE the boot correctly: after the mounts
-   * it runs through, before the bind, under the state home's lifetime lock and the fleet's exclusive
-   * apply claim at once — a deadlock there hangs every start on the machine — and with every ending
-   * reaching the trail a person actually reads. The decisions themselves are proved in the setup
-   * service's unit tests.
+   * What starting a daemon does NOT do, through the REAL composition root: import this host's own
+   * Claude Code or Codex setup. A fresh machine stays "not set up" until somebody chooses — in the app
+   * or with `fy daemon setup` — so these cases give the boot a harness to find and prove it left it alone.
    */
-  describe('the first run a start performs', () => {
+  describe('the first run a start no longer performs', () => {
     const previousClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
     const previousCodexHome = process.env.CODEX_HOME;
 
@@ -5205,11 +5193,9 @@ describe('daemon boot lifecycle', () => {
       const home = await tempDirectory(name);
       const port = await freeLoopbackPort();
       await seedHome(home, port);
-      await writeFile(
-        join(home, 'config', 'daemon.json'),
-        daemonDocument({ host: '127.0.0.1', port, fleet: {}, ...extra }),
-        { mode: 0o600 },
-      );
+      await writeFile(join(home, 'config', 'daemon.json'), daemonDocument({ host: '127.0.0.1', port, ...extra }), {
+        mode: 0o600,
+      });
       return { home, port };
     }
 
@@ -5249,95 +5235,57 @@ describe('daemon boot lifecycle', () => {
 
     const nothing = async (): Promise<undefined> => undefined;
 
-    it('should import the harness it found, publish its runtime and say so', async () => {
-      // Arrange
+    /** What `GET /v1/fleet/machine` says about the live daemon, so a case can read "not set up". */
+    const machineView = async (
+      base: string,
+      headers: Record<string, string>,
+    ): Promise<{ status: number; body: { setUp?: boolean; runtimeCount?: number; code?: string; error?: string } }> => {
+      const response = await fetch(`${base}/v1/fleet/machine`, { headers });
+      return { status: response.status, body: (await response.json()) as never };
+    };
+
+    it('should import nothing from a host with a harness installed, and leave the machine not set up', async () => {
+      // Arrange — exactly the host the retired boot-time import used to set up by itself.
       const { home, port } = await firstRunHome('fyd-first-run', {});
       const world = await harnessOnPath(home, ['claude']);
 
       // Act
-      const { code, said } = await bootOnce(world, home, port, nothing);
+      const { code, said, answer } = await bootOnce(world, home, port, machineView);
 
-      // Assert — the boot completed, so nothing deadlocked on the claims it took.
-      should(code).equal(0);
-      // The configuration it wrote is the account model's, and the manifest publishes its runtime — on
-      // the starter profile, because this host's harness has no settings of its own to import.
-      const written = Bun.YAML.parse(await readFile(join(home, 'fleet', 'config.yaml'), 'utf8')) as {
-        version: unknown;
-      };
-      should(written.version).equal(2);
-      const manifest = FleetManifestSchema.parse(
-        JSON.parse(await readFile(join(home, 'fleet', 'manifest.json'), 'utf8')),
-      );
-      should(manifest.accounts.map(account => basename(account.wrapper))).deepEqual(['claude-starter']);
-      for (const account of manifest.accounts) {
-        should((await stat(account.wrapper)).mode & 0o111).be.above(0);
-      }
-      // One sentence for the whole first run, said as a state so no log level can hide it.
-      const firstRun = said.stated.filter(message => message.startsWith('first run:'));
-      should(firstRun).have.length(1);
-      should(firstRun[0]).match(/1 runtime created: claude-starter\.$/u);
-    });
-
-    it('should run no first run when the operator switched it off', async () => {
-      // Arrange — an explicit false, honoured on a FIRST start, before anything is written.
-      const { home, port } = await firstRunHome('fyd-first-run-off', { fleet: { prepareDefaults: false } });
-      const world = await harnessOnPath(home, ['claude']);
-
-      // Act
-      const { code, said } = await bootOnce(world, home, port, nothing);
-
-      // Assert — nothing was imported and nothing was written, and the boot did not claim a first run.
+      // Assert — the boot completed, and wrote nothing into the fleet: somebody has to choose first.
       should(code).equal(0);
       should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
       should(await Bun.file(join(home, 'fleet', 'manifest.json')).exists()).be.false();
       should(said.stated.filter(message => message.startsWith('first run:'))).be.empty();
-      should(said.stated.join('\n')).containEql('publishes no account for');
+      // The machine says so, which is what the app and `fy daemon start` read to offer the first run.
+      should(answer.status).equal(200);
+      should(answer.body.setUp).be.false();
+      should(answer.body.runtimeCount).equal(0);
     });
 
-    it('should import nothing on a host with no harness, and still start', async () => {
-      // Arrange
-      const { home, port } = await firstRunHome('fyd-first-run-empty', {});
-      const world = await harnessOnPath(home, []);
-
-      // Act
-      const { code, said } = await bootOnce(world, home, port, nothing);
-
-      // Assert — a sentence, never a refusal: somebody may install a harness minutes from now.
-      should(code).equal(0);
-      should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
-      should(said.stated).containEql('first run: nothing was imported, because nothing was found to import.');
-    });
-
-    it('should leave a fleet configuration that already exists exactly as it is', async () => {
-      // Arrange — a machine that has its own account model and a manifest an earlier apply published.
-      const { home, port } = await firstRunHome('fyd-first-run-existing', {});
-      await seedFleet(home);
-      await mkdir(join(home, 'fleet'), { recursive: true });
-      await writeFile(join(home, 'fleet', 'config.yaml'), 'version: 2\n', { mode: 0o600 });
-      const before = await readFile(join(home, 'fleet', 'manifest.json'), 'utf8');
+    it('should boot with the retired fleet.prepareDefaults key, say once that it is no longer read, and import nothing', async () => {
+      // Arrange — the block every earlier boot wrote into a fresh state home, still saying "true".
+      const { home, port } = await firstRunHome('fyd-retired-prepare-defaults', { fleet: { prepareDefaults: true } });
       const world = await harnessOnPath(home, ['claude']);
 
       // Act
       const { code, said } = await bootOnce(world, home, port, nothing);
 
-      // Assert — nothing was re-imported over it, and the boot said why.
+      // Assert — tolerated rather than refused, said exactly once, and obeyed by nobody.
       should(code).equal(0);
-      should(await readFile(join(home, 'fleet', 'config.yaml'), 'utf8')).equal('version: 2\n');
-      should(await readFile(join(home, 'fleet', 'manifest.json'), 'utf8')).equal(before);
-      should(said.stated).containEql(
-        'first run: nothing was imported, because this machine already has a fleet configuration, so it was left as it is',
-      );
+      should(said.stated.filter(message => message === RETIRED_FLEET_BLOCK_NOTICE)).have.length(1);
+      should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
     });
 
     /**
      * A `config.yaml` in the RETIRED account format: refused, never converted, never overwritten.
      *
      * The daemon still boots — a refused fleet must not take pairing, sessions and every other surface
-     * down with it — but the boot trail and the machine view both name the file and say what to do,
-     * and the file is left byte for byte as the operator wrote it.
+     * down with it — but the machine view names the file and says what to do, and the file is left
+     * byte for byte as the operator wrote it.
      */
     it('should boot, refuse and name a fleet configuration in the old account format, touching nothing', async () => {
-      // Arrange — a host with a harness to import, so only the refusal stands between it and a first run.
+      // Arrange
       const { home, port } = await firstRunHome('fyd-first-run-v1', {});
       const configPath = join(home, 'fleet', 'config.yaml');
       const retired = 'accounts: {}\n';
@@ -5346,21 +5294,14 @@ describe('daemon boot lifecycle', () => {
       const world = await harnessOnPath(home, ['claude']);
 
       // Act
-      const { code, said, answer } = await bootOnce(world, home, port, async (base, headers) => {
-        const response = await fetch(`${base}/v1/fleet/machine`, { headers });
-        return { status: response.status, body: (await response.json()) as { code?: string; error?: string } };
-      });
+      const { code, answer } = await bootOnce(world, home, port, machineView);
 
       // Assert — it started anyway.
       should(code).equal(0);
-      // The boot trail names the file and the remedy, in the fleet's own sentence.
-      should(said.stated).containEql(
-        `first run: nothing was imported, because ${RETIRED_FLEET_CONFIG_SENTENCE(configPath)}`,
-      );
-      // The machine view refuses with the same file named, rather than serving an empty machine.
+      // The machine view refuses with the same file named and the remedy, rather than serving an empty machine.
       should(answer.status).equal(409);
       should(answer.body.code).equal('fleet_catalog_unreadable');
-      should(answer.body.error).containEql(configPath);
+      should(answer.body.error).containEql(RETIRED_FLEET_CONFIG_SENTENCE(configPath));
       // And nothing was converted, written over or published.
       should(await readFile(configPath, 'utf8')).equal(retired);
       should(await Bun.file(join(home, 'fleet', 'manifest.json')).exists()).be.false();
@@ -5368,10 +5309,7 @@ describe('daemon boot lifecycle', () => {
 
     it('should boot with the retired accountModel key and say once that it is no longer read', async () => {
       // Arrange — the switch the account model used to sit behind, left in an old document.
-      const { home, port } = await firstRunHome('fyd-retired-switch', {
-        fleet: { prepareDefaults: false },
-        accountModel: { enabled: true },
-      });
+      const { home, port } = await firstRunHome('fyd-retired-switch', { accountModel: { enabled: true } });
       const world = await harnessOnPath(home, []);
 
       // Act
@@ -5380,6 +5318,7 @@ describe('daemon boot lifecycle', () => {
       // Assert — tolerated rather than refused, and said exactly once so the operator can delete it.
       should(code).equal(0);
       should(said.stated.filter(message => message === RETIRED_ACCOUNT_MODEL_NOTICE)).have.length(1);
+      should(said.stated.filter(message => message === RETIRED_FLEET_BLOCK_NOTICE)).be.empty();
     });
   });
 

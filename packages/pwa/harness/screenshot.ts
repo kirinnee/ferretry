@@ -107,14 +107,16 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and five: thirty-seven MACHINES frames at each viewport, plus seventeen other frames at
- * `mobile` and fourteen at `desktop` (37 + 37 + 17 + 14).
+ * One hundred and thirteen: forty-one MACHINES frames at each viewport, plus seventeen other frames at
+ * `mobile` and fourteen at `desktop` (41 + 41 + 17 + 14).
  *
- * MACHINES, thirty-seven per viewport: its section, four tab switches, four Settings-tab flows (Import
+ * MACHINES, forty-one per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
  * Credentials pages, two Add a login steps, twelve Profiles and Components pages (a layer stack, a delete
- * card, two stepper steps, a component with every badge, two edit forms), and three other-machine states
- * (offline, not set up, its first run). Each of these is also a Machines geometry check, below.
+ * card, two stepper steps, a component with every badge, two edit forms), and seven other-machine states
+ * (offline; the first run that opens by itself — tools, the Claude Code question, Codex not signed in,
+ * Sign in now in place, nothing set up — and the not-set-up Runtimes card it leaves to). Each of these
+ * is also a Machines geometry check, below.
  *
  * The rest, fourteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
  * healthy daemon's Warden and its seven other panels, the unreachable daemon's Warden and Carrier, and the
@@ -137,16 +139,16 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 105;
+const SETTINGS_SIDEWAYS_CHECKS = 113;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — the same thirty-seven as above (the section itself is measured once
- * its Runtimes tab has loaded), so 37 + 37. Same tripwire as the number above, for the same reason — a check
+ * Machines frame, at each viewport — the same forty-one as above (the section itself is measured once
+ * its Runtimes tab has loaded), so 41 + 41. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 74;
+const MACHINES_GEOMETRY_CHECKS = 82;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -2099,12 +2101,31 @@ try {
           const offlineSurface = await openMachine('unreachable-daemon');
           await offlineSurface.locator('[data-machine-offline]').waitFor({ state: 'visible' });
           await accountShot('offline', 'offline machine');
+          // A machine that is not set up OPENS ITS FIRST RUN BY ITSELF (S1): nobody hunts for a button.
+          // One question per screen — the tools, then each tool's "Use your login and setup?", a tool
+          // that is installed but not signed in with Sign in now in place, and the "nothing set up yet"
+          // ending — and leaving it lands on the Runtimes card that keeps the way back.
           const newMachine = await openMachine('checking-daemon');
+          await newMachine.locator('[data-first-run-step="tools"]').waitFor({ state: 'visible' });
+          await accountShot('first-run', 'first run');
+          await newMachine.locator('[data-step-next]').click();
+          await newMachine.locator('[data-first-run-step="claude"]').waitFor({ state: 'visible' });
+          await accountShot('first-run-claude', 'first run Claude Code question');
+          await newMachine.locator('[data-harness-skip]').click();
+          await newMachine.locator('[data-first-run-step="codex"] [data-setup-note="sign-in-now"]').waitFor({
+            state: 'visible',
+          });
+          await accountShot('first-run-codex', 'first run Codex not signed in');
+          await newMachine.locator('[data-harness-sign-in]').click();
+          await newMachine.locator('[data-first-run-sign-in="codex"]').waitFor({ state: 'visible' });
+          await accountShot('first-run-sign-in', 'first run Sign in now');
+          await newMachine.locator('[data-first-run-sign-in-close]').click();
+          await newMachine.locator('[data-harness-skip]').click();
+          await newMachine.locator('[data-first-run-result="nothing"]').waitFor({ state: 'visible' });
+          await accountShot('first-run-nothing', 'first run with nothing set up');
+          await newMachine.locator('[data-first-run-finish]').click();
           await newMachine.locator('[data-runtimes-not-set-up]').waitFor({ state: 'visible' });
           await accountShot('not-set-up', 'machine not set up');
-          await newMachine.locator('[data-runtimes-not-set-up] a').click();
-          await newMachine.locator('[data-first-run-step]').first().waitFor({ state: 'visible' });
-          await accountShot('first-run', 'first run');
 
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh

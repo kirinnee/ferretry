@@ -34,7 +34,9 @@ export function renderMachine(machine: FleetMachineView, binaryName: string): st
           `  ${tool.label}: ${tool.installed ? `installed${tool.command ? ` (${tool.command})` : ''}` : 'not installed'}`,
       ),
     ]),
-    ...(machine.setUp ? [] : ['', `Set it up with \`${binaryName} setup\`.`]),
+    ...(machine.setUp
+      ? []
+      : ['', `Set it up with \`${binaryName} daemon setup\`, or pair a phone and finish in the app.`]),
   ].join('\n');
 }
 

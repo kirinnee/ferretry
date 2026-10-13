@@ -125,6 +125,18 @@ export class RecordingFirstPassword {
   }
 }
 
+/** The not-set-up line a start ends with, counted, and written into a trail when one is given. */
+export class RecordingSetupNotice {
+  says = 0;
+
+  constructor(private readonly trail?: string[]) {}
+
+  async say(): Promise<void> {
+    this.says += 1;
+    this.trail?.push('say:setup-notice');
+  }
+}
+
 /** One scripted answer per command, matched on the joined argv. */
 export type CommandScript = ReadonlyArray<readonly [string, CommandOutcome]>;
 

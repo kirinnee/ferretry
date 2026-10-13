@@ -56,7 +56,7 @@ describe('runtime renderings', () => {
 
   it('should say how to get a first runtime', () => {
     should(renderRuntimeList({ format: 'none', runtimes: [] }, 'fz'))
-      .match(/fz setup/)
+      .match(/fz daemon setup/)
       .and.match(/fz runtime add/);
   });
 

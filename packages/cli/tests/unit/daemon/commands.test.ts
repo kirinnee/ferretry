@@ -23,6 +23,7 @@ import {
   installedDaemon,
   layout,
   RecordingFirstPassword,
+  RecordingSetupNotice,
   runningReport,
   SteppingClock,
   stoppedReport,
@@ -86,6 +87,7 @@ function run(
         clock: new SteppingClock(),
         out,
         firstPassword: new RecordingFirstPassword(),
+        setupNotice: new RecordingSetupNotice(),
         readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
         shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
       });
