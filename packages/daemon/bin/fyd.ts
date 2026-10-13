@@ -121,7 +121,6 @@ import {
   NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
-  NodeSocketTicketSecrets,
   type OpenedDaemonStorage,
   PaneProcessInventory,
   PerformanceStopwatch,
@@ -548,8 +547,6 @@ import {
   type SessionTranscriptTail,
   SignalRefused,
   type SocketRoute,
-  type SocketTicketBroker,
-  SocketTicketRegistry,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
@@ -937,10 +934,6 @@ export interface DaemonWorld {
    * the session resolver over real storage — exactly as production builds them.
    */
   readonly terminalRuntime: TerminalRuntimePort;
-  /** Creates the one memory-only ticket registry for one daemon start. It is a world seam so the
-   * production socket path can be exercised at an elapsed deadline without making an integration
-   * test sleep for the public thirty-second ticket lifetime. */
-  readonly createSocketTickets: () => SocketTicketBroker;
   /**
    * The OTHER carriers this daemon can be reached over: outbound sockets to rendezvous.
    *
@@ -1060,7 +1053,6 @@ export interface DaemonWorld {
     push: PushService,
     /** The exact published set pairing redemption receives and authenticated refresh serves. */
     carriers: readonly DaemonCarrier[],
-    socketTickets: SocketTicketBroker,
     /**
      * Where this operator has said the harnesses are, passed IN for the same reason the usage feed
      * is: it is read from the configuration this boot loaded, and the doctor route must report the
@@ -5344,7 +5336,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
-    createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
@@ -5420,7 +5411,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       pairing,
       push,
       carriers,
-      socketTickets,
       harnessDiscovery,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
@@ -6328,11 +6318,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           },
         ),
-        // ONE registry for both halves of the exchange: the route that sells a ticket and the socket
-        // dispatcher that spends it must be the same outstanding set, or every ticket a browser buys
-        // is redeemed against a registry that never issued it. Memory-only and per-daemon by
-        // construction — see the domain's own header for why it is never persisted.
-        socketTickets,
         // Built above, and the same instance the fleet mount confirms a change through. See its
         // definition for why one instance rather than two.
         grants,
@@ -6567,7 +6552,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.subsystem,
     pairing.push,
     carriers,
-    world.createSocketTickets(),
     harnessDiscovery,
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can

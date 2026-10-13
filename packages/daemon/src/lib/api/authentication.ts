@@ -99,3 +99,6 @@ export function authenticate(credentials: ApiCredentials, presented: PresentedTo
 export function isPreKeyDeviceToken(bearer: string | undefined): boolean {
   return bearer !== undefined && /^fy_device_[A-Za-z0-9_-]{43}$/u.test(bearer);
 }
+
+/** A request that DID authenticate, and as which kind of caller. */
+export type AuthenticatedCredential = Extract<Authentication, { readonly kind: 'authenticated' }>;

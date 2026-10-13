@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
-import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import {
@@ -432,7 +431,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   grants: grantSubsystem(),
-  socketTickets: new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` }),
 });
 
 describe('the mounted daemon surface', () => {
@@ -454,7 +452,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      113 + // the session table and everything that is not the account model
+      110 + // the session table and everything that is not the account model (three socket-ticket counters gone: a device opens streams inside its session)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       2 + // the account model's credential list and its Check now
       7 + // the account model's four catalogue reads and its three proposal routes
@@ -612,15 +610,13 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/terminals/:terminalId',
       'POST /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
-      'POST /v1/sessions/:sessionId/terminals/:terminalId/stream/ticket',
       // The human login window, and the per-session automation that is now genuinely served: the
       // browser session runtime composes the worker and its transport into a production
-      // `BrowserViewerHost`, so the read, the action and the viewer's ticket counter are all real.
+      // `BrowserViewerHost`, so the read and the action are real; its viewer opens inside a session.
       'GET /v1/browser/login',
       'POST /v1/browser/login',
       'GET /v1/sessions/:sessionId/browser',
       'POST /v1/sessions/:sessionId/browser',
-      'POST /v1/sessions/:sessionId/browser/stream/ticket',
       'GET /v1/names',
       'GET /v1/learning/status',
       'GET /v1/learning/config',
@@ -658,10 +654,6 @@ describe('the mounted daemon surface', () => {
       // The attach proof. It sits with the operator reads but authorizes a local process action
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
-      // The ticket counters for the socket table below. They are on THIS table, not that one: a
-      // browser buys a ticket over an ordinary request — the only kind that can carry a header — and
-      // spends it on the upgrade.
-      'POST /v1/events/ticket',
     ]);
   });
 

@@ -42,7 +42,8 @@ import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketDownstream, SocketHandler } from '../../../src/lib/api/socket.ts';
 import { LiveDeviceConnections, type SessionPairingAttempt, type PairingCarrier } from '../../../src/lib/pairing/index.ts';
-import { directCarrierSocketRoute, MAX_DIRECT_SESSIONS } from '../../../src/lib/relay/direct-carrier.ts';
+import { MAX_DIRECT_SESSIONS } from '../../../src/lib/relay/direct-carrier.ts';
+import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();

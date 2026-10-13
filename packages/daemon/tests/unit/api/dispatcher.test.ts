@@ -5,7 +5,6 @@ import {
   ApiError,
   type ApiRoute,
   ApiRouter,
-  authorizeRequest,
   type CallerGovernance,
   type CapabilityGuard,
   CLIENT_HEADER,
@@ -16,8 +15,6 @@ import {
   OPERATOR_UNLOCK_HEADER,
   SESSION_ID_HEADER,
   type SocketRoute,
-  SOCKET_TICKET_QUERY_PARAMETER,
-  type SocketTicketRedeemer,
   WARDEN_CAPABILITY_HEADER,
   type WardenRemedyAuthorizer,
   type WardenRemedyDecision,
@@ -1081,36 +1078,6 @@ describe('the warden remedy axis', () => {
     should(seen).be.empty();
   });
 
-  it('should refuse a warden authenticated by a redeemed socket ticket, which carries no headers', async () => {
-    // The one credential path that arrives with NO headers at all: a ticket replays exactly the
-    // classification the bearer that bought it produced, so the caller is a warden and has no way to
-    // present a capability. A presentation that read headers would behave differently here from one
-    // that does not; this pins that the axis reads the token class and refuses on the capability.
-    // Arrange
-    const redeemed: SocketTicketRedeemer = {
-      redeem: () => ({ kind: 'authenticated', tokenClass: 'warden' }),
-    };
-    const router = new ApiRouter([remedial()]);
-
-    // Act
-    const decision = authorizeRequest(
-      router,
-      credentials,
-      request({
-        method: 'POST',
-        path: '/v1/sessions/s-3/stop',
-        query: [[SOCKET_TICKET_QUERY_PARAMETER, 'a-real-ticket']],
-      }),
-      redeemed,
-      NO_GOVERNED_ROUTES_GUARD,
-      allowing(),
-    );
-
-    // Assert — authenticated as a warden, then refused for the capability it structurally cannot send.
-    should(decision.kind).equal('refused');
-    should(decision.kind === 'refused' && jsonBody(decision.response).code).equal('warden_capability_required');
-  });
-
   it('should answer every remedy refusal with a code no other condition uses', async () => {
     // Distinct codes exist so a client can tell these apart WITHOUT parsing prose, and the thing
     // rendering them into something a human acts on has to say which of five different people fixes
@@ -1192,15 +1159,8 @@ describe('the warden remedy axis', () => {
       wardenRemedy: 'kill',
       accept: async () => async () => ({ open: async () => {}, fromClient: () => {}, close: () => {} }),
     };
-    const tickets: SocketTicketRedeemer = { redeem: () => undefined };
-    const wired = new ApiSocketDispatcher(
-      new ApiRouter([upgrade]),
-      credentials,
-      tickets,
-      NO_GOVERNED_ROUTES_GUARD,
-      allowing(),
-    );
-    const unwired = new ApiSocketDispatcher(new ApiRouter([upgrade]), credentials, tickets, NO_GOVERNED_ROUTES_GUARD);
+    const wired = new ApiSocketDispatcher(new ApiRouter([upgrade]), credentials, NO_GOVERNED_ROUTES_GUARD, allowing());
+    const unwired = new ApiSocketDispatcher(new ApiRouter([upgrade]), credentials, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const carrying = { [WARDEN_CAPABILITY_HEADER]: 'cap-7' };

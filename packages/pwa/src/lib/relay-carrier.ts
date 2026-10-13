@@ -49,6 +49,7 @@ import {
   connectionSocketUrl,
   HEARTBEAT_GRACE_SECONDS,
   HEARTBEAT_SECONDS,
+  parseDaemonId,
   type PrivateKeyHandle,
   RELAY_CLOSE_CODES,
   SESSION_PROTOCOL_ID,
@@ -394,6 +395,18 @@ export const driveRelaySession = async <T>({
   }
 };
 
+/**
+ * The daemon's own session address as a socket URL — or `null` for a fingerprint no session can check.
+ *
+ * The same address `connectionSocketUrl` would build for a direct carrier, composed in the CALL above
+ * so the route-agreement gate can see that this app dials the daemon's direct session route.
+ */
+const directSessionUrl = (daemon: DaemonConnection, address: URL): string | null => {
+  if (parseDaemonId(daemon.daemonId) === null) return null;
+  address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:';
+  return address.toString();
+};
+
 export const openRelaySession = async ({
   crypto,
   dial,
@@ -403,7 +416,10 @@ export const openRelaySession = async ({
   mode,
   onData,
 }: OpenRelaySessionOptions): Promise<RelayClientSession> => {
-  const url = connectionSocketUrl(method, daemon.daemonId, 'client');
+  const url =
+    method.kind === 'direct'
+      ? directSessionUrl(daemon, new URL(`/v1/rendezvous/${encodeURIComponent(daemon.daemonId)}/client`, method.daemonUrl))
+      : connectionSocketUrl(method, daemon.daemonId, 'client');
   if (url === null) {
     // `connectionSocketUrl` refuses a fingerprint a session cannot be checked against. That
     // is a refusal, not an address to improvise around.

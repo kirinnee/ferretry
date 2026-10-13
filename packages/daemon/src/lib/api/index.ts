@@ -13,4 +13,3 @@ export * from './routes/health.ts';
 export * from './routes/usage.ts';
 export * from './server.ts';
 export * from './socket.ts';
-export * from './socket-ticket.ts';

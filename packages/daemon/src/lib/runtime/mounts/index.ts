@@ -6,7 +6,6 @@ import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
-import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
@@ -55,11 +54,10 @@ import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
-import { type SocketTicketSubsystem, socketTicketRoutes } from './socket-tickets.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
-import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes, terminalTicketRoutes } from './terminals.ts';
+import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
 
@@ -267,10 +265,6 @@ export interface MountedSubsystems {
   readonly sessionAttach: SessionAttachSubsystem;
   /** This daemon's bounded recent event tail followed by its own live journal appends. */
   readonly fleetEvents: FleetEventStreamSubsystem;
-  /** The credential a browser CAN carry onto an upgrade. One subsystem serves both halves of the
-   *  exchange: the route below sells a ticket, and the socket dispatcher is the only boundary handed
-   *  the redeemer — which is what keeps a ticket useless against an ordinary route. */
-  readonly socketTickets: SocketTicketSubsystem & SocketTicketRedeemer;
   /**
    * What this machine has agreed a caller who is NOT on it may do.
    *
@@ -407,11 +401,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...analyticsRoutes(subsystems.analytics),
     ...analyticsPricingRoutes(subsystems.analyticsPricing),
     ...terminalRoutes(subsystems.terminals),
-    ...terminalTicketRoutes(subsystems.terminals, subsystems.socketTickets),
     // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
     // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
     // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
-    ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser, subsystems.socketTickets),
+    ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
     ...nameRoutes(subsystems.names),
     ...learningRoutes(subsystems.learning),
     ...recommendRoutes(subsystems.recommend),
@@ -437,7 +430,6 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
     // only the request/response table carries — the socket table's `/v1/events` matches GET on one
     // segment less — so the two cannot shadow each other and a POST here is never an upgrade.
-    ...socketTicketRoutes(subsystems.socketTickets),
   ];
 }
 
@@ -483,7 +475,6 @@ export function createMountedSocketDispatcher(
   return new ApiSocketDispatcher(
     new ApiRouter([...mountedSocketRoutes(subsystems), ...carriers]),
     base.credentials,
-    subsystems.socketTickets,
     // The SAME guard the request/response table uses. A terminal socket that skipped it would let a
     // browser drive a shell this machine had refused to let it open.
     subsystems.grants,

@@ -36,8 +36,7 @@ import {
   type SessionId,
   sessionIdFromBytes,
 } from '@ferretry/relay';
-import { ApiError } from '../api/error.ts';
-import type { SocketDownstream, SocketFrame, SocketHandler, SocketRoute } from '../api/socket.ts';
+import type { SocketDownstream, SocketFrame, SocketHandler } from '../api/socket.ts';
 import type { DeviceConnectionTracker } from '../pairing/index.ts';
 import {
   type RelayApiDispatch,
@@ -48,6 +47,7 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
 } from './link.ts';
+import type { SessionArrival } from './tunnel.ts';
 
 /**
  * How many direct sessions this daemon carries at once.
@@ -78,46 +78,8 @@ function frameBytes(frame: SocketFrame): Uint8Array | null {
   return new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
 }
 
-/** The socket route a browser dials for a direct session. */
-export function directCarrierSocketRoute(deps: DirectCarrierDependencies): SocketRoute {
-  let live = 0;
-  return {
-    method: 'GET',
-    path: '/v1/rendezvous/:daemonId/client',
-    // PUBLIC, because the credential is not on the upgrade: it is the device's proof inside the
-    // session that this socket carries. An upgrade with no credential is exactly what a rendezvous
-    // accepts too, and for the same reason.
-    minimum: 'none',
-    accept: async ({ request, params }) => {
-      // A session cannot open a session. The tunnel dispatches a stream's path through this same
-      // socket table, and a nested direct session would be a carrier inside a carrier with nobody's
-      // locality to stamp on it.
-      if (request.device !== undefined) throw new ApiError(404, 'no stream is served at this path', 'not_found');
-      if (params.get('daemonId') !== deps.identity.daemonId)
-        throw new ApiError(404, 'this daemon does not answer for that fingerprint', 'not_found');
-      if (live >= MAX_DIRECT_SESSIONS)
-        throw new ApiError(429, 'this daemon is carrying as many direct sessions as it allows', 'rendezvous_busy');
-      const arrival = {
-        loopback: request.loopback,
-        privilegedLoopback: request.privilegedLoopback === true,
-        ...(request.clientAddress === undefined ? {} : { clientAddress: request.clientAddress }),
-      };
-      return async downstream => {
-        live += 1;
-        let released = false;
-        const release = (): void => {
-          if (released) return;
-          released = true;
-          live -= 1;
-        };
-        return new DirectSession(deps, arrival, downstream, release);
-      };
-    },
-  };
-}
-
 /** One direct socket: one link carrying exactly one session. */
-class DirectSession implements SocketHandler {
+export class DirectSession implements SocketHandler {
   readonly #sessionId: SessionId;
   readonly #link: RelayLink;
   #inbox: Promise<void> = Promise.resolve();
@@ -125,7 +87,7 @@ class DirectSession implements SocketHandler {
 
   constructor(
     deps: DirectCarrierDependencies,
-    arrival: ConstructorParameters<typeof RelayLink>[0]['arrival'],
+    arrival: SessionArrival | undefined,
     private readonly downstream: SocketDownstream,
     private readonly release: () => void,
   ) {

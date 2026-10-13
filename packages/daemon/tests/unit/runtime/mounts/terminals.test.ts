@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
   CloseTerminalResponseSchema,
-  SocketTicketResponseSchema,
   TerminalListViewSchema,
   type TerminalView,
   TerminalViewSchema,
@@ -10,15 +9,13 @@ import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketDownstream } from '../../../../src/lib/api/socket.ts';
-import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import {
   TerminalMountError,
   terminalRoutes,
   terminalSocketRoutes,
-  terminalTicketRoutes,
 } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, FakeTerminals, GRANTED, human, NO_TICKETS } from './support.ts';
+import { CREDENTIALS, FakeTerminals, GRANTED, human } from './support.ts';
 
 /**
  * The terminal lifecycle's HTTP surface, driven through the real router.
@@ -430,43 +427,6 @@ describe('the terminal mount', () => {
   });
 });
 
-describe('the terminal stream ticket counter', () => {
-  const credentials = CREDENTIALS;
-
-  it('should sell the host a ticket for one terminal stream, and refuse a paired device outright', async () => {
-    // Arrange — a paired device opens its stream INSIDE its session, where the credential is the
-    // session; a ticket bought there would be a bearer value it could spend on plain HTTP.
-    const terminals = new FakeTerminals();
-    const created = await dispatcher(terminals).dispatch(post('/v1/sessions/s1/terminals'));
-    const terminal = TerminalViewSchema.parse(jsonBody(created));
-    const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
-    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials, GRANTED);
-    const path = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
-
-    // Act
-    const sold = await counter.dispatch(post(`${path}/ticket`));
-    const body = SocketTicketResponseSchema.parse(jsonBody(sold));
-    const refused = await counter.dispatch(devicePost(`${path}/ticket`));
-
-    // Assert
-    should(sold.status).equal(201);
-    should(sold.headers?.get('cache-control')).equal('no-store');
-    should(tickets.redeem(body.ticket, path)).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
-    should(refused.status).equal(403);
-    should(jsonBody(refused)).have.property('code', 'ticket_not_for_devices');
-  });
-
-  it('should refuse to mint a ticket for a terminal this daemon does not hold', async () => {
-    const terminals = new FakeTerminals();
-    const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
-    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials, GRANTED);
-
-    const sold = await counter.dispatch(post('/v1/sessions/s1/terminals/0123456789ab/stream/ticket'));
-
-    should(sold.status).equal(404);
-  });
-});
-
 /**
  * The terminal STREAM's surface — a protocol switch rather than a response.
  *
@@ -477,7 +437,7 @@ describe('the terminal stream ticket counter', () => {
  */
 describe('the mounted terminal stream', () => {
   function sockets(terminals: FakeTerminals = new FakeTerminals()): ApiSocketDispatcher {
-    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, NO_TICKETS, GRANTED);
+    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, GRANTED);
   }
 
   /** A downstream that records, standing in for the socket the transport would supply. */

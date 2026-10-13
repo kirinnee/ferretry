@@ -133,18 +133,6 @@ export const closeSessionTerminal = async (
   return closed;
 };
 
-/**
- * The daemon route one terminal's stream lives at, credential-free.
- *
- * ONE VALUE, BOTH CARRIERS, AND NO CREDENTIAL IN IT. A viewer puts this path in its §14 `stream`
- * credential record on whichever carrier reaches the daemon; the record carries the device's proof,
- * and §14 refuses `ticket` or `token` in a stream's query with `4400`.
- */
-export const terminalStreamPath = (daemon: DaemonConnection, scope: DaemonSessionScope, terminalId: string): string => {
-  assertScopeDaemon(daemon, scope);
-  return `${terminalPath(scope, terminalId)}/stream`;
-};
-
 /* ---------- one terminal stream, whichever carrier reaches the daemon ------- */
 
 /**
@@ -223,10 +211,13 @@ const relayTerminalStream = (session: RelayClientSession, handlers: TerminalStre
 export const browserTerminalStreamAttach =
   (openStream: TerminalStreamOpener): TerminalStreamAttach =>
   async (daemon, scope, terminalId, handlers) => {
-    const path = terminalStreamPath(daemon, scope, terminalId);
-    const session = await openStream(daemon, { path, onData: frame => onStreamFrame(frame, handlers) }).catch(
-      relayAttachFailure(handlers),
-    );
+    assertScopeDaemon(daemon, scope);
+    // COMPOSED AT THE CALL, credential-free, so the route-agreement gate sees this dial: it recognises a request by the path written in the call's own arguments, and behind a
+    // helper it would report the terminal stream as reached by no client at all.
+    const session = await openStream(daemon, {
+      path: `${terminalPath(scope, terminalId)}/stream`,
+      onData: frame => onStreamFrame(frame, handlers),
+    }).catch(relayAttachFailure(handlers));
     return relayTerminalStream(session, handlers);
   };
 

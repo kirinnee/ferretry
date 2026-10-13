@@ -34,7 +34,6 @@ export * from './session-filesystem.ts';
 export * from './session-fork.ts';
 export * from './session-transcript.ts';
 export * from './session-transfer.ts';
-export * from './socket-ticket.ts';
 export * from './state-home-layout.ts';
 export * from './stt.ts';
 export * from './surface.ts';

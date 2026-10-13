@@ -54,7 +54,6 @@ import { WebCryptoRelayIdentityKeys } from '../../../src/adapters/relay/web-cryp
 import type { ApiResponse } from '../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../../src/lib/api/socket.ts';
-import { SocketTicketRegistry } from '../../../src/lib/api/socket-ticket.ts';
 import { LiveDeviceConnections, type PairingRedemption } from '../../../src/lib/pairing/index.ts';
 import { RelayLink, type RelayLinkSocket } from '../../../src/lib/relay/index.ts';
 import { fleetEventSocketRoutes } from '../../../src/lib/runtime/mounts/fleet-events.ts';
@@ -124,7 +123,6 @@ function socketDispatcher(events: FleetEventStreamService): ApiSocketDispatcher 
   return new ApiSocketDispatcher(
     new ApiRouter(routes),
     { admin: 'fy_admin_host_only', devices: { has: deviceId => deviceId === DEVICE_ID } },
-    new SocketTicketRegistry({ now: () => Date.now() }, { ticket: () => 'unused' }),
     // `/v1/events` names no capability, so the boundary never asks — and a guard that refuses
     // everything proves that, because a route that DID demand one would fail this test loudly.
     {

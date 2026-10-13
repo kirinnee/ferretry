@@ -170,9 +170,6 @@ export const CREDENTIALS = {
   devices: { has: (_deviceId: string) => true },
 } as const;
 
-/** A socket boundary with no ticket surface, for cases whose callers present a real bearer. A ticket
- *  is the browser's credential; refusing every one of them is what these cases mean. */
-export const NO_TICKETS = { redeem: () => undefined } as const;
 
 /** The human's CLI. */
 export const human = { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-client': 'cli' } as const;

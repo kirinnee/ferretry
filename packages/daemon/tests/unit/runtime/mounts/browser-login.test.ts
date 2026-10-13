@@ -7,13 +7,11 @@ import {
   type BrowserPageSnapshot,
   type BrowserStatus,
   BrowserStatusSchema,
-  SocketTicketResponseSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketDownstream, type SocketHandler } from '../../../../src/lib/api/socket.ts';
-import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import { BrowserControlError } from '../../../../src/lib/browser/control/index.ts';
 import { BrowserSessionError } from '../../../../src/lib/browser/runtime/index.ts';
 import {
@@ -22,7 +20,7 @@ import {
   browserSocketRoutes,
 } from '../../../../src/lib/runtime/mounts/browser-login.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { BrokenBrowserLogin, CREDENTIALS, FakeBrowserLogin, GRANTED, human, NO_TICKETS } from './support.ts';
+import { BrokenBrowserLogin, CREDENTIALS, FakeBrowserLogin, GRANTED, human } from './support.ts';
 
 /**
  * The human browser-login route, over a window with no host behind it.
@@ -268,10 +266,8 @@ class FakeBrowser implements BrowserMountedSubsystem {
   }
 }
 
-const REGISTRY = () => new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'b'.repeat(43)}` });
-
-const served = (browser: FakeBrowser, tickets?: SocketTicketRegistry): ApiDispatcher =>
-  new ApiDispatcher(new ApiRouter(browserLoginRoutes(new FakeBrowserLogin(), browser, tickets)), CREDENTIALS, GRANTED);
+const served = (browser: FakeBrowser): ApiDispatcher =>
+  new ApiDispatcher(new ApiRouter(browserLoginRoutes(new FakeBrowserLogin(), browser)), CREDENTIALS, GRANTED);
 
 const act = (path: string, body: unknown) =>
   request({
@@ -363,63 +359,6 @@ describe('the mounted per-session browser', () => {
     // Assert
     should([read.status, acted.status]).deepEqual([500, 500]);
   });
-
-  it('should sell a stream ticket that redeems only for this session browser socket', async () => {
-    // The viewer's WebSocket can carry no device token, so the ticket is the credential — and it must
-    // be worthless anywhere but this one session's stream path.
-    // Arrange
-    const browser = new FakeBrowser();
-    const tickets = REGISTRY();
-
-    // Act
-    const sold = await served(browser, tickets).dispatch(act('/v1/sessions/s1/browser/stream/ticket', {}));
-    const body = SocketTicketResponseSchema.parse(JSON.parse(String(sold.body)));
-
-    // Assert
-    should(sold.status).equal(201);
-    should(body.ttlSeconds).equal(30);
-    should(tickets.redeem(body.ticket, '/v1/sessions/s1/browser/stream')).have.property('tokenClass', 'admin');
-    // The host was asked first: a ticket for a browser this daemon does not hold is a credential for
-    // a socket that would refuse anyway.
-    should(browser.calls).deepEqual(['status:s1']);
-  });
-
-  it('should refuse to mint a ticket for a session browser this daemon does not hold', async () => {
-    // Arrange
-    const absent = new FakeBrowser(new BrowserSessionError('not_found', 'the session does not exist'));
-
-    // Act
-    const sold = await served(absent, REGISTRY()).dispatch(act('/v1/sessions/s1/browser/stream/ticket', {}));
-
-    // Assert
-    should(sold.status).equal(404);
-  });
-
-  it('should refuse to mint a ticket for a caller whose credential it cannot see', async () => {
-    // Unreachable through the dispatcher, which always resolves a credential for a scoped route.
-    // Asserted directly because the alternative to knowing WHO asked is minting authority for nobody.
-    // Arrange
-    const counter = browserLoginRoutes(new FakeBrowserLogin(), new FakeBrowser(), REGISTRY()).find(
-      route => route.path === '/v1/sessions/:sessionId/browser/stream/ticket',
-    );
-
-    // Act
-    const refusal = await counter
-      ?.handle({ request: act('/v1/sessions/s1/browser/stream/ticket', {}), params: new Map([['sessionId', 's1']]) })
-      .then(() => undefined)
-      .catch((error: unknown) => error as { status?: number });
-
-    // Assert
-    should(refusal).have.property('status', 401);
-  });
-
-  it('should offer no ticket counter at all when no broker was composed', async () => {
-    // Arrange / Act
-    const paths = browserLoginRoutes(new FakeBrowserLogin(), new FakeBrowser()).map(route => route.path);
-
-    // Assert — a counter that could not mint anything would answer 500 where 404 is the truth.
-    should(paths).not.containEql('/v1/sessions/:sessionId/browser/stream/ticket');
-  });
 });
 
 /**
@@ -431,7 +370,7 @@ describe('the mounted per-session browser', () => {
  */
 describe('the mounted session browser stream', () => {
   const sockets = (browser: FakeBrowser): ApiSocketDispatcher =>
-    new ApiSocketDispatcher(new ApiRouter(browserSocketRoutes(browser)), CREDENTIALS, NO_TICKETS, GRANTED);
+    new ApiSocketDispatcher(new ApiRouter(browserSocketRoutes(browser)), CREDENTIALS, GRANTED);
 
   /** A downstream that records, standing in for the socket the transport would supply. */
   const downstream = (): { readonly sent: string[]; readonly port: SocketDownstream } => {

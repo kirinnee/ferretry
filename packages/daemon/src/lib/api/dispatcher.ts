@@ -27,7 +27,6 @@ import type {
   WardenRemedyGrant,
 } from './route.ts';
 import type { ApiRouter } from './router.ts';
-import { SOCKET_TICKET_QUERY_PARAMETER, type SocketTicketRedeemer } from './socket-ticket.ts';
 
 /** The pane's own session id, so an in-pane caller is attributed to itself rather than to the
  *  shared token it holds. */
@@ -94,7 +93,6 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   router: ApiRouter<TRoute>,
   credentials: ApiCredentials,
   request: ApiRequest,
-  tickets: SocketTicketRedeemer | undefined,
   guard: CapabilityGuard,
   /**
    * The administrator's per-remedy answer, absent on a boundary that serves no remedy routes.
@@ -141,14 +139,11 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
           // that could already read the token file it came from.
           query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
         });
-  // A ticket is the credential a browser CAN present on an upgrade, and only the upgrade boundary
-  // passes a redeemer — an ordinary route is given none, so a ticket read out of an access log
-  // authenticates nothing there. It is tried only when the request could not authenticate on its own,
-  // so a caller holding a real bearer never silently spends a single-use ticket.
-  const authentication =
-    presented.kind === 'anonymous' && tickets !== undefined && lookup.kind === 'matched'
-      ? (tickets.redeem(queryValue(request, SOCKET_TICKET_QUERY_PARAMETER) ?? '', request.path) ?? presented)
-      : presented;
+  // THERE ARE NO SOCKET TICKETS ANY MORE. They existed so a browser — which cannot put a header on a
+  // WebSocket — could authenticate an upgrade with a short-lived bearer value bought over HTTP. A
+  // browser now opens every stream inside a session its device key opened, so no URL ever carries a
+  // credential and there is nothing here to redeem one.
+  const authentication = presented;
   if (authentication.kind === 'anonymous')
     return {
       kind: 'refused',
@@ -382,7 +377,7 @@ export class ApiDispatcher {
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, undefined, this.guard, this.remedies);
+    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
     if (authorized.kind === 'refused') return authorized.response;
     return await run(authorized.route, authorized.context);

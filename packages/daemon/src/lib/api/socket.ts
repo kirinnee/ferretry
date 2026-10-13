@@ -21,7 +21,6 @@ import type { ApiRequest, ApiResponse } from './http.ts';
 import { errorResponse } from './responses.ts';
 import type { RouteContext, ScopedRoute, WardenRemedyAuthorizer } from './route.ts';
 import type { ApiRouter } from './router.ts';
-import type { SocketTicketRedeemer } from './socket-ticket.ts';
 
 /** A client frame as the transport delivers it: text control JSON, or binary bytes. */
 export type SocketFrame = string | ArrayBuffer | ArrayBufferView;
@@ -129,16 +128,9 @@ export type SocketUpgradeDecision =
 
 /** Decides one protocol switch, over the same authorization boundary the HTTP dispatcher uses. */
 export class ApiSocketDispatcher {
-  /**
-   * `tickets` is required rather than optional, and it is the ONE thing this boundary has that the
-   * request/response one does not. A browser cannot put a header on a `WebSocket`, so without a
-   * redeemer here a paired device can never open a socket at all — an optional dependency is how that
-   * capability would go quietly missing again, in a daemon that still looked correctly wired.
-   */
   constructor(
     private readonly router: ApiRouter<SocketRoute>,
     private readonly credentials: ApiCredentials,
-    private readonly tickets: SocketTicketRedeemer,
     /**
      * The operator's per-capability decision, over the SAME boundary the request/response dispatcher
      * uses. A terminal stream is the capability `terminal`, and a socket table that skipped this
@@ -177,7 +169,6 @@ export class ApiSocketDispatcher {
       this.router,
       this.credentials,
       request,
-      this.tickets,
       this.guard,
       this.remedies,
     );
