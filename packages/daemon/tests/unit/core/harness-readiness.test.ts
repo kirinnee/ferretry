@@ -177,7 +177,7 @@ describe('harness readiness', () => {
     should(noneUsable).match(/but this host cannot run that file/u);
     for (const warning of [nonePublished, noneUsable]) {
       // A diagnosis on its own leaves the reader exactly where they were.
-      should(warning).match(/fy fleet apply/u);
+      should(warning).match(/fy setup/u);
       should(warning).match(/Install Claude Code or Codex/u);
       // It must never read as a refusal: the daemon starts anyway.
       should(warning).match(/can serve its API but cannot start a session/u);

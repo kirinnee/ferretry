@@ -1,9 +1,9 @@
 /**
  * The setup service with every port faked: the first-run scan, Import again, the tool install, the
- * Clone export and import, the migration, and the first run a booting daemon gives a host.
+ * Clone export and import, and the first run a booting daemon gives a host.
  *
  * The import plan, the clone plan and the materialised fleet are the fleet library's real ones; only
- * the host scan, the files, the provisioner, the secret store and the migration are stand-ins, so what
+ * the host scan, the files, the provisioner and the secret store are stand-ins, so what
  * an apply is handed is what a real apply would be.
  */
 import { describe, it } from 'bun:test';
@@ -16,22 +16,19 @@ import {
   type FleetLayout,
   type HostHarnessScan,
   parseAccountModel,
+  RetiredFleetConfigError,
 } from '@ferretry/fleet';
 import {
   type FleetAccountChange,
   FleetCloneBundleSchema,
   type FleetCredentialView,
-  FleetMigrationOutcomeSchema,
-  FleetMigrationViewSchema,
   FleetSetupScanSchema,
   FleetToolInstallResultSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
-import { ACCOUNT_MODEL_DISABLED_SENTENCE } from '../../../src/lib/fleet/account-model-switch.ts';
 import { type AccountDocumentReading, FleetCatalogRefusal } from '../../../src/lib/fleet/catalog-service.ts';
 import {
-  bootFirstRunChoice,
   bootFirstRunSentence,
   CLONE_BUNDLE_MAX_BYTES,
   createFleetSetupSubsystem,
@@ -41,8 +38,6 @@ import {
   type FolderReading,
   IMPORT_RECORD_FILE,
   parseImportRecord,
-  type SetupMigration,
-  type SetupModelApply,
 } from '../../../src/lib/fleet/setup-service.ts';
 import {
   type ToolInstallOutcome,
@@ -142,7 +137,6 @@ interface World {
   readonly secrets: Map<string, string>;
   readonly state: {
     reading: AccountDocumentReading;
-    disabled: string | undefined;
     scans: readonly HostHarnessScan[];
     assets: Record<string, string>;
     folders: Record<string, FolderReading>;
@@ -158,20 +152,14 @@ interface World {
     scanError: unknown;
     locate: Partial<Record<'claude' | 'codex', string>>;
   };
-  /** The apply port the migration was built with. */
-  readonly migrationApply: () => SetupModelApply | undefined;
 }
 
-function world(
-  options: { migration?: SetupMigration | false; overrides?: Partial<FleetSetupServiceDeps> } = {},
-): World {
+function world(options: { overrides?: Partial<FleetSetupServiceDeps> } = {}): World {
   const applied: World['applied'] = [];
   const secrets = new Map<string, string>();
   let minted = 0;
-  let migrationApply: SetupModelApply | undefined;
   const state: World['state'] = {
     reading: EMPTY_READING(),
-    disabled: undefined,
     scans: [claudeScan(), codexScan()],
     assets: {},
     folders: {
@@ -217,7 +205,6 @@ function world(
       readAsset: async path => state.assets[path],
       documentRevision: async path => (state.assets[path] === undefined ? 'absent' : `digest:${path}`),
       ids: async () => undefined,
-      writesRefusal: async () => state.disabled,
       locate: harness => state.locate[harness],
       machineName: () => 'studio',
       credentials: {
@@ -257,14 +244,6 @@ function world(
     },
     readFolder: async path => state.folders[path] ?? { files: [], skipped: [] },
     skillItems: async () => await state.skillItems(),
-    ...(options.migration === false
-      ? {}
-      : {
-          migration: (apply: SetupModelApply) => {
-            migrationApply = apply;
-            return (options.migration as SetupMigration | undefined) ?? MIGRATION();
-          },
-        }),
     digest: text => `sha:${Bun.hash(text).toString(16)}`,
     ...options.overrides,
   };
@@ -273,27 +252,8 @@ function world(
     applied,
     secrets,
     state,
-    migrationApply: () => migrationApply,
   };
 }
-
-const MIGRATION = (overrides: Partial<SetupMigration> = {}): SetupMigration => ({
-  status: async () => ({ kind: 'version-1' }),
-  dryRun: async () => ({ plan: { digest: 'digest-1', blockers: [] }, lines: ['Login claude-you: shared.'] }),
-  migrate: async () => ({
-    kind: 'migrated',
-    resumed: false,
-    report: {
-      credentials: [
-        { id: 'claude-you', harness: 'claude', store: 'host', retired: ['/a', '/b'] },
-        { id: 'codex-work', harness: 'codex', store: 'ferretry', retired: [] },
-        { id: 'api', harness: 'claude', store: 'environment', retired: [] },
-      ],
-      runtimes: [{ name: 'claude-default' }, { name: 'claude-agent', formerName: 'claude-auto-default' }],
-    },
-  }),
-  ...overrides,
-});
 
 const governance = (confirmChange: boolean): CallerGovernance =>
   ({ governed: confirmChange, passwordSet: true, confirmChange }) as CallerGovernance;
@@ -339,19 +299,7 @@ const configOf = (documents: readonly FleetDocumentWrite[]): string =>
 
 // ── Boot ─────────────────────────────────────────────────────────────────────────────────────────
 
-describe('the first run a booting daemon chooses', () => {
-  it('should keep the released version-1 first run while the account model is switched off', () => {
-    should(bootFirstRunChoice({ prepareDefaults: true, accountModelEnabled: false })).equal('version-1');
-  });
-
-  it('should import the host setup as version 2 once the account model is switched on', () => {
-    should(bootFirstRunChoice({ prepareDefaults: true, accountModelEnabled: true })).equal('version-2');
-  });
-
-  it('should run neither when the operator switched first-run preparation off', () => {
-    should(bootFirstRunChoice({ prepareDefaults: false, accountModelEnabled: true })).equal('none');
-  });
-
+describe('the first run a booting daemon reports', () => {
   it('should say each ending in its own sentence', () => {
     should(bootFirstRunSentence({ kind: 'imported', summary: 'studio is ready.' })).equal(
       'first run: studio is ready.',
@@ -386,16 +334,25 @@ describe('firstRunAtBoot', () => {
     should([...secrets.values()]).deepEqual([SECRET_VALUE]);
   });
 
-  it('should skip while the switch is off, writing nothing', async () => {
+  it('should skip a configuration in the old account format with the sentence that names the fix, writing nothing', async () => {
     const { service, state, applied } = world();
-    state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    should(await service.firstRunAtBoot()).deepEqual({ kind: 'skipped', reason: ACCOUNT_MODEL_DISABLED_SENTENCE });
+    const retired = new RetiredFleetConfigError('/state/fleet/config.yaml');
+    state.documentError = retired;
+    should(await service.firstRunAtBoot()).deepEqual({ kind: 'skipped', reason: retired.message });
+    should(retired.message).containEql('/state/fleet/config.yaml');
+    should(applied).have.length(0);
+  });
+
+  it('should report any other unreadable configuration as a failure, never a throw', async () => {
+    const { service, state, applied } = world();
+    state.documentError = new Error('bad yaml');
+    should(await service.firstRunAtBoot()).deepEqual({ kind: 'failed', reason: 'bad yaml' });
     should(applied).have.length(0);
   });
 
   it('should leave a machine that already has a fleet configuration alone', async () => {
     const { service, state } = world();
-    state.reading = { format: 'version-1', model: parseAccountModel({ version: 2 }), revision: 'r' };
+    state.reading = { format: 'version-2', model: parseAccountModel({ version: 2 }), revision: 'r' };
     should(await service.firstRunAtBoot()).deepEqual({
       kind: 'skipped',
       reason: 'this machine already has a fleet configuration, so it was left as it is',
@@ -479,16 +436,11 @@ describe('scan', () => {
     ]);
   });
 
-  it('should say an import cannot be staged while the switch is off, or on the old account format', async () => {
+  it('should refuse a configuration in the old account format with the sentence that says how to set up again', async () => {
     const { service, state } = world();
-    state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    should((await service.scan()).importing).deepEqual({ available: false, reason: ACCOUNT_MODEL_DISABLED_SENTENCE });
-    state.disabled = undefined;
-    state.reading = { format: 'version-1', model: SET_UP_MODEL(), revision: 'r' };
-    should((await service.scan()).importing).deepEqual({
-      available: false,
-      reason: 'This machine still uses the old account format, so its setup cannot be imported until it is migrated.',
-    });
+    state.documentError = new RetiredFleetConfigError('/state/fleet/config.yaml');
+    const refusal = await setupRefusal(service.scan(), 'fleet_setup_unreadable');
+    should(refusal.message).containEql('/state/fleet/config.yaml uses the old account format');
   });
 
   it('should offer Import again the components whose source changed, and name an existing twin runtime', async () => {
@@ -636,172 +588,6 @@ describe('exportBundle', () => {
     should(bundle.credentials).deepEqual([{ id: 'claude-you', harness: 'claude', label: 'work' }]);
   });
 });
-
-// ── Migration ────────────────────────────────────────────────────────────────────────────────────
-
-describe('migration', () => {
-  it('should show the dry run and its digest on a version-1 machine', async () => {
-    const { service } = world();
-    should(FleetMigrationViewSchema.parse(await service.migration())).deepEqual({
-      status: 'version-1',
-      dryRun: { digest: 'digest-1', lines: ['Login claude-you: shared.'], blockers: [] },
-      migrate: { available: true },
-    });
-  });
-
-  it('should say why it cannot migrate: the switch, then a blocker', async () => {
-    const blocked = world({
-      migration: MIGRATION({
-        dryRun: async () => ({ plan: { digest: 'd', blockers: [{ message: 'A session is live.' }] }, lines: [] }),
-      }),
-    });
-    should((await blocked.service.migration()).migrate).deepEqual({ available: false, reason: 'A session is live.' });
-    blocked.state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    should((await blocked.service.migration()).migrate).deepEqual({
-      available: false,
-      reason: ACCOUNT_MODEL_DISABLED_SENTENCE,
-    });
-  });
-
-  it('should say a machine with no fleet or on version 2 has nothing to migrate', async () => {
-    const none = world({ migration: MIGRATION({ status: async () => ({ kind: 'no-fleet' }) }) });
-    should(await none.service.migration()).deepEqual({
-      status: 'no-fleet',
-      migrate: { available: false, reason: 'This machine has no setup to migrate.' },
-    });
-    const done = world({ migration: MIGRATION({ status: async () => ({ kind: 'version-2' }) }) });
-    should(await done.service.migration()).deepEqual({
-      status: 'version-2',
-      migrate: { available: false, reason: 'This machine already uses the new account format.' },
-    });
-  });
-
-  it('should name a half-done migration so approving it finishes that one', async () => {
-    const started = Date.parse('2026-10-13T07:00:00.000Z');
-    const { service, state } = world({
-      migration: MIGRATION({ status: async () => ({ kind: 'in-progress', digest: 'd-half', startedAt: started }) }),
-    });
-    should(await service.migration()).deepEqual({
-      status: 'in-progress',
-      inProgress: { digest: 'd-half', startedAt: '2026-10-13T07:00:00.000Z' },
-      migrate: { available: true },
-    });
-    state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    should((await service.migration()).migrate).deepEqual({
-      available: false,
-      reason: ACCOUNT_MODEL_DISABLED_SENTENCE,
-    });
-  });
-
-  it('should refuse when this machine cannot migrate at all, and turn a failing read into a refusal', async () => {
-    await setupRefusal(world({ migration: false }).service.migration(), 'fleet_setup_refused');
-    const failing = world({
-      migration: MIGRATION({
-        status: async () => {
-          throw new Error('state unreadable');
-        },
-      }),
-    });
-    should((await setupRefusal(failing.service.migration(), 'fleet_setup_refused')).message).equal('state unreadable');
-    const refusing = world({
-      migration: MIGRATION({
-        status: async () => {
-          throw new FleetSetupRefusal('fleet_setup_busy', 'busy');
-        },
-      }),
-    });
-    await setupRefusal(refusing.service.migration(), 'fleet_setup_busy');
-  });
-});
-
-describe('migrate', () => {
-  it('should migrate the approved dry run and report what was kept and renamed', async () => {
-    const { service } = world();
-    should(
-      FleetMigrationOutcomeSchema.parse(await service.migrate({ digest: 'digest-1' }, governance(false))),
-    ).deepEqual({
-      outcome: 'migrated',
-      resumed: false,
-      credentials: [
-        { id: 'claude-you', harness: 'claude', store: 'host', retired: 2 },
-        { id: 'codex-work', harness: 'codex', store: 'ferretry', retired: 0 },
-        { id: 'api', harness: 'claude', store: 'environment', retired: 0 },
-      ],
-      runtimes: [{ name: 'claude-default' }, { name: 'claude-agent', formerName: 'claude-auto-default' }],
-    });
-  });
-
-  it('should pass a refusal and a rollback through as values', async () => {
-    const refused = world({ migration: MIGRATION({ migrate: async () => ({ kind: 'refused', reasons: ['stale'] }) }) });
-    should(await refused.service.migrate({ digest: 'x' }, governance(false))).deepEqual({
-      outcome: 'refused',
-      reasons: ['stale'],
-    });
-    const rolled = world({
-      migration: MIGRATION({
-        migrate: async () => ({ kind: 'rolled-back', reason: 'verify failed', unrestored: ['/a'] }),
-      }),
-    });
-    should(await rolled.service.migrate({ digest: 'x' }, governance(false))).deepEqual({
-      outcome: 'rolled-back',
-      reason: 'verify failed',
-      unrestored: ['/a'],
-    });
-  });
-
-  it('should refuse with no governance, with the switch off, and while another migration runs', async () => {
-    await setupRefusal(world().service.migrate({ digest: 'd' }, undefined), 'fleet_setup_unauthorized');
-    const off = world();
-    off.state.disabled = ACCOUNT_MODEL_DISABLED_SENTENCE;
-    await setupRefusal(off.service.migrate({ digest: 'd' }, governance(false)), 'fleet_setup_disabled');
-    let release: () => void = () => undefined;
-    const slow = world({
-      migration: MIGRATION({
-        migrate: async () =>
-          await new Promise(resolve => {
-            release = () => resolve({ kind: 'refused', reasons: ['done'] });
-          }),
-      }),
-    });
-    const first = slow.service.migrate({ digest: 'd' }, governance(false));
-    await Bun.sleep(0);
-    await setupRefusal(slow.service.migrate({ digest: 'd' }, governance(false)), 'fleet_setup_busy');
-    release();
-    await first;
-  });
-
-  it('should ask a governed caller for the operator password, in words for each refusal', async () => {
-    const { service, state } = world();
-    const missing = await setupRefusal(service.migrate({ digest: 'd' }, governance(true)), 'fleet_setup_unauthorized');
-    should(missing.message).containEql('operator password');
-    const reasons = [
-      ['wrong-password', "that is not this machine's operator password, so nothing was migrated"],
-      ['rate-limited', 'too many wrong operator passwords'],
-      ['no-password', 'this machine has no operator password'],
-    ] as const;
-    for (const [reason, words] of reasons) {
-      state.confirmation = { kind: 'refused', reason };
-      const refusal = await setupRefusal(
-        service.migrate({ digest: 'd', operatorPassword: 'hunter2hunter2' }, governance(true)),
-        'fleet_setup_unauthorized',
-      );
-      should(refusal.message).containEql(words);
-    }
-    state.confirmation = { kind: 'confirmed' };
-    should(
-      (await service.migrate({ digest: 'd', operatorPassword: 'hunter2hunter2' }, governance(true))).outcome,
-    ).equal('migrated');
-  });
-
-  it('should hand the migration an apply that materialises the migrated model', async () => {
-    const { migrationApply, applied } = world();
-    await migrationApply()?.apply(SET_UP_MODEL());
-    should(applied).have.length(1);
-    should(applied[0]?.documents).deepEqual([]);
-  });
-});
-
-// ── The import executor ──────────────────────────────────────────────────────────────────────────
 
 describe('the setup.import executor', () => {
   it('should describe the import, then write config, components, skills, the record and the secret', async () => {
@@ -982,7 +768,7 @@ describe('the setup.import executor', () => {
   });
 
   it('should read settings, hooks and skill bodies the model names, ignoring one that does not parse', async () => {
-    const { migrationApply, applied, state } = world();
+    const { service, applied, state } = world();
     state.assets['/state/fleet/assets/components/settings/good.json'] = '{"theme":"dark"}';
     state.assets['/state/fleet/assets/components/settings/bad.json'] = '{nope';
     state.assets['/state/fleet/assets/components/hooks/h.json'] = '{"hooks":{}}';
@@ -1010,12 +796,13 @@ describe('the setup.import executor', () => {
       profiles: { p: { layers: ['instructions/main', 'skills/s', 'settings/good', 'hooks/h'] } },
       runtimes: { 'claude-p': { credential: 'c', profile: 'p' } },
     });
-    await migrationApply()?.apply(model);
+    state.reading = { format: 'version-2', model, revision: 'rev' };
+    await importOnce(service);
     should(applied).have.length(1);
   });
 
   it('should refuse a model the fleet library cannot materialise', async () => {
-    const { migrationApply, state } = world();
+    const { service, state } = world();
     state.assets['/state/fleet/assets/components/settings/bad.json'] = '{nope';
     const broken = parseAccountModel({
       version: 2,
@@ -1024,7 +811,10 @@ describe('the setup.import executor', () => {
       profiles: { p: { layers: ['settings/bad'] } },
       runtimes: { 'claude-p': { credential: 'c', profile: 'p' } },
     });
-    const refusal = await catalogRefusal(migrationApply()?.apply(broken) ?? Promise.resolve(), 'fleet_change_refused');
+    state.reading = { format: 'version-2', model: broken, revision: 'rev' };
+    const change = IMPORT();
+    await service.executors.setup.describe(change);
+    const refusal = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_refused');
     should(refusal.message).containEql('settings "bad" could not be read');
   });
 });
@@ -1143,7 +933,7 @@ describe('parseImportRecord', () => {
 });
 
 describe('createFleetSetupSubsystem', () => {
-  it('should build a service with no migration when the machine cannot offer one', () => {
-    should(world({ migration: false }).service).be.instanceOf(FleetSetupService);
+  it('should build the service the composition root mounts', () => {
+    should(world().service).be.instanceOf(FleetSetupService);
   });
 });

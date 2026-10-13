@@ -1,219 +1,230 @@
 import { describe, it } from 'bun:test';
-import type { FleetUsage, FleetUsageSnapshot } from '@ferretry/fleet';
+import { buildFleetManifest, type FleetManifest } from '@ferretry/fleet';
+import type { FleetCredentialList, FleetCredentialView } from '@ferretry/protocol';
 import should from 'should';
-import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
-import { accountUsageFromFleet, quotaFromUsage, usageForAgent } from '../../../src/lib/usage/index.ts';
+import { CredentialUsageSource, credentialUsageRows } from '../../../src/lib/usage/credential-usage.ts';
+import { quotaFromUsage, usageForAgent } from '../../../src/lib/usage/index.ts';
 
-const ACCOUNT_ID = '4c0f3b6e-7a91-4a2f-9a7f-2b1d0f5c8e31';
-const OTHER_ID = '9d2e1a44-3c57-4b18-8f60-7c9a5e2d1b03';
+const WRITER_ID = '4c0f3b6e-7a91-4a2f-9a7f-2b1d0f5c8e31';
+const REVIEWER_ID = '9d2e1a44-3c57-4b18-8f60-7c9a5e2d1b03';
+const ORPHAN_ID = '1f7c8d92-58a1-4f3e-9c26-0a4b7e6d5f88';
 
-const account = (overrides: Partial<CoreAccount> = {}): CoreAccount => ({
-  secretEnv: {},
-  id: ACCOUNT_ID,
-  agent: 'claude-writer',
-  wrapper: '/state/fleet/bin/claude-writer',
-  home: '/state/fleet/homes/writer',
-  kind: 'claude',
-  mode: 'auto',
-  displayName: 'Writer',
-  defaultModel: 'sonnet',
+const runtime = (id: string, name: string, credential: string) => ({
+  id,
+  name,
+  harness: 'claude' as const,
+  credential,
+  profile: 'default',
+  agent: true,
+  wrapper: `/state/fleet/bin/${name}`,
   models: [{ id: 'sonnet', available: true }],
-  available: true,
-  unavailableReason: null,
+  defaultModel: 'sonnet',
+});
+
+const manifest = (...runtimes: ReturnType<typeof runtime>[]): FleetManifest =>
+  buildFleetManifest({ generatedAt: '2026-10-13T08:00:00.000Z', accounts: [], runtimes });
+
+const credential = (overrides: Partial<FleetCredentialView> = {}): FleetCredentialView => ({
+  id: 'work',
+  harness: 'claude',
+  store: 'ferretry',
+  needsLabel: false,
+  sharedWithTerminal: false,
+  status: {
+    word: 'ready',
+    label: 'Ready',
+    reason: 'not_checked_yet',
+    explanation: 'This login is present and current.',
+    lastCheckInconclusive: false,
+  },
+  usage: { fiveHour: {}, weekly: {} },
+  usedBy: ['claude-writer'],
+  signIn: { available: true },
+  checkNow: { available: true },
+  signOut: { available: true, sentence: 'Sign out?', runtimesAffected: 1, signsOutTerminal: false },
   ...overrides,
 });
 
-const row = (overrides: Partial<FleetUsage> = {}): FleetUsage => ({
-  accountId: ACCOUNT_ID,
-  kind: 'claude',
-  usageBased: true,
-  ok: true,
-  unavailable: false,
-  atLimit: false,
-  ...overrides,
+const status = (word: FleetCredentialView['status']['word']): FleetCredentialView['status'] => ({
+  ...credential().status,
+  word,
 });
 
-const snapshot = (...accounts: readonly FleetUsage[]): FleetUsageSnapshot => ({
-  at: 1_700_000_000_000,
-  accounts: [...accounts],
+const list = (...credentials: FleetCredentialView[]): FleetCredentialList => ({
+  format: 2,
+  machine: 'studio',
+  credentials,
 });
 
-describe('accountUsageFromFleet', () => {
+describe('credentialUsageRows', () => {
   /**
    * THE JOIN IS THE FEATURE. `agent` is the executable name a session launches with — the value
-   * quota-failover hands to `migrate(...)` and the advisor matches on — and a collector row carries
-   * only the manifest's opaque account id. Simplifying this to `accountId` would type-check, satisfy
-   * every schema and render a plausible `/usage` document that matches nothing, so failover would
-   * quietly stop moving sessions off exhausted accounts. This test fails if anyone ever does.
+   * quota-failover hands to `migrate(...)` and the advisor matches on. Keying by the credential or the
+   * runtime id would satisfy every schema and match nothing, so failover would quietly stop moving
+   * sessions off exhausted logins. This test fails if anyone ever does.
    */
-  it('should key each row by the executable name, never by the account id', () => {
-    // Arrange
-    const rows = accountUsageFromFleet(snapshot(row()), [account()]);
-
+  it('should key each row by the executable name, one row per runtime on the credential', () => {
     // Act
-    const found = usageForAgent(rows ?? [], 'claude-writer');
+    const rows = credentialUsageRows(
+      manifest(runtime(WRITER_ID, 'claude-writer', 'work'), runtime(REVIEWER_ID, 'claude-reviewer', 'work')),
+      [credential()],
+    );
 
     // Assert
-    should(rows?.map(entry => entry.agent)).deepEqual(['claude-writer']);
-    should(rows?.some(entry => entry.agent === ACCOUNT_ID)).be.false();
-    should(found).not.be.undefined();
+    should(rows.map(row => row.agent)).deepEqual(['claude-writer', 'claude-reviewer']);
+    should(usageForAgent(rows, 'claude-writer')).not.be.undefined();
+    should(rows.some(row => row.agent === WRITER_ID || row.agent === 'work')).be.false();
   });
 
-  it('should carry the short and long windows into the five-hour and weekly fields', () => {
+  it('should carry both windows, bounded to 100, with their reset instants', () => {
     // Arrange
-    const reading = row({
-      provider: 'anthropic',
-      authOk: true,
-      shortWindow: { usedPercent: 42, resetAt: 1_700_000_060_000 },
-      longWindow: { usedPercent: 71, resetAt: 1_700_000_900_000 },
+    const reading = credential({
+      usage: {
+        fiveHour: { usedPercent: 42, resetsAt: '2026-10-13T09:00:00.000Z' },
+        weekly: { usedPercent: 140, resetsAt: '2026-10-20T00:00:00.000Z' },
+      },
     });
 
     // Act
-    const [mapped] = accountUsageFromFleet(snapshot(reading), [account()]) ?? [];
+    const [row] = credentialUsageRows(manifest(runtime(WRITER_ID, 'claude-writer', 'work')), [reading]);
 
     // Assert
-    should(mapped).deepEqual({
+    should(row).deepEqual({
       agent: 'claude-writer',
       ok: true,
-      usageBased: true,
-      provider: 'anthropic',
       authOk: true,
       availability: 'available',
       unavailable: false,
-      atLimit: false,
+      atLimit: true,
       fiveHourPercent: 42,
-      weeklyPercent: 71,
-      fiveHourResetAt: 1_700_000_060_000,
-      weeklyResetAt: 1_700_000_900_000,
+      weeklyPercent: 100,
+      fiveHourResetAt: Date.parse('2026-10-13T09:00:00.000Z'),
+      weeklyResetAt: Date.parse('2026-10-20T00:00:00.000Z'),
     });
   });
 
   it('should leave an absent window absent rather than reporting zero percent', () => {
-    // Arrange
-    const reading = row({ shortWindow: { usedPercent: 12 } });
-
     // Act
-    const [mapped] = accountUsageFromFleet(snapshot(reading), [account()]) ?? [];
+    const [row] = credentialUsageRows(manifest(runtime(WRITER_ID, 'claude-writer', 'work')), [
+      credential({ status: status('refresh_due'), usage: { fiveHour: { usedPercent: 12 }, weekly: {} } }),
+    ]);
 
     // Assert — unknown is not exhausted, and it is not empty either.
-    should(mapped?.fiveHourPercent).equal(12);
-    should(mapped).not.have.property('weeklyPercent');
-    should(mapped).not.have.property('fiveHourResetAt');
-    should(mapped).not.have.property('weeklyResetAt');
+    should(row?.fiveHourPercent).equal(12);
+    should(row?.atLimit).be.false();
+    should(row?.availability).equal('available');
+    should(row).not.have.property('weeklyPercent');
+    should(row).not.have.property('fiveHourResetAt');
+    should(row).not.have.property('weeklyResetAt');
   });
 
-  it('should state nothing about a failed probe beyond the failure', () => {
-    // Arrange — the collector writes usageBased:false, unavailable:false and atLimit:false on a row
-    // it could not read. None of those are findings.
-    const reading = row({ usageBased: false, ok: false, error: 'probe failed' });
-
+  it('should carry a signed-out login as a proven unavailability for auth', () => {
     // Act
-    const [mapped] = accountUsageFromFleet(snapshot(reading), [account()]) ?? [];
+    const [row] = credentialUsageRows(manifest(runtime(WRITER_ID, 'claude-writer', 'work')), [
+      credential({ status: status('needs_sign_in') }),
+    ]);
 
     // Assert
-    should(mapped).deepEqual({ agent: 'claude-writer', ok: false });
-    should(quotaFromUsage(mapped as NonNullable<typeof mapped>)).deepEqual({});
-  });
-
-  it('should carry a proven unavailability, and its reason when the wire has a word for it', () => {
-    // Arrange
-    const reading = row({
-      usageBased: false,
-      ok: false,
-      unavailable: true,
-      unavailableReason: 'cooldown',
-      atLimit: true,
-    });
-
-    // Act
-    const [mapped] = accountUsageFromFleet(snapshot(reading), [account()]) ?? [];
-
-    // Assert
-    should(mapped).deepEqual({
+    should(row).deepEqual({
       agent: 'claude-writer',
-      ok: false,
+      ok: true,
+      authOk: false,
       availability: 'unavailable',
       unavailable: true,
-      unavailableReason: 'cooldown',
-      atLimit: true,
+      unavailableReason: 'auth',
+      atLimit: false,
     });
   });
 
-  it('should keep an unavailability whose reason the wire cannot spell', () => {
-    // Arrange — the manifest's reasons are free text; the wire's are a closed set.
-    const reading = row({ ok: false, unavailable: true, unavailableReason: 'no available models' });
-
+  it('should state nothing about a login whose check has not concluded', () => {
     // Act
-    const [mapped] = accountUsageFromFleet(snapshot(reading), [account()]) ?? [];
+    const [row] = credentialUsageRows(manifest(runtime(WRITER_ID, 'claude-writer', 'work')), [
+      credential({ status: status('checking') }),
+    ]);
 
     // Assert
-    should(mapped?.unavailable).be.true();
-    should(mapped).not.have.property('unavailableReason');
+    should(row).deepEqual({ agent: 'claude-writer', ok: false });
+    should(quotaFromUsage(row as NonNullable<typeof row>)).deepEqual({});
   });
 
-  it('should carry an exhausted quota from a successful reading', () => {
-    // Arrange
-    const reading = row({ atLimit: true, shortWindow: { usedPercent: 100 } });
-
+  it('should drop a runtime whose credential the list does not carry', () => {
     // Act
-    const [mapped] = accountUsageFromFleet(snapshot(reading), [account()]) ?? [];
-
-    // Assert
-    should(mapped?.atLimit).be.true();
-  });
-
-  it('should drop a row no account in the manifest answers to', () => {
-    // Act
-    const rows = accountUsageFromFleet(snapshot(row(), row({ accountId: OTHER_ID })), [account()]);
-
-    // Assert — the unnamed row cannot be routed, and the named one still can.
-    should(rows?.map(entry => entry.agent)).deepEqual(['claude-writer']);
-  });
-
-  it('should refuse an executable name two accounts claim rather than pick one', () => {
-    // Arrange — a manifest defect. Attaching this quota to a name another account also answers to is
-    // how one account's exhaustion gets charged to another's session.
-    const manifest = [account(), account({ id: OTHER_ID, displayName: 'Second' })];
-
-    // Act
-    const rows = accountUsageFromFleet(snapshot(row(), row({ accountId: OTHER_ID })), manifest);
-
-    // Assert — nothing survived the join, so this reads as unreadable rather than as no accounts.
-    should(rows).be.undefined();
-  });
-
-  it('should keep the rows it can name when only one executable name is contested', () => {
-    // Arrange
-    const contested = '1f7c8d92-58a1-4f3e-9c26-0a4b7e6d5f88';
-    const manifest = [
-      account(),
-      account({ id: OTHER_ID, agent: 'claude-shared', displayName: 'Second' }),
-      account({ id: contested, agent: 'claude-shared', displayName: 'Third' }),
-    ];
-
-    // Act
-    const rows = accountUsageFromFleet(
-      snapshot(row(), row({ accountId: OTHER_ID }), row({ accountId: contested })),
-      manifest,
+    const rows = credentialUsageRows(
+      manifest(runtime(WRITER_ID, 'claude-writer', 'work'), runtime(ORPHAN_ID, 'claude-orphan', 'gone')),
+      [credential()],
     );
 
     // Assert
-    should(rows?.map(entry => entry.agent)).deepEqual(['claude-writer']);
+    should(rows.map(row => row.agent)).deepEqual(['claude-writer']);
+  });
+});
+
+describe('CredentialUsageSource', () => {
+  const published = manifest(runtime(WRITER_ID, 'claude-writer', 'work'));
+  const source = (overrides: Partial<ConstructorParameters<typeof CredentialUsageSource>[0]> = {}) =>
+    new CredentialUsageSource({
+      enabled: async () => true,
+      manifest: async () => published,
+      credentials: async () => list(credential()),
+      ...overrides,
+    });
+
+  it('should read the credentials list through the published manifest', async () => {
+    // Act
+    const rows = await source().read();
+
+    // Assert
+    should(rows?.map(row => row.agent)).deepEqual(['claude-writer']);
   });
 
-  it('should report a snapshot whose every row is unjoinable as unreadable, not as an empty fleet', () => {
-    // Act — a stale or foreign manifest. Damaged evidence is not evidence of no accounts.
-    const rows = accountUsageFromFleet(snapshot(row({ accountId: OTHER_ID })), [account()]);
+  it('should answer nothing when unattended collection is switched off, without reading anything', async () => {
+    // Arrange
+    let read = false;
+    const subject = source({
+      enabled: async () => false,
+      credentials: async () => {
+        read = true;
+        return list(credential());
+      },
+    });
+
+    // Act
+    const rows = await subject.read();
+
+    // Assert
+    should(rows).be.undefined();
+    should(read).be.false();
+  });
+
+  it('should answer nothing for a machine no apply has published yet', async () => {
+    // Act
+    const rows = await source({ manifest: async () => undefined }).read();
 
     // Assert
     should(rows).be.undefined();
   });
 
-  it('should report a genuinely empty fleet as empty', () => {
+  it('should report a failure as unreadable, never as a fleet with no logins', async () => {
     // Act
-    const rows = accountUsageFromFleet(snapshot(), [account()]);
+    const rows = await source({
+      credentials: async () => {
+        throw new Error('config.yaml uses the old account format');
+      },
+    }).read();
 
     // Assert
-    should(rows).deepEqual([]);
+    should(rows).be.undefined();
+  });
+
+  it('should abandon a read that was already cancelled', async () => {
+    // Arrange
+    const controller = new AbortController();
+    controller.abort();
+
+    // Act
+    const rows = await source().read(controller.signal);
+
+    // Assert
+    should(rows).be.undefined();
   });
 });

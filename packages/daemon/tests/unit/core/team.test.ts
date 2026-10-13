@@ -323,7 +323,7 @@ describe('recommendTeam', () => {
     });
 
     // Assert
-    should(recommendation.exclusions[0]?.reason).containEql('fy fleet login');
+    should(recommendation.exclusions[0]?.reason).containEql('fy credential signin');
   });
 
   it.each([

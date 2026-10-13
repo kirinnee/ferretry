@@ -41,7 +41,6 @@ import { InstantSchema, NonEmptyStringSchema } from './common.ts';
 import { FleetCredentialIdSchema as CredentialIdSchema } from './fleet-credentials.ts';
 import { OperatorPasswordSchema } from './grants.ts';
 
-
 /**
  * A URL a person will be sent to open.
  *
@@ -154,9 +153,9 @@ const failureShape = {
   /**
    * The way back, named at the point of failure.
    *
-   * `fy fleet login` inherits a terminal and keeps working when every assumption this flow makes about
-   * somebody else's CLI is false, so it is the fallback for the whole feature — and a refusal that did
-   * not name it would strand the person who most needs it.
+   * `fy credential signin <id>` inherits a terminal and keeps working when every assumption this flow
+   * makes about somebody else's CLI is false, so it is the fallback for the whole feature — and a
+   * refusal that did not name it would strand the person who most needs it.
    */
   remedy: NonEmptyStringSchema,
   /**

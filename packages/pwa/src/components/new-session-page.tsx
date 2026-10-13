@@ -494,8 +494,8 @@ interface AccountRosterFieldProps extends ConnectedFieldProps {
  * so a first-time reader starts on something that works.
  *
  * The box's value is the wrapper id, because that is what the daemon is sent, but
- * the picker shows the account's display name — "Claude (default, auto)", as
- * `fy fleet ls` prints it — in the box whenever it is not being edited.
+ * the picker shows the runtime's display name — as `fy runtimes` lists it — in
+ * the box whenever it is not being edited.
  *
  * NO "CHECK NOW" HERE. Every row already carries the host's stored health verdict
  * and when it was established, so the re-check button added nothing a person

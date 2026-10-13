@@ -4560,10 +4560,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const publishedManifest = async () => await readFleetManifest(stateFiles, paths.fleetManifest);
   /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
   const declaredUsageRefreshMs = async (): Promise<number> =>
-    usageRefreshMs(await declaredAccountModel().then(
-      model => model?.advanced.usage.interval,
-      () => undefined,
-    ));
+    usageRefreshMs(
+      await declaredAccountModel().then(
+        model => model?.advanced.usage.interval,
+        () => undefined,
+      ),
+    );
   /**
    * The credentials surface's list, once the subsystems are mounted. The usage feed is built before
    * them, and reads through this so it answers "could not read" rather than a list it does not have.
@@ -6746,10 +6748,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * invents neither a cache nor an error result, so a failed read cannot replace good data with an
    * empty fleet.
    *
-   * IT DOES NOT WARM ACCOUNT HEALTH, AND IT MUST NOT BE MADE TO. `/v1/fleet/health` collects when it
-   * is asked, because collecting it costs a real model turn per account — see the note on
-   * `FleetRefreshService`. Warming an answer nobody requested is the whole defect this pass no
-   * longer has.
+   * IT NEVER CHECKS A LOGIN, AND IT MUST NOT BE MADE TO. A login's status is read from what is already
+   * stored, and Check now runs only when a person presses it — see the note on `FleetRefreshService`.
+   * Spending on an answer nobody requested is the whole defect this pass no longer has.
    *
    * ONE CONFIGURATION NAME chooses the cadence. `usage.interval` is the fleet declaration that
    * builds the usage feed's freshness policy too. A daemon without a fleet configuration has made

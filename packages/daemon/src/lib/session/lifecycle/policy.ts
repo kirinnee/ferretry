@@ -103,7 +103,7 @@ export function unrunnableAccountRefusal(
   const refused = `${requested.agent} is for using ${HARNESS_LABEL[requested.kind]} yourself in a terminal, so ${clientName} cannot start sessions on it, in either --mode`;
   const [first] = offered;
   if (first === undefined)
-    return `${refused}, and no account on this host can run sessions yet. Add an agent runtime with \`${clientName} runtime add <name> --credential <login> --profile <profile> --agent\`; \`${clientName} runtimes\` marks the agent runtimes.`;
+    return `${refused}, and no runtime on this machine can run sessions yet. Add an agent runtime with \`${clientName} runtime add <name> --credential <login> --profile <profile> --agent\`; \`${clientName} runtimes\` marks the agent runtimes.`;
   const choice = offered.length === 1 ? first : `one of ${offered.join(', ')}`;
   return `${refused}. Start it on ${choice} instead: \`${clientName} start --agent ${first} "your task"\`. \`${clientName} runtimes\` marks the agent runtimes, which can run sessions.`;
 }

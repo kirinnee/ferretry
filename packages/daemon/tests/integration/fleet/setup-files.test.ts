@@ -1,7 +1,7 @@
 /**
  * A machine's setup over real files: a folder read as text, the asset tree's skill items, and the
- * collaborators the setup service is composed from — the host scan, the secret store, the migration
- * executor — in temporary directories.
+ * collaborators the setup service is composed from — the host scan and the secret store — in temporary
+ * directories.
  *
  * Every path is inside a directory this test created and the person's "own" home is a temporary one,
  * so no real harness setup, login or fleet is read. Every credential is a placeholder.
@@ -20,7 +20,7 @@ import {
   readTextFolder,
   skillItemsIn,
 } from '../../../src/adapters/fleet/setup-files.ts';
-import type { SetupCatalogDeps, SetupModelApply } from '../../../src/lib/fleet/setup-service.ts';
+import type { SetupCatalogDeps } from '../../../src/lib/fleet/setup-service.ts';
 
 const NOW = 1_800_000_000_000;
 
@@ -180,8 +180,6 @@ interface Machine {
   readonly layout: FleetLayout;
   readonly catalog: SetupCatalogDeps;
   readonly secrets: Map<string, string>;
-  readonly stored: unknown[];
-  sessions: { config: unknown; state: unknown }[];
   deps: ReturnType<typeof fileFleetSetupDeps>;
 }
 
@@ -221,16 +219,11 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
     layout,
     catalog,
     secrets,
-    stored: [],
-    sessions: [],
     deps: undefined as never,
   };
   handle.deps = fileFleetSetupDeps({
     catalog,
-    platform: 'linux',
     credentials,
-    command: { run: async () => ({ code: 0, stdout: '' }) },
-    keychainAccount: 'someone',
     tools: { plans: () => [], install: async () => [] },
     secrets: {
       list: async () => [...secrets.keys()].map(name => ({ name })),
@@ -238,12 +231,9 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
         secrets.set(name, value);
       },
     },
-    sessions: async () => handle.sessions,
   });
   return handle;
 }
-
-const NO_APPLY: SetupModelApply = { apply: async () => {} } as unknown as SetupModelApply;
 
 describe('the setup service collaborators over a temporary machine', () => {
   it('should scan the person’s own harness setup from the home it was given, and never another', async () => {
@@ -273,15 +263,11 @@ describe('the setup service collaborators over a temporary machine', () => {
     await writeFile(path.join(codexHome, 'AGENTS.md'), '# elsewhere too\n');
     const deps = fileFleetSetupDeps({
       catalog,
-      platform: 'linux',
       claudeConfigDir: claudeHome,
       codexHome,
       credentials,
-      command: { run: async () => ({ code: 0, stdout: '' }) },
-      keychainAccount: 'someone',
       tools: { plans: () => [], install: async () => [] },
       secrets: { list: async () => [], put: async () => {} },
-      sessions: async () => [],
     });
 
     // Act
@@ -333,61 +319,5 @@ describe('the setup service collaborators over a temporary machine', () => {
     // Assert
     should(digest).match(/^[0-9a-f]{64}$/u);
     should(digest).equal(sha256('ferretry'));
-  });
-
-  it('should build a migration that finds no fleet on an empty machine', async () => {
-    // Arrange
-    const { deps } = await machine();
-
-    // Act
-    const migration = deps.migration?.(NO_APPLY);
-
-    // Assert
-    should(await migration?.status()).deepEqual({ kind: 'no-fleet' });
-  });
-
-  it('should build a migration without a host Codex home when the catalogue has none', async () => {
-    // Arrange
-    const { deps } = await machine({ codexHome: false });
-
-    // Act
-    const migration = deps.migration?.(NO_APPLY);
-
-    // Assert
-    should(await migration?.status()).deepEqual({ kind: 'no-fleet' });
-  });
-
-  it('should plan the migration of a version-1 fleet and name only the sessions still running', async () => {
-    // Arrange
-    const handle = await machine();
-    await writeFile(path.join(handle.layout.fleetDirectory, 'config.yaml'), 'version: 1\n');
-    handle.sessions = [
-      { config: { id: 'fy_s_running', agent: 'acct-1' }, state: { status: 'running' } },
-      { config: { id: 'fy_s_thinking', agent: 'acct-2' }, state: { status: 'tool_running' } },
-      { config: { id: 'fy_s_stopped', agent: 'acct-1' }, state: { status: 'stopped' } },
-      { config: { id: 'fy_s_failed', agent: 'acct-1' }, state: { status: 'failed' } },
-      { config: null, state: { status: 'running' } },
-      { config: { id: 'fy_s_no_state', agent: 'acct-1' }, state: [] },
-      { config: { id: 'fy_s_no_agent' }, state: { status: 'running' } },
-      { config: { agent: 'acct-1' }, state: { status: 'running' } },
-    ];
-    const migration = handle.deps.migration?.(NO_APPLY);
-
-    // Act
-    const status = await migration?.status();
-    const dryRun = await migration?.dryRun();
-    const survey = await (
-      migration as unknown as { survey(document: unknown): Promise<{ liveSessions: unknown }> }
-    ).survey({
-      version: 1,
-    });
-
-    // Assert
-    should(status).deepEqual({ kind: 'version-1' });
-    should(dryRun?.plan.digest).match(/^[0-9a-f]+$/u);
-    should(survey.liveSessions).deepEqual([
-      { session: 'fy_s_running', accountId: 'acct-1' },
-      { session: 'fy_s_thinking', accountId: 'acct-2' },
-    ]);
   });
 });

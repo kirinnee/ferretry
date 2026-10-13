@@ -25,21 +25,20 @@ import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
  *
  * Bun's `homedir()` honours `HOME` only as a process was STARTED with it, and falls back to the user
  * database when it is absent. The supervisor handed the daemon `FY_HOME`, `PATH` and a locale and no
- * `HOME`, so a first run under `HOME=/tmp/x` prepared its default accounts and then looked for a
- * login to copy in the owner's real `~/.claude` and `~/.codex`. Every other journey boots `fyd`
- * inside the test process, which never drops the variable, so nothing noticed.
+ * `HOME`, so a first run under `HOME=/tmp/x` looked for this host's Claude Code and Codex setup in the
+ * owner's real `~/.claude` and `~/.codex`. Every other journey boots `fyd` inside the test process,
+ * which never drops the variable, so nothing noticed.
  *
- * So this launches a real `fyd` through the CLI's real `DirectSupervisor`, with default-account
- * preparation ON and an empty temporary home, and requires the login search to have named ONLY that
- * home.
+ * So this launches a real `fyd` through the CLI's real `DirectSupervisor`, with the first run ON and
+ * an empty temporary home, and requires the first run to have found the harnesses ONLY under that home.
  *
- * IT CANNOT COPY A LOGIN, EVEN WHERE THE BUG IS PRESENT. Both harnesses are declared as
+ * IT CANNOT IMPORT A REAL SETUP, EVEN WHERE THE BUG IS PRESENT. Both harnesses are declared as
  * `~/<unique directory>/<harness>`, and an explicitly named path that resolves to nothing searches no
- * further. Under the home the test gave, those are real executables and preparation runs. Under any
- * other home they name a directory that cannot exist, so no harness is found, nothing is prepared and
- * no login anywhere is read — the defect shows as that unreachable path in the log instead. `PATH` is
- * asserted to hold no `claude` or `codex` besides, and the test never reads the real home itself: it
- * only compares the log against its path.
+ * further. Under the home the test gave, those are real executables and the first run imports both.
+ * Under any other home they name a directory that cannot exist, so no harness is found and nothing is
+ * imported — the defect shows as that unreachable path in the log instead. `PATH` is asserted to hold
+ * no `claude` or `codex` besides, and the test never reads the real home itself: it only compares the
+ * log against its path.
  */
 
 const REPOSITORY = resolve(import.meta.dir, '../../../../..');
@@ -125,19 +124,19 @@ async function arrange(
   return { bin, userHome, stateHome, fyd, probe };
 }
 
-/** The daemon log once the login search has been reported, or whatever it holds when time runs out. */
-async function logAfterLoginSearch(logFile: string): Promise<string> {
+/** The daemon log once the first run has been reported, or whatever it holds when time runs out. */
+async function logAfterFirstRun(logFile: string): Promise<string> {
   let log = '';
   for (let attempt = 0; attempt < 300; attempt += 1) {
     log = await readFile(logFile, 'utf8').catch(() => '');
-    if (log.includes('Nothing was copied for Codex') && log.includes('Nothing was copied for Claude')) return log;
+    if (log.includes('first run:')) return log;
     await Bun.sleep(50);
   }
   return log;
 }
 
 describe('the user home of a daemon `fy daemon start` launched', () => {
-  it('should look for harness logins only under the HOME the CLI ran with', async () => {
+  it('should look for this host’s harness setup only under the HOME the CLI ran with', async () => {
     // Arrange
     const root = await mkdtemp(join(tmpdir(), 'fy-home-'));
     roots.add(root);
@@ -169,11 +168,12 @@ describe('the user home of a daemon `fy daemon start` launched', () => {
     // Act
     const handle = await supervisor.start(fyd);
     if (handle.pid !== undefined) daemons.add(handle.pid);
-    const log = await logAfterLoginSearch(layout.logFile);
+    const log = await logAfterFirstRun(layout.logFile);
 
     // Assert — a failed containment prints the whole log, which is the evidence either way.
-    should(log).containEql(`no usable Claude login was found in ${join(userHome, '.claude')}`);
-    should(log).containEql(`no usable Codex login was found in ${join(userHome, '.codex')}`);
+    should(log).containEql(`claude: ${join(userHome, probe, 'claude')}`);
+    should(log).containEql(`codex: ${join(userHome, probe, 'codex')}`);
+    should(log).containEql('2 runtimes created: claude-starter, codex-starter');
     // Every path the defect produced, spelled against this account's own home. Not the home itself: a
     // temporary directory may live under it — a CI runner's does — and every path above would match.
     const owner = homedir();

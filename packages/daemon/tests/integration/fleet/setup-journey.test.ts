@@ -17,7 +17,6 @@ import { fileFleetCatalogDeps } from '../../../src/adapters/fleet/account-model-
 import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
-import { defaultDaemonConfig } from '../../../src/lib/runtime/config.ts';
 
 const directories: string[] = [];
 
@@ -76,12 +75,6 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
   const catalogDeps = fileFleetCatalogDeps({
     paths: { home: home as never, fleet, fleetManifest: path.join(fleet, 'manifest.json') },
     userHome,
-    daemonConfig: {
-      peek: async () => ({
-        document: undefined,
-        config: { ...defaultDaemonConfig(), accountModel: { enabled: true } },
-      }),
-    },
     sessionStates: async () => [],
     credentials,
     confirmChange: async () => ({ kind: 'confirmed' }),
@@ -92,13 +85,10 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
   const setup = createFleetSetupSubsystem(
     fileFleetSetupDeps({
       catalog: catalogDeps,
-      platform: 'linux',
       credentials: {
         material: async () => ({ outcome: 'missing' }),
         storedMaterial: async () => (options.claude ? { outcome: 'found', blob: FAKE_LOGIN } : { outcome: 'missing' }),
       } as never,
-      command: { run: async () => ({ code: 0, stdout: '' }) } as never,
-      keychainAccount: 'someone',
       tools: { plans: () => [], install: async () => [] },
       secrets: {
         list: async () => [...secrets.keys()].map(secret => ({ name: secret })),
@@ -106,7 +96,6 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
           secrets.set(secret, value);
         },
       },
-      sessions: async () => [],
     }),
   );
   const catalog = new FleetCatalogService({ ...catalogDeps, executors: setup.executors });

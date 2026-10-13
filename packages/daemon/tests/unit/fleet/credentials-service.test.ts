@@ -2,11 +2,10 @@
  * The account model's credentials, as the daemon serves them (docs/design/account-model.md §3.2, §7,
  * §9.4).
  *
- * The claims: the catalog reads either document version and says where each login lives; a sign-in by
- * credential launches against that credential's STORE (or goes through the account flow on version 1);
- * the list carries status and usage and the sentences a surface shows — never material; Check now is
- * gated exactly as a sign-in is and refuses a version-1 Codex group with several copies in words; the
- * usage pass observes stored credentials only and never rejects; and passive Codex usage is attributed
+ * The claims: the catalog reads the machine's account model and says where each login lives; a sign-in
+ * by credential launches against that credential's STORE; the list carries status and usage and the
+ * sentences a surface shows — never material; Check now is gated exactly as a sign-in is; the usage
+ * pass observes stored credentials only and never rejects; and passive Codex usage is attributed
  * through the sessions this daemon launched, never guessed.
  *
  * NO CREDENTIAL MATERIAL APPEARS HERE. Every port is a fake answering classifications and paths, and
@@ -15,13 +14,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  type AccountModel,
   type Credential,
   type CredentialStatus,
   type CredentialStatusView,
   type CredentialSubject,
   type CredentialUsage,
-  type FleetDocument,
-  type FleetManifest,
   type HarnessKind,
   type LocalCredentialReading,
   type PassiveUsageRecord,
@@ -57,60 +55,31 @@ const claudeEnvironment: Credential = {
   env: { ANTHROPIC_BASE_URL: 'https://example.invalid' },
 };
 
-/** A version-2 document, reduced to the two tables the catalog reads. */
+/** An account model, reduced to the two tables the catalog reads. */
 const v2 = (
   credentials: Readonly<Record<string, Credential>>,
   runtimes: Readonly<Record<string, string>> = {},
-): FleetDocument =>
+): AccountModel =>
   ({
     version: 2,
-    model: {
-      credentials,
-      runtimes: Object.fromEntries(Object.entries(runtimes).map(([name, credential]) => [name, { credential }])),
-    },
-  }) as unknown as FleetDocument;
-
-/** A version-1 document's conversion: each credential is a group of routes, each runtime one route. */
-const v1 = (
-  credentials: Readonly<Record<string, Credential>>,
-  groups: Readonly<Record<string, readonly string[]>>,
-  runtimes: Readonly<Record<string, string>>,
-): FleetDocument =>
-  ({
-    version: 1,
-    config: {},
-    conversion: {
-      model: { credentials, runtimes: {} },
-      credentials: Object.fromEntries(
-        Object.entries(groups).map(([id, routeIds]) => [
-          id,
-          { key: `x:${id}`, harness: credentials[id]?.harness, routeIds },
-        ]),
-      ),
-      runtimes: Object.fromEntries(Object.entries(runtimes).map(([name, routeId]) => [name, { routeId }])),
-    },
-  }) as unknown as FleetDocument;
-
-type Manifest = Pick<FleetManifest, 'accounts'>;
-const manifest = (...accounts: readonly { id: string; home: string; available: boolean }[]): Manifest =>
-  ({ accounts }) as unknown as Manifest;
+    credentials,
+    runtimes: Object.fromEntries(Object.entries(runtimes).map(([name, credential]) => [name, { credential }])),
+  }) as unknown as AccountModel;
 
 /** The store path a classification is keyed by: the file a harness keeps the login in. */
 const storeFile = (resolution: StoredCredentialResolution): string =>
   resolution.harness === 'claude' ? resolution.credentialFile : resolution.canonicalFile;
 
 interface CatalogOptions {
-  readonly document?: () => Promise<FleetDocument | undefined>;
-  readonly manifest?: () => Promise<Manifest>;
+  readonly document?: () => Promise<AccountModel | undefined>;
   readonly readings?: Readonly<Record<string, LocalCredentialReading | 'throw'>>;
   readonly paths?: typeof PATHS | typeof NO_CODEX_HOME;
   readonly created?: string[];
 }
 
-const catalogOf = (document: FleetDocument | undefined, options: CatalogOptions = {}): FleetCredentialCatalog =>
+const catalogOf = (document: AccountModel | undefined, options: CatalogOptions = {}): FleetCredentialCatalog =>
   new FleetCredentialCatalog({
     document: options.document ?? (async () => document),
-    manifest: options.manifest ?? (async () => manifest()),
     paths: options.paths ?? PATHS,
     classify: async resolution => {
       const reading = options.readings?.[storeFile(resolution)];
@@ -222,7 +191,7 @@ const resolved = (id: string, credential: Credential, paths: typeof PATHS | type
 const claudeOwned = resolved('work', claudeFerretry) as Extract<StoredCredentialResolution, { harness: 'claude' }>;
 
 describe('the credential catalog', () => {
-  it('should list a version-2 document’s credentials with the runtimes that use each, sorted', async () => {
+  it('should list the model’s credentials with the runtimes that use each, sorted', async () => {
     // Arrange
     const catalog = catalogOf(
       v2({ work: claudeFerretry, keyed: claudeEnvironment }, { zeta: 'work', alpha: 'work', other: 'keyed' }),
@@ -233,15 +202,15 @@ describe('the credential catalog', () => {
 
     // Assert
     should(actual.format).equal(2);
-    should(actual.entries.map(entry => [entry.id, entry.usedBy, entry.copies])).deepEqual([
-      ['work', ['alpha', 'zeta'], []],
-      ['keyed', ['other'], []],
+    should(actual.entries.map(entry => [entry.id, entry.usedBy])).deepEqual([
+      ['work', ['alpha', 'zeta']],
+      ['keyed', ['other']],
     ]);
     should(actual.entries[0]?.resolution).deepEqual(resolved('work', claudeFerretry));
     should(actual.entries[1]?.resolution.store).equal('environment');
   });
 
-  it('should answer no credentials, as version 2, when there is no fleet document yet', async () => {
+  it('should answer no credentials when there is no fleet document yet', async () => {
     // Act
     const actual = await catalogOf(undefined).entries();
 
@@ -281,91 +250,14 @@ describe('the credential catalog', () => {
     should(actual.message).containEql('"ghost"');
   });
 
-  it('should read a version-1 group from its freshest usable copy, tolerating a copy that cannot be read', async () => {
-    // Arrange
-    const catalog = catalogOf(v1({ group: claudeFerretry }, { group: ['a', 'b', 'c', 'd'] }, { one: 'a', two: 'c' }), {
-      manifest: async () =>
-        manifest(
-          { id: 'a', home: '/homes/a', available: false },
-          { id: 'b', home: '/homes/b', available: true },
-          { id: 'c', home: '/homes/c', available: true },
-          { id: 'd', home: '/homes/d', available: true },
-        ),
-      readings: {
-        '/homes/a/.credentials.json': { state: 'valid', expiresAt: 100 },
-        '/homes/b/.credentials.json': { state: 'refreshable', expiresAt: 300 },
-        '/homes/c/.credentials.json': 'throw',
-        '/homes/d/.credentials.json': { state: 'valid' },
-      },
-    });
-
-    // Act
-    const actual = await catalog.entry('group');
-
-    // Assert
-    should(actual.format).equal(1);
-    should(actual.usedBy).deepEqual(['one', 'two']);
-    should(actual.copies).deepEqual(['/homes/a', '/homes/b', '/homes/c', '/homes/d']);
-    should(actual.resolution).deepEqual({
-      harness: 'claude',
-      store: 'ferretry',
-      secureStorage: '/homes/b',
-      storageDirectory: '/homes/b',
-      credentialFile: '/homes/b/.credentials.json',
-    });
-    // The first AVAILABLE member signs the group in, not merely the first member.
-    should(actual.signInAccount).equal('b');
-  });
-
-  it('should fall back to the first copy, and the first member, when no copy is usable', async () => {
-    // Arrange
-    const catalog = catalogOf(v1({ group: codexFerretry }, { group: ['a', 'b', 'missing'] }, {}), {
-      manifest: async () =>
-        manifest({ id: 'a', home: '/homes/a', available: false }, { id: 'b', home: '/homes/b', available: false }),
-    });
-
-    // Act
-    const actual = await catalog.entry('group');
-
-    // Assert
-    should(actual.copies).deepEqual(['/homes/a', '/homes/b']);
-    should(actual.resolution).deepEqual({ harness: 'codex', store: 'ferretry', canonicalFile: '/homes/a/auth.json' });
-    should(actual.signInAccount).equal('a');
-  });
-
-  it('should read a version-1 group with no published copy as its own store, with nobody to sign in through', async () => {
-    // Arrange — the manifest cannot be read at all, and one group has no origin.
-    const catalog = catalogOf(v1({ group: claudeFerretry, keyed: claudeEnvironment }, {}, { one: 'a' }), {
-      manifest: async () => {
-        throw new Error('no manifest yet');
-      },
-    });
-
-    // Act
-    const actual = await catalog.entries();
-
-    // Assert
-    should(actual.format).equal(1);
-    should(actual.entries.map(entry => [entry.id, entry.usedBy, entry.copies, entry.signInAccount])).deepEqual([
-      ['group', [], [], undefined],
-      ['keyed', [], [], undefined],
-    ]);
-    should(actual.entries[0]?.resolution).deepEqual(resolved('group', claudeFerretry));
-    should(actual.entries[1]?.resolution.store).equal('environment');
-  });
-
   it('should say where each kind of login records its email', async () => {
     // Arrange
     const modern = catalogOf(
       v2({ mine: claudeHost, work: claudeFerretry, codex: codexFerretry, keyed: claudeEnvironment }),
     );
-    const legacy = catalogOf(v1({ group: claudeFerretry }, { group: ['a'] }, {}), {
-      manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }),
-    });
 
     // Act
     const sources = (await modern.entries()).entries.map(entry => modern.emailSource(entry));
-    const old = legacy.emailSource(await legacy.entry('group'));
 
     // Assert
     should(sources).deepEqual([
@@ -374,35 +266,10 @@ describe('the credential catalog', () => {
       { harness: 'codex', resolution: resolved('codex', codexFerretry) },
       undefined,
     ]);
-    should(old).deepEqual({ harness: 'claude', accountFile: '/homes/a/.claude.json' });
   });
 });
 
 describe('signing a credential in', () => {
-  it('should go through the account flow on version 1, and refuse in words when it cannot', async () => {
-    // Arrange
-    const catalog = catalogOf(
-      v1({ group: claudeFerretry, orphan: codexFerretry, keyed: claudeEnvironment }, { group: ['a'] }, {}),
-      { manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }) },
-    );
-
-    // Act
-    const [group, orphan, keyed] = (await catalog.entries()).entries.map(entry => catalog.signInTarget(entry));
-
-    // Assert
-    should(group).deepEqual({ kind: 'account', credentialId: 'group', accountId: 'a' });
-    should(orphan).deepEqual({
-      kind: 'refused',
-      credentialId: 'orphan',
-      reason: 'no runtime that uses this login is published on this machine, so there is nothing to sign in through',
-    });
-    should(keyed).deepEqual({
-      kind: 'refused',
-      credentialId: 'keyed',
-      reason: '"keyed" is authenticated by its environment variables, so there is nothing to sign in to',
-    });
-  });
-
   it('should launch a Ferretry Claude sign-in against its own store, in a config directory inside it', async () => {
     // Arrange
     const created: string[] = [];
@@ -469,7 +336,7 @@ describe('signing a credential in', () => {
     should(await own.signedIn()).be.false();
   });
 
-  it('should refuse a version-2 environment credential and a store this machine cannot name', async () => {
+  it('should refuse an environment credential and a store this machine cannot name', async () => {
     // Arrange
     const catalog = catalogOf(v2({ keyed: claudeEnvironment, mine: codexHost }), { paths: NO_CODEX_HOME });
 
@@ -477,7 +344,11 @@ describe('signing a credential in', () => {
     const [keyed, mine] = (await catalog.entries()).entries.map(entry => catalog.signInTarget(entry));
 
     // Assert
-    should(keyed?.kind).equal('refused');
+    should(keyed).deepEqual({
+      kind: 'refused',
+      credentialId: 'keyed',
+      reason: '"keyed" is authenticated by its environment variables, so there is nothing to sign in to',
+    });
     should(mine).deepEqual({
       kind: 'refused',
       credentialId: 'mine',
@@ -538,13 +409,9 @@ describe('the sign-out sentence', () => {
     // Arrange
     const keyed = await entryOf(claudeEnvironment, {});
     const unnamed = await catalogOf(v2({ work: codexHost }), { paths: NO_CODEX_HOME }).entry('work');
-    const legacy = await catalogOf(v1({ work: claudeFerretry }, { work: ['a'] }, {}), {
-      manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }),
-    }).entry('work');
 
     // Act / Assert
-    should([keyed, unnamed, legacy].map(entry => signOutSentence(entry, undefined, 'studio').available)).deepEqual([
-      false,
+    should([keyed, unnamed].map(entry => signOutSentence(entry, undefined, 'studio').available)).deepEqual([
       false,
       false,
     ]);
@@ -672,35 +539,6 @@ describe('the credential list', () => {
     });
   });
 
-  it('should list a version-1 machine as format 1, refusing Check now on a Codex group with several copies', async () => {
-    // Arrange
-    const service = serviceOf(
-      catalogOf(v1({ group: codexFerretry, solo: codexFerretry }, { group: ['a', 'b'], solo: ['c'] }, {}), {
-        manifest: async () =>
-          manifest(
-            { id: 'a', home: '/homes/a', available: true },
-            { id: 'b', home: '/homes/b', available: true },
-            { id: 'c', home: '/homes/c', available: true },
-          ),
-      }),
-      new FakeStatus(),
-    );
-
-    // Act
-    const actual = await service.list();
-
-    // Assert
-    should(actual.format).equal(1);
-    should(actual.credentials.map(row => [row.id, row.checkNow.available, row.signOut.available])).deepEqual([
-      ['group', false, false],
-      ['solo', true, false],
-    ]);
-    const group = actual.credentials[0]?.checkNow;
-    should(group?.available === false && group.reason).equal(
-      'This machine still uses the old account format, where 2 runtimes each keep a copy of this login. Checking it renews one copy and signs the others out, so migrate this machine first.',
-    );
-  });
-
   it('should say why sign-in and Check now are not offered on an environment login or an unnamed store', async () => {
     // Arrange
     const service = serviceOf(
@@ -803,31 +641,6 @@ describe('Check now', () => {
     should(fake.calls).deepEqual([]);
   });
 
-  it('should refuse a version-1 Codex group with more than one copy in words', async () => {
-    // Arrange
-    const fake = new FakeStatus();
-    const service = serviceOf(
-      catalogOf(v1({ group: codexFerretry }, { group: ['a', 'b', 'c'] }, {}), {
-        manifest: async () =>
-          manifest(
-            { id: 'a', home: '/homes/a', available: true },
-            { id: 'b', home: '/homes/b', available: true },
-            { id: 'c', home: '/homes/c', available: true },
-          ),
-      }),
-      fake,
-    );
-
-    // Act
-    const actual = await refusalOf(async () => await service.check('group', {}, governed(false)));
-
-    // Assert
-    should(actual.code).equal('fleet_credential_unavailable');
-    should(actual.message).containEql('3 runtimes each keep a copy of this login');
-    should(actual.message).containEql('migrate this machine first');
-    should(fake.calls).deepEqual([]);
-  });
-
   it('should check with no password for a caller that owes none', async () => {
     // Arrange
     const fake = new FakeStatus();
@@ -883,29 +696,21 @@ describe('Check now', () => {
 });
 
 describe('signing a credential out', () => {
-  it('should refuse an unknown login, a version-1 copy, an environment login and an unnamed store', async () => {
+  it('should refuse an unknown login, an environment login and an unnamed store', async () => {
     // Arrange
-    const legacy = serviceOf(
-      catalogOf(v1({ group: claudeFerretry }, { group: ['a'] }, {}), {
-        manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }),
-      }),
-      new FakeStatus(),
-    );
     const modern = serviceOf(
       catalogOf(v2({ keyed: claudeEnvironment, mine: codexHost }), { paths: NO_CODEX_HOME }),
       new FakeStatus(),
     );
 
     // Act
-    const unknown = await refusalOf(async () => await legacy.signOut('ghost'));
-    const copy = await refusalOf(async () => await legacy.signOut('group'));
+    const unknown = await refusalOf(async () => await modern.signOut('ghost'));
     const keyed = await refusalOf(async () => await modern.signOut('keyed'));
     const mine = await refusalOf(async () => await modern.signOut('mine'));
 
     // Assert
     should(unknown.code).equal('fleet_credential_unknown');
-    should(copy.code).equal('fleet_credential_unavailable');
-    should(copy.message).endWith('migrate this machine first.');
+    should(keyed.code).equal('fleet_credential_unavailable');
     should(keyed.message).equal(
       '"keyed" is authenticated by its environment variables, so there is nothing to sign out of.',
     );
@@ -989,12 +794,12 @@ describe('passive usage', () => {
     { agent: 'stranger', transcript: { home: '/homes/other', file: '/homes/other/sessions/d.jsonl' } },
   ];
 
-  it('should attribute a transcript by the runtime that ran it or the copy it was written in, once each', () => {
+  it('should attribute a transcript only by the runtime that ran it, once each', () => {
     // Act
-    const actual = attributedTranscripts({ usedBy: ['alpha'], copies: ['/homes/copy'] }, sessions);
+    const actual = attributedTranscripts({ usedBy: ['alpha'] }, sessions);
 
-    // Assert
-    should(actual).deepEqual(['/homes/copy/sessions/c.jsonl', '/pool/a.jsonl', '/pool/b.jsonl']);
+    // Assert — a stranger's rollout is never attributed, whatever directory it was written in.
+    should(actual).deepEqual(['/pool/a.jsonl', '/pool/b.jsonl']);
   });
 
   it('should read Claude from its statusLine file and Codex from its attributed rollouts', async () => {
