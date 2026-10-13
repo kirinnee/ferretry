@@ -1,0 +1,25 @@
+name: DEBUG mac keychain (throwaway)
+on:
+  push:
+    branches: ['debug/mac-keychain-*']
+jobs:
+  probe:
+    name: macdbg ${{ matrix.mode }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [pinned, latest]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Probe
+        env:
+          FY_CONTRACT_KEYCHAIN: '1'
+          FY_CONTRACT_ONLY: ./packages/fleet/tests/contract/zz-mac-debug.test.ts
+          FY_CONTRACT_ARTIFACTS: ${{ runner.temp }}/harness-contract
+        run: nix develop .#ci -c ./packages/fleet/tests/contract/run.sh ${{ matrix.mode }}
