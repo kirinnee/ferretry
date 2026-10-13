@@ -218,9 +218,16 @@ proof = Ed25519-Sign(device key,
 - `appSession` is 16 random bytes the page generates once per page load and holds only in memory. It
   names "this running copy of the app" so a step-up (B) belongs to one tab's life and ends when the
   page closes. It is signed, so a relay cannot move it.
-- Declared limit, closed in B: `appSession` is any 16 bytes the client picks. Code running in the page
-  (an XSS, a malicious deploy) can read it and present it again from a later session of the same
-  device, so before a step-up is bound to it, B makes it a value the DAEMON issues.
+- **The daemon, not the page, decides when a copy of the app has closed.** `appSession` is any 16
+  bytes the client picks, so code running in the page (an XSS, a malicious deploy) could keep it and
+  present it again from a later page of the same device. What it cannot keep is a live session. A
+  step-up therefore belongs to one **span**: the unbroken stretch in which that `(deviceId,
+appSession)` holds at least one session, with 60 seconds of slack for a reconnect. When the span
+  ends the step-up is dropped, and the same id presented afterwards begins a new span that holds
+  nothing (`StepUpRegistry`, told by the connection registry when each session opens and closes).
+- Declared limit: while the real page is still open, other code of the same origin on the same device
+  (a second tab of a malicious deploy) can open a session with the same id and share its step-up. It
+  could already drive the open tab itself, so the span does not widen what that code can do.
 - The admin token is still not resolvable through a session, deliberately — it is a host-local secret.
 
 ### A5. The access lease and silent renewal
@@ -256,8 +263,12 @@ proof = Ed25519-Sign(device key, "ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖ 
 - Declared limit: a write still running when a session ends (lease, cap, revocation) completes on the
   daemon, but its answer is lost with the session. The client correctly never replays a write, so the
   person can be told a change failed that in fact happened. A correctness gap, not a security one.
-- Declared limit, closed in B: renewal re-checks pairing and idle expiry, not capability grants. A
-  terminal or browser stream opened under a grant survives a later narrowing until it closes.
+- **An open stream is asked again.** A stream session keeps the request it was accepted for, and the
+  daemon re-runs the socket table's own authorization for it (`ApiSocketDispatcher.reauthorize`) on
+  every renewal and whenever the grant service's answer moves — a change, a refresh, a failed
+  refresh. A stream that is no longer allowed ends with a sealed `1008 this stream is no longer
+allowed`, never `4403`, which would tell the device it is unpaired. The re-check counts the step-up
+  that opened the stream as spent: a step-up authorizes the OPEN, and only a narrowed grant ends it.
 
 ### A6. Idle expiry and revocation
 

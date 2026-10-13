@@ -760,6 +760,50 @@ export function useAppStore(): AppStore {
 }
 
 /**
+ * The typed client a screen reaches a daemon through: the store's own pool, so it rides the carrier
+ * router and a session the device key opened.
+ *
+ * THE ONLY DEFAULT A SURFACE MAY USE. A client built on the plain network reaches no daemon at all — a
+ * paired browser is answered only inside its own session — which is why `daemonApiClient` has no
+ * default transport any more. Outside a provider there is no pool, and the answer is a refusal that
+ * says so rather than a client pointed at nothing — unless a {@link DaemonClientProvider} names one.
+ */
+export function useDaemonClient(): (daemon: DaemonConnection) => Promise<FyApiClient> {
+  const named = useContext(DaemonClientContext);
+  const store = useContext(StoreContext);
+  return useMemo(
+    () =>
+      named ??
+      (store === null
+        ? async () => {
+            throw new Error('no daemon client exists outside the app store');
+          }
+        : async (daemon: DaemonConnection) => await store.clients.client(daemon)),
+    [named, store],
+  );
+}
+
+type DaemonClientFactory = (daemon: DaemonConnection) => Promise<FyApiClient>;
+
+const DaemonClientContext = createContext<DaemonClientFactory | null>(null);
+
+/**
+ * Names the typed client for every screen below it, in place of the app store's pool.
+ *
+ * For a surface rendered WITHOUT an app store — the design harness, which answers a daemon inside the
+ * page. The app never mounts one: inside it, the store's pool is the only client there is.
+ */
+export function DaemonClientProvider({
+  client,
+  children,
+}: {
+  readonly client: DaemonClientFactory;
+  readonly children: ReactNode;
+}) {
+  return <DaemonClientContext.Provider value={client}>{children}</DaemonClientContext.Provider>;
+}
+
+/**
  * The fetch a screen reads a daemon through: the carrier router, so a daemon only the relay can reach
  * is reached through the relay.
  *
@@ -768,28 +812,6 @@ export function useAppStore(): AppStore {
  * Outside a provider — a component rendered on its own by a test — there is no router to route
  * through, and the answer is the plain network.
  */
-/**
- * The typed client a screen reaches a daemon through: the store's own pool, so it rides the carrier
- * router and a session the device key opened.
- *
- * THE ONLY DEFAULT A SURFACE MAY USE. A client built on the plain network reaches no daemon at all — a
- * paired browser is answered only inside its own session — which is why `daemonApiClient` has no
- * default transport any more. Outside a provider there is no pool, and the answer is a refusal that
- * says so rather than a client pointed at nothing.
- */
-export function useDaemonClient(): (daemon: DaemonConnection) => Promise<FyApiClient> {
-  const store = useContext(StoreContext);
-  return useMemo(
-    () =>
-      store === null
-        ? async () => {
-            throw new Error('no daemon client exists outside the app store');
-          }
-        : async (daemon: DaemonConnection) => await store.clients.client(daemon),
-    [store],
-  );
-}
-
 export function useDaemonFetch(): DaemonFetch {
   const store = useContext(StoreContext);
   // ONE identity per store, read through at call time. Effects list this fetch as a dependency, so a
