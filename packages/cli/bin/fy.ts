@@ -86,6 +86,8 @@ import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { registerComponentCommands } from '../src/lib/component/commands';
+import { registerCredentialCommands } from '../src/lib/credential/commands';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
@@ -104,9 +106,11 @@ import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
 import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
+import { registerHistoryCommands } from '../src/lib/history/commands';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
+import { registerMachineCommands } from '../src/lib/machine/commands';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
@@ -115,13 +119,16 @@ import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
+import { registerProfileCommands } from '../src/lib/profile/commands';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
+import { registerRuntimeCommands } from '../src/lib/runtime/commands';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
+import { registerSetupCommands } from '../src/lib/setup/commands';
 import {
   AnswerQuestionController,
   InterruptSessionController,
@@ -139,6 +146,7 @@ import {
 } from '../src/lib/session/index.ts';
 import { StateHomeClaimService } from '../src/lib/state-home/claim';
 import { StateHomeController } from '../src/lib/state-home/controller';
+import { registerStatuslineCommands } from '../src/lib/statusline/commands';
 import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
@@ -642,6 +650,16 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive, world.cwd),
     ),
   ({ program, world, client }) => registerFleetCommands(program, buildFleetController(world, client)),
+  // The account model's command groups (docs/design/account-model.md §6.2). Each is a seed that adds
+  // nothing until its unit fills it; the unit replaces its own line here with the controller it needs.
+  ({ program }) => registerSetupCommands(program),
+  ({ program }) => registerMachineCommands(program),
+  ({ program }) => registerRuntimeCommands(program),
+  ({ program }) => registerCredentialCommands(program),
+  ({ program }) => registerProfileCommands(program),
+  ({ program }) => registerComponentCommands(program),
+  ({ program }) => registerStatuslineCommands(program),
+  ({ program }) => registerHistoryCommands(program),
   // The operator reads. The marker probe takes the INVOCATION cwd rather than reading `process.cwd()`,
   // so a relative `--until-marker` resolves against the directory the human was in.
   ({ program, world, client }) =>

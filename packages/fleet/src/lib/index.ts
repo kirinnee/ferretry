@@ -1,6 +1,18 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'fleet' as const;
 
+export * from './account/adapt.ts';
+export * from './account/clone.ts';
+export * from './account/credential-status.ts';
+export * from './account/credentials.ts';
+export * from './account/fixed-layer.ts';
+export * from './account/ids.ts';
+export * from './account/import.ts';
+export * from './account/layering.ts';
+export * from './account/legacy.ts';
+export * from './account/materialise.ts';
+export * from './account/migration.ts';
+export * from './account/schema.ts';
 export * from './assets.ts';
 export * from './capabilities.ts';
 export * from './config.ts';

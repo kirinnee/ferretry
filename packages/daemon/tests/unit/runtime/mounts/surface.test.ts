@@ -2,8 +2,11 @@ import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
+import { createFleetCredentialsSubsystem } from '../../../../src/lib/fleet/credentials-service.ts';
+import { createFleetSetupSubsystem } from '../../../../src/lib/fleet/setup-service.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
+import { createFleetCatalogSubsystem } from '../../../../src/lib/runtime/mounts/fleet-catalog.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -173,6 +176,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  // The account model's three tables, through the factories the daemon itself calls. They serve no
+  // route yet, so the inventory below is unchanged by them (docs/design/account-model.md §13.2).
+  fleetCredentials: createFleetCredentialsSubsystem(),
+  fleetCatalog: createFleetCatalogSubsystem(),
+  fleetSetup: createFleetSetupSubsystem(),
   cgroups: {
     config: async () => {
       throw new Error('not exercised by the surface inventory');
