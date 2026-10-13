@@ -22,7 +22,7 @@ export type SettingId =
   | 'dictation'
   | 'notifications';
 
-export type SettingsSectionId = 'appearance' | 'behaviour' | 'daemons';
+export type SettingsSectionId = 'appearance' | 'behaviour' | 'daemons' | 'machines';
 
 export interface SettingsSectionDefinition {
   readonly id: SettingsSectionId;
@@ -224,6 +224,17 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     description: 'Pair, check, switch, name, or remove the machines this browser can reach.',
     settingIds: [],
   },
+  {
+    /**
+     * The account model's surface (O1), BESIDE Daemons rather than inside it: Daemons is about the
+     * pairing — reaching a machine — and this is about what runs on one. Its own address is
+     * , which the Settings page reads.
+     */
+    id: 'machines',
+    label: 'Machines',
+    description: 'The runtimes, logins, profiles and components on each machine.',
+    settingIds: [],
+  },
 ] as const;
 
 const SETTINGS_SECTION_BY_ID = new Map(SETTINGS_SECTIONS.map(section => [section.id, section]));
@@ -263,6 +274,37 @@ export interface SettingsLinkDefinition {
 }
 
 export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
+  {
+    // The words somebody types when they want to change what runs: the account model's own nouns,
+    // plus the old ones ("account", "fleet", "login") a person who has used Ferretry before reaches for.
+    id: 'machines',
+    label: 'Machines',
+    description:
+      'The runtimes you launch, the logins they use, and the profiles and components they are built from, per machine.',
+    href: daemon => `${daemonSettingsPath(daemon)}#machines`,
+    keywords: [
+      'machine',
+      'runtime',
+      'runtimes',
+      'credential',
+      'credentials',
+      'login',
+      'logins',
+      'sign in',
+      'profile',
+      'profiles',
+      'component',
+      'components',
+      'mcp',
+      'skills',
+      'instructions',
+      'model set',
+      'agent permissions',
+      'account',
+      'accounts',
+      'fleet',
+    ],
+  },
   {
     /**
      * The panel a refused control sends somebody to, reachable by the words they would actually type.

@@ -108,7 +108,9 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Fifty-one: twenty-seven at `mobile` and twenty-four at `desktop`. Twenty-four at both viewports —
+ * Sixty-five. MACHINES owes six at each viewport — its section, four tab switches and the Machines list the
+ * switcher opens — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
+ * and twenty-four at `desktop`. Twenty-four at both viewports —
  * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
  * surface: each step is a different layout, the model step is a card per model beside a custom-value
  * row, and the recap is a two-column definition list. Capturing only the first would have proved that
@@ -132,7 +134,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 53;
+const SETTINGS_SIDEWAYS_CHECKS = 65;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1371,8 +1373,13 @@ try {
             await picker.waitFor({ state: 'hidden' });
           }
 
-          const selectSettingsSection = async (id: 'appearance' | 'behaviour' | 'daemons') => {
-            const label = { appearance: 'Appearance', behaviour: 'Behaviour', daemons: 'Daemons' }[id];
+          const selectSettingsSection = async (id: 'appearance' | 'behaviour' | 'daemons' | 'machines') => {
+            const label = {
+              appearance: 'Appearance',
+              behaviour: 'Behaviour',
+              daemons: 'Daemons',
+              machines: 'Machines',
+            }[id];
             if (viewport.name === 'mobile') {
               await settingsPage.locator('[data-settings-section-trigger]').click();
               const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
@@ -1674,6 +1681,27 @@ try {
           const removalTarget = join(outDir, `settings-removal-disclosure-${viewport.name}.png`);
           await page.screenshot({ path: removalTarget });
           process.stdout.write(`📸 Settings removal disclosure ${viewport.name} -> ${removalTarget}\n`);
+
+          // MACHINES (account model, O1): the section, each of its five tabs, and the Machines list the
+          // switcher opens. Six checks per viewport. The tab row is five equal columns, which is the
+          // shape most likely to widen a 390px phone once a label is longer than its cell.
+          await selectSettingsSection('machines');
+          const machinesSurface = settingsPage.locator('[data-machines-surface="harness-daemon"]');
+          await machinesSurface.locator('[data-machine-tab-empty="runtimes"]').waitFor({ state: 'visible' });
+          for (const tab of ['credentials', 'profiles', 'components', 'settings'] as const) {
+            await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
+            await machinesSurface.locator(`[data-machine-tab-empty="${tab}"]`).waitFor({ state: 'visible' });
+            await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
+          }
+          const machinesTarget = join(outDir, `settings-machines-${viewport.name}.png`);
+          await page.screenshot({ path: machinesTarget });
+          process.stdout.write(`📸 Settings Machines ${viewport.name} -> ${machinesTarget}\n`);
+          await machinesSurface.locator('[data-machine-switcher]').click();
+          await machinesSurface.locator('[data-machines-list]').waitFor({ state: 'visible' });
+          await assertNoSidewaysScroll(page, `the Machines list at ${viewport.name}`);
+          const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
+          await page.screenshot({ path: machinesListTarget });
+          process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
 
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh

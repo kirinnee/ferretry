@@ -29,6 +29,7 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { accountsSettingsTab } from './features/fleet/accounts-page.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
+import { emptyMachineTab, type MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
@@ -932,6 +933,19 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   );
 }
 
+/**
+ * The Machines tabs (docs/design/account-model.md §4.2). ONE LINE PER TAB, each the shell's empty frame
+ * until the unit that fills it replaces its own line: Runtimes and Credentials U17, Profiles and
+ * Components U18, Settings U19.
+ */
+const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
+  runtimes: emptyMachineTab('runtimes'),
+  credentials: emptyMachineTab('credentials'),
+  profiles: emptyMachineTab('profiles'),
+  components: emptyMachineTab('components'),
+  settings: emptyMachineTab('settings'),
+};
+
 function SettingsRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   const connectionSnapshot = useConnectionSnapshot();
@@ -1002,6 +1016,9 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // on a daemon that is only reachable through the rendezvous.
       createGrantClient={createDaemonClient}
       daemonSettingsTabs={daemonSettingsTabs}
+      // The same pool as every other daemon call, so a machine read rides the measured carrier.
+      createMachineClient={createDaemonClient}
+      machineTabs={MACHINE_TAB_SURFACES}
       onSelectDaemon={daemonId => {
         store.connections.select(daemonId);
         navigate(`${daemonSettingsPath(daemonId)}#daemons`);

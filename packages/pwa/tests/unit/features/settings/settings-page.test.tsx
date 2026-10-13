@@ -4,6 +4,8 @@ import { useLayoutEffect, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
 import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
+import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-configuration-surface.tsx';
+import type { MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
 import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
@@ -11,6 +13,7 @@ import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/c
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
 import { UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
+import { machineClient, machineView } from '../fleet/shell/machine-support.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
 
@@ -52,6 +55,10 @@ interface PageOptions {
   readonly probe?: DaemonReachabilityProbe;
   readonly carrier?: ConnectionChoice;
   readonly calls?: Callbacks;
+  readonly createMachineClient?: FleetClientFactory;
+  readonly machineTabs?: MachineTabSurfaces;
+  /** Leave out onNavigate, as a page composed without a router would. */
+  readonly routerless?: boolean;
 }
 
 const page = (options: PageOptions = {}) => {
@@ -77,7 +84,9 @@ const page = (options: PageOptions = {}) => {
       onRenameDaemon={(id, label) => callbacks.renamed.push({ id, label })}
       onRemoveDaemon={id => callbacks.removed.push(id)}
       onAddDaemon={() => callbacks.added.push('add')}
-      onNavigate={to => callbacks.navigated.push(to)}
+      {...(options.routerless === true ? {} : { onNavigate: (to: string) => callbacks.navigated.push(to) })}
+      {...(options.createMachineClient === undefined ? {} : { createMachineClient: options.createMachineClient })}
+      {...(options.machineTabs === undefined ? {} : { machineTabs: options.machineTabs })}
     />
   );
 };
@@ -173,8 +182,8 @@ describe('SettingsPage sections', () => {
     // The LABEL, found by the class the rail gives it, rather than by counting spans. The row's spans
     // are an implementation detail — adding the fixed icon slot that straightens the rail's left edge
     // renumbered them — and a positional read of them silently asserted layout, not order.
-    expect(tabs.map(tab => railRowLabel(tab))).toEqual(['Appearance', 'Behaviour', 'Daemons']);
-    expect(tabs.map(tab => tab.props['aria-current'])).toEqual(['page', undefined, undefined]);
+    expect(tabs.map(tab => railRowLabel(tab))).toEqual(['Appearance', 'Behaviour', 'Daemons', 'Machines']);
+    expect(tabs.map(tab => tab.props['aria-current'])).toEqual(['page', undefined, undefined, undefined]);
     expect(settingIds(view)).toEqual(['text-size', 'theme', 'density', 'chat-width']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
@@ -972,6 +981,100 @@ describe('daemon settings', () => {
     expect(alert.textContent).toContain('not present in the browser’s pairing registry');
     // Showing beta's settings under alpha's route would be the wrong daemon.
     expect(view.container.textContent).not.toContain('Alpha workstation');
+    await view.unmount();
+  });
+});
+
+describe('SettingsPage Machines section', () => {
+  const machines: FleetClientFactory = async () => machineClient(machineView({ name: 'alpha-host' }));
+  const labelledBeta = { ...beta, label: 'Beta box' };
+
+  const machinesSurface = (container: HTMLElement): HTMLElement | null =>
+    container.querySelector<HTMLElement>('[data-machines-surface]');
+
+  it('opens from a Machines link on the named tab, beside Daemons, and follows a later link', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/profiles');
+    const callbacks = calls();
+    const view = await mount(
+      page({ connections: [alpha, labelledBeta], createMachineClient: machines, calls: callbacks }),
+    );
+    await settle();
+    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
+      'machines',
+    );
+    expect(machinesSurface(view.container)?.getAttribute('data-machines-surface')).toBe('daemon-alpha');
+    expect(view.container.querySelector('[data-machine-tab="profiles"]')?.getAttribute('aria-current')).toBe('page');
+    expect(view.container.querySelector('[data-machine-unknown]')).toBeNull();
+
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/components');
+    await interact(() => window.dispatchEvent(new Event('hashchange')));
+    expect(view.container.querySelector('[data-machine-tab="components"]')?.getAttribute('aria-current')).toBe('page');
+
+    // A tab is an address: the page navigates to it rather than holding it as private state.
+    await interact(() =>
+      must(view.container.querySelector<HTMLElement>('[data-machine-tab="credentials"]'), 'credentials tab').click(),
+    );
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/settings#machines/Alpha%20workstation/credentials']);
+    expect(callbacks.selected).toEqual([]);
+    await view.unmount();
+  });
+
+  it('a link naming another paired machine goes to THAT daemon’s Settings, never shows it here', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Beta%20box/runtimes');
+    const callbacks = calls();
+    const view = await mount(
+      page({ connections: [alpha, labelledBeta], createMachineClient: machines, calls: callbacks }),
+    );
+    await settle();
+    expect(callbacks.navigated).toEqual(['/d/daemon-beta/settings#machines/Beta%20box/runtimes']);
+    await view.unmount();
+  });
+
+  it('a link naming a machine nobody paired says so and shows this one', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/ghost/runtimes');
+    const callbacks = calls();
+    const view = await mount(page({ createMachineClient: machines, calls: callbacks }));
+    await settle();
+    expect(view.container.querySelector('[data-machine-unknown]')?.textContent).toContain('ghost');
+    expect(callbacks.navigated).toEqual([]);
+    await view.unmount();
+  });
+
+  it('two pairings with one name never bounce between them', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/runtimes');
+    const callbacks = calls();
+    const twin = { ...labelledBeta, label: 'Alpha workstation' };
+    const view = await mount(page({ connections: [twin, alpha], createMachineClient: machines, calls: callbacks }));
+    await settle();
+    expect(callbacks.navigated).toEqual([]);
+    await view.unmount();
+  });
+
+  it('renders the supplied tab surfaces, and navigates without a router by assigning the address', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines');
+    const view = await mount(
+      page({
+        createMachineClient: machines,
+        routerless: true,
+        machineTabs: { runtimes: ({ machineName }) => <p data-runtimes-tab="">{machineName}</p> },
+      }),
+    );
+    await settle();
+    expect(view.container.querySelector('[data-runtimes-tab]')?.textContent).toBe('Alpha workstation');
+    await interact(() =>
+      must(view.container.querySelector<HTMLElement>('[data-machine-tab="settings"]'), 'settings tab').click(),
+    );
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings');
+    await view.unmount();
+  });
+
+  it('says it cannot show machines when the page has no way to reach them', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines');
+    const view = await mount(page());
+    expect(machinesSurface(view.container)).toBeNull();
+    expect(view.container.querySelector('[data-settings-section="machines"] [role="alert"]')?.textContent).toBe(
+      'Machines cannot be shown because this page was opened without a way to reach them.',
+    );
     await view.unmount();
   });
 });
