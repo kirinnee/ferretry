@@ -32,7 +32,15 @@ export const unsupportedSentence = (origin: string): string =>
 export const registrationClosedSentence = (hasPasskeys: boolean): string =>
   hasPasskeys
     ? 'Adding another passkey needs a recent passkey confirmation: make a change in Settings and confirm it, then come back here.'
-    : 'A first passkey can be added only within 10 minutes of pairing: add one from a device that already has access, or pair this device again at the machine.';
+    : 'A first passkey can be added only within 10 minutes of pairing: add one from a device that already has access, or ask the owner to run `fy passkey window <this device>` at the machine.';
+
+/** When an open registration window closes, in one sentence, or `null` when the machine named no end. */
+export function registrationClosesSentence(closesAt: string | undefined): string | null {
+  if (closesAt === undefined) return null;
+  const closes = new Date(closesAt);
+  if (Number.isNaN(closes.getTime())) return null;
+  return `You can add a passkey until ${closes.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.`;
+}
 
 const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => string>> = {
   'not-a-device': () => 'Only a paired device can hold a passkey, and this browser is not paired to that machine.',
@@ -42,6 +50,8 @@ const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => stri
   'too-many-passkeys': () => 'This device already holds as many passkeys as this machine allows.',
   'no-passkey': origin => passkeySentence('no-passkey', origin),
   'not-verified': () => 'That passkey did not check out. Try again.',
+  'not-at-machine': () => 'Only the owner at the machine can open a passkey window, and this browser is not that.',
+  'unknown-device': () => 'This machine does not know this device, so no passkey window can be opened for it.',
 };
 
 /** The one plain sentence for a failed registration or read — never a status code or a raw error name. */

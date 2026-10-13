@@ -10,6 +10,7 @@ import {
   passkeyLabel,
   passkeyNudgeDismissed,
   registrationClosedSentence,
+  registrationClosesSentence,
   unsupportedSentence,
   webAuthnSupported,
 } from '../../src/lib/passkey-panel.ts';
@@ -54,7 +55,14 @@ describe('passkey panel sentences', () => {
 
   it('says a different next step for a first passkey and for a second', () => {
     should(registrationClosedSentence(false)).containEql('10 minutes of pairing');
+    should(registrationClosedSentence(false)).containEql('fy passkey window <this device>');
     should(registrationClosedSentence(true)).containEql('recent passkey confirmation');
+  });
+
+  it('says when an open registration window closes, and nothing when no end is named', () => {
+    should(registrationClosesSentence(undefined)).be.null();
+    should(registrationClosesSentence('not a date')).be.null();
+    should(registrationClosesSentence('2026-01-01T00:10:00.000Z')).startWith('You can add a passkey until ');
   });
 
   it('turns every ceremony failure and daemon refusal into one plain sentence', () => {
@@ -69,6 +77,8 @@ describe('passkey panel sentences', () => {
     should(passkeyFailureSentence(refusal('step_up_too_many_passkeys'), ORIGIN)).containEql('as many passkeys');
     should(passkeyFailureSentence(refusal('step_up_no_passkey'), ORIGIN)).containEql('no passkey for this machine');
     should(passkeyFailureSentence(refusal('step_up_not_verified'), ORIGIN)).containEql('did not check out');
+    should(passkeyFailureSentence(refusal('step_up_not_at_machine'), ORIGIN)).containEql('owner at the machine');
+    should(passkeyFailureSentence(refusal('step_up_unknown_device'), ORIGIN)).containEql('does not know this device');
     // Anything else is one sentence too, and never the raw text or a status.
     should(passkeyFailureSentence(refusal('something_else'), ORIGIN)).equal('The passkey was not added. Try again.');
     should(passkeyFailureSentence(new Error('boom'), ORIGIN)).equal('The passkey was not added. Try again.');
