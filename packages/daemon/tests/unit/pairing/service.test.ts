@@ -8,6 +8,9 @@ import {
   type PairingCode,
   type PairingId,
   pairingMintOutcome,
+  type CapabilityGrants,
+  DEFAULT_DEVICE_GRANTS,
+  FULL_DEVICE_GRANTS,
 } from '@ferretry/protocol';
 import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
@@ -156,6 +159,17 @@ class RecordingDevices implements PairingDeviceStore {
     if (this.touchFailure !== undefined) throw this.touchFailure;
     this.records = this.records.map(record => (record.id === id ? { ...record, lastSeenAt } : record));
   }
+
+  /** Held so a case can make the write wait, and race it against a sighting. */
+  grantWrite: Promise<void> = Promise.resolve();
+
+  async setGrants(id: string, grants: CapabilityGrants): Promise<boolean> {
+    if (this.failure !== undefined) throw this.failure;
+    await this.grantWrite;
+    if (!this.records.some(record => record.id === id)) return false;
+    this.records = this.records.map(record => (record.id === id ? { ...record, grants } : record));
+    return true;
+  }
 }
 
 /**
@@ -240,6 +254,8 @@ describe('PairingService minting and status', () => {
       // Who can redeem it travels WITH it. A link and no audience is the shape that put a QR of a
       // loopback address in front of a phone, and the protocol has no value for it any more.
       reach: 'any-device',
+      // What a device redeeming it will hold: least privilege unless minted `--full` at the machine.
+      grants: 'default',
     });
     should(service.status(PAIRING_ID)).deepEqual({
       pairingId: PAIRING_ID,
@@ -407,6 +423,8 @@ describe('PairingService redemption', () => {
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
         publicKey: DEVICE_KEY,
+        // Least privilege: a newly paired device reads the fleet and chats, and nothing more (B5).
+        grants: DEFAULT_DEVICE_GRANTS,
       },
     ]);
     should(JSON.stringify(result.response)).not.containEql(DEVICE_KEY);
@@ -564,6 +582,7 @@ describe('PairingService redemption', () => {
       list: async () => [],
       remove: async () => false,
       touch: async () => undefined,
+      setGrants: async () => false,
     };
     const service = new PairingService({
       daemonId: DAEMON_ID,
@@ -712,6 +731,7 @@ describe('PairingService revocation', () => {
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
         idleExpiresAt: '2026-09-02T12:00:00.000Z',
+        grants: DEFAULT_DEVICE_GRANTS,
       },
     ]);
     should(JSON.stringify(listed)).not.containEql(DEVICE_KEY);
@@ -871,6 +891,7 @@ describe('PairingDeviceRegistry', () => {
     createdAt: '2026-08-03T12:00:00.000Z',
     lastSeenAt: '2026-08-03T12:00:00.000Z',
     publicKey: DEVICE_KEY,
+    grants: DEFAULT_DEVICE_GRANTS,
     ...overrides,
   });
 
@@ -1164,5 +1185,126 @@ describe('PairingService redemption over a relay', () => {
     // Assert — the same fail-closed answer the direct path gives: the code is spent, nothing paired.
     should(redemption).deepEqual({ kind: 'refused' });
     should(service.status(PAIRING_ID)?.status).equal('expired');
+  });
+});
+
+describe('PairingService device grants', () => {
+  async function paired() {
+    const built = fixture();
+    built.mint();
+    const redemption = await redeemDirect(built.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    return built;
+  }
+  const WIDENED: CapabilityGrants = { ...DEFAULT_DEVICE_GRANTS, terminal: { use: true, configure: false } };
+
+  it('should give a newly paired device fleet.use only, and report it', async () => {
+    // Arrange
+    const { service } = await paired();
+
+    // Act + Assert
+    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(DEFAULT_DEVICE_GRANTS);
+    should((await service.devices())[0]?.grants).deepEqual(DEFAULT_DEVICE_GRANTS);
+  });
+
+  it('should write a change to the document first, then to the live grant the boundary reads', async () => {
+    // Arrange
+    const { service, devices, credentials } = await paired();
+
+    // Act
+    const changed = await service.setDeviceGrants(FIRST_DEVICE_ID, WIDENED);
+
+    // Assert
+    should(changed).be.true();
+    should(devices.records[0]?.grants).deepEqual(WIDENED);
+    should(credentials.get(FIRST_DEVICE_ID)?.grants).deepEqual(WIDENED);
+  });
+
+  it('should change nothing live when the document refuses the write', async () => {
+    // Arrange
+    const { service, devices, credentials } = await paired();
+    devices.failure = new Error('disk unavailable');
+
+    // Act + Assert
+    await should(service.setDeviceGrants(FIRST_DEVICE_ID, WIDENED)).be.rejectedWith('disk unavailable');
+    should(credentials.get(FIRST_DEVICE_ID)?.grants).deepEqual(DEFAULT_DEVICE_GRANTS);
+  });
+
+  it('should report a device it does not hold, or one revoked mid-write, as unchanged', async () => {
+    // Arrange
+    const { service, devices } = await paired();
+
+    // Act
+    const unknown = await service.setDeviceGrants(SECOND_DEVICE_ID, WIDENED);
+    devices.records = [];
+    const vanished = await service.setDeviceGrants(FIRST_DEVICE_ID, WIDENED);
+
+    // Assert
+    should([unknown, vanished]).deepEqual([false, false]);
+    should(service.deviceGrants(SECOND_DEVICE_ID)).be.undefined();
+  });
+
+  it('should keep a grant change that lands while a sighting is being written', async () => {
+    // The sighting's refresh used to copy the record it read BEFORE its write; a grant change made in
+    // between would then be undone in memory while the document kept it.
+    // Arrange
+    const { service, clock, credentials } = await paired();
+    clock.nowMs += 61 * 60 * 1_000;
+
+    // Act
+    service.seen(FIRST_DEVICE_ID);
+    await service.setDeviceGrants(FIRST_DEVICE_ID, WIDENED);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Assert
+    should(credentials.get(FIRST_DEVICE_ID)?.grants).deepEqual(WIDENED);
+    should(credentials.get(FIRST_DEVICE_ID)?.lastSeenAt).equal('2026-08-03T13:01:00.000Z');
+  });
+
+  it('should not resurrect a device revoked while its sighting was being written', async () => {
+    // Arrange
+    const { service, clock, credentials } = await paired();
+    clock.nowMs += 61 * 60 * 1_000;
+
+    // Act
+    service.seen(FIRST_DEVICE_ID);
+    credentials.remove(FIRST_DEVICE_ID);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Assert
+    should(credentials.get(FIRST_DEVICE_ID)).be.undefined();
+  });
+});
+
+describe('PairingService full-access codes', () => {
+  it('should give the device that redeems a `full` code every capability, and echo the choice at the mint', async () => {
+    // Arrange
+    const { service } = fixture();
+    const minted = service.mint('full');
+
+    // Act
+    const redemption = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Assert
+    should(redemption.kind).equal('paired');
+    should(minted.grants).equal('full');
+    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(FULL_DEVICE_GRANTS);
+    // The link carries nothing about what the code grants.
+    should(minted.pairUrl).not.match(/full|grant/u);
+  });
+
+  it('should give a default code’s device fleet.use only, and let a newer mint replace the choice', async () => {
+    // Arrange
+    const { service } = fixture();
+    service.mint('full');
+    const minted = service.mint();
+
+    // Act
+    await redeemDirect(service, { code: SECOND_CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Assert
+    should(minted.grants).equal('default');
+    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(DEFAULT_DEVICE_GRANTS);
   });
 });

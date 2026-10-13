@@ -1,11 +1,18 @@
 import { describe, it } from 'bun:test';
-import type { PairedDevice, PairingCodeMintResponse, PairingCodeStatusResponse, PairingId } from '@ferretry/protocol';
+import {
+  DEFAULT_DEVICE_GRANTS,
+  type PairedDevice,
+  type PairingCodeMintResponse,
+  type PairingCodeStatusResponse,
+  type PairingGrantSet,
+  type PairingId,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter, type StepUpWitness } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { grantSubsystem } from './support.ts';
+import { deviceGrantsOver, grantSubsystem } from './support.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const pairingId = `fy_pair_${'c'.repeat(22)}` as PairingId;
@@ -31,6 +38,7 @@ const device = (id: string, name: string): PairedDevice => ({
   createdAt: '2026-08-01T09:00:00.000Z',
   lastSeenAt: '2026-08-03T11:58:00.000Z',
   idleExpiresAt: '2026-09-02T11:58:00.000Z',
+  grants: DEFAULT_DEVICE_GRANTS,
 });
 
 class FakePairing implements PairingSubsystem {
@@ -46,8 +54,12 @@ class FakePairing implements PairingSubsystem {
   /** How many codes the subsystem was actually asked for, so a refusal at the boundary is visible. */
   mints = 0;
 
-  mint(): PairingCodeMintResponse {
+  /** What each mint asked a redeeming device to hold. */
+  readonly grantSets: PairingGrantSet[] = [];
+
+  mint(grants: PairingGrantSet): PairingCodeMintResponse {
     this.mints += 1;
+    this.grantSets.push(grants);
     return minted;
   }
 
@@ -81,7 +93,12 @@ class FakePairing implements PairingSubsystem {
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { has: (deviceId: string) => deviceId !== 'unpaired-device' },
+  devices: {
+    has: (deviceId: string) => deviceId !== 'unpaired-device',
+    // Every capability: these tests are about the daemon-wide grant and the step-up, and the per-device
+    // half has its own file (`device-grants.test.ts`).
+    grants: (deviceId: string) => (deviceId === 'unpaired-device' ? undefined : DEFAULT_CAPABILITY_GRANTS),
+  },
 };
 
 const admin = { authorization: 'Bearer admin-secret' };
@@ -109,7 +126,13 @@ async function mount(subject: PairingSubsystem, allow = true, stepUps?: StepUpWi
     grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: allow, configure: allow } },
   });
   await grants.refresh();
-  return new ApiDispatcher(new ApiRouter(pairingRoutes(subject)), credentials, grants, undefined, stepUps);
+  return new ApiDispatcher(
+    new ApiRouter(pairingRoutes(subject, deviceGrantsOver(grants))),
+    credentials,
+    grants,
+    undefined,
+    stepUps,
+  );
 }
 
 describe('pairing routes', () => {
@@ -320,6 +343,8 @@ describe('pairing routes', () => {
       // A browser on this host is not the owner (B4), so it is not told it is at the machine.
       hostLocal: false,
       thisDeviceId: deviceOneId,
+      // At the machine every axis may be given to a device.
+      mayWiden: DEFAULT_CAPABILITY_GRANTS,
     });
     // The host's admin credential is not a paired device, so there is no grant of its own to mark.
     should(jsonBody(fromHostCli).thisDeviceId).be.undefined();
@@ -363,6 +388,8 @@ describe('pairing routes', () => {
       devices: [device(deviceOneId, 'Pixel 8')],
       hostLocal: false,
       thisDeviceId: deviceOneId,
+      // At the machine every axis may be given to a device.
+      mayWiden: DEFAULT_CAPABILITY_GRANTS,
     });
     should(subject.revokedDevices).deepEqual([deviceTwoId]);
     // Already gone is a 404 rather than a cheerful success: "revoked" and "there was nothing here"
@@ -404,5 +431,40 @@ describe('pairing routes', () => {
 
     // Assert
     should([minting.status, listing.status]).deepEqual([403, 403]);
+  });
+
+  it('should mint a full-access code only at the machine, and a default one otherwise', async () => {
+    // `fy pair --full`: the redeeming device gets every capability, which no remote device holds to
+    // give — so only a caller that arrived on the host may ask for one. The rule is `arrivedOnHost`.
+    // Arrange
+    const subject = new FakePairing();
+    const surface = await mount(subject, true, { held: () => true });
+    const full = JSON.stringify({ grants: 'full' });
+
+    // Act
+    const atHost = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin, body: full }),
+    );
+    const remote = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false, body: full }),
+    );
+    // A loopback peer without the host proof (a local proxy) is not the machine either.
+    const proxied = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: true, body: full }),
+    );
+    // Nor is a browser ON the host with the carrier's proof (B4): only the admin token is the owner.
+    const localBrowserFull = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', ...localBrowser, body: full }),
+    );
+    const plain = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false }),
+    );
+
+    // Assert
+    should([atHost.status, remote.status, proxied.status, localBrowserFull.status, plain.status]).deepEqual([
+      201, 403, 403, 403, 201,
+    ]);
+    should(jsonBody(remote).code).equal('grant_forbidden');
+    should(subject.grantSets).deepEqual(['full', 'default']);
   });
 });

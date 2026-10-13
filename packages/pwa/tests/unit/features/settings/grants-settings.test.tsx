@@ -528,3 +528,43 @@ describe('GrantsSurface', () => {
     expect(marked(renderer, 'data-grant-step-up-open')).toHaveLength(0);
   });
 });
+
+describe('GrantsCard per-device grants', () => {
+  it('shows the secret store beside the other six, as a card of its own', () => {
+    // Arrange, Act
+    const renderer = render(<GrantsCard connection={connection()} view={view()} onChange={() => {}} />);
+
+    // Assert
+    expect(marked(renderer, 'data-grant-capability')).toHaveLength(7);
+    expect(marked(renderer, 'data-grant-capability').at(-1)?.props['data-grant-capability']).toBe('secrets');
+    expect(text(renderer)).toContain('Secrets');
+    expect(axisSwitch(renderer, 'secrets.use')).toBeDefined();
+  });
+
+  it('explains a refusal that is this device’s own grant, with the host command, on that capability only', () => {
+    // Arrange, Act
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [
+            entry({
+              capability: 'terminal',
+              use: false,
+              useRefusal: 'device-not-granted',
+              deviceGranted: { use: false, configure: false },
+            }),
+            entry({ capability: 'fleet', deviceGranted: { use: true, configure: true } }),
+          ],
+        })}
+        onChange={() => {}}
+      />,
+    );
+
+    // Assert
+    expect(marked(renderer, 'data-grant-device-note')).toHaveLength(1);
+    expect(text(renderer)).toContain('fy device grant <device> terminal --use');
+    // The refusal reads as a widen of this device, never as a passkey or the operator's decision.
+    expect(text(renderer)).toContain('this device has not been given it');
+  });
+});

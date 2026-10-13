@@ -96,6 +96,30 @@ and a daemon address is already known to whoever was authorised to pair. The dae
 secret in this subject and it is not on the list — the wire schema has no field for one. The full carrier
 contract is [relay-protocol.md](relay-protocol.md) §13.
 
+### What a new device may do
+
+**A newly paired device can read the fleet and chat with sessions — `fleet.use` — and nothing else**
+([grants.md](grants.md), "Per-device grants"; [design/zero-trust.md](design/zero-trust.md) B5). Terminals,
+files, the browser, secrets, the warden, pairing and every `configure` axis start off for it, and are
+widened one device at a time: by the owner with `fy device grant <device> <capability> --use` (the admin
+token, the only ungoverned caller — B4), or from any browser's Settings → Add a device toggles by a device
+that holds `pairing.configure` and the capability it is giving, with a step-up. A browser on the host is a
+governed device like any other, so its toggles follow the same rule.
+
+**`fy pair --full`** mints a code whose redemption gives the device every capability on both axes, for the
+owner's own browser, which would otherwise need a grant per capability. Its rules:
+
+- **Host-only.** `POST /v1/pair/code` with `{ "grants": "full" }` is refused (`403 grant_forbidden`) unless the
+  request `arrivedOnHost` — the owner's admin token over loopback, i.e. `fy pair --full`. A browser on the
+  host is refused too (B4). Any device could otherwise mint a code giving a new device more than it holds.
+- **The code carries the choice, the link does not.** The daemon holds the grant set with the live code and
+  applies it at redemption; the QR stays the one-version `v1` fragment, so nothing about what a code grants
+  is visible to whoever reads it. A newer mint replaces the code and its choice together.
+- **It is not a bypass.** The daemon-wide document still narrows the device, and every dangerous act still
+  needs its passkey step-up. The mint answers `grants: "full" | "default"`, so the host's screen says which
+  it drew; a daemon too old to know the field echoes nothing, read as `default`, and `fy pair` says
+  `--full` was not applied.
+
 ### Asking again — `GET /v1/carriers`
 
 A set published only at pairing time goes stale while both halves stay healthy: an operator changes or
@@ -132,14 +156,15 @@ on the host included, mints while the operator leaves `pairing` on (B4: a tunnel
 indistinguishable from a local browser). The two facts a UI needs before it offers anything — whether this
 caller is the owner at the machine, and which grant is the caller's own — are on `GET /v1/pair/devices` as
 `hostLocal` and `thisDeviceId`. `hostLocal` is `arrivedOnHost`, never the bare loopback flag, so a caller behind
-a local proxy is never told it is at the machine. Both are
+a local proxy is never told it is at the machine. Since B5 a paired device also needs `pairing.use` in its
+OWN grants, which a newly paired device does not hold. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
 ### Minting needs no password
 
 **`POST /v1/pair/code` asks for no secret.** The owner's `fy pair` mints freely. A **governed** caller — a
 paired phone, a browser across the network or on the host itself — mints only while the operator leaves `pairing`
-on **and** it holds a current passkey step-up, because `pairing.use` is one of the three `use` demands the
+on **and** it holds a current passkey step-up, because `pairing.use` is one of the four `use` demands the
 step-up guards ([grants.md](grants.md)). The refusal is `step-up-required` and the app answers it by raising
 the passkey prompt and retrying once; a remote warden has no device and can never mint.
 

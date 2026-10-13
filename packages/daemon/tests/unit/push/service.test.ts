@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { RegisterPushDeviceRequest } from '@ferretry/protocol';
+import { DEFAULT_DEVICE_GRANTS, type RegisterPushDeviceRequest } from '@ferretry/protocol';
 import should from 'should';
 import {
   PairedPushDevices,
@@ -91,6 +91,7 @@ describe('PairedPushDevices', () => {
           createdAt: AT,
           lastSeenAt: AT,
           publicKey: 'MCowBQYDK2VwAyEA0000000000000000000000000000000000000000000',
+          grants: DEFAULT_DEVICE_GRANTS,
         },
       ],
     });
@@ -182,6 +183,17 @@ describe('PushService.list', () => {
 
     should(await service.list()).have.length(1);
     should(store.forgotten).be.empty();
+  });
+
+  it('should answer one device its own enrolments, and say who filed an id', async () => {
+    // Self-enrolment needs no capability (B5), so a device may always see and end its OWN rows.
+    const mine = record();
+    const theirs = record({ id: 'push-33333333-3333-4333-8333-333333333333', deviceId: deviceId('b') });
+    const { service } = world({ records: [mine, theirs], granted: [deviceId('a'), deviceId('b')] });
+
+    should((await service.listFor(deviceId('a'))).map(device => device.id)).eql([mine.id]);
+    should(await service.ownerOf(theirs.id)).equal(deviceId('b'));
+    should(await service.ownerOf('push-99999999-9999-4999-8999-999999999999')).be.undefined();
   });
 });
 

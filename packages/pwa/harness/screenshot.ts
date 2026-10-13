@@ -117,8 +117,9 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and twenty-one: forty-four MACHINES frames at each viewport, plus eighteen other frames at
- * `mobile` and fifteen at `desktop` (44 + 44 + 18 + 15).
+ * One hundred and twenty-three: forty-four MACHINES frames at each viewport, plus nineteen other frames at
+ * `mobile` and sixteen at `desktop` (44 + 44 + 19 + 16). The extra one at each viewport is the open
+ * per-device capabilities disclosure inside Add a device.
  *
  * MACHINES, forty-four per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
@@ -128,7 +129,7 @@ const WALKS_SETTINGS = !(
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
- * The rest, fifteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
+ * The rest, fifteen at both viewports plus the open device-capabilities disclosure at both: three Settings sections (Appearance, Behaviour, Daemons), the
  * healthy daemon's Warden and its eight other panels (Security, the passkey panel, among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
@@ -149,7 +150,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 121;
+const SETTINGS_SIDEWAYS_CHECKS = 123;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -1917,6 +1918,23 @@ try {
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
+            if (slug === 'devices') {
+              // The per-device capability switches: seven rows by two axes, the longest block this panel
+              // can grow, with a blocked widen's reason and host command beside its switch. Opened on the
+              // first device (the browser doing the looking, holding fleet.use alone), because a closed
+              // disclosure hides exactly the content that could widen a phone.
+              const disclosure = readySurface.locator('[data-device-capabilities]').first();
+              await disclosure.locator('summary').click();
+              await disclosure.locator('[data-device-capability="secrets"]').waitFor({ state: 'visible' });
+              await disclosure.locator('[data-device-grant-reason]').first().waitFor({ state: 'visible' });
+              await assertNoSidewaysScroll(page, `the open device capabilities at ${viewport.name}`);
+              const capabilitiesTarget = join(outDir, `settings-daemon-devices-capabilities-${viewport.name}.png`);
+              await disclosure.scrollIntoViewIfNeeded();
+              await page.screenshot({ path: capabilitiesTarget });
+              process.stdout.write(
+                `📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`,
+              );
+            }
           }
 
           await selectDaemon('Travel laptop');

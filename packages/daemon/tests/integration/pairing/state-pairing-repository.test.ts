@@ -1,7 +1,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type DaemonId, PairingCodeSchema } from '@ferretry/protocol';
+import { type DaemonId, DEFAULT_DEVICE_GRANTS, FULL_DEVICE_GRANTS, PairingCodeSchema } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { NodePairingCryptography, StatePairingRepository } from '../../../src/adapters/pairing/index.ts';
@@ -46,6 +46,7 @@ function record(daemonId: DaemonId, id: string): PairingDeviceRecord {
     createdAt: '2026-08-03T12:00:00.000Z',
     lastSeenAt: '2026-08-03T12:00:00.000Z',
     publicKey: DEVICE_KEY,
+    grants: DEFAULT_DEVICE_GRANTS,
   };
 }
 
@@ -298,5 +299,56 @@ describe('StatePairingRepository device keys', () => {
     const reopened = await new StatePairingRepository(paths, files).open('workstation');
     should(reopened.devices[0]?.lastSeenAt).equal('2026-08-04T12:00:00.000Z');
     should(reopened.devices[0]?.publicKey).equal(DEVICE_KEY);
+  });
+
+  it('should change one device’s grants durably, and write nothing for a device it does not hold', async () => {
+    // Arrange
+    const { paths, files, repository } = await fixture('pairing-state-grants');
+    const state = await repository.open('workstation');
+    await repository.add(record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'));
+    const before = await files.readText(join(paths.state, 'devices.json'));
+
+    // Act
+    const missing = await repository.setGrants('fy_device_id_cccccccccccccccccccccc', FULL_DEVICE_GRANTS);
+    const unchanged = await files.readText(join(paths.state, 'devices.json'));
+    const changed = await repository.setGrants('fy_device_id_aaaaaaaaaaaaaaaaaaaaaa', FULL_DEVICE_GRANTS);
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+
+    // Assert
+    should([missing, changed]).deepEqual([false, true]);
+    should(unchanged).equal(before);
+    should(reopened.devices[0]?.grants).deepEqual(FULL_DEVICE_GRANTS);
+  });
+
+  it('should read a schema-2 device written before per-device grants as the DEFAULT, a narrowing', async () => {
+    // A missing `grants` is safe to read as fleet.use only, which is why the document stays at schema 2.
+    // Arrange
+    const { paths, files, repository } = await fixture('pairing-state-legacy-grants');
+    const state = await repository.open('workstation');
+    const { grants: _dropped, ...legacy } = record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa');
+    await files.writeTextAtomic(
+      join(paths.state, 'devices.json'),
+      `${JSON.stringify({ schemaVersion: 2, daemonId: state.daemonId, devices: [legacy] })}\n`,
+    );
+
+    // Act
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+
+    // Assert
+    should(reopened.devices[0]?.grants).deepEqual(DEFAULT_DEVICE_GRANTS);
+  });
+
+  it('should refuse a device grant document whose grants are malformed, rather than guess', async () => {
+    // Arrange
+    const { paths, files, repository } = await fixture('pairing-state-bad-grants');
+    const state = await repository.open('workstation');
+    const bad = { ...record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'), grants: { fleet: { use: 'yes' } } };
+    await files.writeTextAtomic(
+      join(paths.state, 'devices.json'),
+      `${JSON.stringify({ schemaVersion: 2, daemonId: state.daemonId, devices: [bad] })}\n`,
+    );
+
+    // Act + Assert
+    await should(new StatePairingRepository(paths, files).open('workstation')).be.rejected();
   });
 });

@@ -6,6 +6,7 @@ import {
   type SecretSummary,
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
+import type { CapabilityDemand } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -116,6 +117,9 @@ async function use(uses: SecretUseService, context: RouteContext): Promise<ApiRe
   }
 }
 
+const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
+const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'configure' };
+
 /** Everything this mount needs, already built. */
 export interface SecretSubsystem {
   /** Management only. It cannot open a secret, which is why a route may hold one. */
@@ -134,6 +138,11 @@ export interface SecretSubsystem {
  * `/v1/secrets/use` registers BEFORE the one-segment `:name` pattern. They cannot shadow each other
  * — the verbs differ — but registering the fixed literal first is the habit that keeps that true
  * when a later verb is added.
+ *
+ * GOVERNED BY `secrets`, the seventh capability (`docs/grants.md`). The list and the use sit on `use` —
+ * the use runs a command with a stored value in its environment, which is code on this host, so a
+ * governed caller also needs a passkey step-up for it — and set and delete sit on `configure`. Before
+ * this, these routes named no demand and any paired device could run a command through them.
  */
 export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
   return [
@@ -141,6 +150,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/secrets',
       minimum: 'operator',
+      capability: SECRETS_USE,
       noStore: true,
       handle: async () => await list(subsystem.directory, subsystem.references),
     },
@@ -148,6 +158,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/secrets/use',
       minimum: 'operator',
+      capability: SECRETS_USE,
       noStore: true,
       handle: async context => await use(subsystem.uses, context),
     },
@@ -155,6 +166,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/secrets',
       minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await put(subsystem.directory, context),
     },
@@ -162,6 +174,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'DELETE',
       path: '/v1/secrets/:name',
       minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await remove(subsystem.directory, context),
     },

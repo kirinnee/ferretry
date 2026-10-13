@@ -10,6 +10,7 @@ import {
 import {
   type CallerGovernance,
   type CapabilityGuard,
+  type CapabilityPresentation,
   grantRefusalCode,
   NO_STEP_UP_WITNESS,
   type StepUpWitness,
@@ -221,20 +222,27 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
    */
   const demand = lookup.route.capability;
   let governance: CallerGovernance | undefined;
+  // Built for EVERY authenticated route, governed or not, so a handler that asks one more grant
+  // question (the grant and device-grant surfaces) reads the boundary's facts rather than re-deriving them.
+  const presentation: CapabilityPresentation = {
+    // The CARRIER's proof, never a header's. A relayed hop terminates on this very host and a
+    // locally bound proxy forwards from a loopback peer, so anything derived from an address would
+    // read as local and hand a remote caller the machine.
+    loopback: onHost,
+    // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
+    // headers and would make this decision movable by a header. Attribution only.
+    adminToken: authentication.tokenClass === 'admin',
+    actor,
+    // The SESSION's proven device, never a header's claim. No device — a bearer caller, a warden —
+    // holds no step-up and never can.
+    stepUp: request.device !== undefined && stepUps.held(request.device),
+    // The SESSION's proven device's own grants, from the live registry. `null` for a device that was
+    // admitted but is gone, so it is refused rather than served unnarrowed.
+    ...(authentication.tokenClass === 'device'
+      ? { deviceGrants: credentials.devices?.grants?.(authentication.deviceId) ?? null }
+      : {}),
+  };
   if (demand !== undefined) {
-    const presentation = {
-      // The CARRIER's proof, never a header's. A relayed hop terminates on this very host and a
-      // locally bound proxy forwards from a loopback peer, so anything derived from an address would
-      // read as local and hand a remote caller the machine.
-      loopback: onHost,
-      // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
-      // headers and would make this decision movable by a header. Attribution only.
-      adminToken: authentication.tokenClass === 'admin',
-      actor,
-      // The SESSION's proven device, never a header's claim. No device — a bearer caller, a warden —
-      // holds no step-up and never can.
-      stepUp: request.device !== undefined && stepUps.held(request.device),
-    };
     const decision = guard.decide(demand, presentation) ?? { allowed: false, refusal: 'undetermined' as const };
     if (!decision.allowed)
       return {
@@ -267,6 +275,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       // Present only where the route named a capability, so its ABSENCE means "the operator was never
       // asked about this route" rather than "asked, and the answer was mislaid".
       ...(governance === undefined ? {} : { governance }),
+      presentation,
     },
   };
 }

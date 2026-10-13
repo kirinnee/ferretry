@@ -57,6 +57,7 @@ const NEEDS_STEP_UP: Readonly<Record<DaemonCapability, Readonly<Record<Capabilit
   filesystem: { use: false, configure: true },
   warden: { use: false, configure: true },
   pairing: { use: true, configure: true },
+  secrets: { use: true, configure: true },
 };
 
 /** The grant document states a matrix row can find a capability in. */
@@ -171,7 +172,7 @@ describe('who the grants govern', () => {
 });
 
 describe('which demands need a step-up', () => {
-  it('should need one for every configure and for the use of terminal, browser and pairing only', () => {
+  it('should need one for every configure and for the use of terminal, browser, pairing and secrets only', () => {
     // Act + Assert
     for (const capability of DAEMON_CAPABILITIES) {
       for (const axis of AXES) {
@@ -243,7 +244,10 @@ describe('the per-capability decision matrix', () => {
         for (const grants of [undefined, DEFAULT_CAPABILITY_GRANTS, SHUT]) {
           for (const stepUp of [true, false]) {
             for (const governed of [true, false]) {
-              seen.add(decideCapability({ capability, axis }, evaluation({ grants, stepUp, governed })).refusal);
+              for (const device of [undefined, DEFAULT_CAPABILITY_GRANTS, SHUT]) {
+                const context = evaluation({ grants, stepUp, governed, ...(device === undefined ? {} : { device }) });
+                seen.add(decideCapability({ capability, axis }, context).refusal);
+              }
             }
           }
         }
@@ -338,6 +342,7 @@ describe('what a refused caller is told', () => {
       'the project filesystem',
       'fleet supervision',
       'device pairing',
+      'the secret store',
     ]);
     should(describeDemand('fleet', 'configure')).equal('fleet.configure');
   });

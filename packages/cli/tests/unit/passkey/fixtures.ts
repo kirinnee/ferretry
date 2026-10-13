@@ -1,4 +1,4 @@
-import type { PairedDevice, PairedDeviceId, PasskeyWindowOpened } from '@ferretry/protocol';
+import { DEFAULT_DEVICE_GRANTS, type PairedDevice, type PairedDeviceId, type PasskeyWindowOpened } from '@ferretry/protocol';
 import type { IPasskeyGateway, IPasskeyLocalTime, IPasskeyOutput } from '../../../src/lib/passkey/ports';
 
 export const PIXEL_ID = `fy_device_id_${'a'.repeat(22)}` as PairedDeviceId;
@@ -13,6 +13,7 @@ export const device = (id: PairedDeviceId, name: string): PairedDevice => ({
   createdAt: '2026-10-01T09:00:00.000Z',
   lastSeenAt: '2026-10-12T09:00:00.000Z',
   idleExpiresAt: '2026-11-11T09:00:00.000Z',
+  grants: DEFAULT_DEVICE_GRANTS,
 });
 
 export const PIXEL = device(PIXEL_ID, 'Pixel 8');

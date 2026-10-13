@@ -20,6 +20,8 @@ import {
   capabilityReach,
   capabilityWeight,
   connectionPosture,
+  deviceGrantCommand,
+  deviceGrantNote,
   grantAlreadyReads,
   grantChangeable,
   grantGuidance,
@@ -120,6 +122,26 @@ describe('grant vocabulary', () => {
     // And leaves the machine-wide facts alone: five rows repeating one sentence five times is noise.
     expect(grantGuidance('undetermined', 'fleet').explanation).toBe(grantGuidance('undetermined').explanation);
     expect(grantGuidance('granted', 'fleet').explanation).toBe(grantGuidance('granted').explanation);
+  });
+
+  it('words `device-not-granted` as a widen of this one device, and never as a passkey or an operator decision', () => {
+    // The machine allows it; only THIS device lacks it. A passkey cannot help and the operator has not said no.
+    const bare = grantGuidance('device-not-granted');
+    const named = grantGuidance('device-not-granted', 'terminal');
+    expect(bare.tone).toBe('limit');
+    expect(bare.offersStepUp).toBe(false);
+    expect(bare.explanation).toContain('this device has not been given it');
+    expect(named.explanation).toContain(capabilityNoun('terminal'));
+    expect(named.explanation).toContain('fy device grant <device> terminal --use');
+    expect(named.explanation).not.toContain('operator');
+  });
+
+  it('describes the secret store as code on the machine, in the dangerous tier beside the terminal', () => {
+    expect(capabilityNoun('secrets')).toBe('the secret store');
+    expect(capabilityLabel('secrets')).toBe('Secrets');
+    expect(capabilityReach('secrets')).toContain('code on this machine');
+    expect(capabilityReach('secrets')).toContain('sets or deletes stored secrets');
+    expect(capabilityWeight('secrets')).toBe(capabilityWeight('terminal'));
   });
 
   it('reads each axis and its reason off the view rather than re-deriving them', () => {
@@ -234,6 +256,7 @@ describe('grantRefusalNotice', () => {
     const codes: ReadonlyArray<readonly [string, GrantRefusal]> = [
       ['grant_not_granted', 'not-granted'],
       [STEP_UP_REQUIRED_CODE, 'step-up-required'],
+      ['grant_device_not_granted', 'device-not-granted'],
       ['grant_undetermined', 'undetermined'],
       ['grants_undetermined', 'undetermined'],
       ['grant_forbidden', 'not-granted'],
@@ -331,5 +354,37 @@ describe('why an axis is open', () => {
     expect(openReason(entry(), 'use', 'governed')).toBe('granted');
     for (const reason of ['granted', 'closed', 'unknown'] as const)
       expect(openReasonLabel(reason).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the per-device grant', () => {
+  it('names the host command that widens one device, with the product binary threaded through', () => {
+    expect(deviceGrantCommand('terminal', 'use')).toBe('fy device grant <device> terminal --use');
+    expect(deviceGrantCommand('secrets', 'configure', 'ferret')).toBe(
+      'ferret device grant <device> secrets --configure',
+    );
+  });
+
+  it('is silent on the host, where there is no device grant, and when the device withholds nothing', () => {
+    expect(deviceGrantNote(entry())).toBeNull();
+    expect(deviceGrantNote(entry({ deviceGranted: { use: true, configure: true } }))).toBeNull();
+    // Withheld by the machine as well: the daemon-wide refusal already has its own sentence.
+    expect(
+      deviceGrantNote(
+        entry({ granted: { use: false, configure: false }, deviceGranted: { use: false, configure: false } }),
+      ),
+    ).toBeNull();
+  });
+
+  it('says which axes this device lacks although the machine allows them, with the remedy', () => {
+    const note = deviceGrantNote(
+      entry({ capability: 'terminal', deviceGranted: { use: false, configure: false } }),
+      'ferret',
+    );
+    expect(note).toContain('use or configure of session terminals');
+    expect(note).toContain('ferret device grant <device> terminal --use');
+    const configureOnly = deviceGrantNote(entry({ deviceGranted: { use: true, configure: false } }));
+    expect(configureOnly).toContain('configure of the agent fleet');
+    expect(configureOnly).toContain('--configure');
   });
 });

@@ -58,6 +58,9 @@ import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { MachineSetupNotice } from '../src/lib/daemon/setup-notice';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
+import { registerDeviceCommands } from '../src/lib/device/commands';
+import { DeviceController } from '../src/lib/device/controller';
+import { ProtocolDeviceGateway } from '../src/lib/device/gateway';
 import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
 import { FilesystemController } from '../src/lib/filesystem/controller';
 import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
@@ -676,6 +679,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new GrantController({
           gateway: new ProtocolGrantGateway(client),
+          out: world.io,
+          clientName: BINARY_NAME,
+        }),
+    ),
+  // `fy device` reads and changes what each paired device may do. It takes the shared client, which is
+  // lazy, so listing devices is the first thing that resolves the address and the admin token.
+  ({ program, world, client }) =>
+    registerDeviceCommands(
+      program,
+      () =>
+        new DeviceController({
+          gateway: new ProtocolDeviceGateway(client),
           out: world.io,
           clientName: BINARY_NAME,
         }),

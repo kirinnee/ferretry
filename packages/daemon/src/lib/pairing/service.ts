@@ -1,11 +1,14 @@
 import {
   type Advertisement,
+  type CapabilityGrants,
+  DEFAULT_DEVICE_GRANTS,
   type AdvertisementRefusal,
   type DaemonCarrier,
   type DaemonId,
   DaemonIdSchema,
   DaemonNameSchema,
   DEVICE_IDLE_EXPIRY_DAYS,
+  FULL_DEVICE_GRANTS,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   type PairedDevice,
@@ -15,6 +18,7 @@ import {
   PairingCodeMintResponseSchema,
   PairingCodeSchema,
   type PairingCodeStatusResponse,
+  type PairingGrantSet,
   type PairingId,
   PairingIdSchema,
   type PairingReach,
@@ -66,6 +70,11 @@ export interface PairingDeviceRecord {
    * which never left the browser that generated it.
    */
   readonly publicKey: string;
+  /**
+   * What THIS device may do when it is governed, before the daemon-wide document is applied
+   * (`docs/grants.md`, "Per-device grants"). A new device holds `DEFAULT_DEVICE_GRANTS`: `fleet.use` only.
+   */
+  readonly grants: CapabilityGrants;
 }
 
 export interface PairingDeviceStore {
@@ -82,6 +91,8 @@ export interface PairingDeviceStore {
   remove(id: string): Promise<boolean>;
   /** Records when a device was last seen. An id that is gone is not an error: it was revoked meanwhile. */
   touch(id: string, lastSeenAt: string): Promise<void>;
+  /** Replaces one device's grants, reporting whether the device was still there to change. */
+  setGrants(id: string, grants: CapabilityGrants): Promise<boolean>;
 }
 
 /**
@@ -168,6 +179,11 @@ interface ActivePairing {
   readonly pairingId: PairingId;
   readonly code: PairingCode;
   readonly expiresAtMs: number;
+  /**
+   * What the device that redeems this code will hold — chosen at the mint and kept HERE, with the code,
+   * so the link carries nothing extra and a redemption cannot ask for more than was minted.
+   */
+  readonly grants: PairingGrantSet;
   attempts: number;
   /**
    * WRONG GUESSES THAT ARRIVED OVER A RENDEZVOUS, counted apart from `attempts` on purpose.
@@ -367,7 +383,7 @@ export class PairingService {
    * device already paired. The code itself is single-use and
    * short-lived, so there is no machine-level precondition left for this method to check.
    */
-  mint(): PairingCodeMintResponse {
+  mint(grants: PairingGrantSet = 'default'): PairingCodeMintResponse {
     if (this.active !== undefined) this.expire(this.active);
     while (this.observations.size >= OBSERVATION_LIMIT) {
       const oldest = this.observations.keys().next().value;
@@ -378,7 +394,7 @@ export class PairingService {
     const code = PairingCodeSchema.parse(this.options.cryptography.pairingCode());
     const expiresAtMs = this.options.clock.now() + PAIRING_CODE_TTL_SECONDS * 1_000;
     const expiresAt = instant(expiresAtMs);
-    this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false };
+    this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false, grants };
     this.observations.set(pairingId, { pairingId, status: 'pending', expiresAt });
 
     return PairingCodeMintResponseSchema.parse({
@@ -389,6 +405,7 @@ export class PairingService {
       daemonId: this.daemonId,
       daemonName: this.daemonName,
       ...this.#link(code),
+      grants,
     });
   }
 
@@ -485,6 +502,7 @@ export class PairingService {
         createdAt: record.createdAt,
         lastSeenAt: instant(lastSeenMs),
         idleExpiresAt: instant(lastSeenMs + IDLE_EXPIRY_MS),
+        grants: record.grants,
       });
     });
   }
@@ -526,7 +544,11 @@ export class PairingService {
     void this.options.devices
       .touch(id, lastSeenAt)
       .then(
-        () => this.options.credentials.refresh({ ...record, lastSeenAt }),
+        () => {
+          // The LATEST record, not the one read before the write: a grant change made meanwhile must survive.
+          const latest = this.options.credentials.get(id);
+          if (latest !== undefined) this.options.credentials.refresh({ ...latest, lastSeenAt });
+        },
         () => undefined,
       )
       .finally(() => this.#touching.delete(id));
@@ -548,7 +570,32 @@ export class PairingService {
   }
 
   /**
+   * One device's own grants, or nothing for a device that is unknown or revoked.
+   *
+   * Read from the LIVE registry, synchronously, because the authorization boundary asks it in front of
+   * every governed request — the same registry a revocation clears, so a revoked device has no grants.
+   */
+  deviceGrants(id: string): CapabilityGrants | undefined {
+    return this.options.credentials.get(id)?.grants;
+  }
+
+  /**
+   * Replaces one device's grants: the document first, then the live registry, so a failed write leaves
+   * nothing changed — the order `revokeDevice` keeps, for its reason. Who may make the change is decided
+   * by the caller (`DeviceGrantService`); this only records it.
+   */
+  async setDeviceGrants(id: string, grants: CapabilityGrants): Promise<boolean> {
+    if (this.options.credentials.get(id) === undefined) return false;
+    if (!(await this.options.devices.setGrants(id, grants))) return false;
+    // The LATEST record, re-read after the write: a sighting that landed meanwhile must survive too.
+    const latest = this.options.credentials.get(id);
+    if (latest !== undefined) this.options.credentials.refresh({ ...latest, grants });
+    return true;
+  }
+
+  /**
    * Takes one device's access away.
+
    *
    * THE ORDER IS DELIBERATE: the document is written first, and only a successful write removes the
    * live grant. The other order — kill it in memory, then persist — turns a failed write into a
@@ -665,6 +712,9 @@ export class PairingService {
       createdAt,
       lastSeenAt: createdAt,
       publicKey,
+      // Least privilege: a device starts able to read the fleet and chat, and nothing more (B5) — unless
+      // the code was minted `--full` at the machine.
+      grants: active.grants === 'full' ? FULL_DEVICE_GRANTS : DEFAULT_DEVICE_GRANTS,
     };
 
     try {

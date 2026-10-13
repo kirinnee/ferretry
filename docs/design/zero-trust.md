@@ -477,9 +477,8 @@ was kept.
 - **The cost, stated:** the per-change confirmation's "bound to one diff" property becomes "bound to a
   biometric check in the last 15 minutes", which is weaker against a replayed request and stronger against
   a known password — and replay is no longer possible inside a sealed session anyway.
-- **A declared GAP:** `pairing.use` also guards the four `/v1/push/*` enrolment routes, so a governed push
-  subscription now needs a step-up too. Moving push off `pairing.use` is B5 and is not done here
-  ([grants.md](../grants.md) records it).
+- ~~**A declared GAP:** `pairing.use` also guarded the four `/v1/push/*` enrolment routes.~~ **Closed by B5:**
+  a device enrolling itself needs no capability and no step-up.
 
 ### B4. Only the owner's admin token is ungoverned, and it is the recovery path
 
@@ -533,6 +532,40 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   for everyone and can never switch it back on.
 - Web Push self-enrolment moves off `pairing.use`: a device enrolling **itself** for notifications is
   allowed for every paired device (it grants nothing), so a default device still gets alerts.
+
+**As built.**
+
+- **`secrets` is the seventh capability** (`DAEMON_CAPABILITIES`). `GET /v1/secrets` and `POST /v1/secrets/use`
+  demand `secrets.use`, which also needs a step-up from a governed caller (it runs a command); `POST
+/v1/secrets` and `DELETE /v1/secrets/:name` demand `secrets.configure`. grants.md answers the
+  capability-seven questions.
+- **Per-device grants** live in each `devices.json` record as `grants`. The document stays at
+  `schemaVersion: 2`: a record written before B5 reads as the default, which is a narrowing and therefore
+  safe. A device's grants reach the boundary through the live registry (`PairedDeviceDirectory.grants`),
+  keyed by the session's proven device; the dispatcher puts them on the `CapabilityPresentation`, which now
+  rides on every authenticated `RouteContext`, so no mount re-derives a caller. A device whose record is
+  gone is refused `undetermined`. The device half refuses with `device-not-granted`
+  (`grant_device_not_granted`), asked after the daemon-wide half.
+- **The default device holds `fleet.use` only** (`DEFAULT_DEVICE_GRANTS`). **`fy pair --full`** (owner
+  decision, 2026-10-13) mints a code whose redemption grants `FULL_DEVICE_GRANTS` instead; the mint request
+  is `{ grants: "full" }`, it is refused unless the request `arrivedOnHost` (the owner's admin token, B4 — a browser on the host is refused), and the pairing service keeps
+  the choice with the live code — the link carries nothing extra.
+- **Changing one device** is `PATCH /v1/pair/devices/:deviceId/grants` (demand `pairing.use`), judged by
+  `judgeDeviceGrantChange` in `src/lib/grants/policy.ts` and applied by `DeviceGrantService`: host —
+  anything; any device (a browser on the host included) — a widen only of an axis the caller holds effectively (daemon-wide ∧ its own) and only
+  with `pairing.configure`; every remote change needs a step-up; a patch with one illegal widen is refused
+  whole before any step-up is asked. `configure ⇒ use` is kept true of the result. A change is written to
+  `devices.json` before the live registry, calls `recheckAll` so open streams are re-asked, and is audited
+  in `state/grant-audit.jsonl` as `<deviceId>/capability.axis=on|off`. At the host: `fy device ls` and
+  `fy device grant`. In the app: a per-device Capabilities disclosure with a toggle per axis, disabled with
+  its reason where `PairedDevicesView.mayWiden` says the caller may not widen.
+- **Web Push self-enrolment** needs no capability: a device reads the key, enrols, lists and un-enrols its
+  OWN enrolments freely. Another device's enrolments are behind `pairing.use`, decided by the same guard.
+- **A race closed on the way:** a sighting's `lastSeenAt` refresh and a grant change each used to
+  re-insert the record they read before their write, so the second to land could undo the first in memory;
+  both now refresh the latest record.
+- **Not built:** naming a device by its untrusted display name inside a refusal (the remedy names
+  `<device>`), and a grant set other than `default` and `full` for a code.
 
 ### B6. Per-daemon security settings
 

@@ -54,6 +54,7 @@ import {
 } from '../../../../src/lib/core/index.ts';
 import {
   CapabilityGrantService,
+  DeviceGrantService,
   DEFAULT_CAPABILITY_GRANTS,
   type GrantAuditEntry,
 } from '../../../../src/lib/grants/index.ts';
@@ -163,11 +164,15 @@ import { catalog, inventory } from '../../core/fixtures.ts';
 
 export const AT = '2024-05-01T10:00:00.000Z';
 export const IDS = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'] as const;
-/** The host's two tokens, and a directory in which every device a session names is still paired. */
+/**
+ * The host's two tokens, and a directory in which every device a session names is still paired and has
+ * been given every capability — so a mount test is about its own routes, not the per-device half of
+ * `effective = daemonWide ∧ device`, which `device-grants.test.ts` owns.
+ */
 export const CREDENTIALS = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { has: (_deviceId: string) => true },
+  devices: { has: (_deviceId: string) => true, grants: (_deviceId: string) => DEFAULT_CAPABILITY_GRANTS },
 } as const;
 
 /** The human's CLI. */
@@ -1683,3 +1688,36 @@ export const NARROWED: CapabilityGuard = {
   }),
   explain: (demand, refusal) => describeGrantRefusal(demand, refusal, 'fy'),
 };
+
+/**
+ * The REAL device-grant subsystem over a grant subsystem and an in-memory device store.
+ *
+ * `devices` maps an id to its grants; an id absent from it is a device this daemon does not hold.
+ */
+export function deviceGrantsOver(
+  grants: CapabilityGrantService,
+  devices: Map<string, CapabilityGrants> = new Map(),
+  audit: GrantAuditEntry[] = [],
+  changed: () => void = () => undefined,
+): DeviceGrantService {
+  return new DeviceGrantService({
+    devices: {
+      deviceGrants: id => devices.get(id),
+      setDeviceGrants: async (id, next) => {
+        if (!devices.has(id)) return false;
+        devices.set(id, next);
+        return true;
+      },
+    },
+    daemonWide: () => grants.enforced(),
+    audit: {
+      record: async entry => {
+        audit.push(entry);
+      },
+      recent: async () => ({ entries: [], unreadable: 0, truncated: false }),
+    },
+    clock: { nowMs: () => 1_700_000_000_000 },
+    clientName: 'fy',
+    changed,
+  });
+}

@@ -1,3 +1,5 @@
+import type { CapabilityGrants } from '@ferretry/protocol';
+
 /**
  * The tokens the daemon accepts — the HOST's tokens, and only those.
  *
@@ -24,9 +26,15 @@ export interface ApiCredentials {
   readonly devices?: PairedDeviceDirectory;
 }
 
-/** Whether a device grant exists right now. Answers about an id; it resolves no credential. */
+/** Whether a device grant exists right now, and what it allows. Answers about an id; it resolves no credential. */
 export interface PairedDeviceDirectory {
   has(deviceId: string): boolean;
+  /**
+   * The device's OWN grants — the per-device half of `effective = daemonWide ∧ device` — or `undefined`
+   * for a device this daemon no longer holds. Synchronous, because the boundary asks it per request.
+   * A directory that cannot answer it (absent) narrows every device to nothing: fail closed.
+   */
+  grants?(deviceId: string): CapabilityGrants | undefined;
 }
 
 /** What a request presented. Assembled by the dispatcher from headers and, for loopback WebSocket

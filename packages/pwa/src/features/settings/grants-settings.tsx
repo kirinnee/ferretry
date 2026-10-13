@@ -43,6 +43,7 @@ import {
   capabilityLabel,
   capabilityReach,
   connectionPosture,
+  deviceGrantNote,
   type GrantGuidance,
   grantAlreadyReads,
   grantChangeable,
@@ -193,6 +194,7 @@ function CapabilityCard({
    * pressing something.
    */
   const oneWay = !entry.mayGrant;
+  const deviceNote = deviceGrantNote(entry);
 
   return (
     <section
@@ -213,6 +215,14 @@ function CapabilityCard({
       </div>
       <p className="m-0 text-meta leading-base text-muted">{capabilityReach(entry.capability)}</p>
       <p className="m-0 text-meta leading-base text-faint">{originNote(entry)}</p>
+      {deviceNote === null ? null : (
+        <p
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+          data-grant-device-note={entry.capability}
+        >
+          {deviceNote}
+        </p>
+      )}
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
         {CAPABILITY_AXES.map(axis => (
           <AxisControl

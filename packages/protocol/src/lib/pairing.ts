@@ -3,6 +3,7 @@ import { isLoopbackHost, isWildcardHost } from './address.ts';
 import { ADVERTISEMENT_REFUSALS, type AdvertisementRefusal } from './advertisement.ts';
 import { PublishedCarriersSchema, SocketEndpointSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
+import { CapabilityGrantsSchema, DAEMON_CAPABILITIES, type DaemonCapability } from './grants.ts';
 
 /** Pairing codes are deliberately short-lived and have a small online-attempt budget. */
 export const PAIRING_CODE_TTL_SECONDS = 120 as const;
@@ -212,8 +213,26 @@ export const PairingResponseSchema = z.strictObject({
 });
 export type PairingResponse = z.infer<typeof PairingResponseSchema>;
 
-/** Minting is intentionally bodyless: the redeeming device supplies its own bounded name. */
-export const PairingCodeMintRequestSchema = z.strictObject({});
+/**
+ * What a device that redeems this code will hold (`docs/pairing.md`, "What a new device may do").
+ *
+ * - `default` — `DEFAULT_DEVICE_GRANTS`, `fleet.use` only: least privilege, widened later per device.
+ * - `full` — every capability on both axes (`fy pair --full`), for the owner's own browser, which would
+ *   otherwise need a grant per capability. The daemon-wide document still applies on top, and every
+ *   dangerous act still needs the passkey step-up. Minting one is HOST-ONLY (`arrivedOnHost`): a remote
+ *   device could otherwise mint a code that gives a new device more than it holds itself.
+ *
+ * It travels with the CODE, held by the daemon. The QR and the link carry nothing extra, so the fragment
+ * stays the one-version `v1` shape and a code says nothing about what it grants to whoever reads it.
+ */
+export const PAIRING_GRANT_SETS = ['default', 'full'] as const;
+export type PairingGrantSet = (typeof PAIRING_GRANT_SETS)[number];
+export const PairingGrantSetSchema = z.enum(PAIRING_GRANT_SETS);
+
+/** Minting names no device — the redeeming device supplies its own bounded name — only what it will hold. */
+export const PairingCodeMintRequestSchema = z.strictObject({
+  grants: PairingGrantSetSchema.optional(),
+});
 export type PairingCodeMintRequest = z.infer<typeof PairingCodeMintRequestSchema>;
 
 /**
@@ -295,6 +314,12 @@ const mintedFields = z.strictObject({
    * before any daemon writes it.
    */
   discoveredRelayUrl: SocketEndpointSchema.optional(),
+  /**
+   * What the device that redeems this code will hold. Host-facing, like the field above, so a screen
+   * can say "this code gives full access" beside it; absent from a daemon that predates the choice,
+   * which is read as `default`.
+   */
+  grants: PairingGrantSetSchema.optional(),
 });
 type MintedFields = z.infer<typeof mintedFields>;
 
@@ -498,6 +523,14 @@ export const PairedDeviceSchema = z.strictObject({
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
   idleExpiresAt: InstantSchema,
+  /**
+   * What THIS device has been granted, before the daemon-wide document is applied.
+   *
+   * The effective answer for a governed caller is this AND the daemon-wide grant, axis by axis
+   * (`docs/grants.md`, "Per-device grants"). A newly paired device holds `DEFAULT_DEVICE_GRANTS` —
+   * `fleet.use` only. A caller on the host is ungoverned, so none of this narrows it.
+   */
+  grants: CapabilityGrantsSchema,
 });
 export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
 
@@ -528,5 +561,41 @@ export const PairedDevicesViewSchema = z.strictObject({
   devices: z.array(PairedDeviceSchema).readonly(),
   hostLocal: z.boolean(),
   thisDeviceId: PairedDeviceIdSchema.optional(),
+  /**
+   * Which axes THIS caller may turn ON for a device, so a toggle that would be refused says so before
+   * it is pressed.
+   *
+   * Every axis for a caller on the host. For a governed caller: an axis it holds itself, effective,
+   * provided it also holds `pairing.configure` — and a passkey step-up is still asked at the change,
+   * so `true` here means "allowed after confirming", never "allowed without". Turning an axis OFF is
+   * not listed: it needs only a step-up, on any device, including the caller's own.
+   */
+  mayWiden: CapabilityGrantsSchema,
 });
 export type PairedDevicesView = z.infer<typeof PairedDevicesViewSchema>;
+
+/**
+ * A change to ONE device's grants — `PATCH /v1/pair/devices/:deviceId/grants`.
+ *
+ * PARTIAL, for the reason `GrantsPatchSchema` is: a stale tab restating answers it never looked at
+ * must not revert a decision made elsewhere. Judged field by field and refused WHOLE if any field
+ * widens illegally, so a mixed patch never half-applies.
+ */
+export const DeviceGrantsPatchSchema = z
+  .strictObject(
+    Object.fromEntries(
+      DAEMON_CAPABILITIES.map(capability => [
+        capability,
+        z.strictObject({ use: z.boolean().optional(), configure: z.boolean().optional() }).optional(),
+      ]),
+    ) as {
+      readonly [K in DaemonCapability]: z.ZodOptional<
+        z.ZodObject<{ use: z.ZodOptional<z.ZodBoolean>; configure: z.ZodOptional<z.ZodBoolean> }>
+      >;
+    },
+  )
+  .refine(
+    patch => Object.values(patch).some(value => value !== undefined),
+    'a device grant patch must change something',
+  );
+export type DeviceGrantsPatch = z.infer<typeof DeviceGrantsPatchSchema>;

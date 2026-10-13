@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import type { PushDeviceView, RegisterPushDeviceRequest } from '@ferretry/protocol';
+import {
+  type CapabilityGrants,
+  DEFAULT_DEVICE_GRANTS,
+  type PushDeviceView,
+  type RegisterPushDeviceRequest,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
@@ -48,6 +53,8 @@ class FakePush implements PushSubscriptionSubsystem {
     private readonly enrolled: readonly PushDeviceView[] = [view(enrolmentId, 'Pixel 8')],
     /** The refusal every call raises, when a case is driving one. */
     private readonly refusal?: PushError,
+    /** Who filed each enrolment; every enrolment is the browser's own unless a case says otherwise. */
+    private readonly owners: ReadonlyMap<string, string> = new Map(),
   ) {}
 
   async publicKey(): Promise<string> {
@@ -58,6 +65,16 @@ class FakePush implements PushSubscriptionSubsystem {
   async list(): Promise<readonly PushDeviceView[]> {
     if (this.refusal !== undefined) throw this.refusal;
     return this.enrolled;
+  }
+
+  async listFor(owner: string): Promise<readonly PushDeviceView[]> {
+    if (this.refusal !== undefined) throw this.refusal;
+    return this.enrolled.filter(entry => (this.owners.get(entry.id) ?? deviceId) === owner);
+  }
+
+  async ownerOf(id: string): Promise<string | undefined> {
+    if (this.refusal !== undefined) throw this.refusal;
+    return this.enrolled.some(entry => entry.id === id) ? (this.owners.get(id) ?? deviceId) : undefined;
   }
 
   async register(owner: string, input: RegisterPushDeviceRequest): Promise<PushDeviceView> {
@@ -78,8 +95,13 @@ class FakePush implements PushSubscriptionSubsystem {
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { has: (deviceId: string) => deviceId !== 'unpaired-device' },
+  devices: {
+    has: (deviceId: string) => deviceId !== 'unpaired-device',
+    // A DEFAULT device — `fleet.use` only — because self-enrolment must work on one (B5).
+    grants: (_deviceId: string) => deviceGrants,
+  },
 };
+let deviceGrants: CapabilityGrants = DEFAULT_DEVICE_GRANTS;
 
 const admin = { authorization: 'Bearer admin-secret' };
 /** A paired browser: whoever its session proved. It sends no credential of its own. */
@@ -101,7 +123,7 @@ async function mount(subject: PushSubscriptionSubsystem, allow = true) {
     grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: allow, configure: allow } },
   });
   await grants.refresh();
-  return new ApiDispatcher(new ApiRouter(pushRoutes(subject)), credentials, grants, undefined, {
+  return new ApiDispatcher(new ApiRouter(pushRoutes(subject, grants)), credentials, grants, undefined, {
     held: device => device.deviceId === browser.deviceId,
   });
 }
@@ -243,7 +265,8 @@ describe('push routes', () => {
 
     should([unknown.status, malformed.status]).deepEqual([404, 404]);
     should(jsonBody(malformed)).deepEqual({ error: 'no push enrolment with that id', code: 'push_not_found' });
-    should(subject.revocations).have.length(1);
+    // Neither reached the subsystem's revoke: an unknown id is answered from the ownership lookup.
+    should(subject.revocations).be.empty();
   });
 
   it('should decode a path segment before matching an enrolment id', async () => {
@@ -285,7 +308,7 @@ describe('push routes', () => {
 
   it('should let a defect through as a defect rather than dressing it up as a refusal', async () => {
     class Broken extends FakePush {
-      override async list(): Promise<readonly PushDeviceView[]> {
+      override async listFor(): Promise<readonly PushDeviceView[]> {
         throw new Error('/home/operator/.fy/state/push.json vanished mid-read');
       }
     }
@@ -317,29 +340,102 @@ describe('push routes', () => {
     should([key.status, enrol.status]).deepEqual([401, 401]);
   });
 
-  it('should honour an operator who switched device management off, for a browser on this host too', async () => {
+  it('should let a DEFAULT device enrol itself with no step-up, even with device management switched off', async () => {
+    // B5: self-enrolment grants nothing — it lets this daemon reach the device that asked — so it needs
+    // no `pairing.use` and no passkey. A least-privilege device (`fleet.use` only) still gets alerts.
+    // Arrange
+    deviceGrants = DEFAULT_DEVICE_GRANTS;
     const subject = new FakePush();
     const surface = await mount(subject, false);
+    const unconfirmed = { deviceId, appSession: 'app-without-step-up' } as const;
 
-    const remote = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser, body: JSON.stringify(body) }),
+    // Act
+    const key = await surface.dispatch(request({ method: 'GET', path: '/v1/push/vapid', device: unconfirmed }));
+    const enrol = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: unconfirmed, body: JSON.stringify(body) }),
     );
-    // A browser on this host is an ordinary governed device (B4): only the host's admin token is the owner,
-    // and it enrols no device of its own. So the operator's decision binds the local browser as well.
-    const local = await surface.dispatch(
+    const own = await surface.dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: unconfirmed }));
+    const unenrol = await surface.dispatch(
+      request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, device: unconfirmed }),
+    );
+
+    // Assert
+    should([key.status, enrol.status, own.status, unenrol.status]).deepEqual([200, 201, 200, 200]);
+    should(subject.registrations.map(([owner]) => owner)).deepEqual([deviceId]);
+  });
+
+  it('should show a device that may not manage devices only its OWN enrolments, and refuse it another device’s', async () => {
+    // Arrange
+    deviceGrants = DEFAULT_DEVICE_GRANTS;
+    const otherEnrolment = 'push-22222222-2222-4222-8222-222222222222';
+    const subject = new FakePush(
+      [view(enrolmentId, 'Pixel 8'), view(otherEnrolment, 'iPad')],
+      undefined,
+      new Map([[otherEnrolment, otherDeviceId]]),
+    );
+    const surface = await mount(subject);
+
+    // Act
+    const listing = await surface.dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }));
+    const theirs = await surface.dispatch(
+      request({ method: 'DELETE', path: `/v1/push/subscriptions/${otherEnrolment}`, device: browser }),
+    );
+
+    // Assert
+    should(jsonBody(listing)).deepEqual({ devices: [view(enrolmentId, 'Pixel 8')] });
+    should(theirs.status).equal(403);
+    should(jsonBody(theirs).code).equal('grant_device_not_granted');
+    should(subject.revocations).be.empty();
+  });
+
+  it('should let a device that may manage devices see and revoke every enrolment, and the host always', async () => {
+    // Arrange
+    const otherEnrolment = 'push-22222222-2222-4222-8222-222222222222';
+    const fresh = () =>
+      new FakePush(
+        [view(enrolmentId, 'Pixel 8'), view(otherEnrolment, 'iPad')],
+        undefined,
+        new Map([[otherEnrolment, otherDeviceId]]),
+      );
+    deviceGrants = { ...DEFAULT_DEVICE_GRANTS, pairing: { use: true, configure: false } };
+    const manager = fresh();
+    const managing = await mount(manager);
+    const host = fresh();
+    const atHost = await mount(host, false);
+
+    // Act
+    const managerList = await managing.dispatch(
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }),
+    );
+    const managerRevoke = await managing.dispatch(
+      request({ method: 'DELETE', path: `/v1/push/subscriptions/${otherEnrolment}`, device: browser }),
+    );
+    const hostRevoke = await atHost.dispatch(
       request({
-        method: 'POST',
-        path: '/v1/push/subscriptions',
-        device: browser,
+        method: 'DELETE',
+        path: `/v1/push/subscriptions/${otherEnrolment}`,
+        headers: admin,
         loopback: true,
-        privilegedLoopback: true,
-        body: JSON.stringify(body),
       }),
     );
+    deviceGrants = DEFAULT_DEVICE_GRANTS;
 
-    should(remote.status).equal(403);
-    should(jsonBody(remote).code).match(/^grant_/u);
-    should(local.status).equal(403);
-    should(jsonBody(local).code).match(/^grant_/u);
+    // Assert
+    should((jsonBody(managerList) as { devices: unknown[] }).devices).have.length(2);
+    should([managerRevoke.status, hostRevoke.status]).deepEqual([200, 200]);
+    should(manager.revocations).deepEqual([otherEnrolment]);
+    should(host.revocations).deepEqual([otherEnrolment]);
+  });
+
+  it('should refuse the full list to a remote caller that is neither a device nor a manager', async () => {
+    // A remote admin token is a governed caller with no device, so it has no "own" list to fall back to.
+    const surface = await mount(new FakePush(), false);
+
+    const response = await surface.dispatch(
+      request({ method: 'GET', path: '/v1/push/subscriptions', headers: admin, loopback: false }),
+    );
+
+    should(response.status).equal(403);
+    should(jsonBody(response).code).equal('grant_not_granted');
   });
 });

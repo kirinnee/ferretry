@@ -1,4 +1,4 @@
-import type { AdvertisementNotice, PairingCodeMintResponse } from '@ferretry/protocol';
+import type { AdvertisementNotice, PairingCodeMintResponse, PairingGrantSet } from '@ferretry/protocol';
 import { QR_INDENT, qrColumns, qrFitsTerminal } from './qr.ts';
 
 /**
@@ -110,6 +110,8 @@ export interface PairingInvitation {
   readonly mint: PairingCodeMintResponse;
   /** What can be handed to the device being added, and who that device may be. */
   readonly offer: PairingOffer;
+  /** What the operator asked the daemon to give the device (`--full`), as opposed to what it echoed. */
+  readonly requestedGrants: PairingGrantSet;
   /** The terminal width, or nothing when it will not say. */
   readonly columns: number | undefined;
   /** How long the code has left at the moment of printing. */
@@ -170,6 +172,30 @@ function qrBlock(invitation: PairingInvitation, qr: string): string {
 }
 
 /**
+ * What the device that scans this will be able to do, said BEFORE the QR.
+ *
+ * AN OPERATOR WHO SCANS BEFORE READING HAS ALREADY MADE THE DECISION this line is for, so it sits above
+ * the QR. It is decided by the daemon's ECHO of the grant set, never by the flag alone: a daemon older
+ * than `--full` ignores the request and mints an ordinary code, and a screen that claimed full access
+ * on the strength of what was asked for would be reporting a decision nobody made.
+ */
+function grantsNotice(invitation: PairingInvitation): string {
+  const bin = invitation.binaryName;
+  const granted = invitation.mint.grants ?? 'default';
+  if (granted === 'full')
+    return (
+      'FULL ACCESS: the device that scans this gets every capability on this machine. Anything dangerous ' +
+      'still asks for its passkey first.'
+    );
+  const limited =
+    'A device paired with this code can only read the fleet and chat with sessions until you widen it ' +
+    `with \`${bin} device grant\`.`;
+  if (invitation.requestedGrants === 'full')
+    return `--full was NOT applied: this daemon is older than that flag and minted an ordinary code. ${limited}`;
+  return `${limited} To give your own browser full access instead, run \`${bin} pair --full\`.`;
+}
+
+/**
  * The whole screen, from the instruction down to the deadline.
  *
  * THE HEADLINE IS DECIDED BY THE OFFER, not fixed. "Scan this with your phone" printed above a
@@ -217,6 +243,8 @@ export function renderInvitation(invitation: PairingInvitation): string {
     'PAIRING CODE',
     `${INDENT}${invitation.mint.code}`,
     detail(`aloud: ${spellCode(invitation.mint.code)}`),
+    '',
+    text(grantsNotice(invitation)),
     ...body,
     text(`Expires in ${renderRemaining(invitation.remainingMs)}; the code works once.`),
   ].join('\n');
