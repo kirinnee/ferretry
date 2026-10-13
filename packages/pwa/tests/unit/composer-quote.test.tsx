@@ -19,12 +19,12 @@ import { interact, mount, must } from '../support/dom.ts';
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const daemonB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'https://daemon-b.example.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 
 /** Drafts must not leak between cases through a shared browser store. */

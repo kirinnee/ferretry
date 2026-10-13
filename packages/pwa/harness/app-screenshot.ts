@@ -274,7 +274,7 @@ const VISUAL_VIEWPORT_SCRIPT = `
 
 /** Shaped as `PairingResponseSchema` requires, so the app accepts it as a real redemption would be. */
 const PAIR_FAKE_RESPONSE = {
-  deviceToken: `fy_device_${'Tt'.repeat(21)}A`,
+  deviceId: `fy_device_${'Tt'.repeat(21)}A`,
   daemonId: PAIRING_FAKE_DAEMON_ID,
   daemonName: 'workstation',
   capabilities: [],

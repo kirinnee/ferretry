@@ -38,8 +38,8 @@ class FakeSocket implements RemoteBrowserSocket {
   }
 }
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b' });
 const running = (sessionId: string, pageId = 'page-a') =>
   ({
     sessionId,
@@ -153,7 +153,7 @@ describe('RemoteBrowserViewer', () => {
     const daemonARepaired = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'a2',
+      deviceId: 'a2',
     });
     const viewerFor = (daemon: DaemonConnection, blob: string) => (
       <RemoteBrowserViewer

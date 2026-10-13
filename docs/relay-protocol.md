@@ -1,6 +1,13 @@
 # The Ferretry rendezvous protocol
 
-`ferretry-relay/1`
+Rendezvous control plane: `ferretry-relay/1` · end-to-end session: **`ferretry-relay/2`**
+
+Two identifiers, deliberately. Everything a relay parses — frames, §5's control messages, its
+Durable Object naming — is still `/1`, so no relay was redeployed when sessions changed. Everything
+inside the channel — §6's handshake and every §14 record — is `/2`, which is where device keys
+(§6, "The credential record") replaced the device token. A `/1` session peer meets a `/2` one with
+`4426` at the handshake and a sentence naming which side to update (§9); there is no negotiation and
+nothing to downgrade to.
 
 This document is the contract. It is written so that somebody with no access to this repository can
 implement either endpoint, or a compatible relay, in another language. Where an implementation
@@ -21,10 +28,10 @@ address reachable when the daemon has no inbound route.
 There are two **kinds** of carrier and one security model across both. A daemon may hold several of
 the second kind, and which ones exist is the daemon's answer rather than the browser's.
 
-| Carrier    | What it is                                                                    | Where it belongs                                                              |
-| ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Direct** | The browser opens a WebSocket straight at the daemon.                         | Attempted first, automatically, whenever the daemon is reachable.             |
-| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read. | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
+| Carrier    | What it is                                                                      | Where it belongs                                                              |
+| ---------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Direct** | The browser opens a WebSocket straight at the daemon, and runs a session on it. | Attempted first, automatically, whenever the daemon is reachable.             |
+| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read.   | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
 
 **Neither is a question a conforming product asks.** The required behaviour is: try every direct
 carrier the daemon published first, because direct has fewer hops and fewer observers; then each
@@ -77,15 +84,20 @@ The daemon holds a long-term **Ed25519** identity created at install; its SHA-25
 `daemonId`, and the pairing QR already carries that fingerprint out of band. Every session runs an
 ephemeral **X25519** key agreement, authenticated by an Ed25519 signature from the daemon over the
 whole handshake transcript, and every byte after that is **AES-256-GCM** with the frame header as
-associated data. The client authenticates itself afterwards, inside the encrypted channel, with the
-device token pairing already gave it.
+associated data. The client authenticates itself afterwards, inside the encrypted channel, by signing
+that same transcript with the **non-extractable device key** it registered at pairing — so what it
+presents proves possession for exactly one session and replays into nothing.
 
 That is the TLS 1.3 arrangement — ephemeral agreement for forward secrecy, a signature over the
-transcript for identity, client credentials only after the channel is keyed — and it is chosen
-because it is standard and reviewed, not because it is clever. Nothing here is invented. A device
-that holds no token yet may instead redeem a pairing code inside the same keyed channel — after the
-fingerprint check, never before it — and §14 bounds that exchange to exactly one attempt per
-session.
+transcript for identity, the client's own signature over the transcript only after the channel is
+keyed (TLS 1.3's `CertificateVerify`) — and it is chosen because it is standard and reviewed, not
+because it is clever. Nothing here is invented. A device that holds no grant yet may instead redeem a
+pairing code inside the same keyed channel — after the fingerprint check, never before it — and §14
+bounds that exchange to exactly one attempt per session.
+
+**Both carriers run this.** A direct carrier is not plain HTTP with a header: the browser opens a
+session on the daemon's own listener and everything above is identical, so the LAN is encrypted end to
+end too and nothing on it is worth replaying.
 
 The result: a relay operator, including a hostile one, can drop your traffic, delay it or refuse to
 carry it. They cannot read it, alter it, or insert into it, and they cannot introduce your browser
@@ -100,7 +112,8 @@ would be worse than disclosing it.
 
 Everything on the wire is one binary WebSocket message carrying one frame. The framing is identical
 on both carriers — a relayed conversation and a direct one are byte-for-byte the same above the
-socket — with one exception noted in §8.
+socket — with two exceptions: the heartbeat in §8, and that a direct socket carries exactly one
+control frame, the daemon's own `ready` (§5).
 
 ```
 offset  size  field
@@ -117,7 +130,7 @@ Header length is **28 bytes**. Maximum total frame length is **65536 bytes**.
 
 | kind   | name        | scope      | payload                                            |
 | ------ | ----------- | ---------- | -------------------------------------------------- |
-| `0x01` | `control`   | hop-by-hop | UTF-8 JSON, §5. Absent on a direct carrier.        |
+| `0x01` | `control`   | hop-by-hop | UTF-8 JSON, §5. Direct: only the daemon's `ready`. |
 | `0x02` | `handshake` | end-to-end | UTF-8 JSON, §6. Opaque to a relay.                 |
 | `0x03` | `data`      | end-to-end | AES-256-GCM ciphertext‖tag, §7. Opaque to a relay. |
 | `0x04` | `credit`    | hop-by-hop | 4 bytes, unsigned 32-bit big-endian, §8.           |
@@ -157,6 +170,23 @@ wss://<host>/v1/rendezvous/<daemonId>/<role>
 
 `role` is `daemon` or `client`. On a direct carrier only `client` exists, because the daemon _is_
 the server; asking for the daemon role against a direct address is an error, not a URL.
+
+**The direct carrier, exactly.** `fyd` serves `GET /v1/rendezvous/<its own daemonId>/client` as a
+WebSocket upgrade on its own listener. **One socket is one session**: on upgrade the daemon mints the
+16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included), and
+that is the only control frame on the socket — the daemon never sends `challenge`, accepts no
+`claim`, and refuses with `4400` a client that sends any control frame at all. The session's end is
+the socket's close, with the code the session ended with. A wrong `daemonId` is `404`. An upgrade is
+ADMITTED before any public-key work is done for it. At most 30 admitted upgrades a minute from one
+peer address (a refused upgrade spends none of them) and at most 2 unproven sockets per remote
+address — the host's own loopback address is exempt, because every tab on it shares one — each answer
+`429`. At most 16 sockets may be unproven and 64 open in all; when either is full the OLDEST unproven
+socket is closed `4429` to make room, rather than the newcomer refused, so squatting needs to out-race
+honest arrivals rather than merely arrive first. With all 64 proven, the next upgrade is `429`. The
+slot is reserved at admission rather than at attach, so concurrent upgrades cannot all pass the check
+before one is counted, and a reservation whose socket never attaches is released after ten seconds. Where the session ARRIVED —
+loopback, the privileged bind, the peer address — is the listener's classification of the upgrade,
+exactly as for an HTTP request on the same listener, and nothing inside the session can move it.
 
 `daemonId` is `fy_daemon_` followed by 43 characters of base64url:
 
@@ -233,7 +263,7 @@ only that identifier; using another session's is a protocol error that ends its 
 
 Either endpoint may end one session without dropping its socket by sending
 `{ "t":"closed", "code":…, "reason":… }` addressed to that session. That is how a daemon rejects a
-client whose device token it does not recognise.
+client whose device proof it does not accept.
 
 ### Limits
 
@@ -250,12 +280,12 @@ client whose device token it does not recognise.
 Two frames, one each way, both at sequence `0`.
 
 ```
-client → daemon   { "t":"hs1", "protocol":"ferretry-relay/1",
+client → daemon   { "t":"hs1", "protocol":"ferretry-relay/2",
                     "epk": <32-byte X25519 public key b64url>,
                     "nonce": <32 bytes b64url>,
                     "daemonId": "fy_daemon_…" }
 
-daemon → client   { "t":"hs2", "protocol":"ferretry-relay/1",
+daemon → client   { "t":"hs2", "protocol":"ferretry-relay/2",
                     "epk": <32-byte X25519 public key b64url>,
                     "nonce": <32 bytes b64url>,
                     "spki": <44-byte SPKI b64url>,
@@ -266,11 +296,20 @@ The daemon refuses an `hs1` whose `daemonId` is not its own. On a correct carrie
 happen, which is exactly why it is checked: on an incorrect one it is a misrouted session, and
 answering would key a channel to a peer that thinks it reached somebody else.
 
+**Version skew is answered, not guessed.** A daemon that receives an `hs1` naming `ferretry-relay/1`
+ends the session with `4426` and the sentence that says the APP is older and how to update it. A
+client that receives an `hs2` naming `/1` — or, while it awaits `hs2`, a `closed` `4400` with the
+reason `unparseable client hello`, which is what a `/1` daemon says to a `/2` hello — reports that
+the DAEMON is older, naming the update commands. On the direct carrier an older daemon has no session
+route at all, so after a direct failure the client reads `GET /healthz`: an `ok` answer whose
+`sessionProtocol` is not `ferretry-relay/2` is an older daemon, said in that same sentence, and no
+further carrier is tried.
+
 ### Transcript
 
 ```
 TH = SHA-256(
-       "ferretry-relay-handshake-v1"
+       "ferretry-relay-handshake-v2"
        ‖ LP(sessionId, 16 raw bytes)
        ‖ LP(hs1.epk      as UTF-8 base64url text)
        ‖ LP(hs1.nonce    as UTF-8 base64url text)
@@ -286,22 +325,22 @@ deliberate, checkable choice: it makes the transcript reproducible straight from
 received.
 
 ```
-sig = Ed25519-Sign( daemon identity key, "ferretry-relay-daemon-auth-v1" ‖ 0x00 ‖ TH )
+sig = Ed25519-Sign( daemon identity key, "ferretry-relay-daemon-auth-v2" ‖ 0x00 ‖ TH )
 ```
 
 ### Client checks, in this order
 
 1. `SHA-256(hs2.spki)` matches the pinned fingerprint. **If it does not, abort** — no signature
-   check, no key derivation, and above all no device token.
-2. `sig` verifies over `"ferretry-relay-daemon-auth-v1" ‖ 0x00 ‖ TH`.
+   check, no key derivation, and above all no device proof.
+2. `sig` verifies over `"ferretry-relay-daemon-auth-v2" ‖ 0x00 ‖ TH`.
 3. Key agreement (below) yields a usable secret.
 
 ### Key schedule
 
 ```
 IKM = X25519(own ephemeral private, peer ephemeral public)     -- abort if all-zero
-k_c2d = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-c2d-v1", 32 bytes)
-k_d2c = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-d2c-v1", 32 bytes)
+k_c2d = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-c2d-v2", 32 bytes)
+k_d2c = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-d2c-v2", 32 bytes)
 ```
 
 `HKDF-SHA256(ikm, salt, info, L)` is extract-then-expand, RFC 5869. Separate keys per direction mean
@@ -310,15 +349,33 @@ a record cannot be reflected at its sender and accepted.
 ### The credential record
 
 Immediately after the handshake, at sequence `1`, the client sends a `data` record whose plaintext
-is its credential: the device token pairing already gave it, or — for a device that has none yet —
-the pairing code itself, redeemed once. The daemon accepts or sends `{"t":"closed", …}` for the
-session. Neither credential ever appears outside the encrypted channel, so a relay sees neither —
-this is the reason the credential travels after keying rather than during, and the fingerprint check
-above is why sending a live pairing code here is safe: a daemon that could receive it has already
-been proved to be the one the QR named.
+is its credential. There is no bearer value in it. A paired device names its grant and **signs this
+session's transcript** with its device key:
 
-The token's and the code's own formats belong to the daemon's pairing API, not to this protocol. The
-exact records that carry them, and the session mode each one commits to, are §14.
+```
+proof = Ed25519-Sign( device key, "ferretry-device-auth-v2" ‖ 0x00 ‖ TH ‖ LP(t) ‖ LP(deviceId) ‖ LP(appSession) )
+```
+
+`t` is the record's own mode (`auth` or `stream`), so a proof for one mode opens no other;
+`appSession` is 16 random bytes the page draws once per load and signs in, naming "this running copy
+of the app". A device with no grant yet instead redeems a pairing code once, registering the public
+half of a freshly generated key and proving it holds the private half:
+
+```
+proof = Ed25519-Sign( new device key, "ferretry-device-pair-v2" ‖ 0x00 ‖ TH ‖ LP(deviceKey) )
+```
+
+The daemon verifies the proof against the SPKI it stored at pairing, or sends `{"t":"closed",…}`
+for the session — unknown device, idle-expired device and bad proof are ONE refusal, `4403`, so the
+answer is not an oracle for which ids exist. None of it appears outside the encrypted channel, so a
+relay sees neither the device id nor the code; this is why the credential travels after keying rather
+than during, and the fingerprint check above is why sending a live pairing code here is safe. Because
+`TH` binds both ephemeral keys, both nonces, the daemon's identity and the session id, a captured
+proof verifies for no other session.
+
+The device id's and the code's own formats belong to the daemon's pairing API, not to this protocol.
+The exact records that carry them, the lease that follows, and the session mode each commits to are
+§14.
 
 ---
 
@@ -416,20 +473,21 @@ rendezvous per minute, and every limit above.
 | `4400` | protocol error: unparseable, or right message in the wrong state                               |
 | `4401` | claim rejected: fingerprint mismatch or bad signature                                          |
 | `4402` | claim deadline expired                                                                         |
-| `4403` | the daemon refused the client's credentials inside the encrypted channel                       |
+| `4403` | the daemon refused the client's device proof — unknown, idle-expired, revoked or bad signature |
 | `4404` | no daemon holds this rendezvous                                                                |
 | `4408` | heartbeat timeout                                                                              |
 | `4409` | a daemon already holds this rendezvous                                                         |
 | `4413` | frame too large                                                                                |
 | `4420` | sequence broken: a frame was dropped, duplicated or reordered                                  |
 | `4421` | a record failed authentication                                                                 |
-| `4426` | unsupported version or protocol identifier                                                     |
+| `4426` | unsupported version or protocol identifier; a `/1` peer of a `/2` one is told which to update  |
 | `4429` | rendezvous busy: session, socket or rate limit reached                                         |
 | `4430` | flow violation: the sender exceeded its credit window                                          |
 | `4431` | the hosted relay is disabled by its runtime kill switch                                        |
 | `4432` | a per-daemon or global hosted connection ceiling was reached                                   |
 | `4433` | a per-daemon or global hosted bandwidth ceiling was reached                                    |
 | `4440` | the session concluded; code and public reason are constant, while the outcome was sealed first |
+| `4441` | the access lease ended (§14): open a new session — this is never a revocation                  |
 | `4500` | the rendezvous itself failed                                                                   |
 
 ---
@@ -455,14 +513,17 @@ worse than disclosing it.
   the exchange is uniform in **frame count** and in close code. It is **not** uniform in **size**,
   and this document used to claim the outcome could not be inferred at all. It can. There is no
   padding (above), so a record's length is its plaintext's length: a `paired` record embeds the
-  pairing API's whole redemption response — the minted device token and the published carrier set
+  pairing API's whole redemption response — the minted device id and the published carrier set
   included — while a `pair-refused` record is one short machine reason. The two differ by hundreds of
   bytes, which is not a subtle side channel but a shape an operator can read directly, and it is
   disclosed here rather than left to be discovered. What the size does not give up is any of the
-  content: the code, the token, the device name and every other byte of plaintext stay opaque, and a
+  content: the code, the device key, the device name and every other byte of plaintext stay opaque, and a
   refusal's own cause stays uniform — "no code is active" and "wrong guess" produce the identical
-  record, so the anti-oracle property §14 argues for is untouched. Today this event happens on a LAN
-  and is invisible to everybody; over a relay it is a new metadata class.
+  record, so the anti-oracle property §14 argues for is untouched. On the direct carrier this event
+  is invisible to everybody but the LAN; over a relay it is a new metadata class.
+- **The rhythm of a session's access lease.** A renewal is one sealed record each way, about two
+  minutes before each fifteen-minute lease ends, so an observer can count how long a session has been
+  held. What it cannot see is which device holds it.
 
 The hosted deployment makes a bounded subset of that metadata durable for its operator: per-daemon
 and global request counts, encoded bytes actually forwarded, accepted/refused connection counts,
@@ -471,7 +532,7 @@ byte windows. It does **not** store source IP addresses in that meter, although 
 request logs can observe them as described above. Metrics are behind the operator bearer; the public
 advertisement exposes only `version` and `relayUrl`.
 
-What the operator cannot see: any frame payload, the device token, the pairing code, session content,
+What the operator cannot see: any frame payload, the device id or key, the pairing code, session content,
 stream content — events, keystrokes, terminal output — command output, daemon or device names, or
 anything about what the fleet is doing. A pairing exchange's **outcome** is deliberately not on this
 list any more: nothing about it is readable, and its record size infers it anyway, per the bullet
@@ -706,7 +767,7 @@ to deploy.
 Ferretry and Cloudflare can observe the daemon fingerprint, IP addresses, connection timing and
 duration, encoded frame counts and sizes, traffic timing, and concurrent connections. When a first
 pairing crosses this relay, that includes the fact that a pre-auth session opened for a fingerprint
-and when, from which IP — never the code, the token or the device name, and never the outcome as
+and when, from which IP — never the code, the key or the device name, and never the outcome as
 anything readable, but the outcome IS inferable from the size of the one sealed answer, because
 `paired` carries a whole redemption response and `pair-refused` carries one word (§10).
 When a terminal stream crosses it, frame timing is keystroke timing. The operator meter persists the
@@ -788,7 +849,7 @@ some browser will dial in turn, and an unbounded list is an unbounded walk.
 A paired device refreshes without pairing again:
 
 ```
-GET /v1/carriers        authenticated with the device token pairing issued, fetched no-store
+GET /v1/carriers        inside a session the paired device key opened, fetched no-store
 
 { "carriers": [ { "kind": "direct", "url": "https://workstation.example:7431" },
                 { "kind": "relay",  "url": "wss://relay.example" } ] }
@@ -894,15 +955,15 @@ The relay, the control plane, the caps and the disclosure text are implemented a
 three §14 session modes are now built on both ends** — requests, live streams, and first pairing —
 so a phone that can never reach a daemon's address can pair with it and then watch it work. What
 remains is listed exactly below and is narrower than it was: an operator still edits the carrier
-list by hand, a fresh device can discover only the hosted rendezvous, several browser call sites still
-dial direct only, no surface renders the session-ceiling refusal §14 requires it to, and one onboarding
+list by hand, a fresh device can discover only the hosted rendezvous, the remote-browser viewer is unmounted
+until it moves onto a stream session, no surface renders the session-ceiling refusal §14 requires it to, and one onboarding
 screen has not caught up with §1.
 
 **What proved it, and what that proof does not cover.** A real Google Chrome, holding the link a
 compiled `fy pair` printed, redeems a first-pairing code across a real rendezvous process against a
 freshly compiled standalone `fyd` — after opening a connection to the advertised direct address and
 having it fail at transport — then reconnects as an ordinary authenticated session over the same
-rendezvous and renders a live event the daemon appended. The code, the minted token, the device name
+rendezvous and renders a live event the daemon appended. The code, the device key, the minted grant id, the device name
 and the event payload appear in none of the frames the rendezvous handled.
 `tests/e2e/relay-browser-pairing.e2e.test.ts` is that journey. Its honest limits are the ones
 `tests/e2e/README.md` records and §12 already draws: real Chrome, real compiled binaries, real
@@ -938,7 +999,7 @@ either end.
 
 That divergence fails closed. A directory can advertise a rendezvous the daemon does not hold, but
 the resulting client arrival ends at `4404`; §6 pins the daemon identity from the pairing link before
-the device sends the pairing code, device token or any payload, so neither a divergent directory nor
+the device sends the pairing code, its device key or any payload, so neither a divergent directory nor
 the wrong rendezvous learns those secrets. The costs are availability and metadata: relayed first
 pairing silently disappears, the directory sees the requesting device's IP and timing, and a
 rendezvous it names sees the device IP, daemon fingerprint and connection timing even when its
@@ -966,7 +1027,7 @@ tunnel — and `packages/pwa/src/lib/relay-carrier.ts` is what decides and dials
 every daemon-bound request goes through the router, which walks that set in the order above.
 `packages/pwa/tests/integration/relay-carrier-end-to-end.test.ts` wires the browser client, the real
 `RendezvousDurableObject` and the daemon's real `RelayLink` together and asserts the rendezvous saw
-neither a payload nor the device token.
+neither a payload nor the device id or key.
 
 Four properties of that client are worth stating here because they are contract, not implementation:
 
@@ -1101,33 +1162,15 @@ outstanding:
      relayed caller on earth into one shared anonymous bucket. A relayed caller is now keyed by its
      rendezvous session, stamped inside the ONE constructor that builds a relayed request, so the
      repair covers every rate-limited relayed route rather than the pairing one alone.
-   - **Not every browser call site is routed yet.** The composition root hands the carrier-aware
-     fetcher to everything it already injects one into — the projects, usage and push ports, the
-     attention and pin clients (`packages/pwa/src/lib/store.tsx` builds `DaemonAttentionClient` and
-     `DaemonPinClient` with it, so the attention modal and the pins board work over a relay), and
-     now the TYPED API CLIENT, whose transport used to dial the daemon's own address itself. That last
-     one was not only unrouted, it was actively misleading: the Settings reachability probe is a
-     typed-client call, so a green `Reachable` pill could sit beside a Carrier panel saying nothing
-     worked, and a daemon reachable only through the relay was reported down by a probe that never
-     tried the relay. The feature modules that default their `fetcher` parameter to `browserFetch`
-     — the direct network — and are never handed another (`learning-api.ts`,
-     `remote-browser.ts`, `skills-api.ts`, `files-api.ts`,
-     `attachment-source.ts`, `runtime-models.ts`, `stt/*`) are still
-     direct-only. They FAIL rather than mislead — a request to an unreachable daemon address is a
-     visible error, not a blank screen — but until the fetcher is threaded to them those surfaces
-     are unavailable over a relay. **`web-terminals.ts` is off this list**, and naming it here was
-     the stale item this list carried longest: the terminal deck is handed the carrier-aware fetcher
-     by the composition root and its live half is a §14 stream session, so a relayed terminal opens,
-     paints and takes keystrokes. What is left of it is narrower and belongs beside the modules above
-     rather than as a claim about the file: one OTHER caller of `listSessionTerminals` — the session
-     surface-references panel (`session-surface-references.tsx`) — still passes no fetcher, so that
-     READ-ONLY list is direct-only while the deck beside it is not. The composer's `%terminal:`
-     autocomplete is off this list too: `App.tsx` hands it the carrier fetcher as `composerFetch`.
-     `stt/*` stays on this list on purpose and for the ordinary reason:
-     it is now a single text-only route, `POST /v1/stt/enhance`, and
-     `packages/pwa/src/lib/stt/remote-enhancement.ts` still defaults its `fetchImpl` to the global
-     `fetch`. Threading the carrier-aware fetcher to it is a small, self-contained change and the only
-     thing standing between a relayed connection and remote transcript correction.
+   - **Every browser call site is routed — and has to be.** There is no plain-HTTP device path any
+     more: a daemon answers a paired device only inside a session, so a module that reached a daemon
+     with the bare network would fail on EVERY carrier, the daemon’s own LAN included. The composition
+     root hands the session-routed fetcher to every port it builds, and every component that reaches a
+     daemon reads it from `useDaemonFetch()`; an audit of each `fetcher = browserFetch` default found
+     no production caller that omits it. The defaults remain only so a component rendered alone in a
+     test reaches its stub. One surface is outside this: the **remote-browser viewer** is unmounted and
+     still written against the deleted socket tickets, so it must move onto a stream session before it
+     is mounted again — a declared GAP, not a working path.
 4. **Active-carrier disclosure on screen** — DONE. `ActiveCarrierCard` renders
    `chooseConnection().reason` and the `describeConnectionMethod` observer list for whichever
    carrier a live session won on, from `DaemonCarrierRouter.choice`, in Settings › Daemons. A
@@ -1142,9 +1185,9 @@ outstanding:
 **Deploying a relay now gets you the whole journey**: first pairing for a device that has never
 reached the daemon directly, every request/response route afterwards, and the live event and
 terminal streams that make the phone worth opening twice. What it does not get you is the feature
-surfaces listed in piece 3 above — which fail visibly rather than misleading, with one stated
-exception: a live event feed refused `4429` is swallowed, and that one fails silently until the gap
-above is closed — and a carrier list an operator can edit with a command.
+unmounted remote-browser viewer named in piece 3 above, a live event feed refused `4429` (swallowed,
+so it fails silently until the gap above is closed), and a carrier list an operator can edit with a
+command.
 The kill switch does not wait on any of it: `relayUrl: null` is enforced by this Worker at admission
 and on the live sweep, so disabling the hosted relay stops traffic regardless of what any client
 believes.
@@ -1172,7 +1215,7 @@ later negotiation, and each mode's terminal state is unreachable from the others
 
 | sequence-1 record | the session is        | what follows                                                           |
 | ----------------- | --------------------- | ---------------------------------------------------------------------- |
-| `auth`            | a **request session** | any number of `req`, each answered by `res` or `oversize`              |
+| `auth`            | a **request session** | any number of `req`, each answered by `res` (in parts when large)      |
 | `stream`          | a **stream session**  | exactly one protocol-switching stream, in `data` frames, until it ends |
 | `pair`            | a **pairing session** | one redemption attempt, one sealed outcome, then the session closes    |
 
@@ -1227,20 +1270,64 @@ in their own order — while a stream's `data` records are meaningful only in se
 The credential record:
 
 ```json
-{ "t": "auth", "protocol": "ferretry-relay/1", "deviceToken": "…" }
+{
+  "t": "auth",
+  "protocol": "ferretry-relay/2",
+  "deviceId": "fy_device_id_…",
+  "appSession": "<16 bytes b64url>",
+  "proof": "<64-byte Ed25519 signature b64url>"
+}
 ```
 
-A token the daemon does not recognise ends the session with `4403`. The daemon accepts by answering,
-inside the channel:
+`proof` is §6's device-auth signature with `t = "auth"`. A device the daemon does not hold, one that
+is idle-expired, or a proof that does not verify against the stored key all end the session with the
+same `4403`. The daemon accepts by answering, inside the channel:
 
 ```json
-{ "t": "authenticated", "protocol": "ferretry-relay/1" }
+{ "t": "authenticated", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>" }
 ```
 
-Both refusals and acceptance happen inside the encrypted channel, so a relay sees a session close and
-never learns which it was. The daemon resolves the token against its **device** grants only: a host
+The proof and the acceptance travel inside the encrypted channel; the refusal is a close, and a close
+code is in the clear, so a relay sees `4403` (and later `4441`) and learns WHEN a session was refused
+— never which device, and never why. An unknown device id is verified against a fixed dummy key, so
+it costs what a known one does. The daemon resolves the claim against its **device** grants only: a host
 admin token is not resolvable here, deliberately — it is a host-local secret, and a daemon that
-honoured it over the internet would turn a leaked file into remote authority.
+honoured it over the internet would turn a leaked file into remote authority. Every request the
+session carries is attributed to that device and that `appSession`, and the daemon re-asks at the
+request boundary whether the device is still paired, so a request in flight on a session being torn
+down by a revocation is refused rather than served.
+
+#### The access lease
+
+There is no bearer access token: the "access ticket" is a **lease the daemon holds against one
+keyed session**, 15 minutes from the moment the proof verified (`accessExpiresAt`). Two minutes
+before it ends, the daemon sends — on request and stream sessions alike —
+
+```json
+{ "t": "renew", "protocol": "ferretry-relay/2", "nonce": "<32 bytes b64url>", "expiresAt": "<ISO-8601>" }
+```
+
+and the client answers at once, with the same key, over the same transcript:
+
+```
+proof = Ed25519-Sign( device key, "ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖ LP(nonce) )
+{ "t": "renewed", "protocol": "ferretry-relay/2", "proof": "…" }
+```
+
+An incoming record is what prompts the answer, so a background tab — whose timers a browser
+throttles — still renews in time. A valid answer re-checks that the device is still paired and not
+idle-expired and extends the lease 15 minutes from now — but never past **12 hours** from the
+session's first proof, at which point the session ends `4441` and the client opens a fresh one; the nonce is
+single-use, and a `renewed` with no outstanding `renew` is `4400`. A lease that runs out ends the
+session with **`4441`**, which a client reads as "open a new session" and never as a revocation: a
+**read** (`GET`, `HEAD`) is asked again once on a fresh session, silently; a write is not, for the
+reason no write is replayed. `4403` stays the only code meaning "this device is no longer accepted".
+The daemon also compares the clock with the lease on every record it serves, so a record that
+arrives after the lease ended is never served even when the lease timer fires late, and it queues
+`renew` ahead of any payload waiting for credit. What the lease buys is that authority on any one
+channel needs a device signature at least every fifteen minutes and never outlives twelve hours, and
+every renewal re-reads revocation and expiry from the daemon's own state. Neither an auth nor a
+renewal counts as USE of the device: see `presence` below.
 
 Afterwards, any number of requests:
 
@@ -1252,11 +1339,20 @@ Afterwards, any number of requests:
   "path": "/v1/sessions",
   "query": [["sessionId", "fy_…"]],
   "headers": { "content-type": "application/json" },
-  "body": "…"
+  "body": "…",
+  "presence": true
 }
 ```
 
-`query`, `headers` and `body` are optional; `id`, `method` and `path` are not.
+`query`, `headers`, `body` and `presence` are optional; `id`, `method` and `path` are not.
+
+- **`presence`** is `true` when a person is at the device: the page is visible and was touched,
+  clicked or typed in within the last five minutes, by trusted input the browser raised. A page that only
+  loaded (a restored tab, a launch at login, a reload) is not a person. It is the
+  ONLY thing that advances the device's `lastSeenAt`, and therefore its 30-day idle clock — an auth,
+  a renewal or an unmarked request never does, so a tab left open renews its session without keeping
+  the device paired forever. It is the device's own word: it answers a forgotten device, not a
+  hostile one.
 
 - **`id`** identifies the answer, and must be unique within the session. A repeat is `4400` rather
   than an overwrite: an answer that could belong to either of two requests is worse than a closed
@@ -1267,11 +1363,14 @@ Afterwards, any number of requests:
 - **`query`** is a list of pairs, not an object, because `?sessionId=a&sessionId=b` is meaningful and
   an object cannot hold it.
 - **`headers`** are lowercased and single-valued. **`authorization` is refused** with `4400`: the
-  credential for a relayed request is the device token that opened the session and nothing else, so a
-  request cannot promote itself past the grant it arrived under.
+  credential for a session's request is the device proof that opened the session and nothing else, so
+  a request cannot promote itself past the grant it arrived under. (A client strips the header before
+  it builds the record.)
 - A relayed request is **never a loopback peer**. Everything a daemon grants a loopback caller — a
   token in a query parameter, a `privilegedOnly` route — is unreachable through a relay by construction,
-  not by a check somebody has to remember.
+  not by a check somebody has to remember. A **direct** session's requests carry the arrival the
+  listener classified at the upgrade (§4) — so a browser on the host is host-local exactly when it
+  would have been over plain HTTP — and nothing inside a record can change it.
 - A relayed caller's **rate-limit identity is derived from its rendezvous session** — a value the
   daemon holds and the client cannot choose. It is never a shared placeholder: a daemon that keys
   every relayed caller as one anonymous "remote" peer hands the whole internet a single fixed
@@ -1281,14 +1380,29 @@ The daemon answers each request with one of:
 
 ```json
 { "t": "res", "id": 1, "status": 200, "headers": { "content-type": "application/json" }, "body": "…" }
-{ "t": "oversize", "id": 1, "status": 200, "byteLength": 402641 }
 ```
 
-`oversize` is the honest answer when an answer does not fit one record — §7 caps plaintext at 65492
-bytes, and the envelope is inside that. It is a typed refusal naming the size rather than a truncated
-body or an invented status, because a client that received half a session list and rendered it would
-show a fleet that does not exist. Paging or a chunked reply is unbuilt work, and this is what says so
-on the wire.
+**A body larger than one record travels in ordered parts**, in both directions. §7 caps plaintext at
+65492 bytes with the envelope inside it, so a sender cuts the body with the shared rule
+(`partitionTunnelBody` in `@ferretry/protocol`: each part's JSON-escaped UTF-8 fits what the envelope
+leaves, and no character is split) and marks every part but the last with `"more": true`:
+
+```json
+{ "t": "req", "id": 7, "method": "PUT", "path": "/v1/…", "body": "<part 1>", "more": true }
+{ "t": "req-more", "id": 7, "body": "<part 2>", "more": true }
+{ "t": "req-more", "id": 7, "body": "<last part>" }
+
+{ "t": "res", "id": 7, "status": 200, "headers": { … }, "body": "<part 1>", "more": true }
+{ "t": "res-more", "id": 7, "body": "<last part>" }
+```
+
+Parts of one body are consecutive in sequence order and are reassembled exactly; a `*-more` with no
+open body, or a second start for an open one, is `4400`. A whole body is bounded at **32 MiB**: a
+request over it is refused before any of it is sent (the client says so; a daemon receiving one
+answers `413`), and an answer over it is the daemon's `502` with code `answer_too_large` — never a
+truncated body, because a client that rendered half a session list would show a fleet that does not
+exist. The daemon reassembles at most four request bodies per session at once. There is no
+`oversize` record any more.
 
 Answers carry an `id` because the daemon replies in whatever order its own handlers finish. Sequence
 numbers order the wire; they do not order the work.
@@ -1306,8 +1420,10 @@ The credential record opens the stream in the same breath:
 ```json
 {
   "t": "stream",
-  "protocol": "ferretry-relay/1",
-  "deviceToken": "…",
+  "protocol": "ferretry-relay/2",
+  "deviceId": "fy_device_id_…",
+  "appSession": "…",
+  "proof": "<§6's device-auth signature with t = \"stream\">",
   "path": "/v1/events",
   "query": [
     ["sessionId", "fy_…"],
@@ -1316,27 +1432,25 @@ The credential record opens the stream in the same breath:
 }
 ```
 
-`path` and `query` follow the same rules as a `req`'s. An unrecognised token is `4403` before any
-route is consulted — outside the channel, indistinguishable from a request session's refusal. A
-recognised one is dispatched as a protocol switch against **the daemon's own socket route table**:
-the same routes, the same authorization boundary and the same per-capability guard a direct upgrade
-passes through, with this session's device token as the credential and never as a loopback peer. A
-stream a direct viewer may not open, a relayed viewer may not open either, refused by the same code
-in the same place.
+`path` and `query` follow the same rules as a `req`'s. A proof the daemon does not accept is `4403`
+before any route is consulted — outside the channel, indistinguishable from a request session's
+refusal. An accepted one is dispatched as a protocol switch against **the daemon's own socket route
+table**: the same routes, the same authorization boundary and the same per-capability guard, with
+this session's proven device as the caller. A stream one device may not open, it may not open on any
+carrier, refused by the same code in the same place. Stream sessions hold a lease and renew it
+exactly as request sessions do.
 
-**No tickets.** Single-use socket tickets exist because a browser cannot attach a header to a
-WebSocket; here the credential is the record, so there is nothing for a ticket to do. `ticket` or
-`token` in a stream's `query` is refused with `4400`, for the reason `authorization` is refused on a
-`req`: a relayed stream carries exactly one credential, the one its session was opened with. A
-client must also not **buy** a ticket it means to spend here — a single-use ticket minted for a
-surface that refuses it is a credential the daemon burned for nothing, so the refusal happens before
-the purchase, not after.
+**There are no socket tickets, anywhere.** They existed so a browser — which cannot put a header on a
+WebSocket — could authenticate an upgrade with a short-lived bearer value bought over HTTP. Every
+stream is a session the device key opened now, on either carrier, so the daemon serves no ticket
+route at all. `ticket` or `token` in a stream's `query` is refused with `4400`, for the reason
+`authorization` is refused on a `req`: a stream carries exactly one credential, its session's proof.
 
 The daemon answers with exactly one of, inside the channel:
 
 ```json
-{ "t": "stream-opened", "protocol": "ferretry-relay/1" }
-{ "t": "stream-refused", "protocol": "ferretry-relay/1", "status": 404, "body": "…" }
+{ "t": "stream-opened", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>" }
+{ "t": "stream-refused", "protocol": "ferretry-relay/2", "status": 404, "body": "…" }
 ```
 
 `stream-refused` carries the same status and error body the direct surface would put on the refused
@@ -1385,7 +1499,7 @@ envelope does. What happens when a producer's frame exceeds it is decided by wha
   (below). The residual is disclosed rather than hidden: a pane whose every redraw exceeds the
   budget stays stale for a relayed viewer until it draws something smaller;
 - an **event** frame is a unique record that may be neither dropped nor split, so an event that
-  cannot fit one record **closes the stream** with `1009` — the honest refusal, like `oversize` on
+  cannot fit one record **closes the stream** with `1009` — the honest refusal, like the `502` on
   a request session, rather than a truncated event a client would parse and believe.
 
 #### Backpressure, and what a full buffer does
@@ -1415,7 +1529,7 @@ The daemon ends a stream by sealing the **same close taxonomy the direct socket 
 ending the session:
 
 ```json
-{ "t": "stream-close", "protocol": "ferretry-relay/1", "code": 1013, "reason": "event stream reader fell behind" }
+{ "t": "stream-close", "protocol": "ferretry-relay/2", "code": 1013, "reason": "event stream reader fell behind" }
 ```
 
 followed by `4440`. `1000 terminal viewer disconnected`, `1008 event stream is server-only`, `1009`
@@ -1487,33 +1601,50 @@ exchange — which is exactly as true of the direct path. And the comparison lan
 around from where the prohibition pointed: the permitted direct redemption is a plain-HTTP POST to
 an address nothing has authenticated, which hands the live code to whatever answers at it, while the
 relayed exchange seals the code to a pinned identity before one byte of plaintext leaves the device.
-The forbidden path authenticated the daemon; the permitted one never has. What was actually missing
+The forbidden path authenticated the daemon; the permitted one never had. What was actually missing
 was a session mode — an ordering rule in §6 remembered as a security property — and a session mode
 is what this section adds.
+
+**And it is now the ONLY redemption, on both carriers.** That comparison is why `POST /v1/pair` is
+deleted rather than kept beside this: a direct redemption is the same `pair` record, in a pre-auth
+session on the daemon's own address (§4), so the daemon is proved against the QR before the code
+leaves the device on the LAN as well. A daemon receiving the old `POST /v1/pair` answers `426` with
+the sentence that tells the app to update, never a `401` that reads as a wrong code.
 
 **The exchange.** The credential record:
 
 ```json
-{ "t": "pair", "protocol": "ferretry-relay/1", "code": "XXXX-XXXX", "deviceName": "Ferretry PWA" }
+{
+  "t": "pair",
+  "protocol": "ferretry-relay/2",
+  "code": "XXXX-XXXX",
+  "deviceName": "Ferretry PWA",
+  "deviceKey": "<44-byte Ed25519 SPKI b64url>",
+  "proof": "<§6's device-pair signature by that key>"
+}
 ```
 
-`code` and `deviceName` carry the same values, bounds and meaning as the body of `POST /v1/pair`;
-their formats belong to the pairing API, not to this protocol. The record is domain-separated from
+`code` and `deviceName` carry the pairing API's values, bounds and meaning; their formats belong to
+that API, not to this protocol. `deviceKey` is the public half of a key the browser generated for
+this daemon and cannot export, and `proof` shows it holds the private half for THIS session. A proof
+that does not verify is treated exactly as a wrong code — it spends one attempt and is answered with
+the same `pair-refused` — so the proof adds no oracle of its own. On `paired` the daemon stores the
+SPKI under the grant it mints, and nothing else about the device's key. The record is domain-separated from
 `auth` and from every other tunnel message by the one strict union — nothing can read it as
 anything else — and it is legal **only** as the record at sequence `1`. The daemon answers with
 exactly one sealed outcome:
 
 ```json
-{ "t": "paired", "protocol": "ferretry-relay/1", "response": { "…": "…" } }
-{ "t": "pair-refused", "protocol": "ferretry-relay/1", "reason": "pairing_refused" }
+{ "t": "paired", "protocol": "ferretry-relay/2", "response": { "deviceId": "…", "daemonId": "…", "daemonName": "…", "capabilities": [], "carriers": [], "idleExpiryDays": 30 } }
+{ "t": "pair-refused", "protocol": "ferretry-relay/2", "reason": "pairing_refused" }
 ```
 
 and then ends the session with `4440`. One attempt per session, success or failure; there is no
 second record, no retry on the same channel, and **no edge from a pairing session to serving**. A
-device that paired reconnects as an ordinary request session with the token it was just issued.
+device that paired reconnects as an ordinary request session, proving the key it just registered.
 
-- **`paired.response` is the redemption response of the pairing API, verbatim** — the exact JSON
-  object a direct `POST /v1/pair` answers 200 with, `carriers` included. It is embedded whole rather
+- **`paired.response` is the redemption response of the pairing API, verbatim** — validated by the
+  pairing API's own `PairingResponseSchema`, `carriers` included. It is embedded whole rather
   than re-listed field by field, so the next field the pairing API adds crosses the relay the day it
   ships instead of being silently dropped by a copy of the list; and `carriers` crossing inside the
   sealed record is what a relay-paired device navigates by, so an envelope that lost it would mint a
@@ -1522,17 +1653,17 @@ device that paired reconnects as an ordinary request session with the token it w
   teardown, not a failure that overwrites a pairing that succeeded; a `4440` with no sealed outcome
   before it is a protocol violation. Same rule as a stream's close, same reason.
 - **Refusal is uniform on purpose.** One machine reason, `pairing_refused`, for every cause — no
-  active code, a wrong code, an expired one, a spent budget, a body the schema refused — matching
-  the public route's own single refusal. A pre-auth surface the whole internet can reach must not be
+  active code, a wrong code, an expired one, a spent budget, a body the schema refused, a proof that
+  did not verify. A pre-auth surface the whole internet can reach must not be
   an oracle, which also forbids the cheaper oracle one layer down: a daemon must **not** refuse the
   session early when no code is active. It accepts, keys the channel, runs the same constant-time
-  comparison the direct route runs against a dummy code, and refuses identically. An observer —
+  comparison against a dummy code, and refuses identically. An observer —
   relay operator included — cannot distinguish "no code exists" from "wrong guess", and success and
   refusal have the **same frame count**: one sealed record, then the same close.
 - **Uniform is not indistinguishable, and the difference is stated rather than glossed.** The frame
   count, the close code and the refusal's own wording are uniform; the record **size** is not, and
   §3 pads nothing. `paired` embeds a whole redemption response and `pair-refused` embeds one machine
-  reason, so a relay operator reading one length infers the outcome — not the code, not the token,
+  reason, so a relay operator reading one length infers the outcome — not the code, not the key,
   not the device name, and not which refusal it was, but the outcome. §10 owns that disclosure. The
   uniformity above is what denies the **guesser** an oracle, which is the property this exchange
   needs; denying the **carrier** the outcome would take padding this version does not have.
@@ -1541,11 +1672,11 @@ device that paired reconnects as an ordinary request session with the token it w
 
 1. **It is a record, not a routed request.** The pairing branch invokes the daemon's pairing state
    machine directly and never constructs an `ApiRequest`: a pre-auth session issues no requests at
-   all, so §14's invariant — a relayed request carries exactly one credential, the one its session
-   was opened with — stays literally true, and no route is reachable pre-auth, `minimum: 'none'`
-   routes and `POST /v1/pair` itself included. The alternative — dispatching an anonymous relayed
-   request at the public route — would create the credential-less request path whose absence is the
-   whole reason §14's invariant is easy to defend.
+   all, so §14's invariant — a session's request carries exactly one credential, the proof its
+   session was opened with — stays literally true, and no route is reachable pre-auth, `minimum:
+'none'` routes included. The alternative — dispatching an anonymous request at a public route —
+   would create the credential-less request path whose absence is the whole reason §14's invariant
+   is easy to defend.
 2. **Host credentials remain impossible.** The pairing branch reads no `authorization`, resolves no
    token, and never reaches the request path that attaches one; the session holds no credential,
    mints exactly one, and dies. A host admin token is not accepted here for the same reason it is
@@ -1553,8 +1684,9 @@ device that paired reconnects as an ordinary request session with the token it w
 3. **Replay is already closed by §7.** The `pair` record is sealed under this session's keys with
    its sequence number as the nonce, and a fresh session has fresh keys — a captured record cannot
    be replayed into any other session. The code itself is single-use and consumed before any
-   suspension point, so two concurrent redemptions cannot both win, and the minted token crosses
-   once, sealed, in a record no relay can read.
+   suspension point, so two concurrent redemptions cannot both win, and the minted grant id crosses
+   once, sealed, in a record no relay can read. A captured `pair` record is worth nothing even to its
+   author's peers: its proof is over THIS session's transcript.
 
 **Where the device learns the rendezvous.** A pairing link names the daemon's direct address,
 fingerprint and code, and **nothing else**. A device that cannot reach that address still needs a
@@ -1603,8 +1735,9 @@ whose readers are `fy pair` (released with `fyd`) and the hosted Add-a-device pa
 the binary). Both directions are satisfied by the same release discipline `PairingResponse.carriers`
 already used.
 
-**Two attempt budgets, because two carriers.** The direct path's budget is unchanged: five attempts
-per code, and exhausting them expires the code. A relayed attempt spends a **separate relay budget**
+**Two attempt budgets, because two carriers.** A direct pairing session's budget is the one the
+deleted route had: five attempts per code, keyed by the listener's peer address for the fixed-window
+limiter, and exhausting them expires the code. A relayed attempt spends a **separate relay budget**
 of five per code and can never spend the direct one; exhausting the relay budget closes the **relay
 path** for that code and leaves the code alive for a device on the LAN. The separation is the point:
 redemption used to be reachable only from the daemon's own network, and this section makes it
@@ -1620,8 +1753,8 @@ disclosed here rather than discovered.
 A transport failure spends nothing from either budget: a rendezvous nobody holds (`4404`), a busy
 one (`4429`), a disabled one (`4431`), a fingerprint that fails the pin — none of these reached the
 daemon's comparison, so the walk may continue to the next carrier. A sealed `pair-refused` is the
-opposite: the exchange happened, the answer is final for that attempt, and the remedy is the direct
-route's own sentence — the code is wrong, expired or spent; mint a fresh one. A client must keep the
+opposite: the exchange happened, the answer is final for that attempt, and the remedy is one
+sentence — the code is wrong, expired or spent; mint a fresh one. A client must keep the
 two apart, and it can do so structurally: one arrives as a close outside the channel, the other as a
 record inside it.
 
@@ -1631,7 +1764,7 @@ stopped new codes from existing — with nothing minted there is nothing to rede
 
 **What a relay operator sees of a pairing** is §10's list, with the parts specific to this exchange
 restated once: a pre-auth session for fingerprint X at time T from IP Y, a handshake, one sealed
-record each way, a `4440` close — never the code, the token or the device name, and never the outcome
+record each way, a `4440` close — never the code, the key or the device name, and never the outcome
 as anything it can read, but the sealed answer's SIZE infers the outcome and this document says so
 rather than claiming the exchange is outcome-blind. "Fingerprint X
 gained its first device at T, from Y" is a new operator-visible event that used to happen invisibly
@@ -1645,17 +1778,18 @@ stream, a host admin token anywhere — every path by which a caller could prese
 the credential that opened its session is refused by schema, and the pairing session carries the
 inverse guarantee: it presents no stored credential at all and can never reach a route.
 
-**A loopback peer.** A relayed arrival is never local, whatever address the socket appears to come
-from — the rendezvous terminates on the host it serves, and everything a daemon grants a loopback
-caller is unreachable through a relay by construction.
+**A loopback peer, over a relay.** A relayed arrival is never local, whatever address the socket
+appears to come from — the rendezvous terminates on the host it serves, and everything a daemon grants
+a loopback caller is unreachable through a relay by construction. A direct session is local exactly
+when its upgrade arrived on loopback, as the listener decided before any record was read.
 
 **This list no longer excludes dictation.** The daemon's byte-shaped speech routes — an audio upload
 and a multi-megabyte model download — are deleted, because recognition now happens in the browser.
 The only speech-to-text request a daemon answers is `POST /v1/stt/enhance`: an already-transcribed
 transcript in, a repaired transcript out, ordinary JSON both ways, which this tunnel carries like any
 other request/response route. No microphone audio crosses this tunnel, and none crosses the daemon
-boundary at all. What keeps that route unreachable over a relay today is not its shape but an
-unthreaded fetcher, which §13 piece 3 records.
+boundary at all. The dictation hook hands it the session-routed fetcher, so it is reachable on
+either carrier.
 
 **And nothing else is excluded by shape any more.** Requests, live events, terminal streams and
 first pairing each have a session mode above, and each is built on both ends; §13 names what is

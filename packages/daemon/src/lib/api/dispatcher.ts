@@ -1,5 +1,12 @@
+import { OLDER_APP_SENTENCE } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
-import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
+import {
+  type ApiCredentials,
+  type Authentication,
+  authenticate,
+  bearerToken,
+  isPreKeyDeviceToken,
+} from './authentication.ts';
 import { type CallerGovernance, type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
 import {
@@ -20,7 +27,6 @@ import type {
   WardenRemedyGrant,
 } from './route.ts';
 import type { ApiRouter } from './router.ts';
-import { SOCKET_TICKET_QUERY_PARAMETER, type SocketTicketRedeemer } from './socket-ticket.ts';
 
 /** The pane's own session id, so an in-pane caller is attributed to itself rather than to the
  *  shared token it holds. */
@@ -83,11 +89,19 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  * 5. ask the administrator's warden-remedy authorizer, and ONLY for a caller the token class already
  *    proved to be a warden.
  */
+/**
+ * An app from before device keys redeeming a pairing code over plain HTTP.
+ *
+ * That route is deleted — redemption is a sealed record inside a session now — so nothing here serves
+ * it. It is RECOGNISED only to be answered in words: an old app pairing with an updated machine would
+ * otherwise be told `401`, which reads as "wrong code" to somebody whose only problem is an old app.
+ */
+const isPreKeyPairing = (request: ApiRequest): boolean => request.method === 'POST' && request.path === '/v1/pair';
+
 export function authorizeRequest<TRoute extends ScopedRoute>(
   router: ApiRouter<TRoute>,
   credentials: ApiCredentials,
   request: ApiRequest,
-  tickets: SocketTicketRedeemer | undefined,
   guard: CapabilityGuard,
   /**
    * The administrator's per-remedy answer, absent on a boundary that serves no remedy routes.
@@ -116,22 +130,40 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     return { kind: 'authorized', route: lookup.route, context: { request, params: lookup.params } };
   }
 
-  const presented = authenticate(credentials, {
-    bearer: bearerToken(headerValue(request, 'authorization')),
-    // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer
-    // that could already read the token file it came from.
-    query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
-  });
-  // A ticket is the credential a browser CAN present on an upgrade, and only the upgrade boundary
-  // passes a redeemer — an ordinary route is given none, so a ticket read out of an access log
-  // authenticates nothing there. It is tried only when the request could not authenticate on its own,
-  // so a caller holding a real bearer never silently spends a single-use ticket.
-  const authentication =
-    presented.kind === 'anonymous' && tickets !== undefined && lookup.kind === 'matched'
-      ? (tickets.redeem(queryValue(request, SOCKET_TICKET_QUERY_PARAMETER) ?? '', request.path) ?? presented)
-      : presented;
+  const bearer = bearerToken(headerValue(request, 'authorization'));
+  // A DEVICE IS WHOEVER ITS SESSION PROVED, while its grant still exists, and only a session can say
+  // so — the grant is re-read here so a request in flight on a revoked device's session is refused. `device` is set by the
+  // tunnel that verified the key's signature over the session transcript, and by nothing else. A
+  // session's request carries no `authorization` of its own (the tunnel's schema refuses one), so
+  // there is no second credential here to disagree with it.
+  const device = request.device;
+  const presented: Authentication =
+    device !== undefined
+      ? credentials.devices?.has(device.deviceId) === true
+        ? { kind: 'authenticated', tokenClass: 'device', deviceId: device.deviceId }
+        : { kind: 'anonymous' }
+      : authenticate(credentials, {
+          bearer,
+          // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer
+          // that could already read the token file it came from.
+          query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
+        });
+  // THERE ARE NO SOCKET TICKETS ANY MORE. They existed so a browser — which cannot put a header on a
+  // WebSocket — could authenticate an upgrade with a short-lived bearer value bought over HTTP. A
+  // browser now opens every stream inside a session its device key opened, so no URL ever carries a
+  // credential and there is nothing here to redeem one.
+  const authentication = presented;
   if (authentication.kind === 'anonymous')
-    return { kind: 'refused', response: errorResponse(401, 'unauthorized', 'unauthorized') };
+    return {
+      kind: 'refused',
+      // An app from before device keys still sends the bearer token it was given. Nothing can accept
+      // that any more, and a bare 401 would read as "you were unpaired" when the truth is "update the
+      // app" — so it is told which side is old, in the one sentence every surface shares.
+      response:
+        isPreKeyDeviceToken(bearer) || isPreKeyPairing(request)
+          ? errorResponse(426, OLDER_APP_SENTENCE, 'app_outdated')
+          : errorResponse(401, 'unauthorized', 'unauthorized'),
+    };
 
   if (lookup.kind === 'not-found') return { kind: 'unrouted' };
   if (lookup.kind === 'method-not-allowed')
@@ -355,7 +387,7 @@ export class ApiDispatcher {
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, undefined, this.guard, this.remedies);
+    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
     if (authorized.kind === 'refused') return authorized.response;
     return await run(authorized.route, authorized.context);

@@ -1,27 +1,27 @@
 import { describe, it } from 'bun:test';
 import {
   DaemonIdSchema,
-  DeviceTokenSchema,
   formatPairingFragment,
   invitationRedeemableByAnotherDevice,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   PAIRING_DEVICE_NAME_MAX_LENGTH,
   PAIRING_FRAGMENT_PATTERN,
+  PairedDeviceIdSchema,
   PairingCodeMintRequestSchema,
   PairingCodeMintResponseSchema,
   PairingCodeStatusResponseSchema,
   type PairingLinkSeed,
-  pairingLinkUrl,
-  pairingMintOutcome,
   PairingRequestSchema,
   PairingResponseSchema,
+  pairingLinkUrl,
+  pairingMintOutcome,
   parsePairingFragment,
 } from '@ferretry/protocol';
 import should from 'should';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
-const deviceToken = `fy_device_${'b'.repeat(43)}`;
+const deviceId = `fy_device_id_${'b'.repeat(22)}`;
 const pairingId = `fy_pair_${'c'.repeat(22)}`;
 
 const DAEMON_URL = 'https://workstation.example.test';
@@ -103,7 +103,8 @@ describe('pairing protocol', () => {
 
   it('should validate the complete successful response and typed credentials', () => {
     const response = {
-      deviceToken,
+      deviceId,
+      idleExpiryDays: 30,
       daemonId,
       daemonName: 'workstation',
       capabilities: ['daemon-api'],
@@ -129,9 +130,12 @@ describe('pairing protocol', () => {
       }).success,
     ).be.false();
     should(PairingResponseSchema.safeParse({ ...response, carriers: [], surprise: true }).success).be.false();
-    should(DeviceTokenSchema.parse(deviceToken)).equal(deviceToken);
+    should(PairedDeviceIdSchema.parse(deviceId)).equal(deviceId);
     should(DaemonIdSchema.parse(daemonId)).equal(daemonId);
-    should(DeviceTokenSchema.safeParse('device-token').success).be.false();
+    should(PairedDeviceIdSchema.safeParse(`fy_device_${'b'.repeat(43)}`).success).be.false();
+    should(
+      PairingResponseSchema.safeParse({ ...response, deviceToken: `fy_device_${'b'.repeat(43)}` }).success,
+    ).be.false();
     should(DaemonIdSchema.safeParse('fingerprint').success).be.false();
     should(PairingResponseSchema.safeParse({ ...response, daemonName: 'workstation\u202E' }).success).be.false();
   });

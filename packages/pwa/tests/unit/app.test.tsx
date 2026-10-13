@@ -32,7 +32,6 @@ import {
   HealthViewSchema,
   type ProjectInfo,
   type SessionStatus,
-  SOCKET_TICKET_TTL_SECONDS,
   type WardenVerdictsView,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
@@ -62,22 +61,35 @@ import type { DaemonCarrierRouter } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
+import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
+import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
 
+/*
+ * REAL FINGERPRINTS, because every daemon request rides a session now and a session is checked
+ * against the fingerprint before anything is sent. `ALPHA` and `BETA` are those fingerprints, used
+ * wherever a route or an assertion names the daemon.
+ */
+const ALPHA_IDENTITY = await newDaemonIdentity();
+const BETA_IDENTITY = await newDaemonIdentity();
+const GAMMA_IDENTITY = await newDaemonIdentity();
+const ALPHA = ALPHA_IDENTITY.daemonId;
+const BETA = BETA_IDENTITY.daemonId;
+const DEVICE_KEY = (await testDevice()).privateKey;
 const alpha = daemonConnection({
-  daemonId: 'alpha',
+  daemonId: ALPHA,
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'fy_device_id_alphaDevice00000000001',
 });
 const beta = daemonConnection({
-  daemonId: 'beta',
+  daemonId: BETA,
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'fy_device_id_betaDevice000000000001',
 });
-const GAMMA_ID = `fy_daemon_${'g'.repeat(43)}`;
-const GAMMA_TOKEN = `fy_device_${'t'.repeat(43)}`;
+const GAMMA_ID = GAMMA_IDENTITY.daemonId;
+const GAMMA_TOKEN = 'fy_device_id_gammaDevice00000000001';
 const GAMMA_FRAGMENT = `v1;url=https%3A%2F%2Fgamma.example.test;code=7F3K-Q2ND;fp=${GAMMA_ID}`;
 
 const HOSTED_RELAY = { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' } as const;
@@ -85,33 +97,32 @@ const HOSTED_RELAY = { kind: 'relay', relayUrl: 'https://relay.example.test', op
 /**
  * The same published carrier set under two daemon identities.
  *
- * `alpha` is not a fingerprint this protocol can address, so `daemonCarriers`
+ * `alphaRelayed` is not a fingerprint this protocol can address, so `daemonCarriers`
  * strips its relay and the router never dials one; `gamma` is, so its relay is a
  * real fallback. Everything else about the two pairings is identical, which is
  * what makes them a pair of fixtures rather than two unrelated ones.
  */
 const alphaRelayed = daemonConnection({
-  daemonId: 'alpha',
+  daemonId: 'alpha-unaddressable',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
   carriers: [{ kind: 'direct', daemonUrl: 'https://alpha.example.test' }, HOSTED_RELAY],
 });
 const gammaRelayed = daemonConnection({
   daemonId: GAMMA_ID,
   baseUrl: 'https://gamma.example.test',
-  deviceToken: GAMMA_TOKEN,
+  deviceId: GAMMA_TOKEN,
   carriers: [{ kind: 'direct', daemonUrl: 'https://gamma.example.test' }, HOSTED_RELAY],
 });
 
 /**
- * One running shell on the `shared` session, and the ticket the daemon sells for its socket.
+ * One running shell on the `shared` session.
  *
  * The deck is driven through the ROOT'S OWN dependency object here rather than an injected fake, so
  * these are the daemon's real wire shapes: anything the protocol's schemas reject would surface as
  * an empty deck that never attaches, which is indistinguishable from the bug under test.
  */
 const TERMINAL_ID = 'a1b2c3d4e5f6';
-const TERMINAL_TICKET = `fy_ticket_${'a'.repeat(43)}`;
 const terminalListing = {
   sessionId: 'shared',
   terminals: [
@@ -312,7 +323,7 @@ afterEach(async () => {
   requestedUrls.length = 0;
   // WHICH PANES ARE OPEN IS MODULE STATE, not this shell's. A test that opens the terminal pane
   // therefore leaves it open for every later mount of the same route — and a deck mounted by
-  // accident lists, buys a ticket and dials a real socket at a host that does not exist, which
+  // accident lists and opens a stream session no test is watching, which
   // surfaces as an unhandled socket error in whichever unrelated test happens to be running.
   resetSidePaneTabsStates();
 });
@@ -416,6 +427,9 @@ interface LiveFeed {
   readonly settled: () => boolean;
 }
 
+/** The session network the most recent `appStore` built, so a case can read what a daemon was sent. */
+let daemonNetwork: ReturnType<typeof fetcherDaemons> | undefined;
+
 const appStore = async (
   reads: string[],
   options: ShellOptions = {},
@@ -424,8 +438,56 @@ const appStore = async (
   liveFeeds: LiveFeed[] = [],
   carrierRequests: string[] = [],
   clients: FyApiClient[] = [],
-): Promise<AppStore> =>
-  await createAppStore({
+): Promise<AppStore> => {
+  const deviceKeys = new MemoryDeviceKeyStore();
+  for (const id of [ALPHA, BETA, GAMMA_ID, alphaRelayed.daemonId]) await deviceKeys.save(id, DEVICE_KEY);
+  // The one fixture every daemon route below is answered by — over a real session on each daemon's
+  // own address, and over the plain network for everything that is not a daemon.
+  const daemonFetch = async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    carrierRequests.push(url);
+    // Every carrier this daemon publishes fails at transport, which is what a walk needs to see
+    // before it can answer `ok: false` rather than picking a winner.
+    if (options.carrierDown?.() === true) throw new Error('the daemon is unreachable');
+    // The board a live session reads. A test that wants to watch a refresh
+    // land supplies its own answer per read; every other test gets the same
+    // empty deck the shell has always been given here.
+    const attentionRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
+    if (attentionRoute?.[1] !== undefined) {
+      const sessionId = decodeURIComponent(attentionRoute[1]);
+      return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
+    }
+    if (url.endsWith('/terminals')) return Response.json(terminalListing);
+    // The durable registry, and ONLY when a test supplies one. The default
+    // stays the empty document every other page gets, because the registry's
+    // own failure path is what the projects-route test asserts on.
+    if (options.projects !== undefined && new URL(url).pathname === '/v1/projects')
+      return Response.json(options.projects);
+    // Tasks search and its file index travel the carrier now, so they are answered here too.
+    return sessionSearchFixture(new URL(url)) ?? Response.json({});
+  };
+  const network = fetcherDaemons(
+    [
+      { host: 'alpha.example.test', identity: ALPHA_IDENTITY },
+      { host: 'beta.example.test', identity: BETA_IDENTITY },
+      {
+        host: 'gamma.example.test',
+        identity: GAMMA_IDENTITY,
+        paired: {
+          daemonId: GAMMA_ID,
+          deviceId: GAMMA_TOKEN,
+          daemonName: 'gamma',
+          capabilities: [],
+          carriers: [{ kind: 'direct', url: 'https://gamma.example.test' }],
+          idleExpiryDays: 30,
+        },
+      },
+    ],
+    daemonFetch,
+    () => options.carrierDown?.() !== true,
+  );
+  daemonNetwork = network;
+  return await createAppStore({
     repository: new MemoryRepository(),
     connectClient: async connection => {
       if (options.clientFailure !== undefined) throw new Error(options.clientFailure);
@@ -518,46 +580,14 @@ const appStore = async (
       clients.push(client);
       return client;
     },
-    // Only the pairing exchange and the terminal deck have shapes the root itself depends on; every
-    // other page reads through a store port that answers an empty document.
-    fetcher: async input => {
-      const url = String(input);
-      carrierRequests.push(url);
-      // Every carrier this daemon publishes fails at transport, which is what a walk needs to see
-      // before it can answer `ok: false` rather than picking a winner.
-      if (options.carrierDown?.() === true) throw new Error('the daemon is unreachable');
-      // The board a live session reads. A test that wants to watch a refresh
-      // land supplies its own answer per read; every other test gets the same
-      // empty deck the shell has always been given here.
-      const attentionRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
-      if (attentionRoute?.[1] !== undefined) {
-        const sessionId = decodeURIComponent(attentionRoute[1]);
-        return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
-      }
-      if (url.endsWith('/v1/pair'))
-        return Response.json({
-          daemonId: GAMMA_ID,
-          deviceToken: GAMMA_TOKEN,
-          daemonName: 'gamma',
-          capabilities: [],
-          carriers: [{ kind: 'direct', url: 'https://gamma.example.test' }],
-        });
-      if (url.endsWith('/stream/ticket'))
-        return Response.json({
-          ticket: TERMINAL_TICKET,
-          ttlSeconds: SOCKET_TICKET_TTL_SECONDS,
-          expiresAt: '2026-08-01T10:00:30.000Z',
-        });
-      if (url.endsWith('/terminals')) return Response.json(terminalListing);
-      // The durable registry, and ONLY when a test supplies one. The default
-      // stays the empty document every other page gets, because the registry's
-      // own failure path is what the projects-route test asserts on.
-      if (options.projects !== undefined && new URL(url).pathname === '/v1/projects')
-        return Response.json(options.projects);
-      // Tasks search and its file index travel the carrier now, so they are answered here too.
-      return sessionSearchFixture(new URL(url)) ?? Response.json({});
-    },
+    deviceKeys,
+    relayCrypto,
+    // Every fixture daemon on its own address; `carrierDown` refuses every socket, which is a carrier
+    // that is down rather than a daemon that answered.
+    relayDial: network.dial,
+    fetcher: daemonFetch,
   });
+};
 
 /**
  * A REPLACEMENT MEASURED CARRIER, PUBLISHED TO THE SURFACES AND TO NOTHING ELSE.
@@ -652,10 +682,14 @@ const renderShell = async (
   return { carrierRequests, clients, healthReads, liveFeeds, reads, store, transcriptReads, view };
 };
 
+/**
+ * Lets the shell's work land: the microtasks a render schedules, and the task-queue turns real
+ * WebCrypto resolves on — every daemon request now opens over a session, and a handshake is several
+ * of those turns, where a fetch fixture used to answer in one microtask.
+ */
 const settle = async (): Promise<void> => {
   await interact(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let turn = 0; turn < 12; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
   });
 };
 
@@ -689,30 +723,6 @@ const NOT_SET_UP = {
 const landed = async (): Promise<void> => {
   for (let turn = 0; turn < 20; turn += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
 };
-
-/**
- * A socket that records its URL and does nothing else.
- *
- * The deck's direct attach ends in `new WebSocket(...)`; a real one here would dial a host that does
- * not exist and surface as an unhandled socket error in whichever test happened to be running when
- * it gave up. What this test is about is the URL — a ticket bought on the carrier's own fetcher, for
- * the daemon the route named — so recording it is the whole job.
- */
-const recordingSocket = (opened: string[]): unknown =>
-  class RecordingSocket {
-    static readonly OPEN = 1;
-    binaryType = 'blob';
-    readyState = 0;
-
-    constructor(url: string) {
-      opened.push(url);
-    }
-
-    addEventListener(): void {}
-    removeEventListener(): void {}
-    send(): void {}
-    close(): void {}
-  };
 
 /** Which screen of the setup guide is on the glass, if it is on the glass at all. */
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
@@ -845,7 +855,7 @@ describe('AppShell', () => {
 
     // The daily open. No chooser, no guide, and no picker to dismiss either —
     // this browser answered every question it can be asked, months ago.
-    expect(window.location.pathname).toBe('/d/alpha');
+    expect(window.location.pathname).toBe(`/d/${ALPHA}`);
     expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
 
     // The picker is still REACHABLE, because it is the only screen that offers
@@ -863,7 +873,7 @@ describe('AppShell', () => {
   });
 
   it('mounts the daemon-scoped projects registry from its routed destination', async () => {
-    const { view } = await renderShell('/d/alpha/projects', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/projects`, [alpha.daemonId]);
     await settle();
 
     expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
@@ -878,7 +888,7 @@ describe('AppShell', () => {
     const projectId = '11111111-1111-4111-8111-111111111111';
 
     // Act
-    const { view } = await renderShell(`/d/alpha/projects/${projectId}`, [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/projects/${projectId}`, [alpha.daemonId], {
       projects: [
         {
           id: projectId,
@@ -906,7 +916,7 @@ describe('AppShell', () => {
   it('walks from the registry to one project without leaving the app', async () => {
     // Arrange
     const projectId = '11111111-1111-4111-8111-111111111111';
-    const { view } = await renderShell('/d/alpha/projects', [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/projects`, [alpha.daemonId], {
       projects: [
         {
           id: projectId,
@@ -919,7 +929,7 @@ describe('AppShell', () => {
     });
     await settle();
     const link = view.container.querySelector<HTMLAnchorElement>('[data-registered-project] a');
-    expect(link?.getAttribute('href')).toBe(`/d/alpha/projects/${projectId}`);
+    expect(link?.getAttribute('href')).toBe(`/d/${ALPHA}/projects/${projectId}`);
 
     // Act — an ordinary primary click.
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
@@ -930,7 +940,7 @@ describe('AppShell', () => {
     // would have left through the document instead, which in this environment
     // means the tree would still be showing the registry.
     expect(click.defaultPrevented).toBe(true);
-    expect(window.location.pathname).toBe(`/d/alpha/projects/${projectId}`);
+    expect(window.location.pathname).toBe(`/d/${ALPHA}/projects/${projectId}`);
     expect(view.container.querySelector(`[data-project-detail="${projectId}"]`)).not.toBeNull();
     expect(view.container.querySelector('#projects-heading')).toBeNull();
     await view.unmount();
@@ -1038,7 +1048,7 @@ describe('AppShell', () => {
       'done',
     );
     const snapshot = store.connections.getSnapshot();
-    expect(snapshot.connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID, 'alpha']);
+    expect(snapshot.connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID, ALPHA]);
     expect(String(snapshot.selectedDaemonId)).toBe(GAMMA_ID);
     expect(window.location.pathname).toBe('/pair');
 
@@ -1105,7 +1115,7 @@ describe('AppShell', () => {
       ).click(),
     );
 
-    expect(window.location.pathname).toBe('/d/alpha');
+    expect(window.location.pathname).toBe(`/d/${ALPHA}`);
     await view.unmount();
   });
 
@@ -1136,14 +1146,14 @@ describe('AppShell', () => {
 
   it('uses the routed daemon instead of the selected daemon', async () => {
     // Adding beta last selects it, while the route explicitly asks for alpha.
-    const { reads, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId, beta.daemonId]);
+    const { reads, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId, beta.daemonId]);
     await settle();
 
     const session = view.container.querySelector('[data-session="shared"]');
-    expect(session?.getAttribute('data-daemon')).toBe('alpha');
+    expect(session?.getAttribute('data-daemon')).toBe(ALPHA);
     expect(session?.textContent).toContain('Alpha Agent');
     expect(session?.textContent).not.toContain('Beta Agent');
-    expect(reads).toEqual(['alpha:shared']);
+    expect(reads).toEqual([`${ALPHA}:shared`]);
     await view.unmount();
   });
 
@@ -1157,7 +1167,7 @@ describe('AppShell', () => {
    * has measured anything, and `0` is not "an event arrived".
    */
   it('states the measured carrier and the live-event cursor on the mounted session route', async () => {
-    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     await settle();
 
     const session = view.container.querySelector('[data-session="shared"]');
@@ -1183,7 +1193,7 @@ describe('AppShell', () => {
    * the route's comment describes rather than a separate claim.
    */
   it('advances the live cursor and refreshes the session when the measured feed delivers an event', async () => {
-    const { liveFeeds, reads, store, transcriptReads, view } = await renderShell('/d/alpha/session/shared', [
+    const { liveFeeds, reads, store, transcriptReads, view } = await renderShell(`/d/${ALPHA}/session/shared`, [
       alpha.daemonId,
     ]);
     await settle();
@@ -1240,7 +1250,7 @@ describe('AppShell', () => {
    */
   it('stops claiming a live feed the moment its carrier stops carrying', async () => {
     let reachable = true;
-    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+    const { liveFeeds, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
       carrierDown: () => !reachable,
     });
     await settle();
@@ -1319,7 +1329,7 @@ describe('AppShell', () => {
    */
   it('never commits the previous owner‘s state when a carrier becomes reachable again', async () => {
     let reachable = true;
-    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+    const { liveFeeds, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
       carrierDown: () => !reachable,
     });
     await settle();
@@ -1409,7 +1419,9 @@ describe('AppShell', () => {
    */
   it('never commits the previous owner‘s state when the measured carrier is replaced by its own kind', async () => {
     const carrierSeam = measuredCarrierSeam();
-    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], { carrierSeam });
+    const { liveFeeds, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
+      carrierSeam,
+    });
     await settle();
     const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
     const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
@@ -1495,7 +1507,7 @@ describe('AppShell', () => {
    * the ledger below asserts that something WAS committed before it asserts what.
    */
   it('never commits the previous owner‘s state when the typed client is replaced under the session', async () => {
-    const { clients, liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    const { clients, liveFeeds, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     await settle();
     const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
     const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
@@ -1579,7 +1591,7 @@ describe('AppShell', () => {
    * connected the three of them.
    */
   it('shows the reader a stopped live feed and reconnects it on demand', async () => {
-    const { liveFeeds, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    const { liveFeeds, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     await settle();
     const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
     const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
@@ -1630,28 +1642,22 @@ describe('AppShell', () => {
   });
 
   /**
-   * THE TERMINAL DECK'S THIRD DEPENDENCY: the carrier the deck's attach is allowed to read.
+   * THE ROOT'S OWN TERMINAL DECK, through the real pane, on the real carrier router.
    *
-   * `browserTerminalDeckDependencies` takes a measured-carrier getter and defaults it to
-   * `() => undefined`, and this root passed only two arguments — so the production deck answered "no
-   * carrier measured" forever. That is not a silent nicety: `browserTerminalStreamAttach` gates the
-   * DIRECT branch on exactly that getter, so every direct session's terminals threw
-   * `TERMINAL_STREAM_NO_CARRIER` and cycled the deck's reconnect backoff instead of buying a ticket
-   * and opening a socket. Nothing in the type system notices a defaulted argument, and no deck test
-   * can notice it either — the deck is always handed a fake — so the regression has to be the ROOT'S
-   * own deck, driven through the real pane, on the real carrier router.
-   *
-   * The socket is the assertion because it is the far end of the whole chain: a ticket bought on the
-   * carrier's fetcher, at the daemon the route named, for the terminal the daemon listed.
+   * No deck test can see the composition root's wiring — the deck is always handed a fake — and a
+   * root that wired the deck to the wrong opener would ship a terminal that never attaches. So this
+   * drives the production deck end to end: the listing goes over the daemon's request session, and
+   * the terminal opens as its OWN stream session on the daemon the route named, for the terminal the
+   * daemon listed. That stream record is the assertion, because it is the far end of the whole chain.
    */
-  it('gives the production terminal deck the measured carrier its direct attach is gated on', async () => {
+  it('opens the production terminal deck as a stream session on the daemon the route named', async () => {
     // THE EMULATOR IS LOADED FIRST, AND ITS FAILURE IS REPORTED RATHER THAN SWALLOWED.
     //
     // The deck loads `@xterm/xterm` through a dynamic `import()` inside an effect and, if that
     // rejects, deliberately has nowhere to go: "The emulator could not be loaded at all. There is
     // nothing to retry into", so it sets `refused` and drops the reason on the floor. Correct for a
     // reader, blinding for a test — CI showed exactly that state (one canvas mounted, lamp `refused`,
-    // the terminal listing sent and no ticket ever bought) with no way to see why.
+    // the terminal listing sent and no stream ever opened) with no way to see why.
     //
     // Awaiting the same modules here answers it: the module registry is per process, so the deck's
     // own `loadXterm` resolves from what this line loaded, and a rejection fails the test with the
@@ -1686,9 +1692,9 @@ describe('AppShell', () => {
     } finally {
       probeHost.remove();
     }
-    const sockets: string[] = [];
-    const restoreSocket = patchGlobal(globalThis, 'WebSocket', recordingSocket(sockets));
-    const { carrierRequests, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    const streamsOpened = (): { t: string; path?: string }[] =>
+      (daemonNetwork?.requests('alpha.example.test') ?? []) as { t: string; path?: string }[];
+    const { carrierRequests, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     try {
       await settle();
       // The deck is not mounted yet, so nothing has asked the daemon about terminals at all.
@@ -1703,27 +1709,27 @@ describe('AppShell', () => {
         ).click(),
       );
       // ACROSS REAL TASK BOUNDARIES, not just microtasks. The chain is module load → listing →
-      // ticket → socket, with a task between the links; `settle` flushes two microtasks, which is
+      // stream session, with a task between the links; `settle` flushes two microtasks, which is
       // right for everything else in this file and is not enough for this. The socket is what the
       // assertions below are about, so it is what the wait is gated on — and if it never opens, THIS
       // line says so rather than leaving the next assertion to report an absent URL.
       //
       // WHICH of those links the carrier was asked for is the diagnosis, so the expiry carries it:
-      // nothing at all means the deck never listed; a listing without a ticket puts the stall at the
-      // emulator, because the attach effect only runs once `loadXterm` has produced one; a ticket
+      // nothing at all means the deck never listed; a listing without a stream puts the stall at the
+      // emulator, because the attach effect only runs once `loadXterm` has produced one; a stream
       // without a socket is the attach itself. An expiry that only said "no socket" leaves that to be
       // guessed on a runner nobody can attach a debugger to — which cost two CI rounds before it said
       // this much.
       await settleUntil(
-        () => sockets.length > 0,
+        () => streamsOpened().some(record => record.t === 'stream'),
         () =>
           [
-            'the terminal deck to open its stream socket',
+            'the terminal deck to open its stream session',
             `(terminal requests reached: ${JSON.stringify(carrierRequests.filter(url => url.includes('/terminals')))}`,
             // The deck's own lamp is the state machine's answer: `idle` means the attach effect found
             // no emulator, so `loadXterm` has not resolved; `refused` means it or the attach rejected
-            // and no retry is coming; `connecting` means the ticket purchase is in flight. Without it
-            // a missing ticket cannot tell "still loading" from "gave up".
+            // and no retry is coming; `connecting` means the stream session is opening. Without it
+            // a missing stream cannot tell "still loading" from "gave up".
             `link lamps: ${JSON.stringify(
               [...view.container.querySelectorAll<HTMLElement>('.kt-webterm__lamp')].map(lamp => lamp.dataset.state),
             )}`,
@@ -1733,22 +1739,22 @@ describe('AppShell', () => {
       );
 
       expect(carrierRequests).toContain('https://alpha.example.test/v1/sessions/shared/terminals');
-      expect(carrierRequests).toContain(
-        `https://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL_ID}/stream/ticket`,
-      );
-      expect(sockets).toEqual([
-        `wss://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL_ID}/stream?ticket=${TERMINAL_TICKET}`,
-      ]);
+      expect(
+        streamsOpened()
+          .filter(record => record.t === 'stream')
+          .map(record => record.path),
+      ).toEqual([`/v1/sessions/shared/terminals/${TERMINAL_ID}/stream`]);
+      // No ticket exists to be asked for, on any route.
+      expect(carrierRequests.some(url => url.includes('ticket'))).toBe(false);
     } finally {
       // Unmounted and restored even when an assertion above threw: a retained deck keeps its refresh
       // interval, and a leaked real `WebSocket` fails a later test rather than this one.
       await view.unmount();
-      restoreSocket();
     }
   });
 
   it('applies the persisted chat measure to the real session surface', async () => {
-    const { store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     await settle();
     const surface = must(view.container.querySelector('[data-chat-width]'), 'the chat-width surface');
     expect(surface.getAttribute('data-chat-width')).toBe('full');
@@ -1762,25 +1768,25 @@ describe('AppShell', () => {
 
   it('never crosses two daemons that own the same session id', async () => {
     const { reads, transcriptReads, view } = await renderShell(
-      '/d/alpha/session/shared',
+      `/d/${ALPHA}/session/shared`,
       [alpha.daemonId, beta.daemonId],
       { transcript: daemon => `assistant/message: ${daemon} transcript` },
     );
     await settle();
     expect(view.container.querySelector('[data-session="shared"]')?.textContent).toContain('Alpha Agent');
-    expect(view.container.querySelector('[role="log"]')?.textContent).toContain('alpha transcript');
+    expect(view.container.querySelector('[role="log"]')?.textContent).toContain(`${ALPHA} transcript`);
 
-    await popTo('/d/beta/session/shared');
+    await popTo(`/d/${BETA}/session/shared`);
     await settle();
 
     const session = view.container.querySelector('[data-session="shared"]');
-    expect(session?.getAttribute('data-daemon')).toBe('beta');
+    expect(session?.getAttribute('data-daemon')).toBe(BETA);
     expect(session?.textContent).toContain('Beta Agent');
     expect(session?.textContent).not.toContain('Alpha Agent');
-    expect(view.container.querySelector('[role="log"]')?.textContent).toContain('beta transcript');
-    expect(view.container.querySelector('[role="log"]')?.textContent).not.toContain('alpha transcript');
-    expect(reads).toEqual(['alpha:shared', 'beta:shared']);
-    expect(transcriptReads).toEqual(['alpha:shared', 'beta:shared']);
+    expect(view.container.querySelector('[role="log"]')?.textContent).toContain(`${BETA} transcript`);
+    expect(view.container.querySelector('[role="log"]')?.textContent).not.toContain(`${ALPHA} transcript`);
+    expect(reads).toEqual([`${ALPHA}:shared`, `${BETA}:shared`]);
+    expect(transcriptReads).toEqual([`${ALPHA}:shared`, `${BETA}:shared`]);
     await view.unmount();
   });
 
@@ -1795,7 +1801,7 @@ describe('AppShell', () => {
     const restoreClearInterval = patchGlobal(globalThis, 'clearInterval', () => {});
 
     try {
-      const { store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+      const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
         transcript: 'assistant/message: Review !A3 before continuing.',
         attention: sessionId => {
           attentionReads += 1;
@@ -1834,7 +1840,7 @@ describe('AppShell', () => {
   });
 
   it('publishes a lifecycle result and immediately refreshes its daemon-scoped evidence', async () => {
-    const { reads, transcriptReads, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    const { reads, transcriptReads, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     try {
       await settle();
       const findInterrupt = () =>
@@ -1858,31 +1864,31 @@ describe('AppShell', () => {
       await interact(() => must(interrupt, 'the interrupt control').click());
       await settle();
 
-      expect(reads).toEqual(['alpha:shared', 'alpha:shared']);
-      expect(transcriptReads).toEqual(['alpha:shared', 'alpha:shared']);
+      expect(reads).toEqual([`${ALPHA}:shared`, `${ALPHA}:shared`]);
+      expect(transcriptReads).toEqual([`${ALPHA}:shared`, `${ALPHA}:shared`]);
     } finally {
       await view.unmount();
     }
   });
 
   it('mounts every daemon-qualified destination through its own slot', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId], { sessions: ['one'] });
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessions: ['one'] });
     await settle();
     const announced = () => must(view.container.querySelector('[data-route]'), 'the route announcer').textContent;
 
     expect(announced()).toBe('Sessions');
 
     for (const [path, expected] of [
-      ['/d/alpha/new', 'Sessions, New'],
-      ['/d/alpha/settings', 'Sessions, Settings'],
-      // No `/d/alpha/accounts` row: Accounts is Fleet's child panel inside Settings now, so it has no
+      [`/d/${ALPHA}/new`, 'Sessions, New'],
+      [`/d/${ALPHA}/settings`, 'Sessions, Settings'],
+      // No `/d/${ALPHA}/accounts` row: Accounts is Fleet's child panel inside Settings now, so it has no
       // address and no crumb of its own. The scope comes from the path taken to it, which is the
       // defect this replaced — the crumb it used to have named the page and never the machine.
-      ['/d/alpha/warden', 'Sessions, Warden'],
-      ['/d/alpha/analytics', 'Sessions, Analytics'],
-      ['/d/alpha/learning', 'Sessions, Learning'],
-      ['/d/alpha/history', 'Sessions, Imported history'],
-      ['/d/alpha/session/one', 'Sessions, one'],
+      [`/d/${ALPHA}/warden`, 'Sessions, Warden'],
+      [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
+      [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
+      [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
+      [`/d/${ALPHA}/session/one`, 'Sessions, one'],
     ] as const) {
       await popTo(path);
       await settle();
@@ -1907,7 +1913,7 @@ describe('AppShell', () => {
    * regression. That guard is `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`.
    */
   it('mounts both daemon pickers for a new session, reading stored health and checking nothing', async () => {
-    const { healthReads, view } = await renderShell('/d/alpha/new', [alpha.daemonId]);
+    const { healthReads, view } = await renderShell(`/d/${ALPHA}/new`, [alpha.daemonId]);
     try {
       await settle();
       expect(view.container.querySelector('#fy-new-session-agent')?.getAttribute('role')).toBe('combobox');
@@ -1947,7 +1953,7 @@ describe('AppShell', () => {
     afterEach(() => setPath('/'));
 
     it('puts the runtime named by ?agent= in the Account box, and starts nothing', async () => {
-      const { view } = await renderShell('/d/alpha/new?agent=claude-auto-named', [alpha.daemonId], {
+      const { view } = await renderShell(`/d/${ALPHA}/new?agent=claude-auto-named`, [alpha.daemonId], {
         accounts: roster,
       });
       try {
@@ -1963,7 +1969,7 @@ describe('AppShell', () => {
     it('falls back to the first usable account when there is no hint, an empty one, or one it cannot use', async () => {
       const accounts = [pickerAccount('claude-auto-first'), pickerAccount('claude-auto-down', false)];
       for (const search of ['', '?agent=', '?agent=claude-auto-down', '?agent=claude-auto-nobody']) {
-        const { view } = await renderShell(`/d/alpha/new${search}`, [alpha.daemonId], { accounts });
+        const { view } = await renderShell(`/d/${ALPHA}/new${search}`, [alpha.daemonId], { accounts });
         try {
           await settle();
           const box = must(view.container.querySelector<HTMLInputElement>('#fy-new-session-agent'), 'the Account box');
@@ -1997,7 +2003,7 @@ describe('AppShell', () => {
     };
 
     try {
-      const { view } = await renderShell('/d/alpha/warden', [alpha.daemonId], { wardenVerdicts: verdicts });
+      const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], { wardenVerdicts: verdicts });
       await settle();
 
       const open = must(
@@ -2019,7 +2025,7 @@ describe('AppShell', () => {
   });
 
   it('calls an unreadable Warden index unavailable rather than presenting a healthy empty history', async () => {
-    const { view } = await renderShell('/d/alpha/warden', [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], {
       wardenVerdicts: async () => await Promise.reject(new Error('report index is unreadable')),
     });
     try {
@@ -2036,7 +2042,7 @@ describe('AppShell', () => {
 
 describe('route change accessibility', () => {
   it('leaves the load-time focus alone and still names the page it opened on', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
 
     const announcer = must(view.container.querySelector('[data-route]'), 'the route announcer');
@@ -2053,7 +2059,7 @@ describe('route change accessibility', () => {
     const reads: string[] = [];
     const store = await appStore(reads);
     store.connections.add(alpha);
-    setPath('/d/alpha');
+    setPath(`/d/${ALPHA}`);
     const view = await mountShell(
       <StrictMode>
         <RouterProvider>
@@ -2068,18 +2074,18 @@ describe('route change accessibility', () => {
     const announcer = must(view.container.querySelector('[data-route]'), 'the route announcer');
     expect(document.activeElement).not.toBe(announcer);
 
-    await popTo('/d/alpha/settings');
+    await popTo(`/d/${ALPHA}/settings`);
     await settle();
     expect(document.activeElement).toBe(announcer);
     await view.unmount();
   });
 
   it('moves focus to the announcer on an in-app navigation and renames it', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
     const announcer = must(view.container.querySelector('[data-route]'), 'the route announcer');
 
-    await popTo('/d/alpha/settings');
+    await popTo(`/d/${ALPHA}/settings`);
     await settle();
 
     expect(document.activeElement).toBe(announcer);
@@ -2135,7 +2141,7 @@ describe('the session route live regions', () => {
     const gate = new Promise<void>(resolve => {
       open = resolve;
     });
-    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], { sessionGate: gate });
+    const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], { sessionGate: gate });
     const status = must(view.container.querySelector('[data-session-state]'), 'the session status region');
     const alert = must(view.container.querySelector('[data-session-error]'), 'the session alert region');
 
@@ -2159,7 +2165,7 @@ describe('the session route live regions', () => {
   });
 
   it('reports a failed open in the alert region without unmounting either one', async () => {
-    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
       sessionFailure: 'daemon refused the read',
     });
     const status = must(view.container.querySelector('[data-session-state]'), 'the session status region');
@@ -2177,7 +2183,7 @@ describe('the session route live regions', () => {
   });
 
   it('announces a client connection refusal through the same persistent alert', async () => {
-    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
       clientFailure: 'pairing expired',
     });
     const alert = must(view.container.querySelector('[data-session-error]'), 'the session alert region');
@@ -2198,7 +2204,7 @@ const paletteOpen = (container: HTMLElement): boolean =>
 
 describe('the command palette shortcut', () => {
   it('reserves Cmd/Ctrl+K for current-session file and task search on a session route', async () => {
-    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     const search = must(
       // By the control's stable marker, not by a literal id: the id is now
@@ -2224,7 +2230,7 @@ describe('the command palette shortcut', () => {
    * rather than lower bounds.
    */
   it('reads one board and one file index for the session route, and neither fan-out returns', async () => {
-    const { carrierRequests, view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { carrierRequests, view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     // Counted on the CARRIER: these reads used to dial the daemon's address directly.
     const mine = carrierRequests
@@ -2243,7 +2249,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('reaches the search from inside the composer, which is where a session reader stands', async () => {
-    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     const search = must(
       view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
@@ -2284,7 +2290,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('dismisses on an outside pointer without moving focus or clearing the shared query', async () => {
-    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     const search = must(
       view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
@@ -2312,7 +2318,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('leaves session-route shortcuts inside unrelated editors and modal contexts', async () => {
-    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     const search = must(
       view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
@@ -2348,7 +2354,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('opens from a keystroke that belongs to no field', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
     expect(paletteOpen(view.container)).toBe(false);
 
@@ -2359,7 +2365,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('accepts the platform modifier in either spelling and either case', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
 
     await interact(() => pressKey(document.body, 'K', { metaKey: true }));
@@ -2369,7 +2375,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('leaves the keystroke to the field the reader is typing in', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
 
     for (const tag of ['input', 'textarea', 'select'] as const) {
@@ -2395,7 +2401,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('ignores a bare key, the wrong modifiers, and a composing IME', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
 
     await interact(() => pressKey(document.body, 'k'));
@@ -2410,7 +2416,7 @@ describe('the command palette shortcut', () => {
   });
 
   it('stops listening once the shell unmounts', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
 
     // Dispatched at `window`, the exact target the shell listens on, so this
@@ -2486,7 +2492,7 @@ const finderButton = (container: HTMLElement): HTMLButtonElement =>
 
 describe('the global destination and settings finder', () => {
   it('finds an individual setting by a keyword that is in neither its label nor its description', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
     await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
 
@@ -2504,32 +2510,32 @@ describe('the global destination and settings finder', () => {
   });
 
   it('opens the unanchored Settings page for a row that anchors to no one control', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
     await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
     await searchPalette('preferences');
 
     await pressPaletteRow('open-settings');
 
-    expect(window.location.pathname).toBe('/d/alpha/settings');
+    expect(window.location.pathname).toBe(`/d/${ALPHA}/settings`);
     expect(window.location.hash).toBe('');
     await view.unmount();
   });
 
   it('reaches an app destination through the same search', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
     await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
     await searchPalette('warden');
 
     await pressPaletteRow('destination-warden');
 
-    expect(window.location.pathname).toBe('/d/alpha/warden');
+    expect(window.location.pathname).toBe(`/d/${ALPHA}/warden`);
     await view.unmount();
   });
 
   it('stops promising Cmd/Ctrl+K once a session owns it', async () => {
-    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
 
     // The keystroke belongs to current-session search here, so the bar must not
@@ -2547,7 +2553,7 @@ describe('the global destination and settings finder', () => {
   });
 
   it('still advertises Cmd/Ctrl+K where nothing else claims it', async () => {
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
 
     expect(finderButton(view.container).getAttribute('aria-keyshortcuts')).not.toBeNull();
@@ -2558,7 +2564,7 @@ describe('the global destination and settings finder', () => {
     // Settings names nothing about this gesture, which is the point: the region
     // finds the page's scroll port from the touch, so a destination added later
     // is reachable without being listed anywhere.
-    const { view } = await renderShell('/d/alpha/settings', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId]);
     await settle();
     const region = must(view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'), 'the pull region');
     const inside = must(region.querySelector<HTMLElement>('h1, h2, p, div'), 'something on the settings page');
@@ -2572,7 +2578,7 @@ describe('the global destination and settings finder', () => {
   });
 
   it('never takes the pull that belongs to the transcript', async () => {
-    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     const transcript = must(view.container.querySelector<HTMLElement>('.fy-transcript'), 'the transcript scroller');
     Object.defineProperty(transcript, 'scrollTop', { configurable: true, value: 0 });
@@ -2593,7 +2599,7 @@ describe('the global destination and settings finder', () => {
   it('opens from a pull on an opted-in page scroller, and leaves an ordinary scroll alone', async () => {
     // The harness reports no fine pointer, so `useInputModality` resolves to the
     // conservative touch-affected state a phone gets.
-    const { view } = await renderShell('/d/alpha', [alpha.daemonId], { sessions: ['s1'] });
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessions: ['s1'] });
     await settle();
     const scroller = must(
       view.container.querySelector<HTMLElement>(`[${PULL_TO_PALETTE_ATTR}]`),
@@ -2779,8 +2785,8 @@ describe('browserNotificationSurface', () => {
     const notification = showOnPage('Alpha stopped', { body: 'body', tag: 'tag', renotify: false });
 
     expect(FakeNotification.shown).toEqual(['Alpha stopped']);
-    surface.navigate('/d/alpha/session/one');
-    expect(navigated).toEqual(['/d/alpha/session/one']);
+    surface.navigate(`/d/${ALPHA}/session/one`);
+    expect(navigated).toEqual([`/d/${ALPHA}/session/one`]);
     expect(notification).toBeDefined();
   });
 });
@@ -2848,7 +2854,7 @@ describe('the settings route composition', () => {
    * edge alternated between two x positions and the list read as unfinished. All of them or none.
    */
   it('mounts the Model pricing tab, with its icon, through the production Settings composition', async () => {
-    const { view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId]);
     await settle();
 
     const tab = must(
@@ -2876,7 +2882,9 @@ describe('the settings route composition', () => {
     const { store, view } = await renderShell(`/d/${String(connection.daemonId)}/settings#daemons`, [connection]);
     await settle();
     await interact(async () => {
-      await store.carrier.send(connection, `${connection.baseUrl}/v1/health`);
+      // A pairing no session can address is unreachable on every carrier now, so this read is allowed
+      // to fail: what is under test is what the panel PROMISES, not whether the read was carried.
+      await store.carrier.send(connection, `${connection.baseUrl}/v1/health`).catch(() => undefined);
     });
     await interact(() =>
       must(
@@ -2906,7 +2914,7 @@ describe('the settings route composition', () => {
   });
 
   it('binds the Doctor tab to the selected daemon through the typed diagnostic endpoint', async () => {
-    const { healthReads, view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId]);
+    const { healthReads, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId]);
     await settle();
 
     await interact(() =>
@@ -2927,7 +2935,7 @@ describe('the settings route composition', () => {
   });
 
   it('probes each selected sub-tab through the carrier-aware typed health endpoint, then routes switch and add', async () => {
-    const { healthReads, store, view } = await renderShell('/d/alpha/settings#daemons', [
+    const { healthReads, store, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [
       alpha.daemonId,
       beta.daemonId,
     ]);
@@ -2947,21 +2955,23 @@ describe('the settings route composition', () => {
       ).click(),
     );
     await settle();
-    expect(probes().map(read => String(read.daemonId))).toEqual(['alpha']);
+    expect(probes().map(read => String(read.daemonId))).toEqual([ALPHA]);
     for (const read of probes()) {
       expect(read.path).toBe('/v1/health');
       expect(read.schema).toBe(HealthViewSchema);
       expect(read.timeout).toBe(5_000);
     }
     expect(
-      must(view.container.querySelector('[data-daemon-subtab="alpha"]'), 'alpha sub-tab').getAttribute('aria-selected'),
+      must(view.container.querySelector(`[data-daemon-subtab="${ALPHA}"]`), 'alpha sub-tab').getAttribute(
+        'aria-selected',
+      ),
     ).toBe('true');
 
     await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-daemon-subtab="beta"]'), 'beta tab').click(),
+      must(view.container.querySelector<HTMLButtonElement>(`[data-daemon-subtab="${BETA}"]`), 'beta tab').click(),
     );
     expect(store.connections.getSnapshot().selectedDaemonId).toBe(beta.daemonId);
-    expect(window.location.pathname).toBe('/d/beta/settings');
+    expect(window.location.pathname).toBe(`/d/${BETA}/settings`);
     expect(window.location.hash).toBe('#daemons');
     await settle();
     await interact(() =>
@@ -2971,11 +2981,7 @@ describe('the settings route composition', () => {
       ).click(),
     );
     await settle();
-    expect(
-      probes()
-        .map(read => String(read.daemonId))
-        .sort(),
-    ).toEqual(['alpha', 'beta']);
+    expect(probes().map(read => String(read.daemonId)).sort()).toEqual([ALPHA, BETA].sort());
 
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),
@@ -2987,7 +2993,7 @@ describe('the settings route composition', () => {
   });
 
   it('persists a routed daemon rename and sends active removal to the selected fallback settings', async () => {
-    const { store, view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId, beta.daemonId]);
+    const { store, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId, beta.daemonId]);
     await settle();
     await interact(() =>
       must(
@@ -2996,7 +3002,7 @@ describe('the settings route composition', () => {
       ).click(),
     );
     const alphaHostChecks = must(
-      view.container.querySelector<HTMLElement>('[data-daemon-host-checks="alpha"]'),
+      view.container.querySelector<HTMLElement>(`[data-daemon-host-checks="${ALPHA}"]`),
       'alpha host checks',
     );
     const details = must(
@@ -3021,10 +3027,10 @@ describe('the settings route composition', () => {
     expect(store.connections.get(alpha.daemonId)?.label).toBe('Primary workstation');
 
     await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-remove-daemon="alpha"]'), 'remove alpha').click(),
+      must(view.container.querySelector<HTMLButtonElement>(`[data-remove-daemon="${ALPHA}"]`), 'remove alpha').click(),
     );
     expect(store.connections.get(alpha.daemonId)).toBeUndefined();
-    expect(window.location.pathname).toBe('/d/beta/settings');
+    expect(window.location.pathname).toBe(`/d/${BETA}/settings`);
     expect(window.location.hash).toBe('#daemons');
     await view.unmount();
   });
@@ -3063,7 +3069,7 @@ describe('the connection picker slot', () => {
     // pairing happened to be selected before.
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     // The new pairing joins the existing one and becomes the selected daemon.
-    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID, 'alpha']);
+    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID, ALPHA]);
     expect(requestedUrls.some(url => url.endsWith('/v1/pair'))).toBe(false);
 
     await view.unmount();
@@ -3201,7 +3207,7 @@ describe('the connection picker slot', () => {
     );
     await interact(() => open.click());
 
-    expect(window.location.pathname).toBe('/d/alpha');
+    expect(window.location.pathname).toBe(`/d/${ALPHA}`);
     expect(store.connections.getSnapshot().selectedDaemonId).toBe(alpha.daemonId);
 
     await popTo('/');
@@ -3243,7 +3249,7 @@ describe('the fleet notification watch', () => {
     undo.push(patchGlobal(document, 'hidden', hidden));
 
     let status: SessionStatus = 'running';
-    const { store, view } = await renderShell('/d/alpha', [alpha.daemonId], {
+    const { store, view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], {
       sessions: ['one'],
       sessionStatus: () => status,
     });

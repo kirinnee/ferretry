@@ -12,8 +12,8 @@ import {
   runtimeModelCatalogErrorMessage,
 } from '../../src/lib/runtime-models.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 const scopeA = daemonSessionScope(daemonA, 'same/session');
 const scopeB = daemonSessionScope(daemonB, 'same/session');
 
@@ -96,7 +96,7 @@ describe('daemon-scoped runtime model catalog queries', () => {
 
     should(result.choices[0]?.label).equal('A');
     should(requested?.url).equal('https://a.example.test/v1/sessions/same%2Fsession/runtime-models');
-    should(new Headers(requested?.init.headers).get('authorization')).equal('Bearer token-a');
+    should(new Headers(requested?.init.headers).has('authorization')).be.false();
     should(requested?.init.credentials).equal('include');
   });
 
@@ -175,7 +175,7 @@ describe('daemon runtime model catalog fencing', () => {
     const rePaired = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'token-a-rotated',
+      deviceId: 'token-a-rotated',
     });
     const fresh = await store.load(rePaired, scopeA, async () => {
       requests += 1;

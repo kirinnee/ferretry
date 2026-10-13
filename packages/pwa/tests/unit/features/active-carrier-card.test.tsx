@@ -7,11 +7,9 @@
  * `packages/relay`'s and is asserted to be exactly that rather than a copy.
  */
 
-import { chooseConnection, type ConnectionMethod, describeConnectionMethod } from '@ferretry/relay';
 import { describe, it } from 'bun:test';
+import { type ConnectionMethod, chooseConnection, describeConnectionMethod } from '@ferretry/relay';
 import should from 'should';
-import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
-import { DaemonCarrierRouter } from '../../../src/lib/relay-carrier.ts';
 import {
   ActiveCarrierCard,
   CARRIER_NO_FALLBACK,
@@ -19,8 +17,10 @@ import {
   CARRIER_UNMEASURED,
 } from '../../../src/features/carrier/active-carrier-card.tsx';
 import { useActiveCarrier } from '../../../src/hooks/use-active-carrier.ts';
-import { relayCrypto } from '../../support/relay.ts';
+import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
+import { DaemonCarrierRouter } from '../../../src/lib/relay-carrier.ts';
 import { render, run } from '../../support/react.ts';
+import { relayCrypto } from '../../support/relay.ts';
 
 const DIRECT: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://studio.example' };
 const HOSTED: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.ferretry', operator: 'hosted' };
@@ -80,7 +80,11 @@ describe('the active carrier card', () => {
 
 describe('subscribing to the measured carrier', () => {
   it('should publish the router’s answer, and undefined until there is one', () => {
-    const router = new DaemonCarrierRouter({ crypto: relayCrypto, network: async () => new Response('ok') });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey: async () => undefined,
+      network: async () => new Response('ok'),
+    });
     const daemonId = 'fy_daemon_x' as DaemonId;
     let seen: unknown = 'unset';
     const Probe = (): null => {

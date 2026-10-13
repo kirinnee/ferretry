@@ -8,12 +8,12 @@ import { interact, mount } from '../support/dom.ts';
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
 });
 const workstation = daemonConnection({
   daemonId: 'daemon/workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'token-workstation',
+  deviceId: 'token-workstation',
 });
 
 const catalog = (wrapper: string): AccountPickerCatalog => ({
@@ -95,7 +95,7 @@ describe('useAccountPickerSlice', () => {
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('ready:first pairing');
 
-    const rotated = { ...laptop, deviceToken: 'rotated-token' };
+    const rotated = { ...laptop, deviceId: 'rotated-token' };
     await mounted.render(<Status store={store} daemon={rotated} />);
     expect(reads).toBe(2);
     expect(mounted.container.textContent).toBe('loading:—');

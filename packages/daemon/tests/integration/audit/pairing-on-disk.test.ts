@@ -1,6 +1,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { FileAuditJournal } from '../../../src/adapters/audit/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
@@ -16,11 +17,12 @@ afterAll(cleanupTempDirectories);
  *
  * The unit tests prove the records the audited service writes; this proves the bytes — through the
  * production cryptography, device repository and file journal — for a right and a wrong code over both
- * carriers. The needles are the two credentials a redemption handles: the code it spends and the
- * device token it issues. Neither may be in any audit file, whatever the outcome.
+ * carriers. The needles are what a redemption handles beyond a name: the code it spends (a live
+ * credential) and the device key it registers. The log holds names and ids only, so neither may be in
+ * any audit file, whatever the outcome.
  */
 describe('a real pairing, read back off the disk', () => {
-  it('should record each redemption by name and id and never write the code or the device token', async () => {
+  it('should record each redemption by name and id and never write the code or the device key', async () => {
     // Arrange
     const home = await tempDirectory('fy-audit-pairing');
     const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
@@ -44,14 +46,14 @@ describe('a real pairing, read back off the disk', () => {
         clock: { now: () => Date.now() },
         cryptography,
         devices: repository,
-        credentials: new PairingDeviceRegistry(state.daemonId, cryptography, state.devices),
+        credentials: new PairingDeviceRegistry(state.daemonId, state.devices),
         operatorPassword: { isSet: async () => true },
         clientName: 'fy',
       },
       { log, alert: { newDevicePaired: async () => undefined }, failures: { auditWriteFailed: m => failures.push(m) } },
     );
     const needles: string[] = [];
-    const tokens: string[] = [];
+    const keys: string[] = [];
 
     // Act: each carrier gets a wrong code, then the right one.
     for (const carrier of ['direct', 'relay'] as const) {
@@ -61,14 +63,17 @@ describe('a real pairing, read back off the disk', () => {
       needles.push(code);
       const wrong = `${code.slice(0, -1)}${code.endsWith('A') ? 'B' : 'A'}`;
       const name = carrier === 'direct' ? 'Pixel 8' : 'Tablet';
+      const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+      const deviceKey = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
+      keys.push(deviceKey);
       const attempt = (value: string) =>
-        carrier === 'direct'
-          ? service.redeem({ code: value, deviceName: name }, 'peer')
-          : service.redeemOverRelay({ code: value, deviceName: name });
+        service.redeemInSession(
+          { code: value, deviceName: name, deviceKey, prove: async () => true },
+          carrier === 'direct' ? { kind: 'direct', rateLimitKey: 'peer' } : { kind: 'relay' },
+        );
       should((await attempt(wrong)).kind).equal('refused');
       const paired = await attempt(code);
       if (paired.kind !== 'paired') throw new Error('the fixture could not pair');
-      tokens.push(paired.response.deviceToken);
     }
     await log.flush(Date.now() + 120_000);
     const written = (
@@ -85,8 +90,8 @@ describe('a real pairing, read back off the disk', () => {
     should(failures).deepEqual([]);
     // Both stores were written: the pairings to the kept one, the refusals to the general one.
     should(audited.sort()).deepEqual(['audit-kept.jsonl', 'audit.jsonl']);
-    should(tokens).have.length(2);
-    for (const needle of [...needles, ...tokens]) should({ needle, leaked: written.includes(needle) }).deepEqual({
+    should(keys).have.length(2);
+    for (const needle of [...needles, ...keys]) should({ needle, leaked: written.includes(needle) }).deepEqual({
       needle,
       leaked: false,
     });

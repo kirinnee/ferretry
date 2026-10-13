@@ -24,6 +24,7 @@ import {
   decodeControlMessage,
   decodeDaemonHello,
   decodeFrame,
+  deviceAuthMessage,
   encodeControlMessage,
   encodeFrame,
   encodeHandshakeMessage,
@@ -36,9 +37,11 @@ import {
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
   type RelayFrame,
+  SESSION_PROTOCOL_ID,
   type SessionId,
   sealRecord,
   sessionIdFromBytes,
+  signDeviceProof,
   startClientHandshake,
   toBase64Url,
   utf8Bytes,
@@ -56,14 +59,28 @@ import { LiveDeviceConnections, type PairingRedemption } from '../../../src/lib/
 import { DaemonRelayConfigSchema } from '../../../src/lib/runtime/config.ts';
 
 const relayCrypto = new WebCryptoRelayCrypto();
-const DEVICE_TOKEN = 'fy_device_known';
 const DEVICE_ID = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
 
 let identity: DaemonIdentity;
+let deviceKey: Awaited<ReturnType<WebCryptoRelayCrypto['generateDeviceKey']>>;
+let deviceKeyText: string;
+const APP_SESSION = toBase64Url(new Uint8Array(16).fill(2));
 
 beforeAll(async () => {
   identity = await new WebCryptoRelayIdentityKeys().load(new NodePairingCryptography().newIdentity().privateKeyPem);
+  deviceKey = await relayCrypto.generateDeviceKey();
+  deviceKeyText = toBase64Url(deviceKey.publicKeySpki);
 });
+
+/** The device's claim to one session, signed over that session's transcript — what a browser sends. */
+async function claim(t: 'auth' | 'stream', transcript: Uint8Array): Promise<Record<string, string>> {
+  const proof = await signDeviceProof(
+    relayCrypto,
+    relayCrypto.deviceKeyHandle(deviceKey.privateKey),
+    deviceAuthMessage(transcript, t, DEVICE_ID, APP_SESSION),
+  );
+  return { t, protocol: SESSION_PROTOCOL_ID, deviceId: DEVICE_ID, appSession: APP_SESSION, proof };
+}
 
 const config = (patch: Record<string, unknown>) => DaemonRelayConfigSchema.parse(patch);
 
@@ -73,12 +90,15 @@ const ok = (body: unknown): ApiResponse => ({
   body: JSON.stringify(body),
 });
 
-const devices = { identifyDevice: (token: string) => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) };
+const devices = {
+  deviceKey: async (deviceId: string) => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
+  seen: () => undefined,
+};
 
 /** This tier proves the SOCKET — its order, liveness, patience and teardown — so the two ports the
  *  link uses for streams and pairing answer nothing here. What they carry is the unit tier's subject. */
 const relayStreams = async (): Promise<SocketUpgradeDecision> => ({ outcome: 'unclaimed' });
-const relayPairing = { redeemOverRelay: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) };
+const relayPairing = { redeemInSession: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) };
 
 const session = (): SessionId => {
   const id = sessionIdFromBytes(new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6]));
@@ -185,7 +205,7 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
             const sealed = await sealRecord(
               relayCrypto,
               channel,
-              utf8Bytes(JSON.stringify({ t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: DEVICE_TOKEN })),
+              utf8Bytes(JSON.stringify(await claim('auth', completed.keys.transcriptHash))),
             );
             if (!sealed.ok) throw new Error(sealed.reason);
             channel = sealed.state;
@@ -225,7 +245,7 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
       sockets: relayStreams,
       pairing: relayPairing,
       dispatch: async request =>
-        request.path === '/v1/sessions' && request.headers.get('authorization') === `Bearer ${DEVICE_TOKEN}`
+        request.path === '/v1/sessions' && request.device?.deviceId === DEVICE_ID
           ? ok({ sessions: ['one'] })
           : ok({ error: 'the relayed request did not arrive as itself' }),
     });
@@ -251,10 +271,11 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
 
       // Assert — and the carrier never saw any of it. Every end-to-end payload the rendezvous
       // forwarded is either the handshake JSON or ciphertext; none of them contains the body, the
-      // path or the device token.
+      // path, the device's identity or its proof.
       const carried = opaque.map(payload => utf8Text(payload) ?? '');
       should(carried.some(text => text.includes('sessions'))).be.false();
-      should(carried.some(text => text.includes(DEVICE_TOKEN))).be.false();
+      should(carried.some(text => text.includes(DEVICE_ID))).be.false();
+      should(carried.some(text => text.includes(APP_SESSION))).be.false();
     } finally {
       carrier.stop();
       server.stop(true);
@@ -611,14 +632,7 @@ describe('what a stopped carrier owes a live stream', () => {
     const sealed = await sealRecord(
       relayCrypto,
       openChannel(sessionId, completed.keys, 'client'),
-      utf8Bytes(
-        JSON.stringify({
-          t: 'stream',
-          protocol: RELAY_PROTOCOL_ID,
-          deviceToken: DEVICE_TOKEN,
-          path: '/v1/events',
-        }),
-      ),
+      utf8Bytes(JSON.stringify({ ...(await claim('stream', completed.keys.transcriptHash)), path: '/v1/events' })),
     );
     if (!sealed.ok) throw new Error(sealed.reason);
     socket.onmessage?.({ data: encodeFrame(sealed.frame) });

@@ -14,7 +14,7 @@ import { render } from '../../../support/react.ts';
  * connection that LOOKS local and then varies only what the daemon reported.
  */
 const localLookingConnection = () =>
-  daemonConnection({ daemonId: 'alpha', baseUrl: 'http://127.0.0.1:7431', deviceToken: 'token-alpha' });
+  daemonConnection({ daemonId: 'alpha', baseUrl: 'http://127.0.0.1:7431', deviceId: 'token-alpha' });
 
 const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantView => ({
   capability: 'fleet',

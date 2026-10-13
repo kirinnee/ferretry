@@ -1,11 +1,16 @@
-import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
 import should from 'should';
 
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonNotificationPreferences } from '../../src/lib/notification-preferences.ts';
 import {
   DaemonPushDevices,
+  type DaemonPushService,
+  daemonPushService,
+  disablePushDelivery,
+  enablePushDelivery,
+  enrolDaemonPushDevice,
   PUSH_CREATE_FAILED_MESSAGE,
   PUSH_DEVICE_STORAGE_KEY,
   PUSH_INACTIVE_MESSAGE,
@@ -13,15 +18,10 @@ import {
   PUSH_SYNC_FAILED_MESSAGE,
   PUSH_UNREACHABLE_MESSAGE,
   PUSH_UNSUPPORTED_MESSAGE,
-  type DaemonPushService,
   type PushEnrolment,
   type PushEnrolmentContext,
   type PushRegistrationLike,
   type PushSubscriptionHandle,
-  daemonPushService,
-  disablePushDelivery,
-  enablePushDelivery,
-  enrolDaemonPushDevice,
   parsePushDeviceStore,
   readPushDelivery,
   revokePushDevice,
@@ -30,8 +30,8 @@ import {
   unsubscribeLocalPush,
 } from '../../src/lib/push-enrolment.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 
 const prefs: PushPreferences = {
   events: { attention: true, question: true, failed: false, completed: false },

@@ -28,6 +28,7 @@ const device = (id: string, createdAt: string, name = id): PairedDevice => ({
   platform: 'browser',
   createdAt,
   lastSeenAt: createdAt,
+  idleExpiresAt: createdAt,
 });
 
 describe('security log words', () => {

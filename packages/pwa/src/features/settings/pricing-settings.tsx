@@ -23,7 +23,7 @@ import {
   useState,
 } from 'react';
 
-import { daemonApiClient } from '../../lib/api-client.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
@@ -1047,11 +1047,15 @@ function SyncPreview({
 
 export function PricingSettings({
   connection,
-  createClient = daemonApiClient,
+  createClient: injectedClient,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: AnalyticsPricingClientFactory;
 }) {
+  // The carrier-routed client unless a test or the harness hands one in: a plain-network client
+  // reaches no daemon at all, because a paired browser is answered only inside its own session.
+  const routedClient = useDaemonClient();
+  const createClient = injectedClient ?? routedClient;
   const [state, setState] = useState<PricingLoadState>({ status: 'loading' });
   const [staleMessage, setStaleMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

@@ -8,20 +8,20 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../../../src/lib/fleet-s
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../../src/lib/projects-store.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
-import { interact, mount, must, type Mounted } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const daemon = daemonConnection({
   daemonId: 'workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 
 /** A second machine, so a write can settle onto the wrong screen if unfenced. */
 const laptop = daemonConnection({
   daemonId: 'laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'laptop-token',
+  deviceId: 'laptop-token',
 });
 
 const pathField = (mounted: Mounted): HTMLInputElement => {
@@ -60,10 +60,20 @@ interface StoreShape {
   readonly sessions?: readonly SessionView[];
 }
 
+/**
+ * The store's carrier, as the plain network. The page reaches its daemon through `useDaemonFetch`,
+ * which routes through the store's carrier; these suites replace the global `fetch`, so the carrier
+ * here reads it at call time rather than capturing the original.
+ */
+const NETWORK_CARRIER = {
+  carrier: { fetch: async (input: string | URL | Request, init?: RequestInit) => await globalThis.fetch(input, init) },
+} as unknown as Pick<AppStore, 'carrier'>;
+
 const storeFor = ({ projectsPort, sessions = [] }: StoreShape): AppStore =>
   ({
     projects: new DaemonProjectsStore(projectsPort),
     fleet: new DaemonFleetStore(fleetPort(sessions)),
+    ...NETWORK_CARRIER,
   }) as AppStore;
 
 // The hub's registry rows are in-app links now, so the page reads the router.
@@ -99,7 +109,7 @@ const type = async (input: HTMLInputElement, value: string): Promise<void> => {
   });
 };
 
-// The page's write path goes through the production `browserFetch`, so these
+// The page's write path reaches the network through the store's carrier, so these
 // suites replace the global. Bun runs the whole unit tier in ONE process, so a
 // leaked stub would answer every later suite's requests.
 const realFetch = globalThis.fetch;
@@ -194,6 +204,7 @@ describe('ProjectsPage', () => {
     const store = {
       projects,
       fleet: new DaemonFleetStore(fleetPort([sessionView('s-1', { config: { cwd: '/home/k/scratch' } })])),
+      ...NETWORK_CARRIER,
     } as AppStore;
     const sent: { url: string; method?: string; body?: unknown }[] = [];
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -320,7 +331,7 @@ describe('ProjectsPage', () => {
     const projects = new DaemonProjectsStore({
       projects: async connection => (connection.daemonId === 'workstation' ? workstationRows : laptopRows),
     });
-    const store = { projects, fleet: new DaemonFleetStore(fleetPort([])) } as AppStore;
+    const store = { projects, fleet: new DaemonFleetStore(fleetPort([])), ...NETWORK_CARRIER } as AppStore;
     let release!: () => void;
     const held = new Promise<void>(resolve => {
       release = resolve;
@@ -360,7 +371,7 @@ describe('ProjectsPage', () => {
 
   it('abandons a refusal that settles after a re-pair of the SAME daemon id', async () => {
     const projects = new DaemonProjectsStore({ projects: async () => [] });
-    const store = { projects, fleet: new DaemonFleetStore(fleetPort([])) } as AppStore;
+    const store = { projects, fleet: new DaemonFleetStore(fleetPort([])), ...NETWORK_CARRIER } as AppStore;
     let release!: () => void;
     const held = new Promise<void>(resolve => {
       release = resolve;
@@ -389,7 +400,7 @@ describe('ProjectsPage', () => {
     // Same daemon id, replaced device token: a re-pair, not a different machine.
     // The status must still be dropped, because the refusal belongs to a
     // credential that no longer exists.
-    await mounted.render(element(daemonConnection({ ...daemon, deviceToken: 'rotated-token' })));
+    await mounted.render(element(daemonConnection({ ...daemon, deviceId: 'rotated-token' })));
     await settle();
     release();
     await settle();
@@ -415,6 +426,7 @@ describe('ProjectsPage', () => {
           throw new Error('unused');
         },
       }),
+      ...NETWORK_CARRIER,
     } as AppStore;
 
     const mounted = await mount(page(store));
@@ -438,6 +450,7 @@ describe('ProjectsPage', () => {
           throw new Error('unused');
         },
       }),
+      ...NETWORK_CARRIER,
     } as AppStore;
 
     const mounted = await mount(page(store));

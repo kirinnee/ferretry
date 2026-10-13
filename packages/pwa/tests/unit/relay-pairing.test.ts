@@ -9,47 +9,54 @@
  * `stream-opened` on a pairing session — and every one of those must be refused rather than absorbed.
  */
 
+import { describe, it } from 'bun:test';
 import { RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
 import {
   decodeFrame,
   FRAME_KINDS,
   fromBase64Url,
   RELAY_CLOSE_CODES,
-  RELAY_PROTOCOL_ID,
+  SESSION_PROTOCOL_ID,
   toBase64Url,
   utf8Bytes,
 } from '@ferretry/relay';
-import { describe, it } from 'bun:test';
 import should from 'should';
 import type { RelayCarrier } from '../../src/lib/daemon-connection.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { PairingSeed } from '../../src/lib/pairing.ts';
 import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
+import type { PairingSeed } from '../../src/lib/pairing.ts';
 import { DaemonCarrierRouter } from '../../src/lib/relay-carrier.ts';
-import { browserTerminalStreamAttach, TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
-import { redeemPairingOverRelay, relayPairingCandidates } from '../../src/lib/relay-pairing.ts';
+import { redeemPairingInSession, relayPairingCandidates } from '../../src/lib/relay-pairing.ts';
 import {
   PAIRING_REFUSED_REASON,
   RELAY_DATA_BYTE_BUDGET,
   RelayClientSession,
   RelayPairingRefusedError,
+  RelaySessionError,
   type RelaySessionMode,
   type RelayStreamFrame,
   RelayStreamRefusedError,
-  RelaySessionError,
 } from '../../src/lib/relay-session.ts';
+import { browserTerminalStreamAttach, TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
 import {
   autoDial,
+  LEASE_ENDS,
   newDaemonIdentity,
   readyFrame,
   relayCrypto,
   ScriptedDaemon,
   ScriptedSocket,
   settle,
+  testDevice,
   testSessionId,
 } from '../support/relay.ts';
 
 const sessionId = testSessionId();
+const device = await testDevice('fy_device_id_pairingTestDevice0001');
+const deviceKey = async () => device.claim.key;
+const OPENED = { t: 'stream-opened', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS } as const;
+const ACCEPTED = { t: 'authenticated', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS } as const;
+const PAIRED_DEVICE_ID = 'fy_device_id_pairedDevice0000000001';
 const CODE = '7F3K-Q2ND';
 const FINGERPRINT = `fy_daemon_${'A'.repeat(43)}`;
 const HOSTED = 'wss://relay.ferretry.test';
@@ -63,11 +70,12 @@ const seedFor = (daemonId: string): PairingSeed => ({
 });
 
 const PAIRED_RESPONSE = {
-  deviceToken: `fy_device_${'b'.repeat(43)}`,
+  deviceId: PAIRED_DEVICE_ID,
   daemonId: FINGERPRINT,
   daemonName: 'Studio',
   capabilities: [],
   carriers: [],
+  idleExpiryDays: 30,
 } as const;
 
 interface Harness {
@@ -95,10 +103,16 @@ const keyed = async (mode: RelaySessionMode, onData?: (frame: RelayStreamFrame) 
   return { session, socket, daemon };
 };
 
-const pairMode: RelaySessionMode = { kind: 'pair', code: CODE, deviceName: 'Ferretry PWA' };
+const pairMode: RelaySessionMode = {
+  kind: 'pair',
+  code: CODE,
+  deviceName: 'Ferretry PWA',
+  publicKey: device.publicKey,
+  key: device.claim.key,
+};
 const streamMode: RelaySessionMode = {
   kind: 'stream',
-  deviceToken: 'fy_device_x',
+  device: device.claim,
   path: '/v1/events',
   query: [['after', '0']],
 };
@@ -156,7 +170,7 @@ describe('a pairing session', () => {
     const { session, daemon } = await keyed(pairMode);
     const outcome = session.paired();
     await session.receiveBinary(
-      await daemon.record({ t: 'paired', protocol: RELAY_PROTOCOL_ID, response: PAIRED_RESPONSE }),
+      await daemon.record({ t: 'paired', protocol: SESSION_PROTOCOL_ID, response: PAIRED_RESPONSE }),
     );
     should((await outcome).response).eql(PAIRED_RESPONSE);
   });
@@ -170,7 +184,7 @@ describe('a pairing session', () => {
     const { session, daemon } = await keyed(pairMode);
     const outcome = session.paired();
     await session.receiveBinary(
-      await daemon.record({ t: 'paired', protocol: RELAY_PROTOCOL_ID, response: PAIRED_RESPONSE }),
+      await daemon.record({ t: 'paired', protocol: SESSION_PROTOCOL_ID, response: PAIRED_RESPONSE }),
     );
     session.carrierClosed(RELAY_SESSION_CONCLUDED_CLOSE_CODE, '');
     should((await outcome).kind).equal('paired');
@@ -185,7 +199,7 @@ describe('a pairing session', () => {
   it('should not lose a sealed outcome to a close that arrives while it is still decrypting', async () => {
     const { session, daemon } = await keyed(pairMode);
     const outcome = session.paired();
-    const sealed = await daemon.record({ t: 'paired', protocol: RELAY_PROTOCOL_ID, response: PAIRED_RESPONSE });
+    const sealed = await daemon.record({ t: 'paired', protocol: SESSION_PROTOCOL_ID, response: PAIRED_RESPONSE });
     // Deliberately NOT awaited: this is what the socket adapter does, and it is what makes the race
     // reachable at all.
     const reading = session.receiveBinary(sealed);
@@ -198,7 +212,7 @@ describe('a pairing session', () => {
     const { session, daemon } = await keyed(pairMode);
     const outcome = session.paired();
     await session.receiveBinary(
-      await daemon.record({ t: 'pair-refused', protocol: RELAY_PROTOCOL_ID, reason: PAIRING_REFUSED_REASON }),
+      await daemon.record({ t: 'pair-refused', protocol: SESSION_PROTOCOL_ID, reason: PAIRING_REFUSED_REASON }),
     );
     const reason = await failure(outcome);
     should(reason).be.instanceof(RelayPairingRefusedError);
@@ -220,34 +234,36 @@ describe('a pairing session', () => {
   it('should refuse a daemon that answers a pairing attempt with anything else', async () => {
     const { session, daemon } = await keyed(pairMode);
     const outcome = session.paired();
-    await session.receiveBinary(await daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(ACCEPTED));
     should((await failure(outcome)).message).match(/did not answer this pairing attempt/u);
   });
 
   it('should never serve a request, whatever the daemon says', async () => {
     const { session, daemon } = await keyed(pairMode);
     await session.receiveBinary(
-      await daemon.record({ t: 'paired', protocol: RELAY_PROTOCOL_ID, response: PAIRED_RESPONSE }),
+      await daemon.record({ t: 'paired', protocol: SESSION_PROTOCOL_ID, response: PAIRED_RESPONSE }),
     );
     should(session.live()).be.false();
     should(await failure(session.request({ method: 'GET', path: '/v1/sessions' }))).be.instanceof(RelaySessionError);
   });
 });
 
-describe('redeeming over one rendezvous', () => {
-  it('should refuse a fingerprint that cannot address a rendezvous rather than dialling', async () => {
+describe('redeeming in one session', () => {
+  it('should refuse a fingerprint that cannot address a session rather than dialling', async () => {
     const reason = await failure(
-      redeemPairingOverRelay({
+      redeemPairingInSession({
         crypto: relayCrypto,
         seed: seedFor('sha256:legacy'),
         deviceName: 'Ferretry PWA',
-        rendezvous: SELF_HOSTED_RELAY,
+        method: SELF_HOSTED_RELAY,
+        publicKey: device.publicKey,
+        key: device.claim.key,
         dial: () => {
           throw new Error('nothing may be dialled for an unverifiable fingerprint');
         },
       }),
     );
-    should(reason.message).match(/cannot address a rendezvous/u);
+    should(reason.message).match(/cannot address a session/u);
   });
 });
 
@@ -256,7 +272,7 @@ describe('a stream session', () => {
     const received: RelayStreamFrame[] = [];
     const { session, socket, daemon } = await keyed(streamMode, frame => received.push(frame));
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(OPENED));
     await ready;
     should(session.streaming()).be.true();
 
@@ -280,7 +296,7 @@ describe('a stream session', () => {
   it('should split an oversized write into ordered records and never split a control frame', async () => {
     const { session, socket, daemon } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(OPENED));
     await ready;
 
     const before = socket.sent.length;
@@ -299,7 +315,7 @@ describe('a stream session', () => {
     const { session, daemon } = await keyed(streamMode);
     const ready = session.ready();
     await session.receiveBinary(
-      await daemon.record({ t: 'stream-refused', protocol: RELAY_PROTOCOL_ID, status: 404, body: 'no terminal' }),
+      await daemon.record({ t: 'stream-refused', protocol: SESSION_PROTOCOL_ID, status: 404, body: 'no terminal' }),
     );
     const reason = await failure(ready);
     should(reason).be.instanceof(RelayStreamRefusedError);
@@ -315,12 +331,12 @@ describe('a stream session', () => {
   it('should report the sealed close code and not the session close that follows it', async () => {
     const { session, daemon } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(OPENED));
     await ready;
     const closes: { code: number; reason: string }[] = [];
     session.onStreamClosed(closed => closes.push(closed));
     await session.receiveBinary(
-      await daemon.record({ t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
+      await daemon.record({ t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
     );
     session.carrierClosed(RELAY_SESSION_CONCLUDED_CLOSE_CODE, '');
     should(closes).eql([{ code: 1013, reason: 'fell behind' }]);
@@ -329,10 +345,10 @@ describe('a stream session', () => {
   it('should answer a listener that subscribes after the stream already ended', async () => {
     const { session, daemon } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(OPENED));
     await ready;
     await session.receiveBinary(
-      await daemon.record({ t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1000, reason: 'done' }),
+      await daemon.record({ t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1000, reason: 'done' }),
     );
     const closes: number[] = [];
     session.onStreamClosed(closed => closes.push(closed.code));
@@ -346,7 +362,7 @@ describe('a stream session', () => {
   it('should leave by sealing a close rather than by dropping the socket', async () => {
     const { session, socket, daemon } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(OPENED));
     await ready;
     const before = socket.sent.length;
     session.closeStream(1000, 'the viewer left this stream');
@@ -359,7 +375,7 @@ describe('a stream session', () => {
   it('should end a stream that dies with no sealed close, in the same shape as an orderly one', async () => {
     const { session, daemon } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(OPENED));
     await ready;
     const closes: number[] = [];
     session.onStreamClosed(closed => closes.push(closed.code));
@@ -371,7 +387,7 @@ describe('a stream session', () => {
   it('should refuse bytes that are not base64url, rather than writing invented bytes', async () => {
     const { session, daemon } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(OPENED));
     await ready;
     await session.receiveBinary(await daemon.record({ t: 'data', bytes: 'not base64url!!' }));
     should(await failure(session.paired())).be.instanceof(RelaySessionError);
@@ -381,18 +397,14 @@ describe('a stream session', () => {
   it('should refuse a request answer on a stream session and a data record on a request session', async () => {
     const streaming = await keyed(streamMode);
     const ready = streaming.session.ready();
-    await streaming.session.receiveBinary(
-      await streaming.daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }),
-    );
+    await streaming.session.receiveBinary(await streaming.daemon.record(OPENED));
     await ready;
     await streaming.session.receiveBinary(await streaming.daemon.record({ t: 'res', id: 1, status: 200 }));
     should(streaming.session.streaming()).be.false();
 
-    const serving = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const serving = await keyed({ kind: 'auth', device: device.claim });
     const authenticated = serving.session.ready();
-    await serving.session.receiveBinary(
-      await serving.daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }),
-    );
+    await serving.session.receiveBinary(await serving.daemon.record(ACCEPTED));
     await authenticated;
     await serving.session.receiveBinary(await serving.daemon.record({ t: 'data', text: 'x' }));
     should(serving.session.live()).be.false();
@@ -411,19 +423,22 @@ describe('the carrier a redemption and a stream actually travel', () => {
   it('should redeem over a dialled rendezvous and hand back the response verbatim', async () => {
     const id = await identity();
     const response = {
-      deviceToken: `fy_device_${'m'.repeat(43)}`,
+      deviceId: PAIRED_DEVICE_ID,
       daemonId: id.daemonId,
       daemonName: 'Studio',
       capabilities: [],
       carriers: [],
+      idleExpiryDays: 30,
     };
     const auto = autoDial(id, { paired: response });
 
-    const paired = await redeemPairingOverRelay({
+    const paired = await redeemPairingInSession({
       crypto: relayCrypto,
       seed: seedFor(id.daemonId),
       deviceName: 'Ferretry PWA',
-      rendezvous: RENDEZVOUS,
+      method: RENDEZVOUS,
+      publicKey: device.publicKey,
+      key: device.claim.key,
       dial: auto.dial,
       heartbeat: () => () => undefined,
     });
@@ -439,11 +454,13 @@ describe('the carrier a redemption and a stream actually travel', () => {
     const id = await identity();
     const auto = autoDial(id, { pairRefused: true });
     const reason = await failure(
-      redeemPairingOverRelay({
+      redeemPairingInSession({
         crypto: relayCrypto,
         seed: seedFor(id.daemonId),
         deviceName: 'Ferretry PWA',
-        rendezvous: RENDEZVOUS,
+        method: RENDEZVOUS,
+        publicKey: device.publicKey,
+        key: device.claim.key,
         dial: auto.dial,
         heartbeat: () => () => undefined,
       }),
@@ -461,33 +478,20 @@ describe('a stream opened through the carrier router', () => {
     const auto = autoDial(id, { ...answer, body: '{}' });
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,
-      dial: auto.dial,
+      deviceKey,
+      dial: relayOnly(auto.dial),
       heartbeat: () => () => undefined,
-      network: async () => {
-        throw new Error('direct is not reachable in this case');
-      },
     });
     const daemon = daemonConnection({
       daemonId: id.daemonId,
       baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      deviceId: PAIRED_DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: 'https://studio.example' }, RELAY],
     });
     // One ordinary request first: `openStream` reads a MEASURED carrier and never probes for one.
     await router.send(daemon, 'https://studio.example/v1/health');
     return { router, daemon, auto };
   };
-
-  it('should answer null while nothing has measured a carrier, rather than probing for one', async () => {
-    const id = await newDaemonIdentity();
-    const router = new DaemonCarrierRouter({ crypto: relayCrypto, dial: () => new ScriptedSocket() });
-    const daemon = daemonConnection({
-      daemonId: id.daemonId,
-      baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
-    });
-    should(await router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.null();
-  });
 
   it('should open one stream session per stream and register it where an unpair can reach it', async () => {
     const frames: RelayStreamFrame[] = [];
@@ -569,7 +573,7 @@ describe('a stream opened through the carrier router', () => {
     const refreshed = daemonConnection({
       daemonId: daemon.daemonId,
       baseUrl: daemon.baseUrl,
-      deviceToken: daemon.deviceToken,
+      deviceId: daemon.deviceId,
       carriers: [RELAY],
     });
     await router.send(refreshed, 'https://studio.example/v1/health');
@@ -601,12 +605,22 @@ describe('a stream opened through the carrier router', () => {
   });
 });
 
-describe('a terminal and an event feed on a relayed carrier', () => {
+/** Refuse the daemon's own address, so the walk measures the rendezvous every case here is about. */
+const relayOnly =
+  (dial: (url: string) => ScriptedSocket) =>
+  (url: string): ScriptedSocket => {
+    if (new URL(url).hostname !== 'studio.example') return dial(url);
+    const refused = new ScriptedSocket();
+    queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
+    return refused;
+  };
+
+describe('a terminal and an event feed on a stream session', () => {
   const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
   const daemon = daemonConnection({
     daemonId: 'fy_daemon_x',
     baseUrl: 'https://studio.example',
-    deviceToken: `fy_device_${'x'.repeat(43)}`,
+    deviceId: PAIRED_DEVICE_ID,
   });
 
   /** A stream session the suite drives directly, standing in for one the router opened. */
@@ -624,14 +638,12 @@ describe('a terminal and an event feed on a relayed carrier', () => {
   it('should carry terminal output up, split writes down and seal its own leave', async () => {
     const { session, socket, daemon: scripted } = await scriptedStream();
     const ready = session.ready();
-    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await scripted.record(OPENED));
     await ready;
 
     const received: Uint8Array[] = [];
     const seen: { path?: string } = {};
-    const attach = browserTerminalStreamAttach(openStreamWith(session, seen) as never, async () => {
-      throw new Error('a relayed terminal buys no ticket');
-    });
+    const attach = browserTerminalStreamAttach(openStreamWith(session, seen) as never);
     const stream = await attach(daemon, scope, 'a1b2c3d4e5f6', {
       onOpen: () => undefined,
       onBytes: bytes => received.push(bytes),
@@ -659,16 +671,11 @@ describe('a terminal and an event feed on a relayed carrier', () => {
     should(socket.closed).be.null();
   });
 
-  it('should report a refused relayed terminal without buying a ticket or opening a socket', async () => {
+  it('should report a refused terminal as a refusal the deck will not retry', async () => {
     const refusals: { status: number; body: string }[] = [];
-    const attach = browserTerminalStreamAttach(
-      (async () => {
-        throw new RelayStreamRefusedError(403, 'the operator refused this capability');
-      }) as never,
-      async () => {
-        throw new Error('a refused relayed terminal buys no ticket');
-      },
-    );
+    const attach = browserTerminalStreamAttach((async () => {
+      throw new RelayStreamRefusedError(403, 'the operator refused this capability');
+    }) as never);
     const reason = await failure(
       attach(daemon, scope, 'a1b2c3d4e5f6', {
         onOpen: () => undefined,
@@ -684,21 +691,11 @@ describe('a terminal and an event feed on a relayed carrier', () => {
   it('should carry the event feed as a stream session and end on the sealed close', async () => {
     const { session, daemon: scripted } = await scriptedStream();
     const ready = session.ready();
-    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await scripted.record(OPENED));
     await ready;
 
     const messages: unknown[] = [];
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => {
-        throw new Error('a relayed stream mints no ticket');
-      },
-      () => {
-        throw new Error('a relayed stream opens no socket');
-      },
-      () => ({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' }),
-      openStreamWith(session, {}) as never,
-    );
+    const transport = new DaemonEventTransport(daemon, openStreamWith(session, {}) as never);
     const streaming = transport.stream({
       url: 'wss://studio.example/v1/events?after=0',
       token: 'x',
@@ -709,30 +706,11 @@ describe('a terminal and an event feed on a relayed carrier', () => {
     // Bytes on the event route are a shape this stream does not have, and are not parsed as text.
     onFrame?.({ kind: 'bytes', bytes: utf8Bytes('not an event') });
     await session.receiveBinary(
-      await scripted.record({ t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
+      await scripted.record({ t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
     );
 
     should(await failure(streaming)).match({ message: /1013 fell behind/u });
     should(messages).eql([{ kind: 'event' }]);
-  });
-
-  it('should refuse an event stream when the carrier is no longer a rendezvous', async () => {
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => 'ticket',
-      () => {
-        throw new Error('no socket');
-      },
-      () => ({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' }),
-      async () => null,
-    );
-    should(
-      (
-        await failure(
-          transport.stream({ url: 'wss://studio.example/v1/events', token: 'x', onMessage: () => undefined }),
-        )
-      ).message,
-    ).match(/no longer reachable over a rendezvous/u);
   });
 });
 
@@ -756,9 +734,9 @@ describe('the two sequence counters one channel holds', () => {
    * carrying one sequence is the defect, stated in the only terms an attacker would also see.
    */
   it('should never reuse a record sequence when a seal and an open overlap', async () => {
-    const { session, socket, daemon } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const { session, socket, daemon } = await keyed({ kind: 'auth', device: device.claim });
     const ready = session.ready();
-    await session.receiveBinary(await daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await daemon.record(ACCEPTED));
     await ready;
 
     for (let round = 1; round <= 6; round += 1) {
@@ -793,16 +771,14 @@ describe('the pieces the composition root supplies by default', () => {
     const auto = autoDial(id, { body: '{}' });
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,
-      dial: auto.dial,
+      deviceKey,
+      dial: relayOnly(auto.dial),
       heartbeat: () => () => undefined,
-      network: async () => {
-        throw new Error('direct is not reachable in this case');
-      },
     });
     const daemon = daemonConnection({
       daemonId: id.daemonId,
       baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      deviceId: PAIRED_DEVICE_ID,
       carriers: [
         { kind: 'direct', daemonUrl: 'https://studio.example' },
         { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
@@ -822,36 +798,38 @@ describe('the pieces the composition root supplies by default', () => {
   it('should arm a real interval for a redemption that injects none, and cancel it', async () => {
     const id = await newDaemonIdentity();
     const response = {
-      deviceToken: `fy_device_${'m'.repeat(43)}`,
+      deviceId: PAIRED_DEVICE_ID,
       daemonId: id.daemonId,
       daemonName: 'Studio',
       capabilities: [],
       carriers: [],
+      idleExpiryDays: 30,
     };
     const auto = autoDial(id, { paired: response });
 
     // No `heartbeat` override: this drives the module's own default all the way through.
-    const paired = await redeemPairingOverRelay({
+    const paired = await redeemPairingInSession({
       crypto: relayCrypto,
       seed: seedFor(id.daemonId),
       deviceName: 'Ferretry PWA',
-      rendezvous: { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
+      method: { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
+      publicKey: device.publicKey,
+      key: device.claim.key,
       dial: auto.dial,
     });
 
-    should(paired.deviceToken).equal(response.deviceToken);
+    should(paired.deviceId).equal(response.deviceId);
     // A timer still armed here would keep this process alive past the suite; that it exits proves it.
     should(auto.sockets[0]?.closed?.code).equal(1000);
   });
 });
 
-describe('leaving a stream, on either carrier', () => {
+describe('leaving a stream', () => {
   const daemon = daemonConnection({
     daemonId: 'fy_daemon_x',
     baseUrl: 'https://studio.example',
-    deviceToken: `fy_device_${'x'.repeat(43)}`,
+    deviceId: PAIRED_DEVICE_ID,
   });
-  const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
 
   /*
    * §14 makes a viewer's leave an explicit sealed record "so that the taxonomy survives in both
@@ -862,21 +840,11 @@ describe('leaving a stream, on either carrier', () => {
   it('should seal a stream-close when a relayed event subscription is aborted', async () => {
     const { session, socket, daemon: scripted } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await scripted.record(OPENED));
     await ready;
 
     const abort = new AbortController();
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => {
-        throw new Error('a relayed stream mints no ticket');
-      },
-      () => {
-        throw new Error('a relayed stream opens no socket');
-      },
-      () => ({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' }),
-      (async () => session) as never,
-    );
+    const transport = new DaemonEventTransport(daemon, (async () => session) as never);
     const streaming = transport.stream({
       url: 'wss://studio.example/v1/events',
       token: 'x',
@@ -898,19 +866,9 @@ describe('leaving a stream, on either carrier', () => {
   it('should open nothing for a subscription that is already aborted', async () => {
     const abort = new AbortController();
     abort.abort();
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => {
-        throw new Error('no ticket');
-      },
-      () => {
-        throw new Error('no socket');
-      },
-      () => ({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' }),
-      async () => {
-        throw new Error('no stream session');
-      },
-    );
+    const transport = new DaemonEventTransport(daemon, async () => {
+      throw new Error('no stream session');
+    });
     await transport.stream({
       url: 'wss://studio.example/v1/events',
       token: 'x',
@@ -918,79 +876,9 @@ describe('leaving a stream, on either carrier', () => {
       onMessage: () => undefined,
     });
   });
-
-  /*
-   * The DIRECT adapter of the same port: a real socket, driven through open, output, and close. It
-   * is the carrier a browser on the daemon's own network gets, and the port is what stops the deck
-   * knowing which one it has.
-   */
-  it('should drive a direct terminal socket through open, output and a deliberate leave', async () => {
-    const listeners = new Map<string, (event: unknown) => void>();
-    let sent: unknown[] = [];
-    let closed: { code: number; reason: string } | undefined;
-    class FakeSocket {
-      /** The real constructor carries this, and `directTerminalStream` compares against it. */
-      static readonly OPEN = 1;
-      binaryType = '';
-      readyState = 1;
-      addEventListener(type: string, listener: (event: unknown) => void): void {
-        listeners.set(type, listener);
-      }
-      send(payload: unknown): void {
-        sent.push(payload);
-      }
-      close(code: number, reason: string): void {
-        closed = { code, reason };
-      }
-    }
-    const previousSocket = globalThis.WebSocket;
-    globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket;
-    try {
-      const opens: number[] = [];
-      const bytes: Uint8Array[] = [];
-      const closes: { code: number; reason: string }[] = [];
-      const attach = browserTerminalStreamAttach(
-        async () => null,
-        async () =>
-          Response.json({ ticket: `fy_ticket_${'a'.repeat(43)}`, ttlSeconds: 30, expiresAt: '2026-08-01T10:06:00Z' }),
-        () => ({ kind: 'direct', daemonUrl: 'https://studio.example' }),
-      );
-      const stream = await attach(daemon, scope, 'a1b2c3d4e5f6', {
-        onOpen: () => opens.push(1),
-        onBytes: value => bytes.push(value),
-        onClosed: (code, reason) => closes.push({ code, reason }),
-        onRefused: () => undefined,
-      });
-
-      listeners.get('open')?.({});
-      listeners.get('message')?.({ data: utf8Bytes('built ok').buffer });
-      // `error` has no port equivalent: the close that follows owns the taxonomy.
-      listeners.get('error')?.({});
-      sent = [];
-      stream.write(utf8Bytes('ls\n'));
-      stream.control('{"type":"resize"}');
-      stream.close(1000, 'terminal tab detached');
-      listeners.get('close')?.({ code: 1000, reason: 'terminal tab detached' });
-
-      should(opens).eql([1]);
-      should(new TextDecoder().decode(bytes[0] as Uint8Array)).equal('built ok');
-      should(sent).have.length(2);
-      should(closed).eql({ code: 1000, reason: 'terminal tab detached' });
-      should(closes).eql([{ code: 1000, reason: 'terminal tab detached' }]);
-    } finally {
-      globalThis.WebSocket = previousSocket;
-    }
-  });
 });
 
 describe('the failure shapes the adversarial review named', () => {
-  const daemon = daemonConnection({
-    daemonId: 'fy_daemon_x',
-    baseUrl: 'https://studio.example',
-    deviceToken: `fy_device_${'x'.repeat(43)}`,
-  });
-  const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
-
   /*
    * P1: a consumer that THROWS used to escape into `void session.receiveBinary(bytes)` and become an
    * unhandled rejection, leaving the session in `streaming` with no sealed close and no `4440` — so
@@ -1007,7 +895,7 @@ describe('the failure shapes the adversarial review named', () => {
       throw new Error('this bundle does not know that frame kind');
     });
     const ready = session.ready();
-    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await scripted.record(OPENED));
     await ready;
     const closes: number[] = [];
     session.onStreamClosed(closed => closes.push(closed.code));
@@ -1029,9 +917,9 @@ describe('the failure shapes the adversarial review named', () => {
    * pairing walk can be refused 4429 by a slot the failed attempt is still holding.
    */
   it('should close the socket when it refuses a record, not only mark itself ended', async () => {
-    const { session, socket, daemon: scripted } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const { session, socket, daemon: scripted } = await keyed({ kind: 'auth', device: device.claim });
     const ready = session.ready();
-    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await scripted.record(OPENED));
 
     should(await failure(ready)).be.instanceof(RelaySessionError);
     should(socket.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
@@ -1042,7 +930,7 @@ describe('the failure shapes the adversarial review named', () => {
    * would race its own close frame.
    */
   it('should stay quiet when the rendezvous is the one closing', async () => {
-    const { session, socket } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const { session, socket } = await keyed({ kind: 'auth', device: device.claim });
     const ready = session.ready();
     session.carrierClosed(RELAY_CLOSE_CODES.daemonAbsent, 'no daemon holds this rendezvous');
     await failure(ready);
@@ -1057,7 +945,7 @@ describe('the failure shapes the adversarial review named', () => {
   it('should send a zero-length write rather than dropping it silently', async () => {
     const { session, socket, daemon: scripted } = await keyed(streamMode);
     const ready = session.ready();
-    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await session.receiveBinary(await scripted.record(OPENED));
     await ready;
 
     const before = socket.sent.length;
@@ -1089,16 +977,14 @@ describe('the failure shapes the adversarial review named', () => {
     const auto = autoDial(id, { body: '{}' });
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,
-      dial: auto.dial,
+      deviceKey,
+      dial: relayOnly(auto.dial),
       heartbeat: () => () => undefined,
-      network: async () => {
-        throw new Error('direct is not reachable in this case');
-      },
     });
     const paired = daemonConnection({
       daemonId: id.daemonId,
       baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      deviceId: PAIRED_DEVICE_ID,
       carriers: [
         { kind: 'direct', daemonUrl: 'https://studio.example' },
         { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
@@ -1117,37 +1003,5 @@ describe('the failure shapes the adversarial review named', () => {
     // …and the router evicted it, which a fresh open proves by being a different session.
     const next = await router.openStream(paired, { path: '/v1/events', onData: () => undefined });
     should(next).not.equal(stream);
-  });
-
-  /*
-   * P3: `openStream` answers `null` both for "the winner is direct" and for "no walk has finished".
-   * Reading the second as direct buys a single-use ticket and opens a socket at the daemon's own
-   * address — the one a relayed browser cannot reach — burning a credential on a socket that can only
-   * fail. The live event feed already had this gate; the terminal did not.
-   */
-  it('should refuse to attach a terminal before any carrier has been measured', async () => {
-    let tickets = 0;
-    const attach = browserTerminalStreamAttach(
-      async () => null,
-      async () => {
-        tickets += 1;
-        return Response.json({
-          ticket: `fy_ticket_${'a'.repeat(43)}`,
-          ttlSeconds: 30,
-          expiresAt: '2026-08-01T10:06:00Z',
-        });
-      },
-      () => undefined,
-    );
-    const reason = await failure(
-      attach(daemon, scope, 'a1b2c3d4e5f6', {
-        onOpen: () => undefined,
-        onBytes: () => undefined,
-        onClosed: () => undefined,
-        onRefused: () => undefined,
-      }),
-    );
-    should(reason.message).match(/no carrier has been measured/u);
-    should(tickets).equal(0);
   });
 });

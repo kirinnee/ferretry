@@ -34,7 +34,6 @@ import {
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
-import { describeGrantRefusal } from '../../../../src/lib/grants/policy.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
   type AttentionLedger,
@@ -58,6 +57,7 @@ import {
   DEFAULT_CAPABILITY_GRANTS,
   type GrantAuditEntry,
 } from '../../../../src/lib/grants/index.ts';
+import { describeGrantRefusal } from '../../../../src/lib/grants/policy.ts';
 import type {
   LearningState,
   LearningStorePort,
@@ -163,11 +163,12 @@ import { catalog, inventory } from '../../core/fixtures.ts';
 
 export const AT = '2024-05-01T10:00:00.000Z';
 export const IDS = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'] as const;
-export const CREDENTIALS = { admin: 'admin-secret', warden: 'warden-secret' } as const;
-
-/** A socket boundary with no ticket surface, for cases whose callers present a real bearer. A ticket
- *  is the browser's credential; refusing every one of them is what these cases mean. */
-export const NO_TICKETS = { redeem: () => undefined } as const;
+/** The host's two tokens, and a directory in which every device a session names is still paired. */
+export const CREDENTIALS = {
+  admin: 'admin-secret',
+  warden: 'warden-secret',
+  devices: { has: (_deviceId: string) => true },
+} as const;
 
 /** The human's CLI. */
 export const human = { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-client': 'cli' } as const;

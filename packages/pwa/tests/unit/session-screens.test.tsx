@@ -21,12 +21,12 @@ import { render, run, runAsync } from '../support/react.ts';
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const daemonB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'https://daemon-b.example.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 
 const session = (id: string, status: string, overrides: Record<string, unknown> = {}): SessionView =>

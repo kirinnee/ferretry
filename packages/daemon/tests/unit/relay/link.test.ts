@@ -14,7 +14,14 @@
  */
 
 import { beforeAll, describe, it } from 'bun:test';
-import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/protocol';
+import {
+  MAX_SESSION_SECONDS,
+  MAX_TUNNEL_BODY_BYTES,
+  OLDER_APP_SENTENCE,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+  RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+  RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+} from '@ferretry/protocol';
 import {
   type ChannelState,
   type ClientHello,
@@ -27,6 +34,9 @@ import {
   decodeCreditPayload,
   decodeDaemonHello,
   decodeFrame,
+  deviceAuthMessage,
+  devicePairMessage,
+  deviceRenewMessage,
   encodeControlMessage,
   encodeCreditPayload,
   encodeFrame,
@@ -40,15 +50,19 @@ import {
   NONCE_BYTES,
   openChannel,
   openRecord,
+  type PrivateKeyHandle,
   RELAY_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
   type RelayCrypto,
   type RelayFrame,
+  SESSION_PROTOCOL_ID,
   type SessionId,
   type SessionKeys,
   sealRecord,
   sessionIdFromBytes,
+  signDeviceProof,
+  verifyDeviceProof,
   startClientHandshake,
   toBase64Url,
   utf8Bytes,
@@ -66,23 +80,52 @@ import type {
 import {
   LiveDeviceConnections,
   type PairingRedemption,
-  type RelayPairingAttempt,
+  type SessionPairingAttempt,
 } from '../../../src/lib/pairing/index.ts';
 import {
+  ACCESS_LEASE_ENDED_REASON,
+  MAX_INCOMING_BODIES,
   MAX_PRE_CREDENTIAL_SESSIONS,
   RELAY_CREDENTIAL_DEADLINE_MS,
   RELAY_ENDED_SESSION_GRACE_MS,
   RELAY_MAX_ENDED_SESSIONS,
   RelayLink,
   type RelayLinkSocket,
+  UNKNOWN_DEVICE_KEY,
 } from '../../../src/lib/relay/link.ts';
 import { MAX_TUNNEL_DATA_BYTES } from '../../../src/lib/relay/tunnel.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();
 const HOST = 'relay.example';
+/**
+ * The credential a test MEANS, before it is turned into what a session actually carries.
+ *
+ * A device now proves a key by signing its session's transcript, so a credential record cannot be
+ * written as a literal: it depends on the handshake it follows. Cases still say which device they mean
+ * — the known one, or a stranger — and `clientSend` turns that into a real signed claim.
+ */
 const DEVICE_TOKEN = 'fy_device_known';
+const DEVICE_ID = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
+const APP_SESSION = toBase64Url(new Uint8Array(16).fill(9));
+const TEST_CLOCK = { now: () => 0 };
+const AUTHENTICATED = {
+  t: 'authenticated',
+  protocol: SESSION_PROTOCOL_ID,
+  accessExpiresAt: '1970-01-01T00:15:00.000Z',
+} as const;
+const STREAM_OPENED = {
+  t: 'stream-opened',
+  protocol: SESSION_PROTOCOL_ID,
+  accessExpiresAt: '1970-01-01T00:15:00.000Z',
+} as const;
 
 let identity: DaemonIdentity;
+let deviceKey: PrivateKeyHandle;
+let deviceKeyText: string;
+/** A key nobody paired, for a device the daemon must refuse. */
+let strangerKey: PrivateKeyHandle;
+/** Each open session's transcript hash, so a credential can be signed for exactly that session. */
+const transcripts = new Map<string, Uint8Array>();
 
 beforeAll(async () => {
   const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
@@ -98,7 +141,29 @@ beforeAll(async () => {
     '',
   ].join('\n');
   identity = await crypto_.importDaemonIdentity(pem);
+  const device = await crypto_.generateDeviceKey();
+  deviceKey = crypto_.deviceKeyHandle(device.privateKey);
+  deviceKeyText = toBase64Url(device.publicKeySpki);
+  strangerKey = crypto_.deviceKeyHandle((await crypto_.generateDeviceKey()).privateKey);
 });
+
+/** A credential record as a session carries it: the device's claim, signed over this session. */
+async function credentialed(channel: ChannelState, message: unknown): Promise<unknown> {
+  if (typeof message !== 'object' || message === null) return message;
+  const record = message as Record<string, unknown>;
+  const transcript = transcripts.get(channel.sessionId.text) ?? new Uint8Array(32);
+  if (record.t === 'pair' && !('deviceKey' in record))
+    return {
+      ...record,
+      deviceKey: deviceKeyText,
+      proof: await signDeviceProof(crypto_, deviceKey, devicePairMessage(transcript, deviceKeyText)),
+    };
+  if (!('deviceToken' in record) || (record.t !== 'auth' && record.t !== 'stream')) return message;
+  const { deviceToken, ...rest } = record;
+  const signer = deviceToken === DEVICE_TOKEN ? deviceKey : strangerKey;
+  const proof = await signDeviceProof(crypto_, signer, deviceAuthMessage(transcript, record.t, DEVICE_ID, APP_SESSION));
+  return { ...rest, deviceId: DEVICE_ID, appSession: APP_SESSION, proof };
+}
 
 interface Wire {
   readonly frames: RelayFrame[];
@@ -134,6 +199,14 @@ interface FakeTimer {
   cancelled: boolean;
 }
 
+/** One pairing attempt as the harness records it: its fields, and the verdict its own proof gave. */
+interface RecordedPairing {
+  readonly code: string;
+  readonly deviceName: string;
+  readonly deviceKey: string;
+  readonly proven: boolean;
+}
+
 interface Harness {
   readonly link: RelayLink;
   readonly wire: Wire;
@@ -141,7 +214,8 @@ interface Harness {
   /** Every upgrade the link asked the socket route table for. */
   readonly upgrades: ApiRequest[];
   /** Every pairing attempt the link handed to the redeemer. */
-  readonly pairings: RelayPairingAttempt[];
+  /** Each attempt the pairing service was handed, with its proof already run — as the service runs it. */
+  readonly pairings: RecordedPairing[];
   readonly timers: FakeTimer[];
   /** The device registry the link reports to, so a test can unpair the device a session belongs to. */
   readonly connections: LiveDeviceConnections;
@@ -151,12 +225,17 @@ function harness(
   answer: (request: ApiRequest) => Promise<ApiResponse> = async () => json(200, { ok: true }),
   knownToken = DEVICE_TOKEN,
   upgrade: (request: ApiRequest) => Promise<SocketUpgradeDecision> = async () => ({ outcome: 'unclaimed' }),
-  redeem: (attempt: RelayPairingAttempt) => Promise<PairingRedemption> = async () => ({ kind: 'refused' }),
+  redeem: (attempt: SessionPairingAttempt) => Promise<PairingRedemption> = async () => ({ kind: 'refused' }),
+  extra: {
+    readonly now?: () => number;
+    readonly seen?: (deviceId: string) => void;
+    readonly deviceKey?: (deviceId: string) => Promise<string | undefined>;
+  } = {},
 ): Harness {
   const sent = wire();
   const requests: ApiRequest[] = [];
   const upgrades: ApiRequest[] = [];
-  const pairings: RelayPairingAttempt[] = [];
+  const pairings: RecordedPairing[] = [];
   const timers: FakeTimer[] = [];
   const connections = new LiveDeviceConnections();
   const link = new RelayLink({
@@ -173,13 +252,24 @@ function harness(
       upgrades.push(request);
       return await upgrade(request);
     },
-    devices: { identifyDevice: token => (token === knownToken ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined) },
+    devices: {
+      deviceKey:
+        extra.deviceKey ??
+        (async deviceId => (knownToken === DEVICE_TOKEN && deviceId === DEVICE_ID ? deviceKeyText : undefined)),
+      seen: extra.seen ?? (() => undefined),
+    },
     pairing: {
-      redeemOverRelay: async attempt => {
-        pairings.push(attempt);
+      redeemInSession: async attempt => {
+        pairings.push({
+          code: attempt.code,
+          deviceName: attempt.deviceName,
+          deviceKey: attempt.deviceKey,
+          proven: await attempt.prove(),
+        });
         return await redeem(attempt);
       },
     },
+    clock: extra.now === undefined ? TEST_CLOCK : { now: extra.now },
     scheduler: {
       after: (milliseconds, action) => {
         const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
@@ -286,12 +376,13 @@ async function openSession(
   if (hello === null) throw new Error('the daemon hello did not parse');
   const completed = await completeClientHandshake(crypto_, pending, hello);
   if (!completed.ok) throw new Error(completed.reason);
+  transcripts.set(sessionId.text, completed.keys.transcriptHash);
   return { channel: openChannel(sessionId, completed.keys, 'client'), keys: completed.keys };
 }
 
 /** Seal one tunnel message as the client and hand it to the link. */
 async function clientSend(link: RelayLink, channel: ChannelState, message: unknown): Promise<ChannelState> {
-  const sealed = await sealRecord(crypto_, channel, utf8Bytes(JSON.stringify(message)));
+  const sealed = await sealRecord(crypto_, channel, utf8Bytes(JSON.stringify(await credentialed(channel, message))));
   if (!sealed.ok) throw new Error(sealed.reason);
   await link.receiveBinary(encodeFrame(sealed.frame));
   return sealed.state;
@@ -484,11 +575,11 @@ describe('a relayed session', () => {
     const session = await openSession(link, sent, sessionId);
     let channel = await clientSend(link, session.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
     const authenticated = await clientRead(sent, channel);
-    should(authenticated.message).deepEqual({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID });
+    should(authenticated.message).deepEqual(AUTHENTICATED);
     should(link.report()).containDeep({ claimed: true, sessions: 1 });
 
     channel = await clientSend(link, channel, {
@@ -509,36 +600,142 @@ describe('a relayed session', () => {
       body: JSON.stringify({ sessions: ['one'] }),
     });
     should(requests).have.length(1);
-    should(requests[0]?.headers.get('authorization')).equal(`Bearer ${DEVICE_TOKEN}`);
+    // The device the session PROVED, attached by the tunnel — and no header credential at all.
+    should(requests[0]?.device).deepEqual({ deviceId: DEVICE_ID, appSession: APP_SESSION });
+    should(requests[0]?.headers.has('authorization')).be.false();
     should(requests[0]?.headers.get('x-ferretry-client')).equal('ui');
     should(requests[0]?.loopback).be.false();
   });
 
-  it('should name an answer that does not fit one record rather than truncating it', async () => {
+  it('should carry an answer too large for one record as ordered parts, never truncating it', async () => {
     // Arrange — a response far past one record.
-    const { link, wire: sent } = harness(async () => ({
-      status: 200,
-      headers: new Map(),
-      body: 'x'.repeat(70_000),
-    }));
+    const body = 'x'.repeat(70_000);
+    const { link, wire: sent } = harness(async () => ({ status: 200, headers: new Map(), body }));
     await link.receiveBinary(challenge());
     await link.receiveBinary(claimed());
-    const sessionId = sessionOne();
-    const session = await openSession(link, sent, sessionId);
+    const session = await openSession(link, sent, sessionOne());
 
     // Act
     let channel = await clientSend(link, session.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
-    const authenticated = await clientRead(sent, channel);
     channel = await clientSend(link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/big' });
-    const answer = await clientRead(sent, authenticated.state);
+    const read = await clientReadAll(sent, session.channel);
 
-    // Assert — a typed refusal naming the size. A client that rendered half a list would show a
-    // fleet that does not exist.
-    should(answer.message).containDeep({ t: 'oversize', id: 1, status: 200 });
+    // Assert — the head says more follows, the tail does not, and the parts are the whole body.
+    const [, head, ...rest] = read.messages as Array<{ t: string; body?: string; more?: true }>;
+    should(head).containDeep({ t: 'res', id: 1, status: 200, more: true });
+    should(rest.at(-1)?.more).be.undefined();
+    should([head, ...rest].map(part => part?.body ?? '').join('')).equal(body);
+  });
+
+  it('should assemble a request body that arrived in parts, and dispatch it once the last part lands', async () => {
+    // Arrange
+    const { link, wire: sent, requests } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Act
+    channel = await clientSend(link, channel, {
+      t: 'req',
+      id: 2,
+      method: 'PUT',
+      path: '/v1/x',
+      body: 'one-',
+      more: true,
+    });
+    channel = await clientSend(link, channel, { t: 'req-more', id: 2, body: 'two-', more: true });
+    should(requests).be.empty();
+    channel = await clientSend(link, channel, { t: 'req-more', id: 2, body: 'three' });
+
+    // Assert
+    should(requests).have.length(1);
+    should(await requests[0]?.text()).equal('one-two-three');
+    // A part for a request nobody started is a protocol error.
+    await clientSend(link, channel, { t: 'req-more', id: 3, body: 'stray' });
+    should(controlOf(sent.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError });
+  });
+
+  it('should answer 413 for a body past the limit, holding none of it, and keep the session serving', async () => {
+    // Arrange — a body whose parts cross the limit; the daemon must stop holding them as soon as they do.
+    const { link, wire: sent, requests } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const part = 'p'.repeat(60_000);
+    channel = await clientSend(link, channel, {
+      t: 'req',
+      id: 4,
+      method: 'PUT',
+      path: '/v1/x',
+      body: part,
+      more: true,
+    });
+    const parts = Math.ceil(MAX_TUNNEL_BODY_BYTES / part.length);
+    for (let index = 0; index < parts; index += 1) {
+      channel = await clientSend(link, channel, { t: 'req-more', id: 4, body: part, more: true });
+      // Return credit as the reader a browser is, or the daemon's window would close on its answers.
+      if (index % 8 === 0) await Promise.resolve();
+    }
+    channel = await clientSend(link, channel, { t: 'req-more', id: 4, body: 'end' });
+    const read = await clientReadAll(sent, session.channel);
+
+    // Assert
+    should(requests).be.empty();
+    should(read.messages.at(-1)).containDeep({ t: 'res', id: 4, status: 413 });
+    should(link.report().sessions).equal(1);
+  });
+
+  it('should refuse more bodies arriving at once than one session may assemble', async () => {
+    const { link, wire: sent } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    for (let id = 1; id <= MAX_INCOMING_BODIES + 1; id += 1)
+      channel = await clientSend(link, channel, { t: 'req', id, method: 'PUT', path: '/v1/x', body: 'a', more: true });
+
+    should(controlOf(sent.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError });
+  });
+
+  it('should tell an app from before device keys which side is old, in words, at the handshake', async () => {
+    // A `/1` hello is not an attack and not a bug; it is an app nobody updated.
+    const { link, wire: sent } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    await link.receiveBinary(control({ t: 'open' }, sessionOne()));
+    const pending = await startClientHandshake(crypto_, sessionOne(), identity.daemonId);
+    await link.receiveBinary(
+      encodeFrame({
+        kind: FRAME_KINDS.handshake,
+        sessionId: sessionOne(),
+        sequence: HANDSHAKE_FRAME_SEQUENCE,
+        payload: utf8Bytes(JSON.stringify({ ...pending.hello, protocol: 'ferretry-relay/1' })),
+      }),
+    );
+
+    should(controlOf(sent.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.versionUnsupported,
+      reason: OLDER_APP_SENTENCE,
+    });
   });
 
   it('should refuse a credential nobody knows, inside the encrypted channel', async () => {
@@ -552,7 +749,7 @@ describe('a relayed session', () => {
     // Act
     await clientSend(link, session.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: 'fy_device_stolen',
     });
 
@@ -581,12 +778,12 @@ describe('a relayed session', () => {
     const opened = await openSession(twice.link, twice.wire, sessionOne());
     const channel = await clientSend(twice.link, opened.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
 
     // Act + Assert
-    await clientSend(twice.link, channel, { t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
+    await clientSend(twice.link, channel, { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
     should(controlOf(twice.wire.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError });
   });
 
@@ -598,7 +795,7 @@ describe('a relayed session', () => {
     const session = await openSession(link, sent, sessionOne());
     let channel = await clientSend(link, session.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
 
@@ -790,12 +987,12 @@ describe('a relayed session', () => {
     const { channel: keyed } = await openSession(link, sent, sessionOne());
     const channel = await clientSend(link, keyed, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
       query: [],
     });
-    await clientSend(link, channel, { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1000, reason: 'x' });
+    await clientSend(link, channel, { t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1000, reason: 'x' });
     should(concluded(sent)).be.true();
     const straggler = encodeFrame({
       kind: FRAME_KINDS.data,
@@ -914,7 +1111,7 @@ describe('backpressure on a relayed session', () => {
     const session = await openSession(link, sent, sessionOne());
     let channel = await clientSend(link, session.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
 
@@ -997,11 +1194,12 @@ async function keyedSession(
 }
 
 const PAIRED_RESPONSE = {
-  deviceToken: `fy_device_${'a'.repeat(43)}`,
+  deviceId: `fy_device_id_${'a'.repeat(22)}`,
   daemonId: `fy_daemon_${'b'.repeat(43)}`,
   daemonName: 'studio',
   capabilities: ['daemon-api'],
   carriers: [{ kind: 'relay', url: 'wss://relay.example' }],
+  idleExpiryDays: 30,
 } as const;
 
 describe('one session, one job', () => {
@@ -1025,7 +1223,7 @@ describe('one session, one job', () => {
     const request = await keyedSession(second);
     const authed = await clientSend(second.link, request.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
 
@@ -1131,7 +1329,7 @@ describe('one session, one job', () => {
     const live = await keyedSession(answered);
     await clientSend(answered.link, live.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
 
@@ -1156,13 +1354,17 @@ describe('a pairing session', () => {
     // Act
     const after = await clientSend(harnessed.link, opened.channel, {
       t: 'pair',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 'ABCD-2345',
       deviceName: 'Ferretry PWA',
     });
 
     // Assert — the exchange reached the pairing state machine and NOT the route table.
-    should(harnessed.pairings).deepEqual([{ code: 'ABCD-2345', deviceName: 'Ferretry PWA' }]);
+    // The key it registers travels with it, and the session has already checked the proof over THIS
+    // transcript — only the session holds the transcript, so only it can.
+    should(harnessed.pairings).deepEqual([
+      { code: 'ABCD-2345', deviceName: 'Ferretry PWA', deviceKey: deviceKeyText, proven: true },
+    ]);
     should(harnessed.requests).be.empty();
     should(harnessed.upgrades).be.empty();
 
@@ -1171,7 +1373,7 @@ describe('a pairing session', () => {
     const answer = await clientRead(harnessed.wire, after);
     should(answer.message).deepEqual({
       t: 'paired',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       response: PAIRED_RESPONSE,
     });
 
@@ -1192,7 +1394,7 @@ describe('a pairing session', () => {
     // Act
     const after = await clientSend(refusing.link, opened.channel, {
       t: 'pair',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 'ABCD-2345',
       deviceName: 'Ferretry PWA',
     });
@@ -1201,7 +1403,7 @@ describe('a pairing session', () => {
     // can reach must not be an oracle.
     should((await clientRead(refusing.wire, after)).message).deepEqual({
       t: 'pair-refused',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       reason: 'pairing_refused',
     });
     should(controlOf(refusing.wire.frames.at(-1))).containDeep({
@@ -1218,7 +1420,7 @@ describe('a pairing session', () => {
     const successBefore = pairing.wire.frames.length;
     await clientSend(pairing.link, success.channel, {
       t: 'pair',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 'ABCD-2345',
       deviceName: 'Ferretry PWA',
     });
@@ -1235,7 +1437,7 @@ describe('a pairing session', () => {
     // Act
     await clientSend(harnessed.link, opened.channel, {
       t: 'pair',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 'fy_admin_token',
       deviceName: 'Ferretry PWA',
     });
@@ -1257,7 +1459,7 @@ describe('a stream session', () => {
     // Act — the credential record opens the stream in the same breath.
     const after = await clientSend(harnessed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
       query: [['sessionId', 'fy_s']],
@@ -1269,7 +1471,8 @@ describe('a stream session', () => {
     const upgrade = harnessed.upgrades[0];
     should(upgrade?.method).equal('GET');
     should(upgrade?.path).equal('/v1/events');
-    should(upgrade?.headers.get('authorization')).equal(`Bearer ${DEVICE_TOKEN}`);
+    should(upgrade?.device).deepEqual({ deviceId: DEVICE_ID, appSession: APP_SESSION });
+    should(upgrade?.headers.has('authorization')).be.false();
     should(upgrade?.loopback).be.false();
     should(upgrade?.clientAddress).startWith('relay-session:');
     should(stream.opened).have.length(1);
@@ -1282,7 +1485,7 @@ describe('a stream session', () => {
     // Assert — the acceptance is AHEAD of the first frame the handler produced, and both value
     // shapes cross intact: text stays one complete message, bytes travel as unpadded base64url.
     should((await clientReadAll(harnessed.wire, after)).messages).deepEqual([
-      { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID },
+      STREAM_OPENED,
       { t: 'data', text: '{"kind":"event"}' },
       { t: 'data', bytes: 'aGk' },
     ]);
@@ -1305,7 +1508,7 @@ describe('a stream session', () => {
     // Act — the credential a browser CANNOT carry here, smuggled into the query.
     await clientSend(ticketed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
       query: [['ticket', 'stolen-from-a-log']],
@@ -1326,7 +1529,7 @@ describe('a stream session', () => {
     // Act
     await clientSend(stranger.link, strange.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: 'fy_device_unknown',
       path: '/v1/events',
     });
@@ -1350,7 +1553,7 @@ describe('a stream session', () => {
     // Act
     const after = await clientSend(refused.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/sessions/s/terminals/t/stream',
     });
@@ -1358,7 +1561,7 @@ describe('a stream session', () => {
     // Assert — a refusal, not a close: "it is gone" and "the daemon broke" must stay distinguishable.
     should((await clientRead(refused.wire, after)).message).deepEqual({
       t: 'stream-refused',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       status: 404,
       body: JSON.stringify({ error: 'no terminal' }),
     });
@@ -1371,7 +1574,7 @@ describe('a stream session', () => {
     // Act
     const later = await clientSend(unclaimed.link, none.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/nothing',
     });
@@ -1393,7 +1596,7 @@ describe('a stream session', () => {
     // Act
     const after = await clientSend(broken.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1411,7 +1614,7 @@ describe('a stream session', () => {
     // Act
     const opening = await clientSend(late.link, live.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1431,7 +1634,7 @@ describe('a stream session', () => {
     const opened = await keyedSession(harnessed);
     const after = await clientSend(harnessed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1474,7 +1677,7 @@ describe('a stream session', () => {
     const opened = await keyedSession(harnessed);
     await clientSend(harnessed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1501,7 +1704,7 @@ describe('a stream session', () => {
     const opened = await keyedSession(first);
     const after = await clientSend(first.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1509,7 +1712,7 @@ describe('a stream session', () => {
     // Act
     await clientSend(first.link, after, {
       t: 'stream-close',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 1000,
       reason: 'the viewer left',
     });
@@ -1524,7 +1727,7 @@ describe('a stream session', () => {
     const live = await keyedSession(second);
     await clientSend(second.link, live.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1543,7 +1746,7 @@ describe('a stream session', () => {
     const ending = await keyedSession(third);
     await clientSend(third.link, ending.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1563,7 +1766,7 @@ describe('a stream session', () => {
     const opened = await keyedSession(harnessed);
     const after = await clientSend(harnessed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1585,7 +1788,7 @@ describe('a stream session', () => {
     const live = await keyedSession(second);
     const streaming = await clientSend(second.link, live.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1607,7 +1810,7 @@ describe('a device unpaired while its sessions are live', () => {
   const DEVICE_ID = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
   const streamRequest = {
     t: 'stream',
-    protocol: RELAY_PROTOCOL_ID,
+    protocol: SESSION_PROTOCOL_ID,
     deviceToken: DEVICE_TOKEN,
     path: '/v1/terminals/fy_t/stream',
     query: [],
@@ -1624,7 +1827,7 @@ describe('a device unpaired while its sessions are live', () => {
     const serving = await openSession(harnessed.link, harnessed.wire, second);
     await clientSend(harnessed.link, serving.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
     should(harnessed.link.report().sessions).equal(2);
@@ -1656,7 +1859,7 @@ describe('a device unpaired while its sessions are live', () => {
     // Act
     await clientSend(harnessed.link, opened.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
 
@@ -1713,7 +1916,7 @@ describe('a device unpaired while its sessions are live', () => {
     const opened = await keyedSession(harnessed);
     await clientSend(harnessed.link, opened.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
 
@@ -1741,7 +1944,7 @@ describe('an outcome that has not crossed yet', () => {
     const opened = await keyedSession(harnessed);
     const after = await clientSend(harnessed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1793,7 +1996,7 @@ describe('an outcome that has not crossed yet', () => {
     const opened = await keyedSession(harnessed);
     const after = await clientSend(harnessed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -1805,7 +2008,7 @@ describe('an outcome that has not crossed yet', () => {
     // Act — the viewer says it is done while payload is still queued behind an exhausted window.
     await clientSend(harnessed.link, after, {
       t: 'stream-close',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 1000,
       reason: 'the viewer left',
     });
@@ -1904,9 +2107,11 @@ async function heldStreamingLink(which: 'open' | 'seal'): Promise<HeldStream> {
     sockets: accepts(stream),
     connections: new LiveDeviceConnections(),
     devices: {
-      identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
+      deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
+      seen: () => undefined,
     },
-    pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
+    pairing: { redeemInSession: async () => ({ kind: 'refused' }) },
+    clock: TEST_CLOCK,
     scheduler: { after: () => ({ cancel: () => undefined }) },
   });
   await link.receiveBinary(challenge());
@@ -1914,7 +2119,7 @@ async function heldStreamingLink(which: 'open' | 'seal'): Promise<HeldStream> {
   const opened = await openSession(link, sent, sessionOne());
   const channel = await clientSend(link, opened.channel, {
     t: 'stream',
-    protocol: RELAY_PROTOCOL_ID,
+    protocol: SESSION_PROTOCOL_ID,
     deviceToken: DEVICE_TOKEN,
     path: '/v1/events',
   });
@@ -2051,9 +2256,9 @@ describe('a send queue spliced while one of its records is being sealed', () => 
     // client's own channel, so a sequence that skipped or repeated throws here instead of asserting.
     const read = await clientReadAll(sent, channel);
     should(read.messages).deepEqual([
-      { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID },
+      STREAM_OPENED,
       { t: 'data', text: '{"kind":"event","n":1}' },
-      { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' },
+      { t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1013, reason: 'fell behind' },
     ]);
 
     // Assert — and §14's order holds around it: the sealed outcome crossed BEFORE the `4440` that
@@ -2084,9 +2289,9 @@ describe('a send queue spliced while one of its records is being sealed', () => 
     // Assert — the pinned frame survives because it was already sealed; the two behind it do not.
     const read = await clientReadAll(sent, channel);
     should(read.messages).deepEqual([
-      { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID },
+      STREAM_OPENED,
       { t: 'data', text: '{"kind":"event","n":1}' },
-      { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' },
+      { t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1013, reason: 'fell behind' },
     ]);
     should(concludedAt(sent)).be.above(lastRecordAt(sent));
     should(stream.closed).have.length(1);
@@ -2110,7 +2315,7 @@ describe('a record delivered twice', () => {
     const opened = await openSession(link, sent, sessionOne());
     const authenticated = await clientSend(link, opened.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
     const request = await sealRecord(
@@ -2154,7 +2359,7 @@ describe('a handler that produces a frame after its session ended', () => {
     const opened = await keyedSession(harnessed);
     const after = await clientSend(harnessed.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/sessions/session-a/terminals/0123456789ab/stream',
     });
@@ -2165,7 +2370,7 @@ describe('a handler that produces a frame after its session ended', () => {
     // Act — the viewer leaves, and the pane's already-awaited capture resumes only afterwards.
     await clientSend(harnessed.link, after, {
       t: 'stream-close',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 1000,
       reason: 'the viewer left this stream',
     });
@@ -2186,7 +2391,7 @@ describe('a handler that produces a frame after its session ended', () => {
     const reopened = await openSession(harnessed.link, harnessed.wire, nextId);
     const authenticated = await clientSend(harnessed.link, reopened.channel, {
       t: 'auth',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
     });
     await clientSend(harnessed.link, authenticated, { t: 'req', id: 1, method: 'GET', path: '/v1/fleet' });
@@ -2259,13 +2464,13 @@ describe('what the rendezvous may read of a conclusion', () => {
     const opened = await keyedSession(byClient);
     const after = await clientSend(byClient.link, opened.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
     await clientSend(byClient.link, after, {
       t: 'stream-close',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 1000,
       reason: secret,
     });
@@ -2285,7 +2490,7 @@ describe('what the rendezvous may read of a conclusion', () => {
     const second = await keyedSession(byDaemon);
     const streaming = await clientSend(byDaemon.link, second.channel, {
       t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
@@ -2307,7 +2512,7 @@ describe('what the rendezvous may read of a conclusion', () => {
     const delivered = await clientReadAll(byDaemon.wire, streaming);
     should(delivered.messages.at(-1)).deepEqual({
       t: 'stream-close',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       code: 1013,
       reason: 'stream reader fell behind',
     });
@@ -2321,7 +2526,7 @@ describe('what the rendezvous may read of a conclusion', () => {
       const opened = await keyedSession(harnessed);
       await clientSend(harnessed.link, opened.channel, {
         t: 'pair',
-        protocol: RELAY_PROTOCOL_ID,
+        protocol: SESSION_PROTOCOL_ID,
         code: '7F3K-Q2ND',
         deviceName: 'Ferretry PWA',
       });
@@ -2377,9 +2582,11 @@ async function heldCredentialLink(which: 'handshake' | 'open'): Promise<HeldCred
     sockets: async () => ({ outcome: 'unclaimed' }),
     connections: new LiveDeviceConnections(),
     devices: {
-      identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
+      deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
+      seen: () => undefined,
     },
-    pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
+    pairing: { redeemInSession: async () => ({ kind: 'refused' }) },
+    clock: TEST_CLOCK,
     scheduler: {
       after: (milliseconds, action) => {
         const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
@@ -2453,7 +2660,7 @@ describe('a credential deadline that fires inside an await', () => {
     const credential = await sealRecord(
       crypto_,
       opened.channel,
-      utf8Bytes(JSON.stringify({ t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: DEVICE_TOKEN })),
+      utf8Bytes(JSON.stringify({ t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN })),
     );
     if (!credential.ok) throw new Error(credential.reason);
 
@@ -2486,12 +2693,377 @@ describe('a credential deadline that fires inside an await', () => {
     // with the timer left un-fired: the session keys, authenticates and serves as normal.
     const { link, sent, timers } = await heldCredentialLink('open');
     const opened = await openSession(link, sent, sessionOne());
-    await clientSend(link, opened.channel, { t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
+    await clientSend(link, opened.channel, { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
 
     // Assert — the window is cancelled by the record that answered it, and the session is serving.
     should(timers[0]?.cancelled).be.true();
     should(link.report().sessions).equal(1);
     const answered = await clientRead(sent, opened.channel);
-    should(answered.message).containDeep({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID });
+    should(answered.message).containDeep(AUTHENTICATED);
+  });
+});
+
+describe('the access lease', () => {
+  const LEASE_MS = 900_000;
+  const RENEW_AT_MS = 780_000;
+  /** The renewal is sealed on the link's outbox, which runs real WebCrypto; let it land. */
+  const sealed = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 20));
+
+  async function authenticated(upgrade?: (request: ApiRequest) => Promise<SocketUpgradeDecision>) {
+    const harnessed = harness(undefined, DEVICE_TOKEN, upgrade);
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    return { harnessed, opened, channel };
+  }
+
+  const live = (timers: readonly FakeTimer[], milliseconds: number): FakeTimer | undefined =>
+    timers.filter(timer => timer.milliseconds === milliseconds && !timer.cancelled).at(-1);
+
+  it('should ask for a renewal ahead of the deadline, and extend the lease when the device signs it', async () => {
+    // Arrange
+    const { harnessed, opened, channel } = await authenticated();
+    const renewal = live(harnessed.timers, RENEW_AT_MS);
+    if (renewal === undefined) throw new Error('no renewal was armed');
+
+    // Act — the daemon asks; the device answers with the same key over this transcript and the nonce.
+    renewal.fire();
+    await sealed();
+    const read = await clientReadAll(harnessed.wire, opened.channel);
+    const asked = read.messages.at(-1) as { t: string; nonce: string; expiresAt: string };
+    should(asked).containDeep({ t: 'renew', protocol: SESSION_PROTOCOL_ID, expiresAt: '1970-01-01T00:15:00.000Z' });
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+    const firstLease = live(harnessed.timers, LEASE_MS);
+    const after = await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+
+    // Assert — the old deadline is gone and a fresh one stands; the session is still serving.
+    should(firstLease?.cancelled).be.true();
+    should(live(harnessed.timers, LEASE_MS)).not.be.undefined();
+    should(harnessed.link.report().sessions).equal(1);
+
+    // A second answer, with nothing outstanding, is a protocol error rather than a second chance.
+    await clientSend(harnessed.link, after, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError });
+  });
+
+  it('should end the session with the lease code when nobody renewed, and say nothing about the device', async () => {
+    const { harnessed } = await authenticated();
+    live(harnessed.timers, LEASE_MS)?.fire();
+
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+      reason: ACCESS_LEASE_ENDED_REASON,
+    });
+    should(harnessed.link.report().sessions).equal(0);
+  });
+
+  it('should refuse a renewal signed by another key exactly as it refuses an unknown device', async () => {
+    const { harnessed, opened, channel } = await authenticated();
+    live(harnessed.timers, RENEW_AT_MS)?.fire();
+    await sealed();
+    const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const forged = await signDeviceProof(crypto_, strangerKey, deviceRenewMessage(transcript, asked.nonce));
+
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof: forged });
+
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+  });
+
+  it('should renew a stream session the same way, between its frames', async () => {
+    // Arrange
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    await sealed();
+
+    // Act
+    live(harnessed.timers, RENEW_AT_MS)?.fire();
+    await sealed();
+    const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { t: string; nonce: string };
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+
+    // Assert
+    should(asked.t).equal('renew');
+    should(stream.closed).be.empty();
+    should(harnessed.link.report().sessions).equal(1);
+  });
+
+  it('should ask for nothing on a session that has already ended, and keep a renewal timer from reviving it', async () => {
+    const { harnessed } = await authenticated();
+    const renewal = live(harnessed.timers, RENEW_AT_MS);
+    harnessed.link.close();
+    const before = harnessed.wire.frames.length;
+    renewal?.fire();
+    should(harnessed.wire.frames.length).equal(before);
+  });
+});
+
+const sessionTwo = (): SessionId => {
+  const id = sessionIdFromBytes(new Uint8Array(16).fill(9));
+  if (id === null) throw new Error('unreachable: a 16-byte identifier');
+  return id;
+};
+
+/** The close the link sent last, as the rendezvous would read it. */
+const lastClose = (sent: Wire) => controlOf(sent.frames.at(-1));
+
+describe('a device proof is good for one session and one kind only', () => {
+  /*
+   * THE PROPERTY THE WHOLE DESIGN RESTS ON: a proof signs THIS session's transcript. The right key over
+   * another session's transcript must be refused exactly like a stranger — which only a test that
+   * signs a real, different transcript can show; a constant or a reused transcript would pass every
+   * case that signs the right one.
+   */
+  it('should refuse a proof by the right key lifted from another session', async () => {
+    const harnessed = harness();
+    const first = await keyedSession(harnessed, sessionOne());
+    const second = await openSession(harnessed.link, harnessed.wire, sessionTwo());
+    const transcriptOfFirst = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const lifted = await signDeviceProof(
+      crypto_,
+      deviceKey,
+      deviceAuthMessage(transcriptOfFirst, 'auth', DEVICE_ID, APP_SESSION),
+    );
+
+    await clientSend(harnessed.link, second.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof: lifted,
+    });
+
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+    should(harnessed.requests).be.empty();
+    void first;
+  });
+
+  it('should refuse a renewal signed over another session’s transcript, even with the right nonce', async () => {
+    const harnessed = harness();
+    const first = await keyedSession(harnessed, sessionOne());
+    const channel = await clientSend(harnessed.link, first.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    await openSession(harnessed.link, harnessed.wire, sessionTwo());
+    harnessed.timers.filter(timer => timer.milliseconds === 780_000 && !timer.cancelled)[0]?.fire();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const renewRecord = harnessed.wire.frames
+      .filter(frame => frame.kind === FRAME_KINDS.data && frame.sessionId.text === sessionOne().text)
+      .at(-1);
+    if (renewRecord === undefined) throw new Error('no renewal was asked');
+    const { messages } = await clientReadAll(
+      { ...harnessed.wire, frames: harnessed.wire.frames.filter(frame => frame.sessionId.text === sessionOne().text) },
+      first.channel,
+    );
+    const asked = messages.at(-1) as { nonce: string };
+    const otherTranscript = transcripts.get(sessionTwo().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(otherTranscript, asked.nonce));
+
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+  });
+
+  it('should refuse a proof of one kind presented as another', async () => {
+    const swaps = [
+      // An auth-kind proof on a stream record, and a stream-kind proof on an auth record.
+      { record: 't:stream', sign: (th: Uint8Array) => deviceAuthMessage(th, 'auth', DEVICE_ID, APP_SESSION) },
+      { record: 't:auth', sign: (th: Uint8Array) => deviceAuthMessage(th, 'stream', DEVICE_ID, APP_SESSION) },
+      // A pairing-label proof is not an authentication.
+      { record: 't:auth', sign: (th: Uint8Array) => devicePairMessage(th, deviceKeyText) },
+    ];
+    for (const swap of swaps) {
+      const harnessed = harness();
+      const opened = await keyedSession(harnessed);
+      const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+      const proof = await signDeviceProof(crypto_, deviceKey, swap.sign(transcript));
+      await clientSend(harnessed.link, opened.channel, {
+        t: swap.record === 't:stream' ? 'stream' : 'auth',
+        protocol: SESSION_PROTOCOL_ID,
+        deviceId: DEVICE_ID,
+        appSession: APP_SESSION,
+        proof,
+        ...(swap.record === 't:stream' ? { path: '/v1/events' } : {}),
+      });
+      should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+      should(harnessed.upgrades).be.empty();
+    }
+  });
+});
+
+describe('what keeps a device from idling out, and what keeps a session from living forever', () => {
+  const sealed = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 20));
+
+  it('should move the idle clock only for a request the page marked as a person’s', async () => {
+    const seen: string[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { seen: id => seen.push(id) });
+    const opened = await keyedSession(harnessed);
+    let channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    // Opening the session is not a person: a background tab does it by itself.
+    should(seen).be.empty();
+    channel = await clientSend(harnessed.link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    should(seen).be.empty();
+    await clientSend(harnessed.link, channel, { t: 'req', id: 2, method: 'GET', path: '/v1/sessions', presence: true });
+    should(seen).eql([DEVICE_ID]);
+  });
+
+  it('should not move the idle clock when a tab answers a renewal by itself', async () => {
+    const seen: string[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { seen: id => seen.push(id) });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    harnessed.timers.filter(timer => timer.milliseconds === 780_000)[0]?.fire();
+    await sealed();
+    const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+    should(harnessed.link.report().sessions).equal(1);
+    should(seen).be.empty();
+  });
+
+  it('should refuse a renewal for a device revoked or expired since the session opened', async () => {
+    let known = true;
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, {
+      deviceKey: async deviceId => (known && deviceId === DEVICE_ID ? deviceKeyText : undefined),
+    });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    harnessed.timers.filter(timer => timer.milliseconds === 780_000)[0]?.fire();
+    await sealed();
+    const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+    // Gone from the registry between the open and the renewal — revoked, or idle-expired.
+    known = false;
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+  });
+
+  it('should stop renewing at the session cap, and end the last lease exactly there', async () => {
+    let now = 0;
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { now: () => now });
+    const opened = await keyedSession(harnessed);
+    let channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const capMs = MAX_SESSION_SECONDS * 1_000;
+    // The credential window and stragglers arm their own timers; the lease's are the other two.
+    const leaseTimers = (from: number) => harnessed.timers.slice(from).filter(timer => timer.milliseconds !== 45_000);
+    let armed = leaseTimers(0).filter(timer => !timer.cancelled);
+    let renewal: FakeTimer | undefined = armed.find(timer => timer.milliseconds === 780_000);
+    let lastLease: FakeTimer | undefined = armed.find(timer => timer.milliseconds === 900_000);
+    // A tab that answers every renewal, as a real one does, until the daemon stops asking.
+    for (let round = 0; round < 100 && renewal !== undefined; round += 1) {
+      now += renewal.milliseconds;
+      renewal.fire();
+      await sealed();
+      const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+      // The client returns credit for what it read, as a real one does, so the daemon can keep asking.
+      await harnessed.link.receiveBinary(
+        encodeFrame({
+          kind: FRAME_KINDS.credit,
+          sessionId: sessionOne(),
+          sequence: 0,
+          payload: encodeCreditPayload(1),
+        }),
+      );
+      const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+      const before = harnessed.timers.length;
+      channel = await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+      armed = leaseTimers(before);
+      lastLease = armed.at(-1);
+      renewal = armed.length === 2 ? armed[0] : undefined;
+    }
+    // The last lease ends AT the cap, and nothing is left to ask for another.
+    should(lastLease?.milliseconds).equal(capMs - now);
+    should(
+      harnessed.timers.filter(timer => !timer.cancelled && timer !== lastLease && timer.milliseconds < 900_000),
+    ).be.empty();
+    lastLease?.fire();
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE });
+  });
+
+  it('should refuse a record that arrives after the lease ended, even before its timer has run', async () => {
+    let now = 0;
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { now: () => now });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    now = 900_000;
+    await clientSend(harnessed.link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    should(harnessed.requests).be.empty();
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE });
+  });
+});
+
+describe('the key an unknown device id is verified against', () => {
+  /** RFC 8032 test 1: a key whose SECRET is published, which this key once was. */
+  const RFC_8032_TEST_1_SEED = '9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60';
+
+  it('should verify nothing: not a proof by a real device key, and not one signed with a published secret', async () => {
+    const message = deviceAuthMessage(new Uint8Array(32).fill(7), 'auth', DEVICE_ID, APP_SESSION);
+    const honest = await signDeviceProof(crypto_, deviceKey, message);
+    const seed = Uint8Array.from(RFC_8032_TEST_1_SEED.match(/../g) ?? [], byte => Number.parseInt(byte, 16));
+    const pkcs8 = Uint8Array.from([
+      0x30,
+      0x2e,
+      0x02,
+      0x01,
+      0x00,
+      0x30,
+      0x05,
+      0x06,
+      0x03,
+      0x2b,
+      0x65,
+      0x70,
+      0x04,
+      0x22,
+      0x04,
+      0x20,
+      ...seed,
+    ]);
+    const published = await globalThis.crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
+    const forged = toBase64Url(
+      new Uint8Array(await globalThis.crypto.subtle.sign('Ed25519', published, new Uint8Array(message))),
+    );
+
+    should(await verifyDeviceProof(crypto_, UNKNOWN_DEVICE_KEY, honest, message)).be.false();
+    should(await verifyDeviceProof(crypto_, UNKNOWN_DEVICE_KEY, forged, message)).be.false();
   });
 });

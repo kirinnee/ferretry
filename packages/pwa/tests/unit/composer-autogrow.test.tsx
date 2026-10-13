@@ -27,7 +27,7 @@ import { interact, mount, must } from '../support/dom.ts';
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 /** Drafts must not leak between cases through a shared browser store. */

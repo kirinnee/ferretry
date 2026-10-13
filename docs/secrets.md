@@ -85,6 +85,14 @@ cannot scrub is text it must not serve.
   against _accidents_, not against local access. A passphrase-derived key or an OS keychain would be
   a stronger claim; this is not that.
 - **Anyone who already has your user account on that machine.**
+- **A paired device, today.** The secret routes ask only for the `operator` credential minimum and
+  no capability, so every paired device can list secrets, set and delete them, and — through
+  `POST /v1/secrets/use` — run a command with one in its environment, which is code execution on
+  this machine. What changed is how a device proves itself: it can only do so inside a session its
+  non-extractable device key signed ([design/zero-trust.md](design/zero-trust.md) A), so a sniffed or
+  replayed value no longer works, but a device that IS paired is not narrowed. A seventh capability,
+  `secrets`, off by default for a new device and asking for a passkey step-up on `use`, is design B
+  and closes this; until it lands, treat pairing a device as handing it the vault's `use`.
 
 Say the narrow version wherever this is described. Someone who believes the wide one will hand an
 untrusted agent a production credential.

@@ -112,7 +112,7 @@ describe('who the grants govern', () => {
         },
         query: [['token', 'anything']],
       },
-      'device-token',
+      { deviceId: 'fy_device_id_phone', appSession: 'app-one' },
       'rendezvous-session',
     );
 

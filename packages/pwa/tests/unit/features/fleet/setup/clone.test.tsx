@@ -28,7 +28,7 @@ import {
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────────────────────────
 
-const EMPTY_SOURCE = daemonConnection({ daemonId: 'empty', baseUrl: 'https://empty.example.test', deviceToken: 'w' });
+const EMPTY_SOURCE = daemonConnection({ daemonId: 'empty', baseUrl: 'https://empty.example.test', deviceId: 'w' });
 
 const record = (connection: DaemonConnection, label: string): DaemonConnectionRecord => ({
   ...connection,

@@ -102,7 +102,7 @@ export const daemonProjectsPort = (fetcher: DaemonFetch = browserFetch): DaemonP
 interface ProjectsEntry {
   readonly daemonId: DaemonId;
   readonly baseUrl: string;
-  readonly deviceToken: string;
+  readonly deviceId: string;
 }
 
 export class DaemonProjectsStore {
@@ -218,12 +218,12 @@ export class DaemonProjectsStore {
 
   #entryFor(daemon: DaemonConnection): ProjectsEntry {
     const existing = this.#entries.get(daemon.daemonId);
-    if (existing?.baseUrl === daemon.baseUrl && existing.deviceToken === daemon.deviceToken) return existing;
+    if (existing?.baseUrl === daemon.baseUrl && existing.deviceId === daemon.deviceId) return existing;
     this.#slices.delete(daemon.daemonId);
     const entry: ProjectsEntry = {
       daemonId: daemon.daemonId,
       baseUrl: daemon.baseUrl,
-      deviceToken: daemon.deviceToken,
+      deviceId: daemon.deviceId,
     };
     this.#entries.set(daemon.daemonId, entry);
     return entry;

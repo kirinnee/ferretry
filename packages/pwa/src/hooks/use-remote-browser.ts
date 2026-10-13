@@ -15,11 +15,12 @@
  */
 
 import type { BrowserAction, BrowserActionResult, BrowserStatus } from '@ferretry/protocol';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { fetchRemoteBrowserStatus, runRemoteBrowserAction } from '../lib/remote-browser.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 
 export const REMOTE_BROWSER_POLL_MS = 2_500;
 
@@ -31,11 +32,6 @@ export interface RemoteBrowserTransport {
     action: BrowserAction,
   ) => Promise<BrowserActionResult>;
 }
-
-const defaultTransport: RemoteBrowserTransport = {
-  readStatus: (daemon, scope) => fetchRemoteBrowserStatus(daemon, scope),
-  runAction: (daemon, scope, action) => runRemoteBrowserAction(daemon, scope, action),
-};
 
 /** Cancellable repeat, injectable so tests drive the poll instead of waiting. */
 export type RemoteBrowserScheduler = (callback: () => void, intervalMs: number) => () => void;
@@ -77,9 +73,19 @@ export function useRemoteBrowser({
   scope,
   isActive = true,
   pollIntervalMs = REMOTE_BROWSER_POLL_MS,
-  transport = defaultTransport,
+  transport: injectedTransport,
   schedule = defaultScheduler,
 }: UseRemoteBrowserOptions): RemoteBrowserModel {
+  // Through the carrier router by default: a paired device has no bearer value of its own.
+  const fetcher = useDaemonFetch();
+  const transport = useMemo<RemoteBrowserTransport>(
+    () =>
+      injectedTransport ?? {
+        readStatus: (daemon, scope) => fetchRemoteBrowserStatus(daemon, scope, fetcher),
+        runAction: (daemon, scope, action) => runRemoteBrowserAction(daemon, scope, action, fetcher),
+      },
+    [fetcher, injectedTransport],
+  );
   const [status, setStatus] = useState<BrowserStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

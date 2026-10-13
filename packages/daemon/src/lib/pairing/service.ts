@@ -5,7 +5,7 @@ import {
   type DaemonId,
   DaemonIdSchema,
   DaemonNameSchema,
-  DeviceTokenSchema,
+  DEVICE_IDLE_EXPIRY_DAYS,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   type PairedDevice,
@@ -25,7 +25,8 @@ import {
   isReservedActorPhrase,
   pairingLinkUrl,
 } from '@ferretry/protocol';
-import { type DeviceCredentialVerifier, secretsMatch } from '../api/authentication.ts';
+import { DeviceKeySchema } from '@ferretry/relay';
+import { secretsMatch } from '../api/authentication.ts';
 import type { DeviceConnectionRevoker } from './live-connections.ts';
 
 const FERRETRY_PAIRING_APP_URL = 'https://ferretry.pages.dev/pair';
@@ -64,10 +65,12 @@ export interface OperatorPasswordPresence {
 export interface PairingCryptography {
   pairingCode(): string;
   pairingId(): string;
-  deviceToken(): string;
   deviceId(): string;
-  hashDeviceToken(daemonId: string, token: string): string;
 }
+
+/** An hour, in milliseconds: how often a busy device's `lastSeenAt` is written to disk at most. */
+const LAST_SEEN_PERSIST_INTERVAL_MS = 60 * 60 * 1_000;
+const IDLE_EXPIRY_MS = DEVICE_IDLE_EXPIRY_DAYS * 24 * 60 * 60 * 1_000;
 
 export interface PairingDeviceRecord {
   readonly id: string;
@@ -77,8 +80,16 @@ export interface PairingDeviceRecord {
   readonly createdAt: string;
   readonly lastSeenAt: string;
   /** How the redemption arrived; absent on a grant persisted before this was kept. */
-  readonly pairedOver?: PairingCarrier;
-  readonly tokenHash: string;
+  readonly pairedOver?: PairingCarrierKind;
+  /**
+   * The device's Ed25519 public key, as SPKI base64url — the ONLY thing this daemon keeps about it.
+   *
+   * There is no token and no digest of one. A copy of this file, a backup of the state home or a
+   * stolen disk image gives an attacker a list of public keys, and a public key authenticates nothing:
+   * every session is opened by the device signing that session's transcript with the private half,
+   * which never left the browser that generated it.
+   */
+  readonly publicKey: string;
 }
 
 export interface PairingDeviceStore {
@@ -93,60 +104,52 @@ export interface PairingDeviceStore {
    * "removed" from "was never here" cannot answer honestly either.
    */
   remove(id: string): Promise<boolean>;
+  /** Records when a device was last seen. An id that is gone is not an error: it was revoked meanwhile. */
+  touch(id: string, lastSeenAt: string): Promise<void>;
 }
 
 /**
- * Live verifier for this daemon's persisted device grants.
+ * The live set of device grants: who holds which public key, this instant.
  *
- * Hashing includes the daemon id, so copying a hash document to another daemon cannot make the
- * credential valid there. Every comparison walks the whole digest and every record; neither the
- * matching prefix nor a record's position becomes an early-exit timing oracle.
+ * The document on disk decides what comes back after a restart; this decides whether the next session
+ * is admitted. A revocation that only rewrote the file would leave a revoked phone working until
+ * somebody restarted the daemon, which is precisely when nobody is going to.
  */
-export class PairingDeviceRegistry implements DeviceCredentialVerifier {
+export class PairingDeviceRegistry {
   private readonly records = new Map<string, PairingDeviceRecord>();
 
   constructor(
     private readonly daemonId: DaemonId,
-    private readonly cryptography: Pick<PairingCryptography, 'hashDeviceToken'>,
     records: readonly PairingDeviceRecord[] = [],
-    private readonly compare: (left: string, right: string) => boolean = secretsMatch,
   ) {
     for (const record of records) this.add(record);
   }
 
-  /**
-   * Forgets one grant, so the credential stops authenticating THIS INSTANT.
-   *
-   * The registry is the live verifier, and it is the half of a revocation that actually ends access:
-   * the document on disk decides what comes back after a restart, while this decides whether the next
-   * request is served. A revocation that only rewrote the file would leave a revoked phone working
-   * until somebody restarted the daemon, which is precisely when nobody is going to.
-   */
+  /** Forgets one grant, so its key stops opening sessions THIS INSTANT. */
   remove(id: string): boolean {
     return this.records.delete(id);
   }
 
   add(record: PairingDeviceRecord): void {
     if (record.daemonId !== this.daemonId) throw new Error('a device grant belongs to a different daemon');
-    // A grant with no digest is not a grant. It could never match a real digest, so it would sit in
-    // the registry as a device that silently cannot authenticate — and the invariant "a stored grant
-    // is comparable evidence" would hold only in the file schema, one layer away from the comparison
-    // that relies on it. Refuse loudly instead of registering something unusable.
-    if (record.tokenHash.trim() === '') throw new Error('a device grant carries no token digest');
+    // A grant whose key is not an Ed25519 public key is not a grant. It could never verify a proof, so
+    // it would sit here as a device that silently cannot authenticate; refuse it loudly instead.
+    if (!DeviceKeySchema.safeParse(record.publicKey).success) throw new Error('a device grant carries no usable key');
     this.records.set(record.id, record);
   }
 
-  identify(token: string): string | undefined {
-    // Nothing is not a credential. Without this a blank token is hashed and compared against every
-    // record, safe today only because no grant can hold the digest of an empty token — a property
-    // owned by a schema elsewhere rather than by this comparison.
-    if (token.trim() === '') return undefined;
-    const digest = this.cryptography.hashDeviceToken(this.daemonId, token);
-    let identity: string | undefined;
-    for (const record of this.records.values()) {
-      if (this.compare(digest, record.tokenHash)) identity = record.id;
-    }
-    return identity;
+  /** One grant by id. A device id is not a secret — it names a key, and the key is what is checked. */
+  get(id: string): PairingDeviceRecord | undefined {
+    return this.records.get(id);
+  }
+
+  all(): readonly PairingDeviceRecord[] {
+    return [...this.records.values()];
+  }
+
+  /** Replaces a held grant with a newer copy of itself; a grant revoked meanwhile stays revoked. */
+  refresh(record: PairingDeviceRecord): void {
+    if (this.records.has(record.id)) this.records.set(record.id, record);
   }
 }
 
@@ -208,16 +211,28 @@ interface ActivePairing {
   relayClosed: boolean;
 }
 
-/** What a relayed redemption presents. Typed at the boundary because the tunnel already parsed a
- *  record to reach here — the values are still checked below against the pairing API's own schema,
- *  which owns their bounds. */
-export interface RelayPairingAttempt {
+/**
+ * What one sealed `pair` record presents, on either carrier.
+ *
+ * Typed at the boundary because the session layer already parsed a record to reach here — the code and
+ * name are still checked below against the pairing API's own schema, which owns their bounds.
+ *
+ * `prove` is the session layer's check of the record's PROOF: whether the device signed this session's
+ * transcript with the private half of `deviceKey`. It is the session's because only the session holds
+ * the transcript, and it is a CALLBACK rather than a verdict so that it runs here, AFTER the cheap
+ * per-peer admission: an Ed25519 verify is the expensive part of an unauthenticated attempt, and a
+ * stranger refused by the limiter must not get the daemon to do it first. Its answer is one more way
+ * for an attempt to be wrong.
+ */
+export interface SessionPairingAttempt {
   readonly code: string;
   readonly deviceName: string;
+  readonly deviceKey: string;
+  readonly prove: () => Promise<boolean>;
 }
 
 /** Which way a redemption arrived: at the bound address, or over a rendezvous. */
-export type PairingCarrier = 'direct' | 'relay';
+export type PairingCarrierKind = PairingCarrier['kind'];
 
 /**
  * A device that was just granted access, as an observer may learn it.
@@ -228,7 +243,7 @@ export type PairingCarrier = 'direct' | 'relay';
 export interface PairingGrant {
   readonly deviceId: string;
   readonly deviceName: string;
-  readonly carrier: PairingCarrier;
+  readonly carrier: PairingCarrierKind;
   readonly createdAt: string;
 }
 
@@ -239,6 +254,15 @@ export interface PairingGrant {
  * a full disk cannot turn a pairing that happened into a refusal the device retries.
  */
 export type PairingGrantObserver = (grant: PairingGrant) => Promise<void>;
+
+/**
+ * Which carrier an attempt arrived on, because the two have separate budgets.
+ *
+ * A DIRECT attempt reached the daemon's own listener, so it is keyed by its peer address for the
+ * fixed-window limiter and spends the code's five direct guesses. A RELAYED one spends the separate
+ * relay budget and is bounded structurally instead (see {@link PairingService.redeemInSession}).
+ */
+export type PairingCarrier = { readonly kind: 'direct'; readonly rateLimitKey: string } | { readonly kind: 'relay' };
 
 /**
  * State this daemon holds ABOUT one device, which must not outlive the device's grant.
@@ -374,6 +398,10 @@ export class PairingService {
   private readonly compare: (left: string, right: string) => boolean;
   private active: ActivePairing | undefined;
   private readonly observations = new Map<PairingId, PairingCodeStatusResponse>();
+  /** The latest instant a person used each device, ahead of the hourly copy on disk. */
+  readonly #seen = new Map<string, number>();
+  /** Devices whose `lastSeenAt` is being written right now, so a burst writes it once. */
+  readonly #touching = new Set<string>();
 
   constructor(private readonly options: PairingServiceOptions) {
     this.daemonId = DaemonIdSchema.parse(options.daemonId);
@@ -548,36 +576,95 @@ export class PairingService {
   /**
    * Every device that may reach this daemon, projected for the wire.
    *
-   * THE DIGEST IS DROPPED HERE, and it is dropped by construction rather than by remembering to: the
-   * return type is the protocol's `PairedDevice`, which has no field for one. A record's `tokenHash` is
-   * the only thing standing between a leaked state file and a forged credential, and no caller of this
-   * has any use for it.
+   * THE KEY IS DROPPED HERE, by construction rather than by remembering to: the return type is the
+   * protocol's `PairedDevice`, which has no field for one. Idle grants are expired first, so the list a
+   * person reads never shows a device that could no longer get in.
    */
   async devices(): Promise<readonly PairedDevice[]> {
-    const records = await this.options.devices.list();
-    return records.map(record =>
-      PairedDeviceSchema.parse({
+    await this.expireIdleDevices();
+    return this.options.credentials.all().map(record => {
+      const lastSeenMs = this.#lastSeenMs(record);
+      return PairedDeviceSchema.parse({
         id: record.id,
         name: record.name,
         platform: record.platform,
         createdAt: record.createdAt,
-        lastSeenAt: record.lastSeenAt,
+        lastSeenAt: instant(lastSeenMs),
+        idleExpiresAt: instant(lastSeenMs + IDLE_EXPIRY_MS),
         ...(record.pairedOver === undefined ? {} : { pairedOver: record.pairedOver }),
-      }),
-    );
+      });
+    });
+  }
+
+  /**
+   * The public key a session must prove, or nothing — for a device that is unknown, revoked or idle.
+   *
+   * THIS IS THE ONE QUESTION A SESSION ASKS before it is admitted, and again at every lease renewal,
+   * so idle expiry and revocation are both re-read from this daemon's own state each time a device
+   * exercises its key. An idle grant is expired HERE, as a side effect of being asked about: there is
+   * no timer, because a device nobody is using needs nothing to happen to it until it tries.
+   */
+  async deviceKey(id: string): Promise<string | undefined> {
+    const record = this.options.credentials.get(id);
+    if (record === undefined) return undefined;
+    if (this.options.clock.now() - this.#lastSeenMs(record) < IDLE_EXPIRY_MS) return record.publicKey;
+    await this.revokeDevice(record.id).catch(() => false);
+    return undefined;
+  }
+
+  /**
+   * A person just used this device — a request the page marked `presence`, never an auth or a silent
+   * renewal, so an unattended tab cannot keep a device alive. Advances `lastSeenAt`, writing it to disk
+   * at most once an hour.
+   *
+   * The in-memory instant moves every time, so idle expiry is exact; the document only moves when the
+   * persisted copy is an hour stale, so a busy phone is not a disk write per request. A failed write is
+   * dropped: losing at most an hour of "last seen" can bring an expiry forward by that hour, never
+   * keep a device alive longer than it was actually used.
+   */
+  seen(id: string): void {
+    const now = this.options.clock.now();
+    this.#seen.set(id, now);
+    const record = this.options.credentials.get(id);
+    if (record === undefined || this.#touching.has(id)) return;
+    if (now - Date.parse(record.lastSeenAt) < LAST_SEEN_PERSIST_INTERVAL_MS) return;
+    const lastSeenAt = instant(now);
+    this.#touching.add(id);
+    void this.options.devices
+      .touch(id, lastSeenAt)
+      .then(
+        () => this.options.credentials.refresh({ ...record, lastSeenAt }),
+        () => undefined,
+      )
+      .finally(() => this.#touching.delete(id));
+  }
+
+  /** Ends every grant nobody has used for {@link DEVICE_IDLE_EXPIRY_DAYS}. Called at boot and per list. */
+  async expireIdleDevices(): Promise<number> {
+    const now = this.options.clock.now();
+    let expired = 0;
+    for (const record of this.options.credentials.all()) {
+      if (now - this.#lastSeenMs(record) < IDLE_EXPIRY_MS) continue;
+      if (await this.revokeDevice(record.id).catch(() => false)) expired += 1;
+    }
+    return expired;
+  }
+
+  #lastSeenMs(record: PairingDeviceRecord): number {
+    return Math.max(Date.parse(record.lastSeenAt), this.#seen.get(record.id) ?? 0);
   }
 
   /**
    * Takes one device's access away.
    *
    * THE ORDER IS DELIBERATE: the document is written first, and only a successful write removes the
-   * live credential. The other order — kill it in memory, then persist — turns a failed write into a
+   * live grant. The other order — kill it in memory, then persist — turns a failed write into a
    * daemon whose answer disagrees with its own state file, so the phone stops working now and starts
    * working again at the next restart, which is the least explainable outcome available. This way a
    * write failure means nothing was revoked, the caller is told, and the operator can try again.
    *
-   * There is no await between the write and the in-memory removal, so no request can be authenticated
-   * against a credential this daemon has already promised to forget.
+   * There is no await between the write and the in-memory removal, so no session can be admitted
+   * against a key this daemon has already promised to forget.
    *
    * DEVICE-SCOPED STATE GOES FIRST, before the grant it belongs to. That is the opposite of the order
    * above and for the same reason: whichever step fails, the world it leaves has to be coherent. Purging
@@ -591,69 +678,46 @@ export class PairingService {
     const removed = await this.options.devices.remove(id);
     if (!removed) return false;
     this.options.credentials.remove(id);
+    this.#seen.delete(id);
     // Only now, with nothing left that verifies: a socket ended any earlier could be reopened on the
-    // credential this revocation is about to remove.
+    // key this revocation is about to remove.
     this.options.connections?.endDevice(id);
     return true;
   }
 
-  async redeem(value: unknown, rateLimitKey: string): Promise<PairingRedemption> {
-    if (!this.rateLimiter.admit(rateLimitKey)) return REFUSED;
-
-    const parsed = PairingRequestSchema.safeParse(value);
-    const candidate = parsed.success ? parsed.data.code : pairingCodeFrom(value);
-    const active = this.active;
-    const matches = this.compare(candidate, active?.code ?? DUMMY_PAIRING_CODE);
-    const now = this.options.clock.now();
-
-    if (active === undefined) return REFUSED;
-    if (now >= active.expiresAtMs) {
-      this.expire(active);
-      return REFUSED;
-    }
-    // A body that cannot describe a code guess is still compared above, but it cannot spend the
-    // daemon-wide five-guess budget. Otherwise anybody could kill the active code with five broken
-    // uploads while rotating through rate-limit keys.
-    if (!parsed.success) return REFUSED;
-    if (!matches) {
-      active.attempts += 1;
-      if (active.attempts >= PAIRING_CODE_MAX_ATTEMPTS) this.expire(active);
-      return REFUSED;
-    }
-    // A name that would read as one of the log's fixed actors is refused AFTER the guess is judged,
-    // so a wrong code still spends the budget whatever name it carries. The code survives.
-    if (isReservedActorPhrase(parsed.data.deviceName)) return REFUSED;
-    return await this.grant(active, parsed.data.deviceName, now, 'direct');
-  }
-
   /**
-   * ONE REDEMPTION, ARRIVING OVER A RENDEZVOUS INSTEAD OF OVER THE BOUND ADDRESS.
+   * ONE REDEMPTION, from a sealed `pair` record, on either carrier.
    *
-   * IT TAKES NO `ApiRequest`, AND THAT IS THE SECURITY PROPERTY RATHER THAN A CONVENIENCE. A relayed
-   * session that could build a request would be an anonymous relayed caller reaching a route table,
-   * and the next route somebody marks public would be published to the internet by accident. The
-   * relay's pairing branch calls this and only this: a pre-credential session issues no requests at
-   * all, so `POST /v1/pair` — public on the route table — stays unreachable through a relay, and the
-   * tunnel's invariant that a relayed request carries exactly one credential stays literally true.
+   * There is no other way in any more. The plain-HTTP `POST /v1/pair` handed a live code to whatever
+   * answered at an address nothing had authenticated; every redemption now arrives inside a session
+   * whose daemon was proved against the QR's fingerprint before the code left the device.
    *
-   * THERE IS NO FIXED-WINDOW ADMISSION HERE, deliberately. `redeem` keys {@link PairingRateLimiter}
-   * by the caller's address because many direct attempts share one; a relayed attempt costs a whole
-   * rendezvous session, the session identifier is minted by the rendezvous and cannot repeat, and the
-   * tunnel permits exactly one credential record per session. A limiter keyed by a value that is
-   * unique per attempt admits every time — it is not a limit, it is an entry evicting real ones from
-   * a bounded map. What actually bounds this path is structural: one attempt per session, a ceiling
-   * on pre-credential sessions per link, the rendezvous' own arrival rate, and the relay budget below.
+   * IT TAKES NO `ApiRequest`, AND THAT IS THE SECURITY PROPERTY RATHER THAN A CONVENIENCE. A
+   * pre-credential session that could build a request would be an anonymous caller at a route table.
+   * The session's pairing branch calls this and only this, so the tunnel's invariant — a request carries
+   * exactly one credential, the one its session was opened with — stays literally true.
    *
-   * NOTHING IS REFUSED EARLY, including the case where no code is minted at all. Answering faster
-   * when there is nothing to guess would tell an unauthenticated internet caller when to start
-   * guessing, so the comparison against the dummy runs exactly as it does for a wrong code and both
-   * end in the same refusal.
+   * TWO BUDGETS, BECAUSE TWO CARRIERS. A direct attempt is admitted by the per-peer fixed window and
+   * spends the code's five direct guesses. A relayed attempt spends the separate relay budget and is
+   * never keyed by a peer: the session identifier is minted by the rendezvous and cannot repeat, so a
+   * limiter keyed by it would admit every time. What bounds that path is structural — one attempt per
+   * session, a ceiling on pre-credential sessions per link, the rendezvous' own arrival rate, and the
+   * relay budget below, whose exhaustion closes only the relay path for this code.
+   *
+   * NOTHING IS REFUSED EARLY, including the case where no code is minted at all, and a proof that does
+   * not verify is spent exactly like a wrong code. Answering faster when there is nothing to guess, or
+   * differently for a bad key, would give an unauthenticated caller an oracle.
    */
-  async redeemOverRelay(attempt: RelayPairingAttempt): Promise<PairingRedemption> {
-    const parsed = PairingRequestSchema.safeParse(attempt);
+  async redeemInSession(attempt: SessionPairingAttempt, carrier: PairingCarrier): Promise<PairingRedemption> {
+    if (carrier.kind === 'direct' && !this.rateLimiter.admit(carrier.rateLimitKey)) return REFUSED;
+    // Run for every admitted attempt, whatever its code: verifying only when the code matched would
+    // make a right code measurably slower than a wrong one.
+    const proven = await attempt.prove();
+    const parsed = PairingRequestSchema.safeParse({ code: attempt.code, deviceName: attempt.deviceName });
     const candidate = parsed.success ? parsed.data.code : attempt.code;
     const active = this.active;
     const matches = this.compare(candidate, active?.code ?? DUMMY_PAIRING_CODE);
+    const keyed = proven && DeviceKeySchema.safeParse(attempt.deviceKey).success;
     const now = this.options.clock.now();
 
     if (active === undefined) return REFUSED;
@@ -664,17 +728,26 @@ export class PairingService {
     // A spent relay budget refuses AFTER the comparison, like every other cause: the whole point of
     // the separate budget is that this refusal is invisible from the LAN, and a faster answer here
     // would announce to the attacker that their own guesses had closed the path.
-    if (active.relayClosed) return REFUSED;
+    if (carrier.kind === 'relay' && active.relayClosed) return REFUSED;
+    // A body that cannot describe a code guess is still compared above, but it cannot spend a
+    // budget. Otherwise anybody could kill the active code with five broken records.
     if (!parsed.success) return REFUSED;
-    if (!matches) {
-      active.relayAttempts += 1;
-      // `relayClosed`, NEVER `expire`. This is the entire separation: the code survives, its five
-      // direct guesses survive, and only the carrier the guesses came over is shut.
-      if (active.relayAttempts >= PAIRING_CODE_MAX_ATTEMPTS) active.relayClosed = true;
+    if (!matches || !keyed) {
+      if (carrier.kind === 'direct') {
+        active.attempts += 1;
+        if (active.attempts >= PAIRING_CODE_MAX_ATTEMPTS) this.expire(active);
+      } else {
+        active.relayAttempts += 1;
+        // `relayClosed`, NEVER `expire`. This is the entire separation: the code survives, its five
+        // direct guesses survive, and only the carrier the guesses came over is shut.
+        if (active.relayAttempts >= PAIRING_CODE_MAX_ATTEMPTS) active.relayClosed = true;
+      }
       return REFUSED;
     }
+    // A name that would read as one of the log's fixed actors is refused AFTER the guess is judged,
+    // so a wrong code still spends the budget whatever name it carries. The code survives.
     if (isReservedActorPhrase(parsed.data.deviceName)) return REFUSED;
-    return await this.grant(active, parsed.data.deviceName, now, 'relay');
+    return await this.grant(active, parsed.data.deviceName, attempt.deviceKey, now, carrier.kind);
   }
 
   /**
@@ -687,14 +760,14 @@ export class PairingService {
   private async grant(
     active: ActivePairing,
     deviceName: string,
+    publicKey: string,
     now: number,
-    carrier: PairingCarrier,
+    carrier: PairingCarrierKind,
   ): Promise<PairingRedemption> {
     // The consume is the synchronous state change immediately before any persistence await. A
     // concurrent call therefore sees no active code and cannot enter the successful branch.
     this.active = undefined;
     const createdAt = instant(now);
-    const deviceToken = DeviceTokenSchema.parse(this.options.cryptography.deviceToken());
     const record: PairingDeviceRecord = {
       id: this.options.cryptography.deviceId(),
       daemonId: this.daemonId,
@@ -703,7 +776,7 @@ export class PairingService {
       createdAt,
       lastSeenAt: createdAt,
       pairedOver: carrier,
-      tokenHash: this.options.cryptography.hashDeviceToken(this.daemonId, deviceToken),
+      publicKey,
     };
 
     try {
@@ -730,7 +803,7 @@ export class PairingService {
     return {
       kind: 'paired',
       response: PairingResponseSchema.parse({
-        deviceToken,
+        deviceId: record.id,
         daemonId: this.daemonId,
         daemonName: this.daemonName,
         capabilities: this.capabilities,
@@ -739,6 +812,7 @@ export class PairingService {
         // fail this parse: the constructor already refused a set this schema would reject, which is
         // what keeps a bad carrier from being discovered after the code has been spent.
         carriers: this.options.carriers,
+        idleExpiryDays: DEVICE_IDLE_EXPIRY_DAYS,
       }),
     };
   }
@@ -756,11 +830,6 @@ export class PairingService {
 
 function instant(milliseconds: number): string {
   return new Date(milliseconds).toISOString();
-}
-
-function pairingCodeFrom(value: unknown): string {
-  if (typeof value !== 'object' || value === null || !('code' in value)) return '';
-  return typeof value.code === 'string' ? value.code : '';
 }
 
 /**

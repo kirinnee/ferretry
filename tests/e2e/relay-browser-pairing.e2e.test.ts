@@ -66,7 +66,7 @@ import {
   chromeExecutable,
   clickFirstPresent,
   describeControls,
-  deviceTokenForLeakSearchOnly,
+  deviceGrantForLeakSearchOnly,
   harnessTeardown,
   HOSTED_RELAY_PUBLIC_PATH,
   launchChrome,
@@ -582,8 +582,12 @@ const STEPS: readonly LedgerStep[] = [
     claim: 'a second, authenticated session followed the pairing across the same rendezvous',
   },
   {
+    id: 'device-key-only',
+    claim: 'the browser stores no bearer value, and its device key is a non-extractable Ed25519 CryptoKey',
+  },
+  {
     id: 'relay-read-nothing',
-    claim: 'no pairing code, device token or device name appears in any relay-observable frame',
+    claim: 'no pairing code, device id or device name appears in any relay-observable frame',
   },
   {
     id: 'live-stream-rendered',
@@ -1144,25 +1148,48 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * where the value it names actually exists; asserting the absence of a marker no event ever
          * carried would be a check that passes because it tests nothing.
          *
-         * The token is read out of the browser for this comparison and for nothing else, and
-         * `plaintextLeaks` reports only which LABEL matched — never the value.
+         * The grant id is read out of the browser for this comparison and for nothing else, and
+         * `plaintextLeaks` reports only which LABEL matched — never the value. The same read proves
+         * the two properties device keys exist for: no bearer value is stored anywhere, and the key
+         * this browser proves its grant with is a real Ed25519 `CryptoKey` it cannot export.
          */
-        const stored = await deviceTokenForLeakSearchOnly(browser.page);
-        if (stored.token === '') {
+        const stored = await deviceGrantForLeakSearchOnly(browser.page);
+        if (stored.deviceId === '') {
           ledger.fail(
             'relay-read-nothing',
-            `no device token is stored, so the token leak search would assert nothing. The browser holds: ${stored.shape}`,
+            `no device grant is stored, so the grant leak search would assert nothing. The browser holds: ${stored.shape}`,
           );
         }
+        if (stored.tokenFields.length !== 0) {
+          ledger.fail(
+            'device-key-only',
+            `the browser still stores a token-shaped field (${stored.tokenFields.join(', ')}); a paired browser holds no bearer value`,
+          );
+        }
+        if (
+          stored.key === null ||
+          !stored.key.isCryptoKey ||
+          stored.key.algorithm !== 'Ed25519' ||
+          stored.key.extractable
+        ) {
+          ledger.fail(
+            'device-key-only',
+            `the device key is not a non-extractable Ed25519 CryptoKey: ${JSON.stringify(stored.key)}. The browser holds: ${stored.shape}`,
+          );
+        }
+        ledger.prove(
+          'device-key-only',
+          'the browser stores no token-shaped value, and holds its device key as a non-extractable Ed25519 CryptoKey',
+        );
         const leaks = plaintextLeaks(await rendezvous.observations(), {
           'the pairing code': code,
-          'the minted device token': stored.token,
+          'the minted device id': stored.deviceId,
           'the device name the browser sent': PAIRED_DEVICE_NAME,
         });
         if (leaks.length !== 0) ledger.fail('relay-read-nothing', leaks.join('; '));
         ledger.prove(
           'relay-read-nothing',
-          `the pairing code, the minted device token and the device name ${PAIRED_DEVICE_NAME} are absent from all ` +
+          `the pairing code, the minted device id and the device name ${PAIRED_DEVICE_NAME} are absent from all ` +
             `${String((await rendezvous.observations()).length)} frames the rendezvous handled`,
         );
 

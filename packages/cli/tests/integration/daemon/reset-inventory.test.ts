@@ -26,7 +26,7 @@ const secretsBody = {
   references: [],
 };
 
-/** Two paired devices, as the pairing surface projects them: no token and no digest, ever. */
+/** Two paired devices, as the pairing surface projects them: no key material, ever. */
 const devicesBody = {
   devices: [
     {
@@ -35,6 +35,7 @@ const devicesBody = {
       platform: 'browser',
       createdAt: '2026-07-01T00:00:00.000Z',
       lastSeenAt: '2026-07-05T00:00:00.000Z',
+      idleExpiresAt: '2026-08-04T00:00:00.000Z',
     },
     {
       id: `fy_device_id_${'b'.repeat(22)}`,
@@ -42,6 +43,7 @@ const devicesBody = {
       platform: 'browser',
       createdAt: '2026-07-02T00:00:00.000Z',
       lastSeenAt: '2026-07-06T00:00:00.000Z',
+      idleExpiresAt: '2026-08-05T00:00:00.000Z',
     },
   ],
   hostLocal: true,

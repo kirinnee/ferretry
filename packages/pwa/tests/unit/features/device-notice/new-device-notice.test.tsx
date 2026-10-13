@@ -25,7 +25,7 @@ const MINUTE = 60_000;
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
 
 const record = (daemonId: string, label?: string): DaemonConnectionRecord => ({
-  ...daemonConnection({ daemonId, baseUrl: `https://${daemonId}.example.test`, deviceToken: `${daemonId}-token` }),
+  ...daemonConnection({ daemonId, baseUrl: `https://${daemonId}.example.test`, deviceId: `fy_device_id_${daemonId.padEnd(22, "0")}` }),
   ...(label === undefined ? {} : { label }),
   pairedAt: 0,
   lastSelectedAt: 0,
@@ -42,6 +42,7 @@ const device = (key: string, createdAt: string, name = key): PairedDevice => ({
   platform: 'browser',
   createdAt,
   lastSeenAt: createdAt,
+  idleExpiresAt: createdAt,
 });
 
 const memory = (

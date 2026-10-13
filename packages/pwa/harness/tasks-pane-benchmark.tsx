@@ -14,7 +14,7 @@ import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 
 const ROOT_ID = 'tasks-pane-benchmark-root';
-const DEVICE_TOKEN = 'tasks-pane-benchmark-token';
+const DEVICE_ID = 'tasks-pane-benchmark-token';
 const WAIT_TIMEOUT_MS = 10_000;
 
 interface MountOptions {
@@ -166,7 +166,7 @@ const mount = async (options: MountOptions): Promise<MountResult> => {
   const connection = daemonConnection({
     daemonId: 'tasks-pane-benchmark-daemon',
     baseUrl: window.location.origin,
-    deviceToken: DEVICE_TOKEN,
+    deviceId: DEVICE_ID,
   });
   const scope = daemonSessionScope(connection, options.sessionId);
   mountedAt = performance.now();

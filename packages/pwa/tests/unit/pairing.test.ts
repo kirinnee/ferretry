@@ -176,13 +176,13 @@ describe('paired daemon connection', () => {
     // Act
     const actual = pairedDaemonConnection(seed, {
       daemonId: 'fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
-      deviceToken: 'device-token',
+      deviceId: 'device-token',
       carriers: [],
     });
     const mismatch = (): unknown =>
       pairedDaemonConnection(seed, {
         daemonId: 'fy_daemon_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
-        deviceToken: 'device-token',
+        deviceId: 'device-token',
         carriers: [],
       });
 
@@ -190,7 +190,7 @@ describe('paired daemon connection', () => {
     should(actual).deepEqual({
       daemonId: 'fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
       baseUrl: 'http://127.0.0.1:7431',
-      deviceToken: 'device-token',
+      deviceId: 'device-token',
       carriers: [{ kind: 'direct', daemonUrl: 'http://127.0.0.1:7431' }],
     });
     should(mismatch).throw('pairing response daemon ID does not match its fingerprint');
@@ -207,7 +207,7 @@ describe('paired daemon connection', () => {
       seed,
       {
         daemonId: 'fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
-        deviceToken: 'device-token',
+        deviceId: 'device-token',
         carriers: [
           // A reverse-proxy prefix, credentials and a scheme nobody dials: refused by the daemon's own
           // wire schema, and refused here too if one arrives from a daemon that never applied it.
@@ -237,7 +237,7 @@ describe('paired daemon connection', () => {
     // Act
     const actual = pairedDaemonConnection(seed, {
       daemonId: 'fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
-      deviceToken: 'device-token',
+      deviceId: 'device-token',
       carriers: [{ kind: 'direct', url: 'https://box.example/behind/a/proxy' }],
     });
 
@@ -256,7 +256,7 @@ describe('a pairing that crossed a rendezvous', () => {
   const crossed = { kind: 'relay' as const, relayUrl: 'wss://relay.example' };
   const response = (carriers: readonly { kind: 'direct' | 'relay'; url: string }[]) => ({
     daemonId: 'fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
-    deviceToken: 'device-token',
+    deviceId: 'device-token',
     carriers,
   });
 

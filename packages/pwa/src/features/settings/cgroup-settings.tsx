@@ -10,7 +10,7 @@ import type { CgroupConfigPatch, CgroupConfigView, IFyApiClient } from '@ferretr
 import { CircleAlert, Cpu, LoaderCircle, MemoryStick, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
-import { daemonApiClient } from '../../lib/api-client.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 
 export interface CgroupConfigDraft {
@@ -294,11 +294,15 @@ export type CgroupClientFactory = (connection: DaemonConnection) => Promise<Cgro
 
 export function CgroupConfigSurface({
   connection,
-  createClient = daemonApiClient,
+  createClient: injectedClient,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: CgroupClientFactory;
 }) {
+  // The carrier-routed client unless a test or the harness hands one in: a plain-network client
+  // reaches no daemon at all, because a paired browser is answered only inside its own session.
+  const routedClient = useDaemonClient();
+  const createClient = injectedClient ?? routedClient;
   const [client, setClient] = useState<CgroupClient | null>(null);
   const [view, setView] = useState<{
     readonly daemonId: DaemonConnection['daemonId'];

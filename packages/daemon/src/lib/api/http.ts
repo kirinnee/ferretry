@@ -40,6 +40,16 @@ export interface ApiRequest {
    */
   readonly privilegedLoopback?: boolean;
   /**
+   * The paired device a SESSION proved, and nothing else can set this.
+   *
+   * A device authenticates by signing its session's transcript with a key it cannot export (see
+   * `docs/design/zero-trust.md` A4); the tunnel that verified the proof is the one constructor that
+   * builds a request carrying this (`tunnelApiRequest`). The HTTP transport never sets it, so there is
+   * no header, query parameter or body by which a device identity can be claimed — the bearer path
+   * that used to resolve one was deleted, not disabled.
+   */
+  readonly device?: SessionDevice;
+  /**
    * Fires when the caller gives up, so a long read can stop instead of finishing for nobody.
    *
    * Optional because most handlers answer in one read and have nothing to abandon, and requiring it
@@ -59,6 +69,13 @@ export interface ApiRequest {
    * schema to bound — and no allocation of its own to protect — wants.
    */
   readonly text: (limitBytes?: number) => Promise<string>;
+}
+
+/** Who opened a session: the device whose key signed it, and the running copy of the app it came from. */
+export interface SessionDevice {
+  readonly deviceId: string;
+  /** Random per page load, signed into the session's proof; a step-up belongs to one of these. */
+  readonly appSession: string;
 }
 
 export interface ApiResponse {

@@ -7,7 +7,7 @@ import { interact, mount, must } from '../support/dom.ts';
 const connection = daemonConnection({
   daemonId: 'archive-daemon',
   baseUrl: 'https://archive.example.test',
-  deviceToken: 'archive-token',
+  deviceId: 'archive-token',
 });
 
 const conversation = {

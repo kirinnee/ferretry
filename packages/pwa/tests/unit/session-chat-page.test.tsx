@@ -40,7 +40,7 @@ import { taskSummary } from '../support/tasks.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 
 const originalFetch = globalThis.fetch;
@@ -428,7 +428,7 @@ describe('SessionChatPage', () => {
       // The stale-scope guard is unchanged, and still refuses before the client.
       await expect(
         modelControls.props.api.runtime(
-          daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-token' }),
+          daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'beta-token' }),
           'shared',
           { action: 'model' },
           'foreign',
@@ -570,7 +570,7 @@ describe('SessionChatPage', () => {
 
       await expect(
         modelControls.props.api.runtime(
-          daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-token' }),
+          daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'beta-token' }),
           'shared',
           { action: 'model' },
           'foreign-runtime',
@@ -1232,7 +1232,7 @@ describe('SessionChatPage', () => {
       expect(refreshed).toBe(1);
       await expect(
         form.props.api.answer(
-          daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceToken: 'other-token' }),
+          daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'other-token' }),
           'shared',
           'ask-1',
           ['Yes'],

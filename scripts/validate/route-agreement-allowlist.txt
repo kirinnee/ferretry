@@ -17,7 +17,7 @@
 #                  without this pass ever guessing at the expression that made it unreadable. Pay one off
 #                  by making the verb readable at the dial, never by editing the line.
 #
-# 32 LINES AT SEEDING, 26 NOW, after peaking at 52. Every added line exposed an address the old list
+# 32 LINES AT SEEDING, 23 NOW, after peaking at 52. Every added line exposed an address the old list
 # could not hold anybody to; later fixes then paid thirteen exact exemptions back. The peak arithmetic
 # stays here so that temporary growth cannot be quoted as a relaxation:
 #
@@ -79,7 +79,6 @@ unserved GET /v1/default-relay # CORRECT: dialled against the relay DISCOVERY OR
 # ── unreached: the daemon serves, nothing in this repository dials ────────────────────────────
 
 # Machine feeds. Their callers are an orchestrator, a scraper and a human, none of which live here.
-unreached GET /healthz # CORRECT: liveness probe for whatever supervises the process
 unreached GET /usage # CORRECT: public usage feed for external readers
 unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
 
@@ -109,8 +108,3 @@ verb-unproven GET /v1/learning/proposals # ANALYSIS: pwa learning-api.ts:54 trai
 verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminals.ts:81 trailing `fetcher` argument is indistinguishable from an init
 verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
 
-# `const url = new URL(path, base)` — the composed URL is not an argument to anything, so there is no
-# outer call whose init could be read. The stream route is a WebSocket upgrade: its dial site has no HTTP
-# verb at all, and the daemon declares GET only because that is what an upgrade is.
-verb-unproven POST /v1/pair # ANALYSIS: pwa store.tsx:170 const-bound `new URL()`, dialled a statement later
-verb-unproven GET /v1/sessions/:sessionId/terminals/:terminalId/stream # ANALYSIS: pwa web-terminals.ts:168 const-bound `new URL()` for a WebSocket upgrade

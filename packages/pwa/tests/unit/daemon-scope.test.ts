@@ -3,8 +3,8 @@ import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonSessionCache, daemonSessionKey, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'http://127.0.0.1:7431', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'http://127.0.0.1:7431', deviceId: 'token-b' });
 
 describe('daemon session scope', () => {
   it('should distinguish identical session IDs from different daemons', () => {

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { authenticate, bearerToken, secretsMatch } from '../../../src/lib/api/index.ts';
+import { authenticate, bearerToken, isPreKeyDeviceToken, secretsMatch } from '../../../src/lib/api/index.ts';
 
 describe('secretsMatch', () => {
   const cases: readonly (readonly [string, string, boolean])[] = [
@@ -52,7 +52,6 @@ describe('authenticate', () => {
   const credentials = {
     admin: 'admin-secret',
     warden: 'warden-secret',
-    devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
   };
 
   it('should classify the admin token as admin', () => {
@@ -71,10 +70,12 @@ describe('authenticate', () => {
     should(result).deepEqual({ kind: 'authenticated', tokenClass: 'warden' });
   });
 
-  it('should classify a hashed-registry match as its own device', () => {
-    const result = authenticate(credentials, { bearer: 'device-secret' });
-
-    should(result).deepEqual({ kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' });
+  it('should resolve no device from anything a request can send', () => {
+    // A device is whoever its SESSION proved; there is no bearer that names one any more. Even a value
+    // shaped exactly like an old device token is a stranger here.
+    const oldToken = `fy_device_${'d'.repeat(43)}`;
+    should(authenticate(credentials, { bearer: oldToken })).deepEqual({ kind: 'anonymous' });
+    should(authenticate(credentials, { query: oldToken })).deepEqual({ kind: 'anonymous' });
   });
 
   it('should accept a query token, which is how a WebSocket upgrade authenticates', () => {
@@ -134,58 +135,14 @@ describe('authenticate', () => {
     // Assert
     should(result).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
+});
 
-  it('should refuse a device the registry cannot name', () => {
-    // An identity-less "match" is damaged evidence, not a benign one. Honouring it would authorize a
-    // device on every operator route and journal the action as the bare actor `device`, which no
-    // later revocation could ever aim at.
-    const nameless = { admin: 'admin-secret', devices: { identify: () => '' } };
-    const blank = { admin: 'admin-secret', devices: { identify: () => '   ' } };
-
-    should(authenticate(nameless, { bearer: 'device-secret' })).deepEqual({ kind: 'anonymous' });
-    should(authenticate(blank, { bearer: 'device-secret' })).deepEqual({ kind: 'anonymous' });
-  });
-
-  it('should never consult the registry for a blank presented token', () => {
-    // `?token=` on a loopback upgrade presents ''. A blank secret must authenticate nothing without
-    // relying on the verifier to be the one that says so.
-    const consulted: string[] = [];
-    const recording = {
-      admin: 'admin-secret',
-      devices: {
-        identify: (token: string) => {
-          consulted.push(token);
-          return 'device-1';
-        },
-      },
-    };
-
-    const result = authenticate(recording, { query: '' });
-
-    should(result).deepEqual({ kind: 'anonymous' });
-    should(consulted).be.empty();
-  });
-
-  it('should attribute a device to the trimmed identity the registry reports', () => {
-    const padded = { admin: 'admin-secret', devices: { identify: () => ' device-1 ' } };
-
-    should(authenticate(padded, { bearer: 'device-secret' })).deepEqual({
-      kind: 'authenticated',
-      tokenClass: 'device',
-      deviceId: 'device-1',
-    });
-  });
-
-  it('should prefer the host tokens over a registry that also claims them', () => {
-    const greedy = { ...credentials, devices: { identify: () => 'device-1' } };
-
-    should(authenticate(greedy, { bearer: 'admin-secret' })).deepEqual({
-      kind: 'authenticated',
-      tokenClass: 'admin',
-    });
-    should(authenticate(greedy, { bearer: 'warden-secret' })).deepEqual({
-      kind: 'authenticated',
-      tokenClass: 'warden',
-    });
+describe('isPreKeyDeviceToken', () => {
+  it('should recognise only the exact shape of a device token from before device keys', () => {
+    should(isPreKeyDeviceToken(`fy_device_${'d'.repeat(43)}`)).be.true();
+    should(isPreKeyDeviceToken(`fy_device_${'d'.repeat(42)}`)).be.false();
+    should(isPreKeyDeviceToken(`fy_device_id_${'d'.repeat(22)}`)).be.false();
+    should(isPreKeyDeviceToken('admin-secret')).be.false();
+    should(isPreKeyDeviceToken(undefined)).be.false();
   });
 });

@@ -31,7 +31,7 @@ import { render, run } from '../support/react.ts';
 const connection = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
 });
 const scope = daemonSessionScope(connection, 'session-a');
 

@@ -129,7 +129,7 @@ describe('the session header names the callsign, then the account', () => {
     const connection = daemonConnection({
       daemonId: 'names-daemon',
       baseUrl: 'https://names.example.test',
-      deviceToken: 'token-names',
+      deviceId: 'token-names',
     });
     const mounted = await mount(
       <RosterSessionHeader

@@ -3,13 +3,13 @@ import {
   type Advertisement,
   type DaemonCarrier,
   type DaemonId,
-  type DeviceToken,
   decideAdvertisement,
   invitationRedeemableByAnotherDevice,
   type PairingCode,
   type PairingId,
   pairingMintOutcome,
 } from '@ferretry/protocol';
+import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import {
   type DeviceConnectionRevoker,
@@ -22,11 +22,62 @@ import {
   PairingService,
 } from '../../../src/lib/pairing/index.ts';
 
+/** An Ed25519 SPKI: the fixed DER prefix and 32 key bytes. The service checks the shape; the session checks the key. */
+const DEVICE_KEY = toBase64Url(
+  new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(5)]),
+);
+const SECOND_DEVICE_KEY = toBase64Url(
+  new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(6)]),
+);
+
+interface AttemptShape {
+  readonly code?: string;
+  readonly deviceName?: string;
+}
+
+/**
+ * A redemption that arrived on this daemon's own listener, as the session layer presents one.
+ *
+ * `proven` is the session's verdict on the record's proof; every case that is not about the proof
+ * passes a proven key, and the cases that are say so.
+ */
+function redeemDirect(
+  service: Pick<PairingService, 'redeemInSession'>,
+  attempt: AttemptShape | undefined,
+  peer: string,
+  options: { readonly proven?: boolean; readonly deviceKey?: string } = {},
+) {
+  return service.redeemInSession(
+    {
+      code: attempt?.code ?? '',
+      deviceName: attempt?.deviceName ?? '',
+      deviceKey: options.deviceKey ?? DEVICE_KEY,
+      prove: async () => options.proven ?? true,
+    },
+    { kind: 'direct', rateLimitKey: peer },
+  );
+}
+
+/** The same redemption arriving over a rendezvous, which spends the relay budget instead. */
+function redeemRelayed(
+  service: Pick<PairingService, 'redeemInSession'>,
+  attempt: AttemptShape,
+  options: { readonly proven?: boolean; readonly deviceKey?: string } = {},
+) {
+  return service.redeemInSession(
+    {
+      code: attempt.code ?? '',
+      deviceName: attempt.deviceName ?? '',
+      deviceKey: options.deviceKey ?? DEVICE_KEY,
+      prove: async () => options.proven ?? true,
+    },
+    { kind: 'relay' },
+  );
+}
+
 const DAEMON_ID = `fy_daemon_${'a'.repeat(43)}` as DaemonId;
 const PAIRING_ID = `fy_pair_${'b'.repeat(22)}` as PairingId;
 const SECOND_PAIRING_ID = `fy_pair_${'c'.repeat(22)}` as PairingId;
-const DEVICE_TOKEN = `fy_device_${'d'.repeat(43)}` as DeviceToken;
-const SECOND_DEVICE_TOKEN = `fy_device_${'e'.repeat(43)}` as DeviceToken;
 const CODE = '7F3K-Q2ND' as PairingCode;
 const SECOND_CODE = '6E2J-P3MC' as PairingCode;
 const FIRST_DEVICE_ID = `fy_device_id_${'1'.padStart(22, 'a')}`;
@@ -53,7 +104,6 @@ class FakeClock {
 class FakeCryptography implements PairingCryptography {
   readonly codes = [CODE, SECOND_CODE];
   readonly pairingIds = [PAIRING_ID, SECOND_PAIRING_ID];
-  readonly tokens = [DEVICE_TOKEN, SECOND_DEVICE_TOKEN];
   deviceIds = 0;
 
   pairingCode(): string {
@@ -62,10 +112,6 @@ class FakeCryptography implements PairingCryptography {
 
   pairingId(): string {
     return this.pairingIds.shift() ?? SECOND_PAIRING_ID;
-  }
-
-  deviceToken(): string {
-    return this.tokens.shift() ?? SECOND_DEVICE_TOKEN;
   }
 
   /**
@@ -78,10 +124,6 @@ class FakeCryptography implements PairingCryptography {
   deviceId(): string {
     this.deviceIds += 1;
     return `fy_device_id_${String(this.deviceIds).padStart(22, 'a')}`;
-  }
-
-  hashDeviceToken(daemonId: string, token: string): string {
-    return `hash:${daemonId}:${token.length}`;
   }
 }
 
@@ -104,6 +146,15 @@ class RecordingDevices implements PairingDeviceStore {
     if (remaining.length === this.records.length) return false;
     this.records = remaining;
     return true;
+  }
+
+  readonly touched: { readonly id: string; readonly lastSeenAt: string }[] = [];
+  touchFailure: Error | undefined;
+
+  async touch(id: string, lastSeenAt: string): Promise<void> {
+    this.touched.push({ id, lastSeenAt });
+    if (this.touchFailure !== undefined) throw this.touchFailure;
+    this.records = this.records.map(record => (record.id === id ? { ...record, lastSeenAt } : record));
   }
 }
 
@@ -168,7 +219,7 @@ function fixture(
   const clock = new FakeClock();
   const cryptography = new FakeCryptography();
   const devices = new RecordingDevices();
-  const credentials = new PairingDeviceRegistry(DAEMON_ID, cryptography);
+  const credentials = new PairingDeviceRegistry(DAEMON_ID);
   const service = new PairingService({
     daemonId: DAEMON_ID,
     daemonName: 'workstation',
@@ -297,7 +348,7 @@ describe('PairingService minting and status', () => {
       clock: new FakeClock(),
       cryptography: new FakeCryptography(),
       devices: new RecordingDevices(),
-      credentials: new PairingDeviceRegistry(DAEMON_ID, new FakeCryptography()),
+      credentials: new PairingDeviceRegistry(DAEMON_ID),
       operatorPassword: { isSet: async () => answers.shift() ?? false },
       clientName: 'fy',
     });
@@ -311,7 +362,7 @@ describe('PairingService minting and status', () => {
     should(second.kind).equal('refused');
     should(shifting.status(first.response.pairingId)).containDeep({ status: 'pending' });
     // And the code still redeems, because it was minted while the machine had its gate.
-    const redeemed = await shifting.redeem({ code: first.response.code, deviceName: 'phone' }, 'peer');
+    const redeemed = await redeemDirect(shifting, { code: first.response.code, deviceName: 'phone' }, 'peer');
     should(redeemed.kind).equal('paired');
     // The unrelated fixture is untouched — this case invents no shared state.
     should(service.status(PAIRING_ID)).be.undefined();
@@ -331,7 +382,7 @@ describe('PairingService minting and status', () => {
     const selfHosted = fixture({ carriers });
 
     const mintedWithoutDiscovery = await selfHosted.mint();
-    const redemption = await selfHosted.service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+    const redemption = await redeemRelayed(selfHosted.service, { code: CODE, deviceName: 'phone' });
 
     should(mintedWithoutDiscovery.discoveredRelayUrl).be.undefined();
     if (redemption.kind !== 'paired') throw new Error('expected a pairing');
@@ -446,16 +497,17 @@ describe('PairingService minting and status', () => {
 });
 
 describe('PairingService redemption', () => {
-  it('should atomically consume a code, persist only its hash, and acknowledge the bounded name', async () => {
+  it('should atomically consume a code, persist only its public key, and acknowledge the bounded name', async () => {
     const { credentials, devices, service, mint } = fixture();
     await mint();
 
-    const result = await service.redeem({ code: CODE, deviceName: '  Ernest phone  ' }, '198.51.100.2');
+    const result = await redeemDirect(service, { code: CODE, deviceName: '  Ernest phone  ' }, '198.51.100.2');
 
     should(result.kind).equal('paired');
     if (result.kind !== 'paired') throw new Error('expected successful pairing');
     should(result.response).deepEqual({
-      deviceToken: DEVICE_TOKEN,
+      // An identity, not a credential: nothing in this answer can authenticate anybody.
+      deviceId: FIRST_DEVICE_ID,
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       capabilities: ['daemon-api'],
@@ -464,6 +516,7 @@ describe('PairingService redemption', () => {
       // it cannot discover the rendezvous by itself — each end used to read its own build-time
       // directory and the two met by coincidence.
       carriers: CARRIERS,
+      idleExpiryDays: 30,
     });
     should(devices.records).deepEqual([
       {
@@ -473,13 +526,14 @@ describe('PairingService redemption', () => {
         platform: 'browser',
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
-        tokenHash: `hash:${DAEMON_ID}:${DEVICE_TOKEN.length}`,
         // How it arrived, so every other device can be told "over the relay" or "on the local network".
         pairedOver: 'direct',
+        publicKey: DEVICE_KEY,
       },
     ]);
-    should(JSON.stringify(devices.records)).not.containEql(DEVICE_TOKEN);
-    should(credentials.identify(DEVICE_TOKEN)).equal(FIRST_DEVICE_ID);
+    should(JSON.stringify(result.response)).not.containEql(DEVICE_KEY);
+    should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
     should(service.status(PAIRING_ID)).deepEqual({
       pairingId: PAIRING_ID,
       status: 'redeemed',
@@ -502,7 +556,7 @@ describe('PairingService redemption', () => {
     await mint();
 
     // Act
-    const result = await service.redeem({ code: CODE, deviceName: 'phone' }, '198.51.100.9');
+    const result = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, '198.51.100.9');
 
     // Assert
     if (result.kind !== 'paired') throw new Error('expected successful pairing');
@@ -518,7 +572,7 @@ describe('PairingService redemption', () => {
     // reached by a configuration mistake rather than by an attack. Construction is where it belongs.
     // Arrange — a URL the type permits and `DaemonOriginSchema` does not: a credential in an address.
     const devices = new RecordingDevices();
-    const credentials = new PairingDeviceRegistry(DAEMON_ID, new FakeCryptography());
+    const credentials = new PairingDeviceRegistry(DAEMON_ID);
     const build = () =>
       new PairingService({
         daemonId: DAEMON_ID,
@@ -538,7 +592,7 @@ describe('PairingService redemption', () => {
     should(build).throw(/daemon address may not carry credentials/u);
     // And nothing was mutated on the way: no device row, no live credential, no code to spend.
     should(devices.records).be.empty();
-    should(credentials.identify(DEVICE_TOKEN)).be.undefined();
+    should(credentials.all()).be.empty();
   });
 
   it('should refuse more carriers than the wire will carry, at construction', async () => {
@@ -564,9 +618,9 @@ describe('PairingService redemption', () => {
 
     // Act
     await mint();
-    const first = await service.redeem({ code: CODE, deviceName: 'first' }, '198.51.100.3');
+    const first = await redeemDirect(service, { code: CODE, deviceName: 'first' }, '198.51.100.3');
     await mint();
-    const second = await service.redeem({ code: SECOND_CODE, deviceName: 'second' }, '198.51.100.4');
+    const second = await redeemDirect(service, { code: SECOND_CODE, deviceName: 'second' }, '198.51.100.4');
 
     // Assert
     if (first.kind !== 'paired' || second.kind !== 'paired') throw new Error('expected two pairings');
@@ -583,13 +637,13 @@ describe('PairingService redemption', () => {
     expired.clock.nowMs += 120_000;
     const consumed = fixture();
     await consumed.mint();
-    await consumed.service.redeem({ code: CODE, deviceName: 'phone' }, 'one');
+    await redeemDirect(consumed.service, { code: CODE, deviceName: 'phone' }, 'one');
 
     const refusals = await Promise.all([
-      wrong.service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, 'one'),
-      malformed.service.redeem({ code: 'not-a-code', deviceName: 'phone' }, 'one'),
-      expired.service.redeem({ code: CODE, deviceName: 'phone' }, 'one'),
-      consumed.service.redeem({ code: CODE, deviceName: 'phone' }, 'two'),
+      redeemDirect(wrong.service, { code: SECOND_CODE, deviceName: 'phone' }, 'one'),
+      redeemDirect(malformed.service, { code: 'not-a-code', deviceName: 'phone' }, 'one'),
+      redeemDirect(expired.service, { code: CODE, deviceName: 'phone' }, 'one'),
+      redeemDirect(consumed.service, { code: CODE, deviceName: 'phone' }, 'two'),
     ]);
 
     should(refusals).deepEqual([{ kind: 'refused' }, { kind: 'refused' }, { kind: 'refused' }, { kind: 'refused' }]);
@@ -600,11 +654,11 @@ describe('PairingService redemption', () => {
     await mint();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      should((await service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, `peer-${attempt}`)).kind).equal(
+      should((await redeemDirect(service, { code: SECOND_CODE, deviceName: 'phone' }, `peer-${attempt}`)).kind).equal(
         'refused',
       );
     }
-    const sixth = await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-six');
+    const sixth = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-six');
 
     should(sixth).deepEqual({ kind: 'refused' });
     should(devices.records).be.empty();
@@ -616,9 +670,9 @@ describe('PairingService redemption', () => {
     await mint();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      should((await service.redeem(undefined, `garbage-peer-${attempt}`)).kind).equal('refused');
+      should((await redeemDirect(service, undefined, `garbage-peer-${attempt}`)).kind).equal('refused');
     }
-    const legitimate = await service.redeem({ code: CODE, deviceName: 'phone' }, 'legitimate-peer');
+    const legitimate = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'legitimate-peer');
 
     should(legitimate.kind).equal('paired');
   });
@@ -633,6 +687,7 @@ describe('PairingService redemption', () => {
       add: async () => await persisted,
       list: async () => [],
       remove: async () => false,
+      touch: async () => undefined,
     };
     const service = new PairingService({
       daemonId: DAEMON_ID,
@@ -649,8 +704,8 @@ describe('PairingService redemption', () => {
     const minted = await service.mint();
     if (minted.kind !== 'minted') throw new Error('expected a minted code');
 
-    const first = service.redeem({ code: CODE, deviceName: 'first' }, 'peer-one');
-    const second = service.redeem({ code: CODE, deviceName: 'second' }, 'peer-two');
+    const first = redeemDirect(service, { code: CODE, deviceName: 'first' }, 'peer-one');
+    const second = redeemDirect(service, { code: CODE, deviceName: 'second' }, 'peer-two');
     release?.();
     const results = await Promise.all([first, second]);
 
@@ -663,9 +718,9 @@ describe('PairingService redemption', () => {
     const current = fixture({ limiter });
     await current.mint();
 
-    await current.service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, 'same-peer');
-    const limited = await current.service.redeem({ code: CODE, deviceName: 'phone' }, 'same-peer');
-    const otherPeer = await current.service.redeem({ code: CODE, deviceName: 'phone' }, 'other-peer');
+    await redeemDirect(current.service, { code: SECOND_CODE, deviceName: 'phone' }, 'same-peer');
+    const limited = await redeemDirect(current.service, { code: CODE, deviceName: 'phone' }, 'same-peer');
+    const otherPeer = await redeemDirect(current.service, { code: CODE, deviceName: 'phone' }, 'other-peer');
 
     should(limited.kind).equal('refused');
     should(otherPeer.kind).equal('paired');
@@ -688,12 +743,12 @@ describe('PairingService redemption', () => {
     current.devices.failure = new Error('disk unavailable');
     await current.mint();
 
-    const failed = await current.service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
-    const retried = await current.service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-two');
+    const failed = await redeemDirect(current.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    const retried = await redeemDirect(current.service, { code: CODE, deviceName: 'phone' }, 'peer-two');
 
     should(failed.kind).equal('refused');
     should(retried.kind).equal('refused');
-    should(current.credentials.identify(DEVICE_TOKEN)).be.undefined();
+    should(current.credentials.all()).be.empty();
   });
 
   it('should perform the constant-time comparison even when no usable code exists', async () => {
@@ -705,9 +760,9 @@ describe('PairingService redemption', () => {
       },
     });
 
-    await current.service.redeem({ deviceName: 'phone' }, 'peer-one');
+    await redeemDirect(current.service, { deviceName: 'phone' }, 'peer-one');
     await current.mint();
-    await current.service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, 'peer-two');
+    await redeemDirect(current.service, { code: SECOND_CODE, deviceName: 'phone' }, 'peer-two');
 
     should(comparisons).deepEqual([
       ['', '2222-2222'],
@@ -724,7 +779,7 @@ describe('PairingService revocation', () => {
 
     // Act
     const revoked = service.revoke(minted.pairingId);
-    const attempted = await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    const attempted = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Assert
     should(revoked).deepEqual({
@@ -741,7 +796,7 @@ describe('PairingService revocation', () => {
     // Arrange
     const { service, mint } = fixture();
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
     const revoked = service.revoke(PAIRING_ID);
@@ -765,17 +820,17 @@ describe('PairingService revocation', () => {
     should(unknown).be.undefined();
   });
 
-  it('should project paired devices without their token digests', async () => {
+  it('should project paired devices without their keys, with when they were seen and when they lapse', async () => {
     // Arrange
     const { devices, service, mint } = fixture();
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'Ernest phone' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'Ernest phone' }, 'peer-one');
 
     // Act
     const listed = await service.devices();
 
-    // Assert — the record HAS a digest and the projection has no field for one.
-    should(devices.records[0]?.tokenHash).be.a.String();
+    // Assert — the record HAS a key and the projection has no field for one.
+    should(devices.records[0]?.publicKey).equal(DEVICE_KEY);
     should(listed).deepEqual([
       {
         id: FIRST_DEVICE_ID,
@@ -783,21 +838,22 @@ describe('PairingService revocation', () => {
         platform: 'browser',
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
+        idleExpiresAt: '2026-09-02T12:00:00.000Z',
         pairedOver: 'direct',
       },
     ]);
-    should(JSON.stringify(listed)).not.containEql('tokenHash');
+    should(JSON.stringify(listed)).not.containEql(DEVICE_KEY);
   });
 
   it('should project a device that predates the carrier field without inventing one', async () => {
     // Arrange
-    const { devices, service, mint } = fixture();
+    const { credentials, service, mint } = fixture();
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'Ernest phone' }, 'peer-one');
-    const stored = devices.records[0];
+    await redeemDirect(service, { code: CODE, deviceName: 'Ernest phone' }, 'peer-one');
+    const stored = credentials.get(FIRST_DEVICE_ID);
     if (stored === undefined) throw new Error('expected a device');
     const { pairedOver: _carrier, ...older } = stored;
-    devices.records[0] = older;
+    credentials.refresh(older);
 
     // Act
     const listed = await service.devices();
@@ -813,20 +869,17 @@ describe('PairingService revocation', () => {
     // Arrange
     const { credentials, devices, service, mint } = fixture();
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'first' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'first' }, 'peer-one');
     await mint();
-    await service.redeem({ code: SECOND_CODE, deviceName: 'second' }, 'peer-two');
+    await redeemDirect(service, { code: SECOND_CODE, deviceName: 'second' }, 'peer-two');
 
     // Act
     const removed = await service.revokeDevice(FIRST_DEVICE_ID);
 
     // Assert — the revoked grant is gone from both halves, and the sibling grant is untouched.
-    // `identify` is asserted only NOT to be the revoked device: this fixture's digest is deliberately
-    // sensitive to nothing but token length, so the two grants share one, and which of them answers
-    // is a property of the fake rather than of the service. `PairingDeviceRegistry refusals` below
-    // proves the real separation against a digest that has it.
     should(removed).be.true();
-    should(credentials.identify(DEVICE_TOKEN)).not.equal(FIRST_DEVICE_ID);
+    should(await service.deviceKey(FIRST_DEVICE_ID)).be.undefined();
+    should(credentials.get(SECOND_DEVICE_ID)).not.be.undefined();
     should(devices.records.map(record => record.id)).deepEqual([SECOND_DEVICE_ID]);
   });
 
@@ -834,13 +887,13 @@ describe('PairingService revocation', () => {
     // Arrange
     const { credentials, service, mint } = fixture();
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
     await service.revokeDevice(FIRST_DEVICE_ID);
 
     // Assert
-    should(credentials.identify(DEVICE_TOKEN)).be.undefined();
+    should(credentials.get(FIRST_DEVICE_ID)).be.undefined();
     should(await service.devices()).be.empty();
   });
 
@@ -857,7 +910,7 @@ describe('PairingService revocation', () => {
     const push = new RecordingDeviceState();
     const { devices, service, mint } = fixture({ deviceState: [push] });
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
     should(await service.revokeDevice(FIRST_DEVICE_ID)).be.true();
@@ -876,13 +929,13 @@ describe('PairingService revocation', () => {
     const verifiedAtEnd: Array<string | undefined> = [];
     const connections: DeviceConnectionRevoker = {
       endDevice: deviceId => {
-        verifiedAtEnd.push(credentials.identify(DEVICE_TOKEN));
+        verifiedAtEnd.push(credentials.get(FIRST_DEVICE_ID)?.publicKey);
         return live.endDevice(deviceId);
       },
     };
     const { credentials, service, mint } = fixture({ connections });
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
     const ended: string[] = [];
     live.track(FIRST_DEVICE_ID, () => ended.push('terminal'));
 
@@ -912,14 +965,14 @@ describe('PairingService revocation', () => {
     const push = new RecordingDeviceState(new Error('the enrolment document could not be written'));
     const { credentials, devices, service, mint } = fixture({ deviceState: [push] });
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
     await service.revokeDevice(FIRST_DEVICE_ID).should.be.rejectedWith(/enrolment document/u);
 
     // Assert
     should(devices.records.map(record => record.id)).deepEqual([FIRST_DEVICE_ID]);
-    should(credentials.identify(DEVICE_TOKEN)).equal(FIRST_DEVICE_ID);
+    should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
   });
 
   it('should purge a device’s other state even when there was no grant left to remove', async () => {
@@ -939,7 +992,7 @@ describe('PairingService revocation', () => {
     // Arrange
     const { credentials, devices, service, mint } = fixture();
     await mint();
-    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
     devices.failure = new Error('disk unavailable');
 
     // Act
@@ -950,139 +1003,186 @@ describe('PairingService revocation', () => {
 
     // Assert
     should(attempt).equal('disk unavailable');
-    should(credentials.identify(DEVICE_TOKEN)).equal(FIRST_DEVICE_ID);
+    should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
   });
 });
 
 describe('PairingDeviceRegistry', () => {
-  it('should scope every persisted device grant to its daemon', () => {
-    const cryptography = new FakeCryptography();
-    const registry = new PairingDeviceRegistry(DAEMON_ID, cryptography);
-    const record: PairingDeviceRecord = {
-      id: 'foreign',
-      daemonId: `fy_daemon_${'z'.repeat(43)}` as DaemonId,
-      name: 'foreign',
-      platform: 'browser',
-      createdAt: '2026-08-03T12:00:00.000Z',
-      lastSeenAt: '2026-08-03T12:00:00.000Z',
-      tokenHash: 'hash',
-    };
+  const record = (overrides: Partial<PairingDeviceRecord> = {}): PairingDeviceRecord => ({
+    id: FIRST_DEVICE_ID,
+    daemonId: DAEMON_ID,
+    name: 'phone',
+    platform: 'browser',
+    createdAt: '2026-08-03T12:00:00.000Z',
+    lastSeenAt: '2026-08-03T12:00:00.000Z',
+    publicKey: DEVICE_KEY,
+    ...overrides,
+  });
 
-    should(() => registry.add(record)).throw('a device grant belongs to a different daemon');
-    should(registry.identify(DEVICE_TOKEN)).be.undefined();
+  it('should scope every persisted device grant to its daemon', () => {
+    const registry = new PairingDeviceRegistry(DAEMON_ID);
+    should(() => registry.add(record({ daemonId: `fy_daemon_${'z'.repeat(43)}` as DaemonId }))).throw(
+      /different daemon/u,
+    );
+    should(registry.all()).be.empty();
+  });
+
+  it('should refuse to register a grant whose key is not an Ed25519 public key', () => {
+    // A grant that can never verify a proof would sit here as a device that silently cannot get in.
+    const registry = new PairingDeviceRegistry(DAEMON_ID);
+    should(() => registry.add(record({ publicKey: '' }))).throw(/no usable key/u);
+    should(() => registry.add(record({ publicKey: toBase64Url(new Uint8Array(44).fill(1)) }))).throw(/no usable key/u);
+    should(registry.all()).be.empty();
+  });
+
+  it('should answer for a grant by id, forget it, and never resurrect a revoked one on refresh', () => {
+    const registry = new PairingDeviceRegistry(DAEMON_ID, [
+      record(),
+      record({ id: SECOND_DEVICE_ID, publicKey: SECOND_DEVICE_KEY }),
+    ]);
+    should(registry.get(SECOND_DEVICE_ID)?.publicKey).equal(SECOND_DEVICE_KEY);
+    should(registry.remove(FIRST_DEVICE_ID)).be.true();
+    should(registry.remove(FIRST_DEVICE_ID)).be.false();
+    registry.refresh(record({ lastSeenAt: '2026-08-04T12:00:00.000Z' }));
+    should(registry.get(FIRST_DEVICE_ID)).be.undefined();
+    registry.refresh(
+      record({ id: SECOND_DEVICE_ID, publicKey: SECOND_DEVICE_KEY, lastSeenAt: '2026-08-04T12:00:00.000Z' }),
+    );
+    should(registry.get(SECOND_DEVICE_ID)?.lastSeenAt).equal('2026-08-04T12:00:00.000Z');
+    should(registry.all().map(held => held.id)).deepEqual([SECOND_DEVICE_ID]);
   });
 });
 
-/**
- * The refusals, against a hash that is sensitive to BOTH the daemon id and the whole token — the
- * shape `NodePairingCryptography` has. The service fixture's hash deliberately collides on token
- * length, which is fine for exercising the state machine but cannot show that a wrong token, or the
- * right token at the wrong daemon, is turned away.
- */
-describe('PairingDeviceRegistry refusals', () => {
-  const SECOND_DAEMON_ID = `fy_daemon_${'f'.repeat(43)}` as DaemonId;
-  const separated = {
-    hashDeviceToken: (daemonId: string, token: string): string => `sha256(${daemonId}\0${token})`,
-  };
+describe('PairingService device keys and idle expiry', () => {
+  const DAY_MS = 24 * 60 * 60 * 1_000;
 
-  function grantedTo(daemonId: DaemonId, token: string, id = 'device-1'): PairingDeviceRegistry {
-    const registry = new PairingDeviceRegistry(daemonId, separated);
-    registry.add({
-      id,
-      daemonId,
-      name: 'phone',
-      platform: 'browser',
-      createdAt: '2026-08-03T12:00:00.000Z',
-      lastSeenAt: '2026-08-03T12:00:00.000Z',
-      tokenHash: separated.hashDeviceToken(daemonId, token),
-    });
-    return registry;
+  async function paired(options: Parameters<typeof fixture>[0] = {}) {
+    const built = fixture(options);
+    await built.mint();
+    const redemption = await redeemDirect(built.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    return built;
   }
 
-  it('should identify the device that holds the token', () => {
-    should(grantedTo(DAEMON_ID, DEVICE_TOKEN).identify(DEVICE_TOKEN)).equal('device-1');
+  it('should refuse a key whose proof did not verify exactly as it refuses a wrong code, spending one guess', async () => {
+    // The session decides `proven`; here it is one more way to be wrong. A different answer, or a free
+    // one, would let a guesser tell a bad key apart from a bad code.
+    const { service, mint, devices } = fixture();
+    await mint();
+    for (let attempt = 0; attempt < 5; attempt += 1)
+      should(
+        (await redeemDirect(service, { code: CODE, deviceName: 'phone' }, `peer-${attempt}`, { proven: false })).kind,
+      ).equal('refused');
+    // Five unproven attempts spent the code, so even the right one with a proven key is refused now.
+    should((await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-last')).kind).equal('refused');
+    should(devices.records).be.empty();
   });
 
-  it('should refuse a token no grant covers', () => {
-    should(grantedTo(DAEMON_ID, DEVICE_TOKEN).identify(SECOND_DEVICE_TOKEN)).be.undefined();
-  });
-
-  it('should refuse a token granted by another daemon', () => {
-    // The digest is domain-separated by daemon id, so copying a device document — or the token
-    // itself — to a second daemon cannot make the credential valid there.
-    const here = grantedTo(DAEMON_ID, DEVICE_TOKEN);
-    const there = grantedTo(SECOND_DAEMON_ID, DEVICE_TOKEN, 'device-2');
-
-    should(here.identify(DEVICE_TOKEN)).equal('device-1');
-    should(there.identify(DEVICE_TOKEN)).equal('device-2');
-    should(new PairingDeviceRegistry(SECOND_DAEMON_ID, separated).identify(DEVICE_TOKEN)).be.undefined();
-  });
-
-  it('should refuse the stored digest presented as if it were the token', () => {
-    // What the daemon persists is not a credential: a reader of `devices.json` holds hashes, and a
-    // hash re-hashes to something else. Only the token the phone kept can authenticate.
-    const digest = separated.hashDeviceToken(DAEMON_ID, DEVICE_TOKEN);
-
-    should(grantedTo(DAEMON_ID, DEVICE_TOKEN).identify(digest)).be.undefined();
-  });
-
-  it('should refuse a blank token without consulting any grant', () => {
-    const consulted: string[] = [];
-    const recording = {
-      hashDeviceToken: (daemonId: string, token: string): string => {
-        consulted.push(token);
-        return separated.hashDeviceToken(daemonId, token);
-      },
-    };
-    const registry = new PairingDeviceRegistry(DAEMON_ID, recording);
-
-    should(registry.identify('')).be.undefined();
-    should(registry.identify('   ')).be.undefined();
-    should(consulted).be.empty();
-  });
-
-  it('should refuse to register a grant carrying no digest', () => {
-    const registry = new PairingDeviceRegistry(DAEMON_ID, separated);
-
-    should(() =>
-      registry.add({
-        id: 'device-1',
-        daemonId: DAEMON_ID,
-        name: 'phone',
-        platform: 'browser',
-        createdAt: '2026-08-03T12:00:00.000Z',
-        lastSeenAt: '2026-08-03T12:00:00.000Z',
-        tokenHash: '  ',
-      }),
-    ).throw('a device grant carries no token digest');
-    should(registry.identify(DEVICE_TOKEN)).be.undefined();
-  });
-
-  it('should compare every grant, so neither the match nor its position is observable', () => {
-    // No early exit: the loop walks all three records whichever one holds the token, so the number
-    // of comparisons never says which device answered — or whether one did.
-    const comparisons: Array<readonly [string, string]> = [];
-    const registry = new PairingDeviceRegistry(DAEMON_ID, separated, [], (left, right) => {
-      comparisons.push([left, right]);
-      return left === right;
+  it('should refuse a proven key that is not an Ed25519 public key', async () => {
+    const { service, mint } = fixture();
+    await mint();
+    const refused = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer', {
+      deviceKey: 'not-a-key',
     });
-    for (const [index, token] of [SECOND_DEVICE_TOKEN, DEVICE_TOKEN, 'fy_device_other'].entries()) {
-      registry.add({
-        id: `device-${index}`,
-        daemonId: DAEMON_ID,
-        name: 'phone',
-        platform: 'browser',
-        createdAt: '2026-08-03T12:00:00.000Z',
-        lastSeenAt: '2026-08-03T12:00:00.000Z',
-        tokenHash: separated.hashDeviceToken(DAEMON_ID, token),
-      });
-    }
+    should(refused.kind).equal('refused');
+  });
 
-    should(registry.identify(DEVICE_TOKEN)).equal('device-1');
-    should(comparisons).have.length(3);
-    comparisons.length = 0;
-    should(registry.identify('fy_device_absent')).be.undefined();
-    should(comparisons).have.length(3);
+  it('should spend the relay budget for an unproven relayed key and leave the direct path alone', async () => {
+    const { service, mint } = fixture();
+    await mint();
+    for (let attempt = 0; attempt < 5; attempt += 1)
+      await redeemRelayed(service, { code: CODE, deviceName: 'phone' }, { proven: false });
+    should((await redeemRelayed(service, { code: CODE, deviceName: 'phone' })).kind).equal('refused');
+    should((await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'lan-peer')).kind).equal('paired');
+  });
+
+  it('should answer a key for a live device and nothing for one it never paired', async () => {
+    const { service } = await paired();
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
+    should(await service.deviceKey(SECOND_DEVICE_ID)).be.undefined();
+  });
+
+  it('should expire a device unused for thirty days when it next tries, and take its connections with it', async () => {
+    const live = new LiveDeviceConnections();
+    const { service, clock, devices } = await paired({ connections: live });
+    const ended: string[] = [];
+    live.track(FIRST_DEVICE_ID, () => ended.push('terminal'));
+    clock.nowMs += 30 * DAY_MS - 1;
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
+    clock.nowMs += 1;
+
+    should(await service.deviceKey(FIRST_DEVICE_ID)).be.undefined();
+    should(devices.records).be.empty();
+    should(ended).deepEqual(['terminal']);
+  });
+
+  it('should keep a device that keeps being seen, and push its expiry out with each sighting', async () => {
+    const { service, clock } = await paired();
+    clock.nowMs += 20 * DAY_MS;
+    service.seen(FIRST_DEVICE_ID);
+    clock.nowMs += 20 * DAY_MS;
+
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
+    const [listed] = await service.devices();
+    should(listed?.lastSeenAt).equal('2026-08-23T12:00:00.000Z');
+    should(listed?.idleExpiresAt).equal('2026-09-22T12:00:00.000Z');
+  });
+
+  it('should write a sighting to disk at most once an hour, and refresh the held grant when it lands', async () => {
+    const { service, clock, devices, credentials } = await paired();
+    service.seen(FIRST_DEVICE_ID);
+    clock.nowMs += 59 * 60 * 1_000;
+    service.seen(FIRST_DEVICE_ID);
+    should(devices.touched).be.empty();
+
+    clock.nowMs += 60 * 1_000;
+    service.seen(FIRST_DEVICE_ID);
+    // A burst while the write is in flight writes once.
+    service.seen(FIRST_DEVICE_ID);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    should(devices.touched).deepEqual([{ id: FIRST_DEVICE_ID, lastSeenAt: '2026-08-03T13:00:00.000Z' }]);
+    should(credentials.get(FIRST_DEVICE_ID)?.lastSeenAt).equal('2026-08-03T13:00:00.000Z');
+  });
+
+  it('should drop a failed sighting write without disturbing the grant, and ignore a device it does not hold', async () => {
+    const { service, clock, devices, credentials } = await paired();
+    devices.touchFailure = new Error('disk unavailable');
+    clock.nowMs += 2 * 60 * 60 * 1_000;
+    service.seen(FIRST_DEVICE_ID);
+    service.seen(SECOND_DEVICE_ID);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    should(devices.touched.map(touch => touch.id)).deepEqual([FIRST_DEVICE_ID]);
+    should(credentials.get(FIRST_DEVICE_ID)?.lastSeenAt).equal('2026-08-03T12:00:00.000Z');
+    // The in-memory sighting still counts, so the failed write cannot shorten the device's life.
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
+  });
+
+  it('should expire every idle device at once, and say how many', async () => {
+    const { service, clock, mint } = await paired();
+    await mint();
+    await redeemDirect(service, { code: SECOND_CODE, deviceName: 'laptop' }, 'peer-two', {
+      deviceKey: SECOND_DEVICE_KEY,
+    });
+    clock.nowMs += 29 * DAY_MS;
+    service.seen(SECOND_DEVICE_ID);
+    clock.nowMs += DAY_MS;
+
+    should(await service.expireIdleDevices()).equal(1);
+    should((await service.devices()).map(device => device.id)).deepEqual([SECOND_DEVICE_ID]);
+    should(await service.expireIdleDevices()).equal(0);
+  });
+
+  it('should not count an idle device it could not remove', async () => {
+    const { service, clock, devices } = await paired();
+    devices.failure = new Error('disk unavailable');
+    clock.nowMs += 31 * DAY_MS;
+
+    should(await service.expireIdleDevices()).equal(0);
+    should(await service.deviceKey(FIRST_DEVICE_ID)).be.undefined();
   });
 });
 
@@ -1093,7 +1193,7 @@ describe('PairingService redemption over a relay', () => {
     await mint();
 
     // Act
-    const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+    const redemption = await redeemRelayed(service, { code: CODE, deviceName: 'phone' });
 
     // Assert — the same grant a direct redemption produces, from the same code, `carriers` included:
     // that field is what a relay-paired device navigates by afterwards.
@@ -1107,7 +1207,7 @@ describe('PairingService redemption over a relay', () => {
     should(devices.records[0]?.pairedOver).equal('relay');
     should((await service.devices())[0]?.pairedOver).equal('relay');
     // Assert — single-use, on either carrier.
-    should((await service.redeemOverRelay({ code: CODE, deviceName: 'again' })).kind).equal('refused');
+    should((await redeemRelayed(service, { code: CODE, deviceName: 'again' })).kind).equal('refused');
   });
 
   it('should spend a relay budget that can never expire a code a LAN device could still redeem', async () => {
@@ -1117,13 +1217,13 @@ describe('PairingService redemption over a relay', () => {
 
     // Act — five wrong guesses from the internet, which is the direct budget's whole size.
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      should((await service.redeemOverRelay({ code: SECOND_CODE, deviceName: 'phone' })).kind).equal('refused');
+      should((await redeemRelayed(service, { code: SECOND_CODE, deviceName: 'phone' })).kind).equal('refused');
     }
 
     // Assert — the code is ALIVE. This is the entire reason the counters are separate: a fingerprint
     // is public, so a shared budget would let anybody on earth kill a code sitting on somebody's desk.
     should(service.status(PAIRING_ID)?.status).equal('pending');
-    const direct = await service.redeem({ code: CODE, deviceName: 'phone' }, 'lan-peer');
+    const direct = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'lan-peer');
     should(direct.kind).equal('paired');
     should(devices.records).have.length(1);
   });
@@ -1133,15 +1233,15 @@ describe('PairingService redemption over a relay', () => {
     const { service, mint } = fixture();
     await mint();
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await service.redeemOverRelay({ code: SECOND_CODE, deviceName: 'phone' });
+      await redeemRelayed(service, { code: SECOND_CODE, deviceName: 'phone' });
     }
 
     // Act — the RIGHT code, arriving over the carrier whose budget is spent.
-    const relayed = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+    const relayed = await redeemRelayed(service, { code: CODE, deviceName: 'phone' });
 
     // Assert — refused there, and still redeemable here.
     should(relayed).deepEqual({ kind: 'refused' });
-    should((await service.redeem({ code: CODE, deviceName: 'phone' }, 'lan-peer')).kind).equal('paired');
+    should((await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'lan-peer')).kind).equal('paired');
   });
 
   it('should never spend the relay budget from the direct path either', async () => {
@@ -1151,13 +1251,13 @@ describe('PairingService redemption over a relay', () => {
 
     // Act — the direct budget is exhausted, which expires the code entirely.
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, `peer-${attempt}`);
+      await redeemDirect(service, { code: SECOND_CODE, deviceName: 'phone' }, `peer-${attempt}`);
     }
 
     // Assert — an expired code is gone for everybody. The asymmetry is deliberate: a relayed guesser
     // must not reach the LAN's budget, while the owner's own five guesses still end the code.
     should(service.status(PAIRING_ID)?.status).equal('expired');
-    should((await service.redeemOverRelay({ code: CODE, deviceName: 'phone' })).kind).equal('refused');
+    should((await redeemRelayed(service, { code: CODE, deviceName: 'phone' })).kind).equal('refused');
   });
 
   it('should refuse identically with no code minted, a bad name, and an expired one', async () => {
@@ -1171,10 +1271,10 @@ describe('PairingService redemption over a relay', () => {
 
     // Act
     const refusals = await Promise.all([
-      never.service.redeemOverRelay({ code: CODE, deviceName: 'phone' }),
-      expired.service.redeemOverRelay({ code: CODE, deviceName: 'phone' }),
-      unusable.service.redeemOverRelay({ code: CODE, deviceName: '' }),
-      unusable.service.redeemOverRelay({ code: 'not-a-code', deviceName: 'phone' }),
+      redeemRelayed(never.service, { code: CODE, deviceName: 'phone' }),
+      redeemRelayed(expired.service, { code: CODE, deviceName: 'phone' }),
+      redeemRelayed(unusable.service, { code: CODE, deviceName: '' }),
+      redeemRelayed(unusable.service, { code: 'not-a-code', deviceName: 'phone' }),
     ]);
 
     // Assert — one answer for every cause. A pre-credential surface the whole internet can reach must
@@ -1193,7 +1293,7 @@ describe('PairingService redemption over a relay', () => {
     });
 
     // Act — no code has been minted at all.
-    should((await service.redeemOverRelay({ code: CODE, deviceName: 'phone' })).kind).equal('refused');
+    should((await redeemRelayed(service, { code: CODE, deviceName: 'phone' })).kind).equal('refused');
 
     // Assert — the work happened anyway, against the dummy.
     should(compared).have.length(1);
@@ -1207,7 +1307,7 @@ describe('PairingService redemption over a relay', () => {
     await mint();
 
     // Act
-    const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+    const redemption = await redeemRelayed(service, { code: CODE, deviceName: 'phone' });
 
     // Assert — the same fail-closed answer the direct path gives: the code is spent, nothing paired.
     should(redemption).deepEqual({ kind: 'refused' });

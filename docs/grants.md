@@ -65,8 +65,10 @@ it the machine.
 `ApiRequest.loopback` is therefore **carrier-derived**:
 
 - the Bun transport sets it from the socket's real remote address;
-- `tunnelApiRequest` (the relay hop) sets it to `false` **unconditionally**, whatever address the
-  request appears to carry.
+- `tunnelApiRequest` (the session hop) sets it from the session's **arrival**: `false`
+  **unconditionally** for a relayed session, whatever address the request appears to carry, and for a
+  direct session exactly what the listener decided for its WebSocket upgrade — the same answer the
+  same listener gives an HTTP request — and nothing inside a record can change it.
 
 Nothing re-derives it, and no header can move it.
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
@@ -145,9 +147,9 @@ so it is worth saying out loud why it needs no exception to the permissive defau
   itself hands out credentials therefore makes a decision that sticks: a stolen phone cannot restore an
   access its owner revoked, and it cannot re-grant itself the ability to mint more.
 - **`pairing` governs MINTING, never redemption — on every carrier.** Redemption's credential is the
-  code itself: `POST /v1/pair` is public because the redeeming device has no other credential yet, and
-  the relayed redemption (`relay-protocol.md` §14) is a sealed record on a pre-auth session for exactly
-  the same reason. So an operator who switches `pairing` off has not switched off a redemption path —
+  code itself: redemption is a sealed record on a pre-auth session (`relay-protocol.md` §14), on the
+  direct carrier and over a relay alike, because the redeeming device has no other credential yet —
+  there is no redemption route at all. So an operator who switches `pairing` off has not switched off a redemption path —
   they have stopped new codes from existing, and with nothing minted there is nothing to redeem,
   directly or through a rendezvous. The exposure of the gap is bounded by the live code's two minutes,
   and it is stated here rather than discovered during an incident.
@@ -387,8 +389,8 @@ shutting a door is a liability.
 
 The grant layer is consulted **after** authentication and after the route's credential minimum and
 `privilegedOnly` checks. Every branch either keeps the answer those produced or removes it. There is no input that
-turns a refused route into a served one — a device token cannot reach an `admin-token` route because a
-grant says `use: true`, and no document an operator writes can make it.
+turns a refused route into a served one — a paired device's session cannot reach an `admin-token`
+route because a grant says `use: true`, and no document an operator writes can make it.
 
 ## Unknown is not permitted
 

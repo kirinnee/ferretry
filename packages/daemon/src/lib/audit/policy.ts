@@ -9,7 +9,7 @@ import {
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
-import type { AuthenticatedCredential } from '../api/socket-ticket.ts';
+import type { AuthenticatedCredential } from '../api/authentication.ts';
 import type { AuditEntry, PairedDeviceNotice } from './types.ts';
 
 /**

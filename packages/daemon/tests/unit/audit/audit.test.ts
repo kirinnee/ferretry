@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { AuditRecord, DaemonId, PairingCode, PushDeliveryResult, PushDeviceView } from '@ferretry/protocol';
+import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { ApiDispatcher, ApiError, type ApiRoute, ApiRouter, jsonResponse } from '../../../src/lib/api/index.ts';
 import {
@@ -44,7 +45,10 @@ const DAEMON_ID = `fy_daemon_${'a'.repeat(43)}` as DaemonId;
 const DEVICE_ID = `fy_device_id_${'d'.repeat(22)}`;
 const OTHER_DEVICE_ID = `fy_device_id_${'e'.repeat(22)}`;
 const CODE = '7F3K-Q2ND' as PairingCode;
-const DEVICE_TOKEN = `fy_device_${'t'.repeat(43)}`;
+/** An Ed25519 SPKI: the fixed DER prefix and 32 key bytes. */
+const DEVICE_KEY = toBase64Url(
+  new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(5)]),
+);
 
 class MemoryJournal implements AuditJournalPort {
   readonly lines: string[] = [];
@@ -403,10 +407,10 @@ describe('PushNewDeviceAlert', () => {
 const CREDENTIALS = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { identify: (token: string) => (token === 'device-secret' ? DEVICE_ID : undefined) },
+  devices: { has: (deviceId: string) => deviceId === DEVICE_ID },
 };
 const ADMIN = { authorization: 'Bearer admin-secret' };
-const DEVICE = { authorization: 'Bearer device-secret' };
+const DEVICE = { deviceId: DEVICE_ID, appSession: 'app-one' };
 const WARDEN = { authorization: 'Bearer warden-secret' };
 
 async function dispatcher(routes: readonly ApiRoute[]) {
@@ -446,7 +450,7 @@ describe('auditedRoutes', () => {
 
     // Act
     await api.dispatch(request({ method: 'POST', path: '/v1/pair/code', headers: ADMIN }));
-    await api.dispatch(request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, headers: DEVICE }));
+    await api.dispatch(request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, device: DEVICE }));
     await api.dispatch(request({ method: 'POST', path: '/v1/sessions/s-1/terminals', headers: ADMIN }));
     await api.dispatch(request({ method: 'POST', path: '/v1/fleet/proposals/p-1/apply', headers: ADMIN }));
     await api.dispatch(request({ method: 'GET', path: '/v1/unaudited', headers: ADMIN }));
@@ -573,7 +577,7 @@ describe('auditedRoutes', () => {
     // Act
     const changed = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, body: '{}' }));
     const revoked = await api.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, headers: DEVICE }),
+      request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, device: DEVICE }),
     );
 
     // Assert
@@ -658,7 +662,7 @@ describe('GET /v1/audit', () => {
     );
 
     // Act
-    const response = await api.dispatch(request({ path: '/v1/audit', headers: DEVICE }));
+    const response = await api.dispatch(request({ path: '/v1/audit', device: DEVICE }));
 
     // Assert
     should(response.status).equal(403);
@@ -677,7 +681,7 @@ describe('GET /v1/audit', () => {
     );
 
     // Act
-    const device = await api.dispatch(request({ path: '/v1/audit', headers: DEVICE }));
+    const device = await api.dispatch(request({ path: '/v1/audit', device: DEVICE }));
     const host = await api.dispatch(request({ path: '/v1/audit', headers: ADMIN, loopback: true }));
 
     // Assert
@@ -697,14 +701,13 @@ class Devices implements PairingDeviceStore {
   async remove(): Promise<boolean> {
     return false;
   }
+  async touch(): Promise<void> {}
 }
 
 class Cryptography implements PairingCryptography {
   pairingCode = (): string => CODE;
   pairingId = (): string => `fy_pair_${'p'.repeat(22)}`;
-  deviceToken = (): string => DEVICE_TOKEN;
   deviceId = (): string => DEVICE_ID;
-  hashDeviceToken = (daemonId: string, token: string): string => `hash:${daemonId}:${token}`;
 }
 
 function pairing(
@@ -736,7 +739,7 @@ function pairing(
       clock: { now: () => nowMs },
       cryptography,
       devices,
-      credentials: new PairingDeviceRegistry(DAEMON_ID, cryptography),
+      credentials: new PairingDeviceRegistry(DAEMON_ID),
       operatorPassword: { isSet: async () => true },
       clientName: 'fy',
     },
@@ -751,6 +754,27 @@ function pairing(
 
 const FIRST_DEVICE = `fy_device_id_${'0'.padStart(22, 'd')}`;
 
+interface Attempt {
+  readonly code: string;
+  readonly deviceName?: string;
+}
+
+/** A redemption on this daemon's own listener, with a proven key, as the session layer presents one. */
+function direct(service: AuditedPairingService, attempt: Attempt, peer: string) {
+  return service.redeemInSession(
+    { code: attempt.code, deviceName: attempt.deviceName ?? '', deviceKey: DEVICE_KEY, prove: async () => true },
+    { kind: 'direct', rateLimitKey: peer },
+  );
+}
+
+/** The same redemption arriving over a rendezvous. */
+function relayed(service: AuditedPairingService, attempt: Attempt) {
+  return service.redeemInSession(
+    { code: attempt.code, deviceName: attempt.deviceName ?? '', deviceKey: DEVICE_KEY, prove: async () => true },
+    { kind: 'relay' },
+  );
+}
+
 describe('AuditedPairingService', () => {
   it('should record a direct pairing by id and name, and alert the others', async () => {
     // Arrange
@@ -758,7 +782,7 @@ describe('AuditedPairingService', () => {
     await service.mint();
 
     // Act
-    const result = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
 
     // Assert
     should(result.kind).equal('paired');
@@ -775,7 +799,7 @@ describe('AuditedPairingService', () => {
     should(journal.stores).deepEqual(['kept']);
     should(alerts).deepEqual([{ deviceId: FIRST_DEVICE, deviceName: 'Pixel 8', carrier: 'direct', createdAt: AT }]);
     // NAMES AND IDS ONLY: neither the code nor the issued credential reached the log.
-    should(journal.lines.join('\n')).not.containEql(CODE).and.not.containEql(DEVICE_TOKEN);
+    should(journal.lines.join('\n')).not.containEql(CODE).and.not.containEql(DEVICE_KEY);
   });
 
   it('should record a relayed pairing as relayed', async () => {
@@ -784,7 +808,7 @@ describe('AuditedPairingService', () => {
     await service.mint();
 
     // Act
-    await service.redeemOverRelay({ code: CODE, deviceName: 'Phone' });
+    await relayed(service, { code: CODE, deviceName: 'Phone' });
 
     // Assert
     should(records(journal)[0]?.detail).deepEqual({ carrier: 'relay' });
@@ -796,13 +820,13 @@ describe('AuditedPairingService', () => {
     // names the device ITS redemption created, which a before/after list diff cannot promise.
     const { journal, service } = pairing();
     await service.mint();
-    const first = service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
-    const losing = service.redeemOverRelay({ code: CODE, deviceName: 'Tablet' });
+    const first = direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const losing = relayed(service, { code: CODE, deviceName: 'Tablet' });
 
     // Act
     const results = await Promise.all([first, losing]);
     await service.mint();
-    await service.redeemOverRelay({ code: CODE, deviceName: 'Tablet' });
+    await relayed(service, { code: CODE, deviceName: 'Tablet' });
 
     // Assert
     should(results.map(result => result.kind)).deepEqual(['paired', 'refused']);
@@ -821,10 +845,10 @@ describe('AuditedPairingService', () => {
     const { journal, alerts, service } = pairing();
 
     // Act
-    await service.redeem({ code: 'WRONG' }, 'peer');
-    await service.redeem({ code: 'WRONG' }, 'peer');
-    await service.redeem({ code: 'WRONG' }, 'peer');
-    await service.redeemOverRelay({ code: 'WRONG', deviceName: 'x' });
+    await direct(service, { code: 'WRONG' }, 'peer');
+    await direct(service, { code: 'WRONG' }, 'peer');
+    await direct(service, { code: 'WRONG' }, 'peer');
+    await relayed(service, { code: 'WRONG', deviceName: 'x' });
 
     // Assert
     should(records(journal).map(record => [record.event, record.actor.kind, record.detail])).deepEqual([
@@ -842,12 +866,12 @@ describe('AuditedPairingService', () => {
     await service.mint();
 
     // Act
-    const direct = await service.redeem({ code: CODE, deviceName: 'This  Computer' }, 'peer');
-    const relayed = await service.redeemOverRelay({ code: CODE, deviceName: 'a supervising agent' });
-    const honest = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const directResult = await direct(service, { code: CODE, deviceName: 'This  Computer' }, 'peer');
+    const relayedResult = await relayed(service, { code: CODE, deviceName: 'a supervising agent' });
+    const honest = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
 
     // Assert
-    should([direct.kind, relayed.kind, honest.kind]).deepEqual(['refused', 'refused', 'paired']);
+    should([directResult.kind, relayedResult.kind, honest.kind]).deepEqual(['refused', 'refused', 'paired']);
     should(devices.records.map(record => record.name)).deepEqual(['Pixel 8']);
     should(alerts.map(alert => alert.deviceName)).deepEqual(['Pixel 8']);
     should(records(journal).map(record => record.event)).deepEqual([
@@ -864,8 +888,8 @@ describe('AuditedPairingService', () => {
 
     // Act: five wrong guesses expire the code, whatever name they carry.
     for (let index = 0; index < 5; index += 1)
-      await service.redeem({ code: 'AAAA-AAAA', deviceName: 'this computer' }, 'peer');
-    const late = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+      await direct(service, { code: 'AAAA-AAAA', deviceName: 'this computer' }, 'peer');
+    const late = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
 
     // Assert
     should(late.kind).equal('refused');
@@ -889,7 +913,7 @@ describe('AuditedPairingService', () => {
     await service.mint();
 
     // Act
-    const result = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
 
     // Assert
     should(result.kind).equal('paired');
@@ -909,7 +933,7 @@ describe('AuditedPairingService', () => {
     await service.mint();
 
     // Act
-    const result = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
 
     // Assert
     should(result.kind).equal('paired');
@@ -926,7 +950,7 @@ describe('AuditedPairingService', () => {
     await service.mint();
 
     // Act
-    const result = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
     await Bun.sleep(0);
 
     // Assert
@@ -940,7 +964,7 @@ describe('AuditedPairingService', () => {
     await service.mint();
 
     // Act
-    await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
 
     // Assert
     should(records(journal).map(record => record.event)).deepEqual(['pairing.refused']);

@@ -9,7 +9,7 @@ import {
   runLearningScan,
 } from '../../src/lib/learning-api.ts';
 
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
+const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const status = {
   enabled: true,
   intervalMinutes: 10,
@@ -84,7 +84,7 @@ describe('learning transport', () => {
       'https://a.example.test/v1/learning/proposals/proposal%2Fa/patch',
       'https://a.example.test/v1/learning/run',
     ]);
-    expect(new Headers(calls[2]?.init?.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[2]?.init?.headers).has('authorization')).toBe(false);
     expect(JSON.parse(String(calls[4]?.init?.body))).toEqual({ spawn: true });
   });
 

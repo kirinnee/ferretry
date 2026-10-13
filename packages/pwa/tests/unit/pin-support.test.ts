@@ -16,8 +16,8 @@ import { pinSelection, pinSelectionBlockId, truncatePinSelection } from '../../s
 import type { DaemonPinSnapshot } from '../../src/lib/pin-store.ts';
 import '../support/dom.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 const scopeA = daemonSessionScope(daemonA, 'shared');
 const scopeB = daemonSessionScope(daemonB, 'shared');
 

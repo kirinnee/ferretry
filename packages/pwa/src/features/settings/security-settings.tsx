@@ -26,7 +26,6 @@ import type { AuditRecord, AuditView } from '@ferretry/protocol';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { daemonApiClient } from '../../lib/api-client.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   AUDIT_EVENT_WORDS,
@@ -134,11 +133,11 @@ export function SecurityLog({ view, nowMs }: { readonly view: AuditView; readonl
 
 export function SecuritySurface({
   connection,
-  createClient = daemonApiClient,
+  createClient,
   now = Date.now,
 }: {
   readonly connection: DaemonConnection;
-  readonly createClient?: SecurityLogClientFactory;
+  readonly createClient: SecurityLogClientFactory;
   readonly now?: () => number;
 }) {
   const [state, setState] = useState<{ readonly daemonId: DaemonConnection['daemonId']; readonly load: LoadState }>({

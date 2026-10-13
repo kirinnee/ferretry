@@ -10,6 +10,19 @@
 /** Wire identifier carried in the rendezvous claim so a peer can refuse an unknown dialect. */
 export const RELAY_PROTOCOL_ID = 'ferretry-relay/1' as const;
 
+/**
+ * The END-TO-END dialect: the handshake and every sealed tunnel record carry this, never the claim.
+ *
+ * It moved to `/2` when the client started proving a device key, and the rendezvous identifier above
+ * deliberately did NOT: nothing a relay parses changed, so no deployed relay has to be replaced and
+ * none can tell the two dialects apart. A peer speaking the other end-to-end dialect is refused at the
+ * handshake with `4426` — there is no negotiation and nothing older to fall back to.
+ */
+export const SESSION_PROTOCOL_ID = 'ferretry-relay/2' as const;
+
+/** The end-to-end dialect a pre-device-key peer speaks, recognised only to refuse it in words. */
+export const PREVIOUS_SESSION_PROTOCOL_ID = 'ferretry-relay/1' as const;
+
 /** First byte of every frame. Not ASCII, so a text frame accidentally sent here fails loudly. */
 export const FRAME_MAGIC = 0xfe as const;
 
@@ -118,14 +131,26 @@ export const HANDSHAKE_FRAME_SEQUENCE = 0 as const;
 export const CLAIM_SIGNATURE_LABEL = 'ferretry-relay-claim-v1' as const;
 
 /** Hashed over the handshake transcript both peers reconstruct independently. */
-export const HANDSHAKE_TRANSCRIPT_LABEL = 'ferretry-relay-handshake-v1' as const;
+export const HANDSHAKE_TRANSCRIPT_LABEL = 'ferretry-relay-handshake-v2' as const;
 
 /** Signed by the daemon over the handshake transcript hash, binding its identity to the ephemerals. */
-export const HANDSHAKE_SIGNATURE_LABEL = 'ferretry-relay-daemon-auth-v1' as const;
+export const HANDSHAKE_SIGNATURE_LABEL = 'ferretry-relay-daemon-auth-v2' as const;
 
 /** HKDF info strings for the two directional record keys. */
-export const CLIENT_TO_DAEMON_KEY_LABEL = 'ferretry-relay-c2d-v1' as const;
-export const DAEMON_TO_CLIENT_KEY_LABEL = 'ferretry-relay-d2c-v1' as const;
+export const CLIENT_TO_DAEMON_KEY_LABEL = 'ferretry-relay-c2d-v2' as const;
+export const DAEMON_TO_CLIENT_KEY_LABEL = 'ferretry-relay-d2c-v2' as const;
+
+/**
+ * Signed by the DEVICE key over a session's transcript hash, so the daemon learns which device holds
+ * this channel. One label per act, so a proof made to open a session can never be presented as one
+ * that registers a key or renews a lease.
+ */
+export const DEVICE_AUTH_LABEL = 'ferretry-device-auth-v2' as const;
+export const DEVICE_PAIR_LABEL = 'ferretry-device-pair-v2' as const;
+export const DEVICE_RENEW_LABEL = 'ferretry-device-renew-v2' as const;
+
+/** Random bytes naming one running copy of the app; a step-up belongs to one of these. */
+export const APP_SESSION_BYTES = 16 as const;
 
 /**
  * WebSocket close codes.

@@ -1,16 +1,16 @@
 /**
  * What a paired daemon's carriers are, what survives a reload, and what does not.
  *
- * Three claims are load-bearing and none of them is visible from a coverage number,
+ * Two claims are load-bearing and none of them is visible from a coverage number,
  * because each is a single condition on a single line:
  *
  *   1. Every direct is ordered before every relay, and a relay is offered only for a
  *      fingerprint a rendezvous can actually address.
  *   2. The daemon-published set survives a reload and replaces the previous set whole;
  *      the old singular hosted guess is not promoted into that authoritative cache.
- *   3. The event stream on a relayed carrier opens a §14 STREAM SESSION and mints no
- *      ticket, rather than opening a socket at an address the relay exists because the
- *      browser cannot reach. It used to refuse outright; the envelope exists now.
+ *
+ * (The event stream is a §14 stream session on EVERY carrier now, so what it opens is
+ * `event-transport.test.ts`'s subject rather than a property of which carrier won.)
  */
 
 import { describe, it } from 'bun:test';
@@ -27,11 +27,6 @@ import {
   hostedRelayFallbackCarrier,
   type RelayCarrier,
 } from '../../src/lib/daemon-connection.ts';
-import {
-  DaemonEventTransport,
-  daemonEventTicket,
-  RELAY_STREAM_NEEDS_NO_TICKET,
-} from '../../src/lib/event-transport.ts';
 
 const FINGERPRINT = `fy_daemon_${'A'.repeat(43)}`;
 const DAEMON_URL = 'https://studio.example';
@@ -42,7 +37,7 @@ const connection = (daemonId: string, relays: readonly RelayCarrier[] = []) =>
   daemonConnection({
     daemonId,
     baseUrl: DAEMON_URL,
-    deviceToken: 'fy_device_x',
+    deviceId: 'fy_device_x',
     carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, ...relays],
   });
 
@@ -51,7 +46,7 @@ const stored = (relay: unknown) =>
     v: CONNECTIONS_VERSION,
     selectedDaemonId: FINGERPRINT,
     connections: [
-      { daemonId: FINGERPRINT, baseUrl: DAEMON_URL, deviceToken: 'fy_device_x', pairedAt: 1, lastSelectedAt: 2, relay },
+      { daemonId: FINGERPRINT, baseUrl: DAEMON_URL, deviceId: 'fy_device_x', pairedAt: 1, lastSelectedAt: 2, relay },
     ],
   });
 
@@ -63,7 +58,7 @@ const storedCarriers = (carriers: unknown) =>
       {
         daemonId: FINGERPRINT,
         baseUrl: DAEMON_URL,
-        deviceToken: 'fy_device_x',
+        deviceId: 'fy_device_x',
         pairedAt: 1,
         lastSelectedAt: 2,
         carriers,
@@ -260,79 +255,5 @@ describe('a stored pairing registry', () => {
   it('should say nothing about a daemon that is not paired', () => {
     const store = new DaemonConnectionStore();
     should(store.replaceCarriers(connection(FINGERPRINT), [SELF_RELAY])).be.undefined();
-  });
-});
-
-describe('the event stream on a relayed carrier', () => {
-  const daemon = connection(FINGERPRINT, [HOSTED_RELAY]);
-
-  const ticketBody = JSON.stringify({
-    ticket: `fy_ticket_${'t'.repeat(43)}`,
-    ttlSeconds: 30,
-    expiresAt: '2026-08-03T12:00:30.000Z',
-  });
-
-  it('should refuse before it spends a ticket the daemon would have burned', async () => {
-    let asked = 0;
-    await should(
-      daemonEventTicket(
-        daemon,
-        async () => {
-          asked += 1;
-          return new Response(ticketBody);
-        },
-        () => HOSTED_RELAY,
-      ),
-    ).be.rejectedWith(RELAY_STREAM_NEEDS_NO_TICKET);
-    should(asked).equal(0);
-  });
-
-  /*
-   * The stream used to be REFUSED on a relay because §14 carried no envelope for one. It carries one
-   * now — a session per stream — so the same carrier that used to mean "no live updates" must open a
-   * stream session instead, and must still never construct a socket at the daemon's own address or
-   * mint a ticket the relayed surface would refuse.
-   */
-  it('should open a relayed stream session rather than a socket at an address it cannot reach', async () => {
-    const asked: { path?: string; query?: readonly (readonly [string, string])[] } = {};
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => {
-        throw new Error('no ticket may be minted for a relayed stream');
-      },
-      () => {
-        throw new Error('no socket may be constructed');
-      },
-      () => HOSTED_RELAY,
-      async (_daemon, request) => {
-        asked.path = request.path;
-        asked.query = request.query;
-        return null;
-      },
-    );
-    await should(
-      transport.stream({
-        url: 'wss://studio.example/v1/events?after=7&sessionId=fy_s',
-        token: 'x',
-        onMessage: () => undefined,
-      }),
-    ).be.rejected();
-    should(asked.path).equal('/v1/events');
-    should(asked.query).deepEqual([
-      ['after', '7'],
-      ['sessionId', 'fy_s'],
-    ]);
-  });
-
-  it('should carry on as before when the live carrier is direct', async () => {
-    const issued = await daemonEventTicket(
-      daemon,
-      async () => new Response(ticketBody),
-      () => ({
-        kind: 'direct',
-        daemonUrl: DAEMON_URL,
-      }),
-    );
-    should(issued).equal(`fy_ticket_${'t'.repeat(43)}`);
   });
 });

@@ -26,7 +26,7 @@ import { render, run } from '../../../support/react.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 
 const unavailable = async () => Promise.reject(new Error('unavailable in this suite'));

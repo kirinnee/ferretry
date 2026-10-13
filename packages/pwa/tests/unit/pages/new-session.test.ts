@@ -13,12 +13,12 @@ import {
 const connectionA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'http://daemon-a.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const connectionB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'http://daemon-b.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 
 function draft(overrides: Partial<NewSessionDraft> = {}): NewSessionDraft {

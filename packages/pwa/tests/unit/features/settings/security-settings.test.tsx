@@ -24,9 +24,9 @@ const now = () => NOW;
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'fy_device_id_alpha00000000000000000',
 });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-token' });
+const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'fy_device_id_beta000000000000000000' });
 
 const record = (overrides: Partial<AuditRecord> = {}): AuditRecord => ({
   at: new Date(NOW - 5 * 60_000).toISOString(),

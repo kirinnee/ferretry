@@ -7,7 +7,7 @@ import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 const daemon = daemonConnection({
   daemonId: 'skills-daemon',
   baseUrl: 'https://skills.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 const scope = daemonSessionScope(daemon, 'session-a');
 const disposers: Array<() => void> = [];

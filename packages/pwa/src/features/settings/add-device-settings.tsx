@@ -57,7 +57,7 @@ import { Check, CircleAlert, MonitorSmartphone, Plus, ShieldAlert, ShieldCheck, 
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import { QrSymbol } from '../../components/qr-symbol.tsx';
-import { daemonApiClient } from '../../lib/api-client.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
@@ -563,13 +563,17 @@ export type PairingClock = () => number;
  */
 export function AddDeviceSurface({
   connection,
-  createClient = daemonApiClient,
+  createClient: injectedClient,
   now = Date.now,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: PairingClientFactory;
   readonly now?: PairingClock;
 }) {
+  // The carrier-routed client unless a test or the harness hands one in: a plain-network client
+  // reaches no daemon at all, because a paired browser is answered only inside its own session.
+  const routedClient = useDaemonClient();
+  const createClient = injectedClient ?? routedClient;
   const [client, setClient] = useState<PairingClient | null>(null);
   const [loaded, setLoaded] = useState<{
     readonly daemonId: DaemonConnection['daemonId'];

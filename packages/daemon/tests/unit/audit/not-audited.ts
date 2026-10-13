@@ -12,8 +12,6 @@
  * transcript and its journal — not the machine's security history.
  */
 export const NOT_AUDITED: Readonly<Record<string, string>> = {
-  'POST /v1/pair':
-    'the redemption is recorded by AuditedPairingService through the onGranted port; its response IS a token',
   'POST /v1/fleet/credentials/:credentialId/check': 'a read with a side effect of refreshing a status; changes nothing',
   'POST /v1/fleet/profiles/preview': 'a read with a body: previews a draft and writes nothing',
   'PATCH /v1/cgroups/config': 'resource limits on the host’s own sessions; not who may reach the machine',
@@ -54,15 +52,10 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/analytics/pricing/sync/apply': 'the cost table for usage reports; reaches nobody',
   'POST /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
   'DELETE /v1/sessions/:sessionId/terminals/:terminalId': 'closes a terminal, which removes access rather than adding it',
-  'POST /v1/sessions/:sessionId/terminals/:terminalId/stream/ticket':
-    'mints a one-use ticket for the stream; the stream attach itself is audited on the socket table',
-  'POST /v1/sessions/:sessionId/browser/stream/ticket':
-    'mints a one-use ticket for the stream; the stream attach itself is audited on the socket table',
   'POST /v1/learning/proposals/:id': 'accepts or declines a learning suggestion for a skill file; reaches nobody',
   'POST /v1/learning/run': 'starts a learning pass over transcripts the daemon already holds',
   'POST /v1/recommend': 'a read with a body: recommends a model for a task',
   'POST /v1/stt/enhance': 'a read with a body: tidies dictated text',
-  'POST /v1/events/ticket': 'mints a one-use ticket for the fleet event feed, which is a read',
 };
 
 /** Protocol-switching routes the log does not record. */

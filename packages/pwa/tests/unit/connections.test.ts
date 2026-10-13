@@ -11,7 +11,7 @@ import {
 import { type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 
 const connection = (id: string, suffix = id) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${suffix}.example.test`, deviceToken: `token-${suffix}` });
+  daemonConnection({ daemonId: id, baseUrl: `https://${suffix}.example.test`, deviceId: `token-${suffix}` });
 
 class MemoryRepository implements DaemonConnectionRepository {
   readonly writes: Array<{ key: string; value: string }> = [];
@@ -52,7 +52,7 @@ const persisted = (connections: unknown[], selectedDaemonId: unknown = null) =>
 const row = (id: string, lastSelectedAt: number, extra: Record<string, unknown> = {}) => ({
   daemonId: id,
   baseUrl: `https://${id}.example.test`,
-  deviceToken: `token-${id}`,
+  deviceId: `token-${id}`,
   pairedAt: 1,
   lastSelectedAt,
   ...extra,
@@ -85,7 +85,7 @@ describe('paired daemon record parsing', () => {
 
   it('deduplicates by daemon id, honors a valid selection, and bounds by recency', () => {
     const parsed = parseDaemonConnections(
-      persisted([row('a', 1), row('a', 4, { deviceToken: 'new-token' }), row('b', 5), row('c', 3)], 'c'),
+      persisted([row('a', 1), row('a', 4, { deviceId: 'new-token' }), row('b', 5), row('c', 3)], 'c'),
       2,
     );
     should(parsed.connections.map(record => record.daemonId)).deepEqual(['c', 'b']);
@@ -148,7 +148,7 @@ describe('DaemonConnectionStore', () => {
     store.add(connection('a'));
     store.add(connection('b'));
     store.add(connection('a', 'a-rotated'));
-    should(store.get(daemonId('a'))?.deviceToken).equal('token-a-rotated');
+    should(store.get(daemonId('a'))?.deviceId).equal('token-a-rotated');
     store.add(connection('c'));
     unregister();
     store.remove(daemonId('a'));
@@ -180,7 +180,7 @@ describe('DaemonConnectionStore', () => {
     should(renamed.label).equal('Work box');
     should(renamed.daemonId).equal(before?.daemonId);
     should(renamed.baseUrl).equal(before?.baseUrl);
-    should(renamed.deviceToken).equal(before?.deviceToken);
+    should(renamed.deviceId).equal(before?.deviceId);
     should(renamed.pairedAt).equal(before?.pairedAt);
     should(renamed.lastSelectedAt).equal(before?.lastSelectedAt);
     should(noOp).equal(renamed);
@@ -212,7 +212,7 @@ describe('DaemonConnectionStore', () => {
       { kind: 'direct' as const, daemonUrl: paired.baseUrl },
       { kind: 'relay' as const, relayUrl: 'https://new-relay.example.test', operator: 'self' as const },
     ];
-    const changedToken = daemonConnection({ ...paired, deviceToken: 'token-rotated' });
+    const changedToken = daemonConnection({ ...paired, deviceId: 'token-rotated' });
     const changedBaseUrl = daemonConnection({ ...paired, baseUrl: 'https://moved.example.test' });
 
     should(store.replaceCarriers(changedToken, replacement)).equal(paired);

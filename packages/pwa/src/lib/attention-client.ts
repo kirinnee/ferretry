@@ -94,7 +94,7 @@ export const applyAttentionAction = async (
 
 interface ConnectionBinding {
   readonly baseUrl: string;
-  readonly deviceToken: string;
+  readonly deviceId: string;
   readonly generation: number;
 }
 
@@ -263,11 +263,11 @@ export class DaemonAttentionClient {
 
   #bind(daemon: DaemonConnection): number {
     const existing = this.#bindings.get(daemon.daemonId);
-    if (existing && existing.baseUrl === daemon.baseUrl && existing.deviceToken === daemon.deviceToken)
+    if (existing && existing.baseUrl === daemon.baseUrl && existing.deviceId === daemon.deviceId)
       return existing.generation;
     if (existing) this.clearDaemon(daemon.daemonId);
     const generation = this.#generations.get(daemon.daemonId) ?? 0;
-    this.#bindings.set(daemon.daemonId, { baseUrl: daemon.baseUrl, deviceToken: daemon.deviceToken, generation });
+    this.#bindings.set(daemon.daemonId, { baseUrl: daemon.baseUrl, deviceId: daemon.deviceId, generation });
     return generation;
   }
 
@@ -287,7 +287,7 @@ export class DaemonAttentionClient {
       binding !== undefined &&
       binding.generation === generation &&
       binding.baseUrl === daemon.baseUrl &&
-      binding.deviceToken === daemon.deviceToken
+      binding.deviceId === daemon.deviceId
     );
   }
 

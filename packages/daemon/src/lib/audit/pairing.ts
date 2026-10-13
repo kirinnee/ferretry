@@ -3,7 +3,7 @@ import {
   type PairingGrant,
   type PairingRedemption,
   PairingService,
-  type RelayPairingAttempt,
+  type SessionPairingAttempt,
 } from '../pairing/index.ts';
 import type { AuditFailureReporter, AuditSink, NewDeviceAlertPort } from './types.ts';
 
@@ -21,7 +21,7 @@ export interface PairingAuditOptions {
  * `PairingService` changes type. Every decision is still the parent's.
  *
  * WHICH DEVICE WAS PAIRED comes from the parent's `onGranted` port, called once the grant is persisted
- * — never from the response, which carries the new credential, and never from a before/after diff of
+ * — never from the response, and never from a before/after diff of
  * the device list, which a concurrent revoke or a second redemption could make name the wrong device.
  *
  * NEITHER WRITE DECIDES THE REDEMPTION. The record is awaited — `AuditLog` never throws — and the
@@ -39,21 +39,14 @@ export class AuditedPairingService extends PairingService {
     this.#audit = audit;
   }
 
-  override async redeem(value: unknown, rateLimitKey: string): Promise<PairingRedemption> {
-    return await this.#observed(await super.redeem(value, rateLimitKey), 'direct');
-  }
-
-  override async redeemOverRelay(attempt: RelayPairingAttempt): Promise<PairingRedemption> {
-    return await this.#observed(await super.redeemOverRelay(attempt), 'relay');
-  }
-
-  async #observed(result: PairingRedemption, carrier: PairingCarrier): Promise<PairingRedemption> {
+  override async redeemInSession(attempt: SessionPairingAttempt, carrier: PairingCarrier): Promise<PairingRedemption> {
+    const result = await super.redeemInSession(attempt, carrier);
     if (result.kind === 'refused')
       await this.#audit.log.record({
         event: 'pairing.refused',
         actor: { kind: 'anonymous' },
         outcome: 'refused',
-        detail: { carrier },
+        detail: { carrier: carrier.kind },
       });
     return result;
   }
