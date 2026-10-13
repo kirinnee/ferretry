@@ -1,4 +1,3 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import {
   DAEMON_CAPABILITIES,
@@ -8,6 +7,7 @@ import {
   GrantUnlockViewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';

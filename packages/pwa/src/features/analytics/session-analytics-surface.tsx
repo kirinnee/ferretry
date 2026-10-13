@@ -8,13 +8,14 @@
 // session are explicit inputs: a daemon or session switch renders any in-flight
 // response or error inert, clears the prior ledger during the re-scoped render,
 // and rescopes the autocomplete value cache with it.
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+
 import type { AnalyticsResponse } from '@ferretry/protocol';
+import { Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useDaemonFetch } from '../../lib/store.tsx';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { fetchSessionAnalytics } from './analytics-api.ts';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';

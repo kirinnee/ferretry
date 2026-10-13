@@ -1,6 +1,13 @@
 # The Ferretry rendezvous protocol
 
-`ferretry-relay/1`
+Rendezvous control plane: `ferretry-relay/1` · end-to-end session: **`ferretry-relay/2`**
+
+Two identifiers, deliberately. Everything a relay parses — frames, §5's control messages, its
+Durable Object naming — is still `/1`, so no relay was redeployed when sessions changed. Everything
+inside the channel — §6's handshake and every §14 record — is `/2`, which is where device keys
+(§6, "The credential record") replaced the device token. A `/1` session peer meets a `/2` one with
+`4426` at the handshake and a sentence naming which side to update (§9); there is no negotiation and
+nothing to downgrade to.
 
 This document is the contract. It is written so that somebody with no access to this repository can
 implement either endpoint, or a compatible relay, in another language. Where an implementation
@@ -23,7 +30,7 @@ the second kind, and which ones exist is the daemon's answer rather than the bro
 
 | Carrier    | What it is                                                                    | Where it belongs                                                              |
 | ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Direct** | The browser opens a WebSocket straight at the daemon.                         | Attempted first, automatically, whenever the daemon is reachable.             |
+| **Direct** | The browser opens a WebSocket straight at the daemon, and runs a session on it. | Attempted first, automatically, whenever the daemon is reachable.           |
 | **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read. | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
 
 **Neither is a question a conforming product asks.** The required behaviour is: try every direct
@@ -77,15 +84,20 @@ The daemon holds a long-term **Ed25519** identity created at install; its SHA-25
 `daemonId`, and the pairing QR already carries that fingerprint out of band. Every session runs an
 ephemeral **X25519** key agreement, authenticated by an Ed25519 signature from the daemon over the
 whole handshake transcript, and every byte after that is **AES-256-GCM** with the frame header as
-associated data. The client authenticates itself afterwards, inside the encrypted channel, with the
-device token pairing already gave it.
+associated data. The client authenticates itself afterwards, inside the encrypted channel, by signing
+that same transcript with the **non-extractable device key** it registered at pairing — so what it
+presents proves possession for exactly one session and replays into nothing.
 
 That is the TLS 1.3 arrangement — ephemeral agreement for forward secrecy, a signature over the
-transcript for identity, client credentials only after the channel is keyed — and it is chosen
-because it is standard and reviewed, not because it is clever. Nothing here is invented. A device
-that holds no token yet may instead redeem a pairing code inside the same keyed channel — after the
-fingerprint check, never before it — and §14 bounds that exchange to exactly one attempt per
-session.
+transcript for identity, the client's own signature over the transcript only after the channel is
+keyed (TLS 1.3's `CertificateVerify`) — and it is chosen because it is standard and reviewed, not
+because it is clever. Nothing here is invented. A device that holds no grant yet may instead redeem a
+pairing code inside the same keyed channel — after the fingerprint check, never before it — and §14
+bounds that exchange to exactly one attempt per session.
+
+**Both carriers run this.** A direct carrier is not plain HTTP with a header: the browser opens a
+session on the daemon's own listener and everything above is identical, so the LAN is encrypted end to
+end too and nothing on it is worth replaying.
 
 The result: a relay operator, including a hostile one, can drop your traffic, delay it or refuse to
 carry it. They cannot read it, alter it, or insert into it, and they cannot introduce your browser
@@ -100,7 +112,8 @@ would be worse than disclosing it.
 
 Everything on the wire is one binary WebSocket message carrying one frame. The framing is identical
 on both carriers — a relayed conversation and a direct one are byte-for-byte the same above the
-socket — with one exception noted in §8.
+socket — with two exceptions: the heartbeat in §8, and that a direct socket carries exactly one
+control frame, the daemon's own `ready` (§5).
 
 ```
 offset  size  field
@@ -117,7 +130,7 @@ Header length is **28 bytes**. Maximum total frame length is **65536 bytes**.
 
 | kind   | name        | scope      | payload                                            |
 | ------ | ----------- | ---------- | -------------------------------------------------- |
-| `0x01` | `control`   | hop-by-hop | UTF-8 JSON, §5. Absent on a direct carrier.        |
+| `0x01` | `control`   | hop-by-hop | UTF-8 JSON, §5. Direct: only the daemon's `ready`. |
 | `0x02` | `handshake` | end-to-end | UTF-8 JSON, §6. Opaque to a relay.                 |
 | `0x03` | `data`      | end-to-end | AES-256-GCM ciphertext‖tag, §7. Opaque to a relay. |
 | `0x04` | `credit`    | hop-by-hop | 4 bytes, unsigned 32-bit big-endian, §8.           |
@@ -157,6 +170,16 @@ wss://<host>/v1/rendezvous/<daemonId>/<role>
 
 `role` is `daemon` or `client`. On a direct carrier only `client` exists, because the daemon _is_
 the server; asking for the daemon role against a direct address is an error, not a URL.
+
+**The direct carrier, exactly.** `fyd` serves `GET /v1/rendezvous/<its own daemonId>/client` as a
+WebSocket upgrade on its own listener. **One socket is one session**: on upgrade the daemon mints the
+16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included), and
+that is the only control frame on the socket — the daemon never sends `challenge`, accepts no
+`claim`, and refuses with `4400` a client that sends any control frame at all. The session's end is
+the socket's close, with the code the session ended with. A wrong `daemonId` is `404`; at most 64
+direct sessions are carried at once and the next upgrade is `429`. Where the session ARRIVED —
+loopback, the privileged bind, the peer address — is the listener's classification of the upgrade,
+exactly as for an HTTP request on the same listener, and nothing inside the session can move it.
 
 `daemonId` is `fy_daemon_` followed by 43 characters of base64url:
 
@@ -233,7 +256,7 @@ only that identifier; using another session's is a protocol error that ends its 
 
 Either endpoint may end one session without dropping its socket by sending
 `{ "t":"closed", "code":…, "reason":… }` addressed to that session. That is how a daemon rejects a
-client whose device token it does not recognise.
+client whose device proof it does not accept.
 
 ### Limits
 
@@ -250,12 +273,12 @@ client whose device token it does not recognise.
 Two frames, one each way, both at sequence `0`.
 
 ```
-client → daemon   { "t":"hs1", "protocol":"ferretry-relay/1",
+client → daemon   { "t":"hs1", "protocol":"ferretry-relay/2",
                     "epk": <32-byte X25519 public key b64url>,
                     "nonce": <32 bytes b64url>,
                     "daemonId": "fy_daemon_…" }
 
-daemon → client   { "t":"hs2", "protocol":"ferretry-relay/1",
+daemon → client   { "t":"hs2", "protocol":"ferretry-relay/2",
                     "epk": <32-byte X25519 public key b64url>,
                     "nonce": <32 bytes b64url>,
                     "spki": <44-byte SPKI b64url>,
@@ -266,11 +289,20 @@ The daemon refuses an `hs1` whose `daemonId` is not its own. On a correct carrie
 happen, which is exactly why it is checked: on an incorrect one it is a misrouted session, and
 answering would key a channel to a peer that thinks it reached somebody else.
 
+**Version skew is answered, not guessed.** A daemon that receives an `hs1` naming `ferretry-relay/1`
+ends the session with `4426` and the sentence that says the APP is older and how to update it. A
+client that receives an `hs2` naming `/1` — or, while it awaits `hs2`, a `closed` `4400` with the
+reason `unparseable client hello`, which is what a `/1` daemon says to a `/2` hello — reports that
+the DAEMON is older, naming the update commands. On the direct carrier an older daemon has no session
+route at all, so after a direct failure the client reads `GET /healthz`: an `ok` answer whose
+`sessionProtocol` is not `ferretry-relay/2` is an older daemon, said in that same sentence, and no
+further carrier is tried.
+
 ### Transcript
 
 ```
 TH = SHA-256(
-       "ferretry-relay-handshake-v1"
+       "ferretry-relay-handshake-v2"
        ‖ LP(sessionId, 16 raw bytes)
        ‖ LP(hs1.epk      as UTF-8 base64url text)
        ‖ LP(hs1.nonce    as UTF-8 base64url text)
@@ -286,22 +318,22 @@ deliberate, checkable choice: it makes the transcript reproducible straight from
 received.
 
 ```
-sig = Ed25519-Sign( daemon identity key, "ferretry-relay-daemon-auth-v1" ‖ 0x00 ‖ TH )
+sig = Ed25519-Sign( daemon identity key, "ferretry-relay-daemon-auth-v2" ‖ 0x00 ‖ TH )
 ```
 
 ### Client checks, in this order
 
 1. `SHA-256(hs2.spki)` matches the pinned fingerprint. **If it does not, abort** — no signature
-   check, no key derivation, and above all no device token.
-2. `sig` verifies over `"ferretry-relay-daemon-auth-v1" ‖ 0x00 ‖ TH`.
+   check, no key derivation, and above all no device proof.
+2. `sig` verifies over `"ferretry-relay-daemon-auth-v2" ‖ 0x00 ‖ TH`.
 3. Key agreement (below) yields a usable secret.
 
 ### Key schedule
 
 ```
 IKM = X25519(own ephemeral private, peer ephemeral public)     -- abort if all-zero
-k_c2d = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-c2d-v1", 32 bytes)
-k_d2c = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-d2c-v1", 32 bytes)
+k_c2d = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-c2d-v2", 32 bytes)
+k_d2c = HKDF-SHA256(IKM, salt = TH, info = "ferretry-relay-d2c-v2", 32 bytes)
 ```
 
 `HKDF-SHA256(ikm, salt, info, L)` is extract-then-expand, RFC 5869. Separate keys per direction mean
@@ -310,15 +342,33 @@ a record cannot be reflected at its sender and accepted.
 ### The credential record
 
 Immediately after the handshake, at sequence `1`, the client sends a `data` record whose plaintext
-is its credential: the device token pairing already gave it, or — for a device that has none yet —
-the pairing code itself, redeemed once. The daemon accepts or sends `{"t":"closed", …}` for the
-session. Neither credential ever appears outside the encrypted channel, so a relay sees neither —
-this is the reason the credential travels after keying rather than during, and the fingerprint check
-above is why sending a live pairing code here is safe: a daemon that could receive it has already
-been proved to be the one the QR named.
+is its credential. There is no bearer value in it. A paired device names its grant and **signs this
+session's transcript** with its device key:
 
-The token's and the code's own formats belong to the daemon's pairing API, not to this protocol. The
-exact records that carry them, and the session mode each one commits to, are §14.
+```
+proof = Ed25519-Sign( device key, "ferretry-device-auth-v2" ‖ 0x00 ‖ TH ‖ LP(t) ‖ LP(deviceId) ‖ LP(appSession) )
+```
+
+`t` is the record's own mode (`auth` or `stream`), so a proof for one mode opens no other;
+`appSession` is 16 random bytes the page draws once per load and signs in, naming "this running copy
+of the app". A device with no grant yet instead redeems a pairing code once, registering the public
+half of a freshly generated key and proving it holds the private half:
+
+```
+proof = Ed25519-Sign( new device key, "ferretry-device-pair-v2" ‖ 0x00 ‖ TH ‖ LP(deviceKey) )
+```
+
+The daemon verifies the proof against the SPKI it stored at pairing, or sends `{"t":"closed",…}`
+for the session — unknown device, idle-expired device and bad proof are ONE refusal, `4403`, so the
+answer is not an oracle for which ids exist. None of it appears outside the encrypted channel, so a
+relay sees neither the device id nor the code; this is why the credential travels after keying rather
+than during, and the fingerprint check above is why sending a live pairing code here is safe. Because
+`TH` binds both ephemeral keys, both nonces, the daemon's identity and the session id, a captured
+proof verifies for no other session.
+
+The device id's and the code's own formats belong to the daemon's pairing API, not to this protocol.
+The exact records that carry them, the lease that follows, and the session mode each commits to are
+§14.
 
 ---
 

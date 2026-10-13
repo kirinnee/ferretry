@@ -13,14 +13,11 @@
  */
 
 import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/protocol';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { SessionDeviceClaim } from '../../src/lib/relay-session.ts';
-import { MemoryDeviceKeyStore } from './device-keys.ts';
 import {
   answerClientHandshake,
   type ChannelState,
-  concatBytes,
   type ControlMessage,
+  concatBytes,
   type DaemonIdentity,
   decodeClientHello,
   decodeFrame,
@@ -40,16 +37,19 @@ import {
   RELAY_CLOSE_CODES,
   RELAY_LIMITS,
   RELAY_PROTOCOL_ID,
-  sealRecord,
   SESSION_PROTOCOL_ID,
   type SessionId,
+  sealRecord,
   sessionIdFromBytes,
   toBase64Url,
   utf8Bytes,
   verifyDeviceProof,
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { RelayCarrierSocket } from '../../src/lib/relay-carrier.ts';
+import type { SessionDeviceClaim } from '../../src/lib/relay-session.ts';
+import { MemoryDeviceKeyStore } from './device-keys.ts';
 
 /** One adapter for every test, because the protocol is only ever proved against real primitives. */
 export const relayCrypto = new WebCryptoRelayCrypto();
@@ -285,7 +285,7 @@ export interface AutoDaemonAnswer {
 }
 
 /** One `req` as a scripted daemon reads it. */
-export interface ScriptedRequest {
+interface ScriptedRequest {
   readonly method: string;
   readonly path: string;
   readonly query?: readonly (readonly [string, string])[];
@@ -294,7 +294,7 @@ export interface ScriptedRequest {
 }
 
 /** What a scripted route answers: a status and a body, JSON-encoded unless it is already a string. */
-export interface ScriptedAnswer {
+interface ScriptedAnswer {
   readonly status?: number;
   readonly body?: unknown;
 }

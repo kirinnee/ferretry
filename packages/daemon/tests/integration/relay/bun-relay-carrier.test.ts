@@ -24,6 +24,7 @@ import {
   decodeControlMessage,
   decodeDaemonHello,
   decodeFrame,
+  deviceAuthMessage,
   encodeControlMessage,
   encodeFrame,
   encodeHandshakeMessage,
@@ -36,17 +37,16 @@ import {
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
   type RelayFrame,
+  SESSION_PROTOCOL_ID,
   type SessionId,
   sealRecord,
   sessionIdFromBytes,
+  signDeviceProof,
   startClientHandshake,
   toBase64Url,
   utf8Bytes,
   utf8Text,
   verifyRendezvousClaim,
-  deviceAuthMessage,
-  SESSION_PROTOCOL_ID,
-  signDeviceProof,
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';

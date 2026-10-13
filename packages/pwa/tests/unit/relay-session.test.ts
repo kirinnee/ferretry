@@ -11,6 +11,7 @@
  */
 
 import { describe, it } from 'bun:test';
+import { MAX_TUNNEL_BODY_BYTES, OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import {
   CREDIT_WINDOW_FRAMES,
   encodeCreditPayload,
@@ -22,7 +23,6 @@ import {
   SESSION_PROTOCOL_ID,
   utf8Bytes,
 } from '@ferretry/relay';
-import { MAX_TUNNEL_BODY_BYTES, OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import should from 'should';
 import {
   decodeTunnelDaemonMessage,

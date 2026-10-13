@@ -59,10 +59,10 @@
  */
 
 import {
-  BrowserLoginActionSchema,
-  BrowserLoginStatusSchema,
   type BrowserLoginAction,
+  BrowserLoginActionSchema,
   type BrowserLoginStatus,
+  BrowserLoginStatusSchema,
   type IFyApiClient,
 } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';

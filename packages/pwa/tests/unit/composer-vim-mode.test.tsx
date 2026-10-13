@@ -11,12 +11,12 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { Composer as ProductionComposer, type ComposerProps } from '../../src/components/composer.tsx';
+import { type ComposerProps, Composer as ProductionComposer } from '../../src/components/composer.tsx';
 import { DictationControl } from '../../src/components/dictation-control.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { composerQuoteTarget } from '../../src/lib/quote.ts';
-import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
+import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 

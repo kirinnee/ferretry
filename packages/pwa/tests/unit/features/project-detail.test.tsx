@@ -10,7 +10,7 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../../../src/lib/fleet-s
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../../src/lib/projects-store.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
 import { type AppStore, DaemonApiPool, StoreProvider } from '../../../src/lib/store.tsx';
-import { interact, mount, type Mounted, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const PROJECT_ID = '11111111-1111-4111-8111-111111111111';

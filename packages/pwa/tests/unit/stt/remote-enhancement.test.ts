@@ -10,7 +10,7 @@ import { MAX_DICTIONARY_TERMS, MAX_USER_CONTEXT_CHARS } from '../../../src/lib/s
 import {
   MAX_REMOTE_ENHANCEMENT_TEXT_CHARS,
   REMOTE_ENHANCEMENT_TIMEOUT_MS,
-  RemoteEnhancementError,
+  type RemoteEnhancementError,
   type RemoteEnhancementFetch,
   type RemoteEnhancementInput,
   requestRemoteEnhancement,

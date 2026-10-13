@@ -31,13 +31,13 @@ import { addReferenceMessage, addReferenceToComposer } from '../lib/composer-ref
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import {
   describeSurfaceOwnership,
   type SessionSurface,
-  sessionSurfaces,
   type SurfaceOwnership,
+  sessionSurfaces,
 } from '../lib/surface-references.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
 import { Badge, Button } from '../shell/primitives.tsx';
 

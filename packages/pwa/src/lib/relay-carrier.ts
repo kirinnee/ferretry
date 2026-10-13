@@ -49,8 +49,8 @@ import {
   connectionSocketUrl,
   HEARTBEAT_GRACE_SECONDS,
   HEARTBEAT_SECONDS,
-  parseDaemonId,
   type PrivateKeyHandle,
+  parseDaemonId,
   RELAY_CLOSE_CODES,
   SESSION_PROTOCOL_ID,
   toBase64Url,
@@ -72,9 +72,9 @@ import {
   type RelaySessionMode,
   type RelayStreamFrame,
   RelayStreamRefusedError,
-  type SessionDeviceClaim,
   type RelayTunnelAnswer,
   type RelayTunnelClientMessage,
+  type SessionDeviceClaim,
 } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 

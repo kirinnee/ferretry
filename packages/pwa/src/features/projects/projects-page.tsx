@@ -25,12 +25,11 @@
 import type { RegisterProjectRequest } from '@ferretry/protocol';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { projectPickerOptions } from '../../components/daemon-picker-model.ts';
-import { useDaemonFetch } from '../../lib/store.tsx';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonProjectPath } from '../../lib/pages/routes.ts';
 import { useRouter } from '../../lib/router.tsx';
-import { useAppStore } from '../../lib/store.tsx';
+import { useAppStore, useDaemonFetch } from '../../lib/store.tsx';
 import type { ProjectRegistrationStatus } from './project-registration-model.ts';
 import { alreadyRegistered, registerProject } from './projects-api.ts';
 import { ProjectsHub } from './projects-hub.tsx';

@@ -26,7 +26,7 @@ export const UNSUPPORTED_DEVICE_KEY_SENTENCE =
   'This browser cannot create the kind of key Ferretry pairs with (Ed25519). Update the browser, or pair from a different one.';
 
 /** Said when the key this browser paired with is gone — cleared site data, or a copied profile. */
-export const MISSING_DEVICE_KEY_SENTENCE =
+const MISSING_DEVICE_KEY_SENTENCE =
   'This browser no longer holds the key it paired this machine with — its site data was cleared, or this is a copy of another profile. Pair this device again.';
 
 /** The key a pairing was proved with is not in this browser any more. Re-pairing is the only repair. */

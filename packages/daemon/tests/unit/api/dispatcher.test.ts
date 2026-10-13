@@ -5,11 +5,11 @@ import {
   ApiError,
   type ApiRoute,
   ApiRouter,
+  ApiSocketDispatcher,
   type CallerGovernance,
   type CapabilityGuard,
   CLIENT_HEADER,
   type CredentialMinimum,
-  ApiSocketDispatcher,
   jsonResponse,
   NO_GOVERNED_ROUTES_GUARD,
   OPERATOR_UNLOCK_HEADER,
@@ -194,6 +194,20 @@ describe('ApiDispatcher authorization', () => {
     should(jsonBody(outdated)).containDeep({ code: 'app_outdated' });
     should(String(jsonBody(outdated).error)).match(/Reload the page/u);
     should(stranger.status).equal(401);
+  });
+
+  it('should tell an old app trying to pair over plain HTTP to update, rather than that its code is wrong', async () => {
+    // The route is gone — redemption is a sealed record inside a session — so nothing serves it; it is
+    // only answered in words, because a bare 401 would send that reader to mint a fresh code forever.
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
+    const oldPairing = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/pair', body: '{"code":"7F3K-Q2ND","deviceName":"Old"}' }),
+    );
+    const otherVerb = await dispatcher.dispatch(request({ path: '/v1/pair' }));
+
+    should(oldPairing.status).equal(426);
+    should(jsonBody(oldPairing)).containDeep({ code: 'app_outdated' });
+    should(otherVerb.status).equal(401);
   });
 
   it('should refuse a session device whose grant is gone, and every device when nobody can say', async () => {

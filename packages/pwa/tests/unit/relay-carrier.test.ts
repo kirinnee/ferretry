@@ -13,6 +13,7 @@ import { MAX_TUNNEL_BODY_BYTES, OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_
 import { HEARTBEAT_GRACE_SECONDS, HEARTBEAT_SECONDS, RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '@ferretry/relay';
 import should from 'should';
 import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
+import { DeviceKeyMissingError, DeviceKeyUnreadableError } from '../../src/lib/device-keys.ts';
 import {
   browserRelayDial,
   DaemonCarrierRouter,
@@ -22,7 +23,6 @@ import {
   relayResponse,
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
-import { DeviceKeyMissingError, DeviceKeyUnreadableError } from '../../src/lib/device-keys.ts';
 import { RelaySessionError, RelayStreamRefusedError } from '../../src/lib/relay-session.ts';
 import { autoDial, newDaemonIdentity, relayCrypto, ScriptedSocket, settle, testDevice } from '../support/relay.ts';
 

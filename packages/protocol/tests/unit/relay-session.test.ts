@@ -1,5 +1,13 @@
 import { describe, it } from 'bun:test';
 import {
+  ACCESS_LEASE_SECONDS,
+  ACCESS_RENEW_LEAD_SECONDS,
+  DAEMON_UPDATE_COMMANDS,
+  MAX_TUNNEL_BODY_BYTES,
+  OLDER_APP_SENTENCE,
+  OLDER_DAEMON_SENTENCE,
+  partitionTunnelBody,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   RELAY_SESSION_CONCLUDED_CLOSE_CODE,
   RELAY_SESSION_CONCLUDED_CLOSE_REASON,
   relayDataByteBudget,
@@ -81,5 +89,61 @@ describe('relay session vocabulary', () => {
 
   it('should floor a fractional ceiling rather than inventing capacity', () => {
     should(relayDataByteBudget(MAX_PLAINTEXT_BYTES + 0.9)).equal(relayDataByteBudget(MAX_PLAINTEXT_BYTES));
+  });
+});
+
+/** What one part costs inside a JSON record: its escaped UTF-8 size, without the quotes. */
+const escapedBytes = (part: string): number => Buffer.byteLength(JSON.stringify(part), 'utf8') - 2;
+
+describe('cutting a tunnel body into records', () => {
+  it('should keep a body that fits as one part, and an empty one as one empty part', () => {
+    should(partitionTunnelBody('small', 64)).eql(['small']);
+    should(partitionTunnelBody('', 64)).eql(['']);
+  });
+
+  it('should cut at the budget and reassemble to the original exactly', () => {
+    const body = 'a'.repeat(100);
+    const parts = partitionTunnelBody(body, 32);
+    should(parts.join('')).equal(body);
+    should(parts.every(part => escapedBytes(part) <= 32)).be.true();
+    should(parts.map(part => part.length)).eql([32, 32, 32, 4]);
+  });
+
+  it('should cost every character by what JSON escaping makes of it', () => {
+    // Quote and backslash become two bytes; the five named controls two; any other control six;
+    // two- and three-byte UTF-8 as themselves; a pair as four; a lone surrogate as its six-byte escape.
+    const body = `"\\\b\t\n\f\r\u0001é€😀\ud800x`;
+    for (const budget of [12, 13, 16, 24]) {
+      const parts = partitionTunnelBody(body, budget);
+      should(parts.join('')).equal(body);
+      for (const part of parts) should(escapedBytes(part)).be.belowOrEqual(budget);
+    }
+  });
+
+  it('should never divide a surrogate pair, so every part is valid text on its own', () => {
+    const body = '😀'.repeat(10);
+    const parts = partitionTunnelBody(body, 12);
+    should(parts.join('')).equal(body);
+    should(parts.every(part => part.length % 2 === 0)).be.true();
+  });
+
+  it('should refuse a budget too small to carry an escaped character', () => {
+    should(() => partitionTunnelBody('x', 11)).throw(/room for at least one escaped character/u);
+  });
+});
+
+describe('the session lease and the version-skew sentences', () => {
+  it('should renew inside the lease, and name a close code of its own for a lease that ended', () => {
+    should(ACCESS_RENEW_LEAD_SECONDS).be.below(ACCESS_LEASE_SECONDS);
+    should(RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE).equal(4441);
+    should(MAX_TUNNEL_BODY_BYTES).equal(32 * 1_024 * 1_024);
+  });
+
+  it('should name which side is old and how to update it, in one sentence each', () => {
+    should(OLDER_DAEMON_SENTENCE).match(/machine/iu);
+    should(OLDER_DAEMON_SENTENCE).containEql(DAEMON_UPDATE_COMMANDS);
+    should(OLDER_DAEMON_SENTENCE).containEql('fy daemon restart');
+    should(OLDER_APP_SENTENCE).match(/app/iu);
+    should(OLDER_APP_SENTENCE).not.equal(OLDER_DAEMON_SENTENCE);
   });
 });

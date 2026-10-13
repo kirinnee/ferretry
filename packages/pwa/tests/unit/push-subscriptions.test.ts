@@ -1,14 +1,14 @@
-import { FY_REQUEST_ID_HEADER, type PushDeviceView, type PushPreferences } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import { FY_REQUEST_ID_HEADER, type PushDeviceView, type PushPreferences } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
   applicationServerKey,
   fetchDaemonVapidKey,
   listDaemonPushDevices,
+  type PushSubscriptionLike,
   pushSubscriptionJson,
   registerDaemonPushDevice,
   revokeDaemonPushDevice,
-  type PushSubscriptionLike,
 } from '../../src/lib/push-subscriptions.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });

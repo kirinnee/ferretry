@@ -9,8 +9,8 @@
 import { beforeAll, describe, it } from 'bun:test';
 import { OLDER_APP_SENTENCE, RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
 import {
-  completeClientHandshake,
   type ChannelState,
+  completeClientHandshake,
   type DaemonIdentity,
   decodeControlMessage,
   decodeDaemonHello,
@@ -41,7 +41,7 @@ import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketDownstream, SocketHandler } from '../../../src/lib/api/socket.ts';
-import { LiveDeviceConnections, type SessionPairingAttempt, type PairingCarrier } from '../../../src/lib/pairing/index.ts';
+import { LiveDeviceConnections, type PairingCarrier, type SessionPairingAttempt } from '../../../src/lib/pairing/index.ts';
 import { MAX_DIRECT_SESSIONS } from '../../../src/lib/relay/direct-carrier.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';

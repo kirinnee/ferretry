@@ -1,21 +1,21 @@
 import { describe, it } from 'bun:test';
 import {
   DaemonIdSchema,
-  PairedDeviceIdSchema,
   formatPairingFragment,
   invitationRedeemableByAnotherDevice,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   PAIRING_DEVICE_NAME_MAX_LENGTH,
   PAIRING_FRAGMENT_PATTERN,
+  PairedDeviceIdSchema,
   PairingCodeMintRequestSchema,
   PairingCodeMintResponseSchema,
   PairingCodeStatusResponseSchema,
   type PairingLinkSeed,
-  pairingLinkUrl,
-  pairingMintOutcome,
   PairingRequestSchema,
   PairingResponseSchema,
+  pairingLinkUrl,
+  pairingMintOutcome,
   parsePairingFragment,
 } from '@ferretry/protocol';
 import should from 'should';

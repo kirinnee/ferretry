@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
-  WardenAttention,
   attentionHeadline,
   attentionOutcome,
   judgementSummary,
   nextStateOnFailure,
   orderedAttentionItems,
+  WardenAttention,
 } from '../../../src/features/warden/warden-attention.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run } from '../../support/react.ts';

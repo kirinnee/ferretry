@@ -1,8 +1,8 @@
 import {
   type PairingCodeMintResponse,
   PairingCodeMintResponseSchema,
-  PairingCodeStatusResponseSchema,
   type PairingCodeStatusResponse,
+  PairingCodeStatusResponseSchema,
   type PairingId,
 } from '@ferretry/protocol';
 import type { IPairGateway, PairingApiClient } from './ports.ts';

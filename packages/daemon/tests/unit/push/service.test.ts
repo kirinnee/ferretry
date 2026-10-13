@@ -3,9 +3,9 @@ import type { RegisterPushDeviceRequest } from '@ferretry/protocol';
 import should from 'should';
 import {
   PairedPushDevices,
-  PushService,
   type PushDelivery,
   type PushDeliveryOutcome,
+  PushService,
   type PushSubscriptionRecord,
   type PushSubscriptionStore,
 } from '../../../src/lib/push/index.ts';

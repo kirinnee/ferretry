@@ -1,16 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import type { IFyApiClient, WardenConfigView, WardenStatusView } from '@ferretry/protocol';
-
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
   editableWardenConfig,
-  wardenAccountHealth,
-  wardenConfigPatch,
   WardenConfigCard,
   WardenConfigSurface,
+  wardenAccountHealth,
+  wardenConfigPatch,
 } from '../../../src/features/warden/warden-config-card.tsx';
-import { wardenFailover, wardenStatus } from '../../support/warden.ts';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
+import { wardenFailover, wardenStatus } from '../../support/warden.ts';
 
 const connection = (id: string) =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });

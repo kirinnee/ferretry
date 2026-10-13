@@ -9,6 +9,7 @@ import {
   isLocalPasteChord,
   nextRemoteClickRun,
   REMOTE_MAX_CLICK_COUNT,
+  type RemoteKeyEvent,
   remoteBrowserStreamUrl,
   remoteCanvasPoint,
   remoteInputModifiers,
@@ -18,7 +19,6 @@ import {
   remotePointerButton,
   remoteViewportForContainer,
   runRemoteBrowserAction,
-  type RemoteKeyEvent,
 } from '../../src/lib/remote-browser.ts';
 
 const daemon = daemonConnection({

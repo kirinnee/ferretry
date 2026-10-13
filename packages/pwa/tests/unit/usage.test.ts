@@ -1,5 +1,5 @@
-import type { SessionView } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import type { SessionView } from '@ferretry/protocol';
 import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonUsageIndex, hasReadout, type ResolvedQuota } from '../../src/lib/usage.ts';

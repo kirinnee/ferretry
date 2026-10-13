@@ -25,10 +25,10 @@ import {
   harnessKeychainAccount,
   newestRolloutRateLimits,
   PlatformFleetCredentialStore,
-  StoredCredentialClassifier,
   ProcessFleetTokenRefreshPort,
   resolveUserHome,
   SpawnCredentialCommand,
+  StoredCredentialClassifier,
   spawnFleetTokenRefreshProcess,
 } from '@ferretry/fleet/adapters';
 import {
@@ -66,6 +66,18 @@ import {
   NodeRawDeflate,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+// U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
+import { fileFleetCatalogDeps } from '../src/adapters/fleet/account-model-files.ts';
+import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
+import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
+import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
+import {
+  CredentialEmailReader,
+  ensurePrivateDirectory,
+  readAccountModelFile,
+  rolloutFiles,
+  runCredentialHarness,
+} from '../src/adapters/fleet-credentials/credential-facts.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import {
   FileSessionForkReceiptStore,
@@ -157,6 +169,8 @@ import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
+import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
+import { runPackageInstall } from '../src/adapters/process/package-install.ts';
 import { FileSessionEffectLedger } from '../src/adapters/session/effects/index.ts';
 import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
@@ -185,6 +199,10 @@ import {
   TmuxSessionExitObserver,
   TmuxSessionLifecycleLauncher,
 } from '../src/adapters/session/lifecycle/index.ts';
+import {
+  RuntimeSupervisedLauncher,
+  RuntimeSupervisedReaper,
+} from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -282,21 +300,15 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
-import {
-  CredentialEmailReader,
-  ensurePrivateDirectory,
-  readAccountModelFile,
-  rolloutFiles,
-  runCredentialHarness,
-} from '../src/adapters/fleet-credentials/credential-facts.ts';
+import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
   credentialPassiveUsage,
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
 import { bootFirstRunSentence, createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
-import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
+import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
   SessionForkFacade,
@@ -326,6 +338,7 @@ import {
   AttentionService,
   advertisesForeignAddress,
   answerArguments,
+  attachmentDirectory,
   authorizeSessionCommand,
   type BootNoticePort,
   type BootRefusal,
@@ -333,7 +346,6 @@ import {
   BrowserSessionService,
   type BrowserViewerHost,
   BrowserViewerStream,
-  CredentialUsageSource,
   CALLSIGN_WINDOW_MS,
   CapabilityGrantService,
   type CatalogSubsystem,
@@ -345,6 +357,7 @@ import {
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
+  CredentialUsageSource,
   childGrantRequester,
   chooseRelayCarrierSources,
   combinedReferences,
@@ -361,7 +374,6 @@ import {
   DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
   DONE_MARKER_FILENAME,
-  attachmentDirectory,
   decodeInitialAttachments,
   defaultManagedWorktreeRoot,
   defaultSessionLifecycleSettings,
@@ -374,6 +386,7 @@ import {
   describeGrantPosture,
   describeRelayCarrierPosture,
   dialledRelayUrl,
+  directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
   type ExecutableResolverPort,
   exactWorkerAssignee,
@@ -473,7 +486,6 @@ import {
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
-  directCarrierSocketRoute,
   readHarnessPreflight,
   reconcileAnswerEvidence,
   refuseExhaustedCandidates,
@@ -484,10 +496,10 @@ import {
   relayCarrierRemedy,
   relayCarriersNeedDiscovery,
   releasedAnswerAttentionOwnedBy,
+  releasingAttachmentsOnStop,
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
-  releasingAttachmentsOnStop,
   renderInitialAttachmentSection,
   resolveStateHome,
   runtimeQuarantineState,
@@ -506,7 +518,6 @@ import {
   SessionAnswerError,
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
-  sessionScopedAttachments,
   SessionAttachService,
   SessionControlError,
   type SessionControlFailure,
@@ -557,6 +568,7 @@ import {
   searchTranscript,
   selectableAutoAccounts,
   sessionHealthSettingsAt,
+  sessionScopedAttachments,
   structuredQuestionStatePatch,
   supersededCarrierKeys,
   type TaskAssigneeCandidate,
@@ -594,6 +606,11 @@ import {
 } from '../src/lib/index.ts';
 import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
+import {
+  ConversationLeases,
+  LeaseClaimingLaunchWrapper,
+  LeaseReleasingSessionExits,
+} from '../src/lib/session/conversation-lease.ts';
 import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import {
@@ -606,23 +623,6 @@ import {
   WorkspaceFacetContributor,
 } from '../src/lib/transfer/index.ts';
 import { daemonVersion } from '../src/lib/version.ts';
-import { runPackageInstall } from '../src/adapters/process/package-install.ts';
-import {
-  ConversationLeases,
-  LeaseClaimingLaunchWrapper,
-  LeaseReleasingSessionExits,
-} from '../src/lib/session/conversation-lease.ts';
-// U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
-import { fileFleetCatalogDeps } from '../src/adapters/fleet/account-model-files.ts';
-import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
-import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
-import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
-import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
-import {
-  RuntimeSupervisedLauncher,
-  RuntimeSupervisedReaper,
-} from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
-import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;

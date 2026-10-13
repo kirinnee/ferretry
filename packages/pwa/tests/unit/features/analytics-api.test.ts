@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '@ferretry/protocol';
-
+import { fetchAnalytics, fetchSessionAnalytics } from '../../../src/features/analytics/analytics-api.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
-import { fetchAnalytics, fetchSessionAnalytics } from '../../../src/features/analytics/analytics-api.ts';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const index = {

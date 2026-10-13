@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
   failoverReasonCopy,
   verdictProvenanceLine,
   WardenVerdicts,
   type WardenVerdictView,
 } from '../../../src/features/warden/warden-verdicts.tsx';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run } from '../../support/react.ts';
 
 const connection = daemonConnection({

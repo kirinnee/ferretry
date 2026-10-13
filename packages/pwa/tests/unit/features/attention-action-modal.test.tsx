@@ -12,8 +12,8 @@
  *                        rendering an all-clear, which is the one wrong answer.
  */
 
-import type { AttentionItem, AttentionResponse, AttentionSnapshot } from '@ferretry/protocol';
 import { beforeEach, describe, expect, it } from 'bun:test';
+import type { AttentionItem, AttentionResponse, AttentionSnapshot } from '@ferretry/protocol';
 import { useLayoutEffect } from 'react';
 
 import {
@@ -21,9 +21,9 @@ import {
   AttentionActionModal,
   AttentionActionTrigger,
 } from '../../../src/features/attention/attention-action-modal.tsx';
+import type { AttentionLoadStatus } from '../../../src/lib/attention-store.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
-import type { AttentionLoadStatus } from '../../../src/lib/attention-store.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 
 const installMatchMedia = (): void => {

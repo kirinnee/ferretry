@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { HOSTED_RELAY_PATH } from '../../src/features/onboarding/hosted-relay.ts';
 import type { DaemonConnectionRepository, DaemonConnectionStore } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../src/lib/device-keys.ts';
+import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
 import {
   type AppStore,
   browserConnectionRepository,
@@ -15,8 +17,6 @@ import {
   useAppStore,
   useConnectionSnapshot,
 } from '../../src/lib/store.tsx';
-import { UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../src/lib/device-keys.ts';
-import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import {

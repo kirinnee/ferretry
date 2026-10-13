@@ -11,7 +11,7 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { Composer as ProductionComposer, type ComposerProps } from '../../src/components/composer.tsx';
+import { type ComposerProps, Composer as ProductionComposer } from '../../src/components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../src/components/composer-autocomplete.ts';
 import type { ComposerSkillsCatalog } from '../../src/components/composer-autocomplete-providers.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';

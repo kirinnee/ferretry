@@ -1,8 +1,8 @@
 import { afterAll, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import {
-  DAEMON_CAPABILITIES,
   type BrowserPushSubscription,
+  DAEMON_CAPABILITIES,
   PushDeviceListResponseSchema,
   PushDeviceViewSchema,
   VapidPublicKeyResponseSchema,
@@ -11,7 +11,7 @@ import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { NodePairingCryptography, StatePairingRepository } from '../../../src/adapters/pairing/index.ts';
 import { StatePushRepository, StateVapidKeys, WebPushFetchTransport } from '../../../src/adapters/push/index.ts';
-import { type ApiRequest, ApiDispatcher, ApiRouter, headersFrom, queryFrom } from '../../../src/lib/api/index.ts';
+import { ApiDispatcher, type ApiRequest, ApiRouter, headersFrom, queryFrom } from '../../../src/lib/api/index.ts';
 import {
   CapabilityGrantService,
   createFoundationPaths,
@@ -19,8 +19,8 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
-  pairingRoutes,
   PushService,
+  pairingRoutes,
   pushRoutes,
   resolveStateHome,
 } from '../../../src/lib/index.ts';

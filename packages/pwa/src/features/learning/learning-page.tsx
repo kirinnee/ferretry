@@ -3,7 +3,6 @@ import { Check, Copy, FileDown, GraduationCap, Pencil, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { displayCallsign } from '../../lib/callsign.ts';
-import { useDaemonFetch } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
@@ -13,6 +12,7 @@ import {
   fetchLearningStatus,
   runLearningScan,
 } from '../../lib/learning-api.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { LearningHeader } from './learning-header.tsx';
 import { useTouchAffected } from './use-touch-affected.ts';

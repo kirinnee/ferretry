@@ -57,6 +57,7 @@ import {
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { grantRefusalNotice } from '../lib/grants.ts';
+import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { describeSurfaceOwnership, type SurfaceOwnership } from '../lib/surface-references.ts';
 import {
   describeCoControl,
@@ -71,13 +72,12 @@ import {
   createSessionTerminal,
   listSessionTerminals,
   renameSessionTerminal,
-  terminalLimitLabel,
   type TerminalStream,
   type TerminalStreamHandlers,
   type TerminalStreamOpener,
   TerminalStreamRefused,
+  terminalLimitLabel,
 } from '../lib/web-terminals.ts';
-import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { Button } from '../shell/primitives.tsx';
 
 type XtermModules = {

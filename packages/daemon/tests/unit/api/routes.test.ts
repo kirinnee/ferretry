@@ -1,5 +1,5 @@
-import type { AccountUsage } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import type { AccountUsage } from '@ferretry/protocol';
 import should from 'should';
 import {
   ApiDispatcher,
@@ -9,8 +9,8 @@ import {
   healthRoutes,
   NO_GOVERNED_ROUTES_GUARD,
   PROMETHEUS_CONTENT_TYPE,
-  usageRoutes,
   type UsageFeedDocument,
+  usageRoutes,
 } from '../../../src/lib/api/index.ts';
 import type { UsageFeedPort } from '../../../src/lib/usage/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';

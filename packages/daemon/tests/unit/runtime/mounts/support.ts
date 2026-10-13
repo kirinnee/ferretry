@@ -34,7 +34,6 @@ import {
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
-import { describeGrantRefusal } from '../../../../src/lib/grants/policy.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
   type AttentionLedger,
@@ -58,6 +57,7 @@ import {
   DEFAULT_CAPABILITY_GRANTS,
   type GrantAuditEntry,
 } from '../../../../src/lib/grants/index.ts';
+import { describeGrantRefusal } from '../../../../src/lib/grants/policy.ts';
 import type {
   LearningState,
   LearningStorePort,

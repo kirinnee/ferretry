@@ -2,28 +2,32 @@
 
 A Ferretry daemon serves exactly the devices it has been told to serve. Pairing is the whole of that
 decision: a short-lived code is minted on one side, read by the device being added, and exchanged once
-for a durable device credential. This document is the contract. Implement against it rather than
+to register that device's own key. This document is the contract. Implement against it rather than
 against the code, and change it in the same commit as the behaviour.
 
 ## The one-sentence version
 
 The machine mints a code that lives for **two minutes** and works **once**; the device that reads it
-gets a device token; the machine keeps only a hash of that token and can revoke it at any time.
+registers a **key it generated and can never export**; the machine keeps only the public half, and the
+grant ends when it is revoked or goes unused for **30 days**. No bearer value exists anywhere — the
+rationale and the threat model are [design/zero-trust.md](design/zero-trust.md) A1–A7.
 
 ## What travels, and what never does
 
-| value        | where it lives                                  | who may read it                       |
-| ------------ | ----------------------------------------------- | ------------------------------------- |
-| pairing code | the daemon's memory for its TTL, and one screen | whoever is being shown the code       |
-| pairing id   | the mint response, and revoke URLs              | anybody who may reach the pairing API |
-| device token | the redeeming device, once                      | that device, forever after            |
-| token digest | `state/devices.json`                            | the daemon, to compare against        |
+| value              | where it lives                                                 | who may read it                                         |
+| ------------------ | -------------------------------------------------------------- | ------------------------------------------------------- |
+| pairing code       | the daemon's memory for its TTL, and one screen                | whoever is being shown the code                         |
+| pairing id         | the mint response, and revoke URLs                             | anybody who may reach the pairing API                   |
+| device private key | the redeeming browser's IndexedDB, **non-extractable**         | nobody — the browser will sign with it but never export |
+| device public key  | `state/devices.json` (SPKI), and the sealed `pair` record      | the daemon, to verify each session's proof against      |
+| device id          | the device, and `devices.json`                                 | names a grant; proves nothing on its own                |
 
 Two properties hold by construction rather than by discipline:
 
-- **No route returns a device token or anything derived from one.** `PairedDeviceSchema` — the
-  projection that crosses the wire — has no field for a digest. A daemon that volunteered one is
-  refused by the schema rather than rendered.
+- **There is no device credential to return.** A device proves its grant by signing each session's
+  handshake transcript ([relay-protocol.md](relay-protocol.md) §14), so a captured record is worth
+  nothing in any other session, and the daemon holds nothing a thief could replay. `PairedDeviceSchema` —
+  the projection that crosses the wire — has no field for a key or a proof.
 - **The code never enters a URL path or query.** Revocation is addressed by **pairing id**, which is a
   non-secret handle the mint answers with for exactly this reason: a URL reaches every access log in
   the path, and a code in a log outlives its two minutes. The pairing _link_ carries the code in a
@@ -35,48 +39,53 @@ Two properties hold by construction rather than by discipline:
 POST /v1/pair/code            (operator minimum, `pairing.use`)   → { pairingId, code, expiresAt, link+reach | refusal }
 GET  /v1/pair/code/:pairingId (operator minimum, `pairing.use`)   → pending | redeemed | expired
 DELETE /v1/pair/code/:pairingId (operator minimum, `pairing.use`) → the code's fate, never the code
-POST /v1/pair                 (none minimum — the code is the credential) → { deviceToken, daemonId, capabilities, carriers }
+(no route)                    a sealed `pair` record inside a session  → { deviceId, daemonId, daemonName, capabilities, carriers, idleExpiryDays }
 GET  /v1/pair/devices         (operator minimum, `pairing.use`)   → who may reach this machine
 DELETE /v1/pair/devices/:id   (operator minimum, `pairing.use`)   → the remaining list
 GET  /v1/carriers             (authenticated minimum, no-store)    → { carriers } — the set, asked again later
 ```
 
 **`operator` is the route's credential minimum, not an admin token.** Any credential but a warden's
-meets it — a paired device's token included — which is what lets a browser, whose only credential comes
+meets it — a paired device's session included — which is what lets a browser, whose only grant comes
 from redeeming a pairing code, add the second device. An `admin-token` minimum would have left that
 journey where it started: on the command line. The narrowing that remains is the capability demand
 beside it, and off the host that is the operator's to switch off.
 
-`POST /v1/pair` is the only public route on this surface, and it is public because a device redeeming a
-code has no credential yet — the **code is** the credential for that one request. Everything else either
-mints a credential, lists and revokes them, or is read with one.
+**There is no public route on this surface at all.** Redemption is not an HTTP request on either
+carrier: `POST /v1/pair` is deleted, and an app that still calls it is answered by nothing.
 
-### Redemption has two carriers, and one of them is not a route
+### Redemption is one sealed record, on whichever carrier reaches the daemon
 
-`POST /v1/pair` is the **direct** redemption. A device that cannot reach the daemon's address at all
-redeems through a rendezvous instead: a **sealed `pair` record** on a pre-auth relay session, specified
-exactly in [relay-protocol.md](relay-protocol.md) §14 — the daemon is proved against the QR-pinned
-fingerprint before the code is sent, exactly one attempt per session, one sealed outcome (`paired`
-carrying this same redemption response verbatim, or one generic `pair-refused`), then the session
-closes. The relayed path is deliberately a **record and not a route**: a pre-auth session issues no
-requests, so "`POST /v1/pair` is the only public route on this surface" stays literally true, and no
-credential-less request path exists for the next `minimum: 'none'` route to inherit. Direct is still
-attempted first, like every other exchange in this product; the rendezvous is the fallback, not a
-choice. What a relay operator can and cannot observe about a redemption is §10 and §13 of the same
-document: fingerprint, client IP, timing and frame shape, and the fact that a first pairing happened
-— never the code, the minted device token, the device name, the payload, or the outcome of the
-exchange itself.
+The browser mints a fresh non-extractable Ed25519 key, then opens a **pre-auth session** — on the
+daemon's own address first (`/v1/rendezvous/<daemonId>/client` on its listener), then on the rendezvous
+its build discovered — and sends **one sealed `pair` record** carrying the code, its device name, the
+public key and a signature by that key over this session's transcript, specified exactly in
+[relay-protocol.md](relay-protocol.md) §14. The daemon is proved against the QR-pinned fingerprint
+before the code is sent; there is exactly one attempt per session and one sealed outcome (`paired`
+carrying the redemption response, or one generic `pair-refused`), then the session closes.
+
+- **A bad proof is a wrong code.** An attempt whose signature does not verify spends one guess and gets
+  the same uniform refusal, so the proof is not a second oracle.
+- **The two carriers keep separate budgets** (below): a direct attempt is keyed by its peer address and
+  spends the code's five direct guesses; a relayed one spends the relay budget.
+- **The key is saved only after `paired`.** A refused or unreachable pairing leaves nothing in the
+  browser. An attempt whose record left but whose answer never arrived is reported plainly, and a later
+  refusal of the same code says the earlier attempt may have paired a device nobody holds and tells the
+  reader to check the device list.
+
+What a relay operator can and cannot observe about a redemption is §10 and §13 of the same document:
+fingerprint, client IP, timing and frame shape, and the fact that a first pairing happened — never the
+code, the key, the minted device id, the device name, or the outcome of the exchange itself.
 
 **What the device does next is ordinary.** The pairing session ends the moment its outcome is
-sealed, so the browser reconnects with the grant it was just issued and speaks the ordinary
-authenticated request session — the same one a device paired over the LAN uses — and opens a
-separate relay session per live stream when it wants events or a terminal. There is no relayed mode
-a paired device stays in: pairing is one exchange, and everything after it is the product's normal
-traffic over whichever carrier the walk won.
+sealed, so the browser reconnects proving the key it just registered and speaks the ordinary
+authenticated request session — on either carrier — and opens a separate stream session per live
+stream when it wants events or a terminal. Pairing is one exchange, and everything after it is the
+product's normal traffic over whichever carrier the walk won.
 
 ### What a redemption hands back
 
-`POST /v1/pair` answers with `carriers`: **every way this daemon can be reached**, not merely the address
+The `paired` outcome carries `carriers`: **every way this daemon can be reached**, not merely the address
 this device happened to pair over. A phone that learned only the direct address has nothing to fall back
 on when it leaves the house, and it cannot discover a rendezvous by itself — each end used to read its own
 build-time directory, so the two met only by coincidence of picking the same service.
@@ -110,10 +119,10 @@ answer rather than merging into it — that is what makes both halves of a disag
 relay the daemon dropped disappears instead of being dialled forever, and a relay the daemon added arrives
 without anybody re-pairing. A merge would only ever fix the second.
 
-**This route is not a way in.** It is reached with the token redemption already issued, on any
-carrier. Pairing itself now has a relayed form too — the sealed record above, not a route — so first
-contact no longer requires an address reachable on its own: a daemon that publishes a rendezvous is
-pairable by a phone that can never dial it directly.
+**This route is not a way in.** It is reached inside a session the paired device key opened, on any
+carrier. Pairing itself has a relayed form — the sealed record above, not a route — so first contact
+does not require an address reachable on its own: a daemon that publishes a rendezvous is pairable by
+a phone that can never dial it directly.
 
 ### Who may mint
 
@@ -285,10 +294,15 @@ Two different things are revocable and they are not the same act:
 - **A device** — ends its access. The document is written **first**, and only a successful write drops the
   live grant from the registry; the other order turns a failed write into a phone that stops working now
   and works again after a restart. There is no `await` between the two, so no request can authenticate
-  against a credential the daemon has already promised to forget. Only **then** is every live connection
-  the device holds closed — terminal and event sockets with `1008`, relayed sessions with the same `4403`
-  an unknown credential gets — because a socket is authorized once, at its upgrade, and would otherwise
-  outlive the grant. A socket opened afterwards with a ticket bought just before is closed as it opens.
+  against a credential the daemon has already promised to forget. Only **then** is every live session
+  the device holds closed — direct and relayed alike, with the same `4403` an unknown device gets —
+  because a session is authorized once, at its proof, and would otherwise outlive the grant. A request
+  already in flight on a closing session is refused at the request boundary too: the dispatcher re-asks
+  whether the device is still paired, and an unanswerable question is a refusal.
+- **Idle expiry** — a device that has not opened or renewed a session for **30 days** is removed the
+  next time the daemon looks (at boot, at a session's proof, at a device-list read) and must pair
+  again. `lastSeenAt` advances on every proof and renewal and reaches disk at most once an hour, so a
+  busy phone is not a write per request; `idleExpiresAt` on each row says when the grant ends.
 
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses
@@ -313,17 +327,21 @@ row states what its revoke will do before the press.
 
 ## Declared GAPs
 
-- **`lastSeenAt` is never updated after pairing.** It is written once, at redemption, so the device list
-  shows when a grant was created and not when the daemon last heard from it. The field is served because
-  the shape is right; a UI must not present it as recent activity until something advances it.
 - **A device cannot be renamed.** The name is whatever the device called itself when it redeemed, and it
   is attacker-influenced text bounded by `PairingDeviceNameSchema`. Two phones that both say "Chrome" are
   told apart only by when they were added.
 - **There is no pairing audit record.** A revoked device leaves no trace beyond its absence from
   `devices.json`, so "when did this credential go away, and who ended it" is not answerable. The grant
   layer has an audit journal; this does not.
-- **A device token never expires.** Revocation is the only way one ends. There is no rotation, no
-  last-used cutoff and no maximum age, so a phone that redeemed a code a year ago is still a device.
+- **Code running in the paired page can USE the device key while the tab is open.** The key cannot be
+  exported, so a cross-site script or a malicious deploy cannot carry it away, but it can sign sessions
+  for as long as it runs. Signed PWA releases ([design/zero-trust.md](design/zero-trust.md) D) narrow
+  the deploy half; nothing here narrows the in-page half.
+- **Devices paired before device keys were deleted on upgrade.** A `devices.json` from before schema 2
+  held only token digests, which no session can prove against, so the daemon drops those grants at boot
+  and says so once. Each such device must pair again.
+- **There is no passkey step-up yet.** A paired device's session can do whatever its capabilities
+  allow without a second factor; [design/zero-trust.md](design/zero-trust.md) B adds one.
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first

@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
 import type { RelayStreamRequest } from '../../src/lib/relay-carrier.ts';
 import type { RelayClientSession, RelayStreamClosed } from '../../src/lib/relay-session.ts';
-import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
 
 /** A stream session as the transport sees one: frames in, a close out, and a close listener. */
 class FakeStreamSession {

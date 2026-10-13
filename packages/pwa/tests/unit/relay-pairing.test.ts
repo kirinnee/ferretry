@@ -9,6 +9,7 @@
  * `stream-opened` on a pairing session — and every one of those must be refused rather than absorbed.
  */
 
+import { describe, it } from 'bun:test';
 import { RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
 import {
   decodeFrame,
@@ -19,25 +20,24 @@ import {
   toBase64Url,
   utf8Bytes,
 } from '@ferretry/relay';
-import { describe, it } from 'bun:test';
 import should from 'should';
 import type { RelayCarrier } from '../../src/lib/daemon-connection.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { PairingSeed } from '../../src/lib/pairing.ts';
 import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
+import type { PairingSeed } from '../../src/lib/pairing.ts';
 import { DaemonCarrierRouter } from '../../src/lib/relay-carrier.ts';
-import { browserTerminalStreamAttach, TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
 import { redeemPairingInSession, relayPairingCandidates } from '../../src/lib/relay-pairing.ts';
 import {
   PAIRING_REFUSED_REASON,
   RELAY_DATA_BYTE_BUDGET,
   RelayClientSession,
   RelayPairingRefusedError,
+  RelaySessionError,
   type RelaySessionMode,
   type RelayStreamFrame,
   RelayStreamRefusedError,
-  RelaySessionError,
 } from '../../src/lib/relay-session.ts';
+import { browserTerminalStreamAttach, TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
 import {
   autoDial,
   LEASE_ENDS,

@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createRef } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
+import { Composer } from '../../src/components/composer.tsx';
 import {
   ComposerHighlight,
   highlightReferenceTokens,
   syncComposerHighlightViewport,
 } from '../../src/components/composer-highlight.tsx';
-import { Composer } from '../../src/components/composer.tsx';
 import { tokenizeMarkdown } from '../../src/lib/composer-markdown.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';

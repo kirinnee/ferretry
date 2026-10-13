@@ -1,10 +1,10 @@
 import { type DaemonCarrier, PAIRING_FRAGMENT_PATTERN, parsePairingFragment } from '@ferretry/protocol';
 import { type ConnectionMethod, publishedConnectionMethods } from '@ferretry/relay';
 import {
+  type DaemonConnection,
   daemonBaseUrl,
   daemonConnection,
   daemonId,
-  type DaemonConnection,
   type RelayCarrier,
 } from './daemon-connection.ts';
 

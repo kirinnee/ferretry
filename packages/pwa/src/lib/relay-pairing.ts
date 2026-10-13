@@ -49,8 +49,8 @@ import {
   type ConnectionMethod,
   connectionSocketUrl,
   HEARTBEAT_GRACE_SECONDS,
-  parseDaemonId,
   type PrivateKeyHandle,
+  parseDaemonId,
   RELAY_CLOSE_CODES,
 } from '@ferretry/relay';
 import { daemonRelayCarrier, type RelayCarrier } from './daemon-connection.ts';

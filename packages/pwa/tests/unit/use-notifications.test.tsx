@@ -1,5 +1,5 @@
-import type { PushDeviceView, PushPreferences, SessionStatus, SessionView } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import type { PushDeviceView, PushPreferences, SessionStatus, SessionView } from '@ferretry/protocol';
 
 import {
   type NotificationControls,
@@ -20,13 +20,13 @@ import type {
   NotificationSurface,
 } from '../../src/lib/notify.ts';
 import {
+  DaemonPushDevices,
+  type DaemonPushService,
   PUSH_INACTIVE_MESSAGE,
   PUSH_UNSUPPORTED_MESSAGE,
-  type DaemonPushService,
   type PushEnrolment,
   type PushRegistrationLike,
   type PushSubscriptionHandle,
-  DaemonPushDevices,
 } from '../../src/lib/push-enrolment.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';

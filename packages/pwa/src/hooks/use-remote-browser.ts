@@ -18,9 +18,9 @@ import type { BrowserAction, BrowserActionResult, BrowserStatus } from '@ferretr
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { fetchRemoteBrowserStatus, runRemoteBrowserAction } from '../lib/remote-browser.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 
 export const REMOTE_BROWSER_POLL_MS = 2_500;
 

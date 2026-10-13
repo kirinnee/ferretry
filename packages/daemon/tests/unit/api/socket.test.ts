@@ -1,9 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
+import type { CredentialMinimum } from '../../../src/lib/api/route.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
 import {
-  admitPendingSocketFrame,
   ApiSocketDispatcher,
+  admitPendingSocketFrame,
   SOCKET_CLOSES,
   SOCKET_MAX_FRAME_BYTES,
   SOCKET_MAX_PENDING_FRAMES,
@@ -12,9 +15,6 @@ import {
   type SocketHandler,
   type SocketRoute,
 } from '../../../src/lib/api/socket.ts';
-import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
-import type { CredentialMinimum } from '../../../src/lib/api/route.ts';
 import {
   TERMINAL_MAX_CONTROL_FRAME_BYTES,
   TERMINAL_MAX_INPUT_FRAME_BYTES,

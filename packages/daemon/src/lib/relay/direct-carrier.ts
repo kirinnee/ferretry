@@ -22,6 +22,7 @@
  */
 
 import {
+  type DaemonIdentity,
   decodeControlMessage,
   decodeFrame,
   encodeControlMessage,
@@ -31,7 +32,6 @@ import {
   RELAY_LIMITS,
   RELAY_PROTOCOL_ID,
   type RelayCrypto,
-  type DaemonIdentity,
   SESSION_ID_BYTES,
   type SessionId,
   sessionIdFromBytes,

@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import { SECRET_SCHEMA_VERSION, type SecretList } from '@ferretry/protocol';
-
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
-  SECRET_LIMIT,
-  SECRET_MASK,
-  SECRET_PROMISE,
   listSecrets,
   putSecret,
   removeSecret,
+  SECRET_LIMIT,
+  SECRET_MASK,
+  SECRET_PROMISE,
   SECRETS_PATH,
 } from '../../../src/features/secrets/secrets-api.ts';
 import { SecretsCard, secretDraftProblem } from '../../../src/features/secrets/secrets-card.tsx';
 import { SecretsSurface } from '../../../src/features/secrets/secrets-surface.tsx';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 const AT = '2026-08-05T10:00:00.000Z';

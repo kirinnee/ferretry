@@ -1,20 +1,20 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import type { BrowserLoginAction, BrowserLoginStatus, IFyHttpTransport } from '@ferretry/protocol';
+import should from 'should';
 import type { BrowserLoginView } from '../../src/features/browser/browser-login-banner.tsx';
 import { daemonApiClient } from '../../src/lib/api-client.ts';
 import {
   BROWSER_LOGIN_CLOSED_POLL_MS,
   BROWSER_LOGIN_OPEN_POLL_MS,
   BROWSER_LOGIN_PATH,
-  browserLoginPort,
-  DaemonBrowserLoginStore,
   type BrowserLoginPort,
   type BrowserLoginPortFactory,
   type BrowserLoginSnapshot,
+  browserLoginPort,
+  DaemonBrowserLoginStore,
   type ScheduleBrowserLoginPoll,
 } from '../../src/lib/browser-login.ts';
-import { daemonConnection, type DaemonConnection } from '../../src/lib/daemon-connection.ts';
+import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });

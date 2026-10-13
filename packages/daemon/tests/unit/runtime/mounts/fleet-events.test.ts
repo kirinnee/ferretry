@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiRouter } from '../../../../src/lib/api/index.ts';
 import { ApiSocketDispatcher, type SocketDownstream, type SocketHandler } from '../../../../src/lib/api/socket.ts';
 import { fleetEventSocketRoutes } from '../../../../src/lib/runtime/index.ts';

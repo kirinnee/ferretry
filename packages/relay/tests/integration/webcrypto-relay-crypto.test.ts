@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
+import should from 'should';
 import { RelayKeyHandleError, WebCryptoRelayCrypto } from '../../src/adapters/index.ts';
 import { AEAD_KEY_BYTES, AEAD_NONCE_BYTES, utf8Bytes } from '../../src/lib/index.ts';
-import should from 'should';
 import { newDaemonIdentity, relayCrypto, toPem } from '../support/identities.ts';
 
 describe('WebCrypto relay crypto', () => {

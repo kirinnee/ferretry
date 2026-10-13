@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
+  type AttachmentBlobUrlPort,
   DaemonAttachmentBlobCache,
   daemonAttachmentKey,
   daemonAttachmentScope,
-  type AttachmentBlobUrlPort,
 } from '../../src/lib/attachment-blob-cache.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });

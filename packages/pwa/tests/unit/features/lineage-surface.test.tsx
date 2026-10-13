@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
 import { LineageSurface, LineageSurfaceContent } from '../../../src/features/lineage/lineage-surface.tsx';
-import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { DaemonControlsStore } from '../../../src/lib/controls.ts';
+import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { DaemonFleetStore } from '../../../src/lib/fleet-store.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { sessionView } from '../../support/sessions.ts';

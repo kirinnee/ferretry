@@ -36,26 +36,26 @@ import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
-import { startNotificationWatch, type SessionsSource } from '../lib/notification-ledger.ts';
+import { type SessionsSource, startNotificationWatch } from '../lib/notification-ledger.ts';
 import type { DaemonNotificationPreferences, NotificationPreferences } from '../lib/notification-preferences.ts';
 import {
-  notificationPayload,
-  showNotification,
   type NotificationPermissionState,
   type NotificationSurface,
+  notificationPayload,
+  showNotification,
 } from '../lib/notify.ts';
 import {
-  disablePushDelivery,
-  enablePushDelivery,
-  readPushDelivery,
-  revokePushDevice,
-  syncPushPreferences,
   type DaemonPushDevices,
   type DaemonPushService,
+  disablePushDelivery,
+  enablePushDelivery,
   type PushDeliveryReport,
   type PushDeliveryStatus,
   type PushEnrolment,
   type PushEnrolmentContext,
+  readPushDelivery,
+  revokePushDevice,
+  syncPushPreferences,
 } from '../lib/push-enrolment.ts';
 
 /** One daemon's live preference slice; another pairing's changes never re-render it. */

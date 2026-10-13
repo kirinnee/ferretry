@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-
-import { WardenReportDialog } from '../../../src/features/warden/warden-report-dialog.tsx';
 import type { WardenReportDialogRequest } from '../../../src/features/warden/warden-report-dialog.tsx';
+import { WardenReportDialog } from '../../../src/features/warden/warden-report-dialog.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../../support/dom.ts';
 

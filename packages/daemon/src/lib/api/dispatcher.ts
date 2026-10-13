@@ -89,6 +89,15 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  * 5. ask the administrator's warden-remedy authorizer, and ONLY for a caller the token class already
  *    proved to be a warden.
  */
+/**
+ * An app from before device keys redeeming a pairing code over plain HTTP.
+ *
+ * That route is deleted — redemption is a sealed record inside a session now — so nothing here serves
+ * it. It is RECOGNISED only to be answered in words: an old app pairing with an updated machine would
+ * otherwise be told `401`, which reads as "wrong code" to somebody whose only problem is an old app.
+ */
+const isPreKeyPairing = (request: ApiRequest): boolean => request.method === 'POST' && request.path === '/v1/pair';
+
 export function authorizeRequest<TRoute extends ScopedRoute>(
   router: ApiRouter<TRoute>,
   credentials: ApiCredentials,
@@ -150,9 +159,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       // An app from before device keys still sends the bearer token it was given. Nothing can accept
       // that any more, and a bare 401 would read as "you were unpaired" when the truth is "update the
       // app" — so it is told which side is old, in the one sentence every surface shares.
-      response: isPreKeyDeviceToken(bearer)
-        ? errorResponse(426, OLDER_APP_SENTENCE, 'app_outdated')
-        : errorResponse(401, 'unauthorized', 'unauthorized'),
+      response:
+        isPreKeyDeviceToken(bearer) || isPreKeyPairing(request)
+          ? errorResponse(426, OLDER_APP_SENTENCE, 'app_outdated')
+          : errorResponse(401, 'unauthorized', 'unauthorized'),
     };
 
   if (lookup.kind === 'not-found') return { kind: 'unrouted' };

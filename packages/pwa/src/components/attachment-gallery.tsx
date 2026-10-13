@@ -29,21 +29,21 @@
 import { Download, ExternalLink, FileText, ImageOff, X } from 'lucide-react';
 import {
   createContext,
+  type ReactNode,
+  type RefObject,
   useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
-  type RefObject,
 } from 'react';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import {
-  daemonAttachmentScope,
-  DaemonAttachmentBlobCache,
   type AttachmentBlobUrlPort,
+  DaemonAttachmentBlobCache,
   type DaemonAttachmentScope,
+  daemonAttachmentScope,
 } from '../lib/attachment-blob-cache.ts';
 import { loadAttachmentBlob } from '../lib/attachment-source.ts';
 import {
@@ -51,9 +51,9 @@ import {
   formatAttachmentSize,
   isBrowserOpenableAttachment,
   isImageMime,
-  textExtractionFailureCopy,
   type StoredTranscriptAttachment,
   type TranscriptImage,
+  textExtractionFailureCopy,
 } from '../lib/attachments.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';

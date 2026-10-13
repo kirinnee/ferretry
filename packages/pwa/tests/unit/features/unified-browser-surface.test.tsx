@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import type { BrowserAction, BrowserStatus } from '@ferretry/protocol';
-import { useCallback, useEffect, useState, type ComponentType } from 'react';
-import { browserDestination, type BrowserDestination } from '../../../src/features/browser/in-app-browser-model.ts';
+import { type ComponentType, useCallback, useEffect, useState } from 'react';
 import type { InAppBrowserFrameProps } from '../../../src/features/browser/in-app-browser.tsx';
+import { type BrowserDestination, browserDestination } from '../../../src/features/browser/in-app-browser-model.ts';
 import type {
   RemoteBrowserPaneProps,
   RemoteBrowserPaneState,
@@ -15,8 +15,8 @@ import {
   resetBrowserSurfaceSessions,
 } from '../../../src/features/browser/unified-browser-model.ts';
 import {
-  UnifiedBrowserSurface,
   type UnifiedBrowserDependencies,
+  UnifiedBrowserSurface,
   type UnifiedBrowserSurfaceProps,
 } from '../../../src/features/browser/unified-browser-surface.tsx';
 import type { BrowserLoginSnapshot } from '../../../src/lib/browser-login.ts';

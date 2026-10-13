@@ -8,7 +8,7 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../../../src/lib/fleet-s
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../../src/lib/projects-store.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
-import { interact, mount, must, type Mounted } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const daemon = daemonConnection({

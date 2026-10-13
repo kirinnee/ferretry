@@ -1,13 +1,13 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, type DirectNotificationRequest } from '@ferretry/protocol';
+import { type DirectNotificationRequest, FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import should from 'should';
-import { ApiDispatcher, ApiRouter, type ApiCredentials, type ApiResponse } from '../../../../src/lib/api/index.ts';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
+import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type {
+  AttentionActor,
   AttentionLedger,
   AttentionLedgerRepository,
   AttentionMutation,
-  AttentionActor,
 } from '../../../../src/lib/attention/index.ts';
 import type { NotificationResult } from '../../../../src/lib/notifications/index.ts';
 import {
