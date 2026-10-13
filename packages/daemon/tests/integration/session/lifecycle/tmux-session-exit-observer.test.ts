@@ -294,7 +294,13 @@ describe('tmux session exit observer', () => {
   it('should settle a session whose whole tmux server is gone without inventing an exit status', async () => {
     // Arrange
     const subject = await fixture(0);
+    const serverPid = Number((await subject.commands.execute(['display-message', '-p', '#{pid}'])).stdout.trim());
+    if (!Number.isInteger(serverPid) || serverPid <= 0) throw new Error('the tmux server pid could not be read');
     await Bun.spawn([subject.tmuxExecutable, '-S', join(subject.home, 'tmux.sock'), 'kill-server']).exited;
+    // `kill-server` returns once the server was told, not once it is gone. A query in between still
+    // connects and is answered "server exited unexpectedly", which the observer rightly treats as
+    // proving nothing, so the tick waits for the server process itself to have exited.
+    await until(async () => reaped(serverPid), 'the tmux server to exit');
 
     // Act
     const actual = await selfCheck(subject).selfCheck();
