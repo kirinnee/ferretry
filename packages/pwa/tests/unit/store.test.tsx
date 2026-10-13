@@ -19,6 +19,7 @@ import {
   useAppStore,
   useConnectionSnapshot,
   useDaemonClient,
+  DaemonClientProvider,
 } from '../../src/lib/store.tsx';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, mount, must } from '../support/dom.ts';
@@ -1171,6 +1172,18 @@ describe('useDaemonClient', () => {
     );
     expect(await answered).toBe(pooled);
     expect(await store.clients.client(alpha)).toBe(pooled);
+    await view.unmount();
+  });
+
+  it('hands a screen the client a DaemonClientProvider names, for a surface with no app store', async () => {
+    const named = client('named');
+    let answered: Promise<FyApiClient> | undefined;
+    const view = await mount(
+      <DaemonClientProvider client={async () => named}>
+        <ClientProbe onClient={value => (answered = value)} />
+      </DaemonClientProvider>,
+    );
+    expect(await answered).toBe(named);
     await view.unmount();
   });
 

@@ -178,6 +178,7 @@ import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hook
 import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
 import type { PickerAccount, PickerAccountHealth } from '../src/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/lib/account-picker-store.ts';
+import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
@@ -196,6 +197,7 @@ import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore 
 import { DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
+import { DaemonClientProvider } from '../src/lib/store.tsx';
 import {
   BrowserRecognitionError,
   type BrowserRecognitionProvider,
@@ -6565,6 +6567,12 @@ const PROJECTS_FRAGMENTS: Readonly<Record<string, HarnessProjectsFrame>> = {
   '#projects-already-registered': 'already-registered',
 };
 
+/** A typed client over the page's own (patched) network, which is where this harness answers. */
+const harnessDaemonClient = async (target: DaemonConnection) =>
+  await daemonApiClient(target, {
+    transport: new DaemonHttpTransport(target, async (input, init) => await globalThis.fetch(input, init)),
+  });
+
 const host = document.getElementById('root');
 if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
@@ -6572,24 +6580,28 @@ if (host) {
   const projectsFrame = PROJECTS_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   createRoot(host).render(
-    <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
-      {settingsHarness ? (
-        <StandaloneSettingsPageHarness />
-      ) : window.location.hash === '#session-workspace' ? (
-        <SessionWorkspaceHarness />
-      ) : window.location.hash === '#session-search' ? (
-        <SessionSearchHarness />
-      ) : window.location.hash === '#browser-full-viewport' ? (
-        <BrowserFullViewportHarness />
-      ) : pickerFrame !== undefined ? (
-        <PickerFrameHarness frame={pickerFrame} />
-      ) : projectsFrame !== undefined ? (
-        <ProjectsFrameHarness frame={projectsFrame} />
-      ) : screen === undefined ? (
-        <Shell />
-      ) : (
-        <OnboardingStageHarness screen={screen} />
-      )}
-    </SessionSearchProvider>,
+    // The harness answers its daemon inside the page, on the plain network, so every surface is handed
+    // a client over it; the app itself only ever has the store's session-routed pool.
+    <DaemonClientProvider client={harnessDaemonClient}>
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        {settingsHarness ? (
+          <StandaloneSettingsPageHarness />
+        ) : window.location.hash === '#session-workspace' ? (
+          <SessionWorkspaceHarness />
+        ) : window.location.hash === '#session-search' ? (
+          <SessionSearchHarness />
+        ) : window.location.hash === '#browser-full-viewport' ? (
+          <BrowserFullViewportHarness />
+        ) : pickerFrame !== undefined ? (
+          <PickerFrameHarness frame={pickerFrame} />
+        ) : projectsFrame !== undefined ? (
+          <ProjectsFrameHarness frame={projectsFrame} />
+        ) : screen === undefined ? (
+          <Shell />
+        ) : (
+          <OnboardingStageHarness screen={screen} />
+        )}
+      </SessionSearchProvider>
+    </DaemonClientProvider>,
   );
 }

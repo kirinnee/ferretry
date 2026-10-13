@@ -276,6 +276,23 @@ describe('MigrateSheet', () => {
     expect(calls).toBe(0);
   });
 
+  it('migrates through the routed client of the app store when no migration is handed in', async () => {
+    // Outside an app store there is no session to route through, so the routed client refuses — and the
+    // sheet reports it rather than reaching for the plain network.
+    const { migrateSession: _injected, ...routed } = props();
+    const updates: SessionView[] = [];
+    const view = renderSheet(
+      <MigrateSheet {...routed} onMigrated={(_connection, _scope, next) => updates.push(next)} />,
+    );
+    change(field(view.root, 0), 'codex-auto-atomi');
+    change(field(view.root, 1), 'gpt-5.6-terra');
+    review(view.root);
+    await press(view.root, 'Migrate and relaunch');
+
+    expect(text(view.root)).toContain('no daemon client exists outside the app store');
+    expect(updates).toEqual([]);
+  });
+
   it('requires a second explicit action before accepting a daemon-confirmed context downgrade', async () => {
     const calls: unknown[][] = [];
     const migrated = source();
