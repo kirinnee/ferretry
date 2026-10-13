@@ -72,7 +72,6 @@ export class CodexUsageProbe {
   async #read(resolution: CodexStoreResolution): Promise<FleetUsageProbeResult> {
     const bearer = codexBearer(await this.deps.stored.storedMaterial(resolution));
     if (bearer === undefined) return failure('no readable ChatGPT access token and account id for this credential');
-    let status: number;
     let body: unknown;
     try {
       const response = await this.deps.fetch({
@@ -81,8 +80,7 @@ export class CodexUsageProbe {
         headers: { Authorization: `Bearer ${bearer.token}`, 'ChatGPT-Account-Id': bearer.accountId },
         timeoutMs: this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       });
-      status = response.status;
-      if (!response.ok) return failure(`the Codex usage endpoint answered HTTP ${status}`);
+      if (!response.ok) return failure(`the Codex usage endpoint answered HTTP ${response.status}`);
       if (response.body.truncated) return failure('the Codex usage endpoint answered more than this read keeps');
       body = JSON.parse(new TextDecoder().decode(response.body.bytes)) as unknown;
     } catch (error) {

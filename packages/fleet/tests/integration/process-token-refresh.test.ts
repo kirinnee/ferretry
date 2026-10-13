@@ -10,15 +10,20 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
+import type { FleetBinaryLookup } from '../../src/adapters/process-login.ts';
 import type { FleetTokenRefreshProcess, FleetTokenRefreshSpawn } from '../../src/adapters/process-token-refresh.ts';
 import {
   FLEET_TOKEN_REFRESH_POLL_MS,
   FLEET_TOKEN_REFRESH_TIMEOUT_MS,
   ProcessFleetTokenRefreshPort,
+  scanRefreshStream,
   spawnFleetTokenRefreshProcess,
 } from '../../src/adapters/process-token-refresh.ts';
-import type { FleetBinaryLookup } from '../../src/adapters/process-login.ts';
-import type { FleetTokenRefreshSettled, FleetTokenRefreshTarget } from '../../src/lib/token-refresh.ts';
+import type {
+  CodexRefreshEvidence,
+  FleetTokenRefreshSettled,
+  FleetTokenRefreshTarget,
+} from '../../src/lib/token-refresh.ts';
 
 const HOME = '/fleet/homes/claude-kirin';
 
@@ -216,7 +221,7 @@ describe('ProcessFleetTokenRefreshPort', () => {
       .map(line => JSON.parse(line) as { method: string; params: Record<string, unknown> });
     should(requests.map(request => request.method)).deepEqual(['initialize', 'getAuthStatus']);
     should(requests[1]?.params).deepEqual({ includeToken: false, refreshToken: true });
-    should(actual).deepEqual({ outcome: 'ran' });
+    should(actual).deepEqual({ outcome: 'ran', evidence: { codes: [], unauthorized: false } });
   });
 
   it('should stop the app server as soon as the credential has settled, and not sleep for a guess', async () => {
@@ -264,7 +269,7 @@ describe('ProcessFleetTokenRefreshPort', () => {
     // Assert
     should(slept).deepEqual([25, 25, 25, 25]);
     should(child.killed).equal(1);
-    should(actual).deepEqual({ outcome: 'ran' });
+    should(actual).deepEqual({ outcome: 'ran', evidence: { codes: [], unauthorized: false } });
   });
 
   it('should wait on a real timer, and stop the server when the ceiling is reached', async () => {
@@ -283,7 +288,7 @@ describe('ProcessFleetTokenRefreshPort', () => {
 
     // Assert
     should(child.killed).be.aboveOrEqual(1);
-    should(actual).deepEqual({ outcome: 'ran' });
+    should(actual).deepEqual({ outcome: 'ran', evidence: { codes: [], unauthorized: false } });
   });
 
   it('should report a renewal it could not start as an error, never as something that ran', async () => {
@@ -346,5 +351,165 @@ describe('spawnFleetTokenRefreshProcess', () => {
 
     // Assert — a signalled child is not exit zero, and this port draws no conclusion from either.
     should(code).not.equal(0);
+  });
+});
+
+/** A child whose output named failure words, through the closed-set evidence seam only. */
+class EvidenceProcess extends FakeProcess {
+  constructor(private readonly found: CodexRefreshEvidence) {
+    super();
+  }
+
+  evidence(): CodexRefreshEvidence {
+    return this.found;
+  }
+}
+
+describe('ProcessFleetTokenRefreshPort reading why a Codex refresh failed', () => {
+  it('should stop waiting once the output named a failure word, and return that evidence', async () => {
+    // Arrange
+    const slept: number[] = [];
+    const calls: Recorded[] = [];
+    const found: CodexRefreshEvidence = { codes: ['refresh_token_expired'], unauthorized: false };
+    const child = new EvidenceProcess(found);
+    const subject = new ProcessFleetTokenRefreshPort({
+      spawn: (command, environment, options) => {
+        calls.push({ command, environment });
+        should(options).deepEqual({ scanOutput: true });
+        return child;
+      },
+      environment: {},
+      which: installed,
+      timeoutMs: 100,
+      pollMs: 25,
+      sleep: ms => {
+        slept.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    // Act
+    const actual = await subject.refresh(target({ kind: 'codex' }), never);
+
+    // Assert — a refresh that already said why it failed will never settle, so nobody sleeps on it.
+    should(slept).deepEqual([]);
+    should(actual).deepEqual({ outcome: 'ran', evidence: found });
+  });
+
+  it('should keep polling while the output named only a 401, which is not a word that ends the wait', async () => {
+    // Arrange
+    const slept: number[] = [];
+    const found: CodexRefreshEvidence = { codes: [], unauthorized: true };
+    const subject = new ProcessFleetTokenRefreshPort({
+      spawn: () => new EvidenceProcess(found),
+      environment: {},
+      which: installed,
+      timeoutMs: 50,
+      pollMs: 25,
+      sleep: ms => {
+        slept.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    // Act
+    const actual = await subject.refresh(target({ kind: 'codex' }), never);
+
+    // Assert
+    should(slept).deepEqual([25, 25]);
+    should(actual).deepEqual({ outcome: 'ran', evidence: found });
+  });
+
+  it('should not ask a Claude renewal to scan its output', async () => {
+    // Arrange
+    const seen: unknown[] = [];
+    const subject = new ProcessFleetTokenRefreshPort({
+      spawn: (_command, _environment, options) => {
+        seen.push(options);
+        return new FakeProcess(0);
+      },
+      environment: {},
+      which: installed,
+    });
+
+    // Act
+    const actual = await subject.refresh(target(), never);
+
+    // Assert
+    should(seen).deepEqual([undefined]);
+    should(actual).deepEqual({ outcome: 'ran' });
+  });
+});
+
+describe('scanRefreshStream', () => {
+  const streamOf = (...chunks: string[]): ReadableStream<Uint8Array> =>
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      },
+    });
+
+  it('should find a failure word split across two chunks', async () => {
+    // Arrange
+    const found: CodexRefreshEvidence[] = [];
+
+    // Act
+    await scanRefreshStream(streamOf('error: refresh_tok', 'en_reused by another client\n'), each => found.push(each));
+
+    // Assert
+    should(found.some(each => each.codes.includes('refresh_token_reused'))).be.true();
+  });
+
+  it('should end with what it found when the stream errors', async () => {
+    // Arrange
+    const found: CodexRefreshEvidence[] = [];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('invalid_grant'));
+        controller.error(new Error('child died'));
+      },
+    });
+
+    // Act
+    await scanRefreshStream(stream, each => found.push(each));
+
+    // Assert — the error is swallowed; evidence is a bonus and never a reason to fail.
+    should(found.length).be.aboveOrEqual(0);
+  });
+});
+
+describe('spawnFleetTokenRefreshProcess scanning output', () => {
+  it('should report the closed-set failure words a scanned child printed, and nothing else', async () => {
+    // Arrange
+    const shell = Bun.which('sh') ?? '/bin/sh';
+
+    // Act
+    const child = spawnFleetTokenRefreshProcess(
+      [shell, '-c', 'echo "token refresh failed: refresh_token_expired" >&2; echo "status 401 on refresh"; cat >/dev/null'],
+      { PATH: '/usr/bin:/bin' },
+      { scanOutput: true },
+    );
+    await child.close();
+    await child.exited;
+    await Bun.sleep(50);
+
+    // Assert
+    should(child.evidence?.()).deepEqual({ codes: ['refresh_token_expired'], unauthorized: true });
+  });
+
+  it('should discard an unscanned child output and report no evidence', async () => {
+    // Arrange
+    const shell = Bun.which('sh') ?? '/bin/sh';
+
+    // Act
+    const child = spawnFleetTokenRefreshProcess([shell, '-c', 'echo refresh_token_expired; cat >/dev/null'], {
+      PATH: '/usr/bin:/bin',
+    });
+    await child.close();
+    await child.exited;
+
+    // Assert
+    should(child.evidence?.()).deepEqual({ codes: [], unauthorized: false });
   });
 });

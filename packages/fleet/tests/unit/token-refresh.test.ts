@@ -26,7 +26,16 @@ import type {
   FleetTokenRefreshSettled,
   FleetTokenRefreshTarget,
 } from '../../src/lib/token-refresh.ts';
-import { FleetTokenRefreshService, planTokenRefresh } from '../../src/lib/token-refresh.ts';
+import {
+  CODEX_REFRESH_FAILURE_CODES,
+  classifyCodexRefreshFailure,
+  FleetTokenRefreshService,
+  mergeCodexRefreshEvidence,
+  NO_CODEX_REFRESH_EVIDENCE,
+  planTokenRefresh,
+  SingleFlight,
+  scanCodexRefreshEvidence,
+} from '../../src/lib/token-refresh.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
 const ID_TWO = '00000000-0000-4000-8000-000000000002';
@@ -497,5 +506,82 @@ describe('FleetTokenRefreshService', () => {
     should(port.attempts).equal(2);
     should(first).match({ status: 'failed', reason: 'spawn claude ENOENT' });
     should(second).match({ status: 'failed', reason: 'spawn claude ENOENT' });
+  });
+});
+
+describe('SingleFlight', () => {
+  it('should run one piece of work per key and hand every joiner its answer', async () => {
+    // Arrange
+    const flight = new SingleFlight<number>();
+    let runs = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const work = async (): Promise<number> => {
+      runs += 1;
+      await gate;
+      return runs;
+    };
+
+    // Act
+    const first = flight.run('a', work);
+    const second = flight.run('a', work);
+    const other = flight.run('b', async () => 99);
+    const busy = flight.busy('a');
+    release();
+
+    // Assert
+    should(await Promise.all([first, second, other])).deepEqual([1, 1, 99]);
+    should(busy).be.true();
+    should(flight.busy('a')).be.false();
+  });
+
+  it('should release the key when the work fails', async () => {
+    // Arrange
+    const flight = new SingleFlight<number>();
+
+    // Act
+    await should(flight.run('a', async () => Promise.reject(new Error('boom')))).be.rejectedWith('boom');
+
+    // Assert
+    should(flight.busy('a')).be.false();
+    should(await flight.run('a', async () => 2)).equal(2);
+  });
+});
+
+describe('Codex refresh evidence', () => {
+  it('should find only closed-set words and a refresh 401, never keep the text', () => {
+    // Act
+    const evidence = scanCodexRefreshEvidence(
+      'WARN failed to refresh token: Refresh_Token_Reused (token sk-fake-123)\nERROR refresh failed: 401 Unauthorized',
+    );
+
+    // Assert
+    should(evidence).deepEqual({ codes: ['refresh_token_reused'], unauthorized: true });
+    should(JSON.stringify(evidence)).not.match(/sk-fake/);
+    should(scanCodexRefreshEvidence('request 401 for models\nrefresh took 1401ms')).deepEqual(NO_CODEX_REFRESH_EVIDENCE);
+    should(scanCodexRefreshEvidence('refresh: 401')).deepEqual({ codes: [], unauthorized: true });
+  });
+
+  it('should merge two scans in the declared order', () => {
+    should(
+      mergeCodexRefreshEvidence(
+        { codes: ['invalid_grant'], unauthorized: false },
+        { codes: ['refresh_token_expired'], unauthorized: true },
+      ),
+    ).deepEqual({ codes: ['refresh_token_expired', 'invalid_grant'], unauthorized: true });
+    should(CODEX_REFRESH_FAILURE_CODES).have.length(4);
+  });
+
+  it('should condemn a login only on an unmistakable word', () => {
+    const of = (codes: (typeof CODEX_REFRESH_FAILURE_CODES)[number][], unauthorized = false) =>
+      classifyCodexRefreshFailure({ codes, unauthorized });
+    should(of(['refresh_token_expired', 'refresh_token_reused'])).equal('expired');
+    should(of(['refresh_token_reused'])).equal('revoked');
+    should(of(['refresh_token_invalidated'])).equal('revoked');
+    should(of(['invalid_grant'])).equal('rejected');
+    should(of([], true)).equal('rejected');
+    should(of([])).equal('transient');
   });
 });
