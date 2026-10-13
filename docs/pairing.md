@@ -283,8 +283,9 @@ Two different things are revocable and they are not the same act:
   whether the device is still paired, and an unanswerable question is a refusal.
 - **Idle expiry** — a device nobody has USED for **30 days** is removed the next time the daemon looks
   (at boot, at a session's proof, at a device-list read) and must pair again. Use means a request the
-  page marks `presence` — visible and touched within five minutes, or just opened. A proof or a silent
-  renewal is not use, so a tab left open on a forgotten laptop cannot keep the device paired.
+  page marks `presence` — visible and touched within five minutes, by real input. A page that only
+  loaded is not use, and neither is a proof or a silent renewal, so a tab left open on a forgotten
+  laptop cannot keep the device paired.
   `lastSeenAt` reaches disk at most once an hour, so a busy phone is not a write per request;
   `idleExpiresAt` on each row says when the grant ends.
 
@@ -331,9 +332,12 @@ row states what its revoke will do before the press.
   and says so once. Each such device must pair again.
 - **A step-up bounds who acts, not what the act does.** A governed device holding a step-up may mint a code,
   open a terminal or apply a fleet change for the length of the window; the step-up says the person holding
-  the device agreed recently, nothing about the act itself ([grants.md](grants.md)). A newly paired device
-  with no passkey for the machine sees one dismissible line pointing at Settings → Security → Add a
-  passkey, because its first passkey can be added only in the ten minutes after pairing (B2).
+  the device agreed recently, nothing about the act itself ([grants.md](grants.md)).
+- **A device's first passkey has a ten-minute window.** It can be added only in the ten minutes after
+  pairing (B2), so a newly paired device with no passkey for the machine sees one dismissible line
+  pointing at Settings → Security → Add a passkey. A device that misses the window cannot step up
+  until it pairs again; until then it keeps only the uses
+  that need no step-up ([design/zero-trust.md](design/zero-trust.md) B2).
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first

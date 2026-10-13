@@ -177,11 +177,14 @@ WebSocket upgrade on its own listener. **One socket is one session**: on upgrade
 that is the only control frame on the socket — the daemon never sends `challenge`, accepts no
 `claim`, and refuses with `4400` a client that sends any control frame at all. The session's end is
 the socket's close, with the code the session ended with. A wrong `daemonId` is `404`. An upgrade is
-ADMITTED before any public-key work is done for it, and each bound answers `429`: at most 30
-upgrades a minute from one peer address, at most 8 sockets that have not yet proved a device, and at
-most 64 direct sessions in all. The slot is reserved at admission rather than at attach, so
-concurrent upgrades cannot all pass the check before one is counted, and a reservation whose socket
-never attaches is released after ten seconds. Where the session ARRIVED —
+ADMITTED before any public-key work is done for it. At most 30 admitted upgrades a minute from one
+peer address (a refused upgrade spends none of them) and at most 2 unproven sockets per remote
+address — the host's own loopback address is exempt, because every tab on it shares one — each answer
+`429`. At most 16 sockets may be unproven and 64 open in all; when either is full the OLDEST unproven
+socket is closed `4429` to make room, rather than the newcomer refused, so squatting needs to out-race
+honest arrivals rather than merely arrive first. With all 64 proven, the next upgrade is `429`. The
+slot is reserved at admission rather than at attach, so concurrent upgrades cannot all pass the check
+before one is counted, and a reservation whose socket never attaches is released after ten seconds. Where the session ARRIVED —
 loopback, the privileged bind, the peer address — is the listener's classification of the upgrade,
 exactly as for an HTTP request on the same listener, and nothing inside the session can move it.
 
@@ -1344,7 +1347,8 @@ Afterwards, any number of requests:
 `query`, `headers`, `body` and `presence` are optional; `id`, `method` and `path` are not.
 
 - **`presence`** is `true` when a person is at the device: the page is visible and was touched,
-  clicked or typed in within the last five minutes, or was opened within the last minute. It is the
+  clicked or typed in within the last five minutes, by trusted input the browser raised. A page that only
+  loaded (a restored tab, a launch at login, a reload) is not a person. It is the
   ONLY thing that advances the device's `lastSeenAt`, and therefore its 30-day idle clock — an auth,
   a renewal or an unmarked request never does, so a tab left open renews its session without keeping
   the device paired forever. It is the device's own word: it answers a forgotten device, not a
