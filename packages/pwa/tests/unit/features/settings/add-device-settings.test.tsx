@@ -331,17 +331,18 @@ describe('AddDeviceCard', () => {
     expect(rendered).toContain('Adding a device is how that changes');
   });
 
-  it('says whether this browser is at the machine, from the daemon’s answer rather than the URL', () => {
-    // A page on 127.0.0.1 can be reaching the daemon through the relay, so the address this browser
-    // dialled says nothing. `hostLocal` is the carrier's answer and the only one worth rendering.
+  it('never says a browser is at the machine, whatever the daemon reports about the request', () => {
+    // A browser is a paired device wherever it runs; only the CLI is at the machine. So no badge
+    // claims either, and the view's `hostLocal` does not move any sentence.
     // Arrange, Act
-    const here = card();
-    const away = card({ view: view({ hostLocal: false }) });
+    const here = text(card());
+    const away = text(card({ view: view({ hostLocal: false }) }));
 
     // Assert
-    should(marked(here, 'data-pair-host-local', 'yes')).have.length(1);
-    should(marked(away, 'data-pair-host-local', 'no')).have.length(1);
-    expect(text(away)).toContain('away from this machine');
+    for (const rendered of [here, away]) {
+      expect(rendered).not.toContain('at this machine');
+      expect(rendered).not.toContain('away from this machine');
+    }
   });
 
   it('renders a daemon’s failure sentence whole', () => {
@@ -530,7 +531,7 @@ describe('AddDeviceSurface', () => {
     should(marked(surface, 'data-pair-refusal')).have.length(1);
     should(marked(surface, 'data-pair-mint')).be.empty();
     expect(text(surface)).toContain('has not granted the UI the use of device pairing');
-    expect(text(surface)).toContain('Pairing from the machine itself is never restricted');
+    expect(text(surface)).not.toContain('never restricted');
   });
 
   it('reports a failed mint without pretending a code exists', async () => {

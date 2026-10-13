@@ -116,15 +116,15 @@ describe('the paired device list', () => {
 
 describe('pairing refusals', () => {
   it('keeps the daemon’s own sentence and adds the way out it cannot know', () => {
-    // The daemon's message already names the command that changes the answer. What it cannot know is
-    // that the machine itself is never governed, which is the fastest route out of the refusal.
+    // The daemon's message already names the command that changes the answer, so nothing is added to it:
+    // a browser on the machine is governed like any other and gets no promise that it is exempt.
     // Arrange, Act
     const explained = pairingRefusal('the operator of this machine has not granted the UI the use of device pairing.');
     const silent = pairingRefusal('   ');
 
     // Assert
-    should(explained).startWith('the operator of this machine has not granted');
-    should(explained).containEql('Pairing from the machine itself is never restricted');
+    should(explained).equal('the operator of this machine has not granted the UI the use of device pairing.');
+    should(explained).not.containEql('never restricted');
     should(silent).startWith('This daemon did not say why.');
   });
 

@@ -2336,7 +2336,7 @@ try {
             await captureElement(page, page.locator(selector), target);
             process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
           }
-          // The operator's limits, in the five states a paired browser actually meets. Every one of
+          // The operator's limits, in the four states a paired browser actually meets. Every one of
           // them is a frame where a control is refused, so every one has to show the reason beside it
           // — that is the thing being reviewed, not the switches.
           //
@@ -2350,14 +2350,12 @@ try {
           for (const [name, selector] of [
             [`grants-step-up-needed`, `[data-harness="grants-step-up-needed"]`],
             [`grants-step-up-held`, `[data-harness="grants-step-up-held"]`],
-            [`grants-local`, `[data-harness="grants-local"]`],
             [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
             [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
-            // The capability list in all three postures. The remote one is the frame that matters: the
-            // harness daemon's address is loopback, so a capture reading "Direct" there would be the
-            // URL-derived inversion, visible in a PNG.
-            [`capability-list-local`, `[data-harness="capability-list-local"]`],
-            [`capability-list-remote`, `[data-harness="capability-list-remote"]`],
+            // The capability list in both postures that exist. The governed one is the frame that matters:
+            // the harness daemon's address is loopback, so a capture claiming the limits do not apply
+            // there would be the old direct-local reading, visible in a PNG.
+            [`capability-list-governed`, `[data-harness="capability-list-governed"]`],
             [`capability-list-unknown`, `[data-harness="capability-list-unknown"]`],
           ] as const) {
             const frame = page.locator(selector);

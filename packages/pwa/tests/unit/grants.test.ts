@@ -28,13 +28,11 @@ import {
   grantRefusalNotice,
   grantScopeKey,
   grantScopeNote,
-  LOCAL_TWO_WAY_NOTE,
   mayGrantCapability,
   openReason,
   openReasonLabel,
   originNote,
   postureCopy,
-  postureFromCapabilities,
   REMOTE_ONE_WAY_NOTE,
   remoteRevokeWarning,
   STEP_UP_NOTE,
@@ -173,9 +171,10 @@ describe('grant vocabulary', () => {
     expect(grantOnlyAtMachine('fleet', 'fyd')).toContain('fyd daemon config set fleet --use');
   });
 
-  it('describes the one-way and two-way doors', () => {
+  it('describes the one-way door, and says a browser on the machine does not get past it', () => {
     expect(REMOTE_ONE_WAY_NOTE).toContain('never back on');
-    expect(LOCAL_TWO_WAY_NOTE).toContain('both ways');
+    expect(REMOTE_ONE_WAY_NOTE).toContain('even on the machine itself');
+    expect(REMOTE_ONE_WAY_NOTE).toContain('fy daemon config set');
     expect(mayGrantCapability(entry({ mayGrant: true }))).toBe(true);
     expect(mayGrantCapability(entry({ mayGrant: false }))).toBe(false);
   });
@@ -207,7 +206,7 @@ describe('grantChangeable', () => {
     expect(grantChangeable(view({ governed: true }), noUse)).toBe(false);
   });
 
-  it('lets a caller on the host change anything, because it is not governed', () => {
+  it('lets an ungoverned caller (the CLI, never a browser) change anything', () => {
     const local = view({ governed: false, hostLocal: true });
     expect(grantChangeable(local, noConfigure)).toBe(true);
     expect(grantChangeable(local, noUse)).toBe(true);
@@ -285,39 +284,35 @@ describe('grantRefusalNotice', () => {
 });
 
 describe('the posture', () => {
-  it('reads governed callers as remote and ungoverned ones as at the machine', () => {
-    expect(connectionPosture(false)).toBe('direct-local');
-    expect(connectionPosture(true)).toBe('governed-remote');
+  it('reads a governed connection as governed, and has no direct-local reading at all', () => {
+    expect(connectionPosture(true)).toBe('governed');
+    expect(postureCopy('governed').headline).toContain('even when it runs on the machine itself');
   });
 
   it('keeps “cannot tell” for a daemon that said nothing, rather than assuming the flattering answer', () => {
     expect(connectionPosture(undefined)).toBe('unknown');
   });
 
-  it('falls back to the capabilities only when they agree, and never to the friendly side', () => {
-    expect(postureFromCapabilities([])).toBe('unknown');
-    expect(postureFromCapabilities([entry({ mayGrant: true }), entry({ mayGrant: true })])).toBe('direct-local');
-    expect(postureFromCapabilities([entry({ mayGrant: false })])).toBe('governed-remote');
-    expect(postureFromCapabilities([entry({ mayGrant: true }), entry({ mayGrant: false })])).toBe('unknown');
+  it('never tells a browser that the limits do not apply, even when the daemon says it is not governed', () => {
+    // No browser is ever ungoverned (only the CLI is), so "not governed" is not something to flatter.
+    expect(connectionPosture(false)).toBe('unknown');
   });
 
   it('has copy for every posture, and none of it mentions a password or an unlock', () => {
-    for (const posture of ['direct-local', 'governed-remote', 'unknown'] as const) {
+    for (const posture of ['governed', 'unknown'] as const) {
       const copy = postureCopy(posture);
       expect(copy.badge.length).toBeGreaterThan(0);
-      expect(`${copy.headline} ${copy.detail}`).not.toMatch(/password|unlock/iu);
+      expect(`${copy.headline} ${copy.detail}`).not.toMatch(/password|unlock|standing at the machine/iu);
     }
-    expect(postureCopy('governed-remote').detail).toContain('passkey');
+    expect(postureCopy('governed').detail).toContain('passkey');
   });
 
-  it('says something different to each connection about who the limits apply to', () => {
-    expect(grantScopeKey('governed-remote')).toBe('this-browser');
-    expect(grantScopeNote('governed-remote')).toContain('reached the machine from somewhere else');
-    expect(grantScopeKey('direct-local')).toBe('not-on-this-machine');
-    expect(grantScopeNote('direct-local')).toContain('none of them apply to it');
+  it('says who the limits apply to, and that a browser on the machine is not exempt', () => {
+    expect(grantScopeKey('governed')).toBe('this-browser');
+    expect(grantScopeNote('governed')).toContain('on the machine itself included');
     expect(grantScopeKey('unknown')).toBe('cannot-tell');
     expect(grantScopeNote('unknown')).toContain('safe reading');
-    for (const posture of ['direct-local', 'governed-remote', 'unknown'] as const)
+    for (const posture of ['governed', 'unknown'] as const)
       expect(grantScopeNote(posture)).not.toMatch(/password|unlock/iu);
   });
 });
@@ -325,18 +320,16 @@ describe('the posture', () => {
 describe('why an axis is open', () => {
   it('puts a pending step-up ahead of every other reading, because it is the next step', () => {
     const waiting = entry({ use: false, useRefusal: 'step-up-required' });
-    for (const posture of ['direct-local', 'governed-remote', 'unknown'] as const)
-      expect(openReason(waiting, 'use', posture)).toBe('step-up');
+    for (const posture of ['governed', 'unknown'] as const) expect(openReason(waiting, 'use', posture)).toBe('step-up');
     expect(openReasonLabel('step-up')).toBe('Open — after your passkey');
   });
 
-  it('reads closed, ungoverned, unknown and granted off the axis and the posture', () => {
+  it('reads closed, unknown and granted off the axis and the posture', () => {
     const shut = entry({ configure: false, configureRefusal: 'not-granted' });
-    expect(openReason(shut, 'configure', 'governed-remote')).toBe('closed');
-    expect(openReason(entry(), 'use', 'direct-local')).toBe('ungoverned');
+    expect(openReason(shut, 'configure', 'governed')).toBe('closed');
     expect(openReason(entry(), 'use', 'unknown')).toBe('unknown');
-    expect(openReason(entry(), 'use', 'governed-remote')).toBe('granted');
-    for (const reason of ['ungoverned', 'granted', 'closed', 'unknown'] as const)
+    expect(openReason(entry(), 'use', 'governed')).toBe('granted');
+    for (const reason of ['granted', 'closed', 'unknown'] as const)
       expect(openReasonLabel(reason).length).toBeGreaterThan(0);
   });
 });

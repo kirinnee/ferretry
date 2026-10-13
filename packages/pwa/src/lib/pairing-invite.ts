@@ -145,8 +145,7 @@ export function revokeConsequence(device: PairedDevice, view: PairedDevicesView)
  *
  * THE DAEMON'S OWN REASON IS PREFERRED, WHOLE. It already names the command a person runs, composed by
  * the layer that knows what this product's client is called, and replacing it with wording invented here
- * would either repeat it or contradict it. This adds only what the daemon cannot know: that the machine
- * itself is never governed by any of this, which is the fastest way out of the refusal.
+ * would either repeat it or contradict it, so nothing is added to it.
  *
  * The fallback is used when a request failed for a reason that is not a refusal at all — a daemon that
  * could not be reached. It says so rather than implying a permission problem, because sending somebody
@@ -155,7 +154,7 @@ export function revokeConsequence(device: PairedDevice, view: PairedDevicesView)
 export function pairingRefusal(reason: string): string {
   const trimmed = reason.trim();
   const detail = trimmed === '' ? 'This daemon did not say why.' : trimmed;
-  return `${detail} Pairing from the machine itself is never restricted, so a browser on that machine can always add a device.`;
+  return detail;
 }
 
 /**

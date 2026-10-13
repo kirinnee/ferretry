@@ -74,94 +74,57 @@ const filledPips = (mark: ReturnType<typeof rowWeightMark>): number =>
     ?.findAll(node => typeof node.type === 'string' && String(node.props.className ?? '').includes('h-2 w-2'))
     .filter(node => !String(node.props.className).includes('bg-transparent')).length ?? 0;
 
-describe('the direct-local mark', () => {
+describe('there is no direct-local mark', () => {
   /**
    * THE TEST THE WHOLE SURFACE EXISTS TO PASS.
    *
-   * A browser on `127.0.0.1` reaching the daemon through the relay is a REMOTE caller. A screen that
-   * decided this from its own address bar would tell that person they were standing at the machine —
-   * the exact inversion the grant layer was built to prevent, re-introduced in the UI layer where
-   * nobody would think to look for it.
+   * A browser on `127.0.0.1` is a paired device like any other: only the CLI holding the admin token is
+   * the owner at the machine. A screen that told a local browser its limits do not apply would invite it
+   * to expect a widening it can never get, so even a daemon that reports "not governed" to this browser
+   * must not be read as "you are at the machine".
    */
-  it('does not claim direct local for a 127.0.0.1 page the daemon reported as governed', () => {
+  it('reads a 127.0.0.1 page the daemon reported as governed as governed, never as at the machine', () => {
     const renderer = render(
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
     );
 
-    expect(attr(renderer, 'data-capability-posture')).toBe('governed-remote');
-    expect(attr(renderer, 'data-capability-posture-badge')).toBe('governed-remote');
-    // The words a person reads must agree with the marker.
+    expect(attr(renderer, 'data-capability-posture')).toBe('governed');
+    expect(attr(renderer, 'data-capability-posture-badge')).toBe('governed');
     const rendered = text(renderer);
-    expect(rendered).toContain('reached the machine from somewhere else');
-    expect(rendered).not.toContain('standing at the machine, not because it was granted');
-    // And not one row may claim the ungoverned reason.
+    expect(rendered).toContain('even when it runs on the machine itself');
+    expect(rendered).not.toContain('standing at the machine');
     for (const mark of marked(renderer, 'data-capability-reason'))
-      expect(mark.props['data-capability-reason']).not.toBe('ungoverned');
+      expect(mark.props['data-capability-reason']).toBe('granted');
   });
 
-  it('says direct local only when the daemon itself reported an ungoverned caller', () => {
+  it('does not flatter a browser the daemon reported as not governed', () => {
     const renderer = render(
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed={false} />,
     );
-    expect(attr(renderer, 'data-capability-posture')).toBe('direct-local');
-    expect(text(renderer)).toContain('standing at the machine');
-    // Every open row is open for the ungoverned reason, which is the fact the owner asked to surface.
+    expect(attr(renderer, 'data-capability-posture')).toBe('unknown');
+    expect(text(renderer)).not.toContain('standing at the machine');
     for (const mark of marked(renderer, 'data-capability-reason'))
-      expect(mark.props['data-capability-reason']).toBe('ungoverned');
+      expect(mark.props['data-capability-reason']).toBe('unknown');
   });
 
-  /**
-   * Absence is not evidence of loopback. The flattering assumption is the dangerous one here: it would
-   * paint a remote phone as standing at the machine on any daemon too old to report the fact.
-   */
-  it('refuses to guess when the daemon did not say, and does not read the friendly answer', () => {
-    // Nothing to read the posture FROM: no explicit prop, and no capabilities carrying `mayGrant`.
-    // The friendly reading would be "local"; the safe one is "cannot tell", and this pins the safe one.
+  /** Absence is not evidence of anything: the safe reading is that the limits apply. */
+  it('refuses to guess when the daemon did not say', () => {
     const renderer = render(<CapabilityList connection={localLookingConnection()} capabilities={[]} />);
     expect(attr(renderer, 'data-capability-posture')).toBe('unknown');
     const rendered = text(renderer);
     expect(rendered).toContain('did not say how it saw this connection');
-    // It explicitly tells the reader the address bar is not the answer.
-    expect(rendered).toContain('does not answer this');
-    for (const mark of marked(renderer, 'data-capability-reason'))
-      expect(mark.props['data-capability-reason']).not.toBe('ungoverned');
+    expect(rendered).toContain('applying to this browser');
   });
 
-  /**
-   * The posture is read from `mayGrant`, which the daemon computes as `!governed`. So the fact arrives
-   * once, per capability, and the list reads it back rather than asking for a duplicate field that
-   * could disagree with it.
-   */
-  it('reads the posture off the capabilities when no explicit answer is supplied', () => {
-    const remote = render(
-      <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities({ mayGrant: false })} />,
-    );
-    expect(attr(remote, 'data-capability-posture')).toBe('governed-remote');
-
+  it('does not read the posture off the capabilities: only the daemon’s own answer counts', () => {
     const local = render(
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities({ mayGrant: true })} />,
     );
-    expect(attr(local, 'data-capability-posture')).toBe('direct-local');
-  });
-
-  it('will not name a posture when the capabilities disagree about it', () => {
-    // Every capability on one connection derives from one request's carrier, so a split answer is
-    // damaged evidence rather than a posture — and damaged evidence must not pick the friendly side.
-    const renderer = render(
-      <CapabilityList
-        connection={localLookingConnection()}
-        capabilities={[
-          entry({ capability: 'fleet', mayGrant: true }),
-          entry({ capability: 'warden', mayGrant: false }),
-        ]}
-      />,
-    );
-    expect(attr(renderer, 'data-capability-posture')).toBe('unknown');
+    expect(attr(local, 'data-capability-posture')).toBe('unknown');
   });
 
   it('derives the posture from the daemon boolean alone, with no page input at all', () => {
-    expect(connectionPosture(false)).toBe('direct-local');
-    expect(connectionPosture(true)).toBe('governed-remote');
+    expect(connectionPosture(true)).toBe('governed');
     expect(connectionPosture(undefined)).toBe('unknown');
   });
 
@@ -235,17 +198,15 @@ describe('why each capability is open', () => {
     expect(rendered).not.toMatch(/password|unlock/iu);
   });
 
-  it('shows the one-way notice to a governed caller and the two-way notice to one at the machine', () => {
-    const remote = render(
-      <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
-    );
-    expect(attr(remote, 'data-capability-direction')).toBe('governed-remote');
-    expect(text(remote)).toContain('never back on');
-    const local = render(
-      <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed={false} />,
-    );
-    expect(attr(local, 'data-capability-direction')).toBe('direct-local');
-    expect(text(local)).toContain('both ways');
+  it('always shows the one-way notice, and never a two-way one, even for a 127.0.0.1 page', () => {
+    for (const governed of [true, false, undefined]) {
+      const renderer = render(
+        <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed={governed} />,
+      );
+      expect(text(renderer)).toContain('never back on');
+      expect(text(renderer)).toContain('even on the machine itself');
+      expect(text(renderer)).not.toContain('both ways');
+    }
   });
 
   it('says a switched-off capability a remote caller may not widen can only be turned on at the machine', () => {
@@ -271,13 +232,10 @@ describe('why each capability is open', () => {
 
   it('computes the reason from the axis and the posture, never from one alone', () => {
     const open = entry();
-    expect(openReason(open, 'use', 'direct-local')).toBe('ungoverned');
-    expect(openReason(open, 'use', 'governed-remote')).toBe('granted');
+    expect(openReason(open, 'use', 'governed')).toBe('granted');
     expect(openReason(open, 'use', 'unknown')).toBe('unknown');
-    // A closed axis reads closed on every posture: being at the machine does not reopen it.
     const shut = entry({ use: false, useRefusal: 'not-granted' });
-    for (const posture of ['direct-local', 'governed-remote', 'unknown'] as const)
-      expect(openReason(shut, 'use', posture)).toBe('closed');
+    for (const posture of ['governed', 'unknown'] as const) expect(openReason(shut, 'use', posture)).toBe('closed');
   });
 });
 

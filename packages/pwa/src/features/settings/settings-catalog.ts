@@ -317,7 +317,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'grants',
     label: 'What devices may do',
     description:
-      'Per-capability limits for callers that are not on the machine, why a control is refused, and the passkey confirmation a paired device gives before it changes one. Daemon-wide — opens this daemon’s settings.',
+      'Per-capability limits for paired devices, a browser on the machine included, why a control is refused, and the passkey confirmation a paired device gives before it changes one. Daemon-wide — opens this daemon’s settings.',
     href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
     keywords: [
       'grant',

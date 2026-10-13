@@ -20,14 +20,14 @@
  * Handing another device access is a dangerous act, so a governed browser confirms it with its passkey.
  * The carrier asks for that by itself when the daemon refuses and sends the mint again, so this panel
  * has nothing to pre-check: it offers the button, and whatever the machine answers is rendered whole.
- * A person at the machine itself is asked for nothing.
+ * A browser on the machine itself is asked like any other: only the CLI is the owner at the machine.
  *
  * ## A REFUSAL IS EXPLAINED, NEVER GREYED
  *
- * A caller who is not on the host and whose operator has switched `pairing` off cannot read this panel at
- * all — the routes are governed. That refusal is rendered as the daemon's own sentence, which names the
- * command that changes it, plus the one thing the daemon cannot know: pairing from the machine itself is
- * never restricted. A greyed button with no explanation is the dead end this product keeps removing.
+ * A browser whose operator has switched `pairing` off cannot read this panel at all — the routes are
+ * governed, a browser on the machine itself included. That refusal is rendered as the daemon's own
+ * sentence, which names the command that changes it. A greyed button with no explanation is the dead end
+ * this product keeps removing.
  */
 
 import {
@@ -342,12 +342,6 @@ export function AddDeviceCard({
             <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
             Devices on this machine
           </h3>
-          <span
-            className="rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta text-faint"
-            data-pair-host-local={view.hostLocal ? 'yes' : 'no'}
-          >
-            {view.hostLocal ? 'you are at this machine' : 'you are away from this machine'}
-          </span>
         </div>
         <p className="m-0 text-cell leading-base text-muted">
           A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
@@ -443,8 +437,8 @@ export function AddDeviceCard({
         </p>
         {devices.length === 0 ? (
           <p className="m-0 text-meta leading-base text-muted">
-            Nothing but this machine itself can reach this daemon yet. Adding a device is how that changes, and every
-            device you add appears here with its own revoke.
+            No paired device can reach this daemon yet. Adding a device is how that changes, and every device you add
+            appears here with its own revoke.
           </p>
         ) : (
           <ul className="m-0 list-none p-0">

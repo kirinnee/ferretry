@@ -1167,11 +1167,10 @@ const SECRETS_DAMAGED: SecretList = {
 };
 
 /**
- * The grant fixtures, as a PAIRED REMOTE browser sees them.
- *
- * A loopback caller reads five allowed rows and has nothing to review, so the interesting states are
- * all on this side of the boundary: a capability the operator switched off, a configure axis waiting on
- * a passkey confirmation, and the same machine after that confirmation.
+ * The grant fixtures, as a PAIRED browser sees them — a browser on the machine itself included, because
+ * only the CLI is the owner at the machine. A browser is always governed, so every state worth reviewing
+ * is on this side of the boundary: a capability the operator switched off, a configure axis waiting on a
+ * passkey confirmation, and the same machine after that confirmation.
  */
 const grantEntry = (
   capability: DaemonCapability,
@@ -1179,15 +1178,12 @@ const grantEntry = (
   useRefusal: GrantRefusal,
   configureRefusal: GrantRefusal,
   origin: 'default' | 'config file' = 'default',
-  /** Whether this fixture's caller may turn the capability ON. False models a remote browser, which
-   *  is the interesting case: widening is a local act and no passkey buys it. */
-  mayGrant = false,
 ): CapabilityGrantView => ({
   capability,
   use: useRefusal === 'granted',
   configure: configureRefusal === 'granted',
   granted,
-  mayGrant,
+  mayGrant: false,
   useRefusal,
   configureRefusal,
   origin,
@@ -1223,16 +1219,6 @@ const HARNESS_GRANTS_STEPPED_UP: GrantsView = {
   governed: true,
   hostLocal: false,
   steppedUp: true,
-};
-
-/** A browser ON the machine: ungoverned, every axis open, and the only caller that may widen. */
-const HARNESS_GRANTS_LOCAL: GrantsView = {
-  capabilities: DAEMON_CAPABILITIES.map(capability =>
-    grantEntry(capability, on, 'granted', 'granted', 'default', true),
-  ),
-  governed: false,
-  hostLocal: true,
-  steppedUp: false,
 };
 
 /** A daemon that cannot read its own grant document: denied, loudly, and not shown as permissive. */
@@ -1287,7 +1273,7 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
       idleExpiresAt: '2026-12-31T00:00:00.000Z',
     },
   ],
-  hostLocal: true,
+  hostLocal: false,
   thisDeviceId: `fy_device_id_${'Dd'.repeat(11)}`,
 };
 
@@ -5723,15 +5709,6 @@ function Shell() {
       ),
     },
     {
-      // A browser on the machine: ungoverned, every axis open, no passkey panel because nothing asks.
-      label: 'Capability limits — on the machine',
-      render: () => (
-        <div data-harness="grants-local">
-          <GrantsCard connection={daemon} view={HARNESS_GRANTS_LOCAL} onChange={() => {}} />
-        </div>
-      ),
-    },
-    {
       // A daemon that cannot read its own grant document. Denied loudly, and NOT rendered as
       // permissive: damaged state is not empty state, and unknown is never permitted.
       label: 'Capability limits — daemon cannot say',
@@ -5756,18 +5733,6 @@ function Shell() {
       ),
     },
     {
-      // The capability list on a laptop talking straight to the machine: everything open, and open for
-      // a REASON a person can act on — "you have this because you are standing here", not "granted".
-      // The harness daemon's address is loopback in all three of these frames on purpose: the mark must
-      // come from the daemon's account of the carrier, so the address must be unable to move it.
-      label: 'Capability list — direct local',
-      render: () => (
-        <div data-harness="capability-list-local">
-          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_LOCAL.capabilities} governed={false} />
-        </div>
-      ),
-    },
-    {
       // The panel before anybody presses anything: who may reach this machine, each with its own revoke
       // and the sentence saying what that revoke will do. The device this browser IS carries its mark.
       label: 'Add a device — devices on this machine',
@@ -5787,12 +5752,12 @@ function Shell() {
       ),
     },
     {
-      // THE FRAME THAT MATTERS. Same loopback-looking address, and the daemon said the connection is
-      // governed — so this must read "Remote — governed". A screenshot showing "Direct" here would be
-      // the inversion #289 exists to prevent, visible.
-      label: 'Capability list — governed remote',
+      // THE FRAME THAT MATTERS. The harness daemon's address is loopback, and a browser on the machine
+      // is governed like any paired device — so this must read "Governed", never a claim that the limits
+      // do not apply. There is no direct-local frame: that posture does not exist.
+      label: 'Capability list — governed',
       render: () => (
-        <div data-harness="capability-list-remote">
+        <div data-harness="capability-list-governed">
           <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_STEP_UP.capabilities} governed />
         </div>
       ),
@@ -5821,12 +5786,9 @@ function Shell() {
        * No answer from the daemon. It says so rather than assuming the friendly reading: absence of
        * evidence is not evidence of loopback.
        *
-       * THE FIXTURE HAS TO CARRY NO CAPABILITIES TO REACH THIS. The posture is derived from `mayGrant`,
-       * so a list of capabilities always determines one — passing the step-up fixture here rendered
-       * "Remote — governed" under a frame labelled "cannot tell", which is a screenshot that quietly
-       * documents the wrong thing. An empty list is the honest way to model a daemon that said nothing,
-       * and it is also the real case: `unknown` is what a caller sees when the read produced no
-       * capabilities to infer from.
+       * THE FRAME PASSES NO `governed`, because that is how a daemon that said nothing looks: the posture
+       * is the daemon's own answer and is never inferred from the capabilities, so the empty list is
+       * only there to keep the frame short.
        */
       label: 'Capability list — cannot tell',
       render: () => (
@@ -5863,7 +5825,7 @@ function Shell() {
         <div data-harness="pair-empty">
           <AddDeviceCard
             connection={daemon}
-            view={{ devices: [], hostLocal: true }}
+            view={{ devices: [], hostLocal: false }}
             invite={null}
             nowMs={HARNESS_PAIR_NOW_MS}
             onMint={() => {}}
