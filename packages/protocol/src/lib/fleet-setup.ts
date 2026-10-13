@@ -7,7 +7,7 @@
  *   NAME, missing commands, the runtime names it would suggest, and what Import again would offer to
  *   update. Never a value.
  * - `POST /v1/fleet/machine/tools/install` — install named harness tools with the exact command the
- *   scan showed. From off the machine it needs the operator password, used once and not stored.
+ *   scan showed. From off the machine it needs the passkey step-up.
  * - `GET /v1/fleet/export` — the Clone bundle: components, model sets, profiles and runtimes, and each
  *   login the runtimes use as a DESCRIPTOR (harness, label, email). No credential and no history.
  *
@@ -19,7 +19,6 @@
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import { FleetCatalogActSchema, FleetCatalogFormatSchema } from './fleet-catalog.ts';
-import { OperatorPasswordSchema } from './grants.ts';
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
@@ -54,8 +53,6 @@ export type FleetSetupTool = z.infer<typeof FleetSetupToolSchema>;
 
 export const FleetToolInstallRequestSchema = z.strictObject({
   harnesses: z.array(HarnessKindSchema).min(1).max(2),
-  /** From off the machine only: proved for this one request, never stored. */
-  operatorPassword: OperatorPasswordSchema.optional(),
 });
 export type FleetToolInstallRequest = z.infer<typeof FleetToolInstallRequestSchema>;
 

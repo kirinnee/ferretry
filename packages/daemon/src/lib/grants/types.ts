@@ -18,29 +18,6 @@ import type { CapabilityGrants, DaemonCapability } from '@ferretry/protocol';
  */
 export type EnforcedGrants = CapabilityGrants | undefined;
 
-/**
- * How the operator's password is checked, without this layer ever holding one.
- *
- * USE, NEVER READ — the same shape the secret store is built on. There is no getter, and adding one
- * would delete the property that makes the rest of this safe: nothing above this port can return,
- * log or render a password, because nothing above it is ever given one to return.
- */
-export interface OperatorPasswordPort {
-  /** Whether a verifier exists at all. Never how long it is, never any part of it. */
-  isSet(): Promise<boolean>;
-  /**
-   * Replaces the verifier. The plaintext is consumed here and never retained.
-   *
-   * THERE IS NO REMOVAL, and the missing method is the contract rather than an oversight. Removing a
-   * verifier revokes no paired device, so it would leave a machine with devices paired and nothing
-   * gating them — the state `PairingService.mint` exists to make unreachable. A port with no way to
-   * express it is how that stays true no matter what a caller above decides.
-   */
-  set(password: string): Promise<void>;
-  /** Whether this candidate matches the stored verifier. `false` when none is stored. */
-  verify(password: string): Promise<boolean>;
-}
-
 /** Where the operator's decision is recorded, so a change outlives the daemon that made it. */
 export interface GrantDocumentPort {
   read(): Promise<CapabilityGrants>;
@@ -92,23 +69,8 @@ export interface GrantAuditReading {
   readonly truncated: boolean;
 }
 
-/** Opaque unlock identifiers, minted with real entropy by an adapter. */
-export interface UnlockTokenFactory {
-  mint(): string;
-}
-
-/** The one clock the grant layer reads, so expiry and lockout are testable without waiting. */
+/** The one clock the grant layer reads, so an audit record's time is testable. */
 export interface GrantClock {
   nowMs(): number;
 }
 
-/** What a caller is told when an unlock is refused, so a UI can count down rather than guess. */
-export interface UnlockRefusal {
-  readonly reason: 'rate-limited' | 'wrong-password' | 'no-password';
-  readonly attemptsRemaining: number;
-  readonly lockedUntilMs?: number;
-}
-
-export type UnlockOutcome =
-  | { readonly kind: 'unlocked'; readonly token: string; readonly expiresAtMs: number }
-  | { readonly kind: 'refused'; readonly refusal: UnlockRefusal };

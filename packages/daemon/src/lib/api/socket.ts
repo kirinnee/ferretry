@@ -14,7 +14,7 @@
  */
 
 import type { ApiCredentials } from './authentication.ts';
-import type { CapabilityGuard } from './capability.ts';
+import type { CapabilityGuard, StepUpWitness } from './capability.ts';
 import { authorizeRequest } from './dispatcher.ts';
 import { ApiError } from './error.ts';
 import type { ApiRequest, ApiResponse } from './http.ts';
@@ -150,6 +150,8 @@ export class ApiSocketDispatcher {
      * prohibition.
      */
     private readonly remedies?: WardenRemedyAuthorizer,
+    /** Whose passkey step-up is live — the same witness the request/response table reads. */
+    private readonly stepUps?: StepUpWitness,
   ) {}
 
   /**
@@ -165,7 +167,14 @@ export class ApiSocketDispatcher {
   }
 
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
+    const authorized = authorizeRequest(
+      this.router,
+      this.credentials,
+      request,
+      this.guard,
+      this.remedies,
+      this.stepUps,
+    );
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
     if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
     try {
