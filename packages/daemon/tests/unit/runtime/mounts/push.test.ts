@@ -92,13 +92,18 @@ const warden = { authorization: 'Bearer warden-secret' };
  * Real rather than a stub guard, because the property under test is that these routes are governed by
  * the same object the operator's document feeds. `pairing` is permissive by default, so `allow: false`
  * is how a fixture states that the operator switched device management off for remote callers.
+ *
+ * Enrolment is `pairing.use`, which a remote caller reaches only with a live passkey step-up, so the
+ * paired browser here holds one: these cases are about what the routes do once the gate is passed.
  */
 async function mount(subject: PushSubscriptionSubsystem, allow = true) {
   const grants = grantSubsystem({
     grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: allow, configure: allow } },
   });
   await grants.refresh();
-  return new ApiDispatcher(new ApiRouter(pushRoutes(subject)), credentials, grants);
+  return new ApiDispatcher(new ApiRouter(pushRoutes(subject)), credentials, grants, undefined, {
+    held: device => device.deviceId === browser.deviceId,
+  });
 }
 
 describe('push routes', () => {
@@ -158,9 +163,17 @@ describe('push routes', () => {
     const surface = await mount(subject);
 
     // The host's admin token is not a device: it has no browser, no endpoint, and an enrolment filed
-    // against it could never be revoked with a device.
+    // against it could never be revoked with a device. It is the host CLI, so it arrives on the host and is
+    // past the grant gate — the refusal is the route's own.
     const fromCli = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/push/subscriptions', headers: admin, body: JSON.stringify(body) }),
+      request({
+        method: 'POST',
+        path: '/v1/push/subscriptions',
+        headers: admin,
+        loopback: true,
+        privilegedLoopback: true,
+        body: JSON.stringify(body),
+      }),
     );
     // A device a session names with something the protocol refuses is treated the same way rather
     // than being persisted as an unrevocable row.
@@ -311,10 +324,8 @@ describe('push routes', () => {
     const remote = await surface.dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', device: browser, body: JSON.stringify(body) }),
     );
-    // A LOCAL caller on a machine with NO OPERATOR PASSWORD is ungoverned, which is what this fixture is:
-    // there is nothing to unlock with, so there is no gate to pass. It is not "loopback is ungoverned"
-    // any more — a local browser on a machine that HAS a password is governed until it enters it — and the
-    // distinction matters here because this route carries a `pairing` demand.
+    // A caller whose request ARRIVED on this host is ungoverned, so the `pairing` demand this route carries
+    // never reaches the step-up a remote caller is asked for.
     const local = await surface.dispatch(
       request({
         method: 'POST',

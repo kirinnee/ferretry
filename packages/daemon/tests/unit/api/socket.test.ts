@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
+import {
+  type CapabilityGuard,
+  type CapabilityPresentation,
+  NO_GOVERNED_ROUTES_GUARD,
+  NO_STEP_UP_WITNESS,
+} from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
 import type { CredentialMinimum } from '../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
@@ -158,6 +163,40 @@ describe('ApiSocketDispatcher', () => {
     should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', headers: human }))).be.true();
     should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream' }))).be.false();
     should(accepted).equal(0);
+  });
+
+  it('should count the step-up an open stream was admitted with as standing when it is asked again', async () => {
+    // A remote terminal is admitted on a live passkey step-up and then runs for hours. Re-checking it on
+    // a lease renewal must not demand a step-up that has since lapsed, or every remote terminal would
+    // die at its first renewal after the confirmation expired. Everything else is still re-decided.
+    // Arrange
+    const presented: CapabilityPresentation[] = [];
+    const stepUpGuard: CapabilityGuard = {
+      decide: (_demand, presentation) => {
+        presented.push(presentation);
+        return presentation.stepUp ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' };
+      },
+      governance: () => ({ governed: true, decide: () => ({ allowed: false, refusal: 'undetermined' }) }),
+      explain: () => 'confirm with your passkey',
+    };
+    const terminal = { ...streamRoute(), capability: { capability: 'terminal', axis: 'use' } } as const;
+    const dispatcher = new ApiSocketDispatcher(
+      new ApiRouter([terminal]),
+      CREDENTIALS,
+      stepUpGuard,
+      undefined,
+      NO_STEP_UP_WITNESS,
+    );
+    const device = { deviceId: 'fy_device_id_phone', appSession: 'app-one' } as const;
+
+    // Act
+    const fresh = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+    const standing = dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }));
+
+    // Assert — a NEW stream with no live step-up is refused; the open one keeps going.
+    should(fresh.outcome).equal('refused');
+    should(standing).be.true();
+    should(presented.map(presentation => presentation.stepUp)).eql([false, true]);
   });
 
   it('should refuse an unauthenticated upgrade before the route is ever accepted', async () => {

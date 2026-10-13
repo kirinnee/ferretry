@@ -1683,19 +1683,3 @@ export const NARROWED: CapabilityGuard = {
   }),
   explain: (demand, refusal) => describeGrantRefusal(demand, refusal, 'fy'),
 };
-
-/**
- * A guard for a caller the operator's grants DO govern.
- *
- * The remote paired browser, in other words. It permits every capability, exactly as {@link GRANTED}
- * does, so a test using it is about what a handler does for a governed caller rather than about the
- * grant document.
- */
-export const GOVERNED: CapabilityGuard = {
-  decide: () => ({ allowed: true, refusal: 'granted' }),
-  governance: () => ({
-    governed: true,
-    decide: () => ({ allowed: true, refusal: 'granted' }),
-  }),
-  explain: () => undefined,
-};

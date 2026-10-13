@@ -163,7 +163,8 @@ out**. It is discovery only: a start still launches the absolute wrapper the man
 loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"
 means how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves,
 so any check reading a peer address, a `Host` header or a URL would hand a remote phone full control.
-Defaults are permissive and the **operator password** is the opt-in layer; a grant can only ever
+Defaults are permissive and a **passkey step-up** from the paired device guards configure and the
+terminal/browser/pairing uses; a grant can only ever
 narrow what a credential could already do, and an undetermined document fails closed. The contract,
 the widen/narrow asymmetry and the declared GAPs are [docs/grants.md](docs/grants.md).
 
@@ -177,8 +178,8 @@ no return trip, and a single parameterised flow would have needed both as option
 a Codex sign-in waiting for a paste. A login is a **declared** per-harness property, and whether one applies
 to a CREDENTIAL is decided by where it comes from: a token file or an environment variable means
 there is nothing to sign in to, so no control is offered and the surface says where the credential DOES come
-from instead. Every route that acts sits on `fleet.configure` with the existing per-change
-operator-password confirmation and **no second gate** — the remote risk is account substitution, not token
+from instead. Every route that acts sits on `fleet.configure` behind the same passkey step-up and
+**no second gate** — the remote risk is account substitution, not token
 theft. `--with-access-token` and `--with-api-key` stay host-and-CLI-only at every layer.
 
 How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code
