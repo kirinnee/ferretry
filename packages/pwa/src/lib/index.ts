@@ -277,6 +277,7 @@ export * from './pages/warden-page.tsx';
 export * from './pair-scan.ts';
 export * from './pairing.ts';
 export * from './pairing-invite.ts';
+export * from './passkeys.ts';
 export * from './peer-message.ts';
 export * from './pin-bridge.ts';
 export * from './pin-client.ts';
