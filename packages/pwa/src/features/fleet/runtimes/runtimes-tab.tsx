@@ -368,7 +368,11 @@ export function RuntimesTab({
         <p className="m-0 text-cell leading-base text-muted">
           Setting it up finds Claude Code and Codex on {machineName} and brings in what they already have.
         </p>
-        <a href={`${machineDetailHash(machineName, 'settings')}/setup`} className="kt-btn no-underline hover:no-underline" data-variant="primary">
+        <a
+          href={`${machineDetailHash(machineName, 'settings')}/setup`}
+          className="kt-btn no-underline hover:no-underline"
+          data-variant="primary"
+        >
           Set up {machineName}
         </a>
       </div>

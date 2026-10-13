@@ -16,7 +16,12 @@ const usage = (fiveHour: number, weekly: number) => ({
 });
 
 const STATUS = {
-  ready: { word: 'ready', label: 'Ready', reason: 'provider_accepted', explanation: 'Ready. Checked a few minutes ago.' },
+  ready: {
+    word: 'ready',
+    label: 'Ready',
+    reason: 'provider_accepted',
+    explanation: 'Ready. Checked a few minutes ago.',
+  },
   refresh_due: {
     word: 'refresh_due',
     label: 'Refresh due',
@@ -45,7 +50,12 @@ const login = (fields: Record<string, unknown> & { readonly id: string; readonly
     usedBy: [],
     signIn: { available: true },
     checkNow: { available: true },
-    signOut: { available: true, sentence: 'Sign out of you@example.com? No runtime uses it.', runtimesAffected: 0, signsOutTerminal: false },
+    signOut: {
+      available: true,
+      sentence: 'Sign out of you@example.com? No runtime uses it.',
+      runtimesAffected: 0,
+      signsOutTerminal: false,
+    },
     ...rest,
   };
 };
@@ -185,7 +195,12 @@ const RUNTIMES = {
       agent: true,
       launch: { available: false, reason: 'Sign in to launch' },
     }),
-    runtime({ name: 'claude-team-review', credential: TEAM, profile: 'Review', launch: { available: false, reason: 'Sign in to launch' } }),
+    runtime({
+      name: 'claude-team-review',
+      credential: TEAM,
+      profile: 'Review',
+      launch: { available: false, reason: 'Sign in to launch' },
+    }),
     runtime({
       name: 'codex-default',
       harness: 'codex',
@@ -193,7 +208,10 @@ const RUNTIMES = {
       stack: stack('codex', {
         applied: ['instructions/Main instructions', 'mcp/github', 'mcp/linear', 'mcp/notes', 'skills/My skills'],
         skipped: [
-          { reference: 'settings/Claude settings', sentence: 'Settings Claude settings is for Claude Code only, so it is skipped on Codex.' },
+          {
+            reference: 'settings/Claude settings',
+            sentence: 'Settings Claude settings is for Claude Code only, so it is skipped on Codex.',
+          },
         ],
         partial: [{ reference: 'skills/My skills', reason: 'release-notes limits which tools it may use.' }],
       }),

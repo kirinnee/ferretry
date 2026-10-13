@@ -6,7 +6,17 @@ import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts
 import type { CredentialLoginFlow } from '../../../../../src/features/fleet/harness-login-api.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
-import { type Call, claudeFlow, credential, NOW, PASSWORD, READS, STUDIO, scripted, UNLOCK_TOKEN } from '../account-support.ts';
+import {
+  type Call,
+  claudeFlow,
+  credential,
+  NOW,
+  PASSWORD,
+  READS,
+  STUDIO,
+  scripted,
+  UNLOCK_TOKEN,
+} from '../account-support.ts';
 
 const LOGIN = 'POST /v1/fleet/login';
 const FLOW = '/v1/fleet/login/flow-1';
@@ -126,7 +136,10 @@ describe('CredentialSignIn', () => {
   it('says why a sign-in does not apply, and offers none', async () => {
     const login = credential({
       id: 'claude-env',
-      signIn: { available: false, reason: 'This login comes from an environment variable, so there is nothing to sign in to.' },
+      signIn: {
+        available: false,
+        reason: 'This login comes from an environment variable, so there is nothing to sign in to.',
+      },
     });
     const { view } = await open({}, { credential: login });
     expect(state(view.container)).toBe('unavailable');
@@ -155,9 +168,9 @@ describe('CredentialSignIn', () => {
 
     expect(state(view.container)).toBe('awaiting-code');
     expect(view.container.textContent).toContain('https://claude.ai/oauth/authorize?code=true');
-    expect(view.container.querySelector('[data-claude-login-identity]')?.getAttribute('data-claude-login-identity')).toBe(
-      'claude-work',
-    );
+    expect(
+      view.container.querySelector('[data-claude-login-identity]')?.getAttribute('data-claude-login-identity'),
+    ).toBe('claude-work');
     expect(view.container.querySelector('h3')?.textContent).toBe('you@example.com (work)');
     const field = must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field');
     await type(field, 'the-code-on-the-page');
@@ -202,7 +215,11 @@ describe('CredentialSignIn', () => {
   });
 
   it('says a start that fails, and starts again from the harness’s own failed panel', async () => {
-    let answer: unknown = new FyHttpError('Claude Code is not installed on studio-mac.', 409, 'fleet_login_unavailable');
+    let answer: unknown = new FyHttpError(
+      'Claude Code is not installed on studio-mac.',
+      409,
+      'fleet_login_unavailable',
+    );
     const { view, calls } = await open({ [LOGIN]: () => answer });
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     expect(state(view.container)).toBe('start');
@@ -270,7 +287,10 @@ describe('CredentialSignIn', () => {
   });
 
   it('cancel ends the flow on the machine and goes back to the start, even when the machine does not answer', async () => {
-    const { view, calls } = await open({ [LOGIN]: claudeFlow('awaiting-code'), [`DELETE ${FLOW}`]: claudeFlow('failed') });
+    const { view, calls } = await open({
+      [LOGIN]: claudeFlow('awaiting-code'),
+      [`DELETE ${FLOW}`]: claudeFlow('failed'),
+    });
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     await click(button(view.container, 'Cancel'), 'Cancel');
     expect(only(calls, `DELETE ${FLOW}`)).toHaveLength(1);

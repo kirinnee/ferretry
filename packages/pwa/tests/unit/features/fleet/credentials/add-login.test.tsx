@@ -179,7 +179,9 @@ const open = async (
   const createClient = async (): Promise<FleetClient> => client;
   const view = await mount(
     <Host
-      initial={props.initial ?? startStepper(addLoginFlowInput(props.harness === undefined ? {} : { harness: props.harness }))}
+      initial={
+        props.initial ?? startStepper(addLoginFlowInput(props.harness === undefined ? {} : { harness: props.harness }))
+      }
       tool={props.tool === undefined ? machine() : props.tool}
       createClient={createClient}
       added={added}
@@ -215,7 +217,10 @@ describe('AddLoginStep · Choose tool', () => {
         { harness: 'codex', label: 'Codex', installed: false },
       ],
     });
-    const { view } = await open({ existing: CREDENTIALS.credentials, fresh: credential({ id: 'claude' }) }, { tool: codexMissing });
+    const { view } = await open(
+      { existing: CREDENTIALS.credentials, fresh: credential({ id: 'claude' }) },
+      { tool: codexMissing },
+    );
     expect(step(view.container)).toBe('tool');
     expect(text(view.container, 'p')).toBe('Which tool do you want to sign in to on studio-mac?');
     expect(text(view.container, '[data-stepper-position]')).toBe('Choose tool · 1 of 2');
@@ -357,7 +362,11 @@ describe('AddLoginStep · Sign in', () => {
         existing: CREDENTIALS.credentials,
         fresh: credential({ id: 'claude' }),
         routes: {
-          [CHANGES]: new FyHttpError('Account setup changes are switched off on this machine for now.', 409, 'fleet_change_disabled'),
+          [CHANGES]: new FyHttpError(
+            'Account setup changes are switched off on this machine for now.',
+            409,
+            'fleet_change_disabled',
+          ),
         },
       },
       { harness: 'claude' },
@@ -374,7 +383,11 @@ describe('AddLoginStep · Sign in', () => {
   });
 
   it('a sign-in that will not start leaves the login made and starts from its own panel', async () => {
-    let answer: unknown = new FyHttpError('Claude Code is not installed on studio-mac.', 409, 'fleet_login_unavailable');
+    let answer: unknown = new FyHttpError(
+      'Claude Code is not installed on studio-mac.',
+      409,
+      'fleet_login_unavailable',
+    );
     const { view, calls } = await open(
       {
         existing: CREDENTIALS.credentials,
@@ -391,7 +404,10 @@ describe('AddLoginStep · Sign in', () => {
     expect(view.container.querySelector('[data-credential-sign-in="start"]')).not.toBeNull();
 
     answer = claudeFlow('awaiting-code', 'claude');
-    await click(view.container.querySelector('[data-credential-sign-in="start"] [data-change-submit]'), 'its own start');
+    await click(
+      view.container.querySelector('[data-credential-sign-in="start"] [data-change-submit]'),
+      'its own start',
+    );
     expect(only(calls, LOGIN)).toHaveLength(2);
     expect(only(calls, LOGIN)[1]?.body).toEqual({ credentialId: 'claude' });
     expect(view.container.querySelector('[data-claude-login="awaiting-code"]')).not.toBeNull();
@@ -422,7 +438,10 @@ describe('AddLoginStep · Sign in', () => {
       // After the unlock's expiry, so each guarded act mints its own; the third is turned away.
       { harness: 'claude', now: () => NOW + 2 * 3_600_000 },
     );
-    await type(must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field'), PASSWORD);
+    await type(
+      must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field'),
+      PASSWORD,
+    );
     await click(submit(view.container), 'Sign in to Claude Code');
     expect(only(calls, 'POST /v1/grants/unlock')).toHaveLength(3);
     expect(only(calls, APPLY)).toHaveLength(1);
@@ -498,8 +517,12 @@ describe('AddLoginStep · Label (E26)', () => {
       fresh: credential({ id: 'claude' }),
     });
     await click(next(labelled.view.container), 'Next');
-    expect(must(labelled.view.container.querySelector<HTMLInputElement>('#add-login-label-old'), 'old').value).toBe('work');
-    expect(must(labelled.view.container.querySelector<HTMLInputElement>('#add-login-label-new'), 'new').value).toBe('side');
+    expect(must(labelled.view.container.querySelector<HTMLInputElement>('#add-login-label-old'), 'old').value).toBe(
+      'work',
+    );
+    expect(must(labelled.view.container.querySelector<HTMLInputElement>('#add-login-label-new'), 'new').value).toBe(
+      'side',
+    );
     expect(labelled.view.container.textContent).toContain('Used by 0 runtimes.');
     await labelled.view.unmount();
 
@@ -508,7 +531,9 @@ describe('AddLoginStep · Label (E26)', () => {
       fresh: credential({ id: 'claude' }),
     });
     await click(next(bare.view.container), 'Next');
-    expect(must(bare.view.container.querySelector<HTMLInputElement>('#add-login-label-old'), 'old').value).toBe('personal');
+    expect(must(bare.view.container.querySelector<HTMLInputElement>('#add-login-label-old'), 'old').value).toBe(
+      'personal',
+    );
     expect(must(bare.view.container.querySelector<HTMLInputElement>('#add-login-label-new'), 'new').value).toBe('work');
     expect(bare.view.container.textContent).toContain('Used by 1 runtime.');
     await bare.view.unmount();

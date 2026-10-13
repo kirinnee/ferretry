@@ -86,7 +86,8 @@ describe('readMachineData', () => {
     const boom = new FyHttpError('Profiles gone.', 500, undefined);
     await expect(
       readMachineData(
-        async () => scripted({ ...READS(), 'GET /v1/fleet/profile-stacks': boom, 'GET /v1/fleet/components': new Error('x') }),
+        async () =>
+          scripted({ ...READS(), 'GET /v1/fleet/profile-stacks': boom, 'GET /v1/fleet/components': new Error('x') }),
         STUDIO,
       ),
     ).rejects.toBe(boom);

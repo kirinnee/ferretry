@@ -99,7 +99,9 @@ describe('badges', () => {
 
 describe('credentialExplanation', () => {
   it('explains an empty slot that a clone made', () => {
-    expect(credentialExplanation(credential({ id: 'a', clonedFrom: 'studio-mac', ...withStatus('needs_sign_in') }))).toBe(
+    expect(
+      credentialExplanation(credential({ id: 'a', clonedFrom: 'studio-mac', ...withStatus('needs_sign_in') })),
+    ).toBe(
       'Empty slot. It was copied from studio-mac without the login itself. Sign in once and every runtime that uses it can launch.',
     );
   });
@@ -205,9 +207,9 @@ describe('lists of logins', () => {
   it('knows when emails are shared, from a flag or from the logins themselves', () => {
     expect(hasSharedEmails(CREDENTIALS)).toBe(true);
     expect(hasSharedEmails(listOf(credential({ id: 'a', needsLabel: true })))).toBe(true);
-    expect(hasSharedEmails(listOf(credential({ id: 'a', email: 'a@x.test' }), credential({ id: 'b', email: 'b@x.test' })))).toBe(
-      false,
-    );
+    expect(
+      hasSharedEmails(listOf(credential({ id: 'a', email: 'a@x.test' }), credential({ id: 'b', email: 'b@x.test' }))),
+    ).toBe(false);
     expect(
       hasSharedEmails(listOf(credential({ id: 'a', email: undefined }), credential({ id: 'b', email: undefined }))),
     ).toBe(false);
@@ -217,7 +219,10 @@ describe('lists of logins', () => {
   it('does not call one email on two harnesses shared', () => {
     expect(
       hasSharedEmails(
-        listOf(credential({ id: 'a', email: 'a@x.test' }), credential({ id: 'b', harness: 'codex', email: 'a@x.test' })),
+        listOf(
+          credential({ id: 'a', email: 'a@x.test' }),
+          credential({ id: 'b', harness: 'codex', email: 'a@x.test' }),
+        ),
       ),
     ).toBe(false);
   });
@@ -254,7 +259,10 @@ describe('nextCredentialId', () => {
   it('numbers past every id this machine already has', () => {
     expect(nextCredentialId(listOf(credential({ id: 'claude' })), 'claude')).toBe('claude-2');
     expect(
-      nextCredentialId(listOf(credential({ id: 'claude' }), credential({ id: 'claude-2' }), credential({ id: 'claude-3' })), 'claude'),
+      nextCredentialId(
+        listOf(credential({ id: 'claude' }), credential({ id: 'claude-2' }), credential({ id: 'claude-3' })),
+        'claude',
+      ),
     ).toBe('claude-4');
     expect(nextCredentialId(CREDENTIALS, 'codex')).toBe('codex-2');
   });

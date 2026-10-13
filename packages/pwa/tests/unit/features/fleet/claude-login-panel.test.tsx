@@ -286,11 +286,14 @@ describe('ClaudeLoginPanel with the wording of a login', () => {
   it('labels the finish button with the wording, and falls back to the usual label without one', () => {
     expect(texts(mount({ flow: claudeFlow('awaiting-code'), wording }))).toContain('Finish sign-in for 3 runtimes');
     run(() => mounted?.unmount());
-    expect(texts(mount({ flow: claudeFlow('awaiting-code'), wording: { ...wording, finishLabel: undefined } }))).toContain(
-      'Finish sign-in',
-    );
+    expect(
+      texts(mount({ flow: claudeFlow('awaiting-code'), wording: { ...wording, finishLabel: undefined } })),
+    ).toContain('Finish sign-in');
     run(() => mounted?.unmount());
-    const view = mount({ flow: claudeFlow('awaiting-code'), wording: { coverage: wording.coverage, signedIn: wording.signedIn } });
+    const view = mount({
+      flow: claudeFlow('awaiting-code'),
+      wording: { coverage: wording.coverage, signedIn: wording.signedIn },
+    });
     expect(texts(view)).not.toContain('for 3 runtimes');
     expect(texts(view)).toContain('Finish sign-in');
   });

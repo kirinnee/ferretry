@@ -99,9 +99,9 @@ describe('Runtimes tab list', () => {
       'you@example.com · Default profile · GPT-6',
     );
     expect(text(view.container, '[data-runtime-row="claude-review"]')).toContain('Harness default');
-    expect(
-      view.container.querySelector('[data-runtime-row="claude-default"]')?.getAttribute('href'),
-    ).toBe('#machines/studio-mac/runtimes/claude-default');
+    expect(view.container.querySelector('[data-runtime-row="claude-default"]')?.getAttribute('href')).toBe(
+      '#machines/studio-mac/runtimes/claude-default',
+    );
     const badges = (name: string) =>
       view.container.querySelector(`[data-runtime-row="${name}"]`)?.querySelectorAll('[data-tone="accent"]');
     expect(badges('claude-agent')).toHaveLength(1);
@@ -441,7 +441,7 @@ describe('a runtime’s own page', () => {
     expect(rows[0]?.querySelector('s')).toBeNull();
     expect(rows[1]?.querySelector('s')?.textContent).toBe('Opus 5.5');
     expect(text(view.container, '[data-runtime-model-note]')).toBe(
-      'From Claude models in the Default profile. Its default, Opus 5.5, isn\'t available on this login, so this runtime starts on GPT-6, the first one that is.',
+      "From Claude models in the Default profile. Its default, Opus 5.5, isn't available on this login, so this runtime starts on GPT-6, the first one that is.",
     );
     await view.unmount();
 

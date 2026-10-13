@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type {
-  FleetCredentialList,
-  FleetCredentialView,
-  FleetMachineView,
-} from '@ferretry/protocol';
+import type { FleetCredentialList, FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
@@ -129,10 +125,9 @@ describe('CredentialsTab · the list', () => {
     const codex = must(c.querySelector('[data-credentials-group="codex"]'), 'the Codex group');
     expect(claude.querySelector('h4')?.textContent).toBe('Claude Code');
     expect(codex.querySelector('h4')?.textContent).toBe('Codex');
-    expect(Array.from(claude.querySelectorAll('[data-credential-row]')).map(row => row.getAttribute('data-credential-row'))).toEqual([
-      'claude-personal',
-      'claude-work',
-    ]);
+    expect(
+      Array.from(claude.querySelectorAll('[data-credential-row]')).map(row => row.getAttribute('data-credential-row')),
+    ).toEqual(['claude-personal', 'claude-work']);
 
     const personal = must(c.querySelector<HTMLElement>('[data-credential-row="claude-personal"]'), 'personal row');
     expect(personal.getAttribute('href')).toBe('#machines/studio-mac/credentials/claude-personal');
@@ -279,7 +274,9 @@ describe('CredentialsTab · a login’s page', () => {
     expect(c.querySelector('[data-credential-status]')?.getAttribute('data-credential-status')).toBe('ready');
     expect(text(c, '[data-credential-status]')).toContain('Ready. Checked a few minutes ago.');
     expect(c.querySelectorAll('[data-credential-status] [role="img"]')).toHaveLength(2);
-    expect(text(c, '[data-credential-label]')).toContain('Only you see this. It tells logins with the same email apart.');
+    expect(text(c, '[data-credential-label]')).toContain(
+      'Only you see this. It tells logins with the same email apart.',
+    );
     expect(c.querySelector('[data-credential-needs-label]')).toBeNull();
     expect(c.querySelector('[data-credential-sign-in]')).toBeNull();
 
@@ -336,7 +333,10 @@ describe('CredentialsTab · a login’s page', () => {
       { [CHANGES]: new FyHttpError('That label is already used by another login.', 409, 'fleet_change_refused') },
       { hash: `${HASH}/claude-work` },
     );
-    await type(must(view.container.querySelector<HTMLInputElement>('#credential-label-claude-work'), 'field'), 'personal');
+    await type(
+      must(view.container.querySelector<HTMLInputElement>('#credential-label-claude-work'), 'field'),
+      'personal',
+    );
     await click(view.container.querySelector('[data-credential-label] [data-change-submit]'), 'Save label');
     expect(text(view.container, '[data-credential-label] [data-change-refusal]')).toBe(
       'That label is already used by another login.',
@@ -353,7 +353,8 @@ describe('CredentialsTab · a login’s page', () => {
     );
     await type(must(view.container.querySelector<HTMLInputElement>('#credential-label-claude-twin'), 'field'), 'home');
     expect(
-      must(view.container.querySelector<HTMLButtonElement>('[data-credential-label] [data-change-submit]'), 'save').disabled,
+      must(view.container.querySelector<HTMLButtonElement>('[data-credential-label] [data-change-submit]'), 'save')
+        .disabled,
     ).toBe(true);
     await view.unmount();
   });
@@ -458,11 +459,16 @@ describe('CredentialsTab · Check now', () => {
     );
     expect(submit.disabled).toBe(true);
     await type(
-      must(view.container.querySelector<HTMLInputElement>('[data-credential-actions] [data-change-password]'), 'password'),
+      must(
+        view.container.querySelector<HTMLInputElement>('[data-credential-actions] [data-change-password]'),
+        'password',
+      ),
       PASSWORD,
     );
     await click(submit, 'Check now');
-    expect(only(calls, 'POST /v1/fleet/credentials/claude-work/check')[0]?.body).toEqual({ operatorPassword: PASSWORD });
+    expect(only(calls, 'POST /v1/fleet/credentials/claude-work/check')[0]?.body).toEqual({
+      operatorPassword: PASSWORD,
+    });
     expect(text(view.container, '[data-credential-notice]')).toBe('Checked. The login works.');
     await view.unmount();
   });
@@ -471,7 +477,10 @@ describe('CredentialsTab · Check now', () => {
     const noCheck = credential({
       id: 'codex',
       harness: 'codex',
-      checkNow: { available: false, reason: 'Codex checks refresh the login, which this machine does not allow from here.' },
+      checkNow: {
+        available: false,
+        reason: 'Codex checks refresh the login, which this machine does not allow from here.',
+      },
       signOut: { available: false, sentence: 'Sign out of Codex?', runtimesAffected: 0, signsOutTerminal: true },
     });
     const { view } = await open({ [LIST]: listOf([noCheck]) }, { hash: `${HASH}/codex` });
@@ -483,8 +492,10 @@ describe('CredentialsTab · Check now', () => {
 
     const offline = await open({}, { hash: `${HASH}/claude-work`, online: false });
     expect(
-      must(offline.view.container.querySelector<HTMLButtonElement>('[data-credential-actions] [data-change-submit]'), 'check')
-        .disabled,
+      must(
+        offline.view.container.querySelector<HTMLButtonElement>('[data-credential-actions] [data-change-submit]'),
+        'check',
+      ).disabled,
     ).toBe(true);
     await offline.view.unmount();
   });
@@ -543,7 +554,13 @@ describe('CredentialsTab · Sign out', () => {
     await failed.view.unmount();
 
     const refused = await open(
-      { [CHANGES]: new FyHttpError('Account setup changes are switched off on this machine for now.', 409, 'fleet_change_disabled') },
+      {
+        [CHANGES]: new FyHttpError(
+          'Account setup changes are switched off on this machine for now.',
+          409,
+          'fleet_change_disabled',
+        ),
+      },
       { hash: `${HASH}/claude-work` },
     );
     await click(refused.view.container.querySelector('[data-credential-sign-out-ask]'), 'Sign out…');
@@ -640,7 +657,12 @@ describe('CredentialsTab · signing a login in from its page', () => {
   });
 
   it('the sign-in re-reads on the tab’s own interval while it waits', async () => {
-    const needs = credential({ id: 'claude-work', label: 'work', usedBy: ['claude-work'], ...withStatus('needs_sign_in') });
+    const needs = credential({
+      id: 'claude-work',
+      label: 'work',
+      usedBy: ['claude-work'],
+      ...withStatus('needs_sign_in'),
+    });
     const { view, calls } = await open(
       {
         [LIST]: listOf([needs]),

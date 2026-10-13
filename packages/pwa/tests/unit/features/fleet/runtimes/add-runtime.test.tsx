@@ -356,10 +356,8 @@ describe('Add runtime: no logins (E12)', () => {
     expect(flowName(view.container)).toBe('add-runtime');
     expect(draftOf(view.container)).toMatchObject({ credentialId: 'claude', profile: null, name: '' });
     expect(
-      must(
-        view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'),
-        'new login',
-      ).checked,
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new login')
+        .checked,
     ).toBe(true);
 
     await click(view.container, '[data-step-next]');
@@ -433,7 +431,9 @@ describe('Add runtime: Profile', () => {
 
   it('says so when the machine has no profiles', async () => {
     const view = await mountHost({ ...profileStep, data: NO_PROFILES, draft: { credentialId: 'claude-personal' } });
-    expect(text(view.container, '[data-add-runtime-step="profile"]')).toContain('There are no profiles on studio-mac yet.');
+    expect(text(view.container, '[data-add-runtime-step="profile"]')).toContain(
+      'There are no profiles on studio-mac yet.',
+    );
     expect(view.container.querySelector('[data-add-runtime-profile]')).toBeNull();
     expect(view.container.querySelector('[data-add-row="profile"]')).toBeNull();
     await view.unmount();
@@ -523,10 +523,8 @@ describe('Add runtime: Profile', () => {
     expect(flowName(view.container)).toBe('add-runtime');
     expect(draftOf(view.container)).toMatchObject({ profile: 'Fresh', name: '', addAnother: false });
     expect(
-      must(
-        view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Fresh"] input'),
-        'fresh radio',
-      ).checked,
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Fresh"] input'), 'fresh radio')
+        .checked,
     ).toBe(true);
     await view.unmount();
   });
@@ -641,12 +639,12 @@ describe('Add runtime: Name', () => {
     await waitFor(view.container, '[data-add-runtime-step="done"]');
     expect(calls.find(call => call.path === '/v1/fleet/changes')?.body).toEqual({
       change: {
-      kind: 'runtime.put',
-      name: 'claude-claude-hooks',
-      credential: 'claude-personal',
-      profile: 'Claude hooks',
-      agent: false,
-      create: true,
+        kind: 'runtime.put',
+        name: 'claude-claude-hooks',
+        credential: 'claude-personal',
+        profile: 'Claude hooks',
+        agent: false,
+        create: true,
       },
     });
     await view.unmount();
