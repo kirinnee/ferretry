@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { useState } from 'react';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { ChangeResult, StageResult } from '../../../../../src/features/fleet/shell/apply-change.ts';
 import {
@@ -17,27 +16,15 @@ import {
   OUTCOME,
   STAGED,
   scriptedClient,
-  UNLOCK_TOKEN,
-  UNLOCKED,
 } from './change-support.ts';
 
 const CHANGE = { kind: 'machine.settings', agentPermissions: 'auto' } as const;
-const PASSWORD = 'correct-horse-battery';
-const NOW = () => Date.parse('2026-10-13T08:00:00.000Z');
 const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
 const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });
 
 const settle = async (): Promise<void> => {
   await interact(async () => {
     for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
-  });
-};
-
-const type = async (input: HTMLInputElement, value: string): Promise<void> => {
-  await interact(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
 
@@ -48,7 +35,7 @@ const click = async (element: Element | null, what: string): Promise<void> => {
 
 describe('ChangeApplyPanel', () => {
   it('submits at once when nothing is owed, and waits while authority is being read', async () => {
-    const sent: (string | undefined)[] = [];
+    let sent = 0;
     const reading = await mount(
       <ChangeApplyPanel
         machineName="studio-mac"
@@ -56,7 +43,9 @@ describe('ChangeApplyPanel', () => {
         busy={false}
         refusal={null}
         submitLabel="Create runtime"
-        onSubmit={value => sent.push(value)}
+        onSubmit={() => {
+          sent += 1;
+        }}
       />,
     );
     expect(reading.container.querySelector('[data-change-apply]')?.getAttribute('data-change-apply')).toBe('reading');
@@ -70,52 +59,48 @@ describe('ChangeApplyPanel', () => {
         busy={false}
         refusal="The setup changed since this was staged."
         submitLabel="Create runtime"
-        onSubmit={value => sent.push(value)}
+        onSubmit={() => {
+          sent += 1;
+        }}
       />,
     );
-    expect(view.container.querySelector('[data-change-password]')).toBeNull();
+    expect(view.container.querySelector('[data-change-step-up]')).toBeNull();
     expect(view.container.querySelector('[data-change-refusal]')?.textContent).toBe(
       'The setup changed since this was staged.',
     );
     await click(view.container.querySelector('[data-change-submit]'), 'submit');
-    expect(sent).toEqual([undefined]);
+    expect(sent).toBe(1);
     await view.unmount();
   });
 
-  it('asks for the password when owed, sends it once, and clears the field first', async () => {
-    const sent: (string | undefined)[] = [];
-    function Host() {
-      const [busy] = useState(false);
-      return (
-        <ChangeApplyPanel
-          machineName="studio-mac"
-          authority={{ kind: 'confirm' }}
-          busy={busy}
-          refusal={null}
-          submitLabel="Sign out"
-          variant="danger"
-          onSubmit={value => sent.push(value)}
-        />
-      );
-    }
-    const view = await mount(<Host />);
-    const field = must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'password');
-    expect(view.container.textContent).toContain('used once and not stored');
-    const submit = must(view.container.querySelector<HTMLButtonElement>('[data-change-submit]'), 'submit');
-    expect(submit.disabled).toBe(true);
-    await click(submit, 'submit');
-    expect(sent).toEqual([]);
-    await type(field, PASSWORD);
-    expect(submit.disabled).toBe(false);
-    await click(submit, 'submit');
-    expect(sent).toEqual([PASSWORD]);
-    expect(field.value).toBe('');
-    await view.unmount();
-
-    const locked = await mount(
+  it('says the passkey will be asked for, in plain words, and still submits', async () => {
+    let sent = 0;
+    const view = await mount(
       <ChangeApplyPanel
         machineName="studio-mac"
-        authority={{ kind: 'locked', alsoConfirms: false }}
+        authority={{ kind: 'step-up' }}
+        busy={false}
+        refusal={null}
+        submitLabel="Sign out"
+        variant="danger"
+        onSubmit={() => {
+          sent += 1;
+        }}
+      />,
+    );
+    const note = view.container.querySelector('[data-change-step-up]')?.textContent ?? '';
+    expect(note).toBe('studio-mac will ask you to confirm with your passkey when you save.');
+    expect(note.toLowerCase()).not.toContain('password');
+    const submit = must(view.container.querySelector<HTMLButtonElement>('[data-change-submit]'), 'submit');
+    expect(submit.disabled).toBe(false);
+    await click(submit, 'submit');
+    expect(sent).toBe(1);
+    await view.unmount();
+
+    const busy = await mount(
+      <ChangeApplyPanel
+        machineName="studio-mac"
+        authority={{ kind: 'step-up' }}
         busy
         busyLabel="Signing out…"
         refusal={null}
@@ -123,9 +108,9 @@ describe('ChangeApplyPanel', () => {
         onSubmit={() => undefined}
       />,
     );
-    expect(locked.container.textContent).toContain('before it accepts changes from here');
-    expect(locked.container.querySelector('[data-change-submit]')?.textContent).toBe('Signing out…');
-    await locked.unmount();
+    expect(busy.container.querySelector('[data-change-submit]')?.textContent).toBe('Signing out…');
+    expect((busy.container.querySelector('[data-change-submit]') as HTMLButtonElement).disabled).toBe(true);
+    await busy.unmount();
   });
 
   it('a grant refusal says why, in the shared words, and offers no button that works', async () => {
@@ -159,7 +144,7 @@ function HookHost({
   readonly factory: (connection: DaemonConnection) => Promise<FleetClient>;
   readonly probe: Probe;
 }) {
-  const changes = useAccountChanges({ connection, createClient: factory, now: NOW });
+  const changes = useAccountChanges({ connection, createClient: factory });
   probe.current = changes;
   return (
     <p data-authority={changes.authority?.kind ?? 'reading'} data-busy={String(changes.busy)}>
@@ -229,44 +214,25 @@ describe('useAccountChanges', () => {
     await view.unmount();
   });
 
-  it('a locked browser unlocks once, then asks again what it may do', async () => {
-    const calls: Call[] = [];
-    const client = scriptedClient(
-      {
-        '/v1/fleet/machine': (call: Call) =>
-          call.headers['x-ferretry-operator-unlock'] === UNLOCK_TOKEN
-            ? machineAnswer()
-            : machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
-        '/v1/grants/unlock': UNLOCKED,
-        '/v1/fleet/proposals': STAGED,
-        [APPLY_PATH]: OUTCOME,
-      },
-      calls,
-    );
+  it('reads a step-up-required machine as the step-up authority and still applies', async () => {
+    const client = scriptedClient({
+      '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
+      '/v1/fleet/proposals': STAGED,
+      [APPLY_PATH]: OUTCOME,
+    });
     const { view, hooks } = await hookView(async () => client);
-    expect(view.container.querySelector('[data-authority]')?.getAttribute('data-authority')).toBe('locked');
+    expect(view.container.querySelector('[data-authority]')?.getAttribute('data-authority')).toBe('step-up');
+    let result: ChangeResult | undefined;
     await interact(async () => {
-      await hooks().apply(CHANGE, PASSWORD);
+      result = await hooks().apply(CHANGE);
     });
-    expect(view.container.querySelector('[data-authority]')?.getAttribute('data-authority')).toBe('open');
-    calls.length = 0;
-    await interact(async () => {
-      await hooks().apply(CHANGE);
-    });
-    // The held unlock rides along; nothing is minted again.
-    expect(calls.map(call => call.path)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
-    expect(calls[0]?.headers['x-ferretry-operator-unlock']).toBe(UNLOCK_TOKEN);
+    expect(result).toMatchObject({ kind: 'applied' });
     await view.unmount();
   });
 
-  it('authorizes a guarded act, and shows a sentence the caller worded', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer({ confirmation: 'operator-password' }) });
+  it('shows a sentence the caller worded where a refusal shows', async () => {
+    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const { view, hooks } = await hookView(async () => client);
-    let answer: unknown;
-    await interact(async () => {
-      answer = await hooks().authorize(PASSWORD);
-    });
-    expect(answer).toEqual({ kind: 'authorized', operatorPassword: PASSWORD, held: null });
     await interact(() => hooks().refuse('Claude didn’t accept that code.'));
     expect(view.container.querySelector('p')?.textContent).toBe('Claude didn’t accept that code.');
     await view.unmount();
@@ -279,12 +245,12 @@ describe('useAccountChanges', () => {
     await interact(async () => {
       result = await hooks().apply(CHANGE);
     });
-    expect(result).toMatchObject({ kind: 'refused', passwordRejected: false });
+    expect(result).toMatchObject({ kind: 'refused' });
     expect(view.container.querySelector('p')?.textContent).toContain('didn’t answer');
     await view.unmount();
   });
 
-  it('starts over for another machine, and reads authority itself if asked before it landed', async () => {
+  it('starts over for another machine, and can apply before authority landed', async () => {
     const probe: Probe = { current: null };
     let release: (client: FleetClient) => void = () => undefined;
     const slow = new Promise<FleetClient>(resolve => {

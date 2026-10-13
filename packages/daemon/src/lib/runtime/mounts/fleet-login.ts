@@ -8,13 +8,10 @@
  * every agent run afterwards authenticates as that account. That is a change to how the host behaves, so
  * every route that starts, reads, forwards to or ends a flow declares `fleet`/`configure`.
  *
- * `configure` implies `use`, both axes default to enabled, and a governed caller answers `locked` until an
- * unlock is held — so this is not a default change, it is which lock the operator's password reaches. The
- * START additionally proves that password against this one sign-in, using the SAME three pieces the
- * fleet's proposal apply already wires: the flag the boundary sets, the check the grant service performs,
- * and the `'operator-password'` answer a panel reads before somebody clicks. There is no new credential,
- * no new attempt budget, and no second refusal vocabulary — the last time a fleet capability grew its own
- * authority system it took a week to remove.
+ * `configure` implies `use`, both axes default to enabled, and a governed caller answers `step-up-required`
+ * until its device holds a live passkey step-up — so this is not a default change, it is which lock the
+ * owner's passkey reaches. There is no new credential and no second refusal vocabulary — the last time a
+ * fleet capability grew its own authority system it took a week to remove.
  *
  * `minimum: 'operator'` matches every other fleet route. An `admin-token` minimum would 403 the browser,
  * which is always a paired device, and the browser is the whole point of the feature.
@@ -88,7 +85,7 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       /**
        * Start one credential's sign-in.
        *
-       * The body names a CREDENTIAL and, when this caller owes one, the operator password. It cannot name
+       * The body names a CREDENTIAL and nothing else. It cannot name
        * a command, a path or a wrapper: the daemon resolves what to launch from the configuration, so
        * there is no shape of request that could point this at another program.
        */

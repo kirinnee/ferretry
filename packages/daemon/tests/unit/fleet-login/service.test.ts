@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import type { HarnessKind } from '@ferretry/fleet';
 import type { HarnessLoginSubmission } from '@ferretry/protocol';
 import should from 'should';
-import type { ChangeConfirmation } from '../../../src/lib/api/capability.ts';
+import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { type CredentialSignInTarget, FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
@@ -29,7 +29,7 @@ import {
 } from '../../../src/lib/fleet-login/service.ts';
 import { harnessLoginRoutes } from '../../../src/lib/runtime/mounts/fleet-login.ts';
 import { jsonBody, request } from '../api/support.ts';
-import { CREDENTIALS, GOVERNED, GRANTED, human, NARROWED } from '../runtime/mounts/support.ts';
+import { CREDENTIALS, GRANTED, human, NARROWED } from '../runtime/mounts/support.ts';
 
 const ESC = '\u001b';
 const BEL = '\u0007';
@@ -142,7 +142,6 @@ interface Fixture {
 }
 
 interface FixtureOptions {
-  readonly confirmChange?: (password: string) => Promise<ChangeConfirmation>;
   readonly windowMinutes?: number;
   readonly now?: () => number;
   /** Replaces the default resolution, so a test can hold or break one target. */
@@ -214,7 +213,6 @@ function fixture(options: FixtureOptions = {}): Fixture {
         };
       },
     },
-    confirmChange: options.confirmChange ?? (async () => ({ kind: 'confirmed' })),
     clientName: 'fy',
     credentialTargets: {
       target: async id => {
@@ -269,10 +267,10 @@ function held<T>(value: T): { readonly promise: Promise<T>; release(): void } {
  * `governance` answers for ONE request, so a presentation is required rather than defaulted — which is
  * the point: there is no such thing as "where does this caller stand" without a caller.
  */
-const HOST = GRANTED.governance({ loopback: true, adminToken: true, actor: 'admin-cli' });
+const HOST = GRANTED.governance({ loopback: true, adminToken: true, actor: 'admin-cli', stepUp: false });
 
-/** A paired browser on a machine with an operator password: governed, and owes a confirmation. */
-const BROWSER = GOVERNED.governance({ loopback: false, adminToken: false, actor: 'device' });
+/** A paired browser the boundary let through (its step-up held): governed, and brings nothing else. */
+const BROWSER: CallerGovernance = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) };
 
 const refusalOf = async (work: () => Promise<unknown>): Promise<HarnessLoginRefusal> => {
   try {
@@ -339,28 +337,18 @@ describe('starting a harness login', () => {
     should(subject.children).be.empty();
   });
 
-  it('should refuse a credential that has nothing to sign in to BEFORE spending a password attempt', async () => {
-    // Arrange — a governed caller that brought a password. The refusal must not cost them one of the
-    // shared attempts an unlock also spends.
-    const asked: string[] = [];
-    const subject = fixture({
-      confirmChange: async password => {
-        asked.push(password);
-        return { kind: 'confirmed' };
-      },
-    });
+  it('should refuse a credential that has nothing to sign in to for a governed caller too', async () => {
+    // Arrange
+    const subject = fixture();
 
     // Act
     const actual = await refusalOf(async () =>
-      subject.service.start(
-        { credentialId: ENVIRONMENT_CREDENTIAL, operatorPassword: 'the operator password' },
-        BROWSER,
-      ),
+      subject.service.start({ credentialId: ENVIRONMENT_CREDENTIAL }, BROWSER),
     );
 
     // Assert
     should(actual.code).equal('fleet_login_unavailable');
-    should(asked).be.empty();
+    should(subject.children).be.empty();
   });
 
   it('should refuse a second sign-in for one credential, naming the flow that holds it', async () => {
@@ -380,25 +368,17 @@ describe('starting a harness login', () => {
     should(subject.children).have.length(1);
   });
 
-  it('should refuse a second sign-in for one credential before spending a password attempt', async () => {
+  it('should refuse a second sign-in for one credential from a governed caller too', async () => {
     // Arrange
-    const asked: string[] = [];
-    const subject = fixture({
-      confirmChange: async password => {
-        asked.push(password);
-        return { kind: 'confirmed' };
-      },
-    });
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'first' }, BROWSER);
+    const subject = fixture();
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
 
     // Act
-    const actual = await refusalOf(async () =>
-      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'second' }, BROWSER),
-    );
+    const actual = await refusalOf(async () => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER));
 
     // Assert
     should(actual.code).equal('fleet_login_in_progress');
-    should(asked).deepEqual(['first']);
+    should(subject.children).have.length(1);
   });
 
   it('should allow a sign-in for a DIFFERENT credential while one is running', async () => {
@@ -431,147 +411,19 @@ describe('starting a harness login', () => {
   });
 });
 
-// ─── the operator password, against this one sign-in ──────────────────────────────────────────────
+// ─── a governed caller ────────────────────────────────────────────────────────────────────────────
 
-describe('the per-change confirmation', () => {
-  it('should never ask a caller the operator’s grants do not govern', async () => {
+describe('a governed caller', () => {
+  it('should start a sign-in with nothing but the credential: the step-up was the boundary’s', async () => {
     // Arrange
-    let asked = 0;
-    const subject = fixture({
-      confirmChange: async () => {
-        asked += 1;
-        return { kind: 'confirmed' };
-      },
-    });
+    const subject = fixture();
 
     // Act
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
-
-    // Assert
-    should(asked).equal(0);
-  });
-
-  it('should refuse a governed caller that brought no password', async () => {
-    // Act
-    const actual = await refusalOf(async () => fixture().service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER));
-
-    // Assert
-    should(actual.code).equal('fleet_login_unauthorized');
-    should(actual.message).equal(
-      `signing "${CLAUDE_CREDENTIAL}" in from off this host needs this machine's operator password, entered against this exact sign-in`,
-    );
-  });
-
-  it('should refuse a governed caller that brought the wrong password', async () => {
-    // Arrange
-    const subject = fixture({ confirmChange: async () => ({ kind: 'refused', reason: 'wrong-password' }) });
-
-    // Act
-    const actual = await refusalOf(async () =>
-      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'not-it' }, BROWSER),
-    );
-
-    // Assert
-    should(actual.code).equal('fleet_login_unauthorized');
-    should(actual.message).equal(
-      `that is not this machine's operator password, so "${CLAUDE_CREDENTIAL}" was not signed in`,
-    );
-  });
-
-  it('should name the host remedy when the shared attempt budget is spent', async () => {
-    // Arrange
-    const subject = fixture({ confirmChange: async () => ({ kind: 'refused', reason: 'rate-limited' }) });
-
-    // Act
-    const actual = await refusalOf(async () =>
-      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'x' }, BROWSER),
-    );
-
-    // Assert
-    should(actual.code).equal('fleet_login_unauthorized');
-    should(actual.message).match(/too many wrong operator passwords/u);
-    should(actual.message).match(/fy daemon password set/u);
-  });
-
-  it('should say the true thing when the machine has no password to check against', async () => {
-    // Arrange
-    const subject = fixture({ confirmChange: async () => ({ kind: 'refused', reason: 'no-password' }) });
-
-    // Act
-    const actual = await refusalOf(async () =>
-      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'x' }, BROWSER),
-    );
-
-    // Assert
-    should(actual.message).equal(
-      `this machine has no operator password, so the confirmation for "${CLAUDE_CREDENTIAL}" could not be checked`,
-    );
-  });
-
-  it('should start once a governed caller proves the password', async () => {
-    // Arrange
-    const asked: string[] = [];
-    const subject = fixture({
-      confirmChange: async password => {
-        asked.push(password);
-        return { kind: 'confirmed' };
-      },
-    });
-
-    // Act
-    const actual = await subject.service.start(
-      { credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' },
-      BROWSER,
-    );
+    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
     await subject.child();
 
     // Assert
     should(actual).have.property('state', 'starting');
-    should(asked).deepEqual(['the operator password']);
-  });
-
-  it('should spawn nothing when the password is refused', async () => {
-    // Arrange
-    const subject = fixture({ confirmChange: async () => ({ kind: 'refused', reason: 'wrong-password' }) });
-
-    // Act
-    await refusalOf(async () =>
-      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'no' }, BROWSER),
-    );
-    await subject.settle();
-
-    // Assert
-    should(subject.children).be.empty();
-  });
-
-  it('should refuse the second of two sign-ins whose password checks overlap, and spawn one child', async () => {
-    // Arrange — both confirmations are held open, so both starts are past the in-progress check
-    // before either has launched anything. Each check costs real time (argon2), so this is the
-    // ordinary shape of two quick clicks, not a contrived one.
-    const releases: (() => void)[] = [];
-    const subject = fixture({
-      confirmChange: async () => {
-        await new Promise<void>(resolve => releases.push(resolve));
-        return { kind: 'confirmed' };
-      },
-    });
-    const first = subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'pw' }, BROWSER);
-    const second = refusalOf(async () =>
-      subject.service.start({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'pw' }, BROWSER),
-    );
-    await subject.settle();
-    should(releases).have.length(2);
-
-    // Act
-    for (const release of releases) release();
-    const started = await first;
-    const actual = await second;
-    await subject.settle();
-
-    // Assert
-    should(actual.code).equal('fleet_login_in_progress');
-    should(actual.message).match(new RegExp(`already running as flow "${started.flowId}"`, 'u'));
-    should(subject.children).have.length(1);
   });
 });
 
@@ -1300,33 +1152,6 @@ describe('the harness login routes', () => {
       body: JSON.stringify(body),
     });
 
-  it('should refuse a governed caller that starts a sign-in with no password', async () => {
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    const actual = await dispatcherFor(subject, GOVERNED).dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }));
-
-    // Assert
-    should(actual.status).equal(409);
-    should(jsonBody(actual)).have.property('code', 'fleet_login_unauthorized');
-    should(subject.children).be.empty();
-  });
-
-  it('should start a sign-in for a governed caller that proves the password', async () => {
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    const actual = await dispatcherFor(subject, GOVERNED).dispatch(
-      startRequest({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' }),
-    );
-
-    // Assert
-    should(actual.status).equal(200);
-    should(jsonBody(actual)).match({ state: 'starting', credentialId: CLAUDE_CREDENTIAL });
-  });
-
   it('should answer 409 with the domain’s own code for a credential that is not a login', async () => {
     // Arrange
     const subject = fixture();
@@ -1482,7 +1307,7 @@ describe('the harness login routes', () => {
     // Act
     const actual = await pairedDispatcher(subject, NARROWED).dispatch(
       startRequest(
-        { credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' },
+        { credentialId: CLAUDE_CREDENTIAL },
         browser,
         pairedDevice,
       ),

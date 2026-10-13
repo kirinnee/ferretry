@@ -13,7 +13,7 @@ export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMac
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
   runtimeCount: 2,
   runningSessions: 0,
-  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+  authority: { mayApply: true, applyRefusal: 'granted' },
   ...overrides,
 });
 

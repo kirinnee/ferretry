@@ -2345,15 +2345,9 @@ try {
           // obviously short, which is the worse of the two failures.
           await page.setViewportSize({ width: viewport.width, height: 4_000 });
           for (const [name, selector] of [
-            [`grants-locked`, `[data-harness="grants-locked"]`],
-            [`grants-ungated`, `[data-harness="grants-ungated"]`],
-            // The two frames a browser ON the machine meets, before and after its one unlock. They are
-            // the states the badge, the switch reasons and the password control all read differently in,
-            // and the pair is what makes "friction, not a wall" something a reviewer can see rather than
-            // take on trust.
-            [`grants-local-locked`, `[data-harness="grants-local-locked"]`],
-            [`grants-local-unlocked`, `[data-harness="grants-local-unlocked"]`],
-            [`grants-rate-limited`, `[data-harness="grants-rate-limited"]`],
+            [`grants-step-up-needed`, `[data-harness="grants-step-up-needed"]`],
+            [`grants-step-up-held`, `[data-harness="grants-step-up-held"]`],
+            [`grants-local`, `[data-harness="grants-local"]`],
             [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
             [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
             // The capability list in all three postures. The remote one is the frame that matters: the
@@ -2375,14 +2369,13 @@ try {
             await captureElement(page, frame, target);
             process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);
           }
-          // AND THE PASSWORD FRAMES IN LIGHT. This panel is the one control on the screen that can lock
-          // somebody out, so its warn and danger tones have to be legible in both themes rather than
-          // designed in dark and inverted — a hairline that vanishes on `surface-2` takes a boundary with
-          // it, and the locked panel's warn tone is the last place to lose contrast.
+          // AND THE PASSKEY FRAMES IN LIGHT. The warn tone of a row waiting on a confirmation is the last
+          // place to lose contrast, so it has to be legible in both themes rather than designed in dark and
+          // inverted — a hairline that vanishes on `surface-2` takes a boundary with it.
           await page.evaluate(() => {
             document.documentElement.dataset.theme = 'studio-light';
           });
-          for (const name of ['grants-local-locked', 'grants-local-unlocked'] as const) {
+          for (const name of ['grants-step-up-needed', 'grants-step-up-held'] as const) {
             const frame = page.locator(`[data-harness="${name}"]`);
             await frame.scrollIntoViewIfNeeded();
             const target = join(outDir, `${name}-light-${viewport.name}.png`);
@@ -2403,11 +2396,7 @@ try {
             [`pair-devices`, `[data-harness="pair-devices"]`],
             [`pair-invite`, `[data-harness="pair-invite"]`],
             [`pair-expired`, `[data-harness="pair-expired"]`],
-            // `pair-empty` is the FIRST-PAIRING frame: no password, so no button — the requirement and the
-            // control that satisfies it stand where it would have been. The remote twin is the reader who
-            // cannot satisfy it from where they are, and it must name the two places that can.
             [`pair-empty`, `[data-harness="pair-empty"]`],
-            [`pair-needs-password-remote`, `[data-harness="pair-needs-password-remote"]`],
             [`pair-refused`, `[data-harness="pair-refused"]`],
           ] as const) {
             const frame = page.locator(selector);

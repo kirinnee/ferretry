@@ -36,7 +36,7 @@ import { GrantError, type GrantFailure } from '../../grants/index.ts';
  * the browser's one retry-after-confirmation path covers this route without a special case.
  */
 export interface GrantSubsystem {
-  /** Who changed what, newest first. Ungated for the reason the read above is. */
+  /** Who changed what, newest first. Open to every operator for the reason the read above is. */
   history(limit: number): Promise<GrantAuditView>;
   /**
    * Re-reads the operator's decision.

@@ -12,9 +12,8 @@
  * sign-in is, and a value this browser would send that the daemon would refuse fails here — at the call —
  * rather than as a 400 a person reads as a broken panel.
  *
- * Every call takes a connection-bound client and an optional unlock. A fleet belongs to a MACHINE and
- * this browser can be paired to several, so nothing is cached at module scope; the unlock is per daemon
- * for the same reason.
+ * Every call takes a connection-bound client. A fleet belongs to a MACHINE and
+ * this browser can be paired to several, so nothing is cached at module scope.
  */
 
 import {
@@ -25,15 +24,10 @@ import {
   type HarnessLoginSubmission,
   HarnessLoginSubmissionSchema,
   HarnessLoginSubmitRequestSchema,
-  OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
 import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_LOGIN_PATH = '/v1/fleet/login';
-
-/** Headers for a governed caller that holds an unlock, and nothing extra for one that does not. */
-const unlockHeaders = (unlock: string | undefined): Record<string, string> =>
-  unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock };
 
 const flowPath = (flowId: string): string => `${FLEET_LOGIN_PATH}/${encodeURIComponent(flowId)}`;
 
@@ -46,20 +40,14 @@ export type CredentialLoginStartRequest = HarnessLoginStartRequest;
 /**
  * Starts signing one CREDENTIAL in: every runtime on it, or none yet — an empty slot is signed in
  * before anything uses it (E12, E31).
- *
- * TWO DIFFERENT USES OF ONE SECRET. `unlock` is the token a mint produced and it travels in the header
- * the dispatcher reads for every governed route, so a locked caller stops being locked.
- * `operatorPassword` is the per-change confirmation and is the PASSWORD ITSELF, proved again against
- * this one sign-in. Neither is persisted or echoed anywhere.
- */
+*/
 export const startCredentialSignIn = async (
   client: FleetClient,
   request: CredentialLoginStartRequest,
-  unlock?: string,
 ): Promise<CredentialLoginFlow> =>
   await client.request(FLEET_LOGIN_PATH, HarnessLoginFlowSchema, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(HarnessLoginStartRequestSchema.parse(request)),
   });
 
@@ -67,20 +55,15 @@ export const startCredentialSignIn = async (
 export const readCredentialSignIn = async (
   client: FleetClient,
   flowId: string,
-  unlock?: string,
 ): Promise<CredentialLoginFlow> =>
-  await client.request(flowPath(flowId), HarnessLoginFlowSchema, { headers: unlockHeaders(unlock) });
+  await client.request(flowPath(flowId), HarnessLoginFlowSchema);
 
 /** Ends one credential sign-in and the harness child behind it. */
 export const cancelCredentialSignIn = async (
   client: FleetClient,
   flowId: string,
-  unlock?: string,
 ): Promise<CredentialLoginFlow> =>
-  await client.request(flowPath(flowId), HarnessLoginFlowSchema, {
-    method: 'DELETE',
-    headers: unlockHeaders(unlock),
-  });
+  await client.request(flowPath(flowId), HarnessLoginFlowSchema, { method: 'DELETE' });
 
 /**
  * Forwards the one value a person brings back.
@@ -93,25 +76,22 @@ export const submitCredentialSignInCode = async (
   client: FleetClient,
   flowId: string,
   code: string,
-  unlock?: string,
 ): Promise<HarnessLoginSubmission> =>
   await client.request(flowPath(flowId), HarnessLoginSubmissionSchema, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(HarnessLoginSubmitRequestSchema.parse({ code })),
   });
 
 /**
- * Moves a Codex device-code sign-in that did not work to Codex's link sign-in, in the same flow — so the
- * operator password its start proved is not asked for again.
+ * Moves a Codex device-code sign-in that did not work to Codex's link sign-in, in the same flow.
  */
 export const switchCredentialSignInToLink = async (
   client: FleetClient,
   flowId: string,
-  unlock?: string,
 ): Promise<HarnessLoginSubmission> =>
   await client.request(flowPath(flowId), HarnessLoginSubmissionSchema, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(HarnessLoginSubmitRequestSchema.parse({ method: 'link' })),
   });

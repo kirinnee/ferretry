@@ -32,7 +32,7 @@ import {
   type CapabilityGrantView,
   DAEMON_CAPABILITIES,
 } from '@ferretry/protocol';
-import { CircleHelp, Info, Laptop, Lock, ShieldCheck, Wifi } from 'lucide-react';
+import { CircleHelp, Info, Laptop, ShieldCheck, Wifi } from 'lucide-react';
 import { useId } from 'react';
 
 import { cn } from '../../lib/class-names.ts';
@@ -71,7 +71,7 @@ const POSTURE_TONE: Readonly<Record<ReturnType<typeof postureCopy>['tone'], stri
 const REASON_TONE: Readonly<Record<OpenReason, string>> = {
   ungoverned: 'border-ok-border bg-ok-bg text-ok',
   granted: 'border-accent bg-accent-soft text-accent',
-  ungated: 'border-warn-border bg-warn-bg text-warn',
+  'step-up': 'border-warn-border bg-warn-bg text-warn',
   closed: 'border-border-strong bg-surface text-muted',
   unknown: 'border-err-border bg-err-bg text-err',
 };
@@ -240,14 +240,6 @@ export interface CapabilityListProps {
    * from the page: a `127.0.0.1` address bar does not mean a loopback connection.
    */
   readonly governed?: boolean | undefined;
-  /**
-   * Whether the request ARRIVED on this host — the second, independent fact.
-   *
-   * It is not `!governed` any more: a browser on the machine is a paired device and is governed until it
-   * unlocks, so the two are both true at once for the connection this field was added for. Without it,
-   * that browser would be badged "Remote" while sitting on the machine.
-   */
-  readonly hostLocal?: boolean | undefined;
 }
 
 /**
@@ -257,27 +249,16 @@ export interface CapabilityListProps {
  * an answer nobody gave. Rows are ordered by the protocol's own declaration rather than by arrival, so
  * a person can build a habit around their position.
  */
-export function CapabilityList({ connection, capabilities, governed, hostLocal }: CapabilityListProps) {
+export function CapabilityList({ connection, capabilities, governed }: CapabilityListProps) {
   const headingId = useId();
   // The capabilities carry locality (`mayGrant`), so an omitted prop is read from them rather than
-  // requested a second time. Explicit props win when a caller has the booleans independently. Neither
-  // path touches the page's address.
-  const posture =
-    governed === undefined ? postureFromCapabilities(capabilities) : connectionPosture(governed, hostLocal);
+  // requested a second time. An explicit prop wins. Neither path touches the page's address.
+  const posture = governed === undefined ? postureFromCapabilities(capabilities) : connectionPosture(governed);
   const copy = postureCopy(posture);
   const entries = DAEMON_CAPABILITIES.map(capability =>
     capabilities.find(candidate => candidate.capability === capability),
   ).filter((entry): entry is CapabilityGrantView => entry !== undefined);
-  // One glyph per posture, and `local-locked` gets the LOCK rather than the laptop: the reader is at the
-  // machine, and the fact worth a glyph is the gate, not the address.
-  const PostureIcon =
-    posture === 'direct-local'
-      ? Laptop
-      : posture === 'local-locked'
-        ? Lock
-        : posture === 'governed-remote'
-          ? Wifi
-          : CircleHelp;
+  const PostureIcon = posture === 'direct-local' ? Laptop : posture === 'governed-remote' ? Wifi : CircleHelp;
 
   return (
     <section
@@ -316,11 +297,8 @@ export function CapabilityList({ connection, capabilities, governed, hostLocal }
         {/* Which way the switches travel from HERE. It is the difference between the two postures that
             a person can actually act on, so it is stated with them rather than left to be discovered by
             pressing something. */}
-        {/* `local-locked` takes the LOCAL sentence: this browser is on the machine and its switches do
-            travel both ways once it unlocks. Printing the remote one-way note there would tell somebody
-            standing at the machine that a door they can reopen is shut for good. */}
         <p className="m-0 mt-1 text-meta font-semibold leading-base" data-capability-direction={posture}>
-          {posture === 'direct-local' || posture === 'local-locked' ? LOCAL_TWO_WAY_NOTE : REMOTE_ONE_WAY_NOTE}
+          {posture === 'direct-local' ? LOCAL_TWO_WAY_NOTE : REMOTE_ONE_WAY_NOTE}
         </p>
       </div>
 

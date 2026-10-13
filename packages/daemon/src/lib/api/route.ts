@@ -83,8 +83,8 @@ export interface RouteContext {
    * that does not, because a route the operator was never asked about has no answer here to give.
    *
    * A HANDLER CANNOT MINT ONE, and that is why it travels here rather than being re-derived. Both
-   * facts it carries — whether the grants govern this caller, and whether this machine has an
-   * operator password — are the boundary's, made from the transport's own account of where the socket
+   * facts it carries — whether the grants govern this caller, and whether its device holds a live
+   * passkey step-up — are the boundary's, made from the transport's own account of where the socket
    * came from. A handler that recomputed either from `request.loopback` or from a token class would
    * be writing a second, quieter definition of locality, which is the failure this whole layer is
    * built to prevent. The fleet mount did exactly that in four places before this existed.
@@ -197,9 +197,7 @@ export type WardenRemedyName = string;
  *
  * EVERY FIELD A POLICY *CAN* READ IS A FIELD IT *MIGHT* DECIDE FROM, so this carries only what the
  * question consumes. It deliberately does NOT carry the request: the header map is the whole header
- * map, which would hand a policy object the caller's live bearer token and the operator's
- * five-minute unlock — a value whose own comment says it must never reach anywhere it can outlive
- * those five minutes — and would leave nothing stopping a `decide` from reading
+ * map, which would hand a policy object the caller's live bearer token, and would leave nothing stopping a `decide` from reading
  * `x-ferretry-session-id` and deciding from it, which is the header-movable authority this whole axis
  * exists to close. `method`, `path` and `loopback` are absent for a quieter reason: no conjunct needs
  * them. The route's identity already arrives as `remedy` — one remedy per route — and `loopback` is

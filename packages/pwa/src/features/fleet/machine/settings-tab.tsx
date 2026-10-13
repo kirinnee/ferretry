@@ -50,7 +50,6 @@ export interface MachineSettingsTabProps extends MachineTabProps {
   readonly sources: readonly DaemonConnectionRecord[];
   /** Supplied in tests. */
   readonly browser?: Window;
-  readonly now?: () => number;
 }
 
 function NavRow({
@@ -97,8 +96,8 @@ function AgentPermissionsSection({
   const current = machine.agentPermissions;
   const pending = draft !== current;
   const old = pending ? current : changedFrom;
-  const save = (password: string | undefined): void => {
-    void changes.apply({ kind: 'machine.settings', agentPermissions: draft }, password).then(result => {
+  const save = (): void => {
+    void changes.apply({ kind: 'machine.settings', agentPermissions: draft }).then(result => {
       if (result.kind === 'refused') return;
       setChangedFrom(current);
       onSaved();
@@ -156,24 +155,23 @@ function AgentPermissionsSection({
 }
 
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
-  const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser, now } = props;
+  const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
   const route = useSettingsFlow(machineName, browser);
-  const access = useSetupAccess({ connection, createClient, ...(now === undefined ? {} : { now }) });
+  const access = useSetupAccess({ connection, createClient });
   const leave = (): void => route.open(null);
   const toRuntimes = (): void => route.goTo('runtimes');
-  const clock = now === undefined ? {} : { now };
   const flow: SettingsFlow | null = route.flow;
 
   if (flow === 'setup' || flow === 'import')
-    return <MachineFirstRun key={flow} {...props} {...clock} mode={flow} onDone={toRuntimes} onLeave={leave} />;
+    return <MachineFirstRun key={flow} {...props} mode={flow} onDone={toRuntimes} onLeave={leave} />;
   if (flow === 'clone')
-    return <CloneMachine {...props} {...clock} sources={sources} onDone={toRuntimes} onLeave={leave} />;
+    return <CloneMachine {...props} sources={sources} onDone={toRuntimes} onLeave={leave} />;
   if (flow === 'install-claude' || flow === 'install-codex')
     return (
       <InstallTool
         key={flow}
         {...props}
-        {...clock}
+       
         harness={flow === 'install-claude' ? 'claude' : 'codex'}
         onLeave={leave}
       />

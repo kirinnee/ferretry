@@ -12,9 +12,10 @@ import {
   type CredentialMinimum,
   jsonResponse,
   NO_GOVERNED_ROUTES_GUARD,
-  OPERATOR_UNLOCK_HEADER,
+  NO_STEP_UP_WITNESS,
   SESSION_ID_HEADER,
   type SocketRoute,
+  type StepUpWitness,
   WARDEN_CAPABILITY_HEADER,
   type WardenRemedyAuthorizer,
   type WardenRemedyDecision,
@@ -32,8 +33,6 @@ import { jsonBody, request } from './support.ts';
  */
 const UNGOVERNED: CallerGovernance = {
   governed: false,
-  passwordSet: false,
-  confirmChange: false,
   decide: () => ({ allowed: true, refusal: 'granted' }),
 };
 
@@ -289,9 +288,9 @@ describe('ApiDispatcher authorization', () => {
 
   it('should refuse a privileged route to a device a local proxy forwarded, and keep the host admin', async () => {
     // `tailscale serve` and `cloudflared` forward a remote caller from a LOOPBACK peer, so a loopback
-    // peer alone proved nothing: a paired phone behind one reached `PUT /v1/grants/password`. A device
-    // needs the carrier's proof; the admin token is a host file, so holding it over loopback is enough
-    // — which keeps `fy daemon password set` working on a daemon bound beyond loopback.
+    // peer alone proved nothing: a paired phone behind one reached a host-only route. A device needs
+    // the carrier's proof; the admin token is a host file, so holding it over loopback is enough — which
+    // keeps the host command line working on a daemon bound beyond loopback.
     // Arrange
     const dispatcher = dispatcherFor(echo('/v1/local', 'operator', 'POST', true));
     const proxied = (token: string) =>
@@ -557,7 +556,7 @@ describe('the operator grant layer', () => {
 
   it('should refuse a governed route with the guard’s own sentence and a reason code', async () => {
     // A denial that says only "forbidden" is the dead end this exists to remove: the reason code lets
-    // a client tell "the operator said no" from "you need to unlock" without parsing prose.
+    // a client tell "the operator said no" from "confirm with your passkey" without parsing prose.
     // Arrange
     const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, guard(false));
 
@@ -594,15 +593,14 @@ describe('the operator grant layer', () => {
     should(answered.status).equal(200);
   });
 
-  it('should hand the guard the transport’s loopback answer and the unlock header', async () => {
-    // NEITHER IS SELF-REPORTED IN A WAY THAT MATTERS: `loopback` is the transport's own account of
-    // where the socket came from — a relayed hop is never loopback — and the unlock is a value this
-    // daemon minted itself.
+  it('should hand the guard the transport’s loopback answer and no header-borne authority', async () => {
+    // `loopback` is the transport's own account of where the socket came from — a relayed hop is never
+    // loopback — and nothing a caller writes into a header reaches the presentation.
     // Arrange
-    const seen: { loopback?: boolean; unlock?: string }[] = [];
+    const seen: Record<string, unknown>[] = [];
     const recording: CapabilityGuard = {
       decide: (_demand, presentation) => {
-        seen.push({ loopback: presentation.loopback, unlock: presentation.unlock });
+        seen.push({ ...presentation });
         return { allowed: true, refusal: 'granted' };
       },
       governance: () => UNGOVERNED,
@@ -614,18 +612,102 @@ describe('the operator grant layer', () => {
     await dispatcher.dispatch(
       request({
         path: '/v1/fleet/plan',
-        headers: { authorization: 'Bearer admin-secret', 'x-ferretry-operator-unlock': 'fy_unlock_abc' },
+        headers: { authorization: 'Bearer admin-secret', 'x-ferretry-step-up': 'true' },
         loopback: true,
       }),
     );
 
+    // Assert — exactly four fields, and a bearer caller with no device has not stepped up.
+    should(seen).deepEqual([{ loopback: true, adminToken: true, actor: 'admin-ui', stepUp: false }]);
+  });
+
+  it('should present stepUp true for a device the witness holds and false for one it does not', async () => {
+    // The step-up is the daemon's own record, keyed by the session's PROVEN device and its app session.
+    // Arrange
+    const asked: { deviceId: string; appSession: string }[] = [];
+    const witness: StepUpWitness = {
+      held: subject => {
+        asked.push({ deviceId: subject.deviceId, appSession: subject.appSession });
+        return subject.deviceId === DEVICE.deviceId && subject.appSession === DEVICE.appSession;
+      },
+    };
+    const seen: boolean[] = [];
+    const recording: CapabilityGuard = {
+      decide: (_demand, presentation) => {
+        seen.push(presentation.stepUp);
+        return { allowed: true, refusal: 'granted' };
+      },
+      governance: () => UNGOVERNED,
+      explain: () => undefined,
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording, undefined, witness);
+
+    // Act
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: { ...DEVICE, appSession: 'app-two' } }));
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: { deviceId: 'device-2', appSession: 'app-one' } }));
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }));
+
+    // Assert — the deviceless caller never reaches the witness at all.
+    should(seen).deepEqual([true, false, false, false]);
+    should(asked).deepEqual([
+      { deviceId: 'device-1', appSession: 'app-one' },
+      { deviceId: 'device-1', appSession: 'app-two' },
+      { deviceId: 'device-2', appSession: 'app-one' },
+    ]);
+  });
+
+  it('should present no step-up for any device when no witness is wired', async () => {
+    // Arrange
+    const seen: boolean[] = [];
+    const recording: CapabilityGuard = {
+      decide: (_demand, presentation) => {
+        seen.push(presentation.stepUp);
+        return { allowed: true, refusal: 'granted' };
+      },
+      governance: () => UNGOVERNED,
+      explain: () => undefined,
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording);
+
+    // Act
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
     // Assert
-    should(seen).deepEqual([{ loopback: true, unlock: 'fy_unlock_abc' }]);
+    should(seen).deepEqual([false]);
+    should(NO_STEP_UP_WITNESS.held(DEVICE)).be.false();
+  });
+
+  it('should refuse step-up-required with the guard’s sentence and the step-up wire code', async () => {
+    // Arrange
+    const refusing: CapabilityGuard = {
+      decide: (_demand, presentation) =>
+        presentation.stepUp ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' },
+      governance: () => ({ governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) }),
+      explain: () => 'using the agent fleet needs a passkey confirmation from this device.',
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, refusing, undefined, {
+      held: subject => subject.appSession === 'app-one',
+    });
+
+    // Act
+    const refused = await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', device: { ...DEVICE, appSession: 'app-two' } }),
+    );
+    const served = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
+    // Assert
+    should(refused.status).equal(403);
+    should(jsonBody(refused)).containDeep({
+      code: 'grant_step_up_required',
+      error: 'using the agent fleet needs a passkey confirmation from this device.',
+    });
+    should(served.status).equal(200);
   });
 
   it('should present a device on a loopback peer as remote unless the carrier proved the host', async () => {
     // A PROXIED phone is a loopback peer. Presenting it as local made it `hostLocal` — free to widen its
-    // own grants — and ungoverned on a machine with no password. Only the carrier's proof moves it.
+    // own grants — and ungoverned. Only the carrier's proof moves it.
     // Arrange
     const seen: boolean[] = [];
     const recording: CapabilityGuard = {
@@ -728,8 +810,7 @@ describe('the warden remedy axis', () => {
 
   it('should hand the authorizer FOUR fields and nothing that could carry a credential', async () => {
     // THE CONTRACT IS THE COUNT. The request was removed because its header map is the WHOLE header
-    // map: a policy object would be handed the caller's live bearer and the operator's five-minute
-    // unlock, and nothing would stop a `decide` from reading a session header and deciding from it —
+    // map: a policy object would be handed the caller's live bearer, and nothing would stop a `decide` from reading a session header and deciding from it —
     // the header-movable authority this axis exists to close. Every field a policy CAN read is a
     // field it MIGHT decide from, so this pins the absences as hard as the presences.
     // Arrange
@@ -745,14 +826,13 @@ describe('the warden remedy axis', () => {
     await dispatcher.dispatch(
       wardenRequest({
         [WARDEN_CAPABILITY_HEADER]: 'cap-7',
-        [OPERATOR_UNLOCK_HEADER]: 'fy_unlock_abc',
         [CLIENT_HEADER]: 'cli',
       }),
     );
 
     // Assert
     should(Object.keys(seen[0] ?? {}).sort()).deepEqual(['actor', 'capability', 'params', 'remedy']);
-    for (const absent of ['request', 'method', 'path', 'loopback', 'headers', 'body', 'query', 'unlock'])
+    for (const absent of ['request', 'method', 'path', 'loopback', 'headers', 'body', 'query', 'stepUp'])
       should(seen[0]).not.have.property(absent);
   });
 
@@ -1193,19 +1273,24 @@ describe('the explicit guard for a table that names no capability', () => {
   it('should fail closed on every question, so a table that grows one cannot acquire a bypass', () => {
     // A route table with no capability declaration never asks this guard anything. The value of the
     // constant is entirely in what it answers if one is ADDED and the wiring is not: refused, and a
-    // caller reported as governed, owing a confirmation, with no axis allowed. It is asserted
+    // caller reported as governed, with no axis allowed. It is asserted
     // directly because the dispatcher can never reach `governance` through it — `decide` refuses
     // first — and an unreachable fail-closed answer is exactly the kind that rots unnoticed.
     // Act
     const decision = NO_GOVERNED_ROUTES_GUARD.decide(
       { capability: 'fleet', axis: 'use' },
-      { loopback: true, adminToken: true, actor: 'admin-cli' },
+      { loopback: true, adminToken: true, actor: 'admin-cli', stepUp: true },
     );
-    const governance = NO_GOVERNED_ROUTES_GUARD.governance({ loopback: true, adminToken: true, actor: 'admin-cli' });
+    const governance = NO_GOVERNED_ROUTES_GUARD.governance({
+      loopback: true,
+      adminToken: true,
+      actor: 'admin-cli',
+      stepUp: true,
+    });
 
     // Assert — the STRICTER reading of every field, for the most privileged caller there is.
     should(decision).deepEqual({ allowed: false, refusal: 'undetermined' });
-    should(governance).match({ governed: true, passwordSet: false, confirmChange: true });
+    should(governance.governed).be.true();
     should(governance.decide({ capability: 'fleet', axis: 'configure' })).deepEqual({
       allowed: false,
       refusal: 'undetermined',

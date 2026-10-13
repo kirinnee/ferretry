@@ -117,7 +117,7 @@ export interface MountedSubsystems {
    *  harness's own login against one credential's store with piped stdio, publishes a verification
    *  URL — and for Codex a device code — accepts one short-lived authorization code straight into that
    *  child's stdin, and lets the harness write its own credential into its own store. Every route here
-   *  is `configure`, with the operator password proved against the start. */
+   *  is `configure`, which a caller off this host passes only behind the passkey step-up. */
   readonly harnessLogin: HarnessLoginSubsystem;
   /** The account model's credentials: one login stored once, its status and usage, Check now, and
    *  sign-in targeting a credential id (docs/design/account-model.md §7). */

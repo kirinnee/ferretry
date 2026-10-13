@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { type FleetCredentialList, type FleetCredentialView, OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
+import type { FleetCredentialList, FleetCredentialView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
 import { AddLoginStep, addLoginFlowInput } from '../../../../../src/features/fleet/credentials/add-login.tsx';
@@ -22,14 +22,10 @@ import {
   claudeFlow,
   credential,
   machine,
-  machineWith,
-  NOW,
-  PASSWORD,
   READS,
   STUDIO,
   scripted,
   stagedFrom,
-  UNLOCK_TOKEN,
 } from '../account-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';
@@ -105,14 +101,13 @@ interface HostProps {
   readonly createClient: () => Promise<FleetClient>;
   readonly added: { id: string; next: StepperState | null }[];
   readonly pollMs?: number;
-  readonly now?: () => number;
 }
 
-function Host({ initial, harness, tool, createClient, added, pollMs, now = () => NOW }: HostProps) {
+function Host({ initial, harness, tool, createClient, added, pollMs }: HostProps) {
   const [state, setState] = useState<StepperState>(initial);
   const [done, setDone] = useState(false);
   const { data, reload } = useMachineData(STUDIO, createClient);
-  const changes = useAccountChanges({ connection: STUDIO, createClient, now });
+  const changes = useAccountChanges({ connection: STUDIO, createClient });
   if (done) return <p data-done="">added</p>;
   return (
     <MachineStepper
@@ -156,7 +151,7 @@ interface World {
 
 const open = async (
   world: World,
-  props: Partial<Pick<HostProps, 'initial' | 'harness' | 'tool' | 'pollMs' | 'now'>> = {},
+  props: Partial<Pick<HostProps, 'initial' | 'harness' | 'tool' | 'pollMs'>> = {},
 ) => {
   const calls: Call[] = [];
   const added: HostProps['added'] = [];
@@ -188,7 +183,6 @@ const open = async (
       added={added}
       {...(props.harness === undefined ? {} : { harness: props.harness })}
       {...(props.pollMs === undefined ? {} : { pollMs: props.pollMs })}
-      {...(props.now === undefined ? {} : { now: props.now })}
     />,
   );
   await settle();
@@ -415,42 +409,6 @@ describe('AddLoginStep · Sign in', () => {
     await view.unmount();
   });
 
-  it('when the sign-in is refused after the login was made, the login stays and its own panel carries the refusal', async () => {
-    let unlocks = 0;
-    const { view, calls } = await open(
-      {
-        existing: CREDENTIALS.credentials,
-        fresh: credential({ id: 'claude', email: 'new@example.com' }),
-        routes: {
-          'GET /v1/fleet/machine': (call: Call) =>
-            call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN
-              ? machineWith({})
-              : machineWith({ mayApply: false, applyRefusal: 'locked' }),
-          'POST /v1/grants/unlock': () => {
-            unlocks += 1;
-            return unlocks <= 2
-              ? { token: UNLOCK_TOKEN, expiresAt: '2026-10-13T09:00:00.000Z', ttlSeconds: 300 }
-              : new FyHttpError('Wrong operator password.', 403, 'grant_wrong_password');
-          },
-          [LOGIN]: claudeFlow('awaiting-code', 'claude'),
-        },
-      },
-      // After the unlock's expiry, so each guarded act mints its own; the third is turned away.
-      { harness: 'claude', now: () => NOW + 2 * 3_600_000 },
-    );
-    await type(
-      must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field'),
-      PASSWORD,
-    );
-    await click(submit(view.container), 'Sign in to Claude Code');
-    expect(only(calls, 'POST /v1/grants/unlock')).toHaveLength(3);
-    expect(only(calls, APPLY)).toHaveLength(1);
-    expect(only(calls, LOGIN)).toHaveLength(0);
-    expect(step(view.container)).toBe('signin');
-    expect(view.container.querySelector('[data-credential-sign-in="start"]')).not.toBeNull();
-    expect(text(view.container, '[data-change-refusal]')).toBeDefined();
-    await view.unmount();
-  });
 });
 
 describe('AddLoginStep · Label (E26)', () => {

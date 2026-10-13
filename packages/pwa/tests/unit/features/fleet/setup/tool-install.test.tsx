@@ -7,7 +7,7 @@ import { useSetupAccess } from '../../../../../src/features/fleet/setup/setup-ac
 import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
 import { ToolInstall } from '../../../../../src/features/fleet/setup/tool-install.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
-import { type Call, machineAnswer, NOTHING_INSTALLED, NOW, PASSWORD, STUDIO, scriptedClient } from './setup-support.ts';
+import { type Call, machineAnswer, NOTHING_INSTALLED, STUDIO, scriptedClient } from './setup-support.ts';
 
 const INSTALL_PATH = '/v1/fleet/machine/tools/install';
 
@@ -27,14 +27,6 @@ const BOTH_RUNNABLE: MissingTool[] = [
 const settle = async (): Promise<void> => {
   await interact(async () => {
     for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
-  });
-};
-
-const type = async (input: HTMLInputElement, value: string): Promise<void> => {
-  await interact(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
 
@@ -83,7 +75,7 @@ function Harness({
   });
   const [connection] = useState(() => STUDIO);
   const [createClient] = useState(() => async () => client);
-  const access = useSetupAccess({ connection, createClient, now: NOW });
+  const access = useSetupAccess({ connection, createClient });
   const [phase, setPhase] = useState<InstallPhase>(initial);
   return (
     <ToolInstall
@@ -130,7 +122,7 @@ describe('ToolInstall', () => {
       const submit = must(view.container.querySelector('[data-change-submit]'), 'submit') as HTMLButtonElement;
       expect(submit.textContent).toBe('Install 1 tool');
       expect(submit.disabled).toBe(false);
-      expect(view.container.querySelector('[data-change-password]')).toBeNull();
+      expect(view.container.querySelector('[data-change-step-up]')).toBeNull();
       expect(calls.filter(call => call.path === INSTALL_PATH)).toHaveLength(0);
     } finally {
       await view.unmount();
@@ -266,12 +258,12 @@ describe('ToolInstall', () => {
     }
   });
 
-  it('sends the operator password with the request when this browser is off the machine', async () => {
+  it('installs with the same request on a machine that wants a passkey: the carrier asks for it', async () => {
     const { calls, seen } = fresh();
     const view = await mount(
       <Harness
         answers={{
-          '/v1/fleet/machine': machineAnswer({ confirmation: 'operator-password' }),
+          '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
           [INSTALL_PATH]: { outcomes: [{ harness: 'claude', outcome: 'already-installed' }] },
         }}
         calls={calls}
@@ -281,17 +273,12 @@ describe('ToolInstall', () => {
     );
     try {
       await settle();
+      expect(view.container.querySelector('[data-change-step-up]')?.textContent).toContain('passkey');
       const submit = must(view.container.querySelector('[data-change-submit]'), 'submit') as HTMLButtonElement;
-      expect(submit.disabled).toBe(true);
-      const field = must(view.container.querySelector('[data-change-password]'), 'password field') as HTMLInputElement;
-      await type(field, PASSWORD);
       expect(submit.disabled).toBe(false);
       await click(submit, 'install');
 
-      expect(calls.find(call => call.path === INSTALL_PATH)?.body).toEqual({
-        harnesses: ['claude'],
-        operatorPassword: PASSWORD,
-      });
+      expect(calls.find(call => call.path === INSTALL_PATH)?.body).toEqual({ harnesses: ['claude'] });
       expect(view.container.querySelector('[data-setup-note="installed"]')).not.toBeNull();
     } finally {
       await view.unmount();

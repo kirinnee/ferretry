@@ -90,13 +90,13 @@ export interface ApiResponse {
  *
  * A LOOPBACK PEER IS NOT ENOUGH. A remote caller forwarded through a locally bound proxy (`tailscale
  * serve`, `cloudflared`) arrives as a loopback peer too, so `loopback` alone would let a paired phone
- * behind one widen its own grants and replace the operator password. Only the carrier's
+ * behind one widen its own grants. Only the carrier's
  * `privilegedLoopback` proof counts for a device.
  *
  * THE HOST'S ADMIN TOKEN OVER LOOPBACK IS THE ONE EXCEPTION, and it is load-bearing: reading that
  * token already requires this machine's disk, so a proxy cannot forward anybody who holds it who did
- * not already have the machine — and without it `fy daemon password set`, the escape hatch for a
- * forgotten password, would close on every daemon bound beyond loopback. A relayed hop is never
+ * not already have the machine — and without it `fy daemon config set`, the host's own way to widen a
+ * grant, would close on every daemon bound beyond loopback. A relayed hop is never
  * loopback, so neither branch can admit one.
  */
 export function arrivedOnHost(request: ApiRequest, adminToken: boolean): boolean {

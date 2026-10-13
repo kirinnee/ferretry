@@ -241,9 +241,9 @@ function PickStep(props: StepsProps & { kind: BuildKind }) {
   const picks = draft.picks[kind];
   const problem = form === undefined ? undefined : draftProblem(form, allComponents(catalog));
 
-  const saveNew = (operatorPassword: string | undefined) => {
+  const saveNew = () => {
     if (form === undefined) return;
-    void changes.apply(componentChange(form, true), operatorPassword).then(async result => {
+    void changes.apply(componentChange(form, true)).then(async result => {
       if (result.kind !== 'applied') return;
       const created = form.name.trim();
       await props.reload();
@@ -396,8 +396,8 @@ function NameStep(props: StepsProps) {
   const id = useId();
   const changes = useAccountChanges({ connection, createClient });
   const problem = editing === undefined ? profileNameProblem(draft.name, catalog.profiles.profiles) : undefined;
-  const save = (operatorPassword: string | undefined) =>
-    void changes.apply(profileChange(draft, editing), operatorPassword).then(result => {
+  const save = () =>
+    void changes.apply(profileChange(draft, editing)).then(result => {
       if (result.kind !== 'applied') return;
       const saved = editing ?? draft.name.trim();
       props.onBuilt(saved, returnToParent(editing === undefined ? saveForReuse(state, `Profile ${saved}`) : state));

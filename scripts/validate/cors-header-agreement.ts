@@ -3,12 +3,12 @@
  *
  * ## THE DEFECT
  *
- * `x-ferretry-operator-unlock` became part of every governed mutation the operator password
- * authorizes — applying a fleet proposal, unlocking or locking a grant — and nothing added it to
- * `CORS_REQUEST_HEADERS` in `packages/daemon/src/adapters/api/bun-api-server.ts`. The consequence was
- * not a degraded header, it was an unreachable route: `corsPreflight` refused the whole `OPTIONS`,
- * the refusal carried no `access-control-allow-origin`, and the mutation never left Chrome. The
- * hosted PWA could not apply a fleet proposal or change a grant at all.
+ * A custom `x-` header became part of every governed mutation a browser sends — applying a fleet
+ * proposal, changing a grant — and nothing added it to `CORS_REQUEST_HEADERS` in
+ * `packages/daemon/src/adapters/api/bun-api-server.ts`. The consequence was not a degraded header,
+ * it was an unreachable route: `corsPreflight` refused the whole `OPTIONS`, the refusal carried no
+ * `access-control-allow-origin`, and the mutation never left Chrome. The hosted PWA could not apply a
+ * fleet proposal or change a grant at all.
  *
  * Every tier stayed green through it. The browser's own tests send their headers to a fixture that
  * answers whatever it is asked, and the daemon's tests exercise the transport with the headers the
@@ -30,7 +30,7 @@
  * every custom header it defines, and it is what makes the pass exact rather than a guess about which
  * string in a source file is a header name. A future client that sends a NON-`x-` header — an
  * `if-none-match`, a `prefer` — is outside what this pass can see, and it would break in production
- * exactly the way the unlock header did. Extending the observation set means reading the argument of
+ * exactly the way that header did. Extending the observation set means reading the argument of
  * every `headers.set` and the keys of every `headers:` object, which is `route-agreement`-grade
  * expression parsing rather than the literal pass below.
  *

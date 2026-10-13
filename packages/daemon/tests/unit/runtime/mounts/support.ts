@@ -1599,10 +1599,9 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   };
 }
 
-/** What a grant fixture starts from: the recorded decision, and whether a password is set. */
+/** What a grant fixture starts from: the recorded decision. */
 export interface GrantWorld {
   readonly grants?: CapabilityGrants;
-  readonly password?: string;
   /** Set to make the document unreadable, so a fixture can prove the fail-closed reading. */
   readonly broken?: boolean;
   readonly nowMs?: number;
@@ -1618,8 +1617,6 @@ export interface GrantWorld {
 export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
   let recorded = world.grants ?? DEFAULT_CAPABILITY_GRANTS;
   const recordedChanges: GrantAuditEntry[] = [];
-  let stored = world.password;
-  let minted = 0;
   return new CapabilityGrantService({
     document: {
       read: async () => {
@@ -1629,19 +1626,6 @@ export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
       written: async () => (world.grants === undefined ? [] : DAEMON_CAPABILITIES),
       write: async next => {
         recorded = next;
-      },
-    },
-    passwords: {
-      isSet: async () => stored !== undefined,
-      set: async password => {
-        stored = password;
-      },
-      verify: async candidate => stored !== undefined && candidate === stored,
-    },
-    tokens: {
-      mint: () => {
-        minted += 1;
-        return `fy_unlock_${String(minted).padStart(22, 'a')}`;
       },
     },
     clock: { nowMs: () => world.nowMs ?? 1_700_000_000_000 },
@@ -1678,8 +1662,6 @@ export const GRANTED: CapabilityGuard = {
   // that cannot exist.
   governance: () => ({
     governed: false,
-    passwordSet: false,
-    confirmChange: false,
     decide: () => ({ allowed: true, refusal: 'granted' }),
   }),
   explain: () => undefined,
@@ -1696,8 +1678,6 @@ export const NARROWED: CapabilityGuard = {
     demand.axis === 'configure' ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' },
   governance: () => ({
     governed: true,
-    passwordSet: true,
-    confirmChange: true,
     decide: (demand: CapabilityDemand) =>
       demand.axis === 'configure' ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' },
   }),
@@ -1705,19 +1685,16 @@ export const NARROWED: CapabilityGuard = {
 };
 
 /**
- * A guard for a caller the operator's grants DO govern, on a machine with an operator password.
+ * A guard for a caller the operator's grants DO govern.
  *
- * The remote paired browser, in other words — and, since a machine cannot pair a device until a
- * password exists (`PairingService.mint`), the only shape a remote caller comes in. It permits every
- * capability, exactly as {@link GRANTED} does, so a test using it is about the per-change
- * confirmation rather than about the grant document.
+ * The remote paired browser, in other words. It permits every capability, exactly as {@link GRANTED}
+ * does, so a test using it is about what a handler does for a governed caller rather than about the
+ * grant document.
  */
 export const GOVERNED: CapabilityGuard = {
   decide: () => ({ allowed: true, refusal: 'granted' }),
   governance: () => ({
     governed: true,
-    passwordSet: true,
-    confirmChange: true,
     decide: () => ({ allowed: true, refusal: 'granted' }),
   }),
   explain: () => undefined,

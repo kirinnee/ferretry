@@ -4669,8 +4669,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * Driving a harness's own sign-in from a browser, holding no token: the harness's own login against
    * one credential's store. It is given THIS PROCESS'S ENVIRONMENT, which the service sanitizes before
    * any child sees it, so a sign-in started from inside an agent session cannot authenticate against
-   * that session's login. The confirmation is routed to the one grant service this daemon has, so the
-   * attempt a wrong password spends is one of the same five an unlock spends.
+   * that session's login. Who may start one is the route's `fleet.configure`, which holds a caller
+   * off this host behind the passkey step-up.
    */
   const harnessLogin = new HarnessLoginService({
     credentialTargets: {
@@ -7028,8 +7028,8 @@ export async function checkConfiguration(
    * not change the exit code, exactly as the harness preflight does not: a daemon with any grant
    * posture starts perfectly, and this reports rather than judges.
    *
-   * IT READS, IT DOES NOT CREATE. `passwordSet` is one existence check through the same verifier
-   * port the grant service uses, so a query stays a query and there is no second source to drift.
+   * IT READS, IT DOES NOT CREATE: the posture is a function of the document already read, so a query
+   * stays a query and there is no second source to drift.
    */
   /**
    * THE CARRIER POSTURE, BEFORE THE ADDRESS AND BEFORE THE GRANTS.

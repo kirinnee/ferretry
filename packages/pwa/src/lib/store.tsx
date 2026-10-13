@@ -769,6 +769,21 @@ export function useAppStore(): AppStore {
  * through, and the answer is the plain network.
  */
 /**
+ * The app's ONE passkey prompt, as a function a screen can call BEFORE a press (`store.stepUp.require`).
+ *
+ * Outside a provider there is no prompt and the answer is `undefined`, so a screen rendered on its own
+ * offers no step-up control rather than one that can never be answered. It is the same gate the carrier
+ * asks on a refused request, so there is still exactly one prompt component.
+ */
+export function useStepUpRequest(): ((daemon: DaemonConnection) => Promise<boolean>) | undefined {
+  const store = useContext(StoreContext);
+  return useMemo(
+    () => (store === null ? undefined : async (daemon: DaemonConnection) => await store.stepUp.require(daemon)),
+    [store],
+  );
+}
+
+/**
  * The typed client a screen reaches a daemon through: the store's own pool, so it rides the carrier
  * router and a session the device key opened.
  *

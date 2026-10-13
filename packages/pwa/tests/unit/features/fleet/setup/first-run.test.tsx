@@ -14,22 +14,17 @@ import {
   machineAnswer,
   machineView,
   NOTHING_INSTALLED,
-  NOW,
-  PASSWORD,
   runtimes,
   runtimeView,
   STUDIO,
   scan,
   scriptedClient,
-  UNLOCK_TOKEN,
-  UNLOCKED,
 } from './setup-support.ts';
 
 const SCAN_PATH = '/v1/fleet/setup/scan';
 const RUNTIMES_PATH = '/v1/fleet/runtimes';
 const CHANGES_PATH = '/v1/fleet/proposals';
 const INSTALL_PATH = '/v1/fleet/machine/tools/install';
-const UNLOCK_HEADER = 'x-ferretry-operator-unlock';
 
 const STAGED_IMPORT = {
   id: 'fy_fprop_abcdefghijklmnopqrstuv',
@@ -101,7 +96,6 @@ const start = async (client: FleetClient, options: Partial<Options> = {}): Promi
       createClient={createClient}
       onDone={() => done.push(1)}
       onLeave={() => left.push(1)}
-      now={NOW}
       pollMs={5}
     />
   );
@@ -157,15 +151,11 @@ describe('MachineFirstRun: reading the scan', () => {
     }
   });
 
-  it('a locked browser looks at the machine with its password first', async () => {
+  it('a browser that will be asked for a passkey looks at the machine at once, with no password field', async () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/machine': (call: Call) =>
-          call.headers[UNLOCK_HEADER] === UNLOCK_TOKEN
-            ? machineAnswer()
-            : machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
-        '/v1/grants/unlock': UNLOCKED,
+        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
         [SCAN_PATH]: scan(),
         [RUNTIMES_PATH]: runtimes([]),
       },
@@ -173,19 +163,8 @@ describe('MachineFirstRun: reading the scan', () => {
     );
     const h = await start(client);
     try {
-      expect(calls.some(call => call.path === SCAN_PATH)).toBe(false);
-      expect(h.text('[data-first-run-locked]')).toContain(
-        'Ferretry needs to look at Claude Code and Codex on studio-mac first.',
-      );
-      expect(h.text('[data-change-submit]')).toBe('Look at studio-mac');
-      await typeInto(h.q('[data-change-password]'), PASSWORD, 'password');
-      await clickOn(h.q('[data-change-submit]'), 'look');
-      expect(calls.find(call => call.path === '/v1/grants/unlock')?.body).toEqual({ password: PASSWORD });
-      const scanCall = must(
-        calls.find(call => call.path === SCAN_PATH),
-        'scan call',
-      );
-      expect(scanCall.headers[UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
+      expect(calls.some(call => call.path === SCAN_PATH)).toBe(true);
+      expect(h.q('[data-change-password]')).toBeNull();
       expect(step(h)).toBe('tools');
     } finally {
       await h.view.unmount();

@@ -8,17 +8,14 @@
  * is the login the import shares in place. So it makes that login first when this machine has none yet
  * (`credential.add` with `store: host`, a reviewed change like any other) and the import that follows
  * reuses it rather than adding a second one. The sign-in itself is the existing web sign-in, unchanged.
- *
- * The operator password, when this browser owes it, is typed once and spent on both the change and the
- * sign-in start, then forgotten — the same way Add a login spends it.
  */
 
 import type { FleetCredentialView } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Button } from '../../../shell/primitives.tsx';
-import { readFleetCredentials } from '../credentials-api.ts';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
+import { readFleetCredentials } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -55,49 +52,36 @@ export function FirstRunSignIn({
 }: FirstRunSignInProps) {
   const { changes } = access;
   const [credential, setCredential] = useState<FleetCredentialView | null>(null);
-  const [started, setStarted] = useState<{ readonly flow: CredentialLoginFlow; readonly unlock?: string } | null>(null);
+  const [started, setStarted] = useState<CredentialLoginFlow | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const name = SETUP_HARNESS_NAMES[harness];
 
   /** The person's own login on this machine: the one already listed, or one made now. */
-  const ownLogin = async (password: string | undefined): Promise<FleetCredentialView | undefined> => {
-    const listed = await access.read((client, unlock) => readFleetCredentials(client, unlock), password);
+  const ownLogin = async (): Promise<FleetCredentialView | undefined> => {
+    const listed = await access.read(client => readFleetCredentials(client));
     if (listed.kind === 'refused') {
-      if (!listed.passwordRejected) setRefusal(listed.sentence);
+      setRefusal(listed.sentence);
       return undefined;
     }
     const existing = hostLogin(listed.value.credentials, harness);
     if (existing !== undefined) return existing;
     const id = freeName(`${harness}-you`, new Set(listed.value.credentials.map(candidate => candidate.id)));
-    const made = await changes.apply({ kind: 'credential.add', id, harness, store: 'host' }, password);
+    const made = await changes.apply({ kind: 'credential.add', id, harness, store: 'host' });
     if (made.kind === 'refused') return undefined;
-    const after = await access.read((client, unlock) => readFleetCredentials(client, unlock));
+    const after = await access.read(client => readFleetCredentials(client));
     return after.kind === 'done' ? hostLogin(after.value.credentials, harness) : undefined;
   };
 
-  const begin = async (password: string | undefined): Promise<void> => {
+  const begin = async (): Promise<void> => {
     setRefusal(null);
     setBusy(true);
     try {
-      const login = await ownLogin(password);
+      const login = await ownLogin();
       if (login === undefined) return;
       setCredential(login);
-      let unlock: string | undefined;
-      const flow = await access.act((client, authorization) => {
-        unlock = authorization.unlock;
-        return startCredentialSignIn(
-          client,
-          {
-            credentialId: login.id,
-            ...(authorization.operatorPassword === undefined
-              ? {}
-              : { operatorPassword: authorization.operatorPassword }),
-          },
-          authorization.unlock,
-        );
-      }, password);
-      if (flow.kind === 'done') setStarted({ flow: flow.value, ...(unlock === undefined ? {} : { unlock }) });
+      const flow = await access.act(client => startCredentialSignIn(client, { credentialId: login.id }));
+      if (flow.kind === 'done') setStarted(flow.value);
     } finally {
       setBusy(false);
     }
@@ -131,7 +115,7 @@ export function FirstRunSignIn({
           busyLabel="Starting sign-in…"
           refusal={changes.refusal}
           submitLabel={`Sign in to ${name}`}
-          onSubmit={password => void begin(password)}
+          onSubmit={() => void begin()}
         >
           <Button type="button" data-first-run-sign-in-close="" onClick={onClose}>
             Not now
@@ -145,12 +129,7 @@ export function FirstRunSignIn({
             connection={connection}
             createClient={createClient}
             changes={changes}
-            {...(started === null
-              ? {}
-              : {
-                  initialFlow: started.flow,
-                  ...(started.unlock === undefined ? {} : { initialUnlock: started.unlock }),
-                })}
+            {...(started === null ? {} : { initialFlow: started })}
             {...(pollMs === undefined ? {} : { pollMs })}
             onSignedIn={onSignedIn}
           />

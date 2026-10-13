@@ -22,12 +22,7 @@ export {
   machineAnswer,
   STAGED,
   scriptedClient,
-  UNLOCK_TOKEN,
-  UNLOCKED,
 } from '../shell/change-support.ts';
-
-export const NOW = () => Date.parse('2026-10-13T08:00:00.000Z');
-export const PASSWORD = 'correct-horse-battery';
 
 export const STUDIO = daemonConnection({
   daemonId: 'studio',
@@ -53,7 +48,7 @@ export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMac
     ],
     runtimeCount: 2,
     runningSessions: 0,
-    authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+    authority: { mayApply: true, applyRefusal: 'granted' },
     ...overrides,
   });
 

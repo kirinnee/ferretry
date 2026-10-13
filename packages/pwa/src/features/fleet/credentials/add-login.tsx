@@ -7,8 +7,7 @@
  * as a sub-stepper of Add a runtime ("+ Add a new login", E12), which gets the new login back picked.
  *
  * One click makes the login and starts its sign-in: the empty login is added as a reviewed change
- * (`credential.add`, kept by Ferretry on this machine) and the harness's sign-in is started for it with
- * the same typed password, which is never kept past that click.
+ * (`credential.add`, kept by Ferretry on this machine) and the harness's sign-in is started for it.
  */
 
 import type { FleetMachineView } from '@ferretry/protocol';
@@ -101,7 +100,7 @@ export function AddLoginStep({
 }: AddLoginStepProps) {
   const [harness, setHarness] = useState<HarnessKind | null>(fixedHarness ?? null);
   const [credentialId, setCredentialId] = useState<string | null>(null);
-  const [started, setStarted] = useState<{ readonly flow: CredentialLoginFlow; readonly unlock?: string } | null>(null);
+  const [started, setStarted] = useState<CredentialLoginFlow | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [labels, setLabels] = useState<{ older: string; newer: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -111,30 +110,21 @@ export function AddLoginStep({
   const credential = data?.credentials.credentials.find(candidate => candidate.id === credentialId);
   const twin = credential === undefined || data === null ? undefined : sameEmailLogin(data.credentials, credential);
 
-  /** Make the empty login, then start its sign-in with the same typed password. */
-  const create = async (operatorPassword: string | undefined): Promise<void> => {
+  /** Make the empty login, then start its sign-in. */
+  const create = async (): Promise<void> => {
     if (harness === null) return;
     setRefusal(null);
     const id = nextCredentialId(data?.credentials ?? null, harness);
-    const made = await changes.apply({ kind: 'credential.add', id, harness }, operatorPassword);
+    const made = await changes.apply({ kind: 'credential.add', id, harness });
     if (made.kind === 'refused') return;
     setCredentialId(id);
     onChange(saveForReuse(state, `${HARNESS_NAMES[harness]} login`));
     await reload();
-    const authorization = await changes.authorize(operatorPassword);
-    if (authorization.kind === 'refused') return;
     setBusy(true);
     try {
       const client = await createClient(connection);
-      const started = await startCredentialSignIn(
-        client,
-        {
-          credentialId: id,
-          ...(authorization.operatorPassword === undefined ? {} : { operatorPassword: authorization.operatorPassword }),
-        },
-        authorization.unlock,
-      );
-      setStarted({ flow: started, ...(authorization.unlock === undefined ? {} : { unlock: authorization.unlock }) });
+      const started = await startCredentialSignIn(client, { credentialId: id });
+      setStarted(started);
     } catch (error) {
       // The login exists; its own page can sign it in.
       setRefusal(changeRefusalSentence(error));
@@ -159,17 +149,11 @@ export function AddLoginStep({
     onChange(goToStep(withSteps(state, [...flow.steps.filter(step => step.id !== LABEL.id), LABEL]), LABEL.id));
   };
 
-  const saveLabels = async (operatorPassword: string | undefined): Promise<void> => {
+  const saveLabels = async (): Promise<void> => {
     if (credential === undefined || twin === undefined || labels === null) return;
-    const first = await changes.apply(
-      { kind: 'credential.label', id: twin.id, label: labels.older.trim() },
-      operatorPassword,
-    );
+    const first = await changes.apply({ kind: 'credential.label', id: twin.id, label: labels.older.trim() });
     if (first.kind === 'refused') return;
-    const second = await changes.apply(
-      { kind: 'credential.label', id: credential.id, label: labels.newer.trim() },
-      operatorPassword,
-    );
+    const second = await changes.apply({ kind: 'credential.label', id: credential.id, label: labels.newer.trim() });
     if (second.kind === 'refused') return;
     await reload();
     finish(state);
@@ -274,7 +258,7 @@ export function AddLoginStep({
           refusal={changes.refusal}
           submitLabel="Save labels"
           disabled={problem !== null}
-          onSubmit={password => void saveLabels(password)}
+          onSubmit={() => void saveLabels()}
         />
       </div>
     );
@@ -312,12 +296,7 @@ export function AddLoginStep({
           connection={connection}
           createClient={createClient}
           changes={changes}
-          {...(started === null
-            ? {}
-            : {
-                initialFlow: started.flow,
-                ...(started.unlock === undefined ? {} : { initialUnlock: started.unlock }),
-              })}
+          {...(started === null ? {} : { initialFlow: started })}
           {...(pollMs === undefined ? {} : { pollMs })}
           onSignedIn={() => {
             setSignedIn(true);
@@ -338,7 +317,7 @@ export function AddLoginStep({
         busyLabel="Starting sign-in…"
         refusal={changes.refusal}
         submitLabel={`Sign in to ${name}`}
-        onSubmit={password => void create(password)}
+        onSubmit={() => void create()}
       />
     </div>
   );

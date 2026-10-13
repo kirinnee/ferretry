@@ -8,7 +8,6 @@ import type { FleetSetupScan } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetSetupScan } from '../setup-api.ts';
-import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { type StepperState, startStepper } from '../shell/stepper-model.ts';
@@ -25,13 +24,11 @@ export interface InstallToolProps extends MachineTabProps {
   readonly harness: SetupHarness;
   /** Back to Settings: after Done, or when the person leaves. */
   readonly onLeave: () => void;
-  readonly now?: () => number;
 }
 
 export function InstallTool(props: InstallToolProps) {
-  const { harness, machineName, connection, createClient, online, checking, onRetry, onLeave, now } = props;
-  const access = useSetupAccess({ connection, createClient, ...(now === undefined ? {} : { now }) });
-  const { changes } = access;
+  const { harness, machineName, connection, createClient, online, checking, onRetry, onLeave } = props;
+  const access = useSetupAccess({ connection, createClient });
   const name = SETUP_HARNESS_NAMES[harness];
   const [scan, setScan] = useState<FleetSetupScan | null>(null);
   const [issue, setIssue] = useState<string | null>(null);
@@ -48,35 +45,21 @@ export function InstallTool(props: InstallToolProps) {
 
   const latest = useRef(access);
   latest.current = access;
-  const read = useCallback((password?: string): void => {
+  const read = useCallback((): void => {
     setIssue(null);
-    void latest.current
-      .read((client, unlock) => readFleetSetupScan(client, unlock), password)
-      .then(answer => {
-        if (answer.kind === 'done') setScan(answer.value);
-        else if (!answer.passwordRejected) setIssue(answer.sentence);
-      });
+    void latest.current.read(client => readFleetSetupScan(client)).then(answer => {
+      if (answer.kind === 'done') setScan(answer.value);
+      else setIssue(answer.sentence);
+    });
   }, []);
   const started = useRef(false);
-  const authorityKnown = changes.authority !== null;
   useEffect(() => {
-    if (!authorityKnown || access.locked || started.current) return;
+    if (started.current) return;
     started.current = true;
     read();
-  }, [authorityKnown, access.locked, read]);
+  }, [read]);
 
   const body = (): ReactNode => {
-    if (access.locked)
-      return (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel={`Look at ${machineName}`}
-          onSubmit={password => read(password)}
-        />
-      );
     if (issue !== null)
       return (
         <SetupNote live tone="warn" name="scan-failed" title={`Couldn’t look at ${machineName}`}>
