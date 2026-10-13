@@ -107,17 +107,25 @@ describe('StatePasskeyStore', () => {
     should((await store.list(deviceTwo)).map(entry => entry.signCount)).deepEqual([0]);
   });
 
-  it('should keep a credential id unique across the whole document, whichever device registers it', async () => {
+  it('should bind a credential id to the device that registered it, and never re-point it to another', async () => {
+    // A synced passkey, or an id another device learned: re-pointing it would hand this device's passkey
+    // to whoever registered the same id. It used to be re-pointed.
     // Arrange
     const { store } = await fixture('passkeys-global-unique');
     await store.add(passkey('cred-one'));
 
     // Act
-    await store.add(passkey('cred-one', deviceTwo));
+    const moved = await store.add(passkey('cred-one', deviceTwo)).then(
+      () => 'moved',
+      (error: unknown) => (error instanceof PasskeyStoreDamaged ? error.message : 'other'),
+    );
 
     // Assert
-    should(await store.list(deviceOne)).deepEqual([]);
-    should(await store.list(deviceTwo)).deepEqual([passkey('cred-one', deviceTwo)]);
+    should(moved).equal('that credential already belongs to another device');
+    should(await store.list(deviceOne)).deepEqual([passkey('cred-one')]);
+    should(await store.list(deviceTwo)).deepEqual([]);
+    should(await store.holder('cred-one')).equal(deviceOne);
+    should(await store.holder('cred-unknown')).be.undefined();
   });
 
   it('should treat a counter update for a passkey that is gone as nothing to do', async () => {

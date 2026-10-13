@@ -19,7 +19,11 @@ import {
   type GrantAuditEntry,
   GrantError,
 } from '../../../../src/lib/grants/index.ts';
-import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
+import {
+  type DeviceGrantSubsystem,
+  type PairingSubsystem,
+  pairingRoutes,
+} from '../../../../src/lib/runtime/mounts/pairing.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { deviceGrantsOver, grantSubsystem } from './support.ts';
 
@@ -82,9 +86,15 @@ async function mount(world: World = {}) {
     admin: 'admin-secret',
     devices: { has: (id: string) => devices.has(id), grants: (id: string) => devices.get(id) },
   };
-  const dispatcher = new ApiDispatcher(new ApiRouter(pairingRoutes(pairing, world.service ?? service)), credentials, grants, undefined, {
-    held: () => world.steppedUp ?? true,
-  });
+  const dispatcher = new ApiDispatcher(
+    new ApiRouter(pairingRoutes(pairing, world.service ?? service)),
+    credentials,
+    grants,
+    undefined,
+    {
+      held: () => world.steppedUp ?? true,
+    },
+  );
   return { dispatcher, devices, audit, service, rechecks: () => rechecks };
 }
 
@@ -372,8 +382,9 @@ describe('the device-grant service on its own', () => {
         throw error;
       },
     });
-    const undetermined = (await mount({ caller: MANAGER, service: failing(new GrantError('unavailable', 'unreadable')) }))
-      .dispatcher;
+    const undetermined = (
+      await mount({ caller: MANAGER, service: failing(new GrantError('unavailable', 'unreadable')) })
+    ).dispatcher;
     const broken = (await mount({ caller: MANAGER, service: failing(new Error('disk on fire')) })).dispatcher;
 
     // Act

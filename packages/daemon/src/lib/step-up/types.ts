@@ -22,6 +22,13 @@ export interface StoredPasskey {
 /** Where passkeys are kept. Revoking a device forgets its passkeys through `forgetDevice`. */
 export interface PasskeyStore {
   list(deviceId: string): Promise<readonly StoredPasskey[]>;
+  /**
+   * Which device holds this credential, on ANY device, or nothing. A credential belongs to exactly one
+   * device: a synced passkey (iCloud Keychain, Google Password Manager) puts the same credential on
+   * other phones, and none of them may use it as their own.
+   */
+  holder(credentialId: string): Promise<string | undefined>;
+  /** Stores a new credential. Refuses — never overwrites — one another device already holds. */
   add(passkey: StoredPasskey): Promise<void>;
   /** Records a verified assertion's counter. A passkey that is gone meanwhile is not an error. */
   updateSignCount(deviceId: string, credentialId: string, signCount: number): Promise<void>;

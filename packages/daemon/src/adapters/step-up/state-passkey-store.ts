@@ -59,11 +59,21 @@ export class StatePasskeyStore implements PasskeyStore {
     return (await this.read()).filter(passkey => passkey.deviceId === deviceId);
   }
 
+  async holder(credentialId: string): Promise<string | undefined> {
+    return (await this.read()).find(passkey => passkey.credentialId === credentialId)?.deviceId;
+  }
+
+  /**
+   * A credential belongs to one device. Adding one another device already holds is refused rather than
+   * re-pointed: re-pointing would hand that device's passkey to whoever registered the same id.
+   */
   async add(passkey: StoredPasskey): Promise<void> {
-    await this.mutate(current => [
-      ...current.filter(existing => existing.credentialId !== passkey.credentialId),
-      RecordSchema.parse(passkey),
-    ]);
+    await this.mutate(current => {
+      const held = current.find(existing => existing.credentialId === passkey.credentialId);
+      if (held !== undefined && held.deviceId !== passkey.deviceId)
+        throw new PasskeyStoreDamaged('that credential already belongs to another device');
+      return [...current.filter(existing => existing.credentialId !== passkey.credentialId), RecordSchema.parse(passkey)];
+    });
   }
 
   async updateSignCount(deviceId: string, credentialId: string, signCount: number): Promise<void> {

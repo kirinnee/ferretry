@@ -1,4 +1,9 @@
-import { DEFAULT_DEVICE_GRANTS, type PairedDevice, type PairedDeviceId, type PasskeyWindowOpened } from '@ferretry/protocol';
+import {
+  DEFAULT_DEVICE_GRANTS,
+  type PairedDevice,
+  type PairedDeviceId,
+  type PasskeyWindowOpened,
+} from '@ferretry/protocol';
 import type { IPasskeyGateway, IPasskeyLocalTime, IPasskeyOutput } from '../../../src/lib/passkey/ports';
 
 export const PIXEL_ID = `fy_device_id_${'a'.repeat(22)}` as PairedDeviceId;

@@ -48,6 +48,10 @@ class MemoryStore implements PasskeyStore {
     return this.held.filter(passkey => passkey.deviceId === id);
   }
 
+  async holder(credentialId: string): Promise<string | undefined> {
+    return this.held.find(passkey => passkey.credentialId === credentialId)?.deviceId;
+  }
+
   async add(passkey: StoredPasskey): Promise<void> {
     this.held = [...this.held.filter(existing => existing.credentialId !== passkey.credentialId), passkey];
   }
@@ -409,7 +413,13 @@ describe('step-up routes', () => {
     const lookalike = { 'x-forwarded-for': '127.0.0.1', host: 'localhost' };
     const asBrowser = (arrival: Record<string, unknown>) =>
       dispatcher.dispatch(
-        request({ method: 'POST', path: '/v1/passkeys/registration-window', body: windowBody, ...asDevice, ...arrival }),
+        request({
+          method: 'POST',
+          path: '/v1/passkeys/registration-window',
+          body: windowBody,
+          ...asDevice,
+          ...arrival,
+        }),
       );
 
     // Act — a browser on a host-proven carrier, on a loopback peer, behind a spoofed header; then the owner

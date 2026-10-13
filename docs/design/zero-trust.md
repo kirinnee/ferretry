@@ -434,6 +434,12 @@ is holding it; (b) any device **with a current step-up** (adds a second authenti
 whose window **the owner re-opened at the machine** with `fy passkey window <device>` — ten minutes, one
 passkey, audited (B4). Lost every passkey? That last path recovers it without pairing again.
 
+**A credential belongs to exactly one device.** A step-up only accepts a credential stored for the device
+whose session presents it, and a registration refuses a credential id ANY device already holds. So a
+synced passkey (iCloud Keychain, Google Password Manager) that lands on a second phone cannot step up
+that phone, and a device that learned another device's credential id cannot re-register it and take the
+passkey over.
+
 **As built** (`feat/zt-passkey-ui`), the app's side of registration:
 
 - **Settings → Daemons → Security** is one panel per machine (`#security` deep-links to it, and the
