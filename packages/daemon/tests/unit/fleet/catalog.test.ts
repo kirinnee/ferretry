@@ -42,6 +42,7 @@ const factsOf = (overrides: Partial<CatalogFacts> = {}): CatalogFacts => ({
   tools: TOOLS,
   runningSessions: 0,
   acceptsAutoPermissionMode: true,
+  userHome: '/home/me',
   ...overrides,
 });
 

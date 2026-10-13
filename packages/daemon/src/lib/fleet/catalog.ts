@@ -21,10 +21,12 @@ import {
   type FlatLayer,
   fixedLayerFor,
   flattenProfile,
+  freeName,
   HARNESS_DISPLAY_NAMES,
   type HarnessKind,
   type LayerReferenceText,
   looksSecret,
+  parseLayerReference,
   type PartialSupport,
   type ResolvedProfile,
   resolveProfile,
@@ -36,6 +38,7 @@ import type {
   FleetCatalogAct,
   FleetCatalogFormat,
   FleetComponentCatalog,
+  FleetComponentContent,
   FleetComponentDetail,
   FleetCredentialStatusWord,
   FleetEnvEntry,
@@ -43,8 +46,11 @@ import type {
   FleetLayerConflict,
   FleetLayeredProfileCatalog,
   FleetMachineView,
+  FleetProfileDraftRequest,
+  FleetProfileDraftView,
   FleetRuntimeCatalog,
   FleetRuntimeModelSet,
+  FleetSettingsEntry,
   FleetStackView,
 } from '@ferretry/protocol';
 
@@ -143,6 +149,10 @@ export interface CatalogFacts {
   /** Instructions text and skill frontmatter, for partial support (K5). */
   readonly instructionBodies?: Readonly<Record<string, string>>;
   readonly skillFrontmatter?: Readonly<Record<string, readonly string[]>>;
+  /** Each hooks component's file text, for the edit screen and E30. */
+  readonly hooksTexts?: Readonly<Record<string, string>>;
+  /** This machine's user home: a path under it is not one to check (E30). */
+  readonly userHome: string;
   /** MCP commands this machine does not have (K6, E8). */
   readonly missingCommands?: ReadonlySet<string>;
   /** Each credential's status word, from the credentials surface's own reading. */
@@ -233,6 +243,113 @@ const partialSupportOf = (model: AccountModel, facts: CatalogFacts): readonly Pa
     ...(facts.skillFrontmatter === undefined ? {} : { skillFrontmatter: facts.skillFrontmatter }),
   });
 
+
+// ── Component content ────────────────────────────────────────────────────────────────────────────
+//
+// What a component's file says, for the edit screen: instructions and hooks as text, settings as
+// dotted entries. Every value `looksSecret` flags is cut out before it leaves, the same rule the
+// environment rows follow (K4), so a credential pasted into a file never reaches a browser.
+
+/** What a hidden value is replaced by in a component's text. */
+export const HIDDEN_TEXT = '‹hidden›';
+
+/** `NAME=value`, `name: value`, `"name": "value"` — a value with the name that says what it is. */
+const ASSIGNMENT = /([A-Za-z_][A-Za-z0-9_.-]*)(["']?\s*[:=]\s*["']?)([^\s"'`,;)}\]]+)/gu;
+
+/** One bare word of text, for a value whose own shape says it is a token. */
+const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
+
+/** A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. */
+export function redactText(text: string): { readonly text: string; readonly redacted: boolean } {
+  let redacted = false;
+  const named = text.replace(ASSIGNMENT, (whole, name: string, separator: string, value: string) => {
+    if (!looksSecret(name, value)) return whole;
+    redacted = true;
+    return `${name}${separator}${HIDDEN_TEXT}`;
+  });
+  const bare = named.replace(WORD, word => {
+    if (!looksSecret('', word)) return word;
+    redacted = true;
+    return HIDDEN_TEXT;
+  });
+  return { text: bare, redacted };
+}
+
+const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
+
+/**
+ * A settings document as dotted keys, sorted: an object nests, and an array, a scalar or `{}` is one
+ * entry. The inverse of what an edit by entry builds.
+ */
+export function flattenSettings(settings: SettingsObject): readonly (readonly [string, unknown])[] {
+  const entries: (readonly [string, unknown])[] = [];
+  const walk = (prefix: string, value: unknown): void => {
+    if (prefix !== '' && !isTable(value)) {
+      entries.push([prefix, value]);
+      return;
+    }
+    for (const [key, child] of Object.entries(value as Readonly<Record<string, unknown>>)) {
+      walk(prefix === '' ? key : `${prefix}.${key}`, child);
+    }
+  };
+  walk('', settings);
+  return entries.toSorted(([left], [right]) => byName(left, right));
+}
+
+/** A settings value in words: a string as it is, anything else as its JSON text. */
+export const settingsValueText = (value: unknown): string =>
+  typeof value === 'string' ? value : JSON.stringify(value);
+
+function settingsEntries(settings: SettingsObject): FleetSettingsEntry[] {
+  return flattenSettings(settings).map(([key, value]) => {
+    const text = settingsValueText(value);
+    return looksSecret(key, text) ? { key, hidden: true as const } : { key, value: text };
+  });
+}
+
+function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts): FleetComponentContent | undefined {
+  if (kind === 'settings') {
+    const body = facts.settingsBodies?.[name];
+    return body === undefined ? undefined : { form: 'entries', entries: settingsEntries(body) };
+  }
+  const text =
+    kind === 'instructions' ? facts.instructionBodies?.[name] : kind === 'hooks' ? facts.hooksTexts?.[name] : undefined;
+  return text === undefined ? undefined : { form: 'text', ...redactText(text) };
+}
+
+/** A path under a person's home on macOS or Linux, as it appears in text (U15's clone uses the same). */
+const HOME_PATH = /\/(?:Users|home)\/[^\s"'`,;)}\]]+/gu;
+
+/**
+ * E30: the first path this component names under somebody else's home — a component copied from
+ * another machine still pointing there. A path under this machine's own home is not one.
+ */
+function checkPathOf(kind: ComponentKind, name: string, component: Record<string, unknown>, facts: CatalogFacts) {
+  const texts: string[] = [];
+  if (kind === 'instructions') texts.push(facts.instructionBodies?.[name] ?? '');
+  if (kind === 'hooks') texts.push(facts.hooksTexts?.[name] ?? '');
+  if (kind === 'settings') {
+    // A hidden value is never searched: its path would say what it was.
+    const entries = settingsEntries(facts.settingsBodies?.[name] ?? {});
+    texts.push(...entries.flatMap(entry => ('value' in entry ? [entry.value] : [])));
+  }
+  if (kind === 'mcp') {
+    for (const field of ['command', 'url'] as const) {
+      if (typeof component[field] === 'string') texts.push(component[field] as string);
+    }
+    if (Array.isArray(component.args)) texts.push(...(component.args as string[]));
+  }
+  const home = facts.userHome;
+  for (const text of texts) {
+    for (const match of redactText(text).text.matchAll(HOME_PATH)) {
+      const path = match[0];
+      if (path !== home && !path.startsWith(`${home}/`)) return path;
+    }
+  }
+  return undefined;
+}
+
 /** `GET /v1/fleet/components`. */
 export function componentCatalog(model: AccountModel, facts: CatalogFacts): FleetComponentCatalog {
   const partial = partialSupportOf(model, facts);
@@ -248,6 +365,8 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
           const harness = typeof component.harness === 'string' ? (component.harness as HarnessKind) : undefined;
           const command = typeof component.command === 'string' ? component.command : undefined;
           const missing = command !== undefined && facts.missingCommands?.has(command) === true;
+          const content = componentContent(group.kind, name, facts);
+          const checkPath = checkPathOf(group.kind, name, component, facts);
           return {
             reference,
             kind: group.kind,
@@ -265,6 +384,8 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
                 ? undefined
                 : `It is a layer in ${listed(usage.direct)}. Remove it from ${usage.direct.length === 1 ? 'that profile' : 'those profiles'} first.`,
             ),
+            ...(content === undefined ? {} : { content }),
+            ...(checkPath === undefined ? {} : { checkPath }),
           };
         }),
     })),
@@ -512,5 +633,78 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
           },
         ];
       }),
+  };
+}
+
+// ── Layers ───────────────────────────────────────────────────────────────────────────────────────
+
+/** The product's word for each kind, singular, as a sentence uses it. */
+export const KIND_WORDS: Readonly<Record<ComponentKind, string>> = {
+  instructions: 'instructions',
+  mcp: 'MCP server',
+  skills: 'skills',
+  settings: 'settings',
+  hooks: 'hooks',
+  modelSets: 'model set',
+};
+
+/** The plain words for a layer in a refusal: "profile base", "instructions main". */
+export const layerWords = (text: string): string => {
+  const reference = parseLayerReference(text);
+  if (reference === undefined) return text;
+  return reference.kind === 'profile'
+    ? `profile ${reference.name}`
+    : `${KIND_WORDS[reference.componentKind]} ${reference.name}`;
+};
+
+/**
+ * Why profile `name` cannot have these layers — one that is not a layer, is there twice, does not
+ * exist, or would include the profile itself (P3, E19) — or `undefined` when it can. The one reading
+ * a save refuses with and a draft preview reports.
+ */
+export function layersRefusal(model: AccountModel, name: string, layers: readonly string[]): string | undefined {
+  const seen = new Set<string>();
+  for (const text of layers) {
+    const reference = parseLayerReference(text);
+    if (reference === undefined) return `"${text}" is not a layer — write <kind>/<name> or profile/<name>`;
+    if (seen.has(text)) return `${layerWords(text)} is in the layers twice`;
+    seen.add(text);
+    if (reference.kind === 'profile') {
+      if (model.profiles[reference.name] === undefined) return `no profile ${reference.name} exists on this machine`;
+      if (wouldIncludeItself(model.profiles, name, reference.name)) {
+        return `profile ${reference.name} would include itself: it is ${name} or is built on it`;
+      }
+      continue;
+    }
+    if (model.components[reference.componentKind][reference.name] === undefined) {
+      return `no ${KIND_WORDS[reference.componentKind]} ${reference.name} exists on this machine`;
+    }
+  }
+  return undefined;
+}
+
+/** The name a draft that is not an edit stands under: one no profile has. */
+const DRAFT_NAME = 'draft';
+
+/**
+ * `POST /v1/fleet/profile-stacks/preview`: a profile's layers before they are saved, resolved per
+ * harness exactly as {@link profileCatalog} resolves a saved one. The draft stands in a copy of the
+ * model under the profile being edited, or a name no profile has.
+ */
+export function profileDraftView(
+  model: AccountModel,
+  request: FleetProfileDraftRequest,
+  facts: CatalogFacts,
+): FleetProfileDraftView {
+  const name = request.editing ?? freeName(DRAFT_NAME, candidate => model.profiles[candidate] !== undefined);
+  const draft = {
+    ...model,
+    profiles: { ...model.profiles, [name]: { layers: [...request.layers] as LayerReferenceText[] } },
+  } as AccountModel;
+  const partial = partialSupportOf(draft, facts);
+  const refusal = layersRefusal(model, name, request.layers);
+  return {
+    harnesses: HARNESSES.map(harness => stackView(resolvedFor(draft, name, harness, facts, partial), harness)),
+    ...(refusal === undefined ? {} : { refusal }),
   };
 }

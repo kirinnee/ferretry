@@ -12,6 +12,8 @@
  * - `GET /v1/fleet/profile-stacks` — every profile with its layers, its flattened stack per harness and
  *   its conflicts. (The design names `/v1/fleet/profiles`; the old Accounts screen still reads that
  *   path until it is retired, so this read has its own.)
+ * - `POST /v1/fleet/profile-stacks/preview` — a profile's layers before they are saved, resolved the
+ *   same way. It is a read with a body: it writes nothing.
  * - `GET /v1/fleet/runtimes` — each runtime with its resolved stack, model set, fixed layer and whether
  *   it can launch.
  *
@@ -154,6 +156,23 @@ export const FleetPartialSupportSchema = z.strictObject({
   reason: NonEmptyStringSchema,
 });
 
+/** One settings key as it may travel: its value in words, or the fact that it is hidden (K4). */
+export const FleetSettingsEntrySchema = z.union([
+  /** A string is shown as it is; any other value as its JSON text. */
+  z.strictObject({ key: NonEmptyStringSchema, value: z.string() }),
+  z.strictObject({ key: NonEmptyStringSchema, hidden: z.literal(true) }),
+]);
+export type FleetSettingsEntry = z.infer<typeof FleetSettingsEntrySchema>;
+
+/** What a component's file says, for the kinds that have one, with every secret-looking value cut out. */
+export const FleetComponentContentSchema = z.discriminatedUnion('form', [
+  /** Instructions and hooks: the file text. `redacted` says a secret-looking value was replaced by `‹hidden›`. */
+  z.strictObject({ form: z.literal('text'), text: z.string(), redacted: z.boolean() }),
+  /** Settings: the parsed file flattened to dotted keys, sorted. Objects nest; arrays, scalars and `{}` are leaves. */
+  z.strictObject({ form: z.literal('entries'), entries: z.array(FleetSettingsEntrySchema).readonly() }),
+]);
+export type FleetComponentContent = z.infer<typeof FleetComponentContentSchema>;
+
 export const FleetComponentViewSchema = z.strictObject({
   /** `<kind>/<name>`, as a profile layer names it. */
   reference: NonEmptyStringSchema,
@@ -170,8 +189,12 @@ export const FleetComponentViewSchema = z.strictObject({
   editNote: NonEmptyStringSchema,
   /** Whether it can be deleted now (K7, E21). */
   remove: FleetCatalogActSchema,
+  /** What its file says: absent for MCP, skills and model sets, or when the file cannot be read or parsed. */
+  content: FleetComponentContentSchema.optional(),
+  /** E30: a path under somebody else's home that this component names, to check on this machine. */
+  checkPath: NonEmptyStringSchema.optional(),
 });
-export type FleetComponentView = z.infer<typeof FleetComponentViewSchema>;
+export type FleetComponentView =z.infer<typeof FleetComponentViewSchema>;
 
 export const FleetComponentGroupSchema = z.strictObject({
   kind: FleetComponentKindSchema,
@@ -240,6 +263,27 @@ export const FleetLayeredProfileCatalogSchema = z.strictObject({
   profiles: z.array(FleetLayeredProfileViewSchema).readonly(),
 });
 export type FleetLayeredProfileCatalog = z.infer<typeof FleetLayeredProfileCatalogSchema>;
+
+/**
+ * `POST /v1/fleet/profile-stacks/preview`: a profile's layers as the builder has them, before it is
+ * named or saved. Writes nothing.
+ */
+export const FleetProfileDraftRequestSchema = z.strictObject({
+  /** Oldest first, as `profile.put` would send them. */
+  layers: z.array(NonEmptyStringSchema).max(200),
+  /** The profile being edited, whose own layers these replace. */
+  editing: FleetComponentNameSchema.optional(),
+});
+export type FleetProfileDraftRequest = z.infer<typeof FleetProfileDraftRequestSchema>;
+
+/** The draft resolved per harness exactly as a saved profile is, or why it cannot be. */
+export const FleetProfileDraftViewSchema = z.strictObject({
+  /** Claude Code, then Codex. */
+  harnesses: z.array(FleetStackViewSchema).readonly(),
+  /** A layer that does not exist, or one that would include the profile itself. */
+  refusal: NonEmptyStringSchema.optional(),
+});
+export type FleetProfileDraftView = z.infer<typeof FleetProfileDraftViewSchema>;
 
 // ── Runtimes ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -314,6 +358,16 @@ export const FleetEnvInputSchema = z.record(
 export type FleetEnvInput = z.infer<typeof FleetEnvInputSchema>;
 
 /**
+ * A settings file as an edit sends it, by dotted key: a new value, or "keep the one it has" for a
+ * value the catalogue reported as hidden.
+ */
+export const FleetSettingsEntriesInputSchema = z.record(
+  z.string(),
+  z.union([z.strictObject({ value: z.json() }), z.strictObject({ keep: z.literal(true) })]),
+);
+export type FleetSettingsEntriesInput = z.infer<typeof FleetSettingsEntriesInputSchema>;
+
+/**
  * A component's fields as a change sends them. A file's path is never sent: the daemon names it
  * (`components/<kind>/<name>.<ext>`) or keeps the one an existing component has, and `content` is its
  * text.
@@ -338,6 +392,8 @@ export const FleetComponentInputSchema = z.discriminatedUnion('kind', [
     harness: HarnessKindSchema,
     flags: z.array(NonEmptyStringSchema).optional(),
     env: FleetEnvInputSchema.optional(),
+    /** The file by entry, instead of `content`: the daemon writes the document. */
+    entries: FleetSettingsEntriesInputSchema.optional(),
   }),
   z.strictObject({ kind: z.literal('hooks'), harness: HarnessKindSchema }),
   z.strictObject({
@@ -379,6 +435,8 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     name: NonEmptyStringSchema,
     /** E21 "Switch n runtimes and delete": the profile every runtime on this one moves to. */
     switchRuntimesTo: FleetComponentNameSchema.optional(),
+    /** E21 "Remove from those first": take it out of every profile built on it, then delete it. */
+    removeFromProfiles: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('component.put'),

@@ -27,19 +27,20 @@ import {
   isRuntimeName,
   looksSecret,
   orphanedSharedDocuments,
-  parseLayerReference,
   parseSettings,
+  type SettingsObject,
+  serializeSettings,
   resolveProfile,
   SafeNameSchema,
   type SettingsFormat,
   slugName,
-  wouldIncludeItself,
 } from '@ferretry/fleet';
 import {
   type FleetAccountChange,
   type FleetComponentInput,
   type FleetEnvInput,
   type FleetModelDeclaration,
+  type FleetSettingsEntriesInput,
   type FleetMutation,
   FleetMutationSchema,
 } from '@ferretry/protocol';
@@ -47,6 +48,8 @@ import {
   componentUsage,
   counted,
   editConsequence,
+  KIND_WORDS,
+  layersRefusal,
   listed,
   profileUsage,
   runtimesUsingCredential,
@@ -653,6 +656,8 @@ export interface AccountModelEdit {
 export interface AccountChangeFacts {
   readonly machineName: string;
   readonly runningSessions: number;
+  /** Each settings component's parsed file, by name: what an edit by entry keeps a hidden value from. */
+  readonly settingsBodies?: Readonly<Record<string, SettingsObject>>;
 }
 
 /** The document format each harness's settings file is in. */
@@ -664,16 +669,6 @@ const componentExtension = (input: FleetComponentInput): string | undefined => {
   if (input.kind === 'settings') return SETTINGS_FORMAT[input.harness];
   if (input.kind === 'hooks') return 'json';
   return undefined;
-};
-
-/** The product's word for each kind, singular. */
-const KIND_WORDS: Readonly<Record<ComponentKind, string>> = {
-  instructions: 'instructions',
-  mcp: 'MCP server',
-  skills: 'skills',
-  settings: 'settings',
-  hooks: 'hooks',
-  modelSets: 'model set',
 };
 
 const refuse = (message: string): never => {
@@ -699,6 +694,65 @@ function assertFreeRuntimeName(
   }
 }
 
+/** E7: what a value that looks like a secret is refused with, wherever a component would hold it. */
+const secretRefusal = (name: string): string =>
+  `${name} looks like a secret, and a secret never sits in a component. Save it in this machine's secret store and write \${secret:NAME} here instead.`;
+
+/**
+ * A settings document built from the entries an edit sends, by dotted key, with every "keep" resolved
+ * against the file the component has. The inverse of the catalogue's flattening: each dot nests one
+ * object deeper, so `permissions.defaultMode` lands in `{ permissions: { defaultMode } }`.
+ */
+function settingsFromEntries(
+  entries: FleetSettingsEntriesInput,
+  existing: SettingsObject | undefined,
+  owner: string,
+  format: SettingsFormat,
+): string {
+  const document: Record<string, unknown> = {};
+  const leaves = new Set<string>();
+  for (const [key, entry] of Object.entries(entries).toSorted(([left], [right]) => (left < right ? -1 : 1))) {
+    const path = key.split('.');
+    if (path.some(segment => segment === '')) refuse(`${owner} cannot have a setting named "${key}"`);
+    let value: unknown;
+    if ('keep' in entry) {
+      const kept = keptValue(existing, path);
+      if (kept === undefined) refuse(`${owner} has no value for ${key} to keep; type one`);
+      value = kept;
+    } else {
+      // K4, E7: the same rule a component's environment follows, for a value typed into its file.
+      if (looksSecret(key, typeof entry.value === 'string' ? entry.value : JSON.stringify(entry.value))) {
+        refuse(secretRefusal(key));
+      }
+      value = entry.value;
+    }
+    // Sorted, so a key always comes before the keys inside it.
+    const parent = path
+      .slice(0, -1)
+      .map((_, index) => path.slice(0, index + 1).join('.'))
+      .find(prefix => leaves.has(prefix));
+    if (parent !== undefined) refuse(`${owner} sets ${parent} and a setting inside it`);
+    leaves.add(key);
+    let table = document;
+    for (const segment of path.slice(0, -1)) {
+      table[segment] ??= {};
+      table = table[segment] as Record<string, unknown>;
+    }
+    table[path.at(-1) as string] = value;
+  }
+  return serializeSettings(document, format);
+}
+
+/** The value at a dotted path in a parsed settings file, or `undefined` when it has none. */
+function keptValue(settings: SettingsObject | undefined, path: readonly string[]): unknown {
+  let value: unknown = settings;
+  for (const segment of path) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    value = (value as Readonly<Record<string, unknown>>)[segment];
+  }
+  return value;
+}
+
 /** The environment an edit asks for, with every "keep" resolved against what the component has. */
 function resolvedEnv(
   input: FleetEnvInput | undefined,
@@ -715,11 +769,7 @@ function resolvedEnv(
       continue;
     }
     // K4, E7: a secret value never sits in a component, only a reference to the secret store.
-    if (looksSecret(name, value)) {
-      refuse(
-        `${name} looks like a secret, and a secret never sits in a component. Save it in this machine's secret store and write \${secret:NAME} here instead.`,
-      );
-    }
+    if (looksSecret(name, value)) refuse(secretRefusal(name));
     env[name] = value;
   }
   return Object.keys(env).length === 0 ? undefined : env;
@@ -740,15 +790,20 @@ function assertDocument(text: string, format: SettingsFormat, what: string): voi
 function componentOf(
   name: string,
   input: FleetComponentInput,
-  content: string | undefined,
+  given: string | undefined,
   existing: Record<string, unknown> | undefined,
+  existingSettings: SettingsObject | undefined,
 ): { readonly component: Record<string, unknown>; readonly file?: AccountComponentFile } {
+  const owner = `${KIND_WORDS[input.kind]} ${name}`;
+  const content =
+    input.kind === 'settings' && input.entries !== undefined
+      ? settingsFromEntries(input.entries, existingSettings, owner, SETTINGS_FORMAT[input.harness])
+      : given;
   const extension = componentExtension(input);
   const ownFile = extension === undefined ? undefined : componentFilePath(input.kind, name, extension);
   const written = content === undefined || ownFile === undefined ? undefined : { file: ownFile, content };
   const keptFile = typeof existing?.file === 'string' ? existing.file : undefined;
   const file = written?.file ?? keptFile;
-  const owner = `${KIND_WORDS[input.kind]} ${name}`;
   const existingEnv = existing?.env as Readonly<Record<string, string>> | undefined;
   const harness = 'harness' in input && input.harness !== undefined ? { harness: input.harness } : {};
   switch (input.kind) {
@@ -794,39 +849,6 @@ function componentOf(
     }
     default:
       return { component: { models: [...input.models], default: input.default } };
-  }
-}
-
-/** The plain words for a layer in a refusal: "profile base", "instructions main". */
-const layerWords = (text: string): string => {
-  const reference = parseLayerReference(text);
-  if (reference === undefined) return text;
-  return reference.kind === 'profile'
-    ? `profile ${reference.name}`
-    : `${KIND_WORDS[reference.componentKind]} ${reference.name}`;
-};
-
-/** The layers a profile edit asks for, checked against what exists and against P3 (E19). */
-function assertLayers(model: AccountModel, name: string, layers: readonly string[]): void {
-  const seen = new Set<string>();
-  for (const text of layers) {
-    const reference = parseLayerReference(text);
-    if (reference === undefined) {
-      refuse(`"${text}" is not a layer — write <kind>/<name> or profile/<name>`);
-      return;
-    }
-    if (seen.has(text)) refuse(`${layerWords(text)} is in the layers twice`);
-    seen.add(text);
-    if (reference.kind === 'profile') {
-      if (model.profiles[reference.name] === undefined) refuse(`no profile ${reference.name} exists on this machine`);
-      if (wouldIncludeItself(model.profiles, name, reference.name)) {
-        refuse(`profile ${reference.name} would include itself: it is ${name} or is built on it`);
-      }
-      continue;
-    }
-    if (model.components[reference.componentKind][reference.name] === undefined) {
-      refuse(`no ${KIND_WORDS[reference.componentKind]} ${reference.name} exists on this machine`);
-    }
   }
 }
 
@@ -1023,7 +1045,8 @@ function putProfile(
     );
   }
   if (!change.create && !exists) refuse(`no profile ${change.name} exists on this machine`);
-  assertLayers(model, change.name, change.layers);
+  const layers = layersRefusal(model, change.name, change.layers);
+  if (layers !== undefined) refuse(layers);
   draft.profiles[change.name] = { layers: [...change.layers] };
   if (exists) {
     const consequence = editConsequence(profileUsage(model, change.name));
@@ -1042,8 +1065,24 @@ function removeProfile(
   // P6, E21: a base is removed from the profiles built on it first; they would lose what it gave them.
   const usage = profileUsage(model, change.name);
   if (usage.direct.length > 0) {
-    refuse(
-      `Profile ${change.name} is a base for ${listed(usage.direct)}. Remove it from ${usage.direct.length === 1 ? 'that profile' : 'those profiles'} first.`,
+    if (change.removeFromProfiles !== true) {
+      refuse(
+        `Profile ${change.name} is a base for ${listed(usage.direct)}. Remove it from ${usage.direct.length === 1 ? 'that profile' : 'those profiles'} first.`,
+      );
+    }
+    const base = `profile/${change.name}`;
+    for (const profile of usage.direct) {
+      const layers = (draft.profiles[profile] as { layers: string[] }).layers.filter(layer => layer !== base);
+      if (layers.length === 0) {
+        refuse(
+          `removing profile ${change.name} would leave profile ${profile} with no layers; add another layer to it first`,
+        );
+      }
+      (draft.profiles[profile] as { layers: string[] }).layers = layers;
+    }
+    const behind = usage.runtimes.filter(runtime => !runtimesUsingProfile(model, change.name).includes(runtime));
+    consequences.push(
+      `Removes it from ${listed(usage.direct)}${behind.length === 0 ? '' : `, which changes ${counted(behind.length, 'runtime')}`}. Running sessions keep the old version until restarted.`,
     );
   }
   const runtimes = runtimesUsingProfile(model, change.name);
@@ -1086,7 +1125,16 @@ function putComponent(
   if (change.content !== undefined && componentExtension(change.component) === undefined) {
     refuse(`a ${word} has no text to save; send its fields instead`);
   }
-  const built = componentOf(change.name, change.component, change.content, existing);
+  if (change.component.kind === 'settings' && change.component.entries !== undefined && change.content !== undefined) {
+    refuse(`send settings ${change.name} as its text or as its entries, not both`);
+  }
+  const built = componentOf(
+    change.name,
+    change.component,
+    change.content,
+    existing,
+    facts.settingsBodies?.[change.name],
+  );
   draft.components[kind][change.name] = built.component;
   if (built.file !== undefined) files.push(built.file);
   if (existing !== undefined) {
