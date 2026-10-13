@@ -184,6 +184,15 @@ told.
   or a browser extension), which is out of scope. The daemon's audit log is meant to record this too;
   the page leaves a typed hook for it (`onUnsignedWorker` in `use-release-integrity.ts`) that nothing
   is wired to yet — the audit log is zero-trust PR C.
+- **A server that lies only to the browser's worker install.** The alarm compares the bytes the
+  running worker fetches for the new script with the signed list. A hostile host that answers the
+  browser's own worker-install request (which carries `Sec-Fetch-Dest: serviceworker`) differently
+  from an ordinary fetch of the same address can install its worker without tripping the alarm. A
+  static Pages deploy cannot tell the two apart; a deploy that adds server code can.
+- **Code running in the open app.** The pinned key and the active release live in this site's
+  IndexedDB, which any script running on the site can rewrite. An XSS bug can therefore replace the
+  pinned key while the tab is open — the same boundary as the rest of the zero-trust design, where
+  code in the open app is out of scope.
 - **A browser with no service worker** (an insecure origin, some private windows): nothing is
   checked and nothing is shown.
 - **The daemon.** Daemon requests never go through this cache: the worker answers only same-origin
