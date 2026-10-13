@@ -6,9 +6,8 @@
  * parameterised suite over both would be evidence about a shape rather than about either sign-in.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { ReactTestRenderer } from 'react-test-renderer';
-
 import type { ClaudeLoginFlow } from '@ferretry/protocol';
+import type { ReactTestRenderer } from 'react-test-renderer';
 import { ClaudeLoginPanel } from '../../../../src/features/fleet/claude-login-panel.tsx';
 import { render, run } from '../../../support/react.ts';
 import { CLAUDE_URL, claudeFlow } from './harness-login-support.ts';
@@ -262,5 +261,49 @@ describe('ClaudeLoginPanel when Claude does not take a code', () => {
     expect(texts(view)).toContain('That sign-in link expired before a code was accepted.');
     expect(texts(view)).toContain('Get a new link');
     expect(texts(view)).not.toContain('fy fleet login');
+  });
+});
+
+describe('ClaudeLoginPanel with the wording of a login', () => {
+  const wording = {
+    coverage: 'Every runtime that uses it can launch once it is done.',
+    signedIn: 'Signed in. 3 runtimes can launch now.',
+    finishLabel: 'Finish sign-in for 3 runtimes',
+  };
+
+  it('hides the identity line and says its own coverage sentence instead of the wrapper one', () => {
+    const plain = texts(mount());
+    expect(plain).toContain('Identity');
+
+    const view = mount({ wording });
+    expect(texts(view)).not.toContain('Identity');
+    expect(view.root.findAllByType('code')).toHaveLength(0);
+    expect(texts(view)).toContain('Every runtime that uses it can launch once it is done.');
+    expect(texts(view)).not.toContain('One sign-in covers');
+    expect(texts(view)).not.toContain('sibling');
+  });
+
+  it('labels the finish button with the wording, and falls back to the usual label without one', () => {
+    expect(texts(mount({ flow: claudeFlow('awaiting-code'), wording }))).toContain('Finish sign-in for 3 runtimes');
+    run(() => mounted?.unmount());
+    expect(
+      texts(mount({ flow: claudeFlow('awaiting-code'), wording: { ...wording, finishLabel: undefined } })),
+    ).toContain('Finish sign-in');
+    run(() => mounted?.unmount());
+    const view = mount({
+      flow: claudeFlow('awaiting-code'),
+      wording: { coverage: wording.coverage, signedIn: wording.signedIn },
+    });
+    expect(texts(view)).not.toContain('for 3 runtimes');
+    expect(texts(view)).toContain('Finish sign-in');
+  });
+
+  it('says the signedIn sentence on complete — and none of the sibling copy report', () => {
+    const view = mount({ flow: claudeFlow('complete'), wording });
+
+    expect(view.root.findByProps({ 'data-claude-login': 'complete' })).toBeDefined();
+    expect(texts(view)).toContain('Signed in. 3 runtimes can launch now.');
+    expect(texts(view)).not.toContain('copied to');
+    expect(texts(view)).not.toContain('Signed in to Studio Claude');
   });
 });

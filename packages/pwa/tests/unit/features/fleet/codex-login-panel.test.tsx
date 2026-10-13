@@ -6,9 +6,8 @@
  * this harness has no way to receive.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { ReactTestRenderer } from 'react-test-renderer';
-
 import type { CodexLoginFlow } from '@ferretry/protocol';
+import type { ReactTestRenderer } from 'react-test-renderer';
 import { CodexLoginPanel } from '../../../../src/features/fleet/codex-login-panel.tsx';
 import { render, run } from '../../../support/react.ts';
 import { CODEX_CODE, CODEX_URL, codexFlow } from './harness-login-support.ts';
@@ -205,5 +204,31 @@ describe('CodexLoginPanel when the one-time code expired', () => {
     expect(texts(view)).toContain('the sign-in ran out of time');
     expect(texts(view)).toContain('Start a new sign-in');
     expect(texts(view)).not.toContain('Get a new code');
+  });
+});
+
+describe('CodexLoginPanel with the wording of a login', () => {
+  const wording = {
+    coverage: 'Every runtime that uses it can launch once it is done.',
+    signedIn: 'Signed in. 2 runtimes can launch now.',
+  };
+
+  it('hides the identity line and says its own coverage sentence instead of the wrapper one', () => {
+    expect(texts(mount())).toContain('Identity');
+
+    const view = mount({ wording });
+    expect(texts(view)).not.toContain('Identity');
+    expect(view.root.findAllByType('code')).toHaveLength(0);
+    expect(texts(view)).toContain('Every runtime that uses it can launch once it is done.');
+    expect(texts(view)).not.toContain('One sign-in covers');
+  });
+
+  it('says the signedIn sentence on complete — and none of the sibling copy report', () => {
+    const view = mount({ flow: codexFlow('complete'), wording });
+
+    expect(texts(view)).toContain('Signed in. 2 runtimes can launch now.');
+    expect(texts(view)).not.toContain('copied to');
+    expect(texts(view)).not.toContain('No sibling wrapper needed a copy');
+    expect(texts(view)).not.toContain('Signed in to Studio Codex');
   });
 });

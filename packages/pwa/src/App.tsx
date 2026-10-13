@@ -30,7 +30,11 @@ import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.
 import { accountsSettingsTab } from './features/fleet/accounts-page.tsx';
 import { ComponentsTab } from './features/fleet/components/components-tab.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
+import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
+import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.tsx';
+import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
+import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { emptyMachineTab, type MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -529,6 +533,12 @@ function SessionsRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** A runtime's Launch names it as `?agent=`: a hint the Account box may honour, never a start. */
+const launchHint = (search: string): { readonly initialAgent?: string } => {
+  const agent = new URLSearchParams(search).get('agent');
+  return agent === null || agent === '' ? {} : { initialAgent: agent };
+};
+
 function NewSessionRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
@@ -541,6 +551,7 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
       startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
       usage={store.usage}
       onNavigate={navigate}
+      {...launchHint(window.location.search)}
     />
   );
 }
@@ -941,8 +952,10 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
  * Components U18, Settings U19.
  */
 const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
-  runtimes: emptyMachineTab('runtimes'),
-  credentials: emptyMachineTab('credentials'),
+  runtimes: createRuntimesTab({
+    profileBuilder: { kind: BUILD_PROFILE_FLOW_KIND, flowInput: buildProfileFlowInput, Step: BuildProfileStep },
+  }),
+  credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsTab,
   settings: emptyMachineTab('settings'),
