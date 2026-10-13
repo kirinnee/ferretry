@@ -1931,7 +1931,9 @@ try {
               const capabilitiesTarget = join(outDir, `settings-daemon-devices-capabilities-${viewport.name}.png`);
               await disclosure.scrollIntoViewIfNeeded();
               await page.screenshot({ path: capabilitiesTarget });
-              process.stdout.write(`📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`);
+              process.stdout.write(
+                `📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`,
+              );
             }
           }
 

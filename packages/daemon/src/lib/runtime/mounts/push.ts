@@ -83,7 +83,8 @@ function manageRefusal(context: RouteContext, guard: CapabilityGuard): ApiRespon
     context.presentation === undefined ? 'undetermined' : guard.decide(MANAGE_DEMAND, context.presentation).refusal;
   return errorResponse(
     403,
-    guard.explain(MANAGE_DEMAND, refusal) ?? 'only a device that may manage devices can change another device’s notifications',
+    guard.explain(MANAGE_DEMAND, refusal) ??
+      'only a device that may manage devices can change another device’s notifications',
     grantRefusalCode(refusal),
   );
 }

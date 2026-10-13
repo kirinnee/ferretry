@@ -7,8 +7,17 @@ import {
   STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import should from 'should';
-import { ApiDispatcher, ApiRouter, type CapabilityPresentation, type SessionDevice } from '../../../../src/lib/api/index.ts';
-import { DEFAULT_CAPABILITY_GRANTS, DeviceGrantService, type GrantAuditEntry } from '../../../../src/lib/grants/index.ts';
+import {
+  ApiDispatcher,
+  ApiRouter,
+  type CapabilityPresentation,
+  type SessionDevice,
+} from '../../../../src/lib/api/index.ts';
+import {
+  DEFAULT_CAPABILITY_GRANTS,
+  DeviceGrantService,
+  type GrantAuditEntry,
+} from '../../../../src/lib/grants/index.ts';
 import { type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { deviceGrantsOver, grantSubsystem } from './support.ts';
@@ -70,13 +79,9 @@ async function mount(world: World = {}) {
     admin: 'admin-secret',
     devices: { has: (id: string) => devices.has(id), grants: (id: string) => devices.get(id) },
   };
-  const dispatcher = new ApiDispatcher(
-    new ApiRouter(pairingRoutes(pairing, service)),
-    credentials,
-    grants,
-    undefined,
-    { held: () => world.steppedUp ?? true },
-  );
+  const dispatcher = new ApiDispatcher(new ApiRouter(pairingRoutes(pairing, service)), credentials, grants, undefined, {
+    held: () => world.steppedUp ?? true,
+  });
   return { dispatcher, devices, audit, service, rechecks: () => rechecks };
 }
 

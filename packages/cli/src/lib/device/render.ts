@@ -17,7 +17,11 @@ export function renderDeviceGrants(grants: CapabilityGrants, indent = '  '): str
  * Device names are chosen by the redeeming device and are therefore untrusted text; they are printed
  * on their own line, quoted, so one cannot impersonate the structure around it.
  */
-export function renderDevices(devices: readonly PairedDevice[], thisDeviceId: string | undefined, clientName: string): string {
+export function renderDevices(
+  devices: readonly PairedDevice[],
+  thisDeviceId: string | undefined,
+  clientName: string,
+): string {
   if (devices.length === 0) return `no device is paired with this host; pair one with \`${clientName} pair\``;
   const blocks = devices.map(device =>
     [

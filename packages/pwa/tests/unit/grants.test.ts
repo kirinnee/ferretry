@@ -367,18 +367,27 @@ describe('why an axis is open', () => {
 describe('the per-device grant', () => {
   it('names the host command that widens one device, with the product binary threaded through', () => {
     expect(deviceGrantCommand('terminal', 'use')).toBe('fy device grant <device> terminal --use');
-    expect(deviceGrantCommand('secrets', 'configure', 'ferret')).toBe('ferret device grant <device> secrets --configure');
+    expect(deviceGrantCommand('secrets', 'configure', 'ferret')).toBe(
+      'ferret device grant <device> secrets --configure',
+    );
   });
 
   it('is silent on the host, where there is no device grant, and when the device withholds nothing', () => {
     expect(deviceGrantNote(entry())).toBeNull();
     expect(deviceGrantNote(entry({ deviceGranted: { use: true, configure: true } }))).toBeNull();
     // Withheld by the machine as well: the daemon-wide refusal already has its own sentence.
-    expect(deviceGrantNote(entry({ granted: { use: false, configure: false }, deviceGranted: { use: false, configure: false } }))).toBeNull();
+    expect(
+      deviceGrantNote(
+        entry({ granted: { use: false, configure: false }, deviceGranted: { use: false, configure: false } }),
+      ),
+    ).toBeNull();
   });
 
   it('says which axes this device lacks although the machine allows them, with the remedy', () => {
-    const note = deviceGrantNote(entry({ capability: 'terminal', deviceGranted: { use: false, configure: false } }), 'ferret');
+    const note = deviceGrantNote(
+      entry({ capability: 'terminal', deviceGranted: { use: false, configure: false } }),
+      'ferret',
+    );
     expect(note).toContain('use or configure of session terminals');
     expect(note).toContain('ferret device grant <device> terminal --use');
     const configureOnly = deviceGrantNote(entry({ deviceGranted: { use: true, configure: false } }));

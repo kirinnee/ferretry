@@ -386,7 +386,11 @@ function PairedDeviceRow({
         data-device-capabilities={device.id}
       >
         <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1.5 text-ui font-medium text-fg">
-          <ChevronRight size={14} className={cn('shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+          <ChevronRight
+            size={14}
+            className={cn('shrink-0 transition-transform', open && 'rotate-90')}
+            aria-hidden="true"
+          />
           Capabilities
           <span className="text-meta font-normal text-faint" data-device-capabilities-count="">
             {held.length === 0 ? 'none' : `${String(held.length)} of ${String(DAEMON_CAPABILITIES.length)}`}

@@ -56,9 +56,7 @@ export class DeviceController {
       return;
     }
     if (options.use === undefined && options.configure === undefined) {
-      this.fail(
-        'nothing to change: name at least one axis, as `--use`/`--no-use` or `--configure`/`--no-configure`',
-      );
+      this.fail('nothing to change: name at least one axis, as `--use`/`--no-use` or `--configure`/`--no-configure`');
       return;
     }
     const { devices } = await this.deps.gateway.list();

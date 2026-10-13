@@ -5,7 +5,14 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { secretRoutes, type SecretSubsystem } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, EchoSecretChildRunner, GRANTED, human, MemorySecretDocuments, secretSubsystem } from './support.ts';
+import {
+  CREDENTIALS,
+  EchoSecretChildRunner,
+  GRANTED,
+  human,
+  MemorySecretDocuments,
+  secretSubsystem,
+} from './support.ts';
 
 /**
  * The HTTP surface of the secret store.

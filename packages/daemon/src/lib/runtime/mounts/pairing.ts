@@ -98,7 +98,11 @@ export interface PairingSubsystem {
  */
 export interface DeviceGrantSubsystem {
   mayWiden(presentation: CapabilityPresentation): CapabilityGrants;
-  change(deviceId: string, patch: DeviceGrantsPatch, presentation: CapabilityPresentation): Promise<'changed' | 'not-found'>;
+  change(
+    deviceId: string,
+    patch: DeviceGrantsPatch,
+    presentation: CapabilityPresentation,
+  ): Promise<'changed' | 'not-found'>;
 }
 
 /**
@@ -274,9 +278,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
         const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
         if (!deviceId.success) return errorResponse(404, 'device not found', 'pairing_device_not_found');
         const patch = await parseBody(context.request, DeviceGrantsPatchSchema);
-        const outcome = await grants
-          .change(deviceId.data, patch, presentationIn(context))
-          .catch(deviceGrantRefusal);
+        const outcome = await grants.change(deviceId.data, patch, presentationIn(context)).catch(deviceGrantRefusal);
         return outcome === 'changed'
           ? jsonResponse(await devicesView(subsystem, grants, context))
           : errorResponse(404, 'device not found', 'pairing_device_not_found');

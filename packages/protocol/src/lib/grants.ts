@@ -352,5 +352,7 @@ export type GrantsPatch = z.infer<typeof GrantsPatchSchema>;
 
 /** Every capability on both axes — what a `fy pair --full` code gives the device that redeems it. */
 export const FULL_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
-  Object.fromEntries(DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }])) as CapabilityGrants,
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }]),
+  ) as CapabilityGrants,
 );

@@ -354,9 +354,7 @@ describe('push routes', () => {
     const enrol = await surface.dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', device: unconfirmed, body: JSON.stringify(body) }),
     );
-    const own = await surface.dispatch(
-      request({ method: 'GET', path: '/v1/push/subscriptions', device: unconfirmed }),
-    );
+    const own = await surface.dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: unconfirmed }));
     const unenrol = await surface.dispatch(
       request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, device: unconfirmed }),
     );
@@ -372,7 +370,8 @@ describe('push routes', () => {
     const otherEnrolment = 'push-22222222-2222-4222-8222-222222222222';
     const subject = new FakePush(
       [view(enrolmentId, 'Pixel 8'), view(otherEnrolment, 'iPad')],
-      undefined, new Map([[otherEnrolment, otherDeviceId]]),
+      undefined,
+      new Map([[otherEnrolment, otherDeviceId]]),
     );
     const surface = await mount(subject);
 
@@ -393,7 +392,11 @@ describe('push routes', () => {
     // Arrange
     const otherEnrolment = 'push-22222222-2222-4222-8222-222222222222';
     const fresh = () =>
-      new FakePush([view(enrolmentId, 'Pixel 8'), view(otherEnrolment, 'iPad')], undefined, new Map([[otherEnrolment, otherDeviceId]]));
+      new FakePush(
+        [view(enrolmentId, 'Pixel 8'), view(otherEnrolment, 'iPad')],
+        undefined,
+        new Map([[otherEnrolment, otherDeviceId]]),
+      );
     deviceGrants = { ...DEFAULT_DEVICE_GRANTS, pairing: { use: true, configure: false } };
     const manager = fresh();
     const managing = await mount(manager);

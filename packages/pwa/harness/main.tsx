@@ -1269,9 +1269,7 @@ const HARNESS_INVITE: PairingCodeMintResponse = {
   reach: 'any-device',
 };
 
-const harnessGrants = (
-  held: Partial<Record<DaemonCapability, Partial<CapabilityGrant>>>,
-): CapabilityGrants =>
+const harnessGrants = (held: Partial<Record<DaemonCapability, Partial<CapabilityGrant>>>): CapabilityGrants =>
   Object.fromEntries(
     DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false, ...held[capability] }]),
   ) as CapabilityGrants;

@@ -203,4 +203,3 @@ export interface StepUpWitness {
 
 /** The witness for a dispatcher with no step-up subsystem wired: nobody holds one. */
 export const NO_STEP_UP_WITNESS: StepUpWitness = { held: () => false };
-

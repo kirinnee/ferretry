@@ -208,7 +208,12 @@ describe('deviceAxisControl', () => {
 
     // Act
     const blocked = deviceAxisControl(onlyConfigure, target, 'filesystem', 'configure');
-    const fine = deviceAxisControl(onlyConfigure, device({ grants: grantsOf({ filesystem: { use: true } }) }), 'filesystem', 'configure');
+    const fine = deviceAxisControl(
+      onlyConfigure,
+      device({ grants: grantsOf({ filesystem: { use: true } }) }),
+      'filesystem',
+      'configure',
+    );
 
     // Assert
     should(blocked.blocked).equal(true);

@@ -89,7 +89,10 @@ export class DeviceGrantService {
       );
     }
     if (verdict.kind === 'step-up-required')
-      throw new GrantError('step-up-required', "changing a device's grants needs a passkey confirmation from this device.");
+      throw new GrantError(
+        'step-up-required',
+        "changing a device's grants needs a passkey confirmation from this device.",
+      );
     const changes = grantChanges(current, next).map(change => `${deviceId}/${change}`);
     if (changes.length === 0) return 'changed';
     if (!(await this.deps.devices.setDeviceGrants(deviceId, next))) return 'not-found';
@@ -114,7 +117,10 @@ export class DeviceGrantService {
     if (own === undefined || own === null) return undefined;
     const daemonWide = this.deps.daemonWide();
     if (daemonWide === undefined)
-      throw new GrantError('unavailable', 'this daemon could not read its capability grants, so it will not change them');
+      throw new GrantError(
+        'unavailable',
+        'this daemon could not read its capability grants, so it will not change them',
+      );
     return intersectGrants(daemonWide, own);
   }
 }

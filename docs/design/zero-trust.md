@@ -517,7 +517,7 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
 
 - **`secrets` is the seventh capability** (`DAEMON_CAPABILITIES`). `GET /v1/secrets` and `POST /v1/secrets/use`
   demand `secrets.use`, which also needs a step-up from a governed caller (it runs a command); `POST
-  /v1/secrets` and `DELETE /v1/secrets/:name` demand `secrets.configure`. grants.md answers the
+/v1/secrets` and `DELETE /v1/secrets/:name` demand `secrets.configure`. grants.md answers the
   capability-seven questions.
 - **Per-device grants** live in each `devices.json` record as `grants`. The document stays at
   `schemaVersion: 2`: a record written before B5 reads as the default, which is a narrowing and therefore

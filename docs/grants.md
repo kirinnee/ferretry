@@ -87,7 +87,7 @@ acts and unable to widen. `fy` on the host still can.
 | `browser`    | the human login window and per-session browser control                                              |
 | `filesystem` | reading session working trees and registering projects on the host                                  |
 | `warden`     | supervision status, sweeps and the warden configuration                                             |
-| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments             |
+| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
 
 Each has two axes, and they are different questions:
@@ -371,10 +371,10 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
 list. At the machine: `fy device grant <device> <capability> --use|--no-use|--configure|--no-configure`,
 or the local browser's Settings → Add a device, where each device's capabilities are toggles.
 
-| change                         | on the host | a remote device                                                                    |
-| ------------------------------ | ----------- | ---------------------------------------------------------------------------------- |
-| turn an axis **on** (widen)    | allowed     | only an axis it holds itself, effective, **and** it holds `pairing.configure`; step-up |
-| turn an axis **off** (narrow)  | allowed     | allowed with a step-up — any device, its own included                              |
+| change                        | on the host | a remote device                                                                        |
+| ----------------------------- | ----------- | -------------------------------------------------------------------------------------- |
+| turn an axis **on** (widen)   | allowed     | only an axis it holds itself, effective, **and** it holds `pairing.configure`; step-up |
+| turn an axis **off** (narrow) | allowed     | allowed with a step-up — any device, its own included                                  |
 
 - **No device can grant what it does not hold**, so nothing escalates: the most a device can give another
   is a copy of what it has. A remote widen of anything else is `403 grant_forbidden`, naming the host command.
@@ -413,7 +413,7 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 | the authorization boundary | `packages/daemon/src/lib/api/capability.ts`, `dispatcher.ts`               |
 | the routes                 | `packages/daemon/src/lib/runtime/mounts/grants.ts`                         |
 | the grants themselves      | `<FY_HOME>/config/daemon.json`, under `grants`                             |
-| one device's own grants   | `<FY_HOME>/state/devices.json`, each record's `grants`; `fy device`           |
+| one device's own grants    | `<FY_HOME>/state/devices.json`, each record's `grants`; `fy device`        |
 | the change record          | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history`    |
 | the step-up                | `packages/protocol/src/lib/step-up.ts`, `packages/daemon/src/lib/step-up/` |
 | the command line           | `fy daemon config`                                                         |
@@ -428,13 +428,13 @@ usually asking which of these they chose and which something chose for them.
 Every refusal names a command that fixes it. That is the point of the layer, not a nicety — a person
 meeting a denial should not have to know this file exists:
 
-| refusal            | what the sentence says to do                                              |
-| ------------------ | ------------------------------------------------------------------------- |
-| `granted`          | nothing — the caller was served                                           |
-| `not-granted`      | `fy daemon config set <capability> --use` / `--configure`, on the host    |
+| refusal              | what the sentence says to do                                               |
+| -------------------- | -------------------------------------------------------------------------- |
+| `granted`            | nothing — the caller was served                                            |
+| `not-granted`        | `fy daemon config set <capability> --use` / `--configure`, on the host     |
 | `device-not-granted` | `fy device grant <device> <capability> --use` / `--configure`, on the host |
-| `step-up-required` | confirm with the passkey on this device; the app does it and retries once |
-| `undetermined`     | `fy daemon config` on the host, to see and repair the document            |
+| `step-up-required`   | confirm with the passkey on this device; the app does it and retries once  |
+| `undetermined`       | `fy daemon config` on the host, to see and repair the document             |
 
 `step-up-required` is the one worth explaining. The axis is granted and nothing is broken, so it is the only
 refusal the **caller** can clear without the operator: the person holding the device confirms and carries on.
@@ -515,6 +515,7 @@ command says so at the moment somebody might be tempted to do that instead.
   **The honest cost, stated rather than discovered:** switching `pairing` off for remote callers no longer
   stops a paired device enrolling itself for notifications. That is the intended shape — notifications are
   not a credential — and revoking the device still takes its enrolments with it.
+
 - **The secret routes needed no capability before B5**, so a device paired before it could run a command
   with a stored secret without the operator ever being asked. They now demand `secrets` (see the capability
   seven section); a device paired before B5 reads as the default, `fleet.use` only, so it lost that access

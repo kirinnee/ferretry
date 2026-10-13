@@ -351,7 +351,10 @@ export function intersectGrants(left: CapabilityGrants, right: CapabilityGrants)
   return Object.fromEntries(
     DAEMON_CAPABILITIES.map(capability => [
       capability,
-      { use: left[capability].use && right[capability].use, configure: left[capability].configure && right[capability].configure },
+      {
+        use: left[capability].use && right[capability].use,
+        configure: left[capability].configure && right[capability].configure,
+      },
     ]),
   ) as CapabilityGrants;
 }

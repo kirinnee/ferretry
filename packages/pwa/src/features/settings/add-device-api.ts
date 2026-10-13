@@ -123,9 +123,13 @@ export async function changeDeviceGrants(
   deviceId: string,
   patch: DeviceGrantsPatch,
 ): Promise<PairedDevicesView> {
-  return await client.request(`${PAIRED_DEVICES_PATH}/${encodeURIComponent(deviceId)}/grants`, PairedDevicesViewSchema, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(DeviceGrantsPatchSchema.parse(patch)),
-  });
+  return await client.request(
+    `${PAIRED_DEVICES_PATH}/${encodeURIComponent(deviceId)}/grants`,
+    PairedDevicesViewSchema,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(DeviceGrantsPatchSchema.parse(patch)),
+    },
+  );
 }

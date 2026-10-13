@@ -145,7 +145,10 @@ describe('effective = daemon-wide AND device, for a governed caller', () => {
 
   it('should refuse the secrets routes to a device without the grant, and need a step-up to run one', () => {
     // Act
-    const unGranted = decideCapability({ capability: 'secrets', axis: 'use' }, governed({ device: DEFAULT_DEVICE_GRANTS }));
+    const unGranted = decideCapability(
+      { capability: 'secrets', axis: 'use' },
+      governed({ device: DEFAULT_DEVICE_GRANTS }),
+    );
     const unconfirmed = decideCapability({ capability: 'secrets', axis: 'use' }, governed({ stepUp: false }));
     const setting = decideCapability(
       { capability: 'secrets', axis: 'configure' },
@@ -240,8 +243,20 @@ describe('judging one device-grant change', () => {
     const next = withGrant(DEFAULT_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
 
     // Act
-    const confirmed = judgeDeviceGrantChange({ current: DEFAULT_DEVICE_GRANTS, next, hostLocal: false, stepUp: true, holder: manager });
-    const unconfirmed = judgeDeviceGrantChange({ current: DEFAULT_DEVICE_GRANTS, next, hostLocal: false, stepUp: false, holder: manager });
+    const confirmed = judgeDeviceGrantChange({
+      current: DEFAULT_DEVICE_GRANTS,
+      next,
+      hostLocal: false,
+      stepUp: true,
+      holder: manager,
+    });
+    const unconfirmed = judgeDeviceGrantChange({
+      current: DEFAULT_DEVICE_GRANTS,
+      next,
+      hostLocal: false,
+      stepUp: false,
+      holder: manager,
+    });
 
     // Assert
     should(confirmed).deepEqual({ kind: 'allowed' });
@@ -253,7 +268,13 @@ describe('judging one device-grant change', () => {
     const next = withGrant(DEFAULT_DEVICE_GRANTS, 'secrets', { use: true, configure: false });
 
     // Act
-    const verdict = judgeDeviceGrantChange({ current: DEFAULT_DEVICE_GRANTS, next, hostLocal: false, stepUp: true, holder: manager });
+    const verdict = judgeDeviceGrantChange({
+      current: DEFAULT_DEVICE_GRANTS,
+      next,
+      hostLocal: false,
+      stepUp: true,
+      holder: manager,
+    });
 
     // Assert
     should(verdict).deepEqual({ kind: 'forbidden', widened: ['secrets.use'] });
@@ -265,7 +286,13 @@ describe('judging one device-grant change', () => {
     const next = withGrant(DEFAULT_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
 
     // Act
-    const verdict = judgeDeviceGrantChange({ current: DEFAULT_DEVICE_GRANTS, next, hostLocal: false, stepUp: true, holder });
+    const verdict = judgeDeviceGrantChange({
+      current: DEFAULT_DEVICE_GRANTS,
+      next,
+      hostLocal: false,
+      stepUp: true,
+      holder,
+    });
 
     // Assert
     should(verdict).deepEqual({ kind: 'forbidden', widened: ['terminal.use'] });
@@ -277,7 +304,13 @@ describe('judging one device-grant change', () => {
     const next = DEFAULT_DEVICE_GRANTS;
 
     // Act
-    const confirmed = judgeDeviceGrantChange({ current, next, hostLocal: false, stepUp: true, holder: DEFAULT_DEVICE_GRANTS });
+    const confirmed = judgeDeviceGrantChange({
+      current,
+      next,
+      hostLocal: false,
+      stepUp: true,
+      holder: DEFAULT_DEVICE_GRANTS,
+    });
     const unconfirmed = judgeDeviceGrantChange({ current, next, hostLocal: false, stepUp: false, holder: undefined });
 
     // Assert

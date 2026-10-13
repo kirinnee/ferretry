@@ -406,7 +406,11 @@ describe('AddDeviceCard', () => {
 });
 
 describe('AddDeviceCard capabilities', () => {
-  const IPAD = device({ id: OTHER_DEVICE_ID, name: 'iPad', grants: grantsOf({ fleet: { use: true, configure: true } }) });
+  const IPAD = device({
+    id: OTHER_DEVICE_ID,
+    name: 'iPad',
+    grants: grantsOf({ fleet: { use: true, configure: true } }),
+  });
   const switchFor = (renderer: ReactTestRenderer, id: string, capability: string, axis: string) =>
     marked(renderer, 'data-device-grant', `${id}:${capability}.${axis}`)[0];
 
@@ -439,7 +443,9 @@ describe('AddDeviceCard capabilities', () => {
     should(marked(renderer, 'data-device-capabilities', DEVICE_ID)[0]?.props.open).equal(false);
     should(marked(renderer, 'data-device-capabilities-count')[0]?.children.join('')).equal('none');
     // The disclosure is the browser's own: toggling it is reflected, never persisted.
-    run(() => marked(renderer, 'data-device-capabilities', DEVICE_ID)[0]?.props.onToggle({ currentTarget: { open: true } }));
+    run(() =>
+      marked(renderer, 'data-device-capabilities', DEVICE_ID)[0]?.props.onToggle({ currentTarget: { open: true } }),
+    );
     should(marked(renderer, 'data-device-capabilities', DEVICE_ID)[0]?.props.open).equal(true);
   });
 
@@ -495,7 +501,10 @@ describe('AddDeviceCard capabilities', () => {
     // Arrange
     const asked: [string, DeviceGrantsPatch][] = [];
     const renderer = card({
-      view: view({ devices: [device(), IPAD], mayWiden: grantsOf({ fleet: { use: true, configure: true }, terminal: { use: true, configure: true } }) }),
+      view: view({
+        devices: [device(), IPAD],
+        mayWiden: grantsOf({ fleet: { use: true, configure: true }, terminal: { use: true, configure: true } }),
+      }),
       onChangeDeviceGrants: (id, patch) => asked.push([id, patch]),
     });
 
@@ -526,7 +535,8 @@ describe('AddDeviceCard capabilities', () => {
 
   it('shows a refusal on the device it was for, whole, and not on its neighbours', () => {
     // Arrange, Act
-    const sentence = 'terminal.use can only be turned on at the machine: run `fy device grant <device> terminal --use`.';
+    const sentence =
+      'terminal.use can only be turned on at the machine: run `fy device grant <device> terminal --use`.';
     const renderer = card({
       view: view({ devices: [device(), IPAD] }),
       grantFailure: { deviceId: OTHER_DEVICE_ID, failure: { message: sentence, code: 'grant_forbidden' } },
@@ -822,12 +832,10 @@ describe('AddDeviceSurface', () => {
     // Assert
     should(calls).containEql(`PATCH /v1/pair/devices/${DEVICE_ID}/grants`);
     should(patches).deepEqual([{ deviceId: DEVICE_ID, body: { terminal: { use: true, configure: true } } }]);
-    should(
-      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked'],
-    ).equal(true);
-    should(
-      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked'],
-    ).equal(true);
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(true);
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
+      true,
+    );
   });
 
   it('turns configure off with use, and re-reads nothing it was not told', async () => {
@@ -843,26 +851,28 @@ describe('AddDeviceSurface', () => {
     const surface = renderer as ReactTestRenderer;
 
     // Act
-    await runAsync(async () =>
-      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick(),
-    );
+    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
 
     // Assert
     should(patches[0]?.body).deepEqual({ terminal: { use: false, configure: false } });
-    should(
-      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked'],
-    ).equal(false);
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
+      false,
+    );
   });
 
   it('shows a refused change inline on its device and leaves every switch as the daemon last said', async () => {
     // Arrange
     const refusal = Object.assign(
-      new Error('terminal.use can only be turned on from a device that holds it: run `fy device grant <device> terminal --use`.'),
+      new Error(
+        'terminal.use can only be turned on from a device that holds it: run `fy device grant <device> terminal --use`.',
+      ),
       { code: 'grant_forbidden' },
     );
     let renderer: ReactTestRenderer | undefined;
     await runAsync(async () => {
-      renderer = render(<AddDeviceSurface connection={connection()} createClient={fakeClient({ grantFailure: refusal })} />);
+      renderer = render(
+        <AddDeviceSurface connection={connection()} createClient={fakeClient({ grantFailure: refusal })} />,
+      );
     });
     const surface = renderer as ReactTestRenderer;
 
@@ -872,9 +882,7 @@ describe('AddDeviceSurface', () => {
     // Assert
     should(marked(surface, 'data-device-grant-failure', DEVICE_ID)).have.length(1);
     expect(text(surface)).toContain('can only be turned on from a device that holds it');
-    should(
-      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked'],
-    ).equal(false);
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(false);
     // And the next attempt clears the old sentence before it asks again.
     await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:fleet.use`)[0]?.props.onClick());
     should(marked(surface, 'data-device-grant-failure')).have.length(1);
@@ -905,7 +913,10 @@ describe('AddDeviceSurface', () => {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
         seen.push(`${init?.method ?? 'GET'} ${path}`);
         if (init?.method === 'PATCH')
-          current = { ...current, devices: [device({ grants: grantsOf({ fleet: { use: true }, terminal: { use: true } }) })] };
+          current = {
+            ...current,
+            devices: [device({ grants: grantsOf({ fleet: { use: true }, terminal: { use: true } }) })],
+          };
         return schema.parse(current);
       },
     } as unknown as FyApiClient;

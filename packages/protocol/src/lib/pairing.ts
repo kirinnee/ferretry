@@ -594,5 +594,8 @@ export const DeviceGrantsPatchSchema = z
       >;
     },
   )
-  .refine(patch => Object.values(patch).some(value => value !== undefined), 'a device grant patch must change something');
+  .refine(
+    patch => Object.values(patch).some(value => value !== undefined),
+    'a device grant patch must change something',
+  );
 export type DeviceGrantsPatch = z.infer<typeof DeviceGrantsPatchSchema>;
