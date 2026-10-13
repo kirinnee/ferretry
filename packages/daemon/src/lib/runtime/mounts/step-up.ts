@@ -22,6 +22,9 @@ import {
   PasskeyRegistrationSchema,
   PasskeysViewSchema,
   PasskeyViewSchema,
+  PASSKEY_WINDOW_PATH,
+  PasskeyWindowOpenedSchema,
+  PasskeyWindowRequestSchema,
   StepUpAssertionSchema,
   StepUpGrantedSchema,
   StepUpOptionsSchema,
@@ -54,6 +57,11 @@ const REFUSALS: Readonly<Record<StepUpRefusal, { readonly status: number; readon
   'too-many-passkeys': { status: 409, message: 'this device already holds as many passkeys as it may' },
   'no-passkey': { status: 404, message: 'this copy of the app has no passkey for this machine' },
   'not-verified': { status: 401, message: 'that passkey confirmation did not check out; try again' },
+  'not-at-machine': {
+    status: 403,
+    message: 'only the owner at the machine can re-open a passkey window; run `fy passkey window <device>` there',
+  },
+  'unknown-device': { status: 404, message: 'no paired device has that id; `fy pair` lists none, so pair it first' },
 };
 
 const refusal = (reason: StepUpRefusal): ApiResponse => {
@@ -61,9 +69,10 @@ const refusal = (reason: StepUpRefusal): ApiResponse => {
   return errorResponse(status, message, stepUpRefusalCode(reason));
 };
 
-const caller = ({ request, credential }: RouteContext): StepUpCaller => ({
+const caller = ({ request, credential, actor }: RouteContext): StepUpCaller => ({
   ...(request.device === undefined ? {} : { device: request.device }),
   hostLocal: arrivedOnHost(request, credential?.tokenClass === 'admin'),
+  ...(actor === undefined ? {} : { actor }),
 });
 
 const answer = <T>(outcome: StepUpOutcome<T>, parse: (value: T) => unknown, status = 200): ApiResponse =>
@@ -120,6 +129,21 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       handle: async context => {
         const body = await parseBody(context.request, StepUpAssertionSchema);
         return answer(await service.stepUp(caller(context), body), value => StepUpGrantedSchema.parse(value));
+      },
+    },
+    {
+      // The owner's recovery path (B4): a browser is never at the machine, so a device that missed its
+      // first window or lost its authenticator would otherwise never step up again. The service refuses
+      // anybody but the owner, whatever the route's minimum lets through.
+      method: 'POST',
+      path: PASSKEY_WINDOW_PATH,
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const body = await parseBody(context.request, PasskeyWindowRequestSchema);
+        return answer(await service.reopenRegistration(caller(context), body.deviceId), value =>
+          PasskeyWindowOpenedSchema.parse(value),
+        );
       },
     },
   ];

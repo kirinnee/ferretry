@@ -707,9 +707,10 @@ describe('the operator grant layer', () => {
     should(served.status).equal(200);
   });
 
-  it('should present a device on a loopback peer as remote unless the carrier proved the host', async () => {
-    // A PROXIED phone is a loopback peer. Presenting it as local made it `hostLocal` — free to widen its
-    // own grants — and ungoverned. Only the carrier's proof moves it.
+  it('should present every device as remote, even on a host-proven carrier, and only the owner as local', async () => {
+    // A PROXIED phone is a loopback peer, and a tunnel to a loopback-only bind is indistinguishable from
+    // a browser on the host. So no device is ever the owner: only the host's admin token over loopback is
+    // (owner decision, docs/design/zero-trust.md B4).
     // Arrange
     const seen: boolean[] = [];
     const recording: CapabilityGuard = {
@@ -727,9 +728,12 @@ describe('the operator grant layer', () => {
     await dispatcher.dispatch(
       request({ path: '/v1/fleet/plan', device: DEVICE, loopback: true, privilegedLoopback: true }),
     );
+    await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' }, loopback: true }),
+    );
 
     // Assert
-    should(seen).deepEqual([false, true]);
+    should(seen).deepEqual([false, false, true]);
   });
 });
 

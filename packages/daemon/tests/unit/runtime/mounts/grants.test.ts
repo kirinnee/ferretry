@@ -170,9 +170,10 @@ describe('the grant read', () => {
     should(view.capabilities.every(entry => entry.mayGrant)).be.true();
   });
 
-  it('should treat a host-proven local browser as on the host, and a merely loopback peer as remote', async () => {
-    // A loopback PEER is not the host: a locally bound proxy forwards a remote phone from one. Only the
-    // carrier's proof (`privilegedLoopback`) makes a device-credentialed browser local.
+  it('should govern every browser, even one on a host-proven carrier, and treat only the owner as local', async () => {
+    // A loopback PEER is not the owner: a tunnel or a locally bound proxy forwards a remote phone from one,
+    // and is indistinguishable from a browser on this host even on a loopback-only bind. A browser is an
+    // ordinary governed device; only the host's admin token over loopback is at the machine (B4).
     // Arrange
     const { dispatcher } = await mount();
 
@@ -183,7 +184,7 @@ describe('the grant read', () => {
     const proxied = await dispatcher.dispatch(request({ path: '/v1/grants', device: PHONE, loopback: true }));
 
     // Assert
-    should(GrantsViewSchema.parse(jsonBody(proved))).containDeep({ governed: false, hostLocal: true });
+    should(GrantsViewSchema.parse(jsonBody(proved))).containDeep({ governed: true, hostLocal: false });
     should(GrantsViewSchema.parse(jsonBody(proxied))).containDeep({ governed: true, hostLocal: false });
   });
 

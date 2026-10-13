@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
+import { PairedDeviceIdSchema } from './pairing.ts';
 
 /**
  * THE PASSKEY STEP-UP, ON THE WIRE (`docs/design/zero-trust.md` B1–B2).
@@ -119,12 +120,13 @@ export type PasskeyView = z.infer<typeof PasskeyViewSchema>;
 /**
  * What this device may do about passkeys right now, so a surface offers only what will work.
  *
- * `registration` says why a new passkey may be added (`first-window`, `stepped-up`, `host`) or that it
- * may not (`closed`); `stepUpUntil` is the current step-up's end, when there is one.
+ * `registration` says why a new passkey may be added — `first-window` (just paired), `stepped-up` (a
+ * current step-up), `reopened` (the owner re-opened a window for this device at the machine) — or that
+ * it may not (`closed`); `stepUpUntil` is the current step-up's end, when there is one.
  */
 export const PasskeysViewSchema = z.strictObject({
   passkeys: z.array(PasskeyViewSchema).max(MAX_PASSKEYS_PER_DEVICE),
-  registration: z.enum(['first-window', 'stepped-up', 'host', 'closed']),
+  registration: z.enum(['first-window', 'stepped-up', 'reopened', 'closed']),
   registrationClosesAt: InstantSchema.optional(),
   stepUpUntil: InstantSchema.optional(),
 });
@@ -138,6 +140,7 @@ export type PasskeysView = z.infer<typeof PasskeysViewSchema>;
  * `origin-not-allowed` means this copy of the app is not one the machine serves; `not-verified` means
  * the passkey answer did not check out (a stale challenge, a different authenticator, a rewound
  * counter) — never which of those, because the detail helps an attacker and nobody else.
+ * `not-at-machine` and `unknown-device` answer only the owner's re-open request.
  */
 export const STEP_UP_REFUSALS = [
   'not-a-device',
@@ -146,6 +149,8 @@ export const STEP_UP_REFUSALS = [
   'too-many-passkeys',
   'no-passkey',
   'not-verified',
+  'not-at-machine',
+  'unknown-device',
 ] as const;
 export type StepUpRefusal = (typeof STEP_UP_REFUSALS)[number];
 
@@ -159,3 +164,23 @@ export const stepUpRefusalCode = (refusal: StepUpRefusal): string => `step_up_${
  * refusal: the operator allowed the act, and this copy of the app has not proved its owner recently.
  */
 export const STEP_UP_REQUIRED_CODE = 'grant_step_up_required' as const;
+
+/**
+ * The OWNER, at the machine, re-opens the passkey registration window for one paired device.
+ *
+ * The recovery path, and the only one: a browser is never "at the machine" (B4), so a device that missed
+ * its first window and holds no passkey — or lost the authenticator that held it — could otherwise never
+ * step up again. The window is {@link PASSKEY_REGISTRATION_WINDOW_SECONDS} long, opens for exactly one
+ * device, and is spent by the first passkey registered in it.
+ */
+export const PASSKEY_WINDOW_PATH = '/v1/passkeys/registration-window' as const;
+
+export const PasskeyWindowRequestSchema = z.strictObject({ deviceId: PairedDeviceIdSchema });
+export type PasskeyWindowRequest = z.infer<typeof PasskeyWindowRequestSchema>;
+
+export const PasskeyWindowOpenedSchema = z.strictObject({
+  deviceId: PairedDeviceIdSchema,
+  deviceName: z.string().min(1).max(200),
+  closesAt: InstantSchema,
+});
+export type PasskeyWindowOpened = z.infer<typeof PasskeyWindowOpenedSchema>;

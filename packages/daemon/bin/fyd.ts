@@ -4382,10 +4382,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // app opens and closes a session, so a step-up ends with the page that performed it.
   const stepUpRegistry = new StepUpRegistry({ nowMs: () => Date.now() });
   const deviceConnections = new LiveDeviceConnections(stepUpRegistry);
+  // ONE journal for the owner's acts — grant changes and re-opened passkey windows — so two writers never
+  // interleave in the same file.
+  const grantAudit = new JournalGrantAudit(paths.grantAudit, stateFiles);
   const grants = new CapabilityGrantService({
     document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
     clock: new SystemGrantClock(),
-    audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+    audit: grantAudit,
     clientName: CLIENT_NAME,
     // A narrowed grant reaches the streams already open, not only the next one.
     changed: () => deviceConnections.recheckAll(),
@@ -5278,6 +5281,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         store: new StatePasskeyStore(paths, stateFiles),
         verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
         registry: stepUpRegistry,
+        audit: grantAudit,
         challenges: new ChallengeLedger(),
         random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
         clock: { nowMs: () => Date.now() },

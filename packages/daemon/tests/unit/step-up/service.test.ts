@@ -71,6 +71,7 @@ function fixture(options: { nowMs?: number; origins?: readonly string[]; paired?
   const registry = new StepUpRegistry({ nowMs: () => clock.now });
   registry.open(phone);
   registry.open({ ...phone, appSession: 'tab-two' });
+  const audited: { readonly actor: string; readonly changes: readonly string[] }[] = [];
   const service = new StepUpService({
     store,
     verifier: passkeyVerifier(webCrypto),
@@ -87,8 +88,13 @@ function fixture(options: { nowMs?: number; origins?: readonly string[]; paired?
     },
     allowedOrigins: () => options.origins ?? [ORIGIN, OTHER_ORIGIN],
     relyingPartyName: 'Ferretry',
+    audit: {
+      record: async entry => {
+        audited.push(entry);
+      },
+    },
   });
-  return { clock, store, registry, service };
+  return { clock, store, registry, service, audited };
 }
 
 const registrationBody = async (authenticator: Authenticator, credentialId = CREDENTIAL_ID) => {
@@ -145,14 +151,15 @@ describe('StepUpService', () => {
     });
 
     it('should refuse registration options for a device the directory no longer knows', async () => {
-      // Arrange
-      const { service } = fixture({ paired: false });
+      // Arrange — a step-up still held in memory for a device whose grant is already gone
+      const { clock, registry, service } = fixture({ paired: false });
+      registry.grant(phone, clock.now);
 
       // Act
-      const hosted = await service.registrationOptions({ device: phone, hostLocal: true }, ORIGIN);
+      const options = await service.registrationOptions(remote(), ORIGIN);
 
       // Assert
-      should(hosted).eql({ ok: false, refusal: 'not-a-device' });
+      should(options).eql({ ok: false, refusal: 'not-a-device' });
     });
   });
 
@@ -238,18 +245,54 @@ describe('StepUpService', () => {
       should(store.rows).have.length(2);
     });
 
-    it('should let the host register at any time', async () => {
-      // Arrange
-      const { service } = fixture({ nowMs: PAIRED_AT_MS + 86_400_000 });
-      const host: StepUpCaller = { device: phone, hostLocal: true };
+    it('should let the owner at the machine re-open a window for one passkey, ten minutes, audited', async () => {
+      // Arrange — paired a day ago, so the first window is long closed; a browser is never the owner (B4)
+      const { clock, service, audited } = fixture({ nowMs: PAIRED_AT_MS + 86_400_000 });
+      const owner: StepUpCaller = { hostLocal: true, actor: 'admin-cli' };
+      const opensAt = clock.now;
 
       // Act
-      const view = await service.view(host);
-      const added = await enrol(service, await es256Authenticator(), host);
+      const byBrowser = await service.reopenRegistration(remote(), phone.deviceId);
+      const byOwner = await service.reopenRegistration(owner, phone.deviceId);
+      const unknown = await service.reopenRegistration(owner, deviceId('z'));
+      const view = await service.view(remote());
+      const added = await enrol(service, await es256Authenticator());
+      // Spent by that one passkey: another copy of the app on the phone, holding no step-up, is closed.
+      const afterwards = await service.view(remote({ ...phone, appSession: 'tab-two' }));
 
       // Assert
-      should(view).eql({ ok: true, value: { passkeys: [], registration: 'host' } });
+      const closesAt = new Date(opensAt + PASSKEY_REGISTRATION_WINDOW_SECONDS * 1_000).toISOString();
+      should(byBrowser).eql({ ok: false, refusal: 'not-at-machine' });
+      should(byOwner).eql({ ok: true, value: { deviceId: phone.deviceId, deviceName: 'Phone', closesAt } });
+      should(unknown).eql({ ok: false, refusal: 'unknown-device' });
+      should(view).eql({ ok: true, value: { passkeys: [], registration: 'reopened', registrationClosesAt: closesAt } });
       should(added.ok).be.true();
+      should(afterwards.ok && afterwards.value.registration).equal('closed');
+      should(audited).eql([
+        {
+          actor: 'admin-cli',
+          changes: [`passkey.registration-window=${phone.deviceId}`],
+          at: new Date(opensAt).toISOString(),
+        },
+      ]);
+    });
+
+    it('should close a re-opened window when its ten minutes end, or when the device is revoked', async () => {
+      // Arrange
+      const { clock, service } = fixture({ nowMs: PAIRED_AT_MS + 86_400_000 });
+      const owner: StepUpCaller = { hostLocal: true };
+      await service.reopenRegistration(owner, phone.deviceId);
+
+      // Act
+      clock.now += PASSKEY_REGISTRATION_WINDOW_SECONDS * 1_000;
+      const lapsed = await service.view(remote());
+      await service.reopenRegistration(owner, phone.deviceId);
+      await service.forgetDevice(phone.deviceId);
+      const revoked = await service.view(remote());
+
+      // Assert
+      should(lapsed.ok && lapsed.value.registration).equal('closed');
+      should(revoked.ok && revoked.value.registration).equal('closed');
     });
 
     it('should re-check the window at registration, not trust the options call', async () => {
