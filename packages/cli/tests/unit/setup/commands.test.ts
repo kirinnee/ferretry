@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
+import { Command } from 'commander';
 import should from 'should';
-import { registerSetupCommands, renderHarnessScan, runSetup } from '../../../src/lib/setup/commands.ts';
+import { registerSetupCommands, renderHarnessScan, runImport, runSetup } from '../../../src/lib/setup/commands.ts';
 import { authorityOf, fakeWorld, machine, runCommand, scan } from '../fleet/account-fakes.ts';
 
 const bothInstalled = () =>
@@ -51,21 +52,29 @@ describe('renderHarnessScan', () => {
   });
 });
 
+/** A program with the `daemon` group the setup verbs mount onto, as `fy.ts` registers it first. */
+const daemonGroup = (program: Command): void => {
+  program.command('daemon');
+};
+
 describe('runSetup', () => {
-  it('should refuse a script that did not say --yes', async () => {
+  it('should refuse a script and name the no-questions verb', async () => {
     const world = fakeWorld({ interactive: false });
-    await should(runSetup(world.deps, {}, false)).be.rejectedWith(/pass --yes/);
+    await should(runSetup(world.deps, {})).be.rejectedWith(
+      /needs a terminal\. In a script, run `fz daemon import claude` or `fz daemon import codex` instead\./,
+    );
+    should(world.gateway.called('stage')).be.empty();
   });
 
   it('should refuse when the machine takes no import yet, with the reason', async () => {
     const world = fakeWorld({
       gateway: { scan: () => scan({ importing: { available: false, reason: 'Account changes are switched off.' } }) },
     });
-    await should(runSetup(world.deps, { yes: true }, false)).be.rejectedWith('Account changes are switched off.');
+    await should(runSetup(world.deps, {})).be.rejectedWith('Account changes are switched off.');
   });
 
-  it('should offer to install a missing tool, import, and name the runtime at a terminal', async () => {
-    // Arrange: install Codex? yes. Import Claude? yes. Import Codex? no. Claude's name? work.
+  it('should ask one question at a time: install, use each login and setup, then the runtime name', async () => {
+    // Arrange: install Codex? yes. Use Claude? yes. Use Codex? no. Claude's name? work.
     let scans = 0;
     const world = fakeWorld({
       answers: ['y', '', 'n', 'work-claude'],
@@ -78,13 +87,13 @@ describe('runSetup', () => {
     });
 
     // Act
-    await runSetup(world.deps, {}, false);
+    await runSetup(world.deps, {});
 
     // Assert
     should(world.prompt.questions).eql([
       'Codex is not installed. Install now? [Y/n]',
-      'Import Claude Code? [Y/n]',
-      'Import Codex? [Y/n]',
+      'We found Claude Code on studio. Use your login and setup? [Y/n]',
+      'We found Codex on studio. Use your login and setup? [Y/n]',
       'Name for the Claude Code runtime [claude-default]:',
     ]);
     should(world.gateway.called('installTools')[0]?.args[0]).eql(['codex']);
@@ -96,16 +105,25 @@ describe('runSetup', () => {
     should(world.out.text('report')).match(/fz runtimes/);
   });
 
-  it('should take every suggestion under --yes, honouring --skip and --name', async () => {
-    const world = fakeWorld({ interactive: false, gateway: { scan: bothInstalled } });
-    await runSetup(world.deps, { yes: true, skip: ['codex'], name: ['claude=mine'] }, false);
-    should(world.prompt.questions).be.empty();
-    should(world.gateway.called('installTools')).be.empty();
-    should(world.gateway.called('stage')[0]?.args[0]).eql({
-      kind: 'setup.import',
-      include: ['claude'],
-      names: { claude: 'mine' },
+  it('should say a login that is not signed in can still be imported, and name the sign-in after', async () => {
+    // Arrange: both installed; Codex's own login is not signed in.
+    const notSignedIn = bothInstalled();
+    const world = fakeWorld({
+      answers: ['n', 'y', ''],
+      gateway: { scan: () => ({ ...notSignedIn, format: 'version-2' }) },
     });
+
+    // Act
+    await runSetup(world.deps, {});
+
+    // Assert — no tools question on a machine that already has a setup.
+    should(world.prompt.questions[0]).equal('We found Claude Code on studio. Use your login and setup? [Y/n]');
+    should(world.out.text('report'))
+      .match(/Your Codex login is not signed in\. You can still import it, and sign in afterwards\./)
+      .and.match(
+        /Codex is not signed in yet: find its login with `fz credentials`, then run `fz credential signin <login>`/,
+      );
+    should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'setup.import', include: ['codex'] });
   });
 
   it('should keep a suggested name when the answer is blank, and skip installing on a dry run', async () => {
@@ -113,7 +131,7 @@ describe('runSetup', () => {
       answers: ['', ''],
       gateway: { scan: () => scan({ notes: [{ harness: 'claude', text: 'CLAUDE.md and AGENTS.md match.' }] }) },
     });
-    await runSetup(world.deps, { dryRun: true }, false);
+    await runSetup(world.deps, { dryRun: true });
     should(world.gateway.called('installTools')).be.empty();
     should(world.out.text('report'))
       .match(/Claude Code: CLAUDE\.md and AGENTS\.md match\./)
@@ -123,29 +141,38 @@ describe('runSetup', () => {
 
   it('should not install when the person says no', async () => {
     const world = fakeWorld({ answers: ['n', 'y', ''] });
-    await runSetup(world.deps, {}, false);
+    await runSetup(world.deps, {});
     should(world.gateway.called('installTools')).be.empty();
   });
 
-  it('should exit non-zero when nothing was chosen', async () => {
+  it('should end with a clear "nothing set up yet" and the way back when everything is skipped', async () => {
     const world = fakeWorld({ answers: ['n', 'n'] });
-    await runSetup(world.deps, {}, false);
+    await runSetup(world.deps, {});
     should(world.gateway.called('stage')).be.empty();
-    should(world.out.exitCode).equal(1);
-    should(world.out.text('error')).match(/Nothing was imported/);
+    should(world.out.exitCode).be.undefined();
+    should(world.out.text('report')).match(
+      /Nothing was set up, so studio has no runtimes yet\. Run `fz daemon setup` again when you are ready, or finish in the app\./,
+    );
+  });
+
+  it('should say nothing changed when Import again chooses nothing', async () => {
+    const world = fakeWorld({ answers: ['n'], gateway: { scan: () => scan({ format: 'version-2' }) } });
+    await runSetup(world.deps, {});
+    should(world.out.text('report')).match(/Nothing was imported\. Your runtimes are unchanged\./);
   });
 
   it('should offer each changed component on Import again and add only those chosen', async () => {
     // Arrange
     const world = fakeWorld({
-      answers: ['y', '', 'y', 'n'],
+      answers: ['y', 'y', 'n'],
       gateway: {
         scan: () =>
           scan({
+            format: 'version-2',
+            runtimes: [],
             updates: [
               { reference: 'instructions/main', sources: ['~/.claude/CLAUDE.md'] },
               { reference: 'mcp/github', sources: ['~/.claude.json'] },
-              { reference: 'skills/mine', sources: ['~/.claude/skills'] },
             ],
             duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
           }),
@@ -153,40 +180,35 @@ describe('runSetup', () => {
     });
 
     // Act
-    await runSetup(world.deps, { acceptUpdate: ['skills/mine'], addDuplicates: true }, true);
+    await runSetup(world.deps, {});
 
     // Assert
-    should(world.prompt.questions.slice(2)).eql([
+    should(world.prompt.questions.slice(1)).eql([
       'instructions/main changed in ~/.claude/CLAUDE.md since the last import. Update it? [y/N]',
       'mcp/github changed in ~/.claude.json since the last import. Update it? [y/N]',
     ]);
     should(world.out.text('report')).match(
-      /claude-default already uses that Claude Code login and profile; adding claude-default-2 anyway\./,
+      /claude-default already uses that Claude Code login and profile, so no new runtime is added\./,
     );
     should(world.gateway.called('stage')[0]?.args[0]).eql({
       kind: 'setup.import',
       include: ['claude'],
-      acceptedUpdates: ['skills/mine', 'instructions/main'],
-      addDuplicates: true,
+      acceptedUpdates: ['instructions/main'],
     });
   });
 
-  it('should never update a changed component under --yes unless it was named', async () => {
+  it('should take an update alone when no tool is chosen', async () => {
     const world = fakeWorld({
-      interactive: false,
-      gateway: {
-        scan: () =>
-          scan({
-            updates: [{ reference: 'instructions/main', sources: ['x'] }],
-            duplicates: [{ harness: 'claude', existing: 'a', suggested: 'a-2' }],
-          }),
-      },
+      answers: ['n', 'y'],
+      gateway: { scan: () => scan({ format: 'version-2', updates: [{ reference: 'mcp/x', sources: ['y'] }] }) },
     });
-    await runSetup(world.deps, { yes: true, json: true }, true);
-    should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'setup.import', include: ['claude'] });
-    should(world.out.text('report'))
-      .match(/no new runtime is added/)
-      .and.not.match(/fz runtimes/);
+    await runSetup(world.deps, { json: true });
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'setup.import',
+      include: [],
+      acceptedUpdates: ['mcp/x'],
+    });
+    should(world.out.text('report')).not.match(/fz runtimes/);
   });
 
   it('should ask a caller off this machine for the operator password once, for the install and the import', async () => {
@@ -200,7 +222,7 @@ describe('runSetup', () => {
         installTools: () => ({ outcomes: [{ harness: 'codex', outcome: 'installed', command: 'x' }] }),
       },
     });
-    await runSetup(world.deps, {}, false);
+    await runSetup(world.deps, {});
     should(world.prompt.secrets).have.length(1);
     should(world.gateway.called('installTools')[0]?.args[1]).eql({
       unlock: 'unlock-token',
@@ -208,28 +230,79 @@ describe('runSetup', () => {
     });
     should(world.gateway.called('apply')[0]?.args[1]).eql({ unlock: 'unlock-token', password: 'operator-password-1' });
   });
+});
 
-  it('should refuse a --name it cannot read', async () => {
-    await should(runSetup(fakeWorld().deps, { name: ['claude'] }, false)).be.rejectedWith(/tool=name/);
+describe('runImport', () => {
+  it('should import one tool with no questions, under the suggested name', async () => {
+    const world = fakeWorld({ interactive: false });
+    await runImport(world.deps, 'claude', {});
+    should(world.prompt.questions).be.empty();
+    should(world.gateway.called('installTools')).be.empty();
+    should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'setup.import', include: ['claude'] });
+    should(world.out.text('report')).match(/fz runtimes/);
+  });
+
+  it('should take --name for the runtime it creates', async () => {
+    const world = fakeWorld({ interactive: false, gateway: { scan: bothInstalled } });
+    await runImport(world.deps, 'Codex', { name: 'codex-smoke' });
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'setup.import',
+      include: ['codex'],
+      names: { codex: 'codex-smoke' },
+    });
+  });
+
+  it('should refuse a tool that is not installed, naming the install command, and install nothing', async () => {
+    const world = fakeWorld({ interactive: false });
+    await should(runImport(world.deps, 'codex', {})).be.rejectedWith(
+      'Codex is not installed on studio. Install it with `fz machine install codex`, then import it.',
+    );
+    should(world.gateway.called('installTools')).be.empty();
+    should(world.gateway.called('stage')).be.empty();
+  });
+
+  it('should refuse a tool it does not know', async () => {
+    await should(runImport(fakeWorld().deps, 'gemini', {})).be.rejectedWith(/use claude or codex/);
+  });
+
+  it('should say when the login and profile already have a runtime', async () => {
+    const world = fakeWorld({
+      interactive: false,
+      gateway: { scan: () => scan({ duplicates: [{ harness: 'claude', existing: 'mine', suggested: 'mine-2' }] }) },
+    });
+    await runImport(world.deps, 'claude', { json: true });
+    should(world.out.text('report'))
+      .match(/mine already uses that Claude Code login and profile, so no new runtime is added\./)
+      .and.not.match(/fz runtimes/);
   });
 });
 
 describe('registerSetupCommands', () => {
-  it('should run the first run, and Import again with setup flags typed after the verb', async () => {
+  it('should mount setup and import onto the daemon group, with their flags after the verb', async () => {
     const world = fakeWorld({ interactive: false });
-    await runCommand(registerSetupCommands, world, ['setup', '--yes']);
-    await runCommand(registerSetupCommands, world, [
-      'setup',
-      'import',
-      '--yes',
-      '--accept-update',
-      'mcp/x',
-      '--add-duplicates',
-    ]);
+    await runCommand(
+      registerSetupCommands,
+      world,
+      ['daemon', 'import', 'claude', '--name', 'claude-auto-smoke'],
+      daemonGroup,
+    );
+    await should(
+      runCommand(registerSetupCommands, world, ['daemon', 'setup', '--dry-run'], daemonGroup),
+    ).be.rejectedWith(/needs a terminal/);
     should(world.gateway.called('stage').map(call => call.args[0])).eql([
-      { kind: 'setup.import', include: ['claude'] },
-      { kind: 'setup.import', include: ['claude'], acceptedUpdates: ['mcp/x'], addDuplicates: true },
+      { kind: 'setup.import', include: ['claude'], names: { claude: 'claude-auto-smoke' } },
     ]);
-    should(world.gateway.called('installTools')).have.length(1);
+  });
+
+  it('should run setup at a terminal', async () => {
+    const world = fakeWorld({ answers: ['n', 'y', ''] });
+    await runCommand(registerSetupCommands, world, ['daemon', 'setup'], daemonGroup);
+    should(world.gateway.called('stage')).have.length(1);
+  });
+
+  it('should refuse to mount without the daemon group, and leave no top-level setup', () => {
+    const program = new Command();
+    should(() => registerSetupCommands(program, fakeWorld().deps)).throw(/daemon command group/);
+    should(program.commands).be.empty();
   });
 });

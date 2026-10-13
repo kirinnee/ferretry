@@ -60,12 +60,14 @@ import { DaemonController } from '../src/lib/daemon/controller';
 import { FirstPasswordOffer } from '../src/lib/daemon/first-password';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
+import { MachineSetupNotice } from '../src/lib/daemon/setup-notice';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
 import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
 import { FilesystemController } from '../src/lib/filesystem/controller';
 import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { ProtocolAccountGateway } from '../src/lib/fleet/account-gateway';
 import { registerAccountModelCommands } from '../src/lib/fleet/account-model';
+import type { AccountCommandDeps } from '../src/lib/fleet/account-ports';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { resolveFleetLayout } from '../src/lib/fleet/layout';
@@ -108,6 +110,7 @@ import {
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
+import { registerSetupCommands } from '../src/lib/setup/commands';
 import { StateHomeClaimService } from '../src/lib/state-home/claim';
 import { StateHomeController } from '../src/lib/state-home/controller';
 import { registerStatuslineCommands } from '../src/lib/statusline/commands';
@@ -492,6 +495,13 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
       interactive: () => world.io.interactive(),
       clientName: BINARY_NAME,
     }),
+    // The machine's own answer, through the same lazy client, after the start has already waited for it.
+    setupNotice: new MachineSetupNotice({
+      setUp: async () => (await new ProtocolAccountGateway(client).machine()).setUp,
+      out,
+      interactive: () => world.io.interactive(),
+      clientName: BINARY_NAME,
+    }),
   });
 }
 
@@ -518,6 +528,21 @@ export interface DomainWiring {
   readonly world: CliWorld;
   readonly client: SharedDaemonClient;
   readonly ownSessionId: string | undefined;
+}
+
+/** The account model's collaborators, one set for every group that changes a machine's setup. */
+function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): AccountCommandDeps {
+  return {
+    gateway: new ProtocolAccountGateway(client),
+    out: world.io,
+    prompt: world.prompt,
+    interactive: world.interactive,
+    binaryName: BINARY_NAME,
+    readPasswordFromStdin: () => new StdinOperatorPassword(BINARY_NAME).read(),
+    readText: path => Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
+    sleep: milliseconds => Bun.sleep(milliseconds),
+    now: () => Date.now(),
+  };
 }
 
 /**
@@ -606,21 +631,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         binaryName: BINARY_NAME,
       }),
     ),
-  // The account model's command groups (docs/design/account-model.md §6.2): setup, machine, runtimes,
+  // The account model's command groups (docs/design/account-model.md §6.2): machine, runtimes,
   // credentials, profiles and components. Every write goes through the daemon's
   // reviewed changes, so nothing here touches a configuration file.
-  ({ program, world, client }) =>
-    registerAccountModelCommands(program, {
-      gateway: new ProtocolAccountGateway(client),
-      out: world.io,
-      prompt: world.prompt,
-      interactive: world.interactive,
-      binaryName: BINARY_NAME,
-      readPasswordFromStdin: () => new StdinOperatorPassword(BINARY_NAME).read(),
-      readText: path => Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
-      sleep: milliseconds => Bun.sleep(milliseconds),
-      now: () => Date.now(),
-    }),
+  ({ program, world, client }) => registerAccountModelCommands(program, accountCommandDeps(world, client)),
   ({ program, world }) =>
     registerStatuslineCommands(
       program,
@@ -714,6 +728,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         binaryName: BINARY_NAME,
       }),
     ),
+  // `daemon setup` and `daemon import <tool>` mount onto the daemon group above, so they come after it: a
+  // booting daemon never sets a machine up, and these are how a person (or a script) does.
+  ({ program, world, client }) => registerSetupCommands(program, accountCommandDeps(world, client)),
 ];
 
 /**

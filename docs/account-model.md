@@ -36,6 +36,27 @@ A change is a reviewed **proposal**: the person or agent proposes it, reads what
 applies it. No route, command or log line ever returns a credential value
 ([secrets.md](secrets.md)).
 
+## Setting a machine up
+
+**Starting a daemon imports nothing.** A machine is _not set up_ (`GET /machine` answers
+`setUp: false`) until somebody chooses what to bring in, and then it is one reviewed `setup.import`
+change, like every other. There are three ways to choose, and they ask the same questions:
+
+- **The app** opens the first run by itself for a machine that is not set up: right after pairing,
+  and whenever Settings → Machines lands on it. One question per screen: install what is missing,
+  then "We found Claude Code on _machine_. Use your login and setup?" (**Import** · **Skip**), the
+  same for Codex, then the runtime names. A tool that is installed but not signed in offers **Sign
+  in now**, which adds the person's own login (`credential.add` with `store: host`), signs it in
+  there, and returns to the step; the import then reuses that login. Skipping both ends on "Nothing
+  is set up on _machine_ yet", with the way back.
+- **`fy daemon setup`** asks the same questions in a terminal, one at a time. With no terminal it
+  refuses and names `fy daemon import`.
+- **`fy daemon import claude|codex`** imports one tool with no questions, for scripts, under
+  `--name <runtime>` or the suggested name (`claude-default`).
+
+`fy daemon start` at a terminal on a machine that is not set up ends with one line naming the app and
+`fy daemon setup`. There is no top-level `fy setup`.
+
 ## Reaching it
 
 **Browser:** Settings → **Machines** → a machine → Runtimes, Credentials, Profiles, Components,
@@ -45,7 +66,7 @@ Settings. The link is `#machines/<name>/<tab>`.
 
 | Verb                                                                                       | Does                                                           |
 | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| `fy setup` / `fy setup import`                                                             | the first run, and "import again"                              |
+| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked  |
 | `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex      |
 | `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (logins arrive as empty slots) |
 | `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                       |
@@ -74,11 +95,11 @@ not on the host also needs the per-change operator password ([grants.md](grants.
 ## Version 1 is retired
 
 A `config.yaml` with no `version` key, or `version: 1`, is **refused, never converted**. Nothing is
-read from it and nothing is deleted. The same sentence reaches the daemon boot, `fy` and the browser:
+read from it and nothing is deleted. The same sentence reaches `fy` and the browser:
 
 > _path_ uses the old account format, which this Ferretry no longer reads. Move it aside (for example
-> rename it to config.yaml.old) and restart the daemon; the first run then sets this machine up again
-> from its own Claude Code and Codex.
+> rename it to config.yaml.old), then set this machine up again from the app or with `fy daemon setup`.
 
-A `config/daemon.json` that still has an `accountModel` key still boots; the key is ignored and the boot
-says so once. Delete it.
+A `config/daemon.json` that still has an `accountModel` key, or the retired `fleet.prepareDefaults`
+key (which every earlier boot wrote itself), still boots; the key is ignored and the boot says so
+once. Delete it.

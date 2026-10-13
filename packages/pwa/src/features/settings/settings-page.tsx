@@ -26,6 +26,7 @@ import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
+import { machineItemHash, settingsFlowFromHash } from '../fleet/setup/settings-route.ts';
 import { DEFAULT_MACHINE_TAB, type MachineRoute, machineHash, parseMachineHash } from '../fleet/shell/machine-route.ts';
 import { MachinesSurface, type MachineTabSurfaces } from '../fleet/shell/machines-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
@@ -491,6 +492,20 @@ export function SettingsPage({
     },
     [connections, go],
   );
+  /**
+   * A machine that is not set up opens its first run by itself. A flow the address already names — Clone
+   * from another machine, installing a tool, the first run itself — is left alone: that is somebody's
+   * own choice of how to set it up. It is always THIS page's machine, so only the hash moves — the way
+   * the Settings tab opens its own flows, which is the event that tab follows.
+   */
+  const openSetup = useCallback(
+    (target: DaemonId): void => {
+      const record = connections.find(candidate => candidate.daemonId === target);
+      if (record === undefined || settingsFlowFromHash(window.location.hash) !== null) return;
+      window.location.hash = machineItemHash(daemonDisplayName(record), 'settings', 'setup');
+    },
+    [connections],
+  );
   const switchToId = activeSection === 'machines' ? switchTo?.daemonId : undefined;
   useEffect(() => {
     if (switchToId !== undefined) openMachine(switchToId, machineRoute.tab);
@@ -643,6 +658,7 @@ export function SettingsPage({
                       {...(unknownMachine === undefined ? {} : { unknownMachine })}
                       onOpen={openMachine}
                       onAddMachine={onAddDaemon}
+                      onSetUp={openSetup}
                       createClient={createMachineClient}
                       {...(machineTabs ? { tabs: machineTabs } : {})}
                     />

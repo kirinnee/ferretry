@@ -979,6 +979,38 @@ describe('deriveAccountChange: credential.add', () => {
     // Assert
     should(edit.model.credentials.fresh?.label).equal('Work');
   });
+
+  it('should add the person’s own login, shared in place, for the first run’s Sign in now', () => {
+    // Arrange — a machine with no own Claude Code login yet.
+    const model = modelOf({
+      credentials: { work: { harness: 'claude', store: 'ferretry' }, home: { harness: 'claude', store: 'ferretry' } },
+    });
+
+    // Act
+    const edit = derive({ kind: 'credential.add', id: 'claude-you', harness: 'claude', store: 'host' }, model);
+
+    // Assert
+    should(edit.summary).equal('Add your own Claude Code login as claude-you');
+    should(edit.model.credentials['claude-you']).deepEqual({ harness: 'claude', store: 'host' });
+    should(edit.consequences).deepEqual([
+      'It is your own Claude Code login, shared with claude in your terminal: signing in here signs that in too.',
+    ]);
+  });
+
+  it('should treat an explicit ferretry store as the default', () => {
+    // Act
+    const edit = derive({ kind: 'credential.add', id: 'fresh', harness: 'codex', store: 'ferretry' });
+
+    // Assert
+    should(edit.model.credentials.fresh).deepEqual({ harness: 'codex', store: 'ferretry' });
+  });
+
+  it('should refuse a second pointer at the person’s own login', () => {
+    // Act + Assert — the fixture already shares the host's Codex login as my-codex.
+    should(refusalOf({ kind: 'credential.add', id: 'codex-you', harness: 'codex', store: 'host' })).equal(
+      'my-codex is already your own Codex login on this machine',
+    );
+  });
 });
 
 describe('deriveAccountChange: credential.label', () => {

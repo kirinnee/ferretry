@@ -98,11 +98,7 @@ async function seedHome(home: string, port: number): Promise<void> {
   const opened = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
   await opened.storage.close();
   // No first run: this host's own harness setup must not be imported over the fixture's manifest.
-  await writeFile(
-    join(home, 'config', 'daemon.json'),
-    JSON.stringify({ host: '127.0.0.1', port, fleet: { prepareDefaults: false } }),
-    { mode: 0o600 },
-  );
+  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
 }
 
 /** A fleet whose one account is published under a wrapper this host could actually run. */

@@ -8,6 +8,8 @@ import { interact, type Mounted, mount, must } from '../../../../support/dom.ts'
 import {
   APPLY_PATH,
   type Call,
+  credentials,
+  credentialView,
   FRESH_MACHINE,
   machineAnswer,
   machineView,
@@ -100,6 +102,7 @@ const start = async (client: FleetClient, options: Partial<Options> = {}): Promi
       onDone={() => done.push(1)}
       onLeave={() => left.push(1)}
       now={NOW}
+      pollMs={5}
     />
   );
   let current: Options = { mode: 'setup', machine: FRESH_MACHINE, online: true, ...options };
@@ -256,14 +259,23 @@ describe('MachineFirstRun: Check tools', () => {
       await clickOn(h.q('[data-step-next]'), 'continue');
       expect(step(h)).toBe('claude');
       expect(h.text('[data-setup-note="not-installed"]')).toBe(
-        'Claude Code isn’t installed · Install later in Settings',
+        'Claude Code isn’t installed on studio-mac. You can install it later in Settings.',
       );
       await clickOn(h.q('[data-step-next]'), 'continue');
       expect(step(h)).toBe('codex');
-      expect(h.text('[data-setup-note="not-installed"]')).toBe('Codex isn’t installed · Install later in Settings');
+      expect(h.text('[data-setup-note="not-installed"]')).toBe(
+        'Codex isn’t installed on studio-mac. You can install it later in Settings.',
+      );
       await clickOn(h.q('[data-step-next]'), 'continue');
-      expect(h.q('[data-first-run-result="nothing"]')?.textContent).toContain('Nothing was imported');
-      expect(h.text()).toContain('That’s fine. You can add a runtime any time, or import later from Settings.');
+      // Nothing set up: said plainly, with the way back.
+      expect(h.q('[data-first-run-result="nothing"]')?.textContent).toContain('Nothing is set up on studio-mac yet');
+      expect(h.text()).toContain(
+        'That’s fine. Ferretry can’t start a session on studio-mac until it has a runtime. Set it up any time from Settings, or add a runtime yourself.',
+      );
+      await clickOn(h.q('[data-first-run-start-again]'), 'start again');
+      expect(step(h)).toBe('tools');
+      expect(h.done).toHaveLength(0);
+      for (const _ of [1, 2, 3]) await clickOn(h.q('[data-step-next]'), 'continue');
       await clickOn(h.q('[data-first-run-finish]'), 'go to runtimes');
       expect(h.done).toHaveLength(1);
     } finally {
@@ -309,7 +321,7 @@ describe('MachineFirstRun: Check tools', () => {
       expect((h.q('[data-step-next]') as HTMLButtonElement).disabled).toBe(false);
       await clickOn(h.q('[data-step-next]'), 'continue');
       expect(step(h)).toBe('claude');
-      expect(h.text('[data-harness-import]')).toBe('Import from Claude Code');
+      expect(h.text('[data-harness-import]')).toBe('Import');
     } finally {
       await h.view.unmount();
     }
@@ -317,7 +329,7 @@ describe('MachineFirstRun: Check tools', () => {
 });
 
 describe('MachineFirstRun: the harness steps', () => {
-  it('Skip, then Import instead, then import both (E4 sign in later, problems, E9 badge)', async () => {
+  it('asks one question per tool, Skip moves on and Back asks again (E4 sign in later, problems, E9 badge)', async () => {
     const withProblems = scan({
       harnesses: [CLAUDE_SCAN, { ...CODEX_SCAN, problems: ['Couldn’t read config.toml: it is not valid TOML.'] }],
     });
@@ -333,23 +345,22 @@ describe('MachineFirstRun: the harness steps', () => {
       // Import again has no Check tools step.
       expect(step(h)).toBe('claude');
       expect(h.text('[data-stepper-position]')).toBe('Claude Code · 1 of 3');
+      expect(h.text('[data-first-run-question]')).toBe('We found Claude Code on studio-mac. Use your login and setup?');
       const claude = h.text('[data-first-run-step="claude"]');
-      expect(claude).toContain(
-        'Ferretry found Claude Code on studio-mac. Import it to use your login and setup from here.',
-      );
       expect(claude).toContain('you@example.com');
       expect(claude).toContain('2 secret values · go to the secret store, never shown');
       expect(claude).toContain('Ferretry and your own claude share this login: signing out in one signs out both.');
+      expect(claude).not.toContain('Component');
       expect(h.q('[data-setup-note="problem"]')).toBeNull();
+      expect(h.q('[data-setup-note="sign-in-now"]')).toBeNull();
+      expect(h.text('[data-harness-skip]')).toBe('Skip');
+      expect(h.text('[data-harness-import]')).toBe('Import');
 
+      // Skip is an answer: it moves on, and Back brings the same question back.
       await clickOn(h.q('[data-harness-skip]'), 'skip claude');
+      expect(step(h)).toBe('codex');
+      await clickOn(h.q('[data-stepper-back]'), 'back');
       expect(step(h)).toBe('claude');
-      expect(h.text('[data-setup-note="skipped"]')).toContain(
-        'Skipped Claude Code. You can import it later from Settings.',
-      );
-      expect(h.text('[data-harness-unskip]')).toBe('Import Claude Code instead');
-      await clickOn(h.q('[data-harness-unskip]'), 'import instead');
-      expect(h.q('[data-setup-note="skipped"]')).toBeNull();
       expect(h.q('[data-setup-section="found"]')).not.toBeNull();
 
       await clickOn(h.q('[data-harness-import]'), 'import claude');
@@ -358,6 +369,11 @@ describe('MachineFirstRun: the harness steps', () => {
       expect(codex).toContain('Same as your CLAUDE.md · one shared copy');
       expect(codex).not.toContain('share this login');
       expect(h.text('[data-setup-note="problem"]')).toBe('Couldn’t read config.toml: it is not valid TOML.');
+      // Installed but not signed in: sign in now, or import and sign in later.
+      expect(h.text('[data-setup-note="sign-in-now"]')).toContain('Codex isn’t signed in');
+      expect(h.text('[data-setup-note="sign-in-now"]')).toContain(
+        'Sign in now, or import your setup and sign in later.',
+      );
       expect(h.text('[data-harness-import]')).toBe('Import, sign in later');
       await clickOn(h.q('[data-harness-import]'), 'import codex');
       expect(step(h)).toBe('names');
@@ -366,15 +382,185 @@ describe('MachineFirstRun: the harness steps', () => {
     }
   });
 
-  it('a skipped harness can be continued past', async () => {
+  it('skipping both ends on Done with nothing, and Start again goes back to the first question', async () => {
     const h = await start(
       scriptedClient({ '/v1/fleet/machine': machineAnswer(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
       { mode: 'import', machine: machineView() },
     );
     try {
       await clickOn(h.q('[data-harness-skip]'), 'skip claude');
-      await clickOn(h.q('[data-step-next]'), 'continue');
+      await clickOn(h.q('[data-harness-skip]'), 'skip codex');
+      expect(h.q('[data-first-run-result="nothing"]')?.textContent).toContain('Nothing was imported');
+      expect(h.text()).toContain('That’s fine. Your runtimes are unchanged.');
+      await clickOn(h.q('[data-first-run-start-again]'), 'start again');
+      expect(step(h)).toBe('claude');
+    } finally {
+      await h.view.unmount();
+    }
+  });
+});
+
+const LOGIN_PATH = '/v1/fleet/login';
+const FLOW_PATH = '/v1/fleet/login/flow-1';
+const CREDENTIALS_PATH = '/v1/fleet/credentials';
+
+const codexFlow = (state: 'awaiting-approval' | 'complete') => ({
+  harness: 'codex',
+  flowId: 'flow-1',
+  credentialId: 'codex-you',
+  identity: 'codex:you',
+  startedAt: '2026-10-13T08:00:00.000Z',
+  expiresAt: '2026-10-13T08:10:00.000Z',
+  state,
+  ...(state === 'awaiting-approval'
+    ? { verificationUrl: 'https://auth.openai.com/codex/device', userCode: '0IER-FFQW6' }
+    : {}),
+});
+
+const ownCodexLogin = credentialView('codex-you', { harness: 'codex', store: 'host', sharedWithTerminal: true });
+
+// One act per slice: a state change inside an act only commits (and so re-arms the poll) when that act ends.
+const wait = async (ms: number): Promise<void> => {
+  for (let elapsed = 0; elapsed < ms; elapsed += 10)
+    await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
+  await settle();
+};
+
+describe('MachineFirstRun: Sign in now', () => {
+  it('makes the own login in place, signs it in, and returns to the same step with it signed in', async () => {
+    const calls: Call[] = [];
+    let added = false;
+    let signedIn = false;
+    const signedInScan = scan({
+      harnesses: [CLAUDE_SCAN, { ...CODEX_SCAN, account: { state: 'signed-in', email: 'you@example.com' } }],
+    });
+    const client = scriptedClient(
+      {
+        '/v1/fleet/machine': machineAnswer(),
+        [SCAN_PATH]: () => (signedIn ? signedInScan : scan()),
+        [RUNTIMES_PATH]: runtimes([]),
+        [CREDENTIALS_PATH]: () => credentials(added ? [ownCodexLogin] : []),
+        [CHANGES_PATH]: (call: Call) => ({ ...STAGED_IMPORT, change: (call.body as { change: unknown }).change }),
+        [APPLY_PATH]: () => {
+          added = true;
+          return EXECUTED;
+        },
+        [LOGIN_PATH]: codexFlow('awaiting-approval'),
+        [FLOW_PATH]: () => {
+          signedIn = true;
+          return codexFlow('complete');
+        },
+      },
+      calls,
+    );
+    const h = await start(client, { mode: 'import', machine: machineView() });
+    try {
+      await clickOn(h.q('[data-harness-import]'), 'import claude');
       expect(step(h)).toBe('codex');
+      await clickOn(h.q('[data-harness-sign-in]'), 'sign in now');
+      // The sign-in replaces the step's answers until it is done or put off.
+      expect(h.q('[data-first-run-sign-in="codex"]')).not.toBeNull();
+      expect(h.q('[data-harness-import]')).toBeNull();
+      expect(h.text('[data-first-run-sign-in="codex"]')).toContain(
+        'This is your own Codex login on studio-mac: codex in your terminal signs in too.',
+      );
+      expect(h.text('[data-change-submit]')).toBe('Sign in to Codex');
+      await clickOn(h.q('[data-change-submit]'), 'sign in to codex');
+      expect(changeBodies(calls)).toEqual([
+        { kind: 'credential.add', id: 'codex-you', harness: 'codex', store: 'host' },
+      ]);
+      expect(calls.find(call => call.path === LOGIN_PATH)?.body).toEqual({ credentialId: 'codex-you' });
+      expect(h.q('[data-codex-login="awaiting-approval"]')).not.toBeNull();
+
+      await wait(60);
+      // Back on the same step, now signed in, and the import is a plain Import.
+      expect(step(h)).toBe('codex');
+      expect(h.q('[data-first-run-sign-in]')).toBeNull();
+      expect(h.q('[data-setup-note="sign-in-now"]')).toBeNull();
+      expect(h.text('[data-harness-import]')).toBe('Import');
+      await clickOn(h.q('[data-harness-import]'), 'import codex');
+      expect(step(h)).toBe('names');
+    } finally {
+      await h.view.unmount();
+    }
+  });
+
+  it('reuses an own login that is already there, and Not now puts the sign-in off', async () => {
+    const calls: Call[] = [];
+    const client = scriptedClient(
+      {
+        '/v1/fleet/machine': machineAnswer(),
+        [SCAN_PATH]: scan(),
+        [RUNTIMES_PATH]: runtimes([]),
+        [CREDENTIALS_PATH]: credentials([
+          credentialView('codex-you', { harness: 'claude', store: 'host' }),
+          ownCodexLogin,
+        ]),
+        [LOGIN_PATH]: new FyHttpError('a sign-in is already running', 409, 'conflict'),
+      },
+      calls,
+    );
+    const h = await start(client, { mode: 'import', machine: machineView() });
+    try {
+      await clickOn(h.q('[data-harness-import]'), 'import claude');
+      await clickOn(h.q('[data-harness-sign-in]'), 'sign in now');
+      await clickOn(h.q('[data-change-submit]'), 'sign in to codex');
+      // Nothing is made: the machine already points at the person's own Codex login.
+      expect(changeBodies(calls)).toEqual([]);
+      expect(calls.find(call => call.path === LOGIN_PATH)?.body).toEqual({ credentialId: 'codex-you' });
+      await clickOn(h.q('[data-first-run-sign-in-close]'), 'not now');
+      expect(h.q('[data-first-run-sign-in]')).toBeNull();
+      expect(h.text('[data-harness-import]')).toBe('Import, sign in later');
+    } finally {
+      await h.view.unmount();
+    }
+  });
+
+  it('says why the own login could not be made, and starts no sign-in', async () => {
+    const calls: Call[] = [];
+    const sentence = 'codex-you is already a login on studio-mac';
+    const client = scriptedClient(
+      {
+        '/v1/fleet/machine': machineAnswer(),
+        [SCAN_PATH]: scan(),
+        [RUNTIMES_PATH]: runtimes([]),
+        [CREDENTIALS_PATH]: credentials([]),
+        [CHANGES_PATH]: new FyHttpError(sentence, 409, 'fleet_change_refused'),
+      },
+      calls,
+    );
+    const h = await start(client, { mode: 'import', machine: machineView() });
+    try {
+      await clickOn(h.q('[data-harness-import]'), 'import claude');
+      await clickOn(h.q('[data-harness-sign-in]'), 'sign in now');
+      await clickOn(h.q('[data-change-submit]'), 'sign in to codex');
+      expect(h.text('[data-first-run-sign-in="codex"]')).toContain(sentence);
+      expect(calls.some(call => call.path === LOGIN_PATH)).toBe(false);
+    } finally {
+      await h.view.unmount();
+    }
+  });
+
+  it('says why the logins could not be read, and starts nothing', async () => {
+    const calls: Call[] = [];
+    const client = scriptedClient(
+      {
+        '/v1/fleet/machine': machineAnswer(),
+        [SCAN_PATH]: scan(),
+        [RUNTIMES_PATH]: runtimes([]),
+        [CREDENTIALS_PATH]: new FyHttpError('the setup could not be read', 409, 'fleet_catalog_unreadable'),
+      },
+      calls,
+    );
+    const h = await start(client, { mode: 'import', machine: machineView() });
+    try {
+      await clickOn(h.q('[data-harness-import]'), 'import claude');
+      await clickOn(h.q('[data-harness-sign-in]'), 'sign in now');
+      await clickOn(h.q('[data-change-submit]'), 'sign in to codex');
+      expect(h.text('[data-first-run-sign-in="codex"] [role="alert"]')).toContain('the setup could not be read');
+      expect(calls.some(call => call.path === LOGIN_PATH)).toBe(false);
+      await clickOn(h.q('[data-first-run-sign-in-close]'), 'not now');
+      expect(h.q('[data-setup-note="sign-in-now"]')).not.toBeNull();
     } finally {
       await h.view.unmount();
     }
@@ -404,9 +590,7 @@ describe('MachineFirstRun: What changed (O6)', () => {
     const h = await start(client, { mode: 'import', machine: machineView() });
     try {
       await clickOn(h.q('[data-harness-skip]'), 'skip claude');
-      await clickOn(h.q('[data-step-next]'), 'continue');
       await clickOn(h.q('[data-harness-skip]'), 'skip codex');
-      await clickOn(h.q('[data-step-next]'), 'continue');
       expect(step(h)).toBe('updates');
       const body = h.text('[data-first-run-step="updates"]');
       expect(body).toContain('Some of your setup on studio-mac changed since the last import.');
@@ -444,9 +628,7 @@ describe('MachineFirstRun: What changed (O6)', () => {
     );
     try {
       await clickOn(h.q('[data-harness-skip]'), 'skip claude');
-      await clickOn(h.q('[data-step-next]'), 'continue');
       await clickOn(h.q('[data-harness-skip]'), 'skip codex');
-      await clickOn(h.q('[data-step-next]'), 'continue');
       await clickOn(h.q('[data-step-next]'), 'continue past updates');
       expect(h.q('[data-first-run-result="nothing"]')).not.toBeNull();
     } finally {

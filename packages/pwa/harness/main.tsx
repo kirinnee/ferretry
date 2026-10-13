@@ -1473,7 +1473,7 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   const setUp = connection.daemonId === daemon.daemonId;
   const answer = (path: string, init?: RequestInit): unknown => {
-    if (path === '/v1/fleet/setup/scan') return HARNESS_SETUP_SCAN;
+    if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
     if (path !== '/v1/fleet/machine') return harnessCatalogAnswer(path, init);
     return {
       name: 'studio-mac',
@@ -1491,6 +1491,53 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
     request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
       schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
+};
+
+/**
+ * What the first run finds on a machine that is not set up: both tools installed, Claude Code signed in
+ * with a full setup, and Codex installed but not signed in — so the Codex step offers Sign in now.
+ */
+const HARNESS_FIRST_RUN_SCAN = {
+  machine: 'studio-mac',
+  format: 'none',
+  tools: [
+    { harness: 'claude', label: 'Claude Code', installed: true },
+    { harness: 'codex', label: 'Codex', installed: true },
+  ],
+  harnesses: [
+    {
+      harness: 'claude',
+      installed: true,
+      account: { state: 'signed-in', email: 'someone.with.a.long.address@example.com' },
+      instructions: { name: 'CLAUDE.md', source: 'CLAUDE.md', bytes: 2150 },
+      settings: { source: 'settings.json', count: 6, hooks: 1 },
+      mcpServers: ['github', 'linear', 'notes'],
+      skills: ['release-notes', 'pr-review', 'changelog'],
+      secretKeys: ['env.GITHUB_TOKEN'],
+      missingCommands: [],
+      problems: [],
+    },
+    {
+      harness: 'codex',
+      installed: true,
+      account: { state: 'not-signed-in' },
+      instructions: { name: 'AGENTS.md', source: 'AGENTS.md', bytes: 1400 },
+      mcpServers: ['github'],
+      skills: [],
+      secretKeys: [],
+      missingCommands: [],
+      problems: [],
+    },
+  ],
+  instructionsIdentical: false,
+  runtimes: [
+    { harness: 'claude', name: 'claude-default', profile: 'default' },
+    { harness: 'codex', name: 'codex-default', profile: 'default' },
+  ],
+  updates: [],
+  duplicates: [],
+  notes: [],
+  importing: { available: true },
 };
 
 /** What Import again finds on the harness machine: a full Claude Code setup, and Codex not installed. */

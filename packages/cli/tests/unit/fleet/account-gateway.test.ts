@@ -138,3 +138,19 @@ describe('ProtocolAccountGateway', () => {
     should(headers(fake.sent[0])[OPERATOR_UNLOCK_HEADER]).equal('u');
   });
 });
+
+describe('ProtocolAccountGateway Codex method', () => {
+  it('should send a Codex sign-in method only when one is chosen', async () => {
+    // Arrange
+    const fake = client({ '/v1/fleet/login': flowAnswer });
+    const gateway = new ProtocolAccountGateway(fake);
+
+    // Act
+    await gateway.startSignIn('codex-you', {}, 'link');
+    await gateway.startSignIn('codex-you', {});
+
+    // Assert
+    should(body(fake.sent[0])).eql({ credentialId: 'codex-you', method: 'link' });
+    should(body(fake.sent[1])).eql({ credentialId: 'codex-you' });
+  });
+});

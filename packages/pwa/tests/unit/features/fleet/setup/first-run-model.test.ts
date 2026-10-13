@@ -21,6 +21,7 @@ import {
   nameCards,
   nameProblem,
   nameProblems,
+  offersSignIn,
   scanHasHarness,
   sendsImport,
   updateDetail,
@@ -388,8 +389,8 @@ describe('harnessProblems', () => {
 
 describe('importLabel', () => {
   it('offers a plain import for a login that is usable', () => {
-    expect(importLabel(scan(), 'claude')).toBe('Import from Claude Code');
-    expect(importLabel(withCodex({ account: { state: 'refresh-due' } }), 'codex')).toBe('Import from Codex');
+    expect(importLabel(scan(), 'claude')).toBe('Import');
+    expect(importLabel(withCodex({ account: { state: 'refresh-due' } }), 'codex')).toBe('Import');
   });
 
   it('offers to sign in later for every other state (E4)', () => {
@@ -400,6 +401,17 @@ describe('importLabel', () => {
 
   it('offers to sign in later when the harness was not scanned', () => {
     expect(importLabel(scan({ harnesses: [] }), 'claude')).toBe('Import, sign in later');
+  });
+});
+
+describe('offersSignIn', () => {
+  it('offers Sign in now only for an own login that is there to share but not signed in', () => {
+    expect(offersSignIn(scan(), 'codex')).toBe(true);
+    expect(offersSignIn(scan(), 'claude')).toBe(false);
+    expect(offersSignIn(withCodex({ account: { state: 'refresh-due' } }), 'codex')).toBe(false);
+    expect(offersSignIn(withCodex({ account: { state: 'unreadable' } }), 'codex')).toBe(false);
+    expect(offersSignIn(withCodex({ account: { state: 'not-shareable' } }), 'codex')).toBe(false);
+    expect(offersSignIn(scan({ harnesses: [] }), 'codex')).toBe(false);
   });
 });
 

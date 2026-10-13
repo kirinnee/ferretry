@@ -73,7 +73,6 @@ function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetS
         return BUNDLE;
       },
       executors: {} as FleetSetupSubsystem['executors'],
-      firstRunAtBoot: async () => ({ kind: 'skipped' }) as never,
       ...overrides,
     },
   };

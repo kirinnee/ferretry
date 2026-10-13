@@ -68,7 +68,7 @@ describe('parseAccountConfigText', () => {
 describe('RETIRED_FLEET_CONFIG_SENTENCE', () => {
   it('should say where the file is, that it is not read, and how to set the machine up again', () => {
     should(RETIRED_FLEET_CONFIG_SENTENCE(PATH)).equal(
-      `${PATH} uses the old account format, which this Ferretry no longer reads. Move it aside (for example rename it to config.yaml.old) and restart the daemon; the first run then sets this machine up again from its own Claude Code and Codex.`,
+      `${PATH} uses the old account format, which this Ferretry no longer reads. Move it aside (for example rename it to config.yaml.old), then set this machine up again from the app or with \`fy daemon setup\`.`,
     );
   });
 });

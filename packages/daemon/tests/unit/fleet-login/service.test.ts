@@ -16,7 +16,12 @@ import type { ChangeConfirmation } from '../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { type CredentialSignInTarget, FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
-import type { HarnessLoginChild, HarnessLoginChildSpec } from '../../../src/lib/fleet-login/ports.ts';
+import type { CodexCallbackDelivery } from '../../../src/lib/fleet-login/codex-link.ts';
+import type {
+  HarnessLoginCallbackDeliver,
+  HarnessLoginChild,
+  HarnessLoginChildSpec,
+} from '../../../src/lib/fleet-login/ports.ts';
 import {
   HARNESS_LOGIN_WINDOW_MINUTES,
   HarnessLoginRefusal,
@@ -128,6 +133,8 @@ interface Fixture {
   readonly prepared: string[];
   /** The credentials whose store now holds a usable login. The harness "writes" one by adding to it. */
   readonly logins: Set<string>;
+  /** Every request a Codex link sign-in delivered to Codex's listener, in order. */
+  readonly deliveries: CodexCallbackDelivery[];
   /** Let the not-awaited login work run. Everything in the fixture is synchronous or a microtask. */
   settle(): Promise<void>;
   /** The child a flow spawned, once it has. `index` picks one out of a run of several flows. */
@@ -141,6 +148,8 @@ interface FixtureOptions {
   /** Replaces the default resolution, so a test can hold or break one target. */
   readonly target?: (credentialId: string, fallback: (id: string) => CredentialSignInTarget) => CredentialSignInTarget;
   readonly locate?: (harness: HarnessKind) => string | undefined;
+  /** What Codex's listener answers a delivery with. Delivered, by default. */
+  readonly deliver?: HarnessLoginCallbackDeliver;
 }
 
 const LOCATED = (harness: HarnessKind): string => `/usr/local/bin/${harness}`;
@@ -151,6 +160,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
   const resolved: string[] = [];
   const prepared: string[] = [];
   const logins = new Set<string>();
+  const deliveries: CodexCallbackDelivery[] = [];
   let minted = 0;
 
   const fallback = (id: string): CredentialSignInTarget => {
@@ -213,6 +223,10 @@ function fixture(options: FixtureOptions = {}): Fixture {
       },
     },
     locate: options.locate ?? LOCATED,
+    deliverCallback: async delivery => {
+      deliveries.push(delivery);
+      return options.deliver === undefined ? 'delivered' : await options.deliver(delivery);
+    },
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
   });
 
@@ -229,6 +243,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
     resolved,
     prepared,
     logins,
+    deliveries,
     settle,
     child: async (index = 0) => {
       await settle();
@@ -625,7 +640,7 @@ describe('the Claude leg', () => {
     child.emit(CLAUDE_URL_LINE);
 
     // Act
-    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+    const actual = await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Assert
     should(actual).have.property('outcome', 'accepted');
@@ -639,7 +654,7 @@ describe('the Claude leg', () => {
     const child = await subject.child();
 
     // Act
-    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+    const actual = await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Assert
     should(actual).have.property('outcome', 'refused');
@@ -655,7 +670,7 @@ describe('the Claude leg', () => {
     child.reading = false;
 
     // Act
-    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+    const actual = await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Assert
     should(actual).deepEqual({
@@ -682,7 +697,7 @@ describe('the Claude leg', () => {
     await subject.settle();
 
     // Act
-    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+    const actual = await subject.service.submit(started.flowId, { code: PASTED_CODE });
     proving.release();
     await subject.settle();
 
@@ -697,7 +712,7 @@ describe('the Claude leg', () => {
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
+    await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Act — the harness writes its own store, then exits.
     subject.logins.add(CLAUDE_CREDENTIAL);
@@ -775,7 +790,7 @@ describe('the Codex leg', () => {
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
     // Act
-    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+    const actual = await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Assert
     should(actual).have.property('outcome', 'refused');
@@ -1132,7 +1147,7 @@ describe('a login’s lifetime', () => {
     await subject.service.cancel(started.flowId);
 
     // Act
-    const actual: HarnessLoginSubmission = await subject.service.submit(started.flowId, PASTED_CODE);
+    const actual: HarnessLoginSubmission = await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Assert
     should(actual).have.property('outcome', 'conflict');
@@ -1155,7 +1170,7 @@ describe('a login’s lifetime', () => {
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child(index);
     child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
+    await subject.service.submit(started.flowId, { code: PASTED_CODE });
     subject.logins.add(CLAUDE_CREDENTIAL);
     child.exit(0);
     await subject.settle();
@@ -1201,7 +1216,7 @@ describe('what the daemon holds', () => {
     // Act — the child prints something shaped exactly like the credential it writes, and the person
     // brings a code back. Both then have to be absent from everything a caller can read.
     child.emit(CLAUDE_URL_LINE, CREDENTIAL_SHAPED_LINE, 'Paste code here if prompted > ');
-    const submitted = await subject.service.submit(started.flowId, PASTED_CODE);
+    const submitted = await subject.service.submit(started.flowId, { code: PASTED_CODE });
     subject.logins.add(CLAUDE_CREDENTIAL);
     child.exit(0);
     await subject.settle();
@@ -1229,7 +1244,7 @@ describe('what the daemon holds', () => {
 
     // Act
     child.emit(CLAUDE_URL_LINE, CREDENTIAL_SHAPED_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
+    await subject.service.submit(started.flowId, { code: PASTED_CODE });
     subject.logins.add(CLAUDE_CREDENTIAL);
     child.exit(0);
     await subject.settle();
@@ -1515,7 +1530,7 @@ describe('a code the harness does not take', () => {
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
-    const submitted = await subject.service.submit(started.flowId, PASTED_CODE);
+    const submitted = await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Act
     child.emit(CLAUDE_INVALID_CODE_LINE);
@@ -1534,11 +1549,11 @@ describe('a code the harness does not take', () => {
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, 'first-TESTONLY');
+    await subject.service.submit(started.flowId, { code: 'first-TESTONLY' });
     child.emit(CLAUDE_INVALID_CODE_LINE);
 
     // Act
-    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+    const actual = await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Assert
     should(actual).have.property('outcome', 'accepted');
@@ -1552,7 +1567,7 @@ describe('a code the harness does not take', () => {
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
+    await subject.service.submit(started.flowId, { code: PASTED_CODE });
     child.emit(CLAUDE_INVALID_CODE_LINE);
 
     // Act
@@ -1569,7 +1584,7 @@ describe('a code the harness does not take', () => {
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
-    await subject.service.submit(started.flowId, PASTED_CODE);
+    await subject.service.submit(started.flowId, { code: PASTED_CODE });
 
     // Act
     child.exit(1);
@@ -1638,5 +1653,276 @@ describe('a code the harness does not take', () => {
 
     // Assert
     should(actual).match({ state: 'failed', lastCode: 'expired' });
+  });
+});
+
+/** Observed on stderr from `codex login` at codex-cli 0.145.0 (the URL's values replaced). */
+const LINK_STATE = 'STATE-TESTONLY_abc';
+const LINK_URL = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_TESTONLY&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=${LINK_STATE}&originator=codex_cli_rs`;
+const LINK_LINES = [
+  'Starting local login server on http://localhost:1455.',
+  'If your browser did not open, navigate to this URL to authenticate:',
+  '',
+  LINK_URL,
+  '',
+  'On a remote or headless machine? Use `codex login --device-auth` instead.',
+];
+/** The address a phone's browser is left on. Recognisable, so its absence from every answer is checkable. */
+const CALLBACK_CODE = 'callback-code-TESTONLY';
+const CALLBACK_ADDRESS = `http://localhost:1455/auth/callback?code=${CALLBACK_CODE}&scope=openid+profile&state=${LINK_STATE}`;
+/** Quoted from the codex binary (0.145.0 and 0.156.1). */
+const DEVICE_DISABLED_LINE =
+  'Error logging in with device code: device code login is not enabled for this Codex server. Use the browser login or verify the server URL.';
+
+/** A Codex link sign-in that has printed its link. */
+async function linkAwaiting(options: FixtureOptions = {}) {
+  const subject = fixture(options);
+  const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+  const child = await subject.child();
+  child.emit(...LINK_LINES);
+  return { subject, started, child };
+}
+
+describe('the Codex link sign-in', () => {
+  it('should run Codex’s ordinary browser login and publish its link when a link is asked for', async () => {
+    // Act
+    const { subject, started, child } = await linkAwaiting();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(child.spec.command).deepEqual(['/usr/local/bin/codex', '-c', 'cli_auth_credentials_store="file"', 'login']);
+    should(started).have.property('state', 'starting');
+    should(actual).match({ harness: 'codex', state: 'awaiting-callback', verificationUrl: LINK_URL });
+    should(actual).not.have.property('deviceCode');
+  });
+
+  it('should move to the link sign-in by itself when Codex says device codes are turned off', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const device = await subject.child();
+
+    // Act
+    device.emit(DEVICE_DISABLED_LINE);
+    device.exit(1);
+    const link = await subject.child(1);
+    link.emit(...LINK_LINES);
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(device.spec.command.at(-1)).equal('--device-auth');
+    should(device.killed).be.true();
+    should(link.spec.command.at(-1)).equal('login');
+    should(actual).match({ flowId: started.flowId, state: 'awaiting-callback', deviceCode: 'unavailable' });
+  });
+
+  it('should move to a link when the person says the device code did not work, in the same flow', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const device = await subject.child();
+    device.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+
+    // Act
+    const actual = await subject.service.submit(started.flowId, { method: 'link' });
+    const link = await subject.child(1);
+    link.emit(...LINK_LINES);
+
+    // Assert
+    should(actual).match({ outcome: 'accepted', flow: { flowId: started.flowId, state: 'starting' } });
+    should(device.killed).be.true();
+    should(await subject.service.status(started.flowId)).match({ state: 'awaiting-callback' });
+    should(await subject.service.status(started.flowId)).not.have.property('deviceCode');
+  });
+
+  it('should launch the link sign-in first when the switch arrives before any child ran', async () => {
+    // Arrange
+    const gate = held(undefined);
+    const subject = fixture({
+      target: (id, fallback) => {
+        const target = fallback(id) as StoreTarget;
+        return { ...target, prepare: async () => await gate.promise };
+      },
+    });
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+
+    // Act
+    await subject.service.submit(started.flowId, { method: 'link' });
+    gate.release();
+    const child = await subject.child();
+
+    // Assert
+    should(subject.children).have.length(1);
+    should(child.spec.command.at(-1)).equal('login');
+  });
+
+  it('should deliver the checked address to Codex’s listener, and finish when Codex signs in', async () => {
+    // Arrange
+    const { subject, started, child } = await linkAwaiting();
+
+    // Act
+    const submitted = await subject.service.submit(started.flowId, { code: `  ${CALLBACK_ADDRESS}\n` });
+    const during = await subject.service.status(started.flowId);
+    subject.logins.add(CODEX_CREDENTIAL);
+    child.exit(0);
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(subject.deliveries).deepEqual([
+      { port: 1455, path: '/auth/callback', query: `code=${CALLBACK_CODE}&scope=openid+profile&state=${LINK_STATE}` },
+    ]);
+    should(submitted).match({ outcome: 'accepted', flow: { state: 'finishing' } });
+    should(during).have.property('state', 'finishing');
+    should(actual).have.property('state', 'complete');
+    should(child.written).be.empty();
+    should(JSON.stringify([submitted, during, actual])).not.containEql(CALLBACK_CODE);
+  });
+
+  it('should refuse an address from another attempt without delivering it or repeating it', async () => {
+    // Arrange
+    const { subject, started } = await linkAwaiting();
+    const stale = CALLBACK_ADDRESS.replace(LINK_STATE, 'other-attempt');
+
+    // Act
+    const actual = await subject.service.submit(started.flowId, { code: stale });
+
+    // Assert
+    should(actual).match({ outcome: 'refused', reason: /different sign-in attempt/u });
+    should(subject.deliveries).be.empty();
+    should(JSON.stringify(actual)).not.containEql(CALLBACK_CODE);
+    should(await subject.service.status(started.flowId)).have.property('state', 'awaiting-callback');
+  });
+
+  it('should refuse a second address while Codex is finishing with the first', async () => {
+    // Arrange
+    const delivery = held<'delivered'>('delivered');
+    const { subject, started } = await linkAwaiting({ deliver: async () => await delivery.promise });
+
+    // Act
+    const first = subject.service.submit(started.flowId, { code: CALLBACK_ADDRESS });
+    const second = await subject.service.submit(started.flowId, { code: CALLBACK_ADDRESS });
+    delivery.release();
+
+    // Assert
+    should(second).match({ outcome: 'conflict', reason: /already has the address/u });
+    should(await first).have.property('outcome', 'accepted');
+    should(subject.deliveries).have.length(1);
+  });
+
+  it('should go back to waiting when Codex says it was not waiting for that address', async () => {
+    // Arrange
+    const { subject, started } = await linkAwaiting({ deliver: async () => 'refused' });
+
+    // Act
+    const actual = await subject.service.submit(started.flowId, { code: CALLBACK_ADDRESS });
+
+    // Assert
+    should(actual).match({ outcome: 'refused', reason: /not waiting for that address/u });
+    should(await subject.service.status(started.flowId)).have.property('state', 'awaiting-callback');
+  });
+
+  it('should keep a flow that ended during a refused delivery ended', async () => {
+    // Arrange
+    let flowId = '';
+    const subject = fixture({
+      deliver: async () => {
+        await subject.service.cancel(flowId);
+        return 'refused';
+      },
+    });
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    flowId = started.flowId;
+    (await subject.child()).emit(...LINK_LINES);
+
+    // Act
+    await subject.service.submit(started.flowId, { code: CALLBACK_ADDRESS });
+
+    // Assert
+    should(await subject.service.status(started.flowId)).have.property('state', 'failed');
+  });
+
+  it('should say nobody knows whether the address arrived when Codex was not listening', async () => {
+    // Arrange
+    const { subject, started } = await linkAwaiting({ deliver: async () => 'unreachable' });
+
+    // Act
+    const actual = await subject.service.submit(started.flowId, { code: CALLBACK_ADDRESS });
+
+    // Assert
+    should(actual).match({ outcome: 'unconfirmed', reason: /no longer listening/u });
+  });
+
+  it('should say Codex could not use the address when it exits after the delivery', async () => {
+    // Arrange
+    const { subject, started, child } = await linkAwaiting();
+    await subject.service.submit(started.flowId, { code: CALLBACK_ADDRESS });
+
+    // Act
+    child.emit('Error logging in: Token exchange failed: token endpoint returned status 401 Unauthorized');
+    child.exit(1);
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).match({ state: 'failed', lastCode: 'rejected', reason: /could not finish signing in/u });
+    should(JSON.stringify(actual)).not.containEql('Token exchange');
+  });
+
+  it('should name the busy ports, not a missing sign-in, when Codex cannot listen', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    const child = await subject.child();
+
+    // Act
+    child.emit('Error logging in: Port 127.0.0.1:1457 is already in use');
+    child.exit(1);
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).match({ state: 'failed', reason: /ports 1455 and 1457 .* already in use/u, remedy: /device code/u });
+  });
+
+  it('should say the link expired when the window closes while it waits for the address', async () => {
+    // Arrange
+    const { subject, started } = await linkAwaiting();
+
+    // Act
+    subject.timers[0]?.run();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).match({ state: 'failed', lastCode: 'expired', reason: /link expired/u });
+  });
+
+  it('should refuse a link for Claude, at the start and on a running flow', async () => {
+    // Arrange
+    const subject = fixture();
+
+    // Act
+    const atStart = subject.service.start({ credentialId: CLAUDE_CREDENTIAL, method: 'link' }, HOST);
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const running = await subject.service.submit(started.flowId, { method: 'link' });
+
+    // Assert
+    await should(atStart).be.rejectedWith({ name: 'HarnessLoginRefusal', code: 'fleet_login_unavailable' });
+    should(running).match({ outcome: 'refused', reason: /one way to sign in/u });
+  });
+
+  it('should refuse a switch once the flow already uses a link, and an address before the link shows', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    await subject.child();
+
+    // Act
+    const switched = await subject.service.submit(started.flowId, { method: 'link' });
+    const early = await subject.service.submit(started.flowId, { code: CALLBACK_ADDRESS });
+
+    // Assert
+    should(switched).match({ outcome: 'conflict', reason: /already using a link/u });
+    should(early).match({ outcome: 'refused', reason: /has not shown its link yet/u });
   });
 });

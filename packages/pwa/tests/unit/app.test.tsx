@@ -320,6 +320,8 @@ afterEach(async () => {
 /* ---------- the mounted shell --------------------------------------------- */
 
 interface ShellOptions {
+  /** Fleet reads by path, answered as given; any other path answers an empty document. */
+  readonly fleet?: Readonly<Record<string, unknown>>;
   /** Sessions the stub daemon answers `list` with. */
   readonly sessions?: readonly string[];
   /** Makes `get` reject, which is the session route's failure path. */
@@ -507,6 +509,7 @@ const appStore = async (
           healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
           if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
             return { format: 'version-2', runtimes: options.accounts };
+          if (options.fleet?.[path] !== undefined) return options.fleet[path];
           return path === '/v1/doctor' ? doctorReport : {};
         },
       } as unknown as FyApiClient;
@@ -654,6 +657,37 @@ const settle = async (): Promise<void> => {
     await Promise.resolve();
     await Promise.resolve();
   });
+};
+
+/** A paired machine that answers it is not set up yet, and the first run's reads of it. */
+const NOT_SET_UP = {
+  '/v1/fleet/machine': {
+    name: 'gamma',
+    format: 'none',
+    setUp: false,
+    agentPermissions: 'auto',
+    tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
+    runtimeCount: 0,
+    runningSessions: 0,
+    authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+  },
+  '/v1/fleet/setup/scan': {
+    machine: 'gamma',
+    format: 'none',
+    tools: [],
+    harnesses: [],
+    runtimes: [],
+    updates: [],
+    duplicates: [],
+    notes: [],
+    importing: { available: true },
+  },
+  '/v1/fleet/runtimes': { format: 'version-2', runtimes: [] },
+};
+
+/** Where a pairing lands is decided by one read of the machine, so it arrives a few turns later. */
+const landed = async (): Promise<void> => {
+  for (let turn = 0; turn < 20; turn += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
 };
 
 /**
@@ -1011,6 +1045,7 @@ describe('AppShell', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
+    await landed();
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
@@ -1045,6 +1080,7 @@ describe('AppShell', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
+    await landed();
     await settle();
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
 
@@ -3021,7 +3057,7 @@ describe('the connection picker slot', () => {
       'the confirmation control',
     );
     await interact(() => confirm.click());
-    await settle();
+    await landed();
 
     // The root must land on the daemon the exchange returned, not on whichever
     // pairing happened to be selected before.
@@ -3068,7 +3104,56 @@ describe('the connection picker slot', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
+    await landed();
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
+    await view.unmount();
+  });
+
+  it('opens the first run of a machine it just paired that is not set up, rather than its sessions', async () => {
+    const { view } = await renderShell('/', [alpha.daemonId], { fleet: NOT_SET_UP });
+    await popTo('/');
+    const field = must(view.container.querySelector<HTMLInputElement>('#pairing-link'), 'the pairing link field');
+    await interact(() => {
+      const setter = must(
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set,
+        'the input value setter',
+      );
+      setter.call(field, `https://pwa.example.test/#${GAMMA_FRAGMENT}`);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await interact(() =>
+      must(field.closest('form'), 'the pairing form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+    await interact(() =>
+      must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
+        'the confirmation control',
+      ).click(),
+    );
+    await landed();
+
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/settings`);
+    expect(window.location.hash).toMatch(/^#machines\/[^/]+\/settings\/setup$/u);
+    await view.unmount();
+  });
+
+  it('opens the first run from the guide’s last stage when the machine it paired is not set up', async () => {
+    const { view } = await renderShell(`/pair#${GAMMA_FRAGMENT}`, [], { fleet: NOT_SET_UP });
+    await interact(() =>
+      must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
+        'the confirmation control',
+      ).click(),
+    );
+    await settle();
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
+    );
+    await landed();
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/settings`);
+    expect(window.location.hash).toMatch(/^#machines\/[^/]+\/settings\/setup$/u);
     await view.unmount();
   });
 

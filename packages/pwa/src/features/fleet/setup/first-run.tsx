@@ -7,6 +7,13 @@
  * change, `setup.import`, sent from the last step before Done through the shared change helper. Until
  * then nothing is imported, so Back can change any answer.
  *
+ * Starting a daemon imports nothing, so this is how a machine gets set up: the app opens it by itself
+ * for a machine that is not set up (`first-run-landing.ts`). Each tool's step asks ONE question — "We
+ * found Claude Code on <machine>. Use your login and setup?" — answered Import or Skip. A login that is
+ * installed but not signed in can be signed in right there ("Sign in now", `first-run-sign-in.tsx`),
+ * which returns to the same step. Skipping everything ends on "Nothing is set up on <machine> yet",
+ * with Start again and the Runtimes tab, which keeps offering the way back.
+ *
  * A machine that is asleep or offline pauses the flow with its progress kept (E11).
  */
 
@@ -19,7 +26,15 @@ import { readFleetSetupScan } from '../setup-api.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { currentFlow, type StepperState, startStepper, stepForward, withSteps } from '../shell/stepper-model.ts';
+import {
+  currentFlow,
+  goToStep,
+  type StepperState,
+  type StepperStep,
+  startStepper,
+  stepForward,
+  withSteps,
+} from '../shell/stepper-model.ts';
 import {
   cardMakes,
   cardName,
@@ -39,11 +54,13 @@ import {
   NO_ANSWERS,
   nameCards,
   nameProblems,
+  offersSignIn,
   scanHasHarness,
   sendsImport,
   updateDetail,
   updateTitle,
 } from './first-run-model.ts';
+import { FirstRunSignIn } from './first-run-sign-in.tsx';
 import type { InstallPhase } from './install-model.ts';
 import { machineItemHash } from './settings-route.ts';
 import { type SetupAccess, useSetupAccess } from './setup-access.ts';
@@ -60,6 +77,8 @@ export interface MachineFirstRunProps extends MachineTabProps {
   readonly onLeave: () => void;
   /** Supplied in tests. */
   readonly now?: () => number;
+  /** How often a waiting sign-in is re-read. Supplied in tests. */
+  readonly pollMs?: number;
 }
 
 interface ImportResult {
@@ -148,10 +167,13 @@ function ScanGate({
 }
 
 export function MachineFirstRun(props: MachineFirstRunProps) {
-  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, now } = props;
+  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, now, pollMs } =
+    props;
   const access = useSetupAccess({ connection, createClient, ...(now === undefined ? {} : { now }) });
   const { changes } = access;
   const [scan, setScan] = useState<FleetSetupScan | null>(null);
+  /** The tool whose own login is being signed in, in place, on its step. */
+  const [signingIn, setSigningIn] = useState<SetupHarness | null>(null);
   const [issue, setIssue] = useState<string | null>(null);
   const [taken, setTaken] = useState<ReadonlySet<string>>(new Set());
   const [answers, setAnswers] = useState<FirstRunAnswers>(NO_ANSWERS);
@@ -232,7 +254,16 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
   const sending = sendsImport(steps, at, wouldSend);
 
   const body = (): ReactNode => {
-    if (at === 'done') return <DoneStep result={result} machineName={machineName} onDone={onDone} />;
+    if (at === 'done')
+      return (
+        <DoneStep
+          result={result}
+          mode={mode}
+          machineName={machineName}
+          onDone={onDone}
+          onStartAgain={() => setStepper(goToStep(state, (steps[0] as StepperStep).id))}
+        />
+      );
     if (scan === null) return <ScanGate access={access} machineName={machineName} issue={issue} onRead={read} />;
 
     if (at === 'tools') {
@@ -410,23 +441,9 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
       return (
         <div className="flex min-w-0 flex-col gap-3" data-first-run-step={harness}>
           <SetupNote name="not-installed">
-            <span>{name} isn’t installed · Install later in Settings</span>
-          </SetupNote>
-          <Foot>
-            <ContinueButton onClick={next} />
-          </Foot>
-        </div>
-      );
-    if (answers.choices[harness] === 'skip')
-      return (
-        <div className="flex min-w-0 flex-col gap-3" data-first-run-step={harness}>
-          <SetupNote name="skipped">
-            <span>Skipped {name}. You can import it later from Settings.</span>
-            <div className="mt-2">
-              <Button type="button" size="sm" data-harness-unskip="" onClick={() => choose(harness, 'import')}>
-                Import {name} instead
-              </Button>
-            </div>
+            <span>
+              {name} isn’t installed on {machineName}. You can install it later in Settings.
+            </span>
           </SetupNote>
           <Foot>
             <ContinueButton onClick={next} />
@@ -435,10 +452,11 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
       );
     const claudeImported = answers.choices.claude === 'import' && scanHasHarness(current, 'claude');
     const problems = harnessProblems(current, harness);
+    const canSignIn = offersSignIn(current, harness);
     return (
       <div className="flex min-w-0 flex-col gap-3" data-first-run-step={harness}>
-        <p className="m-0 text-cell leading-base text-fg">
-          Ferretry found {name} on {machineName}. Import it to use your login and setup from here.
+        <p className="m-0 text-row font-semibold leading-base text-fg" data-first-run-question="">
+          We found {name} on {machineName}. Use your login and setup?
         </p>
         <SetupSection title={`Found on ${machineName}`} name="found">
           {foundRows(current, harness, claudeImported).map(row => (
@@ -464,34 +482,61 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
             <span>{problem}</span>
           </SetupNote>
         ))}
+        {!canSignIn ? null : signingIn === harness ? (
+          <FirstRunSignIn
+            harness={harness}
+            machineName={machineName}
+            access={access}
+            connection={connection}
+            createClient={createClient}
+            {...(pollMs === undefined ? {} : { pollMs })}
+            onClose={() => setSigningIn(null)}
+            onSignedIn={() => {
+              setSigningIn(null);
+              void read();
+            }}
+          />
+        ) : (
+          <SetupNote tone="warn" name="sign-in-now" title={`${name} isn’t signed in`}>
+            <span>Sign in now, or import your setup and sign in later.</span>
+            <div className="mt-2">
+              <Button type="button" size="sm" data-harness-sign-in="" onClick={() => setSigningIn(harness)}>
+                Sign in now
+              </Button>
+            </div>
+          </SetupNote>
+        )}
         <p className="m-0 text-meta leading-base text-muted">
           Importing copies your setup into Ferretry. {name} on {machineName} keeps working as before.
           {harness === 'claude'
             ? ' Ferretry and your own claude share this login: signing out in one signs out both.'
             : ''}
         </p>
-        <Foot>
-          <Button
-            type="button"
-            data-harness-skip=""
-            onClick={() => {
-              choose(harness, 'skip');
-            }}
-          >
-            Skip {name}
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            data-harness-import=""
-            onClick={() => {
-              choose(harness, 'import');
-              next();
-            }}
-          >
-            {importLabel(current, harness)}
-          </Button>
-        </Foot>
+        {signingIn === harness ? null : (
+          <Foot>
+            <Button
+              type="button"
+              data-harness-skip=""
+              onClick={() => {
+                choose(harness, 'skip');
+                next();
+              }}
+            >
+              Skip
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              data-harness-import=""
+              onClick={() => {
+                choose(harness, 'import');
+                next();
+              }}
+            >
+              {importLabel(current, harness)}
+            </Button>
+          </Foot>
+        )}
       </div>
     );
   }
@@ -512,12 +557,17 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
 
 function DoneStep({
   result,
+  mode,
   machineName,
   onDone,
+  onStartAgain,
 }: {
   readonly result: ImportResult | null;
+  readonly mode: FirstRunMode;
   readonly machineName: string;
   readonly onDone: () => void;
+  /** Back to the first question, every answer kept. */
+  readonly onStartAgain: () => void;
 }) {
   const goToRuntimes = (
     <Foot>
@@ -529,11 +579,22 @@ function DoneStep({
   if (result === null)
     return (
       <div className="flex min-w-0 flex-col gap-2" data-first-run-step="done" data-first-run-result="nothing">
-        <p className="m-0 text-row font-semibold text-fg">Nothing was imported</p>
-        <p className="m-0 text-cell leading-base text-muted">
-          That’s fine. You can add a runtime any time, or import later from Settings.
+        <p className="m-0 text-row font-semibold text-fg">
+          {mode === 'setup' ? `Nothing is set up on ${machineName} yet` : 'Nothing was imported'}
         </p>
-        {goToRuntimes}
+        <p className="m-0 text-cell leading-base text-muted">
+          {mode === 'setup'
+            ? `That’s fine. Ferretry can’t start a session on ${machineName} until it has a runtime. Set it up any time from Settings, or add a runtime yourself.`
+            : 'That’s fine. Your runtimes are unchanged.'}
+        </p>
+        <Foot>
+          <Button type="button" data-first-run-start-again="" onClick={onStartAgain}>
+            ‹ Start again
+          </Button>
+          <Button type="button" variant="primary" data-first-run-finish="" onClick={onDone}>
+            Go to Runtimes
+          </Button>
+        </Foot>
       </div>
     );
   const needsSignIn = result.runtimes.filter(runtime => runtime.credential.status === 'needs_sign_in');

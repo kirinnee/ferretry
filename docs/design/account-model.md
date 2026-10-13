@@ -265,7 +265,10 @@ Where this surface mounts (open question O1, now resolved, §14): the PWA Settin
 
 ### 4.3 First run (per machine)
 
-Shown when a machine is selected that is not set up. Five steps, each one decision.
+Shown BY ITSELF when a machine is selected that is not set up: right after pairing, and whenever
+Settings › Machines lands on it (owner decision, 2026-10-13: "ask the user on the screen"). Starting
+a daemon never imports anything, so a fresh machine is not set up until somebody chooses. Five steps,
+each one decision.
 
 1. **Check tools.** "Ferretry runs Claude Code and Codex on _machine_. First it checks they're
    installed." Each tool shows Installed · _version_ or Not installed. For missing ones: a checkbox
@@ -274,10 +277,10 @@ claude-code`, `npm install -g @openai/codex`, …; §8.6), and, from a phone or 
    caller, the **operator password**, "used once and not stored". Then **Install _n_ tools**, or
    **Skip, continue without them** (E1). A failed install says why and gives the command to run by
    hand, with **Retry** (E2).
-2. **Claude Code.** "Ferretry found Claude Code on _machine_." A **Found on _machine_** list: Account
+2. **Claude Code.** "We found Claude Code on _machine_. Use your login and setup?" A **Found on _machine_** list: Account
    (Signed in / refresh due / Not signed in), Instructions (`CLAUDE.md`, size), Settings
    (`settings.json`, "6 settings, 1 hook"), MCP servers (names), Skills (names), with warnings
-   inline. **Import from Claude Code** or **Skip Claude Code**. "Importing copies your setup into
+   inline. **Import** or **Skip** (Skip moves on; Back asks again). "Importing copies your setup into
    Ferretry. Claude Code on _machine_ keeps working as before." Import creates: the credential
    (`store: host`, shared in place), one component per item found, and a **Default** profile that
    matches the person's setup (or a plain **Starter** profile with only a model set when nothing was
@@ -293,11 +296,17 @@ claude-code`, `npm install -g @openai/codex`, …; §8.6), and, from a phone or 
    profile name), validated as you type (E16). When an identical runtime already exists (Import
    again), "Add another anyway" is unchecked by default.
 5. **Done.** "_machine_ is ready · 2 runtimes created", each with status, email, profile and model,
-   then **Go to Runtimes**. With nothing imported: "Nothing was imported. That's fine." (E10).
+   then **Go to Runtimes**. With nothing imported: "Nothing is set up on _machine_ yet" on a first run,
+   "Nothing was imported" on Import again, each with **Start again** and **Go to Runtimes** (E10).
 
-The runtimes the first run creates are **agent runtimes** (O2). The daemon also runs this import
-itself the first time it boots on a host that has a harness and no configuration (`store: host`, the
-login shared in place); `fleet.prepareDefaults: false` in `config/daemon.json` turns that off.
+The runtimes the first run creates are **agent runtimes** (O2). **The daemon never runs this import
+itself**: an earlier build imported at the first boot (`fleet.prepareDefaults`), and that key is now
+retired — tolerated in an old `config/daemon.json` and said once in the boot trail. The same questions
+are `fy daemon setup` in a terminal; `fy daemon import claude|codex` is the no-questions form for
+scripts. A tool that is installed but not signed in offers **Sign in now** on its step: it adds the
+person's own login (`credential.add`, `store: host`), runs the existing sign-in in place, and returns
+to the step, so the import reuses that login. Skipping both tools ends on "Nothing is set up on
+_machine_ yet" with **Start again** and **Go to Runtimes**.
 
 **Import again** (Settings → Setup) runs steps 2–5 again and only adds what is new.
 
@@ -520,8 +529,8 @@ takes `--dry-run` and `--yes`.
 
 | Command                                                                                                    | Purpose                                                                                                |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `fy setup [--yes] [--skip <tool>] [--name <tool=name>]`                                                    | the first run (§4.3) in a terminal: tools, Claude import, Codex import, names                          |
-| `fy setup import`                                                                                          | Import again: adds what is new and offers updates to what changed                                      |
+| `fy daemon setup`                                                                                          | the first run (§4.3) in a terminal, one question at a time; Import again on a machine already set up   |
+| `fy daemon import claude\|codex [--name <runtime>]`                                                        | one tool's own login and setup, no questions (for scripts); refuses a tool that is not installed       |
 | `fy machine` / `fy machine set agent-permissions auto\|skip`                                               | machine facts, tools, Agent permissions                                                                |
 | `fy machine install claude\|codex`                                                                         | install a harness tool (§8.6); shows the command first                                                 |
 | `fy machine export > setup.json` / `fy machine clone setup.json [--replace]`                               | Clone without a browser: export from the source, import on the target                                  |

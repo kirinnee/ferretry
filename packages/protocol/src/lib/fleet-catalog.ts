@@ -486,6 +486,12 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     id: TypedNameSchema,
     harness: HarnessKindSchema,
     label: NonEmptyStringSchema.optional(),
+    /**
+     * Where the login lives. Absent (or `ferretry`) is an empty slot Ferretry keeps on this machine;
+     * `host` is the person's OWN login, shared in place with `claude` or `codex` in their terminal — what
+     * the first run's "Sign in now" makes before it signs in, so the import that follows reuses it.
+     */
+    store: z.enum(['ferretry', 'host']).optional(),
   }),
   z.strictObject({
     kind: z.literal('credential.label'),
