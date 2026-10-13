@@ -26,6 +26,7 @@ import { FleetCredentialCheckRequestSchema, FleetCredentialListSchema, FleetCred
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter } from '../../api/http.ts';
+import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { FleetCredentialRefusal, type FleetCredentialsService } from '../../fleet/credentials-service.ts';
@@ -38,7 +39,7 @@ function refusal(error: FleetCredentialRefusal): ApiError {
   return new ApiError(error.code === 'fleet_credential_unknown' ? 404 : 409, error.message, error.code);
 }
 
-async function answer(work: () => Promise<unknown>, parse: (value: unknown) => unknown): Promise<Response> {
+async function answer(work: () => Promise<unknown>, parse: (value: unknown) => unknown): Promise<ApiResponse> {
   try {
     return jsonResponse(parse(await work()));
   } catch (error) {

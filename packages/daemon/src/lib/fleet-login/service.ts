@@ -69,6 +69,7 @@ import {
   type FleetLoginResult,
   FleetLoginService,
   type FleetLoginTarget,
+  type HarnessKind,
   type HarnessLoginDeclarations,
   referencedEnvNames,
   type FleetTokenRenewal,
@@ -195,7 +196,7 @@ export interface DaemonHarnessLoginOptions {
    * Signing in by CREDENTIAL (account model §4.6): resolves a credential id to what a sign-in for it
    * launches. Absent means a start that names a credential refuses in words.
    */
-  readonly credentials?: { target(credentialId: string): Promise<CredentialSignInTarget> };
+  readonly credentialTargets?: { target(credentialId: string): Promise<CredentialSignInTarget> };
   /** The harness command, by this daemon's one rule. A credential sign-in launches it directly. */
   readonly locate?: (harness: HarnessKind) => string | undefined;
 }
@@ -354,7 +355,7 @@ export class HarnessLoginService {
     governance: CallerGovernance | undefined,
   ): Promise<HarnessLoginFlow> {
     if (governance === undefined) throw new HarnessLoginRefusal('fleet_login_unauthorized', SIGN_IN.undecidable);
-    const targets = this.options.credentials;
+    const targets = this.options.credentialTargets;
     if (targets === undefined) {
       throw new HarnessLoginRefusal('fleet_login_unavailable', 'this daemon is not configured to sign logins in by id');
     }

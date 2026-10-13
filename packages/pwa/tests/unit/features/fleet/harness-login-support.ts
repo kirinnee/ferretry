@@ -88,7 +88,7 @@ const FLOW_BASE = {
   expiresAt: '2026-08-19T10:10:00.000Z',
 } as const;
 
-export const claudeFlow = (state: ClaudeLoginFlow['state']): ClaudeLoginFlow => {
+export const claudeFlow = (state: ClaudeLoginFlow['state']): ClaudeLoginFlow & { readonly accountId: string } => {
   const base = { harness: 'claude', ...FLOW_BASE, accountId: CLAUDE_ACCOUNT_ID, identity: 'claude:studio' } as const;
   if (state === 'awaiting-code') return { ...base, state, verificationUrl: CLAUDE_URL };
   if (state === 'complete') {
@@ -112,7 +112,7 @@ export const claudeFlow = (state: ClaudeLoginFlow['state']): ClaudeLoginFlow => 
   return { ...base, state: 'starting' };
 };
 
-export const codexFlow = (state: CodexLoginFlow['state']): CodexLoginFlow => {
+export const codexFlow = (state: CodexLoginFlow['state']): CodexLoginFlow & { readonly accountId: string } => {
   const base = { harness: 'codex', ...FLOW_BASE, accountId: CODEX_ACCOUNT_ID, identity: 'codex:studio' } as const;
   if (state === 'awaiting-approval') return { ...base, state, verificationUrl: CODEX_URL, userCode: CODEX_CODE };
   if (state === 'complete') return { ...base, state, accounts: [{ accountId: CODEX_ACCOUNT_ID, status: 'logged-in' }] };

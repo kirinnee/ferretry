@@ -58,6 +58,7 @@ import {
   type HarnessKind,
   HOST_CLAUDE_SECURE_STORAGE,
   type LocalCredentialReading,
+  type PassiveUsageRecord,
   resolveCredentialStore,
   type StoredCredentialResolution,
 } from '@ferretry/fleet';
@@ -737,6 +738,56 @@ function needsLabel(
 }
 
 const subjectOf = (entry: CredentialEntry): CredentialSubject => ({ id: entry.id, resolution: entry.resolution });
+
+// ── Passive usage ────────────────────────────────────────────────────────────────────────────────
+
+/** One session this daemon launched, as usage attribution reads it: who ran it and where it wrote. */
+export interface CredentialSessionRecord {
+  /** The runtime (or version-1 account) the session was started on. */
+  readonly agent: string;
+  readonly transcript?: { readonly home: string; readonly file?: string };
+}
+
+export interface CredentialPassiveUsageDeps {
+  readonly catalog: Pick<FleetCredentialCatalog, 'entry'>;
+  /** A Claude credential's statusLine file (`FilePassiveUsageStore.read`). */
+  claude(id: string): Promise<PassiveUsageRecord | undefined>;
+  /** The sessions this daemon has records for. */
+  sessions(): Promise<readonly CredentialSessionRecord[]>;
+  /** The newest reading across these rollout files (`newestRolloutRateLimits`). */
+  newestRollout(files: readonly string[]): Promise<PassiveUsageRecord | undefined>;
+}
+
+/**
+ * The transcripts of the sessions that ran on this credential (§8.2.3): a session started on one of
+ * its runtimes, or — version 1 — one whose transcript lives in one of its copies. A rollout this
+ * daemon did not launch has no record, so it is never attributed: the shared pool mixes credentials.
+ */
+export function attributedTranscripts(
+  entry: Pick<CredentialEntry, 'usedBy' | 'copies'>,
+  sessions: readonly CredentialSessionRecord[],
+): readonly string[] {
+  const files = new Set<string>();
+  for (const session of sessions) {
+    const file = session.transcript?.file;
+    if (file === undefined) continue;
+    const home = session.transcript?.home ?? '';
+    if (entry.usedBy.includes(session.agent) || entry.copies.includes(home)) files.add(file);
+  }
+  return [...files].sort();
+}
+
+/** The status service's `passiveUsage` port: Claude's statusLine file, or Codex's attributed rollouts. */
+export function credentialPassiveUsage(
+  deps: CredentialPassiveUsageDeps,
+): (subject: CredentialSubject) => Promise<PassiveUsageRecord | undefined> {
+  return async subject => {
+    if (subject.resolution.harness === 'claude') return await deps.claude(subject.id);
+    const entry = await deps.catalog.entry(subject.id);
+    const files = attributedTranscripts(entry, await deps.sessions());
+    return files.length === 0 ? undefined : await deps.newestRollout(files);
+  };
+}
 
 // ── The subsystem ────────────────────────────────────────────────────────────────────────────────
 

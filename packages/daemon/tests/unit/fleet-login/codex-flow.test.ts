@@ -32,13 +32,13 @@ const CODE_LINE = `   ${ESC}[94m0IER-FFQW6${ESC}[0m`;
 const CODEX_URL = 'https://auth.openai.com/codex/device';
 const USER_CODE = '0IER-FFQW6';
 
-const BASE: HarnessLoginFlowBase = {
+const BASE = {
   flowId: 'flow-two',
   accountId: '00000000-0000-4000-8000-000000000002',
   identity: 'codex:kirin',
   startedAt: '2026-08-19T10:00:00.000Z',
   expiresAt: '2026-08-19T10:10:00.000Z',
-};
+} satisfies HarnessLoginFlowBase;
 
 const awaiting: CodexLoginStage = { stage: 'awaiting-approval', verificationUrl: CODEX_URL, userCode: USER_CODE };
 const complete: CodexLoginStage = { stage: 'complete', accounts: [{ accountId: BASE.accountId, status: 'logged-in' }] };
