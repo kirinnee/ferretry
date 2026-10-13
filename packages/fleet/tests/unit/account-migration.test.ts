@@ -151,7 +151,11 @@ describe('planMigration — the default first run', () => {
     const plan = planMigration(firstRunSurvey());
 
     // Assert
-    should(plan.ids.runtimes['claude-auto-default']).deepEqual({ id: id(1), formerNames: [], home: 'claude-auto-default' });
+    should(plan.ids.runtimes['claude-auto-default']).deepEqual({
+      id: id(1),
+      formerNames: [],
+      home: 'claude-auto-default',
+    });
     should(plan.runtimes.find(runtime => runtime.name === 'codex-default')).deepEqual({
       name: 'codex-default',
       id: id(2),
@@ -250,7 +254,10 @@ describe('planMigration — choosing the copy that survives', () => {
     const plan = planMigration({ ...base, homes });
 
     // Assert
-    should(decision(plan, 'claude-default')?.source).deepEqual({ kind: 'empty', reason: 'no copy holds a usable login' });
+    should(decision(plan, 'claude-default')?.source).deepEqual({
+      kind: 'empty',
+      reason: 'no copy holds a usable login',
+    });
     should(plan.notes.map(note => note.message)).containEql(
       'login claude-default has no usable copy (no copy holds a usable login); it needs sign-in after the migration',
     );
@@ -294,7 +301,9 @@ describe('planMigration — what refuses it', () => {
     const plan = planMigration({ ...base, homes });
 
     // Assert
-    should(plan.blockers[0]?.message).startWith('the login copy in /fy/fleet/homes/codex-default (codex-default) could not be read, so');
+    should(plan.blockers[0]?.message).startWith(
+      'the login copy in /fy/fleet/homes/codex-default (codex-default) could not be read, so',
+    );
   });
 
   it('should refuse while a session runs on a login it moves, naming the sessions', () => {
@@ -399,8 +408,13 @@ describe('planMigration — a runtime already living in your own harness directo
     // Act
     const plan = planMigration(
       survey(document, {
-        homes: [homeReading(id(1), 'claude', '/home/someone/.claude'), homeReading(id(2), 'claude', '/home/someone/.claude')],
-        host: { claude: { harness: 'claude', directory: '/home/someone/.claude', state: 'valid', fingerprint: 'same' } },
+        homes: [
+          homeReading(id(1), 'claude', '/home/someone/.claude'),
+          homeReading(id(2), 'claude', '/home/someone/.claude'),
+        ],
+        host: {
+          claude: { harness: 'claude', directory: '/home/someone/.claude', state: 'valid', fingerprint: 'same' },
+        },
       }),
     );
 
@@ -417,7 +431,11 @@ describe('planMigration — a runtime already living in your own harness directo
     );
 
     // Assert
-    should(decision(plan, 'codex-me')?.source).match({ kind: 'host', directory: '/home/someone/.codex', signedIn: false });
+    should(decision(plan, 'codex-me')?.source).match({
+      kind: 'host',
+      directory: '/home/someone/.codex',
+      signedIn: false,
+    });
   });
 });
 
@@ -491,8 +509,12 @@ describe('planMigration — the rest of a hand-built fleet', () => {
     should(plan.model.profiles['claude-a']?.layers).containEql('mcp/linear');
     should(plan.model.profiles['claude-b']?.layers).containEql('mcp/github-2');
     const messages = plan.notes.map(note => note.message);
-    should(messages).containEql('MCP server "bad" in "./mcp.json" is not one a runtime can start or reach, so it is not carried');
-    should(messages).containEql('MCP server "again" in "./other.json" is not one a runtime can start or reach, so it is not carried');
+    should(messages).containEql(
+      'MCP server "bad" in "./mcp.json" is not one a runtime can start or reach, so it is not carried',
+    );
+    should(messages).containEql(
+      'MCP server "again" in "./other.json" is not one a runtime can start or reach, so it is not carried',
+    );
     should(messages).containEql(
       'MCP servers in "./broken.json" could not be read (not JSON), so none are carried; add them again as MCP servers',
     );
@@ -529,7 +551,13 @@ describe('planMigration — the rest of a hand-built fleet', () => {
     const base = firstRunSurvey({ keychain: true });
     const homes = base.homes.map(home =>
       home.harness === 'claude'
-        ? { ...home, copies: [...home.copies, { kind: 'keychain' as const, service: `Claude Code-credentials-${home.accountId.slice(-2)}` }] }
+        ? {
+            ...home,
+            copies: [
+              ...home.copies,
+              { kind: 'keychain' as const, service: `Claude Code-credentials-${home.accountId.slice(-2)}` },
+            ],
+          }
         : home,
     );
 
@@ -546,7 +574,9 @@ describe('planMigration — the rest of a hand-built fleet', () => {
     // Arrange
     const document = { agents: [{ name: 'a', kind: 'claude', routes: { default: route(1, 'claude-a') } }] };
     const homes = [
-      homeReading(id(1), 'claude', '/fy/fleet/homes/claude-a', { copies: [{ kind: 'keychain', service: 'Claude Code-credentials-1' }] }),
+      homeReading(id(1), 'claude', '/fy/fleet/homes/claude-a', {
+        copies: [{ kind: 'keychain', service: 'Claude Code-credentials-1' }],
+      }),
     ];
 
     // Act
@@ -633,13 +663,16 @@ describe('renderMigrationDryRun', () => {
     should(lines).containEql(
       '    keeps: your own login in /home/someone/.claude — every copy is still the unchanged copy taken from your own claude login, so Ferretry shares that login instead of keeping copies',
     );
-    should(lines).containEql('    retires: /fy/fleet/homes/claude-auto-default/.credentials.json (claude-auto-default)');
+    should(lines).containEql(
+      '    retires: /fy/fleet/homes/claude-auto-default/.credentials.json (claude-auto-default)',
+    );
     should(lines).containEql('    links: /fy/fleet/homes/codex-default/auth.json to the one login file');
     should(lines).containEql(
       '  claude-auto-default — login claude-default, launched as an agent; its settings folder stays at /fy/fleet/homes/claude-auto-default',
     );
     should(lines).containEql('History: claude and codex conversations become shared by every runtime of that tool.');
-    for (const note of plan.conversion.notes) should(lines.some(line => line.startsWith(`  - ${note.message}`))).be.true();
+    for (const note of plan.conversion.notes)
+      should(lines.some(line => line.startsWith(`  - ${note.message}`))).be.true();
     should(lines).containEql('  version: 2');
     should(lines[lines.length - 1]).equal(`Plan ${plan.digest}. Nothing has been changed.`);
   });
@@ -665,7 +698,11 @@ describe('renderMigrationDryRun', () => {
       survey(document, {
         homes: [
           homeReading(id(1), 'claude', '/fy/fleet/homes/claude.a'),
-          homeReading(id(2), 'codex', '/fy/fleet/homes/codex-b', { state: 'missing', fingerprint: undefined, copies: [] }),
+          homeReading(id(2), 'codex', '/fy/fleet/homes/codex-b', {
+            state: 'missing',
+            fingerprint: undefined,
+            copies: [],
+          }),
           homeReading(id(4), 'codex', '/fy/fleet/homes/codex-d', { state: 'unreadable' }),
         ],
       }),

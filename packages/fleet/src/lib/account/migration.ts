@@ -305,7 +305,9 @@ function mcpComponentsOf(
   note: (message: string) => void,
 ): Record<string, McpComponent> {
   if (read === undefined || !read.ok) {
-    note(`MCP servers in "${file}" could not be read (${read?.ok === false ? read.reason : 'not found'}), so none are carried; add them again as MCP servers`);
+    note(
+      `MCP servers in "${file}" could not be read (${read?.ok === false ? read.reason : 'not found'}), so none are carried; add them again as MCP servers`,
+    );
     return {};
   }
   const servers: Record<string, McpComponent> = {};
@@ -347,7 +349,11 @@ function withMcpServers(
       }
     }
   }
-  return AccountModelSchema.parse({ ...conversion.model, components: { ...conversion.model.components, mcp }, profiles });
+  return AccountModelSchema.parse({
+    ...conversion.model,
+    components: { ...conversion.model.components, mcp },
+    profiles,
+  });
 }
 
 /**
@@ -387,15 +393,16 @@ export function planMigration(survey: MigrationSurvey): MigrationPlan {
     });
     const directory = hostDirectory(origin.harness);
     const hostHome =
-      directory !== undefined &&
-      origin.routeIds.some(id => sameDirectory(absoluteHome.get(id) ?? '', directory));
+      directory !== undefined && origin.routeIds.some(id => sameDirectory(absoluteHome.get(id) ?? '', directory));
     const facts = { origin, homes, hostHome };
     factsByKey.set(origin.key, facts);
     return facts;
   };
   const hostUsable = (harness: HarnessKind): boolean => {
     const host = survey.host[harness];
-    return host !== undefined && host.unavailable === undefined && USABLE.has(host.state) && host.fingerprint !== undefined;
+    return (
+      host !== undefined && host.unavailable === undefined && USABLE.has(host.state) && host.fingerprint !== undefined
+    );
   };
   const isHostLogin = (origin: LegacyCredentialOrigin): boolean => {
     const facts = factsOf(origin);
@@ -498,7 +505,8 @@ export function planMigration(survey: MigrationSurvey): MigrationPlan {
         facts.hostHome &&
         fresher?.fingerprint !== undefined &&
         fresher.fingerprint !== host?.fingerprint &&
-        (fresher.freshness ?? -1) > (facts.homes.find(home => hostDir !== undefined && sameDirectory(home.home, hostDir))?.freshness ?? -1)
+        (fresher.freshness ?? -1) >
+          (facts.homes.find(home => hostDir !== undefined && sameDirectory(home.home, hostDir))?.freshness ?? -1)
       ) {
         // Retiring it would throw away the live login; writing it over the person's own would be
         // Ferretry changing their terminal's login. Neither is a migration's decision.
@@ -561,7 +569,10 @@ export function planMigration(survey: MigrationSurvey): MigrationPlan {
                 : `the freshest copy (${freshnessWord(origin.harness)})`,
           };
     if (source.kind === 'empty') {
-      note(['credentials', id], `login ${id} has no usable copy (${source.reason}); it needs sign-in after the migration`);
+      note(
+        ['credentials', id],
+        `login ${id} has no usable copy (${source.reason}); it needs sign-in after the migration`,
+      );
     }
     credentials.push({
       id,
@@ -587,7 +598,9 @@ export function planMigration(survey: MigrationSurvey): MigrationPlan {
   }
 
   const historyPooled = (['claude', 'codex'] as const).filter(
-    harness => !config.sharedHistory[harness] && runtimes.some(runtime => model.credentials[runtime.credential]?.harness === harness),
+    harness =>
+      !config.sharedHistory[harness] &&
+      runtimes.some(runtime => model.credentials[runtime.credential]?.harness === harness),
   );
 
   const approved = {
@@ -630,7 +643,9 @@ export function renderMigrationDryRun(plan: MigrationPlan, configText: string): 
     const { source } = credential;
     if (source.kind === 'host') lines.push(`    keeps: your own login in ${source.directory} — ${source.reason}`);
     else if (source.kind === 'copy') {
-      lines.push(`    keeps: the copy from ${source.wrapper} (${source.home}) — ${source.reason}; it moves into Ferretry's store`);
+      lines.push(
+        `    keeps: the copy from ${source.wrapper} (${source.home}) — ${source.reason}; it moves into Ferretry's store`,
+      );
     } else if (source.kind === 'empty') lines.push(`    keeps: nothing — ${source.reason}; needs sign-in`);
     else lines.push('    keeps: its environment variables; nothing to move');
     for (const item of credential.retire) lines.push(`    retires: ${describeCopy(item.copy)} (${item.wrapper})`);
@@ -668,4 +683,3 @@ export function renderMigrationDryRun(plan: MigrationPlan, configText: string): 
   lines.push(`Plan ${plan.digest}. Nothing has been changed.`);
   return lines;
 }
-

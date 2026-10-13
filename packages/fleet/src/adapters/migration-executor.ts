@@ -584,7 +584,9 @@ export class FleetMigration {
       await this.#step(state, `link:${credential.id}`, () => this.#link(state, credential));
     }
     await this.#step(state, 'bodies', () => this.#bodies(state));
-    await this.#step(state, 'ids', () => this.#replace(state, runtimeIdsPath(this.#fleet), serializeRuntimeIds(plan.ids)));
+    await this.#step(state, 'ids', () =>
+      this.#replace(state, runtimeIdsPath(this.#fleet), serializeRuntimeIds(plan.ids)),
+    );
     await this.#step(state, 'config', () => this.#replace(state, this.deps.configPath, renderConfig(plan.model)));
     await this.#step(state, 'apply', () => this.deps.apply.apply(plan.model));
     await this.#step(state, 'provenance', () => this.#retireProvenance(state));
@@ -658,7 +660,9 @@ export class FleetMigration {
   async #writeKeychain(service: string, blob: string): Promise<void> {
     const line = keychainWriteLine(this.deps.keychainAccount, service, blob);
     if (line === undefined) {
-      throw new MigrationStepError('the keychain write was refused, because it could not be made without exposing the login');
+      throw new MigrationStepError(
+        'the keychain write was refused, because it could not be made without exposing the login',
+      );
     }
     const { code } = await this.deps.command.run(['security', '-i'], KEYCHAIN_TIMEOUT_MS, line);
     if (code !== 0) throw new MigrationStepError(`the keychain write failed (exit ${code})`);
@@ -853,7 +857,9 @@ export class FleetMigration {
     }
     if (action.kind === 'moved') {
       if ((await stat(action.from)) !== undefined) {
-        unrestored.push(`${action.from} was not put back, because something is there now; the original is at ${action.to}`);
+        unrestored.push(
+          `${action.from} was not put back, because something is there now; the original is at ${action.to}`,
+        );
         return;
       }
       await moveFile(action.to, action.from);
