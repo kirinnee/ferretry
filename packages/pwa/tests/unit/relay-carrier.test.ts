@@ -1495,3 +1495,125 @@ describe('the carrier router meeting a passkey step-up', () => {
     should(attempts()).equal(1);
   });
 });
+
+describe('the carrier router meeting a presence requirement', () => {
+  const PRESENCE = { code: 'presence_required', message: 'Confirm it is you.' };
+  const STEP_UP = { code: 'grant_step_up_required', message: 'Confirm with your passkey.' };
+
+  const presenceRouter = async (
+    respond: (attempt: number) => { status: number; body: unknown },
+    handlers: {
+      readonly presenceRequired?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>;
+      readonly stepUp?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>;
+    } = {},
+  ) => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
+    let attempts = 0;
+    const carriers = carriersFor(identity, directOnly, {
+      respond: () => {
+        attempts += 1;
+        return respond(attempts);
+      },
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: carriers.dial,
+      heartbeat: () => () => undefined,
+      network: unreachable,
+      ...handlers,
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    return { router, daemon, attempts: () => attempts };
+  };
+
+  it('should ask once and send the request again after the person confirms', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const { router, daemon, attempts } = await presenceRouter(
+      attempt => (attempt === 1 ? { status: 401, body: PRESENCE } : { status: 200, body: { ok: true } }),
+      {
+        presenceRequired: async connection => {
+          asked.push(connection.daemonId);
+          return true;
+        },
+      },
+    );
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet`);
+
+    // Assert
+    should(response.status).equal(200);
+    should(asked).eql([daemon.daemonId]);
+    should(attempts()).equal(2);
+  });
+
+  it('should return the refusal unchanged when the prompt is dismissed', async () => {
+    // Arrange
+    const { router, attempts } = await presenceRouter(() => ({ status: 401, body: PRESENCE }), {
+      presenceRequired: async () => false,
+    });
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet`);
+
+    // Assert
+    should(response.status).equal(401);
+    should(await response.json()).eql(PRESENCE);
+    should(attempts()).equal(1);
+  });
+
+  it('should hand the refusal back when nothing is able to ask, or when it is some other 401', async () => {
+    // Arrange
+    let asked = 0;
+    const silent = await presenceRouter(() => ({ status: 401, body: PRESENCE }));
+    const other = await presenceRouter(() => ({ status: 401, body: { code: 'something_else' } }), {
+      presenceRequired: async () => {
+        asked += 1;
+        return true;
+      },
+    });
+
+    // Act
+    const first = await silent.router.fetch(`${DAEMON_URL}/v1/fleet`);
+    const second = await other.router.fetch(`${DAEMON_URL}/v1/fleet`);
+
+    // Assert
+    should([first.status, second.status]).eql([401, 401]);
+    should(asked).equal(0);
+    should(silent.attempts() + other.attempts()).equal(2);
+  });
+
+  it('should still ask for a step-up on the resent request, after presence', async () => {
+    // Arrange — presence first, then the resent request needs a step-up, then it succeeds.
+    const order: string[] = [];
+    const { router, attempts } = await presenceRouter(
+      attempt =>
+        attempt === 1
+          ? { status: 401, body: PRESENCE }
+          : attempt === 2
+            ? { status: 403, body: STEP_UP }
+            : { status: 200, body: { ok: true } },
+      {
+        presenceRequired: async () => {
+          order.push('presence');
+          return true;
+        },
+        stepUp: async () => {
+          order.push('step-up');
+          return true;
+        },
+      },
+    );
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet/import`, { method: 'POST', body: '{}' });
+
+    // Assert
+    should(response.status).equal(200);
+    should(order).eql(['presence', 'step-up']);
+    should(attempts()).equal(3);
+  });
+});

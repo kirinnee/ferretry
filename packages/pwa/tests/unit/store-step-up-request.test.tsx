@@ -44,6 +44,19 @@ describe('useStepUpRequest', () => {
     await view.unmount();
   });
 
+  it('gives presence its own prompt, apart from the step-up one', async () => {
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+    });
+    const answer = store.presenceGate.require(alpha);
+    expect(store.presenceGate.snapshot()?.daemon.daemonId).toBe(alpha.daemonId);
+    expect(store.stepUp.snapshot()).toBeNull();
+    store.presenceGate.dismiss();
+    expect(await answer).toBe(false);
+  });
+
   it('offers nothing outside the app store, so no control is rendered that could never be answered', async () => {
     let ask: Ask = async () => true;
     const view = await mount(<Probe onAsk={value => (ask = value)} />);

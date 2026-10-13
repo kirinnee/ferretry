@@ -117,8 +117,9 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and twenty-one: forty-four MACHINES frames at each viewport, plus eighteen other frames at
- * `mobile` and fifteen at `desktop` (44 + 44 + 18 + 15).
+ * One hundred and twenty-five: forty-four MACHINES frames at each viewport, plus twenty frames at
+ * `mobile` and seventeen at `desktop` (44 + 44 + 20 + 17); the two extra at each viewport are the Security
+ * settings block's loosening sentence and out-of-bounds sentence.
  *
  * MACHINES, forty-four per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
@@ -149,7 +150,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 121;
+const SETTINGS_SIDEWAYS_CHECKS = 125;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -1886,6 +1887,26 @@ try {
             // Every panel, at both widths, with its real values on it — this is the one check that
             // catches the widest value in a panel widening the whole page instead of scrolling itself.
             await assertNoSidewaysScroll(page, `the ${label} panel at ${viewport.name}`);
+            if (slug === 'security') {
+              // THE SETTINGS BLOCK'S TWO SENTENCES, DRIVEN: a loosening a remote phone may not make, and a number
+              // past its bounds. Each is the longest unbroken text the block can show, so each is measured.
+              const block = wardenFrame.locator('[data-security-settings]');
+              await block.scrollIntoViewIfNeeded();
+              for (const [field, value, sentence, slugPart] of [
+                ['idleExpiryDays', '60', 'Loosening this can only be done at the machine', 'loosen'],
+                ['idleExpiryDays', '999', 'Enter a whole number from 1 to 90.', 'bounds'],
+              ] as const) {
+                await block.locator(`[data-security-input="${field}"]`).fill(value);
+                await block.getByText(sentence, { exact: false }).first().waitFor({ state: 'visible' });
+                await assertNoSidewaysScroll(page, `the Security settings (${slugPart}) at ${viewport.name}`);
+                const settingsTarget = join(outDir, `settings-daemon-security-${slugPart}-${viewport.name}.png`);
+                await page.screenshot({ path: settingsTarget });
+                process.stdout.write(
+                  `📸 Settings daemon Security settings ${slugPart} ${viewport.name} -> ${settingsTarget}\n`,
+                );
+              }
+              await block.locator('[data-security-input="idleExpiryDays"]').fill('30');
+            }
             if (slug === 'resource-limits') {
               // Keep a top frame as navigation context, then compose the acceptance frame at the
               // native viewport. The compact two-column mobile editors leave enough room between

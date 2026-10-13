@@ -10,9 +10,11 @@ import type { z } from 'zod';
 import {
   fetchPasskeys,
   passkeyRegistrationOptions,
+  presenceOptions,
   registerPasskey,
   type StepUpClient,
   stepUpOptions,
+  submitPresence,
   submitStepUp,
 } from '../../src/lib/step-up-client.ts';
 
@@ -148,5 +150,38 @@ describe('the passkey routes', () => {
     await should(
       submitStepUp(client, { credentialId: 'a', clientDataJSON: 'b', authenticatorData: 'c', signature: 'd' }),
     ).rejected();
+  });
+});
+
+describe('the presence routes', () => {
+  it('should ask for options at the app origin on its own route', async () => {
+    const client = clientAnswering({
+      challenge: 'AAAA',
+      rpId: 'ferretry.pages.dev',
+      allowCredentials: [{ type: 'public-key', id: 'AQID' }],
+      timeout: 60_000,
+    });
+
+    await presenceOptions(client, ORIGIN);
+
+    should(client.calls[0]?.path).equal('/v1/presence/options');
+    should(client.calls[0]?.init?.method).equal('POST');
+    should(bodyOf(client.calls[0])).eql({ origin: ORIGIN });
+  });
+
+  it('should submit the assertion on its own route and read when it lapses', async () => {
+    const client = clientAnswering({ presentUntil: INSTANT });
+    const assertion: StepUpAssertion = {
+      credentialId: 'AQID',
+      clientDataJSON: 'BA',
+      authenticatorData: 'BQ',
+      signature: 'Bg',
+    };
+
+    const granted = await submitPresence(client, assertion);
+
+    should(granted.presentUntil).equal(INSTANT);
+    should(client.calls[0]?.path).equal('/v1/presence');
+    should(bodyOf(client.calls[0])).eql(assertion);
   });
 });

@@ -19,6 +19,8 @@ import {
   PasskeysViewSchema,
   type PasskeyView,
   PasskeyViewSchema,
+  type PresenceGranted,
+  PresenceGrantedSchema,
   type StepUpAssertion,
   type StepUpGranted,
   StepUpGrantedSchema,
@@ -57,4 +59,14 @@ export async function stepUpOptions(client: StepUpClient, origin: string): Promi
 
 export async function submitStepUp(client: StepUpClient, assertion: StepUpAssertion): Promise<StepUpGranted> {
   return await client.request('/v1/step-up', StepUpGrantedSchema, json(assertion));
+}
+
+/** Options for the passkey confirmation that opens the app (`presenceOnOpen`): same shape as a step-up's. */
+export async function presenceOptions(client: StepUpClient, origin: string): Promise<StepUpOptions> {
+  return await client.request('/v1/presence/options', StepUpOptionsSchema, json({ origin }));
+}
+
+/** Submits that confirmation. It is never a step-up: the acts that need one still ask for their own. */
+export async function submitPresence(client: StepUpClient, assertion: StepUpAssertion): Promise<PresenceGranted> {
+  return await client.request('/v1/presence', PresenceGrantedSchema, json(assertion));
 }

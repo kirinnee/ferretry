@@ -38,7 +38,12 @@
  *   show a fleet that does not exist.
  */
 
-import { OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
+import {
+  OLDER_DAEMON_SENTENCE,
+  PRESENCE_REQUIRED_CODE,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+  STEP_UP_REQUIRED_CODE,
+} from '@ferretry/protocol';
 import {
   APP_SESSION_BYTES,
   type ConnectionChoice,
@@ -538,6 +543,12 @@ export interface DaemonCarrierRouterOptions {
   readonly presence?: () => boolean;
 }
 
+  /**
+   * Asked when the daemon answers `401 presence_required`: this machine wants a passkey on opening and
+   * this device has not given one. `true` once the person has confirmed, and the request is then sent
+   * again ONCE. Absent means nothing can ask, and the refusal is returned as it came.
+   */
+  readonly presenceRequired?: (daemon: DaemonConnection) => Promise<boolean>;
 /**
  * One live rendezvous session this router is holding, and which rendezvous it is on.
  *
@@ -710,6 +721,7 @@ export class DaemonCarrierRouter {
   /**
    * THE INJECTED NETWORK IS DETACHED FROM ITS RECEIVER EXACTLY ONCE, HERE.
    *
+  readonly #presenceRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
    * `this.#network(url, init)` is a member call, and a member call passes the holder
    * as `this`. Handed a WebIDL builtin that is a refusal —
    * `Failed to execute 'fetch' on 'Window': Illegal invocation` — thrown before a
@@ -746,6 +758,7 @@ export class DaemonCarrierRouter {
    * Supplied by the composition root from the pairing registry, because the router
    * must not hold its own copy of who is paired: a second copy is how a request
    * keeps going to a daemon that has been unpaired.
+    this.#presenceRequired = options.presenceRequired;
    */
   resolveByOrigin(lookup: (origin: string) => DaemonConnection | undefined): void {
     this.#lookup = lookup;
@@ -905,12 +918,25 @@ export class DaemonCarrierRouter {
    * behaviour that can ever recover.
    */
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
-    const response = await this.#sendOnce(daemon, url, init);
+    let response = await this.#sendOnce(daemon, url, init);
+    // PRESENCE COMES FIRST: while this machine wants a passkey on opening it answers every request `401
+    // presence_required`, so nothing else it says can be read yet. One prompt, one resend; a dismissed
+    // prompt returns the refusal unchanged, and a second refusal is the answer.
+    const confirmPresence = this.#presenceRequired;
+    if (
+      confirmPresence !== undefined &&
+      response.status === 401 &&
+      (await answersWithCode(response, PRESENCE_REQUIRED_CODE))
+    ) {
+      if (!(await confirmPresence(daemon))) return response;
+      response = await this.#sendOnce(daemon, url, init);
+    }
     // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to
     // confirm; once they have, the same request is sent again exactly once — its body is text, so it
     // can be — and a dismissed prompt returns the refusal unchanged for the caller to say.
     const ask = this.#stepUp;
-    if (ask === undefined || response.status !== 403 || !(await asksForStepUp(response))) return response;
+    if (ask === undefined || response.status !== 403 || !(await answersWithCode(response, STEP_UP_REQUIRED_CODE)))
+      return response;
     if (!(await ask(daemon))) return response;
     return await this.#sendOnce(daemon, url, init);
   }
@@ -1276,11 +1302,11 @@ export class DaemonCarrierRouter {
   }
 }
 
-/** Whether a refusal is the daemon asking for a passkey step-up. Read from a copy; the body stays. */
-const asksForStepUp = async (response: Response): Promise<boolean> => {
+/** Whether a refusal carries this `code`. Read from a copy; the body stays. */
+const answersWithCode = async (response: Response, code: string): Promise<boolean> => {
   try {
     const body = (await response.clone().json()) as { readonly code?: unknown } | null;
-    return body?.code === STEP_UP_REQUIRED_CODE;
+    return body?.code === code;
   } catch {
     return false;
   }

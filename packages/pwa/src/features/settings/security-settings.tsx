@@ -1,6 +1,6 @@
 /**
- * THE SECURITY PANEL: the passkeys THIS device holds for ONE machine, and the one control that adds
- * another (`docs/design/zero-trust.md` B2, B6).
+ * THE SECURITY PANEL: the passkeys THIS device holds for ONE machine, the one control that adds
+ * another, and the machine's security settings (`./security-settings-block.tsx`) (`docs/design/zero-trust.md` B2, B6).
  *
  * ## WHAT THE MACHINE REPORTS IS ALL THIS SHOWS
  *
@@ -41,6 +41,7 @@ import {
   type StepUpClient,
 } from '../../lib/step-up-client.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
+import { SecuritySettingsBlock } from './security-settings-block.tsx';
 
 export type PasskeyClientFactory = (connection: DaemonConnection) => Promise<StepUpClient>;
 
@@ -191,22 +192,25 @@ export function SecuritySurface({
     setBusy(false);
   }, [credentials, loaded, origin, supported]);
 
-  if (loaded.kind === 'ready')
-    return (
-      <SecurityCard
-        view={loaded.view}
-        supported={supported()}
-        origin={origin()}
-        busy={busy}
-        failure={failure}
-        onAdd={() => void add()}
-      />
-    );
   return (
-    <section className="kt-panel p-panel" role="status" aria-label="Passkeys" data-security-state={loaded.kind}>
-      <p className="m-0 text-cell leading-base text-muted">
-        {loaded.kind === 'loading' ? 'Reading the passkeys this device holds…' : LOAD_FAILURE}
-      </p>
-    </section>
+    <div className="flex min-w-0 flex-col gap-2">
+      {loaded.kind === 'ready' ? (
+        <SecurityCard
+          view={loaded.view}
+          supported={supported()}
+          origin={origin()}
+          busy={busy}
+          failure={failure}
+          onAdd={() => void add()}
+        />
+      ) : (
+        <section className="kt-panel p-panel" role="status" aria-label="Passkeys" data-security-state={loaded.kind}>
+          <p className="m-0 text-cell leading-base text-muted">
+            {loaded.kind === 'loading' ? 'Reading the passkeys this device holds…' : LOAD_FAILURE}
+          </p>
+        </section>
+      )}
+      <SecuritySettingsBlock connection={connection} createClient={createClient} />
+    </div>
   );
 }

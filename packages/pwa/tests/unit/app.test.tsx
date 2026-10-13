@@ -900,7 +900,21 @@ describe('AppShell', () => {
   });
 
   it('nudges a paired device with no passkey toward Settings → Security, once, and not on Settings itself', async () => {
-    const PASSKEYS = { '/v1/passkeys': { passkeys: [], registration: 'first-window' } };
+    const PASSKEYS = {
+      '/v1/passkeys': { passkeys: [], registration: 'first-window' },
+      '/v1/security': {
+        settings: {
+          stepUpWindowMinutes: 15,
+          deviceKeyRotationDays: 30,
+          presenceOnOpen: false,
+          presenceValidityHours: 8,
+          idleExpiryDays: 30,
+        },
+        source: 'defaults',
+        mayWiden: false,
+        widenCommand: 'fy daemon security set <field> <value>',
+      },
+    };
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { fleet: PASSKEYS });
     await settle();
 

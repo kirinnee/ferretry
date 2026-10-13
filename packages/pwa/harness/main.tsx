@@ -27,6 +27,7 @@ import type {
   ProjectInfo,
   ProposalView,
   SecretList,
+  SecuritySettingsView,
   SessionSearchTask,
   SessionView,
   TaskLive,
@@ -1311,6 +1312,23 @@ const HARNESS_PASSKEYS: PasskeysView = {
   stepUpUntil: '2026-01-01T00:15:00.000Z',
 };
 
+/**
+ * The security settings a remote phone sees: the machine's own document, presence switched ON so the
+ * loosening sentence is on screen without a press, and a caller that may not loosen anything.
+ */
+const HARNESS_SECURITY: SecuritySettingsView = {
+  settings: {
+    stepUpWindowMinutes: 15,
+    deviceKeyRotationDays: 30,
+    presenceOnOpen: true,
+    presenceValidityHours: 8,
+    idleExpiryDays: 30,
+  },
+  source: 'document',
+  mayWiden: false,
+  widenCommand: 'fy daemon security set <field> <value>',
+};
+
 /** The secret store's client: answers the one list the panel reads, and no write. */
 const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
@@ -1319,7 +1337,12 @@ const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
 
 const HARNESS_PASSKEY_CLIENT: PasskeyClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-  return { request: (async () => HARNESS_PASSKEYS) as StepUpClient['request'] };
+  return {
+    request: (async (path: string, _schema: unknown, init?: RequestInit) => {
+      if (path === '/v1/security' && init?.method === 'PATCH') throw new Error('the harness changes nothing');
+      return path === '/v1/security' ? HARNESS_SECURITY : HARNESS_PASSKEYS;
+    }) as StepUpClient['request'],
+  };
 };
 
 const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {

@@ -56,7 +56,7 @@ import {
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
-import { browserCredentials, describeStepUpFailure, stepUpCeremony } from './step-up-ceremony.ts';
+import { browserCredentials, describeStepUpFailure, presenceCeremony, stepUpCeremony } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
@@ -341,6 +341,11 @@ export interface AppStore {
   readonly stepUp: StepUpGate;
   readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
   /**
+   * The prompt a machine that wants a passkey on opening raises (`401 presence_required`): the same
+   * gate, its own two routes. Rendered by a second `StepUpDialog` with the presence copy.
+   */
+  readonly presenceGate: StepUpGate;
+  /**
    * Whether Ferretry's default relay is advertising itself right now.
    *
    * Bound to the SAME injected fetcher as pairing and push, for the same reason:
@@ -430,10 +435,19 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     describe: describeStepUpFailure(appOrigin),
   });
   const carrier = new DaemonCarrierRouter({
+  const presenceGate = new StepUpGate({
+    ceremony: presenceCeremony({
+      client: async daemon => await clients.client(daemon),
+      credentials: options.passkeyCredentials ?? browserCredentials(),
+      origin: appOrigin,
+    }),
+    describe: describeStepUpFailure(appOrigin),
+  });
     network: fetcher,
     presence: () => presence.present(),
     stepUp: async daemon => await stepUp.require(daemon),
     crypto: relayCrypto,
+    presenceRequired: async daemon => await presenceGate.require(daemon),
     // Read per session, never cached: a key the person removed by clearing site data must stop
     // opening sessions the moment it is gone.
     deviceKey: async daemonId => {
@@ -567,6 +581,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     stepUp,
     connections,
     clients,
+    presenceGate,
     fleet,
     controls,
     projects,

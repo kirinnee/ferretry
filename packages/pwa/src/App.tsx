@@ -60,7 +60,7 @@ import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
-import { StepUpDialog } from './features/step-up/step-up-dialog.tsx';
+import { PRESENCE_COPY, StepUpDialog } from './features/step-up/step-up-dialog.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
@@ -1538,6 +1538,11 @@ export function AppShell() {
     );
   }
 
+  const promptMachineName = (daemonId: string): string => {
+    const record = connectionSnapshot.connections.find(candidate => candidate.daemonId === daemonId);
+    return record === undefined ? 'This machine' : daemonDisplayName(record);
+  };
+
   return (
     <NotificationControlsContext.Provider value={notificationControlsHost}>
       {/*
@@ -1560,13 +1565,9 @@ export function AppShell() {
       {content}
       {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
           it, and it names which machine is asking. */}
-      <StepUpDialog
-        gate={store.stepUp}
-        machineName={daemonId => {
-          const record = connectionSnapshot.connections.find(candidate => candidate.daemonId === daemonId);
-          return record === undefined ? 'This machine' : daemonDisplayName(record);
-        }}
-      />
+      <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
+      {/* The same prompt, for a machine that asks for a passkey on opening (`presence_required`). */}
+      <StepUpDialog gate={store.presenceGate} copy={PRESENCE_COPY} machineName={promptMachineName} />
     </NotificationControlsContext.Provider>
   );
 }

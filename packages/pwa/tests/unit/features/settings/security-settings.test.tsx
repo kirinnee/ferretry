@@ -24,6 +24,19 @@ const view = (over: Partial<PasskeysView> = {}): PasskeysView => ({
   ...over,
 });
 
+const SECURITY_VIEW = {
+  settings: {
+    stepUpWindowMinutes: 15,
+    deviceKeyRotationDays: 30,
+    presenceOnOpen: false,
+    presenceValidityHours: 8,
+    idleExpiryDays: 30,
+  },
+  source: 'defaults',
+  mayWiden: false,
+  widenCommand: 'fy daemon security set <field> <value>',
+};
+
 const OPTIONS = {
   challenge: 'AAAA',
   rp: { id: 'ferretry.example.test', name: 'Ferretry' },
@@ -53,6 +66,7 @@ const machine = (
     request: async (path: string, _schema: unknown, init?: RequestInit) => {
       ledger.paths.push(`${init?.method ?? 'GET'} ${path}`);
       if (init?.body !== undefined) ledger.bodies.push(JSON.parse(String(init.body)));
+      if (path === '/v1/security') return SECURITY_VIEW;
       if (path === '/v1/passkeys/options') return OPTIONS;
       if (path === '/v1/passkeys' && init?.method === 'POST') {
         if (registerFailure !== undefined) throw registerFailure;
@@ -145,7 +159,7 @@ describe('SecuritySurface', () => {
     const surface = await mountSurface(machine([view()], ledger));
 
     // Assert
-    should(ledger.paths).eql(['GET /v1/passkeys']);
+    should(ledger.paths).eql(['GET /v1/security', 'GET /v1/passkeys']);
     run(() => surface.unmount());
   });
 
@@ -161,6 +175,7 @@ describe('SecuritySurface', () => {
 
     // Assert
     should(ledger.paths).eql([
+      'GET /v1/security',
       'GET /v1/passkeys',
       'POST /v1/passkeys/options',
       'POST /v1/passkeys',
@@ -309,5 +324,17 @@ describe('SecuritySurface', () => {
     // Assert
     expect(mounted.container.textContent).toContain('did not answer the list of passkeys');
     await mounted.unmount();
+  });
+});
+
+describe('SecuritySurface with the settings block', () => {
+  it('shows the machine’s security settings under its passkeys', async () => {
+    // Arrange / Act
+    const surface = await mountSurface(machine([view()]));
+
+    // Assert
+    should(marked(surface, 'data-security-settings')).have.length(1);
+    should(marked(surface, 'data-security-card')).have.length(1);
+    run(() => surface.unmount());
   });
 });

@@ -4,7 +4,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { STEP_UP_SCOPE_NOTE, StepUpDialog } from '../../src/features/step-up/step-up-dialog.tsx';
+import {
+  PRESENCE_COPY,
+  PRESENCE_SCOPE_NOTE,
+  STEP_UP_SCOPE_NOTE,
+  StepUpDialog,
+} from '../../src/features/step-up/step-up-dialog.tsx';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { StepUpGate } from '../../src/lib/step-up-gate.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -209,5 +214,28 @@ describe('the passkey prompt', () => {
       expect(ceremonies).toEqual([]);
       expect(container.querySelector('[role="dialog"]')).toBeNull();
     });
+  });
+});
+
+describe('the passkey prompt in its presence wording', () => {
+  it('says what opening needs and what that confirmation buys, in place of the step-up words', async () => {
+    const { gate } = harness();
+    const mounted = await mount(<StepUpDialog gate={gate} copy={PRESENCE_COPY} machineName={id => `Name of ${id}`} />);
+    try {
+      // Act
+      await interact(() => void gate.require(studio));
+
+      // Assert
+      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
+      expect(dialog.textContent).toContain('Confirm it’s you');
+      expect(dialog.textContent).toContain('Name of daemon-studio');
+      expect(dialog.textContent).toContain(PRESENCE_COPY.purpose);
+      expect(must(mounted.container.querySelector('[data-step-up-scope]'), 'the scope note').textContent).toBe(
+        PRESENCE_SCOPE_NOTE,
+      );
+      expect(dialog.textContent).not.toContain('15 minutes');
+    } finally {
+      await mounted.unmount();
+    }
   });
 });

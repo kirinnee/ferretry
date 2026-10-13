@@ -10,7 +10,7 @@ import { type StepUpRefusal, stepUpRefusalCode } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { DaemonConnection } from './daemon-connection.ts';
 import { assertPasskey, type CredentialsPort, PasskeyCeremonyError, passkeySentence } from './passkeys.ts';
-import { type StepUpClient, stepUpOptions, submitStepUp } from './step-up-client.ts';
+import { presenceOptions, type StepUpClient, stepUpOptions, submitPresence, submitStepUp } from './step-up-client.ts';
 
 export interface StepUpCeremonyDependencies {
   readonly client: (daemon: DaemonConnection) => Promise<StepUpClient>;
@@ -26,6 +26,16 @@ export const stepUpCeremony =
     const options = await stepUpOptions(client, deps.origin);
     const assertion = await assertPasskey(deps.credentials, options);
     await submitStepUp(client, assertion);
+  };
+
+/** The same ceremony for the confirmation that opens the app: its own two routes, no rotation, no step-up. */
+export const presenceCeremony =
+  (deps: StepUpCeremonyDependencies) =>
+  async (daemon: DaemonConnection): Promise<void> => {
+    const client = await deps.client(daemon);
+    const options = await presenceOptions(client, deps.origin);
+    const assertion = await assertPasskey(deps.credentials, options);
+    await submitPresence(client, assertion);
   };
 
 const refusalWith = (reason: unknown, refusal: StepUpRefusal): boolean =>

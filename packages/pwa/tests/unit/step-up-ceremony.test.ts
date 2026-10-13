@@ -10,7 +10,12 @@ import should from 'should';
 import type { z } from 'zod';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { type CredentialsPort, PasskeyCeremonyError, passkeySentence } from '../../src/lib/passkeys.ts';
-import { browserCredentials, describeStepUpFailure, stepUpCeremony } from '../../src/lib/step-up-ceremony.ts';
+import {
+  browserCredentials,
+  describeStepUpFailure,
+  presenceCeremony,
+  stepUpCeremony,
+} from '../../src/lib/step-up-ceremony.ts';
 import type { StepUpClient } from '../../src/lib/step-up-client.ts';
 
 const ORIGIN = 'https://ferretry.pages.dev';
@@ -159,5 +164,50 @@ describe('the browser credential container', () => {
     should(seen[1]?.receiver).equal(credentials);
     should(seen[0]?.options).equal(createOptions);
     should(seen[1]?.options).equal(getOptions);
+  });
+});
+
+describe('running the presence ceremony', () => {
+  const hadPublicKeyCredential = 'PublicKeyCredential' in globalThis;
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'PublicKeyCredential', { value: class {}, configurable: true, writable: true });
+  });
+  afterEach(() => {
+    if (!hadPublicKeyCredential) Reflect.deleteProperty(globalThis, 'PublicKeyCredential');
+  });
+
+  it('should use the presence routes, never the step-up ones', async () => {
+    // Arrange
+    const paths: string[] = [];
+    const client: StepUpClient = {
+      request: async <T>(path: string, schema: z.ZodType<T>): Promise<T> => {
+        paths.push(path);
+        return schema.parse(
+          path === '/v1/presence/options'
+            ? {
+                challenge: toBase64Url(Uint8Array.of(5, 6, 7)),
+                rpId: 'ferretry.pages.dev',
+                allowCredentials: [{ type: 'public-key', id: toBase64Url(Uint8Array.of(0xaa, 0xbb)) }],
+                timeout: 60_000,
+              }
+            : { presentUntil: INSTANT },
+        );
+      },
+    };
+    const credentials: CredentialsPort = {
+      create: async () => null,
+      get: async () =>
+        ({
+          type: 'public-key',
+          rawId: buffer(0xaa, 0xbb),
+          response: { clientDataJSON: buffer(0x7b, 0x7d), authenticatorData: buffer(1, 2, 3), signature: buffer(4, 5) },
+        }) as unknown as Credential,
+    };
+
+    // Act
+    await presenceCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon);
+
+    // Assert
+    should(paths).eql(['/v1/presence/options', '/v1/presence']);
   });
 });
