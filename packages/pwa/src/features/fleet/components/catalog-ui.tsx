@@ -197,7 +197,11 @@ export function ComponentBadges({ badges }: { badges: readonly ComponentBadge[] 
   return (
     <span className="flex min-w-0 flex-wrap gap-1" data-component-badges="">
       {badges.map(badge => (
-        <Badge key={badge.text} tone={badge.tone} className="inline-flex h-auto max-w-full items-center gap-1 !whitespace-normal">
+        <Badge
+          key={badge.text}
+          tone={badge.tone}
+          className="inline-flex h-auto max-w-full items-center gap-1 !whitespace-normal"
+        >
           {badge.warn ? <TriangleAlert size={12} aria-hidden="true" className="shrink-0" /> : null}
           {badge.lock ? <Lock size={12} aria-hidden="true" className="shrink-0" /> : null}
           <span className="min-w-0 break-words">{badge.text}</span>

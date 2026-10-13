@@ -125,9 +125,9 @@ describe('ProfilesTab — list and page', () => {
     window.history.replaceState(null, '', '/#machines/studio-mac/profiles/Review');
     const root = await open();
     expect(text(root, 'h3')).toBe('Review');
-    await followHash("#machines/studio-mac/profiles/Default");
+    await followHash('#machines/studio-mac/profiles/Default');
     expect(text(root, 'h3')).toBe('Default');
-    await followHash("#machines/studio-mac/profiles/Nope");
+    await followHash('#machines/studio-mac/profiles/Nope');
     expect(text(root, 'h3')).toBe('Profiles');
   });
 });

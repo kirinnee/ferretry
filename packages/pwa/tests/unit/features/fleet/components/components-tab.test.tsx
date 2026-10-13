@@ -192,7 +192,7 @@ describe('ComponentsTab — a component’s page', () => {
     window.history.replaceState(null, '', `/#machines/studio-mac/components/${encodeURIComponent('mcp/github')}`);
     const root = await open();
     expect(text(root, 'h3')).toBe('github');
-    await followHash("#machines/studio-mac/components/mcp%2Fgone");
+    await followHash('#machines/studio-mac/components/mcp%2Fgone');
     expect(root.textContent).toContain('This component is not on studio-mac any more.');
     await click(root, '[data-catalog-back]');
     expect(root.querySelector('[data-components-page="kinds"]')).not.toBeNull();
