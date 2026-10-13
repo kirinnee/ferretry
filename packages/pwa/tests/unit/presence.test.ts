@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import '../support/dom.ts';
 import {
   browserPresenceEnvironment,
-  PRESENCE_OPENING_MS,
   PRESENCE_WINDOW_MS,
   type PresenceEnvironment,
   PresenceTracker,
@@ -37,25 +36,15 @@ const page = (start = 1_000) => {
 };
 
 describe('PresenceTracker', () => {
-  it('counts a page that was just opened as attended, before anybody touches it', () => {
+  it('never counts a page that only loaded: a restored tab or a launch at login has nobody at it', () => {
     const fake = page();
     const tracker = new PresenceTracker(fake.environment);
-    expect(tracker.present()).toBe(true);
-    fake.advance(PRESENCE_OPENING_MS - 1);
-    expect(tracker.present()).toBe(true);
-  });
-
-  it('stops counting an untouched page once the opening minute is over', () => {
-    const fake = page();
-    const tracker = new PresenceTracker(fake.environment);
-    fake.advance(PRESENCE_OPENING_MS);
     expect(tracker.present()).toBe(false);
   });
 
   it('counts an interaction for five minutes and no longer', () => {
     const fake = page();
     const tracker = new PresenceTracker(fake.environment);
-    fake.advance(PRESENCE_OPENING_MS * 10);
     fake.touch();
     fake.advance(PRESENCE_WINDOW_MS - 1);
     expect(tracker.present()).toBe(true);
@@ -79,19 +68,36 @@ describe('PresenceTracker', () => {
   });
 });
 
+/** A key press as the browser raises one for real input. A script cannot make one of these. */
+const trustedKeydown = (): KeyboardEvent => {
+  const event = new KeyboardEvent('keydown');
+  Object.defineProperty(event, 'isTrusted', { value: true });
+  return event;
+};
+
 describe('browserPresenceEnvironment', () => {
-  it('hears a key press anywhere in the page until the listener is removed', () => {
+  it('hears real input anywhere in the page until the listener is removed', () => {
     const environment = browserPresenceEnvironment();
     let heard = 0;
     const stop = environment.onInteraction(() => {
       heard += 1;
     });
-    window.dispatchEvent(new KeyboardEvent('keydown'));
+    window.dispatchEvent(trustedKeydown());
     stop();
-    window.dispatchEvent(new KeyboardEvent('keydown'));
+    window.dispatchEvent(trustedKeydown());
     expect(heard).toBe(1);
     expect(environment.visible()).toBe(document.visibilityState !== 'hidden');
     expect(Math.abs(environment.now() - Date.now())).toBeLessThan(1_000);
+  });
+
+  it('ignores input a script dispatched', () => {
+    let heard = 0;
+    const stop = browserPresenceEnvironment().onInteraction(() => {
+      heard += 1;
+    });
+    window.dispatchEvent(new KeyboardEvent('keydown'));
+    stop();
+    expect(heard).toBe(0);
   });
 
   it('listens to nothing where there is no window', () => {
