@@ -1271,9 +1271,7 @@ export class DaemonCarrierRouter {
     } catch (refused) {
       const rotation = this.#rotation;
       const daemonId = entry.connection.daemonId;
-      const pending = refusedDevice(refused)
-        ? await rotation?.pending(daemonId).catch(() => undefined)
-        : undefined;
+      const pending = refusedDevice(refused) ? await rotation?.pending(daemonId).catch(() => undefined) : undefined;
       if (rotation === undefined || pending === undefined) throw refused;
       try {
         const session = await open({ ...device, key: pending });

@@ -84,7 +84,10 @@ function fixture(
   // Both of the phone's tabs hold a live session throughout, so a step-up is judged on its window and
   // binding alone; what ends a span is the span tests' subject.
   const window = options.window;
-  const registry = new StepUpRegistry({ nowMs: () => clock.now }, window === undefined ? undefined : () => window.minutes);
+  const registry = new StepUpRegistry(
+    { nowMs: () => clock.now },
+    window === undefined ? undefined : () => window.minutes,
+  );
   registry.open(phone);
   registry.open({ ...phone, appSession: 'tab-two' });
   const audited: { readonly actor: string; readonly changes: readonly string[] }[] = [];

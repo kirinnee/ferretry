@@ -1462,7 +1462,10 @@ describe('spending a single-use step-up', () => {
 
   it('should spend the device’s step-up exactly once when an allowed act leaned on it', async () => {
     const spent: { deviceId: string; appSession: string }[] = [];
-    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), witness(spent));
+    const dispatcher = dispatcherWithGuard(
+      guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }),
+      witness(spent),
+    );
 
     const served = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
 
@@ -1472,7 +1475,10 @@ describe('spending a single-use step-up', () => {
 
   it('should spend once per act, so a second request cannot ride the first one’s confirmation', async () => {
     const spent: { deviceId: string; appSession: string }[] = [];
-    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), witness(spent));
+    const dispatcher = dispatcherWithGuard(
+      guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }),
+      witness(spent),
+    );
 
     await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
     await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
@@ -1502,7 +1508,10 @@ describe('spending a single-use step-up', () => {
 
   it('should not spend for a caller with no device, which can hold no step-up', async () => {
     const spent: { deviceId: string; appSession: string }[] = [];
-    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), witness(spent));
+    const dispatcher = dispatcherWithGuard(
+      guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }),
+      witness(spent),
+    );
 
     const served = await dispatcher.dispatch(
       request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }),
@@ -1513,10 +1522,9 @@ describe('spending a single-use step-up', () => {
   });
 
   it('should serve an allowed stepped-up act when the witness has nothing to spend', async () => {
-    const served = await dispatcherWithGuard(
-      guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }),
-      { held: () => true },
-    ).dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+    const served = await dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), {
+      held: () => true,
+    }).dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
 
     should(served.status).equal(200);
   });

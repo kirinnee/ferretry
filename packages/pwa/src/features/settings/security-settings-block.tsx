@@ -48,7 +48,7 @@ import {
 } from '../../lib/security-settings-client.ts';
 import { cn } from '../../lib/class-names.ts';
 
-export type SecuritySettingsClientFactory = (connection: DaemonConnection) => Promise<SecuritySettingsClient>;
+type SecuritySettingsClientFactory = (connection: DaemonConnection) => Promise<SecuritySettingsClient>;
 
 const NUMERIC_FIELDS: readonly NumericSecuritySetting[] = [
   'stepUpWindowMinutes',

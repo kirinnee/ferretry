@@ -156,7 +156,9 @@ export class StatePairingRepository implements PairingDeviceStore {
   async rotateKey(id: string, publicKey: string, keyRotatedAt: string): Promise<boolean> {
     return await this.write(records =>
       records.some(existing => existing.id === id)
-        ? records.map(existing => (existing.id === id ? DeviceRecordSchema.parse({ ...existing, publicKey, keyRotatedAt }) : existing))
+        ? records.map(existing =>
+            existing.id === id ? DeviceRecordSchema.parse({ ...existing, publicKey, keyRotatedAt }) : existing,
+          )
         : undefined,
     );
   }

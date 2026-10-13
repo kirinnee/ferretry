@@ -1284,7 +1284,12 @@ is idle-expired, or a proof that does not verify against the stored key all end 
 same `4403`. The daemon accepts by answering, inside the channel:
 
 ```json
-{ "t": "authenticated", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>", "rotateBy": "<ISO-8601 instant>" }
+{
+  "t": "authenticated",
+  "protocol": "ferretry-relay/2",
+  "accessExpiresAt": "<ISO-8601 instant>",
+  "rotateBy": "<ISO-8601 instant>"
+}
 ```
 
 `rotateBy` is optional: present when the machine asks for device-key rotation, it is when this device's

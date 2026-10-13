@@ -424,7 +424,13 @@ describe('step-up routes', () => {
     const lookalike = { 'x-forwarded-for': '127.0.0.1', host: 'localhost' };
     const asBrowser = (arrival: Record<string, unknown>) =>
       dispatcher.dispatch(
-        request({ method: 'POST', path: '/v1/passkeys/registration-window', body: windowBody, ...asDevice, ...arrival }),
+        request({
+          method: 'POST',
+          path: '/v1/passkeys/registration-window',
+          body: windowBody,
+          ...asDevice,
+          ...arrival,
+        }),
       );
 
     // Act — a browser on a host-proven carrier, on a loopback peer, behind a spoofed header; then the owner
@@ -534,9 +540,9 @@ describe('step-up routes: presence on opening (B6)', () => {
   it('should answer 401 presence_required to every other route until the device confirms', async () => {
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
-    const refused = ROUTES.filter(
-      route => route.path !== '/v1/passkeys' || route.method !== 'GET',
-    ).filter(route => !route.path.startsWith('/v1/presence'));
+    const refused = ROUTES.filter(route => route.path !== '/v1/passkeys' || route.method !== 'GET').filter(
+      route => !route.path.startsWith('/v1/presence'),
+    );
 
     for (const route of refused) {
       // Act
@@ -774,7 +780,9 @@ describe('step-up routes: key rotation (B6)', () => {
     await dispatcher.dispatch(inSession(originBody, '/v1/step-up/options'));
 
     // Act
-    const response = await dispatcher.dispatch(request({ method: 'POST', path: '/v1/step-up', body: rotationBody, ...asDevice }));
+    const response = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: rotationBody, ...asDevice }),
+    );
 
     // Assert
     should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);

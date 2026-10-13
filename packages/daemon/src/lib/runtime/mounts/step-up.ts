@@ -59,7 +59,8 @@ const REFUSALS: Readonly<Record<StepUpRefusal, { readonly status: number; readon
   'not-verified': { status: 401, message: 'that passkey confirmation did not check out; try again' },
   'rotation-required': {
     status: 403,
-    message: "this device's key is due for replacement, and this machine replaces it with the next passkey confirmation",
+    message:
+      "this device's key is due for replacement, and this machine replaces it with the next passkey confirmation",
   },
   'not-at-machine': {
     status: 403,

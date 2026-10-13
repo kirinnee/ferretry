@@ -292,7 +292,9 @@ describe('the verbs', () => {
   it('should show examples in the set help', () => {
     // Arrange
     const { program } = mounted(new FakeGateway());
-    const set = program.commands[0]?.commands.find(c => c.name() === 'security')?.commands.find(c => c.name() === 'set');
+    const set = program.commands[0]?.commands
+      .find(c => c.name() === 'security')
+      ?.commands.find(c => c.name() === 'set');
 
     // Act
     let help = '';

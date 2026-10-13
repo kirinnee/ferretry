@@ -1,8 +1,4 @@
-import {
-  SECURITY_SETTING_FIELDS,
-  type SecuritySettingField,
-  type SecuritySettingsPatch,
-} from '@ferretry/protocol';
+import { SECURITY_SETTING_FIELDS, type SecuritySettingField, type SecuritySettingsPatch } from '@ferretry/protocol';
 import type { ISecurityGateway, ISecurityOutput } from './ports.ts';
 import { renderSecurity, renderSecurityChange } from './render.ts';
 
@@ -39,7 +35,9 @@ export class SecurityController {
   async set(field: string, value: string): Promise<void> {
     const target = SECURITY_SETTING_FIELDS.find(candidate => candidate === field);
     if (target === undefined) {
-      this.fail(`${JSON.stringify(field)} is not a security setting; expected one of ${SECURITY_SETTING_FIELDS.join(', ')}`);
+      this.fail(
+        `${JSON.stringify(field)} is not a security setting; expected one of ${SECURITY_SETTING_FIELDS.join(', ')}`,
+      );
       return;
     }
     const patch = parseValue(target, value);
@@ -61,7 +59,9 @@ export class SecurityController {
 function parseValue(field: SecuritySettingField, value: string): SecuritySettingsPatch | string {
   if (field === 'presenceOnOpen') {
     const word = SWITCH_WORDS[value.trim().toLowerCase()];
-    return word === undefined ? `${field} takes on, off, true or false, not ${JSON.stringify(value)}` : { [field]: word };
+    return word === undefined
+      ? `${field} takes on, off, true or false, not ${JSON.stringify(value)}`
+      : { [field]: word };
   }
   if (!/^[+-]?\d+$/u.test(value.trim())) return `${field} takes a whole number, not ${JSON.stringify(value)}`;
   return { [field]: Number.parseInt(value, 10) };

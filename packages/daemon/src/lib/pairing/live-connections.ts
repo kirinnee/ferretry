@@ -71,7 +71,13 @@ export class LiveDeviceConnections implements DeviceConnectionTracker, DeviceCon
 
   constructor(private readonly appSessions?: AppSessionObserver) {}
 
-  track(deviceId: string, end: () => void, appSession?: string, recheck?: () => void, lapse?: SessionLapse): () => void {
+  track(
+    deviceId: string,
+    end: () => void,
+    appSession?: string,
+    recheck?: () => void,
+    lapse?: SessionLapse,
+  ): () => void {
     if (this.#unpaired.has(deviceId)) {
       end();
       return () => undefined;

@@ -29,7 +29,7 @@ export interface PasskeyPromptCopy {
   readonly scope: string;
 }
 
-export const STEP_UP_COPY: PasskeyPromptCopy = {
+const STEP_UP_COPY: PasskeyPromptCopy = {
   purpose: 'needs your passkey before it makes this change.',
   scope: STEP_UP_SCOPE_NOTE,
 };

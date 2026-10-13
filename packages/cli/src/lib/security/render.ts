@@ -49,10 +49,7 @@ export function renderSecurity(view: SecuritySettingsView, clientName: string): 
 }
 
 /** What a change reports: the new value, and the devices a shortened idle period will unpair. */
-export function renderSecurityChange(
-  field: SecuritySettingField,
-  change: SecuritySettingsChange,
-): string {
+export function renderSecurityChange(field: SecuritySettingField, change: SecuritySettingsChange): string {
   const lines = [`${field} = ${formatSettingValue(field, change.view.settings)}`];
   if (change.devicesExpiring > 0)
     lines.push(`${String(change.devicesExpiring)} paired device(s) will be unpaired at the next check`);

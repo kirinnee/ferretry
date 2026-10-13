@@ -209,7 +209,10 @@ const rig = async (
       if (request.path !== '/v1/step-up') return { status: 200, body: {} };
       if (proven && rotation.success && options.swap !== false) accepted.keys = [rotation.data.deviceKey];
       if (options.dropAnswer === true) return 'drop';
-      return { status: 200, body: { expiresAt: FUTURE, ...(proven && options.swap !== false ? { keyRotated: true } : {}) } };
+      return {
+        status: 200,
+        body: { expiresAt: FUTURE, ...(proven && options.swap !== false ? { keyRotated: true } : {}) },
+      };
     },
   });
   const carrier: Rig['carrier'] = { failAfter: undefined };

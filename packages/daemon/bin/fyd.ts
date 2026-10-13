@@ -5340,7 +5340,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               deviceRotateMessage(transcriptHash, deviceId, deviceKey),
             ),
           rotate: async ({ deviceId, transcriptHash, deviceKey }) => {
-            if (pairingService === undefined || !(await pairingService.rotateDeviceKey(deviceId, deviceKey))) return false;
+            if (pairingService === undefined || !(await pairingService.rotateDeviceKey(deviceId, deviceKey)))
+              return false;
             deviceConnections.lapseDevice(deviceId, transcriptKey(transcriptHash));
             await securityAudit.record({
               kind: 'device.key-rotated',
@@ -5352,14 +5353,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
       });
-      return {
-        credentials,
-        push,
-        stepUp,
-        security,
-        securityNotice,
-        droppedBearerGrants: state.droppedBearerGrants,
-        subsystem: (pairingService = new PairingService({
+      pairingService = new PairingService({
           daemonId: state.daemonId,
           daemonName: state.daemonName,
           // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
@@ -5381,7 +5375,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
           connections: deviceConnections,
           idleExpiryDays: () => security.current().idleExpiryDays,
-        })),
+      });
+      return {
+        credentials,
+        push,
+        stepUp,
+        security,
+        securityNotice,
+        droppedBearerGrants: state.droppedBearerGrants,
+        subsystem: pairingService,
       };
     },
     sessions: planner,

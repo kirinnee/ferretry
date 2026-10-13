@@ -206,8 +206,7 @@ export class StepUpService {
     const challenge = this.deps.challenges.take(device, 'register', now);
     const passkeys = await this.deps.store.list(device.deviceId);
     // Asked again rather than trusted from the options call: the window can close in between.
-    if ((await this.#registration(device, passkeys, now)).kind === 'closed')
-      return refuse('registration-closed');
+    if ((await this.#registration(device, passkeys, now)).kind === 'closed') return refuse('registration-closed');
     if (passkeys.length >= MAX_PASSKEYS_PER_DEVICE) return refuse('too-many-passkeys');
     if (challenge === undefined) return refuse('not-verified');
     const clientDataJSON = fromBase64Url(registration.clientDataJSON);

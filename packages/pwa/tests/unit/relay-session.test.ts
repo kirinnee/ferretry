@@ -104,7 +104,12 @@ const streamingWith = async (extra: Record<string, unknown>): Promise<Harness> =
   await harness.session.receiveBinary(await harness.daemon.answer(harness.socket.sent[0] as Uint8Array));
   const ready = harness.session.ready();
   await harness.session.receiveBinary(
-    await harness.daemon.record({ t: 'stream-opened', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS, ...extra }),
+    await harness.daemon.record({
+      t: 'stream-opened',
+      protocol: SESSION_PROTOCOL_ID,
+      accessExpiresAt: LEASE_ENDS,
+      ...extra,
+    }),
   );
   await ready;
   return harness;
@@ -566,16 +571,16 @@ describe('a relay session told to rotate its device key', () => {
   it('should refuse to sign for a session that is not serving requests', async () => {
     const before = await opened();
     const replacement = await testDevice();
-    await should(before.session.signRotation('fy_dev_session', replacement.claim.key, replacement.publicKey)).be.rejectedWith(
-      /not serving requests/u,
-    );
+    await should(
+      before.session.signRotation('fy_dev_session', replacement.claim.key, replacement.publicKey),
+    ).be.rejectedWith(/not serving requests/u);
 
     const keyed = await opened();
     await keyed.session.receiveBinary(await keyed.daemon.answer(keyed.socket.sent[0] as Uint8Array));
     await settle();
-    await should(keyed.session.signRotation('fy_dev_session', replacement.claim.key, replacement.publicKey)).be.rejectedWith(
-      /not serving requests/u,
-    );
+    await should(
+      keyed.session.signRotation('fy_dev_session', replacement.claim.key, replacement.publicKey),
+    ).be.rejectedWith(/not serving requests/u);
   });
 });
 

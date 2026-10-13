@@ -224,7 +224,10 @@ export class ScriptedDaemon {
   }
 
   /** Whether `rotation` is its own key's signature over THIS session's rotate message for `deviceId`. */
-  async provesRotation(rotation: { readonly deviceKey: string; readonly proof: string }, deviceId: string): Promise<boolean> {
+  async provesRotation(
+    rotation: { readonly deviceKey: string; readonly proof: string },
+    deviceId: string,
+  ): Promise<boolean> {
     const transcript = this.#transcript;
     if (transcript === undefined) throw new Error('this daemon has not keyed a channel');
     return await verifyDeviceProof(

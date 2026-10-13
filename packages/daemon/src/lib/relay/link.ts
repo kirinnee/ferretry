@@ -1094,13 +1094,7 @@ export class RelayLink {
     const device = session.device;
     if (device === undefined) return;
     const response = await this.deps.dispatch(
-      tunnelApiRequest(
-        { ...request, body },
-        device,
-        session.sessionId.text,
-        this.deps.arrival,
-        session.transcript,
-      ),
+      tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival, session.transcript),
     );
     this.#answer(session, request.id, response);
   }

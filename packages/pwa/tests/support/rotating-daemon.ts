@@ -6,21 +6,8 @@
  * rotation proof in a step-up was worth against the transcript of the session that carried it.
  */
 
-import {
-  type DaemonIdentity,
-  decodeFrame,
-  FRAME_KINDS,
-  RELAY_CLOSE_CODES,
-  SESSION_PROTOCOL_ID,
-} from '@ferretry/relay';
-import {
-  controlFrame,
-  LEASE_ENDS,
-  readyFrame,
-  ScriptedDaemon,
-  ScriptedSocket,
-  testSessionId,
-} from './relay.ts';
+import { type DaemonIdentity, decodeFrame, FRAME_KINDS, RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '@ferretry/relay';
+import { controlFrame, LEASE_ENDS, readyFrame, ScriptedDaemon, ScriptedSocket, testSessionId } from './relay.ts';
 
 export interface RotatingRequest {
   readonly method: string;
