@@ -772,7 +772,9 @@ const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
   let downstream: SocketDownstream | undefined;
   let attached = 0;
   let released = 0;
-  await bridge.admitDaemon(identity, answered('{}'), undefined, async request => {
+  await bridge.admitDaemon(identity, answered('{}'), undefined, {
+    reauthorize: () => true,
+    upgrade: async request => {
     upgrade = request;
     if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
     return {
@@ -794,6 +796,7 @@ const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
         };
       },
     } satisfies SocketUpgradeDecision;
+  },
   });
 
   const overHttp: string[] = [];

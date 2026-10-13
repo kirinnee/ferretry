@@ -10,10 +10,17 @@ const phoneOtherTab: StepUpSubject = { deviceId: phone.deviceId, appSession: 'ta
 const laptop: StepUpSubject = { deviceId: deviceId('b'), appSession: 'tab-one' };
 const bytes = (fill: number) => new Uint8Array(32).fill(fill);
 
+/** Every subject here holds a live session throughout; ending one is the span tests' subject. */
+const openRegistry = (): StepUpRegistry => {
+  const registry = new StepUpRegistry({ nowMs: () => NOW });
+  for (const subject of [phone, phoneOtherTab, laptop]) registry.open(subject);
+  return registry;
+};
+
 describe('StepUpRegistry', () => {
   it('should hold a granted step-up for its window and forget it once lapsed', () => {
     // Arrange
-    const registry = new StepUpRegistry();
+    const registry = openRegistry();
 
     // Act
     const expiresAtMs = registry.grant(phone, NOW);
@@ -29,7 +36,7 @@ describe('StepUpRegistry', () => {
 
   it('should bind a step-up to one app session of one device', () => {
     // Arrange
-    const registry = new StepUpRegistry();
+    const registry = openRegistry();
 
     // Act
     registry.grant(phone, NOW);
@@ -41,7 +48,7 @@ describe('StepUpRegistry', () => {
 
   it('should end every app session of a revoked device and no other device', () => {
     // Arrange
-    const registry = new StepUpRegistry();
+    const registry = openRegistry();
     registry.grant(phone, NOW);
     registry.grant(phoneOtherTab, NOW);
     registry.grant(laptop, NOW);

@@ -66,8 +66,11 @@ const remote = (subject: StepUpSubject = phone): StepUpCaller => ({ device: subj
 function fixture(options: { nowMs?: number; origins?: readonly string[]; paired?: boolean } = {}) {
   const clock = { now: options.nowMs ?? PAIRED_AT_MS + 60_000 };
   const store = new MemoryPasskeys();
-  // ONE construction point for the registry, so a change to its constructor is a one-line edit.
-  const registry = new StepUpRegistry();
+  // Both of the phone's tabs hold a live session throughout, so a step-up is judged on its window and
+  // binding alone; what ends a span is the span tests' subject.
+  const registry = new StepUpRegistry({ nowMs: () => clock.now });
+  registry.open(phone);
+  registry.open({ ...phone, appSession: 'tab-two' });
   const service = new StepUpService({
     store,
     verifier: passkeyVerifier(webCrypto),

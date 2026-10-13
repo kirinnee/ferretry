@@ -74,7 +74,7 @@ const stepUpSubsystem = (): StepUpService =>
       verifyRegistration: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
       verifyAssertion: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
     },
-    registry: new StepUpRegistry(),
+    registry: new StepUpRegistry({ nowMs: () => 1_700_000_000_000 }),
     challenges: new ChallengeLedger(),
     random: { bytes: length => new Uint8Array(length) },
     clock: { nowMs: () => 1_700_000_000_000 },
