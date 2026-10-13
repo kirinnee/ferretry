@@ -25,8 +25,11 @@ import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
+import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
+import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
 import { type HarnessLoginSubsystem, harnessLoginRoutes } from './fleet-login.ts';
+import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
@@ -118,6 +121,15 @@ export interface MountedSubsystems {
    *  authority question: the fleet table above is mostly reads on `use`, and every route here but the
    *  readiness read is `configure` with the operator password proved against the start. */
   readonly harnessLogin: HarnessLoginSubsystem;
+  /** The account model's credentials: one login stored once, its status and usage, Check now, and
+   *  sign-in targeting a credential id (docs/design/account-model.md §7). */
+  readonly fleetCredentials: FleetCredentialsSubsystem;
+  /** The account model's catalogue reads: the machine, its components, layered profiles and runtimes
+   *  (docs/design/account-model.md §7). */
+  readonly fleetCatalog: FleetCatalogSubsystem;
+  /** The account model's first run and clone: the setup scan, tool install and the export bundle
+   *  (docs/design/account-model.md §7). */
+  readonly fleetSetup: FleetSetupSubsystem;
   /** How much of this machine the managed fleet may take: the aggregate every agent shares, the
    *  ceiling on any one of them, and whether either is enforced. It is the read side of the same
    *  seam the session launch uses — one saved document, one conversion to host-manager properties —
@@ -313,6 +325,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
     ...daemonHealthRoutes(subsystems.health),
     ...doctorRoutes(subsystems.doctor),
+    // The account model's tables register BEFORE the fleet table so a path the design repurposes
+    // (`GET /v1/fleet/profiles`) is answered by its new owner. Every other path in them is a literal
+    // no older fleet route uses (docs/design/account-model.md §7).
+    ...fleetCredentialRoutes(subsystems.fleetCredentials),
+    ...fleetCatalogRoutes(subsystems.fleetCatalog),
+    ...fleetSetupRoutes(subsystems.fleetSetup),
     // Fleet paths are fixed literals under their own namespace and disclose operator configuration,
     // so their mount owns the admin scope and cannot shadow any session route below.
     ...fleetRoutes(subsystems.fleet),
