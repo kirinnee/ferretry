@@ -17,8 +17,9 @@ import {
   DEFAULT_CAPABILITY_GRANTS,
   DeviceGrantService,
   type GrantAuditEntry,
+  GrantError,
 } from '../../../../src/lib/grants/index.ts';
-import { type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
+import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { deviceGrantsOver, grantSubsystem } from './support.ts';
 
@@ -52,6 +53,8 @@ interface World {
   readonly target?: CapabilityGrants;
   readonly daemonWide?: CapabilityGrants;
   readonly steppedUp?: boolean;
+  /** Replaces the real device-grant service, for a case driving a failure it would never raise. */
+  readonly service?: DeviceGrantSubsystem;
 }
 
 async function mount(world: World = {}) {
@@ -79,7 +82,7 @@ async function mount(world: World = {}) {
     admin: 'admin-secret',
     devices: { has: (id: string) => devices.has(id), grants: (id: string) => devices.get(id) },
   };
-  const dispatcher = new ApiDispatcher(new ApiRouter(pairingRoutes(pairing, service)), credentials, grants, undefined, {
+  const dispatcher = new ApiDispatcher(new ApiRouter(pairingRoutes(pairing, world.service ?? service)), credentials, grants, undefined, {
     held: () => world.steppedUp ?? true,
   });
   return { dispatcher, devices, audit, service, rechecks: () => rechecks };
@@ -359,5 +362,27 @@ describe('the device-grant service on its own', () => {
 
     // Assert
     should(outcome).equal('not-found');
+  });
+
+  it('should answer an undetermined daemon-wide document 503, and a defect as a defect', async () => {
+    // Arrange — a remote manager reaches the subsystem; the subsystem then fails.
+    const failing = (error: Error): DeviceGrantSubsystem => ({
+      mayWiden: () => DEFAULT_CAPABILITY_GRANTS,
+      change: async () => {
+        throw error;
+      },
+    });
+    const undetermined = (await mount({ caller: MANAGER, service: failing(new GrantError('unavailable', 'unreadable')) }))
+      .dispatcher;
+    const broken = (await mount({ caller: MANAGER, service: failing(new Error('disk on fire')) })).dispatcher;
+
+    // Act
+    const unavailable = await undetermined.dispatch(patch({ fleet: { use: false } }));
+    const defect = await broken.dispatch(patch({ fleet: { use: false } }));
+
+    // Assert
+    should(unavailable.status).equal(503);
+    should(jsonBody(unavailable).code).equal('grants_undetermined');
+    should(defect.status).equal(500);
   });
 });
