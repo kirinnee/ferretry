@@ -184,7 +184,7 @@ theft. `--with-access-token` and `--with-api-key` stay host-and-CLI-only at ever
 
 How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code
 redeemed inside a session, which registers a **non-extractable device key** the browser generated; the
-daemon keeps only the public half, and the grant ends on revocation or after 30 days unused. **There is no
+daemon keeps only the public half, and the grant ends on revocation or after its idle period unused (30 days unless the owner changed it). **There is no
 device bearer value at all** — each session's own transcript is signed by the device key, so nothing on the
 wire replays — and the design and its threat model are [docs/design/zero-trust.md](docs/design/zero-trust.md).
 A **pairing code is a live credential**, so its QR is generated locally and never by an image service, never announced to a screen

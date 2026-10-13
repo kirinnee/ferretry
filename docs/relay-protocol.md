@@ -1284,8 +1284,12 @@ is idle-expired, or a proof that does not verify against the stored key all end 
 same `4403`. The daemon accepts by answering, inside the channel:
 
 ```json
-{ "t": "authenticated", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>" }
+{ "t": "authenticated", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>", "rotateBy": "<ISO-8601 instant>" }
 ```
+
+`rotateBy` is optional: present when the machine asks for device-key rotation, it is when this device's
+key is due for replacement (see "Replacing the device key" below). A daemon that sends none asks for no
+rotation, which is what an older one means.
 
 The proof and the acceptance travel inside the encrypted channel; the refusal is a close, and a close
 code is in the clear, so a relay sees `4403` (and later `4441`) and learns WHEN a session was refused
@@ -1328,6 +1332,37 @@ arrives after the lease ended is never served even when the lease timer fires la
 channel needs a device signature at least every fifteen minutes and never outlives twelve hours, and
 every renewal re-reads revocation and expiry from the daemon's own state. Neither an auth nor a
 renewal counts as USE of the device: see `presence` below.
+
+#### Replacing the device key
+
+A machine's owner sets how often a device's key is replaced (`deviceKeyRotationDays`,
+[design/zero-trust.md](design/zero-trust.md) B6). Once `rotateBy` has passed, the device replaces its key
+inside its next passkey step-up — there is no separate record and no extra prompt. It mints a new
+non-extractable key, keeps it as **pending** before anything is sent, and adds to the `POST /v1/step-up`
+body, carried by a session the OLD key opened:
+
+```
+proof = Ed25519-Sign( NEW device key, "ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey) )
+"rotation": { "deviceKey": "<new SPKI, b64url>", "proof": "…" }
+```
+
+`TH` is the carrying session's transcript hash and `deviceKey` is the new key's base64url text, so the
+proof is good for one session and one device. An overdue step-up without a rotation is refused
+`403 step_up_rotation_required` without spending its challenge. The daemon checks the proof, then the
+passkey assertion, then rewrites the device's key, closes every OTHER session the device holds with
+`4441` (each reopens with the new key), keeps the carrying one, records `device.key-rotated`, and answers
+`keyRotated: true`; the browser then promotes the pending key. From then on the old key opens nothing
+(`4403`). If the answer is lost, the browser's next session is refused on the old key and it tries the
+pending key once — so a dropped response never strands the device.
+
+#### Presence on opening
+
+When the machine asks for a passkey on opening (`presenceOnOpen`), a session still opens — the device key
+is proved as always — but every request answers `401 { "code": "presence_required" }` until the device
+confirms with a passkey through `POST /v1/presence/options` and `POST /v1/presence`, which are served, as
+are `GET /v1/passkeys` and `GET /v1/security`. One confirmation lasts `presenceValidityHours` for that
+device, across page loads; it is never a step-up. This is a daemon response, not a session record: nothing
+on the wire beside it changes.
 
 Afterwards, any number of requests:
 
@@ -1449,7 +1484,7 @@ route at all. `ticket` or `token` in a stream's `query` is refused with `4400`, 
 The daemon answers with exactly one of, inside the channel:
 
 ```json
-{ "t": "stream-opened", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>" }
+{ "t": "stream-opened", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>", "rotateBy": "<ISO-8601 instant>" }
 { "t": "stream-refused", "protocol": "ferretry-relay/2", "status": 404, "body": "…" }
 ```
 

@@ -9,7 +9,8 @@ against the code, and change it in the same commit as the behaviour.
 
 The machine mints a code that lives for **two minutes** and works **once**; the device that reads it
 registers a **key it generated and can never export**; the machine keeps only the public half, and the
-grant ends when it is revoked or goes unused for **30 days**. No bearer value exists anywhere — the
+grant ends when it is revoked or goes unused for its idle period — **30 days** unless the machine's owner
+changed it. No bearer value exists anywhere — the
 rationale and the threat model are [design/zero-trust.md](design/zero-trust.md) A1–A7.
 
 ## What travels, and what never does
@@ -281,13 +282,17 @@ Two different things are revocable and they are not the same act:
   because a session is authorized once, at its proof, and would otherwise outlive the grant. A request
   already in flight on a closing session is refused at the request boundary too: the dispatcher re-asks
   whether the device is still paired, and an unanswerable question is a refusal.
-- **Idle expiry** — a device nobody has USED for **30 days** is removed the next time the daemon looks
+- **Idle expiry** — a device nobody has USED for the idle period is removed the next time the daemon looks
   (at boot, at a session's proof, at a device-list read) and must pair again. Use means a request the
   page marks `presence` — visible and touched within five minutes, by real input. A page that only
   loaded is not use, and neither is a proof or a silent renewal, so a tab left open on a forgotten
   laptop cannot keep the device paired.
   `lastSeenAt` reaches disk at most once an hour, so a busy phone is not a write per request;
-  `idleExpiresAt` on each row says when the grant ends.
+  `idleExpiresAt` on each row says when the grant ends. The period is the `idleExpiryDays` security
+  setting (1–90 days, default 30; [design/zero-trust.md](design/zero-trust.md) B6), read at every check, so
+  shortening it can unpair devices at once. The change's answer says how many (`devicesExpiring`), and the
+  redemption response's `idleExpiryDays` reports the value in force. Change it at the machine with
+  `fy daemon security set idleExpiryDays <days>`, or shorten it from a paired device in Settings.
 
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses

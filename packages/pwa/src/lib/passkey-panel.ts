@@ -42,6 +42,8 @@ const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => stri
   'too-many-passkeys': () => 'This device already holds as many passkeys as this machine allows.',
   'no-passkey': origin => passkeySentence('no-passkey', origin),
   'not-verified': () => 'That passkey did not check out. Try again.',
+  'rotation-required': () =>
+    'This device needs a new key before it can confirm, and it makes one with the next confirmation. Try again.',
 };
 
 /** The one plain sentence for a failed registration or read — never a status code or a raw error name. */

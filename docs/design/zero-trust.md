@@ -575,6 +575,55 @@ audit record for every change.
 Delivery: built after B (it needs the step-up ceremony), as part of B if it fits, otherwise as a
 small PR E immediately after it.
 
+**As built** (`feat/zt-security-settings`, PR E):
+
+- **Contract.** `@ferretry/protocol` `security.ts` owns the fields, bounds, defaults, the patch and view
+  schemas and `widensSecurity`, so the daemon, `fy` and the app agree on what "narrower" means. `GET
+/v1/security` answers `{ settings, source, mayWiden, widenCommand, updatedAt? }` to any paired caller;
+  `PATCH /v1/security` demands `pairing.configure` and answers `{ view, devicesExpiring }`. A remote widen
+  is `403 security_widen_at_machine` naming `fy daemon security set <setting> <value>`; an out-of-bounds
+  value is `400`. "At the machine" is `arrivedOnHost`, the one host-locality rule (B4).
+- **Store.** `state/security.json`, `schemaVersion: 1`, atomic write, mode `0600`. Read once at boot; the
+  service is then synchronous, so no enforcement waits on a file. A missing file is the defaults.
+- **Damaged document — one deliberate departure from the spec text.** It fails closed to window `0`,
+  presence on, validity 1 hour and rotation 7 days, with a boot notice naming the file. Idle expiry is
+  **kept at the default**, not shortened to 1 day: the narrowest reading would unpair every device a day
+  after a corrupted file, and an unpairing cannot be undone. A remote caller cannot patch a damaged
+  document (`503 security_unavailable`); the host replaces it.
+- **Audit.** `state/security-audit.jsonl`, one `security.changed` record per change with
+  `security.<field>=<old>-><new>` and the actor, an empty change included, and one `device.key-rotated`
+  record per rotation. Its own file, so the grant history reader is unchanged.
+- **Step-up window.** `StepUpRegistry` reads the window at every question, so a shortened window applies
+  to step-ups already held. `0` makes a step-up single-use: the authorization boundary spends it when it
+  admits a step-up-gated act (`GrantDecision.steppedUp`), and so does `PATCH /v1/grants`, which checks its
+  own step-up. An unspent single-use step-up lives two minutes, enough for the app's one re-send.
+- **Idle expiry.** `PairingService` reads `idleExpiryDays` at every check, so a shortened period applies
+  at the next boot, session proof or device list; the pairing response reports the current value.
+  `devicesExpiring` counts the devices the new period will end, and only when it shortened.
+- **Presence on open.** When on, the request boundary answers every device request
+  `401 presence_required` until that device confirms with a passkey. Exempt: `GET /v1/passkeys`,
+  `GET /v1/security`, `POST /v1/presence/options` and `POST /v1/presence`. A confirmation is held in the
+  daemon's memory per **device** for `presenceValidityHours`, so it survives page loads and ends on a
+  restart or a revoke. Registering a first passkey counts as a confirmation, so a device on a machine
+  with presence on can still get in. It is never a step-up. A device on the host (B4) is not asked. The
+  app shows "Confirm it's you" with the same dialog component as the step-up prompt and re-sends once.
+- **Rotation.** `authenticated` and `stream-opened` carry `rotateBy` (key age counted from the last
+  `keyRotatedAt` on the device record, or from pairing). Past it, `POST /v1/step-up` without a
+  `rotation` is `403 step_up_rotation_required` **without spending the challenge**, so the browser can
+  answer the same challenge again with a new key, and reads that need no step-up keep working. The new
+  key's proof is checked over the carrying session's transcript before the assertion is verified; after
+  it verifies, the daemon rewrites the device's key, ends the device's other sessions with `4441`, keeps
+  the carrying session, audits `device.key-rotated`, and answers `keyRotated: true`. The label and
+  message builder are `deviceRotateMessage` in `@ferretry/relay`.
+- **Not exercised end to end:** a real authenticator; a real browser rotating its key against a real
+  daemon; presence on a machine reached only through the hosted relay. Each half is unit-tested against
+  the other half's contract.
+- **Declared gap:** the daemon refuses a stream open (terminal, event feed) for presence too, because
+  both route tables share the one authorization boundary. The app raises the "Confirm it's you" prompt
+  only for a refused **request**; a refused stream open is reported as a refusal, and the prompt appears
+  with the page's next request. A stream already open when a confirmation lapses keeps running: presence
+  is asked when something opens, and a renewal re-asks only the grant.
+
 ## C. Audit log and alerts
 
 - **Where:** `<FY_HOME>/state/audit.jsonl`, rotated to `audit.1.jsonl` at 1 MiB, two files kept —

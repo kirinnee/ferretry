@@ -213,7 +213,9 @@ right about the artefact it was handed, and the formatter had changed the artefa
 There is no operator password. The passkey step-up replaced it for every purpose it had — the local
 browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for
 compatibility**. [design/zero-trust.md](design/zero-trust.md) B owns the ceremony (who verifies it, the
-15-minute window, which origin a passkey belongs to); this section owns what the grant layer does with it.
+step-up window, which origin a passkey belongs to); this section owns what the grant layer does with it.
+The window is the `stepUpWindowMinutes` security setting (0–60, default 15); at `0` a step-up admits
+exactly one act and the boundary spends it.
 
 **What needs one.** A **governed** caller needs a current step-up for:
 
@@ -273,6 +275,16 @@ request schemas are empty objects. That is a real weakening and it is stated rat
 - The remote risk in a sign-in is still **account substitution**, not disclosure: a caller who can start one
   and forward its code can bind this fleet to a provider account THEY control. That is a change to how the
   host behaves, so it sits on `fleet.configure` and the step-up is what stands in front of it.
+
+## Who may change the security settings
+
+The per-machine security settings ([design/zero-trust.md](design/zero-trust.md) B6 — step-up window, key
+rotation, presence on opening, idle expiry) follow the same asymmetry as the grants. Changing one is a
+`configure` act on `pairing`: `PATCH /v1/security` demands `pairing.configure`, so a remote caller needs
+that grant **and** a current step-up, and may only **narrow**. Widening any field is host-only
+(`arrivedOnHost`): a remote widen is `403 security_widen_at_machine`, whose sentence names
+`fy daemon security set <setting> <value>`. A request that changes several fields is judged field by field
+and refused whole if any one widens remotely. Reading them (`GET /v1/security`) needs no capability.
 
 ## Widening is a local act. There is no remote path to it.
 
