@@ -157,6 +157,11 @@ export interface RelayDeviceDirectory {
   deviceKey(deviceId: string): Promise<string | undefined>;
   /** The device just proved its key: at a session's open, or at a lease renewal. */
   seen(deviceId: string): void;
+  /**
+   * When this device's key is due for replacement (`docs/design/zero-trust.md` B6), told to it in the
+   * record that accepts each session. Absent, or nothing, means no rotation is asked for.
+   */
+  rotateBy?(deviceId: string): number | undefined;
 }
 
 /**
@@ -866,6 +871,7 @@ export class RelayLink {
       t: 'authenticated',
       protocol: SESSION_PROTOCOL_ID,
       accessExpiresAt: instant(session.leaseExpiresAtMs),
+      ...this.#rotateBy(session),
     });
   }
 
@@ -910,6 +916,15 @@ export class RelayLink {
       },
       claim.appSession,
       () => this.#recheckStream(session),
+      // After the device replaces its key, every OTHER session it holds ends as a lapsed lease and
+      // reopens with the new one; the session that carried the replacement is named so it is spared.
+      {
+        key: transcriptKey(transcript),
+        end: () => {
+          if (!this.#live(session)) return;
+          this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
+        },
+      },
     );
     // A device unpaired a moment ago is ended by the registry before `track` returns.
     if (!this.#live(session)) return false;
@@ -946,6 +961,13 @@ export class RelayLink {
       if (!this.#live(session)) return;
       this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
     });
+  }
+
+  /** The record field that tells a device when its key is due, or nothing. */
+  #rotateBy(session: LinkSession): { readonly rotateBy?: string } {
+    const device = session.device;
+    const at = device === undefined ? undefined : this.deps.devices.rotateBy?.(device.deviceId);
+    return at === undefined ? {} : { rotateBy: instant(at) };
   }
 
   #askRenewal(session: LinkSession): void {
@@ -1072,7 +1094,13 @@ export class RelayLink {
     const device = session.device;
     if (device === undefined) return;
     const response = await this.deps.dispatch(
-      tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival),
+      tunnelApiRequest(
+        { ...request, body },
+        device,
+        session.sessionId.text,
+        this.deps.arrival,
+        session.transcript,
+      ),
     );
     this.#answer(session, request.id, response);
   }
@@ -1194,6 +1222,7 @@ export class RelayLink {
       t: 'stream-opened',
       protocol: SESSION_PROTOCOL_ID,
       accessExpiresAt: instant(session.leaseExpiresAtMs),
+      ...this.#rotateBy(session),
     });
     // Queued before `open` runs, so the acceptance is ahead of the first frame the handler produces
     // however eagerly it produces one.
@@ -1652,4 +1681,13 @@ export class RelayLink {
 
 function instant(milliseconds: number): string {
   return new Date(milliseconds).toISOString();
+}
+
+/**
+ * A session's name among one device's sessions: its transcript hash, hex. The hash is unique per
+ * session and public to both of its ends, so it can name one without being a secret. Empty before the
+ * handshake keyed the channel, which no tracked session ever is.
+ */
+export function transcriptKey(transcript: Uint8Array | undefined): string {
+  return transcript === undefined ? '' : [...transcript].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }

@@ -87,4 +87,36 @@ export interface StepUpDeviceDirectory {
 export interface StepUpCaller {
   readonly device?: { readonly deviceId: string; readonly appSession: string };
   readonly hostLocal: boolean;
+  /**
+   * The transcript hash of the session carrying this request — what a key rotation's proof is signed
+   * over. Present only for a request a session carried; a rotation without one is refused.
+   */
+  readonly transcriptHash?: Uint8Array;
+}
+
+/**
+ * Replacing a device's key inside a step-up (`docs/design/zero-trust.md` B6), as the step-up service
+ * needs it. The verifier of the new key's proof, the swap, and the one fact that decides whether a
+ * rotation is due: when the device's current key was put in place.
+ */
+export interface DeviceKeyRotationPort {
+  /** When the device's current key was put in place, or nothing for a device that is gone. */
+  keyIssuedAt(deviceId: string): number | undefined;
+  /** Whether `proof` is `deviceKey`'s signature over this session's rotation message. Total. */
+  verify(input: {
+    readonly transcriptHash: Uint8Array;
+    readonly deviceId: string;
+    readonly deviceKey: string;
+    readonly proof: string;
+  }): Promise<boolean>;
+  /**
+   * Adopts the new key, closes every OTHER session the device holds so each reopens with it, and
+   * audits `device.key-rotated`. `false` when the device was gone by the time it was written.
+   */
+  rotate(input: {
+    readonly deviceId: string;
+    readonly deviceKey: string;
+    /** The carrying session's transcript hash, so that session is the one NOT closed. */
+    readonly transcriptHash: Uint8Array;
+  }): Promise<boolean>;
 }

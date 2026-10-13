@@ -95,6 +95,11 @@ export interface CapabilityPresentation {
 export interface GrantDecision {
   readonly allowed: boolean;
   readonly refusal: GrantRefusal;
+  /**
+   * Set on an ALLOWED decision that leaned on the caller's step-up, so the boundary can spend a
+   * single-use one (a step-up window of `0`). Never set on a refusal.
+   */
+  readonly steppedUp?: true;
 }
 
 /**
@@ -190,6 +195,18 @@ export function grantRefusalCode(refusal: GrantRefusal): string {
  */
 export interface StepUpWitness {
   held(subject: SessionDevice): boolean;
+  /**
+   * One act that needed the step-up was just admitted. Spends it when the machine asks every time;
+   * absent on a witness whose step-ups are never single-use.
+   */
+  spend?(subject: SessionDevice): void;
+  /**
+   * Whether this device must confirm a person is present before it is served at all, on a machine that
+   * asks for that on opening (`presenceOnOpen`, `docs/design/zero-trust.md` B6). Absent means it never
+   * must. Asked of the same witness because a confirmation on opening is the same passkey ceremony,
+   * verified by the same subsystem — and it never counts as a step-up.
+   */
+  presenceRequired?(subject: SessionDevice): boolean;
 }
 
 /** The witness for a dispatcher with no step-up subsystem wired: nobody holds one. */

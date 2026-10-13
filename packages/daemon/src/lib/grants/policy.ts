@@ -125,8 +125,9 @@ export function decideCapability(demand: CapabilityDemand, evaluation: GrantEval
   const grant = grants[demand.capability];
   if (!grant.use) return { allowed: false, refusal: 'not-granted' };
   if (demand.axis === 'configure' && !grant.configure) return { allowed: false, refusal: 'not-granted' };
-  if (demandNeedsStepUp(demand) && !evaluation.stepUp) return { allowed: false, refusal: 'step-up-required' };
-  return { allowed: true, refusal: 'granted' };
+  if (!demandNeedsStepUp(demand)) return { allowed: true, refusal: 'granted' };
+  if (!evaluation.stepUp) return { allowed: false, refusal: 'step-up-required' };
+  return { allowed: true, refusal: 'granted', steppedUp: true };
 }
 
 /** The capability name as an operator reads it, so a refusal names a thing rather than a key. */

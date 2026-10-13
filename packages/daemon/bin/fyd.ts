@@ -55,6 +55,7 @@ import {
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
 // is the class of bug this removes.
+import { deviceRotateMessage, verifyDeviceProof } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
@@ -152,6 +153,7 @@ import {
   StatePairingRepository,
   StatePushRepository,
   StatePasskeyStore,
+  StateSecuritySettingsDocument,
   WebCryptoPasskeyCrypto,
   StateVapidKeys,
   SystemClock,
@@ -456,6 +458,7 @@ import {
   PushService,
   ChallengeLedger,
   passkeyVerifier,
+  SecuritySettingsService,
   StepUpRegistry,
   StepUpService,
   packageRole,
@@ -480,6 +483,7 @@ import {
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
   type RelayPairingRedeemer,
+  transcriptKey,
   type RelayStreamDispatch,
   type ResumeAnswerAttention,
   ResumeCancelled,
@@ -889,6 +893,13 @@ export interface DaemonWorld {
     readonly push: PushService;
     /** Passkeys and the step-up they prove, opened with pairing because revoking a device forgets them. */
     readonly stepUp: StepUpService;
+    /**
+     * The machine's security settings (`docs/design/zero-trust.md` B6), opened with pairing because
+     * the idle period and the key rotation it governs are pairing's, and READ before anything else here
+     * is asked a question. `notice` is its boot sentence when the document could not be read.
+     */
+    readonly security: SecuritySettingsService;
+    readonly securityNotice: string | undefined;
     /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
     readonly droppedBearerGrants: number;
   }>;
@@ -1051,6 +1062,8 @@ export interface DaemonWorld {
     push: PushService,
     /** Opened with pairing for the same reason: a device's passkeys die with its grant. */
     stepUp: StepUpService,
+    /** The machine's security settings, opened with pairing — see `createPairing`. */
+    security: SecuritySettingsService,
     /** The exact published set pairing redemption receives and authenticated refresh serves. */
     carriers: readonly DaemonCarrier[],
     /**
@@ -4380,7 +4393,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // ONE registry, shared by the bound address, every relay carrier and the pairing service.
   // One step-up registry per process, told by the connection registry when each running copy of the
   // app opens and closes a session, so a step-up ends with the page that performed it.
-  const stepUpRegistry = new StepUpRegistry({ nowMs: () => Date.now() });
+  // THE STEP-UP WINDOW IS THE OWNER'S SETTING (B6), read at every question. The settings service opens
+  // with pairing, later than this registry, so the window is read through a holder that answers the
+  // strictest reading — every time — until the settings have been read.
+  let securitySettings: SecuritySettingsService | undefined;
+  const stepUpRegistry = new StepUpRegistry(
+    { nowMs: () => Date.now() },
+    () => securitySettings?.current().stepUpWindowMinutes ?? 0,
+  );
   const deviceConnections = new LiveDeviceConnections(stepUpRegistry);
   const grants = new CapabilityGrantService({
     document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
@@ -5256,6 +5276,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
       const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
+      // Read BEFORE pairing is built: the idle period and the step-up window are both asked of it.
+      let pairingService: PairingService | undefined;
+      const security = new SecuritySettingsService({
+        document: new StateSecuritySettingsDocument(paths, stateFiles),
+        audit: new JournalGrantAudit(paths.securityAudit, stateFiles, 'security.changed'),
+        clock: { nowMs: () => Date.now() },
+        widenCommand: `${CLIENT_NAME} daemon security set <setting> <value>`,
+        devicesIdleLongerThan: days => pairingService?.devicesIdleLongerThan(days) ?? 0,
+      });
+      const securityNotice = await security.refresh();
+      securitySettings = security;
+      const securityAudit = new JournalGrantAudit(paths.securityAudit, stateFiles, 'security.changed');
+      const relayCryptoForRotation = new WebCryptoRelayCrypto();
       // The application-server key pair, minted into the state home on first use and never returned by
       // anything: the transport below is the only holder of the signing half, and the domain above sees
       // the public point alone. See `src/adapters/push/webcrypto-vapid-keys.ts`.
@@ -5289,13 +5322,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         allowedOrigins: () => browserOrigins(config),
         relyingPartyName: 'Ferretry',
+        settings: () => security.current(),
+        // A device's key, replaced inside a step-up (B6): the new key proves itself over the carrying
+        // session's transcript, the grant is rewritten, the device's other sessions end as lapsed
+        // leases so each reopens on the new key, and the swap is journalled.
+        rotation: {
+          keyIssuedAt: deviceId => pairingService?.keyIssuedAt(deviceId),
+          verify: async ({ transcriptHash, deviceId, deviceKey, proof }) =>
+            await verifyDeviceProof(
+              relayCryptoForRotation,
+              deviceKey,
+              proof,
+              deviceRotateMessage(transcriptHash, deviceId, deviceKey),
+            ),
+          rotate: async ({ deviceId, transcriptHash, deviceKey }) => {
+            if (pairingService === undefined || !(await pairingService.rotateDeviceKey(deviceId, deviceKey))) return false;
+            deviceConnections.lapseDevice(deviceId, transcriptKey(transcriptHash));
+            await securityAudit.record({
+              kind: 'device.key-rotated',
+              actor: `device:${deviceId}`,
+              changes: [`device.key-rotated=${deviceId}`],
+              at: new Date().toISOString(),
+            });
+            return true;
+          },
+        },
       });
       return {
         credentials,
         push,
         stepUp,
+        security,
+        securityNotice,
         droppedBearerGrants: state.droppedBearerGrants,
-        subsystem: new PairingService({
+        subsystem: (pairingService = new PairingService({
           daemonId: state.daemonId,
           daemonName: state.daemonName,
           // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
@@ -5316,7 +5376,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           deviceState: [push, stepUp],
           // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
           connections: deviceConnections,
-        }),
+          idleExpiryDays: () => security.current().idleExpiryDays,
+        })),
       };
     },
     sessions: planner,
@@ -5405,6 +5466,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       pairing,
       push,
       stepUp,
+      security,
       carriers,
       harnessDiscovery,
     ) => {
@@ -5988,6 +6050,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         pairing,
         push,
         stepUp,
+        security,
         carriers,
         harnessLogin,
         fleetCredentials,
@@ -6463,6 +6526,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const startedAtMs = world.clock.now();
   const pairing = await world.createPairing(config, world.clock, carriers, discoverableRelayUrl(relaySources));
   world.notices.step('pairing identity opened');
+  if (pairing.securityNotice !== undefined) world.notices.state(pairing.securityNotice);
   // NO COMPATIBILITY, SAID ONCE. A `devices.json` from before device keys held bearer-token grants
   // nothing can accept any more; the repository dropped them, and the operator is told how many
   // devices have to pair again rather than discovering it one phone at a time.
@@ -6473,12 +6537,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const idleExpired = await pairing.subsystem.expireIdleDevices();
   if (idleExpired > 0)
     world.notices.state(
-      `${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for 30 days ${idleExpired === 1 ? 'was' : 'were'} removed`,
+      `${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for ${pairing.security.current().idleExpiryDays} days ${idleExpired === 1 ? 'was' : 'were'} removed`,
     );
   /** Which key a session must prove, answered by the pairing state machine that owns the grants. */
   const sessionDevices: RelayDeviceDirectory = {
     deviceKey: async deviceId => await pairing.subsystem.deviceKey(deviceId),
     seen: deviceId => pairing.subsystem.seen(deviceId),
+    rotateBy: deviceId => pairing.stepUp.rotateBy(deviceId),
   };
   const base = {
     credentials: {
@@ -6546,6 +6611,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.subsystem,
     pairing.push,
     pairing.stepUp,
+    pairing.security,
     carriers,
     harnessDiscovery,
   );

@@ -50,6 +50,12 @@ export interface ApiRequest {
    */
   readonly device?: SessionDevice;
   /**
+   * The transcript hash of the session that carried this request, set beside `device` by the same one
+   * constructor. What a device-key rotation's proof is signed over (`docs/design/zero-trust.md` B6);
+   * a hash, public to both ends of the session, and never a secret.
+   */
+  readonly transcriptHash?: Uint8Array;
+  /**
    * Fires when the caller gives up, so a long read can stop instead of finishing for nobody.
    *
    * Optional because most handlers answer in one read and have nothing to abandon, and requiring it

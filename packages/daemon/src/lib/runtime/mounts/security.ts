@@ -10,6 +10,7 @@
 
 import {
   SECURITY_WIDEN_REFUSED_CODE,
+  SecuritySettingsChangeSchema,
   SecuritySettingsPatchSchema,
   SecuritySettingsViewSchema,
 } from '@ferretry/protocol';
@@ -28,6 +29,8 @@ export function securityRoutes(service: SecuritySettingsService): readonly ApiRo
       path: '/v1/security',
       minimum: 'operator',
       noStore: true,
+      // How strict the machine is, readable before a confirmation on opening, so the app can say why.
+      presenceExempt: true,
       handle: async context => jsonResponse(SecuritySettingsViewSchema.parse(service.view(callerOf(context)))),
     },
     {
@@ -39,7 +42,7 @@ export function securityRoutes(service: SecuritySettingsService): readonly ApiRo
       handle: async context => {
         const patch = await parseBody(context.request, SecuritySettingsPatchSchema);
         const outcome = await service.patch(patch, callerOf(context));
-        if (outcome.ok) return jsonResponse(SecuritySettingsViewSchema.parse(outcome.view));
+        if (outcome.ok) return jsonResponse(SecuritySettingsChangeSchema.parse(outcome.change));
         if (outcome.refusal === 'unavailable')
           throw new ApiError(
             503,

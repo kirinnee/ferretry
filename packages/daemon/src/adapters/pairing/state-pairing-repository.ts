@@ -27,6 +27,8 @@ const DeviceRecordSchema = z.strictObject({
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
   publicKey: DeviceKeySchema,
+  /** When `publicKey` last replaced an earlier one. Absent until a first rotation. */
+  keyRotatedAt: InstantSchema.optional(),
 });
 
 const DEVICE_DOCUMENT_VERSION = 2;
@@ -147,6 +149,14 @@ export class StatePairingRepository implements PairingDeviceStore {
     await this.write(records =>
       records.some(existing => existing.id === id)
         ? records.map(existing => (existing.id === id ? { ...existing, lastSeenAt } : existing))
+        : undefined,
+    );
+  }
+
+  async rotateKey(id: string, publicKey: string, keyRotatedAt: string): Promise<boolean> {
+    return await this.write(records =>
+      records.some(existing => existing.id === id)
+        ? records.map(existing => (existing.id === id ? DeviceRecordSchema.parse({ ...existing, publicKey, keyRotatedAt }) : existing))
         : undefined,
     );
   }

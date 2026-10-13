@@ -6,6 +6,7 @@ import {
   type SecuritySettingsPatch,
   type SecuritySettingsSource,
   type SecuritySettingsView,
+  type SecuritySettingsChange,
   widensSecurity,
 } from '@ferretry/protocol';
 import type { GrantAuditPort } from '../grants/types.ts';
@@ -56,7 +57,7 @@ export interface SecurityCaller {
 }
 
 export type SecurityPatchOutcome =
-  | { readonly ok: true; readonly view: SecuritySettingsView }
+  | { readonly ok: true; readonly change: SecuritySettingsChange }
   | { readonly ok: false; readonly refusal: 'widen-remote'; readonly fields: readonly SecuritySettingField[] }
   | { readonly ok: false; readonly refusal: 'unavailable' };
 
@@ -68,6 +69,11 @@ export interface SecuritySettingsDeps {
   readonly widenCommand: string;
   /** Told after every change, so what enforces a setting can act on the new value at once. */
   readonly changed?: (settings: SecuritySettings) => void;
+  /**
+   * How many paired devices an idle period of `days` would unpair at the next check, so the answer to a
+   * shortening can say so. Absent means nobody can count, and the answer says none.
+   */
+  readonly devicesIdleLongerThan?: (days: number) => number;
 }
 
 export class SecuritySettingsService {
@@ -138,7 +144,9 @@ export class SecuritySettingsService {
     // Recorded even when nothing moved, as the grant journal records an empty patch: an attempt is
     // part of the history.
     await this.deps.audit.record({ actor: caller.actor, changes, at });
-    return { ok: true, view: this.view(caller) };
+    const devicesExpiring =
+      next.idleExpiryDays < current.idleExpiryDays ? (this.deps.devicesIdleLongerThan?.(next.idleExpiryDays) ?? 0) : 0;
+    return { ok: true, change: { view: this.view(caller), devicesExpiring } };
   }
 
   #apply(settings: SecuritySettings, source: SecuritySettingsSource): void {

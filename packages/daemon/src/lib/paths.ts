@@ -69,6 +69,8 @@ export interface FoundationPaths {
    * a token and never anything about the password.
    */
   readonly grantAudit: string;
+  /** Who changed this machine's security settings, and every device key replaced (B6). */
+  readonly securityAudit: string;
 }
 export interface SessionPaths {
   readonly directory: string;
@@ -104,6 +106,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     daemonIdentity: join(state, 'daemon-identity.json'),
     retiredOperatorPassword: join(state, 'operator-password.json'),
     grantAudit: join(state, 'grant-audit.jsonl'),
+    securityAudit: join(state, 'security-audit.jsonl'),
   };
 }
 

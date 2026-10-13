@@ -1,4 +1,4 @@
-import { OLDER_APP_SENTENCE } from '@ferretry/protocol';
+import { OLDER_APP_SENTENCE, PRESENCE_REQUIRED_CODE } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import {
   type ApiCredentials,
@@ -194,6 +194,26 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       ),
     };
 
+  // A MACHINE THAT WANTS A PERSON ON OPENING serves a device nothing until one has confirmed. The
+  // session is sound, so this is 401 rather than a refusal of the device, and the few routes a device
+  // needs to GIVE that confirmation are exempt. Asked only of a proven device off this host: the CLI
+  // and a warden have no passkey to give, and a browser on the host is ungoverned (B4) — it is the
+  // way back in when everything else is lost.
+  if (
+    device !== undefined &&
+    !onHost &&
+    lookup.route.presenceExempt !== true &&
+    stepUps.presenceRequired?.(device) === true
+  )
+    return {
+      kind: 'refused',
+      response: errorResponse(
+        401,
+        'this machine asks you to confirm it is you with a passkey before it shows anything',
+        PRESENCE_REQUIRED_CODE,
+      ),
+    };
+
   // Server-derived, unforgeable: the token class decides warden versus admin, and the self-
   // identification headers only refine WHICH warden or peer. The source also flipped the class to
   // `warden` whenever a stop-capability header was merely PRESENT, so an admin CLI that passed one
@@ -245,6 +265,9 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
           grantRefusalCode(decision.refusal),
         ),
       };
+    // A step-up the machine wants asked for every time is good for this one act and no other. Spent
+    // here, at the decision, so a second request cannot ride the confirmation the first one bought.
+    if (decision.steppedUp === true && request.device !== undefined) stepUps.spend?.(request.device);
     // Derived AFTER the refusal, so it can only ever describe a request this daemon is about to
     // serve. A handler is given where the caller stands so it can ask for one more thing; it is
     // never given a way to conclude that a refused caller was allowed.

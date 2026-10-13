@@ -1,7 +1,7 @@
 /**
  * THE PASSKEY STEP-UP SURFACE (`docs/design/zero-trust.md` B2).
  *
- * Five routes, all for a paired DEVICE and all inside a session its key opened: what this device holds,
+ * Seven routes, all for a paired DEVICE and all inside a session its key opened: what this device holds,
  * the two ceremonies (register a passkey, prove one), and their options. The browser runs WebAuthn; the
  * daemon issues the challenge and verifies the answer, so a relay carrying these records can neither
  * forge an assertion nor replay one.
@@ -22,6 +22,7 @@ import {
   PasskeyRegistrationSchema,
   PasskeysViewSchema,
   PasskeyViewSchema,
+  PresenceGrantedSchema,
   StepUpAssertionSchema,
   StepUpGrantedSchema,
   StepUpOptionsSchema,
@@ -54,6 +55,10 @@ const REFUSALS: Readonly<Record<StepUpRefusal, { readonly status: number; readon
   'too-many-passkeys': { status: 409, message: 'this device already holds as many passkeys as it may' },
   'no-passkey': { status: 404, message: 'this copy of the app has no passkey for this machine' },
   'not-verified': { status: 401, message: 'that passkey confirmation did not check out; try again' },
+  'rotation-required': {
+    status: 403,
+    message: "this device's key is due for replacement, and this machine replaces it with the next passkey confirmation",
+  },
 };
 
 const refusal = (reason: StepUpRefusal): ApiResponse => {
@@ -63,6 +68,7 @@ const refusal = (reason: StepUpRefusal): ApiResponse => {
 
 const caller = ({ request, credential }: RouteContext): StepUpCaller => ({
   ...(request.device === undefined ? {} : { device: request.device }),
+  ...(request.transcriptHash === undefined ? {} : { transcriptHash: request.transcriptHash }),
   hostLocal: arrivedOnHost(request, credential?.tokenClass === 'admin'),
 });
 
@@ -76,6 +82,8 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       path: '/v1/passkeys',
       minimum: 'operator',
       noStore: true,
+      // The panel that offers the first passkey must load on a machine that asks for one on opening.
+      presenceExempt: true,
       handle: async context => answer(await service.view(caller(context)), value => PasskeysViewSchema.parse(value)),
     },
     {
@@ -120,6 +128,32 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       handle: async context => {
         const body = await parseBody(context.request, StepUpAssertionSchema);
         return answer(await service.stepUp(caller(context), body), value => StepUpGrantedSchema.parse(value));
+      },
+    },
+    // A CONFIRMATION ON OPENING (`presenceOnOpen`): the same ceremony on its own challenge, served to a
+    // device the machine is otherwise refusing, so these two are the way in. Never a step-up.
+    {
+      method: 'POST',
+      path: '/v1/presence/options',
+      minimum: 'operator',
+      noStore: true,
+      presenceExempt: true,
+      handle: async context => {
+        const body = await parseBody(context.request, PasskeyOptionsRequestSchema);
+        return answer(await service.presenceOptions(caller(context), body.origin), value =>
+          StepUpOptionsSchema.parse(value),
+        );
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/presence',
+      minimum: 'operator',
+      noStore: true,
+      presenceExempt: true,
+      handle: async context => {
+        const body = await parseBody(context.request, StepUpAssertionSchema);
+        return answer(await service.presence(caller(context), body), value => PresenceGrantedSchema.parse(value));
       },
     },
   ];

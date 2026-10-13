@@ -111,12 +111,15 @@ export function grantRoutes(
       path: '/v1/grants',
       minimum: 'operator',
       noStore: true,
-      handle: async context =>
-        jsonResponse(
-          await subsystem
-            .patch(await parseBody(context.request, GrantsPatchSchema), presentationOf(context, stepUps))
-            .catch(refuse),
-        ),
+      handle: async context => {
+        const view = await subsystem
+          .patch(await parseBody(context.request, GrantsPatchSchema), presentationOf(context, stepUps))
+          .catch(refuse);
+        // This route asks for its step-up itself rather than at the boundary, so it spends it itself: a
+        // machine that asks every time must not let one confirmation change the grants twice.
+        if (context.request.device !== undefined) stepUps.spend?.(context.request.device);
+        return jsonResponse(view);
+      },
     },
   ];
 }

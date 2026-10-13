@@ -48,7 +48,7 @@ export interface PairingCryptography {
 
 /** An hour, in milliseconds: how often a busy device's `lastSeenAt` is written to disk at most. */
 const LAST_SEEN_PERSIST_INTERVAL_MS = 60 * 60 * 1_000;
-const IDLE_EXPIRY_MS = DEVICE_IDLE_EXPIRY_DAYS * 24 * 60 * 60 * 1_000;
+const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export interface PairingDeviceRecord {
   readonly id: string;
@@ -66,6 +66,11 @@ export interface PairingDeviceRecord {
    * which never left the browser that generated it.
    */
   readonly publicKey: string;
+  /**
+   * When `publicKey` replaced an earlier key (`docs/design/zero-trust.md` B6). Absent until the first
+   * rotation, when the key's age is counted from `createdAt`.
+   */
+  readonly keyRotatedAt?: string;
 }
 
 export interface PairingDeviceStore {
@@ -82,6 +87,8 @@ export interface PairingDeviceStore {
   remove(id: string): Promise<boolean>;
   /** Records when a device was last seen. An id that is gone is not an error: it was revoked meanwhile. */
   touch(id: string, lastSeenAt: string): Promise<void>;
+  /** Replaces a device's key, reporting whether the device was still there to receive it. */
+  rotateKey(id: string, publicKey: string, keyRotatedAt: string): Promise<boolean>;
 }
 
 /**
@@ -298,6 +305,11 @@ interface PairingServiceOptions {
    */
   readonly connections?: DeviceConnectionRevoker;
   readonly rateLimiter?: PairingRateLimiter;
+  /**
+   * The machine's idle period in days, read at every check so a shortened one applies at the next
+   * (`idleExpiryDays`, `docs/design/zero-trust.md` B6). Absent means {@link DEVICE_IDLE_EXPIRY_DAYS}.
+   */
+  readonly idleExpiryDays?: () => number;
   readonly compare?: (left: string, right: string) => boolean;
   readonly pairingAppUrl?: string;
   readonly capabilities?: readonly string[];
@@ -483,7 +495,7 @@ export class PairingService {
         platform: record.platform,
         createdAt: record.createdAt,
         lastSeenAt: instant(lastSeenMs),
-        idleExpiresAt: instant(lastSeenMs + IDLE_EXPIRY_MS),
+        idleExpiresAt: instant(lastSeenMs + this.#idleExpiryMs()),
       });
     });
   }
@@ -499,7 +511,7 @@ export class PairingService {
   async deviceKey(id: string): Promise<string | undefined> {
     const record = this.options.credentials.get(id);
     if (record === undefined) return undefined;
-    if (this.options.clock.now() - this.#lastSeenMs(record) < IDLE_EXPIRY_MS) return record.publicKey;
+    if (this.options.clock.now() - this.#lastSeenMs(record) < this.#idleExpiryMs()) return record.publicKey;
     await this.revokeDevice(record.id).catch(() => false);
     return undefined;
   }
@@ -525,21 +537,59 @@ export class PairingService {
     void this.options.devices
       .touch(id, lastSeenAt)
       .then(
-        () => this.options.credentials.refresh({ ...record, lastSeenAt }),
+        // The LIVE record, re-read: the copy taken before the write may hold a key rotated meanwhile,
+        // and writing it back would restore the key this daemon has just promised to forget.
+        () => {
+          const live = this.options.credentials.get(id);
+          if (live !== undefined) this.options.credentials.refresh({ ...live, lastSeenAt });
+        },
         () => undefined,
       )
       .finally(() => this.#touching.delete(id));
   }
 
-  /** Ends every grant nobody has used for {@link DEVICE_IDLE_EXPIRY_DAYS}. Called at boot and per list. */
+  /** Ends every grant nobody has used for the idle period. Called at boot and per list. */
   async expireIdleDevices(): Promise<number> {
     const now = this.options.clock.now();
     let expired = 0;
     for (const record of this.options.credentials.all()) {
-      if (now - this.#lastSeenMs(record) < IDLE_EXPIRY_MS) continue;
+      if (now - this.#lastSeenMs(record) < this.#idleExpiryMs()) continue;
       if (await this.revokeDevice(record.id).catch(() => false)) expired += 1;
     }
     return expired;
+  }
+
+  /**
+   * How many paired devices an idle period of `days` would end at the next check — what a person is
+   * told BEFORE nothing can be done about it. Ends nothing itself.
+   */
+  devicesIdleLongerThan(days: number): number {
+    const now = this.options.clock.now();
+    return this.options.credentials.all().filter(record => now - this.#lastSeenMs(record) >= days * DAY_MS).length;
+  }
+
+  /** When this device's current key was put in place: its last rotation, or its pairing. */
+  keyIssuedAt(id: string): number | undefined {
+    const record = this.options.credentials.get(id);
+    return record === undefined ? undefined : Date.parse(record.keyRotatedAt ?? record.createdAt);
+  }
+
+  /**
+   * Replaces a device's key with `publicKey` (`docs/design/zero-trust.md` B6), written first and adopted
+   * only once written, for the reason {@link revokeDevice} gives. The caller has verified the new key
+   * inside a session the old one opened; this only records it. `false` when the device is gone.
+   */
+  async rotateDeviceKey(id: string, publicKey: string): Promise<boolean> {
+    const record = this.options.credentials.get(id);
+    if (record === undefined) return false;
+    const keyRotatedAt = instant(this.options.clock.now());
+    if (!(await this.options.devices.rotateKey(id, publicKey, keyRotatedAt))) return false;
+    this.options.credentials.refresh({ ...record, publicKey, keyRotatedAt });
+    return true;
+  }
+
+  #idleExpiryMs(): number {
+    return (this.options.idleExpiryDays?.() ?? DEVICE_IDLE_EXPIRY_DAYS) * DAY_MS;
   }
 
   #lastSeenMs(record: PairingDeviceRecord): number {
@@ -693,7 +743,7 @@ export class PairingService {
         // fail this parse: the constructor already refused a set this schema would reject, which is
         // what keeps a bad carrier from being discovered after the code has been spent.
         carriers: this.options.carriers,
-        idleExpiryDays: DEVICE_IDLE_EXPIRY_DAYS,
+        idleExpiryDays: this.options.idleExpiryDays?.() ?? DEVICE_IDLE_EXPIRY_DAYS,
       }),
     };
   }

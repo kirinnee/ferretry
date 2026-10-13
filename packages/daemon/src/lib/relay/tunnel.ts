@@ -427,6 +427,8 @@ export function tunnelApiRequest(
   device: SessionDevice,
   sessionId: string,
   arrival?: SessionArrival,
+  /** The carrying session's transcript hash, which a device-key rotation's proof is signed over. */
+  transcriptHash?: Uint8Array,
 ): ApiRequest {
   const body = source.body ?? '';
   return {
@@ -439,6 +441,7 @@ export function tunnelApiRequest(
     loopback: arrival?.loopback ?? false,
     privilegedLoopback: arrival?.privilegedLoopback ?? false,
     device,
+    ...(transcriptHash === undefined ? {} : { transcriptHash }),
     // The route's own bound applies to a session's body exactly as it does to an HTTP one: a body the
     // tunnel reassembled up to 32 MiB is still refused by a route that reads at most 512 KiB.
     text: async limitBytes => {

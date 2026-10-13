@@ -71,12 +71,18 @@ export class JournalGrantAudit implements GrantAuditPort {
   constructor(
     private readonly path: string,
     private readonly files: FileSystemPort,
+    /**
+     * The record kind this journal writes and reads back. The grant journal is `grant.changed`; the
+     * security settings journal is `security.changed` (`docs/design/zero-trust.md` B6). One kind per
+     * file, so a reader never mistakes one history for the other.
+     */
+    private readonly kind: string = 'grant.changed',
   ) {}
 
   async record(entry: GrantAuditEntry): Promise<void> {
     await this.files.appendLineDurable(
       this.path,
-      JSON.stringify({ kind: 'grant.changed', at: entry.at, actor: entry.actor, changes: entry.changes }),
+      JSON.stringify({ kind: entry.kind ?? this.kind, at: entry.at, actor: entry.actor, changes: entry.changes }),
     );
   }
 
@@ -108,7 +114,7 @@ export class JournalGrantAudit implements GrantAuditPort {
     const entries: GrantAuditEntry[] = [];
     for (const line of lines) {
       if (line.trim() === '') continue;
-      const parsed = readAuditLine(line);
+      const parsed = readAuditLine(line, this.kind);
       if (parsed === undefined) unreadable += 1;
       else entries.push(parsed);
     }
@@ -126,10 +132,10 @@ export class JournalGrantAudit implements GrantAuditPort {
 const AUDIT_WINDOW_BYTES = 64 * 1024;
 
 /** One journal line, or nothing when it is not a record this daemon wrote. */
-function readAuditLine(line: string): GrantAuditEntry | undefined {
+function readAuditLine(line: string, kind: string): GrantAuditEntry | undefined {
   try {
     const value = JSON.parse(line) as Record<string, unknown>;
-    if (value.kind !== 'grant.changed') return undefined;
+    if (value.kind !== kind) return undefined;
     const { at, actor, changes } = value;
     if (typeof at !== 'string' || typeof actor !== 'string' || !Array.isArray(changes)) return undefined;
     if (at === '' || actor === '' || !changes.every(change => typeof change === 'string')) return undefined;

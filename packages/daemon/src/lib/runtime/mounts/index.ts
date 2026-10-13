@@ -2,6 +2,7 @@ import type { DaemonCarrier } from '@ferretry/protocol';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
 import type { StepUpService } from '../../step-up/index.ts';
+import type { SecuritySettingsService } from '../../security/index.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
@@ -38,6 +39,7 @@ import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
 import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
+import { securityRoutes } from './security.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
@@ -107,6 +109,8 @@ export interface MountedSubsystems {
   readonly push: PushSubscriptionSubsystem;
   /** Passkeys and the step-up they prove — `docs/design/zero-trust.md` B2. */
   readonly stepUp: StepUpService;
+  /** The machine's security settings — `docs/design/zero-trust.md` B6. */
+  readonly security: SecuritySettingsService;
   /** Every way this daemon can be reached, as the daemon itself publishes it. NOT A SUBSYSTEM BUT A
    *  VALUE, and the only field here that is one: it is resolved once at boot and it is THE SAME ARRAY
    *  the pairing service hands out on redemption, so the set a device is given and the set it later
@@ -305,6 +309,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
     // there are no patterns among them, so it can neither shadow nor be shadowed.
     ...stepUpRoutes(subsystems.stepUp),
+    // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
+    // literal no other subsystem uses, so it can neither shadow nor be shadowed.
+    ...securityRoutes(subsystems.security),
     // The grant surface sits beside pairing for the same reason pairing sits beside the base feeds:
     // it establishes what the credential pairing hands out is then ALLOWED to do. Every path is under
     // `/v1/grants`, which no other subsystem uses, so it can neither shadow nor be shadowed. It is

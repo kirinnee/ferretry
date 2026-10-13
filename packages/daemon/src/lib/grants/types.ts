@@ -40,6 +40,11 @@ export interface GrantAuditEntry {
   /** Each axis that moved, as `capability.axis=on|off`. Empty when a patch changed nothing. */
   readonly changes: readonly string[];
   readonly at: string;
+  /**
+   * The record's kind when it is not the journal's own — `device.key-rotated` in the security journal,
+   * beside its `security.changed` records. Absent means the journal's kind.
+   */
+  readonly kind?: string;
 }
 
 /**

@@ -14,6 +14,16 @@ const key = (subject: StepUpSubject): string => `${subject.deviceId}\u0000${subj
  */
 export const APP_SESSION_GRACE_MS = 60_000;
 
+/** One verified step-up: when it was proved. Its end is read from the window in force, every time. */
+interface HeldStepUp {
+  readonly grantedAtMs: number;
+}
+
+/** The step-up window in force, in minutes. `0` means a step-up admits exactly one governed act. */
+export type StepUpWindow = () => number;
+
+const DEFAULT_WINDOW: StepUpWindow = () => STEP_UP_TTL_SECONDS / 60;
+
 /** One copy of the app's unbroken life on this daemon: how many sessions it holds, and since when none. */
 interface AppSessionSpan {
   open: number;
@@ -24,8 +34,14 @@ interface AppSessionSpan {
  * WHICH RUNNING COPIES OF THE APP HAVE PROVED A PASSKEY RECENTLY, held in memory and nowhere else.
  *
  * A verified step-up is never a value the browser holds: there is nothing to steal or carry to another
- * tab. It is a fact this daemon remembers about one `(deviceId, appSession)` for fifteen minutes, and
- * it ends early on revocation (`forgetDevice`), on a restart (memory), and when the page closes.
+ * tab. It is a fact this daemon remembers about one `(deviceId, appSession)` for the machine's step-up
+ * window (`stepUpWindowMinutes`, fifteen minutes unless the owner changed it), and it ends early on
+ * revocation (`forgetDevice`), on a restart (memory), and when the page closes.
+ *
+ * THE WINDOW IS READ AT EVERY QUESTION, not stamped at the grant, so a shortened window applies to the
+ * step-ups already held the moment it is saved. A window of `0` asks every time: a step-up is then
+ * good for ONE governed act — spent by the boundary that admits it ({@link spend}) — and lives no
+ * longer than a challenge does, which is long enough for the refused request to be sent again.
  *
  * "WHEN THE PAGE CLOSES" IS DECIDED HERE, NOT BY THE PAGE. `appSession` is 16 bytes the page picks,
  * so code running in it — an injected script, a malicious deploy — could keep the value and present it
@@ -35,10 +51,13 @@ interface AppSessionSpan {
  * and the same id presented afterwards begins a new span that holds nothing.
  */
 export class StepUpRegistry {
-  readonly #held = new Map<string, number>();
+  readonly #held = new Map<string, HeldStepUp>();
   readonly #spans = new Map<string, AppSessionSpan>();
 
-  constructor(private readonly clock: { readonly nowMs: () => number }) {}
+  constructor(
+    private readonly clock: { readonly nowMs: () => number },
+    private readonly window: StepUpWindow = DEFAULT_WINDOW,
+  ) {}
 
   /** A session of this copy of the app opened. Returns the call for when it ends. */
   open(subject: StepUpSubject): () => void {
@@ -60,9 +79,17 @@ export class StepUpRegistry {
 
   /** Records a verified step-up and returns when it lapses. */
   grant(subject: StepUpSubject, nowMs: number): number {
-    const expiresAtMs = nowMs + STEP_UP_TTL_SECONDS * 1_000;
-    this.#held.set(key(subject), expiresAtMs);
-    return expiresAtMs;
+    const held: HeldStepUp = { grantedAtMs: nowMs };
+    this.#held.set(key(subject), held);
+    return this.#endOf(held);
+  }
+
+  /**
+   * One governed act was admitted on this copy's step-up. Under a window of `0` that spends it;
+   * under any other window a step-up covers every act inside it, and this does nothing.
+   */
+  spend(subject: StepUpSubject): void {
+    if (this.window() === 0) this.#held.delete(key(subject));
   }
 
   /**
@@ -71,8 +98,9 @@ export class StepUpRegistry {
    */
   expiresAt(subject: StepUpSubject, nowMs: number): number | undefined {
     const id = key(subject);
-    const expiresAtMs = this.#held.get(id);
-    if (expiresAtMs === undefined) return undefined;
+    const held = this.#held.get(id);
+    if (held === undefined) return undefined;
+    const expiresAtMs = this.#endOf(held);
     if (expiresAtMs > nowMs && this.#liveSpan(id, nowMs) !== undefined) return expiresAtMs;
     this.#held.delete(id);
     return undefined;
@@ -85,6 +113,12 @@ export class StepUpRegistry {
   /** Revoking a device ends every step-up any copy of the app on it holds. */
   forgetDevice(deviceId: string): void {
     for (const id of [...this.#held.keys()]) if (id.startsWith(`${deviceId}\u0000`)) this.#held.delete(id);
+  }
+
+  /** When a held step-up lapses under the window in force now. A single-use one lasts a challenge's life. */
+  #endOf(held: HeldStepUp): number {
+    const minutes = this.window();
+    return held.grantedAtMs + (minutes === 0 ? PASSKEY_CHALLENGE_TTL_SECONDS * 1_000 : minutes * 60_000);
   }
 
   /** The span this copy is in, or nothing — and an ended one is dropped with its step-up. */
@@ -112,7 +146,7 @@ export class StepUpRegistry {
 }
 
 /** What a challenge was issued for. A registration challenge answers no assertion, and back. */
-export type ChallengePurpose = 'register' | 'step-up';
+export type ChallengePurpose = 'register' | 'step-up' | 'presence';
 
 interface IssuedChallenge {
   readonly bytes: Uint8Array;
