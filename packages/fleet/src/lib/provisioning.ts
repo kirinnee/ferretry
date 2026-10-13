@@ -5,6 +5,7 @@
  * so the decision half stays pure — the plan for a configuration is a value a test can assert on,
  * with no filesystem in sight — and so `--dry-run` is the same code path minus the last step.
  */
+import type { RuntimeIds } from './account/ids.ts';
 import type { FleetConfig } from './config.ts';
 import type { FleetManifest, HarnessKind } from './manifest.ts';
 import type { SettingsFormat, SettingsObject } from './settings.ts';
@@ -56,6 +57,13 @@ export type FleetWriteOperation =
       readonly kind: 'symlink';
       readonly source: string;
       readonly path: string;
+      /**
+       * The source may not exist yet, so its absence is not a refusal. Only for a runtime's link to
+       * the ONE file its credential lives in (Codex `auth.json`, account model §8.2.1): an empty slot
+       * has no login until somebody signs in, and the harness then writes the login THROUGH the link.
+       * Every other link must resolve, because a dangling one is a harness quietly finding nothing.
+       */
+      readonly dangling?: true;
     }
   | {
       readonly kind: 'settings';
@@ -68,6 +76,13 @@ export type FleetWriteOperation =
        * at runtime (`/effort`), and a re-apply that clobbered them would silently reset the user.
        */
       readonly preserveExisting: boolean;
+      /**
+       * Top-level keys the layers REPLACE whole rather than merge into. For a document the harness
+       * also writes — Claude's `.claude.json` — where a key is entirely the plan's and a deep merge
+       * would keep, say, an MCP server the profile no longer has. Every other key is folded in as
+       * `preserveExisting` says.
+       */
+      readonly replaceKeys?: readonly string[];
     }
   | {
       /**
@@ -110,7 +125,26 @@ export type FleetWriteOperation =
       readonly path: string;
       /** Names this plan materialized. Every other direct child is removed, file or directory. */
       readonly keep: readonly string[];
+      /**
+       * Narrow the sweep to these direct children, for a directory the plan does NOT own outright — a
+       * runtime's config directory, which the harness and the person write into too (Claude's
+       * `/memory` makes `CLAUDE.md` there). Each named child is removed only on evidence it is this
+       * plan's: it is a symbolic link (only the plan makes links there), or {@link record} names it.
+       * Anything else stays.
+       */
+      readonly only?: readonly string[];
+      /**
+       * With {@link only}: the previous apply's {@link MaterialisedRecord} of what it put in this
+       * directory. Absent or unreadable means no record, and so only links are removed.
+       */
+      readonly record?: string;
     };
+
+/** What a narrowed sweep's record holds: the entries one apply materialised, relative to their directory. */
+export interface MaterialisedRecord {
+  readonly version: 1;
+  readonly entries: readonly string[];
+}
 
 /** A settings layer as the plan sees it: a file still to be read, or an object already known. */
 export type SettingsLayerSource =
@@ -132,6 +166,17 @@ export interface FleetApplyPreview extends FleetApplyPlan {
 
 export interface FleetPlanBuilder {
   build(config: FleetConfig, layout: FleetLayout, generatedAt: string): FleetApplyPlan;
+}
+
+/**
+ * The plan a version-2 configuration produces, plus the `ids.json` it was planned against.
+ *
+ * The ids travel with the plan because the plan already WRITES them — `ids.json` is one of its file
+ * operations, inside the same rollback boundary — and a caller reporting what it applied names
+ * runtimes by those ids.
+ */
+export interface FleetModelApplyPlan extends FleetApplyPlan {
+  readonly ids: RuntimeIds;
 }
 
 /**
