@@ -10,9 +10,11 @@
  * verifier — so a deploy that ships its own worker replaces the check itself. The running, verified
  * worker is therefore asked about every NEW worker the moment the browser starts installing one: it
  * fetches that script and compares its hash to the signed release. A worker no signed release lists
- * — or an audit nobody answers — raises a loud warning. This DETECTS the replacement; it cannot
- * prevent it (`docs/pwa-release-signing.md`). `onUnsignedWorker` is the seam the daemon's audit log
- * attaches to; nothing records it yet.
+ * — or an audit nobody answers — raises a loud warning. This SOMETIMES detects the replacement and
+ * never prevents it: it runs only while a verified tab is open, a worker that skips waiting and takes
+ * the tab over wins the race, and the warning is page state that a reload clears
+ * (`docs/pwa-release-signing.md`). `onUnsignedWorker` is the seam the daemon's audit log attaches
+ * to; nothing records it yet.
  *
  * Every browser surface is injected, exactly as in `use-service-worker-update.ts`, so each branch is
  * provable without a browser.

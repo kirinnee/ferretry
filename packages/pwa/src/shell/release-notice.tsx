@@ -6,8 +6,10 @@
  * "service worker". The two kinds differ in weight on purpose:
  *
  *   - a REFUSED update is reassuring news with a cause: nothing changed, keep working;
- *   - an UNSIGNED worker is the one this design cannot stop, only report, so it is an alert and it
- *     cannot be dismissed — the reader has to see it every time until it is resolved.
+ *   - an UNSIGNED worker is the one this design cannot stop, only sometimes report, so it is an alert
+ *     and it cannot be dismissed while this page lives. It is page state: it does NOT survive a reload,
+ *     and a hostile worker that takes the tab over first means it is never shown at all
+ *     (`docs/pwa-release-signing.md`).
  */
 
 import { ShieldAlert } from 'lucide-react';

@@ -43,8 +43,7 @@
         "tests/integration/fixtures/fy-render-visual-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
-        "scripts/fy-render-shell/lottie-entry.ts",
-        "scripts/sign-release.ts"
+        "scripts/fy-render-shell/lottie-entry.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",

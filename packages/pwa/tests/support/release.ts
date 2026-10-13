@@ -53,6 +53,7 @@ export const buildRelease = async (
   signer: ReleaseSigner,
   options: {
     readonly version?: string;
+    readonly sequence?: number;
     readonly createdAt?: string;
     readonly commit?: string;
     readonly files?: ReleaseFiles;
@@ -65,6 +66,7 @@ export const buildRelease = async (
   const manifest: ReleaseManifest = {
     version: options.version ?? '1.0.0',
     commit: options.commit ?? 'abcdef1',
+    sequence: options.sequence ?? 1,
     createdAt: options.createdAt ?? '2026-10-01T00:00:00.000Z',
     worker: RELEASE_WORKER_FILE,
     files: hashes,

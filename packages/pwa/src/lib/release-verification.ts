@@ -2,67 +2,56 @@
  * THE RELEASE VERIFIER — the decision the service worker makes before a byte of a new release is
  * allowed to serve the app.
  *
- * Pure: it takes the bytes the worker fetched and the trust it pinned, and answers accepted or a
- * named refusal. It never fetches, never stores and never reads a clock, so every refusal is
- * provable without a browser (`tests/unit/release-verification.test.ts`). WebCrypto is used for
- * Ed25519 and SHA-256 because both a worker and a page already have it; nothing is imported.
+ * Pure: it takes signed bytes and the keys to check them against, and answers accepted or a named
+ * refusal. It never fetches, never stores and never reads a clock, so every refusal is provable
+ * without a browser (`tests/unit/release-verification.test.ts`). WebCrypto is used for Ed25519 and
+ * SHA-256 because both a worker and a page already have it; nothing is imported.
  *
- * WHAT IS PINNED, AND WHEN. The first install pins the key compiled into the worker that installed
- * it (trust on first use — the first install trusts whatever the site served at that moment). From
- * then on the PINNED set decides, not the key a later worker carries: a deploy that rebuilt the
- * worker around its own key gains nothing by it. A key enters the set only one way — announced as
- * `nextKey` by a release signed with a key already in it — and the old key leaves the set the first
- * time a release signed by the new one is accepted. See `docs/pwa-release-signing.md`.
+ * WHERE TRUST COMES FROM. The one anchor is the key compiled into the RUNNING worker. Nothing the
+ * worker stores is trusted: IndexedDB and Cache Storage are readable and writable by any page on this
+ * origin, so a script that ever ran here could rewrite them. The worker therefore keeps signed BYTES,
+ * never conclusions, and re-checks them from the anchor every time it reads them:
+ *
+ *   - the KEY CHAIN starts at the compiled key and grows only through signed releases that announce
+ *     a `nextKey` (`releaseKeyChain`) — a stored key list is never read;
+ *   - the active release is the stored list and signature, re-verified against that chain.
+ *
+ * A key's position in the chain is its RANK. Once a release signed at some rank is installed, a
+ * release signed at a lower rank is refused: that is how a planned rotation retires the old key.
+ * See `docs/pwa-release-signing.md`.
  */
 
 import {
   type ReleaseManifest,
-  type ReleaseOrder,
-  compareReleases,
   fromBase64Url,
   parseReleaseManifest,
   parseReleaseSignature,
+  releaseStanding,
   toBase64Url,
 } from './release-manifest.ts';
-
-/** What the worker keeps between releases, in its own IndexedDB. */
-export interface ReleaseTrust {
-  /** SPKI base64url keys a release may be signed with. Never empty once pinned. */
-  readonly keys: readonly string[];
-  /** The release this worker is serving, or `null` before the first one was accepted. */
-  readonly installed: ReleaseOrder | null;
-}
 
 export type ReleaseRefusal =
   /** The signature file is the build's "no key" marker on an origin that may not run one. */
   | 'unsigned'
   /** The list or the signature is not well-formed. */
   | 'malformed'
-  /** Signed, but by a key this app never pinned. */
+  /** Signed by a key this app does not trust, or by a key a later release retired. */
   | 'unknown-key'
-  /** Claims a pinned key, and the signature does not verify. */
+  /** Claims a trusted key, and the signature does not verify. */
   | 'bad-signature'
-  /** A valid release that is older than the one already installed. */
+  /** Not newer than the installed release (a replay of an older or a sibling deploy). */
   | 'older'
   /** A listed file's bytes are not the bytes the list names. */
   | 'hash-mismatch';
 
-export type ReleaseDecision =
-  | {
-      readonly accepted: true;
-      readonly manifest: ReleaseManifest;
-      /** The trust to store once every file has also checked out. */
-      readonly trust: ReleaseTrust;
-    }
-  /** A dev build on a developer's own machine: nothing is verified and nothing is cached. */
-  | { readonly accepted: false; readonly unverified: true }
-  | { readonly accepted: false; readonly unverified?: never; readonly refusal: ReleaseRefusal };
+/** A release exactly as it was served: the list's bytes and the signature's text. */
+export interface SignedRelease {
+  readonly manifestBytes: Uint8Array;
+  readonly signatureText: string;
+}
 
 export const sha256Base64Url = async (bytes: Uint8Array): Promise<string> =>
   toBase64Url(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)));
-
-/** The trust a worker starts from the first time it runs: its own compiled-in key, and nothing installed. */
-export const firstUseTrust = (compiledKey: string): ReleaseTrust => ({ keys: [compiledKey], installed: null });
 
 const verifyWith = async (key: string, signature: Uint8Array, bytes: Uint8Array): Promise<boolean> => {
   const spki = fromBase64Url(key);
@@ -86,49 +75,108 @@ const verifyWith = async (key: string, signature: Uint8Array, bytes: Uint8Array)
   }
 };
 
-const refuse = (refusal: ReleaseRefusal): ReleaseDecision => ({ accepted: false, refusal });
+export type SignatureCheck =
+  | { readonly ok: true; readonly manifest: ReleaseManifest; readonly signerRank: number }
+  /** A dev build on a developer's own machine: nothing is verified and nothing is cached. */
+  | { readonly ok: false; readonly unverified: true }
+  | { readonly ok: false; readonly unverified?: never; readonly refusal: ReleaseRefusal };
 
-export interface ReleaseCandidate {
-  /** The exact bytes of `release-manifest.json` as served. */
-  readonly manifestBytes: Uint8Array;
-  /** The text of `release-manifest.sig` as served. */
-  readonly signatureText: string;
-}
+const refusal = (reason: ReleaseRefusal): SignatureCheck => ({ ok: false, refusal: reason });
 
 /**
- * Checks a release's list and signature against the pinned trust.
+ * Checks one signed release against a key chain.
  *
  * ORDER IS PART OF THE CONTRACT: the signature is checked over the raw bytes BEFORE they are parsed,
- * so nothing an unsigned list says — its version included — can influence the decision.
+ * so nothing an unsigned list says can influence the decision. The fingerprint in the signature file
+ * only CHOOSES the key; the signature is what authenticates.
  */
+export const checkReleaseSignature = async (
+  release: SignedRelease,
+  chain: readonly string[],
+  options: { readonly allowUnsigned: boolean },
+): Promise<SignatureCheck> => {
+  const signature = parseReleaseSignature(release.signatureText);
+  if (signature === null) return refusal('malformed');
+  if (signature.kind === 'unsigned')
+    return options.allowUnsigned ? { ok: false, unverified: true } : refusal('unsigned');
+
+  let signerRank = -1;
+  for (const [rank, key] of chain.entries()) {
+    const spki = fromBase64Url(key);
+    if (spki !== null && (await sha256Base64Url(spki)) === signature.keyFingerprint) signerRank = rank;
+  }
+  const signer = chain[signerRank];
+  if (signer === undefined) return refusal('unknown-key');
+  if (!(await verifyWith(signer, signature.signature, release.manifestBytes))) return refusal('bad-signature');
+
+  const manifest = parseReleaseManifest(release.manifestBytes);
+  return manifest === null ? refusal('malformed') : { ok: true, manifest, signerRank };
+};
+
+/**
+ * The keys a release may be signed with: the compiled-in key, then every key announced as `nextKey`
+ * by a release that verifies under a key already in the chain. Stored endorsements are re-verified
+ * here every time, so one that was forged or edited simply adds nothing. `check` is how each one is
+ * checked; the keeper passes a remembering one so a request does not cost an Ed25519 verify.
+ */
+export const releaseKeyChain = async (
+  compiledKey: string,
+  endorsements: readonly SignedRelease[],
+  check: (release: SignedRelease, chain: readonly string[]) => Promise<SignatureCheck> = (release, chain) =>
+    checkReleaseSignature(release, chain, { allowUnsigned: false }),
+): Promise<readonly string[]> => {
+  const chain = [compiledKey];
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const endorsement of endorsements) {
+      const checked = await check(endorsement, [...chain]);
+      const announced = checked.ok ? checked.manifest.nextKey : undefined;
+      if (announced !== undefined && !chain.includes(announced)) {
+        chain.push(announced);
+        grew = true;
+      }
+    }
+  }
+  return chain;
+};
+
+/** What a candidate is compared with: the installed release's order and its signer's rank. */
+export interface InstalledOrder {
+  readonly sequence: number;
+  readonly commit: string;
+  readonly signerRank: number;
+}
+
+export type ReleaseDecision =
+  | {
+      readonly accepted: true;
+      readonly manifest: ReleaseManifest;
+      readonly signerRank: number;
+      /** `same` is the installed release itself, so nothing needs fetching. */
+      readonly standing: 'first' | 'newer' | 'same';
+    }
+  | { readonly accepted: false; readonly unverified: true }
+  | { readonly accepted: false; readonly unverified?: never; readonly refusal: ReleaseRefusal };
+
+/** Checks a candidate release against the chain and the installed release. */
 export const verifyReleaseManifest = async (
-  candidate: ReleaseCandidate,
-  trust: ReleaseTrust,
+  candidate: SignedRelease,
+  chain: readonly string[],
+  installed: InstalledOrder | null,
   options: { readonly allowUnsigned: boolean },
 ): Promise<ReleaseDecision> => {
-  const signature = parseReleaseSignature(candidate.signatureText);
-  if (signature === null) return refuse('malformed');
-  if (signature.kind === 'unsigned')
-    return options.allowUnsigned ? { accepted: false, unverified: true } : refuse('unsigned');
-
-  let signer: string | undefined;
-  for (const key of trust.keys) {
-    const spki = fromBase64Url(key);
-    if (spki !== null && (await sha256Base64Url(spki)) === signature.keyFingerprint) signer = key;
-  }
-  if (signer === undefined) return refuse('unknown-key');
-  if (!(await verifyWith(signer, signature.signature, candidate.manifestBytes))) return refuse('bad-signature');
-
-  const manifest = parseReleaseManifest(candidate.manifestBytes);
-  if (manifest === null) return refuse('malformed');
-  if (trust.installed !== null && compareReleases(manifest, trust.installed) < 0) return refuse('older');
-
-  const keys = manifest.nextKey === undefined || manifest.nextKey === signer ? [signer] : [signer, manifest.nextKey];
-  return {
-    accepted: true,
-    manifest,
-    trust: { keys, installed: { version: manifest.version, createdAt: manifest.createdAt } },
-  };
+  const check = await checkReleaseSignature(candidate, chain, options);
+  if (!check.ok)
+    return check.unverified === true
+      ? { accepted: false, unverified: true }
+      : { accepted: false, refusal: check.refusal };
+  if (installed === null)
+    return { accepted: true, manifest: check.manifest, signerRank: check.signerRank, standing: 'first' };
+  if (check.signerRank < installed.signerRank) return { accepted: false, refusal: 'unknown-key' };
+  const standing = releaseStanding(check.manifest, installed);
+  if (standing === 'older') return { accepted: false, refusal: 'older' };
+  return { accepted: true, manifest: check.manifest, signerRank: check.signerRank, standing };
 };
 
 /**
@@ -145,6 +193,6 @@ export const RELEASE_REFUSAL_WORDS: Readonly<Record<ReleaseRefusal, string>> = {
   malformed: 'its signature or file list was damaged',
   'unknown-key': 'it was signed with a key this app does not trust',
   'bad-signature': 'its signature did not match',
-  older: 'it is older than the version you have',
+  older: 'it is not newer than the version you have',
   'hash-mismatch': 'one of its files was not the file that was signed',
 };

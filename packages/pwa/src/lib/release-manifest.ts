@@ -68,6 +68,12 @@ export const ReleaseManifestSchema = z
   .strictObject({
     version: z.string().regex(VERSION_PATTERN),
     commit: z.string().regex(/^[0-9a-f]{7,64}$/u),
+    /**
+     * What orders releases: a counter CI owns and only ever raises (`pwa-pages.yaml` passes the
+     * workflow run number). Never the clock, which is whatever whoever made the commit said it was.
+     */
+    sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** When the commit was made. Informational only: it orders nothing. */
     createdAt: z.iso.datetime(),
     worker: z.string().regex(WORKER_PATH_PATTERN),
     files: z.record(z.string().regex(RELEASE_PATH_PATTERN), z.string().regex(SHA256_PATTERN)),
@@ -81,27 +87,18 @@ export const ReleaseManifestSchema = z
   );
 export type ReleaseManifest = z.infer<typeof ReleaseManifestSchema>;
 
-/** What orders two releases: the version, then the moment the release's commit was made. */
-export interface ReleaseOrder {
-  readonly version: string;
-  readonly createdAt: string;
-}
-
-const versionParts = (version: string): readonly number[] => version.split('.').map(Number);
-
 /**
- * Negative when `a` is older than `b`. Pages deploys every push to `main`, so many deploys share one
- * version; the commit time breaks the tie, which is what makes an older signed deploy of the SAME
- * version replayable by nobody.
+ * How a candidate release stands against the installed one. Only the CI-owned `sequence` decides:
+ * Pages deploys every push to `main`, so many deploys share a version, and a commit's time is
+ * whatever its author's clock said. Two releases with the same sequence and DIFFERENT commits are
+ * not "the same release" — one of them is a replay — so that answers `older` too.
  */
-export const compareReleases = (a: ReleaseOrder, b: ReleaseOrder): number => {
-  const left = versionParts(a.version);
-  const right = versionParts(b.version);
-  for (let index = 0; index < 3; index += 1) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return Date.parse(a.createdAt) - Date.parse(b.createdAt);
+export const releaseStanding = (
+  candidate: Pick<ReleaseManifest, 'sequence' | 'commit'>,
+  installed: Pick<ReleaseManifest, 'sequence' | 'commit'>,
+): 'newer' | 'same' | 'older' => {
+  if (candidate.sequence > installed.sequence) return 'newer';
+  return candidate.sequence === installed.sequence && candidate.commit === installed.commit ? 'same' : 'older';
 };
 
 /**
@@ -118,6 +115,7 @@ export const serializeReleaseManifest = (manifest: ReleaseManifest): string => {
   const ordered = {
     version: manifest.version,
     commit: manifest.commit,
+    sequence: manifest.sequence,
     createdAt: manifest.createdAt,
     worker: manifest.worker,
     files,
@@ -179,9 +177,7 @@ export const parseReleaseSignature = (text: string): ReleaseSignature | null => 
 /* ---------- the committed public key -------------------------------------- */
 
 /** The fixed DER header of every Ed25519 SubjectPublicKeyInfo; the 32 key bytes follow it. */
-export const ED25519_SPKI_PREFIX = Uint8Array.from([
-  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
-]);
+const ED25519_SPKI_PREFIX = Uint8Array.from([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]);
 
 /**
  * `packages/pwa/release-signing-key.pub` — a PEM `PUBLIC KEY` block, as `openssl pkey -pubout`
@@ -228,7 +224,8 @@ export interface ReleaseRequest {
 
 /**
  * The listed file that answers a same-origin request, or `null` for "not part of this release" —
- * which the worker answers from the network, untouched.
+ * which `ReleaseKeeper.respond` answers with the release's own shell for a page load, and leaves to
+ * the network otherwise.
  */
 export const releasePathForRequest = (
   request: ReleaseRequest,

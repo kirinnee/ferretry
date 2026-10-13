@@ -1,13 +1,17 @@
 /**
- * THE RELEASE KEEPER'S BROWSER PORTS — IndexedDB for the pinned trust and the active release, Cache
- * Storage for verified bytes, and the site's own origin for fresh ones.
+ * THE RELEASE KEEPER'S BROWSER PORTS — IndexedDB for the signed releases the worker keeps, Cache
+ * Storage for their files' bytes, and the site's own origin for fresh ones.
+ *
+ * Every one of them is UNTRUSTED storage: both stores belong to the origin, so any page on it can
+ * write them. They therefore move bytes and nothing else, and the keeper re-checks everything it
+ * reads back (`release-keeper.ts`).
  *
  * Each is a thin class over an INJECTED browser object (the pattern `store.tsx` uses for pairings),
  * so the worker entry only constructs them and a unit suite drives each one with a plain fake. None
  * of them ever talks to a daemon: every path they are given is a file of this site.
  */
 
-import type { KeeperState, ReleaseCaches, ReleaseFile, ReleaseNetwork, ReleaseStateStore } from './release-keeper.ts';
+import type { KeeperState, ReleaseCaches, ReleaseNetwork, ReleaseStateStore } from './release-keeper.ts';
 
 /** The worker's own database. Separate from the page's pairing database on purpose. */
 const RELEASE_DATABASE = 'ferretry-release';
@@ -29,7 +33,8 @@ const transactionComplete = (transaction: IDBTransaction): Promise<void> =>
 
 /**
  * The keeper's one record. A single `put` in a single transaction is what makes a release swap
- * atomic: either the new trust AND the new active release are stored, or neither is.
+ * atomic: either the new active release AND everything that goes with it are stored, or neither is.
+ * `load` answers whatever the record holds, unshaped: deciding what it is worth is the keeper's job.
  */
 export class IndexedDbReleaseState implements ReleaseStateStore {
   readonly #database: Promise<IDBDatabase>;
@@ -48,11 +53,10 @@ export class IndexedDbReleaseState implements ReleaseStateStore {
     });
   }
 
-  async load(): Promise<KeeperState | null> {
+  async load(): Promise<unknown> {
     const database = await this.#database;
     const transaction = database.transaction(RELEASE_OBJECT_STORE, 'readonly');
-    const value: unknown = await requestResult(transaction.objectStore(RELEASE_OBJECT_STORE).get(RELEASE_STATE_KEY));
-    return typeof value === 'object' && value !== null ? (value as KeeperState) : null;
+    return await requestResult<unknown>(transaction.objectStore(RELEASE_OBJECT_STORE).get(RELEASE_STATE_KEY));
   }
 
   async save(state: KeeperState): Promise<void> {
@@ -73,31 +77,21 @@ export interface CacheStorageLike {
   delete(cacheName: string): Promise<boolean>;
 }
 
-const fileResponse = (file: ReleaseFile): Response =>
-  new Response(file.bytes as Uint8Array<ArrayBuffer>, {
-    status: 200,
-    headers: [...file.headers] as [string, string][],
-  });
-
-const responseFile = async (response: Response): Promise<ReleaseFile> => ({
-  bytes: new Uint8Array(await response.arrayBuffer()),
-  headers: [...response.headers.entries()],
-});
-
 /**
- * Verified bytes, keyed by site path. The key is a plain `/path` rather than a full URL so a cache
- * entry can only ever answer for this origin.
+ * Bytes, keyed by site path. The key is a plain `/path` rather than a full URL so a cache entry can
+ * only ever answer for this origin. No header is stored: a stored header would be one more thing a
+ * page could rewrite, and the worker never serves one (`release-headers.ts`).
  */
 export class CacheStorageReleaseCaches implements ReleaseCaches {
   constructor(private readonly storage: CacheStorageLike) {}
 
-  async put(cacheName: string, path: string, file: ReleaseFile): Promise<void> {
-    await (await this.storage.open(cacheName)).put(`/${path}`, fileResponse(file));
+  async put(cacheName: string, path: string, bytes: Uint8Array): Promise<void> {
+    await (await this.storage.open(cacheName)).put(`/${path}`, new Response(bytes as Uint8Array<ArrayBuffer>));
   }
 
-  async get(cacheName: string, path: string): Promise<ReleaseFile | null> {
+  async get(cacheName: string, path: string): Promise<Uint8Array | null> {
     const response = await (await this.storage.open(cacheName)).match(`/${path}`);
-    return response === undefined ? null : await responseFile(response);
+    return response === undefined ? null : new Uint8Array(await response.arrayBuffer());
   }
 
   names(): Promise<readonly string[]> {
@@ -111,12 +105,6 @@ export class CacheStorageReleaseCaches implements ReleaseCaches {
 
 /** The one network call the keeper needs, bound by the worker entry to its own `fetch`. */
 export type ReleaseFetch = (input: string, init: RequestInit) => Promise<Response>;
-
-/**
- * Headers that describe the TRANSFER, not the file. The body a `fetch` hands back is already
- * decoded, so replaying `content-encoding` from a cache would make the browser decode it twice.
- */
-const TRANSFER_HEADERS = new Set(['content-encoding', 'content-length', 'transfer-encoding']);
 
 /**
  * Fresh bytes from this site. `no-store` so neither the browser's HTTP cache nor a stale edge copy
@@ -133,15 +121,14 @@ export class FetchReleaseNetwork implements ReleaseNetwork {
     private readonly origin: string,
   ) {}
 
-  async get(path: string): Promise<ReleaseFile | null> {
+  async get(path: string): Promise<Uint8Array | null> {
     try {
       const response = await this.fetcher(new URL(`/${path}`, this.origin).href, {
         cache: 'no-store',
         credentials: 'same-origin',
       });
       if (!response.ok || new URL(response.url || this.origin).origin !== this.origin) return null;
-      const file = await responseFile(response);
-      return { ...file, headers: file.headers.filter(([name]) => !TRANSFER_HEADERS.has(name.toLowerCase())) };
+      return new Uint8Array(await response.arrayBuffer());
     } catch {
       return null;
     }

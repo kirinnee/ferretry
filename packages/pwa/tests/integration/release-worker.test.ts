@@ -2,19 +2,24 @@
  * The built service worker, in real Chromium: the end-to-end proof of `docs/pwa-release-signing.md`.
  *
  * WHY A BROWSER. The worker's claims are about what it SERVES — verified bytes from its own cache, a
- * refused update leaving the running version in place — and only a real worker, real Cache Storage
- * and real IndexedDB can show that. The decisions themselves are proved in `tests/unit/release-*.ts`.
+ * refused update leaving the running version in place, a page's tampering with the origin's storage
+ * changing nothing — and only a real worker, real Cache Storage and real IndexedDB can show that. The
+ * decisions themselves are proved in `tests/unit/release-*.ts`.
  *
  * THE FIXTURE is a tiny site, not the app: a page, a script, the real `sw.verified.js` built from
- * `src/worker/service-worker.ts`, and a list signed with a throwaway key generated here (the build is
- * told to compile in that key's public half). Each scene then changes what the server serves and
- * asks the page what it sees. The build runs in a CHILD PROCESS, never in this one — see
- * `support/fy-render-integration-fixture.ts` for why a `Bun.build` inside the test runner wedges.
+ * `src/worker/service-worker.ts` with the real `public/_headers` and `public/_redirects`, and lists
+ * signed by the REAL CI signer (`scripts/ci/sign-pwa-release.sh`, openssl) with throwaway keys made
+ * here. Each scene then changes what the server serves — or what a page writes into the origin's
+ * storage — and asks the page what it sees. The build runs in a CHILD PROCESS, never in this one —
+ * see `support/fy-render-integration-fixture.ts` for why a `Bun.build` inside the test runner wedges.
  *
- * The server listens on `127.0.0.1`, which the worker treats as a developer machine — so an
- * UNSIGNED build is answered "unverified" here rather than refused. Every other scene is signed, so
- * that allowance never decides their outcome; one scene asserts the allowance itself. "Older than
- * installed" is proved in `tests/unit/release-verification.test.ts`.
+ * THE SERVER IS HOSTILE ABOUT HEADERS: it sends no security policy and an `X-Edge` header of its own
+ * with every file, so any header a page sees under the worker came from the signed worker's compiled
+ * `_headers` rules, not from the edge.
+ *
+ * The server listens on `127.0.0.1`, which the worker treats as a developer machine — so an UNSIGNED
+ * build is answered "unverified" here rather than refused. Every other scene is signed, so that
+ * allowance never decides their outcome; one scene asserts the allowance itself.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -25,10 +30,13 @@ import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from './support/chromium.ts';
 
 const packageRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(packageRoot, '../..');
 
 const PAGE = `<!doctype html><meta charset="utf-8"><title>release</title>
-<script src="/assets/app.js"></script>`;
+<script src="/release.js"></script>`;
 const SCRIPT = (label: string) => `window.releaseLabel = ${JSON.stringify(label)};`;
+/** What a compromised deploy puts at a path the release does not list. */
+const HOSTILE_PAGE = '<!doctype html><title>hostile</title><script>window.releaseLabel = "hostile";</script>';
 
 let workDirectory = '';
 let browser: Browser;
@@ -37,8 +45,8 @@ let server: ReturnType<typeof Bun.serve>;
 let served = new Map<string, Uint8Array>();
 const requests: string[] = [];
 
-const run = (command: string[], cwd = packageRoot): void => {
-  const result = spawnSync(command[0] ?? '', command.slice(1), { cwd, encoding: 'utf8' });
+const run = (command: string[], cwd = packageRoot, input?: Uint8Array): void => {
+  const result = spawnSync(command[0] ?? '', command.slice(1), { cwd, encoding: 'utf8', input });
   if (result.status !== 0) throw new Error(`${command.join(' ')} failed:\n${result.stdout}\n${result.stderr}`);
 };
 
@@ -47,39 +55,46 @@ const listFiles = async (directory: string): Promise<string[]> =>
     .filter(entry => entry.isFile())
     .map(entry => relative(directory, join(entry.parentPath, entry.name)).split(sep).join('/'));
 
+const keyPair = async (name: string): Promise<{ pem: string; pub: string }> => {
+  const pem = join(workDirectory, `${name}.pem`);
+  const pub = join(workDirectory, `${name}.pub`);
+  run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', pem], workDirectory);
+  run(['openssl', 'pkey', '-in', pem, '-pubout', '-out', pub], workDirectory);
+  return { pem, pub };
+};
+
 /** Builds and (optionally) signs one release of the fixture site; returns its files. */
 const release = async (
   name: string,
   label: string,
-  identity: { readonly commit: string; readonly createdAt: string },
+  identity: { readonly commit: string; readonly sequence: number },
+  key: { readonly pem: string; readonly pub: string },
   sign = true,
 ): Promise<Map<string, Uint8Array>> => {
   const dist = join(workDirectory, name);
-  await mkdir(join(dist, 'assets'), { recursive: true });
+  await mkdir(dist, { recursive: true });
   await writeFile(join(dist, 'index.html'), PAGE);
-  await writeFile(join(dist, 'assets/app.js'), SCRIPT(label));
+  await writeFile(join(dist, 'release.js'), SCRIPT(label));
   run([
     'bun',
     'run',
     'scripts/build-release.ts',
     dist,
     '--public-key',
-    join(workDirectory, 'key.pub'),
+    key.pub,
     '--commit',
     identity.commit,
+    '--sequence',
+    String(identity.sequence),
     '--created-at',
-    identity.createdAt,
+    '2026-10-01T00:00:00Z',
   ]);
   if (sign) {
-    run([
-      'bun',
-      'run',
-      'scripts/sign-release.ts',
-      join(workDirectory, 'key.pem'),
-      dist,
-      '--public-key',
-      join(workDirectory, 'key.pub'),
-    ]);
+    run(
+      [join(repositoryRoot, 'scripts/ci/sign-pwa-release.sh'), dist, key.pub],
+      repositoryRoot,
+      new Uint8Array(await readFile(key.pem)),
+    );
   }
   const files = new Map<string, Uint8Array>();
   for (const path of await listFiles(dist)) files.set(path, new Uint8Array(await readFile(join(dist, path))));
@@ -89,17 +104,15 @@ const release = async (
 let first: Map<string, Uint8Array>;
 let second: Map<string, Uint8Array>;
 let unsigned: Map<string, Uint8Array>;
+let stranger: Map<string, Uint8Array>;
 
 beforeAll(async () => {
   workDirectory = await mkdtemp(join(tmpdir(), 'ferretry-release-worker-'));
-  run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', join(workDirectory, 'key.pem')], workDirectory);
-  run(
-    ['openssl', 'pkey', '-in', join(workDirectory, 'key.pem'), '-pubout', '-out', join(workDirectory, 'key.pub')],
-    workDirectory,
-  );
-  first = await release('first', 'first', { commit: 'aaaaaaa', createdAt: '2026-10-01T00:00:00Z' });
-  second = await release('second', 'second', { commit: 'bbbbbbb', createdAt: '2026-10-02T00:00:00Z' });
-  unsigned = await release('unsigned', 'unsigned', { commit: 'ccccccc', createdAt: '2026-10-03T00:00:00Z' }, false);
+  const key = await keyPair('key');
+  first = await release('first', 'first', { commit: 'aaaaaaa', sequence: 1 }, key);
+  second = await release('second', 'second', { commit: 'bbbbbbb', sequence: 2 }, key);
+  unsigned = await release('unsigned', 'unsigned', { commit: 'ccccccc', sequence: 3 }, key, false);
+  stranger = await release('stranger', 'stranger', { commit: 'ddddddd', sequence: 9 }, await keyPair('stranger'));
 
   browser = await sharedChromium();
   server = Bun.serve({
@@ -111,9 +124,14 @@ beforeAll(async () => {
       const path = pathname === '/' ? 'index.html' : pathname.slice(1);
       const bytes = served.get(path);
       if (bytes === undefined) return new Response('not found', { status: 404 });
-      const type = path.endsWith('.html') ? 'text/html' : path.endsWith('.js') ? 'text/javascript' : 'text/plain';
+      const type =
+        path.endsWith('.html') || path.startsWith('release-manifest')
+          ? 'text/html'
+          : path.endsWith('.js')
+            ? 'text/javascript'
+            : 'text/plain';
       return new Response(bytes as Uint8Array<ArrayBuffer>, {
-        headers: { 'content-type': type, 'cache-control': 'no-store' },
+        headers: { 'content-type': type, 'cache-control': 'no-store', 'x-edge': 'whatever the edge says' },
       });
     },
   });
@@ -155,6 +173,7 @@ const ask = (page: Page, message: Record<string, unknown>) =>
   );
 
 const label = (page: Page) => page.evaluate(() => (window as unknown as { releaseLabel?: string }).releaseLabel);
+const encoded = (text: string) => new TextEncoder().encode(text);
 
 describe('the signed-release service worker', () => {
   test('serves the verified release, even when the server goes away', async () => {
@@ -183,7 +202,7 @@ describe('the signed-release service worker', () => {
   test('refuses a release whose file was changed after signing, and keeps serving the old one', async () => {
     const { context, page } = await installed(first);
     served = new Map(second);
-    served.set('assets/app.js', new TextEncoder().encode(SCRIPT('tampered')));
+    served.set('release.js', encoded(SCRIPT('tampered')));
 
     const reply = await ask(page, { type: 'fy-release-check' });
     await page.reload();
@@ -211,6 +230,36 @@ describe('the signed-release service worker', () => {
     await context.close();
   }, 120_000);
 
+  test('refuses a replayed OLDER signed release, and keeps serving the newer one', async () => {
+    const { context, page } = await installed(second);
+    served = new Map(first);
+
+    const reply = await ask(page, { type: 'fy-release-check' });
+    await page.reload();
+
+    expect(reply).toEqual({
+      type: 'fy-release-outcome',
+      outcome: { status: 'refused', refusal: 'older', hadRelease: true },
+    });
+    expect(await label(page)).toBe('second');
+    await context.close();
+  }, 120_000);
+
+  test('refuses a release signed by a key the worker does not trust', async () => {
+    const { context, page } = await installed(first);
+    served = new Map(stranger);
+
+    const reply = await ask(page, { type: 'fy-release-check' });
+    await page.reload();
+
+    expect(reply).toEqual({
+      type: 'fy-release-outcome',
+      outcome: { status: 'refused', refusal: 'unknown-key', hadRelease: true },
+    });
+    expect(await label(page)).toBe('first');
+    await context.close();
+  }, 120_000);
+
   test('accepts an unsigned build only as "unverified", on a developer machine', async () => {
     const { context, page } = await installed(first);
     served = new Map(unsigned);
@@ -223,11 +272,113 @@ describe('the signed-release service worker', () => {
     await context.close();
   }, 120_000);
 
+  test('never serves a cache entry a page rewrote, online or offline', async () => {
+    // An XSS writes a backdoor into the active release's cache, with no security policy on it.
+    const { context, page } = await installed(first);
+    await page.evaluate(async hostile => {
+      for (const name of await caches.keys()) {
+        if (!name.startsWith('fy-release-')) continue;
+        const cache = await caches.open(name);
+        await cache.put('/index.html', new Response(hostile, { headers: { 'content-type': 'text/html' } }));
+        await cache.put('/release.js', new Response('window.releaseLabel = "backdoor";'));
+      }
+    }, HOSTILE_PAGE);
+
+    await page.reload();
+    const online = await label(page);
+    served = new Map();
+    await page.reload();
+    const offline = await label(page);
+
+    expect(online).toBe('first');
+    expect(offline).toBe('first');
+    await context.close();
+  }, 120_000);
+
+  test('ignores a release record a page forged, signed with its own key', async () => {
+    // An XSS points the worker's record at a release IT signed, and fills the matching cache.
+    const { context, page } = await installed(first);
+    const forged = {
+      manifest: [...(stranger.get('release-manifest.json') ?? [])],
+      signature: new TextDecoder().decode(stranger.get('release-manifest.sig')),
+      index: new TextDecoder().decode(stranger.get('index.html')),
+      script: new TextDecoder().decode(stranger.get('release.js')),
+    };
+    await page.evaluate(async record => {
+      const cache = await caches.open('fy-release-ddddddd-9');
+      await cache.put('/index.html', new Response(record.index));
+      await cache.put('/release.js', new Response(record.script));
+      const database = await new Promise<IDBDatabase>((resolveOpen, rejectOpen) => {
+        const request = indexedDB.open('ferretry-release', 1);
+        request.onsuccess = () => resolveOpen(request.result);
+        request.onerror = () => rejectOpen(request.error);
+      });
+      await new Promise<void>((resolveWrite, rejectWrite) => {
+        const transaction = database.transaction('state', 'readwrite');
+        transaction.objectStore('state').put(
+          {
+            active: { manifestBytes: Uint8Array.from(record.manifest), signatureText: record.signature },
+            previous: null,
+            endorsements: [],
+            lastOutcome: { status: 'current' },
+          },
+          'keeper',
+        );
+        transaction.oncomplete = () => resolveWrite();
+        transaction.onerror = () => rejectWrite(transaction.error);
+      });
+      database.close();
+    }, forged);
+
+    await page.reload();
+
+    // Believed, the forged sequence 9 would make the real release read as OLDER; it is a first install.
+    const reply = await ask(page, { type: 'fy-release-check' });
+
+    expect(await label(page)).toBe('first');
+    expect(reply).toEqual({ type: 'fy-release-outcome', outcome: { status: 'updated' } });
+    await context.close();
+  }, 120_000);
+
+  test.each([
+    ['the signed list', '/release-manifest.json'],
+    ['the signature', '/release-manifest.sig'],
+    ['a page no release lists', '/hostile.html'],
+  ])(
+    'answers a navigation to %s with the verified shell, never the network',
+    async (_name, pathname) => {
+      // A compromised deploy serves its own HTML at the path and links the reader to it.
+      const { context, page } = await installed(first);
+      served.set(pathname.slice(1), encoded(HOSTILE_PAGE));
+      requests.length = 0;
+
+      await page.goto(`${origin()}${pathname}`);
+
+      expect(await label(page)).toBe('first');
+      expect(requests).not.toContain(pathname);
+      await context.close();
+    },
+    120_000,
+  );
+
+  test('serves the headers the signed worker carries, never the ones the edge sent', async () => {
+    const { context, page } = await installed(first);
+
+    const response = await page.reload();
+    const headers = (await response?.allHeaders()) ?? {};
+
+    expect(headers['content-security-policy']).toStartWith("default-src 'self'");
+    expect(headers['x-content-type-options']).toBe('nosniff');
+    expect(headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(headers['x-edge']).toBeUndefined();
+    await context.close();
+  }, 120_000);
+
   test('tells the page whether a worker script is the signed one', async () => {
     const { context, page } = await installed(first);
 
     const signed = await ask(page, { type: 'fy-release-audit-worker', scriptUrl: `${origin()}/sw.verified.js` });
-    served.set('sw.verified.js', new TextEncoder().encode('self.addEventListener("fetch", () => {});'));
+    served.set('sw.verified.js', encoded('self.addEventListener("fetch", () => {});'));
     const replaced = await ask(page, { type: 'fy-release-audit-worker', scriptUrl: `${origin()}/sw.verified.js` });
 
     expect(signed).toEqual({ type: 'fy-release-worker-audit', signed: true });
@@ -235,7 +386,54 @@ describe('the signed-release service worker', () => {
     await context.close();
   }, 120_000);
 
-  test('leaves a file no release lists to the network, untouched', async () => {
+  test('reports a replaced worker the browser starts installing, when that worker waits its turn', async () => {
+    // What `use-release-integrity.ts` does on `updatefound`, through the browser's own update.
+    const { context, page } = await installed(first);
+    served.set('sw.verified.js', encoded('self.addEventListener("fetch", () => {});'));
+
+    const audit = await page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.ready;
+      const found = new Promise<string>(resolveFound => {
+        registration.addEventListener('updatefound', () => resolveFound(registration.installing?.scriptURL ?? ''));
+      });
+      await registration.update();
+      const scriptUrl = await found;
+      return await new Promise(resolveReply => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = event => resolveReply(event.data);
+        registration.active?.postMessage({ type: 'fy-release-audit-worker', scriptUrl }, [channel.port2]);
+      });
+    });
+
+    expect(audit).toEqual({ type: 'fy-release-worker-audit', signed: false });
+    await context.close();
+  }, 120_000);
+
+  test('DECLARED LIMIT: a replaced worker that skips waiting and claims the tab takes it over', async () => {
+    // docs/pwa-release-signing.md: a deploy that ships its own worker is detected only if a verified
+    // tab is open while it installs AND the worker does not take the tab first. This one does.
+    const { context, page } = await installed(first);
+    served.set(
+      'sw.verified.js',
+      encoded(
+        'self.oninstall = () => self.skipWaiting();' +
+          'self.onactivate = event => event.waitUntil(self.clients.claim());',
+      ),
+    );
+
+    const takenOver = await page.evaluate(async () => {
+      const changed = new Promise<boolean>(resolveChange => {
+        navigator.serviceWorker.addEventListener('controllerchange', () => resolveChange(true));
+      });
+      await (await navigator.serviceWorker.ready).update();
+      return await changed;
+    });
+
+    expect(takenOver).toBe(true);
+    await context.close();
+  }, 120_000);
+
+  test('leaves a fetch of a file no release lists to the network, untouched', async () => {
     const { context, page } = await installed(first);
     requests.length = 0;
 

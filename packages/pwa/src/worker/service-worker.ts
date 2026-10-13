@@ -9,25 +9,30 @@
  * a real Chromium instead.
  *
  * What it does, in order:
- *   - install: pin the compiled-in key (first use only) and fetch, verify and cache the release;
+ *   - install: download, verify and cache the release the site serves now;
  *   - activate: take control of the pages that are open, so the first install protects them now;
- *   - fetch: answer a same-origin GET from verified bytes when a verified release lists it, and
+ *   - fetch: once a verified release exists, answer EVERY same-origin page load from it and every
+ *     subresource it lists, from bytes re-hashed on the way out, with the headers `_headers` names;
  *     leave everything else — every daemon request included — exactly as the page sent it;
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
  *   - push / notificationclick: show a daemon's Web Push notification and open what it names.
  *
- * Two values are compiled in by the build and nothing else: the release public key from
- * `packages/pwa/release-signing-key.pub`, and the app's rewrites from `public/_redirects`.
+ * Three values are compiled in by the build and nothing else: the release public key from
+ * `packages/pwa/release-signing-key.pub`, the app's rewrites from `public/_redirects`, and its
+ * header rules from `public/_headers`. The key is the ONE anchor: nothing this worker stores is
+ * trusted, because any page on this origin can write IndexedDB and Cache Storage.
  */
 
 import { PushNotificationPayloadSchema, isLoopbackHost } from '@ferretry/protocol';
 import { showGroupedNotification } from '../lib/notify.ts';
 import { ReleaseKeeper, answerReleaseRequest, parseReleaseRequest } from '../lib/release-keeper.ts';
+import type { ReleaseHeaderRule } from '../lib/release-headers.ts';
 import type { ReleaseRewrite } from '../lib/release-manifest.ts';
 import { CacheStorageReleaseCaches, FetchReleaseNetwork, IndexedDbReleaseState } from '../lib/release-storage.ts';
 
 declare const __FY_RELEASE_KEY__: string;
 declare const __FY_RELEASE_REWRITES__: readonly ReleaseRewrite[];
+declare const __FY_RELEASE_HEADERS__: readonly ReleaseHeaderRule[];
 
 /** The worker-global surface this file uses, typed here rather than through the WebWorker lib. */
 interface ExtendableEvent extends Event {
@@ -81,6 +86,7 @@ const keeper = new ReleaseKeeper({
   // hostname, which a deploy cannot change, so a production origin can never accept one.
   allowUnsigned: isLoopbackHost(worker.location.hostname),
   rewrites: __FY_RELEASE_REWRITES__,
+  headers: __FY_RELEASE_HEADERS__,
 });
 
 worker.addEventListener('install', event => {
@@ -103,12 +109,12 @@ worker.addEventListener('fetch', event => {
     keeper
       .respond({ pathname: url.pathname, navigate: request.mode === 'navigate' })
       .catch(() => null)
-      .then(file =>
-        file === null
+      .then(answer =>
+        answer === null
           ? globalThis.fetch(request)
-          : new Response(file.bytes as Uint8Array<ArrayBuffer>, {
-              status: 200,
-              headers: [...file.headers] as [string, string][],
+          : new Response(answer.bytes as Uint8Array<ArrayBuffer>, {
+              status: answer.status,
+              headers: [...answer.headers] as [string, string][],
             }),
       ),
   );

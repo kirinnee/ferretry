@@ -90,7 +90,12 @@ const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?
   return { factory, stores };
 };
 
-const STATE: KeeperState = { trust: { keys: ['k'], installed: null }, active: null, previous: null, lastOutcome: null };
+const STATE: KeeperState = {
+  active: { manifestBytes: bytesOf('{}'), signatureText: 'unsigned' },
+  previous: null,
+  endorsements: [],
+  lastOutcome: null,
+};
 
 describe('IndexedDbReleaseState', () => {
   it('stores and reloads the keeper record, creating its store once', async () => {
@@ -104,14 +109,14 @@ describe('IndexedDbReleaseState', () => {
     const after = await subject.load();
 
     // Assert
-    should(before).be.null();
+    should(before).be.undefined();
     should(after).eql(STATE);
     should([...idb.stores]).eql(['state']);
   });
 
   it('reuses a store that already exists', async () => {
     const subject = new IndexedDbReleaseState(fakeIndexedDb({ stores: ['state'] }).factory);
-    should(await subject.load()).be.null();
+    should(await subject.load()).be.undefined();
   });
 
   it.each([
@@ -162,24 +167,22 @@ const fakeCacheStorage = () => {
 };
 
 describe('CacheStorageReleaseCaches', () => {
-  it('puts, reads back with headers, lists and removes', async () => {
+  it('puts and reads back bytes alone, lists and removes', async () => {
     // Arrange
     const fake = fakeCacheStorage();
     const subject = new CacheStorageReleaseCaches(fake.storage);
 
     // Act
-    await subject.put('fy-release-1', 'app/index.html', {
-      bytes: bytesOf('<p>'),
-      headers: [['content-type', 'text/html']],
-    });
+    await subject.put('fy-release-1', 'app/index.html', bytesOf('<p>'));
+    const stored = await fake.caches.get('fy-release-1')?.get('/app/index.html')?.clone();
     const read = await subject.get('fy-release-1', 'app/index.html');
     const missing = await subject.get('fy-release-1', 'other');
     const names = await subject.names();
     await subject.remove('fy-release-1');
 
     // Assert
-    should(new TextDecoder().decode(read?.bytes)).equal('<p>');
-    should(read?.headers).containEql(['content-type', 'text/html']);
+    should(new TextDecoder().decode(read ?? new Uint8Array())).equal('<p>');
+    should([...(stored?.headers.keys() ?? ['missing'])].filter(name => name !== 'content-type')).eql([]);
     should(missing).be.null();
     should(names).eql(['fy-release-1']);
     should([...fake.caches.keys()]).eql([]);
@@ -205,7 +208,7 @@ describe('FetchReleaseNetwork', () => {
     return response;
   };
 
-  it('fetches this origin with no cache, keeping file headers and dropping transfer headers', async () => {
+  it('fetches this origin with no cache, and answers the body alone', async () => {
     // Arrange
     const { subject, calls } = network(url =>
       served('bytes', { headers: { 'content-type': 'text/javascript', 'content-encoding': 'br' } }, url),
@@ -216,8 +219,7 @@ describe('FetchReleaseNetwork', () => {
 
     // Assert
     should(calls).eql([{ url: `${ORIGIN}/assets/a.js`, init: { cache: 'no-store', credentials: 'same-origin' } }]);
-    should(new TextDecoder().decode(actual?.bytes)).equal('bytes');
-    should(actual?.headers).eql([['content-type', 'text/javascript']]);
+    should(new TextDecoder().decode(actual ?? new Uint8Array())).equal('bytes');
   });
 
   it('follows a same-origin redirect, and accepts a response that reports no URL', async () => {

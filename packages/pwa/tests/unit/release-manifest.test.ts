@@ -3,7 +3,6 @@ import should from 'should';
 
 import {
   RELEASE_WORKER_FILE,
-  compareReleases,
   formatReleaseSignature,
   fromBase64Url,
   parseReleaseManifest,
@@ -11,6 +10,7 @@ import {
   parseReleaseSignature,
   releaseKeyFromPem,
   releasePathForRequest,
+  releaseStanding,
   serializeReleaseManifest,
   toBase64Url,
 } from '../../src/lib/release-manifest.ts';
@@ -21,6 +21,7 @@ const HASH = 'A'.repeat(43);
 const manifest = (overrides: Record<string, unknown> = {}) => ({
   version: '1.0.0',
   commit: 'abcdef1',
+  sequence: 3,
   createdAt: '2026-10-01T00:00:00.000Z',
   worker: RELEASE_WORKER_FILE,
   files: { 'b.js': HASH, 'a.js': HASH, [RELEASE_WORKER_FILE]: HASH },
@@ -74,44 +75,22 @@ describe('parseReleaseManifest', () => {
     ['a short hash', bytesOf(JSON.stringify(manifest({ files: { [RELEASE_WORKER_FILE]: 'AA' } })))],
     ['an unknown field', bytesOf(JSON.stringify(manifest({ extra: true })))],
     ['a version that is not x.y.z', bytesOf(JSON.stringify(manifest({ version: 'v1' })))],
+    ['a negative sequence', bytesOf(JSON.stringify(manifest({ sequence: -1 })))],
+    ['a fractional sequence', bytesOf(JSON.stringify(manifest({ sequence: 1.5 })))],
+    ['no sequence', bytesOf(JSON.stringify(manifest({ sequence: undefined })))],
   ])('refuses %s', (_name, input) => {
     should(parseReleaseManifest(input)).be.null();
   });
 });
 
-describe('compareReleases', () => {
+describe('releaseStanding', () => {
   it.each([
-    [
-      { version: '1.0.0', createdAt: '2026-10-01T00:00:00Z' },
-      { version: '1.0.1', createdAt: '2026-01-01T00:00:00Z' },
-      -1,
-    ],
-    [
-      { version: '2.0.0', createdAt: '2026-01-01T00:00:00Z' },
-      { version: '1.9.9', createdAt: '2026-10-01T00:00:00Z' },
-      1,
-    ],
-    [
-      { version: '1.0.0', createdAt: '2026-10-01T00:00:00Z' },
-      { version: '1.0.0', createdAt: '2026-10-02T00:00:00Z' },
-      -1,
-    ],
-    [
-      { version: '1.0.0', createdAt: '2026-10-01T00:00:00Z' },
-      { version: '1.0.0', createdAt: '2026-10-01T00:00:00Z' },
-      0,
-    ],
-  ])('orders %j against %j', (a, b, expected) => {
-    should(Math.sign(compareReleases(a, b))).equal(expected);
-  });
-
-  it('reads a missing version part as zero', () => {
-    should(
-      compareReleases(
-        { version: '1', createdAt: '2026-10-01T00:00:00Z' },
-        { version: '1.0.0', createdAt: '2026-10-01T00:00:00Z' },
-      ),
-    ).equal(0);
+    [{ sequence: 6, commit: 'aaaaaaa' }, 'newer'],
+    [{ sequence: 5, commit: 'bbbbbbb' }, 'same'],
+    [{ sequence: 5, commit: 'aaaaaaa' }, 'older'],
+    [{ sequence: 4, commit: 'bbbbbbb' }, 'older'],
+  ] as const)('answers %j against sequence 5 of bbbbbbb as %s', (candidate, expected) => {
+    should(releaseStanding(candidate, { sequence: 5, commit: 'bbbbbbb' })).equal(expected);
   });
 });
 
