@@ -560,6 +560,11 @@ Said plainly, because the useful property is narrower than "zero trust" sounds:
   line, so a prompt nobody asked for must be refused. Its authority ends when the tab closes.
 - **A compromised Pages deploy, on first install or via a new service worker** — see D. A deploy is
   trusted the way any website is, once.
+- **A host that answers the browser’s own worker-install request differently from a plain fetch.**
+  The release-integrity check reads the worker script with an ordinary fetch; a deploy that serves a
+  different script to the browser’s install request bypasses the alarm.
+- **Code running in the open app rewriting the pinned release key** in IndexedDB. The pin is only as
+  strong as the app that holds it.
 - **An unlocked phone in a thief's hand with the app open**, for everything that needs no step-up:
   reading the fleet and chatting. Chatting with an agent that has tool permissions is **code
   execution by proxy**; least privilege does not change what an agent already allowed to act will do
