@@ -278,6 +278,8 @@ import {
 import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
+import { harnessCatalogAnswer } from './account-model-catalog.ts';
+import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -1536,9 +1538,10 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   const activeCarrier = harnessSettingsCarrier(activeDaemonId);
 
   // The Settings tab reads the OTHER paired machines from the app store; the harness has none, so it
-  // hands them over itself. The other four tabs stay the shell's frames until their units land.
+  // hands them over itself. The other tabs are the harness map's.
   const machineTabs = useMemo<MachineTabSurfaces>(
     () => ({
+      ...HARNESS_MACHINE_TABS,
       settings: function HarnessMachineSettings(props: MachineTabProps) {
         return (
           <MachineSettingsTab
@@ -2144,35 +2147,29 @@ const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
 /**
  * The Machines section's reads, answered locally: `GET /v1/fleet/machine` for the switcher (the
  * unreachable pairing is offline, the first is set up, the rest are not), plus what the Settings tab's
- * flows read — what this browser may change, the setup scan with one tool missing, and an empty
- * catalogue — so Import again, Clone and Install are walkable without a daemon.
+ * flows read — the setup scan, with one tool missing, on top of the shared catalogue — so Import again,
+ * Clone and Install are walkable without a daemon.
  */
 const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   const setUp = connection.daemonId === daemon.daemonId;
-  const answer = (path: string): unknown => {
-    if (path === '/v1/fleet/permissions')
-      return { mayInspect: true, mayPropose: true, mayApply: true, applyRefusal: 'granted', confirmation: 'none' };
-    if (path === '/v1/fleet/runtimes') return { format: 'version-2', runtimes: [] };
-    if (path === '/v1/fleet/profile-stacks') return { format: 'version-2', profiles: [] };
+  const answer = (path: string, init?: RequestInit): unknown => {
     if (path === '/v1/fleet/setup/scan') return HARNESS_SETUP_SCAN;
+    if (path !== '/v1/fleet/machine') return harnessCatalogAnswer(path, init);
     return {
       name: 'studio-mac',
       format: setUp ? 'version-2' : 'none',
       setUp,
       agentPermissions: 'auto',
-      tools: [
-        { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
-        { harness: 'codex', label: 'Codex', installed: false },
-      ],
+      tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
       runtimeCount: setUp ? 5 : 0,
-      runningSessions: setUp ? 2 : 0,
+      runningSessions: 0,
       changes: { available: true },
     };
   };
   return {
-    request: (async (path: string, schema: { parse: (value: unknown) => unknown }) =>
-      schema.parse(answer(path))) as Awaited<ReturnType<FleetClientFactory>>['request'],
+    request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
+      schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
 };
 

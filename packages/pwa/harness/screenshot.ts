@@ -108,9 +108,10 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Seventy-three. MACHINES owes ten at each viewport — its section, four tab switches, the Machines list the
- * switcher opens, and four Settings-tab flows (Import again found + names, Clone source, Install) — and the
- * breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
+ * Ninety-seven. MACHINES owes twenty-two at each viewport — its section, four tab switches, the Machines list the
+ * switcher opens, twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps,
+ * a component with every badge, two edit forms) and four Settings-tab flows (Import again found + names,
+ * Clone source, Install) — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
  * and twenty-four at `desktop`. Twenty-four at both viewports —
  * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
  * surface: each step is a different layout, the model step is a card per model beside a custom-value
@@ -135,7 +136,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 73;
+const SETTINGS_SIDEWAYS_CHECKS = 97;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1728,7 +1729,10 @@ try {
           await machinesSurface.locator('[data-clone-source-reason]').nth(1).waitFor({ state: 'visible' });
           await machineFrame('Clone source', 'clone-source');
           await backToSettingsTab();
-          await machinesSurface.locator('[data-tool-install="codex"]').click();
+          // By its address: the shared machine data lists only Claude Code, and the flow is linkable anyway.
+          await page.evaluate(() => {
+            window.location.hash = `#machines/${encodeURIComponent('Studio workstation')}/settings/install-codex`;
+          });
           await machinesSurface.locator('[data-install-flow="codex"]').waitFor({ state: 'visible' });
           await machineFrame('Install Codex', 'install');
           await backToSettingsTab();
@@ -1738,6 +1742,76 @@ try {
           const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
           await page.screenshot({ path: machinesListTarget });
           process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
+
+          // PROFILES AND COMPONENTS (account model U18): twelve pages per viewport, each one a different
+          // layout — a layer stack, a conflict sentence with a dotted key, a delete card, a stepper with a
+          // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
+          const accountShot = async (name: string, label: string): Promise<void> => {
+            await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
+            const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
+            await page.screenshot({ path: target });
+            process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
+          };
+          await machinesSurface.locator('[data-machines-list] button:has-text("Close")').click();
+          await machinesSurface.locator('[data-machine-tab="profiles"]').click();
+          const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
+          await profilesPanel.locator('[data-profile-row="Default"]').waitFor({ state: 'visible' });
+          await accountShot('profiles', 'Profiles list');
+          await profilesPanel.locator('[data-profile-row="Default"]').click();
+          await profilesPanel.locator('[data-layer-stack]').waitFor({ state: 'visible' });
+          await accountShot('profile', 'profile page');
+          await profilesPanel.locator('[data-profile-delete]').click();
+          await profilesPanel.locator('[data-catalog-note="delete"]').scrollIntoViewIfNeeded();
+          await accountShot('profile-delete', 'profile delete card');
+          await profilesPanel.locator('[data-profile-keep]').click();
+          await profilesPanel.locator('[data-profile-edit]').click();
+          await profilesPanel.locator('[data-build-loop]').first().waitFor({ state: 'visible' });
+          await accountShot('profile-edit', 'Edit layers start');
+          await profilesPanel.locator('[data-stepper-cancel]').click();
+          await profilesPanel.locator('[data-stepper-stop]').click();
+          await profilesPanel.locator('[data-catalog-back]').click();
+          await profilesPanel.locator('[data-profile-build]').click();
+          await profilesPanel.locator('[data-build-base="Default"]').click();
+          await profilesPanel.locator('[data-build-base="Agent"]').click();
+          await profilesPanel.locator('[data-build-order]').waitFor({ state: 'visible' });
+          await accountShot('build-start', 'Build a profile start');
+          for (let step = 0; step < 6; step += 1) await profilesPanel.locator('[data-build-next]').click();
+          await profilesPanel.locator('[data-conflicts]').waitFor({ state: 'visible' });
+          await accountShot('build-review', 'Build a profile review');
+          await profilesPanel.locator('[data-stepper-cancel]').click();
+          await profilesPanel.locator('[data-stepper-stop]').click();
+
+          await machinesSurface.locator('[data-machine-tab="components"]').click();
+          const componentsPanel = machinesSurface.locator('[data-machine-tab-panel="components"]');
+          await componentsPanel.locator('[data-component-kind="mcp"]').waitFor({ state: 'visible' });
+          await accountShot('components', 'Components kinds');
+          await componentsPanel.locator('[data-component-kind="mcp"]').click();
+          await componentsPanel.locator('[data-component-row="mcp/notes"]').waitFor({ state: 'visible' });
+          await accountShot('component-list', 'MCP servers list');
+          await componentsPanel.locator('[data-component-row="mcp/notes"]').click();
+          await componentsPanel.locator('[data-catalog-note="path"]').waitFor({ state: 'visible' });
+          await accountShot('component', 'component page with warnings');
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-component-kind="instructions"]').click();
+          await componentsPanel.locator('[data-component-row="instructions/Main instructions"]').click();
+          await componentsPanel.locator('[data-component-edit]').click();
+          await componentsPanel.locator('[data-catalog-note="used"]').waitFor({ state: 'visible' });
+          await accountShot('component-edit', 'component edit used everywhere');
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-component-kind="skills"]').click();
+          await componentsPanel.locator('[data-component-row="skills/My skills"]').click();
+          await componentsPanel.locator('[data-catalog-note="partial"]').waitFor({ state: 'visible' });
+          await accountShot('component-partial', 'component partly supported');
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-component-kind="settings"]').click();
+          await componentsPanel.locator('[data-component-row="settings/Claude settings"]').click();
+          await componentsPanel.locator('[data-component-edit]').click();
+          await componentsPanel.locator('[data-component-hidden]').waitFor({ state: 'visible' });
+          await accountShot('component-settings-edit', 'settings edit with a hidden value');
 
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh

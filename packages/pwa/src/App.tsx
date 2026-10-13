@@ -29,8 +29,10 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { accountsSettingsTab } from './features/fleet/accounts-page.tsx';
+import { ComponentsTab } from './features/fleet/components/components-tab.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
+import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { emptyMachineTab, type MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -942,8 +944,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
 const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   runtimes: emptyMachineTab('runtimes'),
   credentials: emptyMachineTab('credentials'),
-  profiles: emptyMachineTab('profiles'),
-  components: emptyMachineTab('components'),
+  profiles: ProfilesTab,
+  components: ComponentsTab,
   settings: MachineSettingsSurface,
 };
 
