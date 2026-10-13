@@ -1,18 +1,156 @@
-import type { ApiRoute } from '../../api/route.ts';
+/**
+ * The routes a browser reads the account model's catalogue through, and stages and applies every
+ * change to it (docs/design/account-model.md §4, §7). The service is `fleet/catalog-service.ts`.
+ *
+ * ## Reads are `fleet.use`; every change is `fleet.configure`
+ *
+ * The four reads disclose the same class of fact the account roster already gives a caller with
+ * `fleet.use`: component names and files, profile layers, runtime names and whether each can launch.
+ * No value a credential could occupy travels — an environment entry that looks like a secret is
+ * reported as hidden.
+ *
+ * Staging a change is `fleet.configure` too, not `use`: a staged change holds a materialised plan for
+ * this machine, and the design governs the whole proposal flow as configuration (§7). Applying one
+ * adds the per-change operator password for a caller the boundary says owes it.
+ *
+ * ## Their own paths, for now
+ *
+ * The layered profiles are read at `/v1/fleet/profile-stacks`, and changes are staged at
+ * `/v1/fleet/changes`, because the old Accounts screen still reads `/v1/fleet/profiles` and stages
+ * at `/v1/fleet/proposals` until it is retired; U21 folds them together.
+ *
+ * ## `noStore` on all seven
+ *
+ * Every answer is a statement about now: a runtime that can launch, a change that is still pending.
+ */
+import {
+  FleetAccountChangeOutcomeSchema,
+  FleetAccountChangeRequestSchema,
+  FleetAccountChangeViewSchema,
+  FleetComponentCatalogSchema,
+  FleetLayeredProfileCatalogSchema,
+  FleetMachineViewSchema,
+  FleetProposalApplyRequestSchema,
+  FleetRuntimeCatalogSchema,
+} from '@ferretry/protocol';
+import type { z } from 'zod';
+import { parseBody, parseOptionalBody } from '../../api/body.ts';
+import { ApiError } from '../../api/error.ts';
+import { decodeParameter } from '../../api/http.ts';
+import type { ApiResponse } from '../../api/http.ts';
+import { jsonResponse } from '../../api/responses.ts';
+import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import {
+  FleetCatalogRefusal,
+  FleetCatalogService,
+  type FleetCatalogServiceDeps,
+} from '../../fleet/catalog-service.ts';
 
-// Account-model seed, created by U0 and filled by U14 (docs/design/account-model.md §13.2). The field on
-// `MountedSubsystems`, the construction in the composition root and the registration in the route
-// table already reach it, so filling it touches no shared file.
+/** The machine, its components, profiles and runtimes, and every change to them. */
+export type FleetCatalogSubsystem = Pick<
+  FleetCatalogService,
+  'machine' | 'components' | 'profiles' | 'runtimes' | 'propose' | 'read' | 'apply'
+>;
 
-/** The machine, its components, profiles and runtimes. Empty until U14 fills it. */
-export type FleetCatalogSubsystem = Readonly<Record<never, never>>;
+/** The largest change body: a component's text and its fields, with room for the envelope. */
+const MAX_CHANGE_BODY_BYTES = 512 * 1024;
 
-/** This subsystem's route table: none until U14 fills it. */
-export function fleetCatalogRoutes(_subsystem: FleetCatalogSubsystem): readonly ApiRoute[] {
-  return [];
+/** `404` for a change that does not exist; `409` for every other refusal, as the fleet's own answer. */
+function refusal(error: FleetCatalogRefusal): ApiError {
+  return new ApiError(error.code === 'fleet_change_unknown' ? 404 : 409, error.message, error.code);
+}
+
+async function answer<Schema extends z.ZodType>(schema: Schema, work: () => Promise<unknown>): Promise<ApiResponse> {
+  try {
+    return jsonResponse(schema.parse(await work()));
+  } catch (error) {
+    if (error instanceof FleetCatalogRefusal) throw refusal(error);
+    throw error;
+  }
+}
+
+function changeId(context: RouteContext): string {
+  const id = decodeParameter(context.params.get('changeId') ?? '') ?? '';
+  if (id === '') throw new ApiError(400, 'the change id in the path is not usable', 'bad_request');
+  return id;
+}
+
+const USE = { capability: 'fleet', axis: 'use' } as const;
+const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
+
+/** This subsystem's route table. */
+export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly ApiRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/v1/fleet/machine',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async () => await answer(FleetMachineViewSchema, () => subsystem.machine()),
+    },
+    {
+      method: 'GET',
+      path: '/v1/fleet/components',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async () => await answer(FleetComponentCatalogSchema, () => subsystem.components()),
+    },
+    {
+      method: 'GET',
+      path: '/v1/fleet/profile-stacks',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async () => await answer(FleetLayeredProfileCatalogSchema, () => subsystem.profiles()),
+    },
+    {
+      method: 'GET',
+      path: '/v1/fleet/runtimes',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async () => await answer(FleetRuntimeCatalogSchema, () => subsystem.runtimes()),
+    },
+    {
+      method: 'POST',
+      path: '/v1/fleet/changes',
+      minimum: 'operator',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, FleetAccountChangeRequestSchema, {
+          maxBytes: MAX_CHANGE_BODY_BYTES,
+        });
+        return await answer(FleetAccountChangeViewSchema, () => subsystem.propose(request.change));
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/fleet/changes/:changeId',
+      minimum: 'operator',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => await answer(FleetAccountChangeViewSchema, () => subsystem.read(changeId(context))),
+    },
+    {
+      method: 'POST',
+      path: '/v1/fleet/changes/:changeId/apply',
+      minimum: 'operator',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const body = (await parseOptionalBody(context.request, FleetProposalApplyRequestSchema)) ?? {};
+        return await answer(FleetAccountChangeOutcomeSchema, () =>
+          subsystem.apply(changeId(context), body, context.governance),
+        );
+      },
+    },
+  ];
 }
 
 /** Builds the catalog subsystem the composition root mounts. */
-export function createFleetCatalogSubsystem(): FleetCatalogSubsystem {
-  return {};
+export function createFleetCatalogSubsystem(deps: FleetCatalogServiceDeps): FleetCatalogSubsystem {
+  return new FleetCatalogService(deps);
 }
