@@ -67,7 +67,7 @@ describe('daemon push enrolment', () => {
     const { calls, fetcher } = recorder({ publicKey: vapidKey() });
     expect(await fetchDaemonVapidKey(daemonA, fetcher)).toBe(vapidKey());
     expect(calls[0]?.url).toBe('https://a.example.test/v1/push/vapid');
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
     expect(new Headers(calls[0]?.init?.headers).get(FY_REQUEST_ID_HEADER)).toBeNull();
   });
 
@@ -78,7 +78,7 @@ describe('daemon push enrolment', () => {
     const forB = recorder({ devices: [] });
     expect(await listDaemonPushDevices(daemonB, forB.fetcher)).toEqual([]);
     expect(forB.calls[0]?.url).toBe('https://b.example.test/v1/push/subscriptions');
-    expect(new Headers(forB.calls[0]?.init?.headers).get('authorization')).toBe('Bearer token-b');
+    expect(new Headers(forB.calls[0]?.init?.headers).has('authorization')).toBe(false);
   });
 
   it('enrols against one daemon, stamping a request id and the subscription body', async () => {

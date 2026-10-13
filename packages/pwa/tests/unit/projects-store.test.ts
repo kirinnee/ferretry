@@ -64,7 +64,7 @@ describe('fetchDaemonProjects', () => {
     });
 
     expect(seen).toBe('https://laptop.example.test/v1/projects');
-    expect(authorization).toBe('Bearer token-laptop');
+    expect(authorization).toBe('');
     // Nothing is narrowed away. The earlier version mapped each row down to
     // `{ name, path }`, which made `source` unsearchable in the folder picker
     // and left every provenance surface with nothing to render.

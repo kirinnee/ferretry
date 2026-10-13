@@ -41,7 +41,7 @@ describe('files API', () => {
     expect(listing.entries).toEqual([]);
     expect(listUrl(scopeA, 'src')).toBe('/v1/sessions/same%2Fsession/fs?path=src');
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs?path=src');
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer a-token');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
     expect(() => fsApi.list(daemonA, scopeB, '', undefined, browserFetch)).toThrow('file scope must belong');
   });
 
@@ -80,7 +80,7 @@ describe('files API', () => {
     expect(indexUrl(scopeA)).not.toContain('?');
     expect(indexUrl(scopeA).endsWith('/fs')).toBe(false);
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs/index');
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer a-token');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
     // The reader's own question is never answered from a cache: the daemon walks
     // the tree inside the request, so a stale index is a wrong answer.
     expect(calls[0]?.init?.cache).toBe('no-store');

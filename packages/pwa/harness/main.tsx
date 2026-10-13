@@ -1304,6 +1304,7 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
       platform: 'browser',
       createdAt: '2025-12-20T18:22:00.000Z',
       lastSeenAt: '2025-12-31T22:04:00.000Z',
+      idleExpiresAt: '2026-12-31T00:00:00.000Z',
     },
     {
       id: `fy_device_id_${'Ee'.repeat(11)}`,
@@ -1311,6 +1312,7 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
       platform: 'browser',
       createdAt: '2025-11-02T09:15:00.000Z',
       lastSeenAt: '2025-11-02T09:15:00.000Z',
+      idleExpiresAt: '2026-12-31T00:00:00.000Z',
     },
   ],
   hostLocal: true,

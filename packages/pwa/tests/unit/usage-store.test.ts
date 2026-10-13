@@ -371,7 +371,7 @@ describe('daemonUsagePort', () => {
 
     const value = await port.usage(laptop);
     expect(seen).toBe('https://laptop.example.test/v1/usage');
-    expect(authorization).toBe('Bearer token-laptop');
+    expect(authorization).toBe('');
     expect(value).toMatchObject({ stale: false });
   });
 

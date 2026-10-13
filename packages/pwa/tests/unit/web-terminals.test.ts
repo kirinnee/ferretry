@@ -5,11 +5,9 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   closeSessionTerminal,
   createSessionTerminal,
-  daemonTerminalTicket,
   listSessionTerminals,
   renameSessionTerminal,
   terminalLimitLabel,
-  terminalStreamUrl,
 } from '../../src/lib/web-terminals.ts';
 
 const daemonA = daemonConnection({
@@ -57,12 +55,12 @@ const recorder = (...bodies: readonly unknown[]) => {
 };
 
 describe('web terminal transport', () => {
-  it('addresses every call to the paired daemon with a bearer token, never the page origin', async () => {
+  it('addresses every call to the paired daemon, never the page origin, and carries no credential', async () => {
     const { calls, fetcher } = recorder(list);
     expect(await listSessionTerminals(daemonA, scopeA, fetcher)).toEqual(list);
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/terminals');
     const headers = new Headers(calls[0]?.init?.headers);
-    expect(headers.get('authorization')).toBe('Bearer token-a');
+    expect(headers.has('authorization')).toBe(false);
     expect(headers.get(FY_REQUEST_ID_HEADER)).toBeNull();
     expect(calls[0]?.init?.credentials).toBe('include');
   });
@@ -74,7 +72,6 @@ describe('web terminal transport', () => {
     await expect(createSessionTerminal(daemonA, scopeB, {}, fetcher)).rejects.toThrow(crossed);
     await expect(renameSessionTerminal(daemonA, scopeB, TERMINAL_ID, 'x', fetcher)).rejects.toThrow(crossed);
     await expect(closeSessionTerminal(daemonA, scopeB, TERMINAL_ID, fetcher)).rejects.toThrow(crossed);
-    expect(() => terminalStreamUrl(daemonA, scopeB, TERMINAL_ID, 'ticket')).toThrow(crossed);
   });
 
   it('stamps a request id and JSON content type on mutations only', async () => {
@@ -111,7 +108,6 @@ describe('web terminal transport', () => {
   it('rejects a terminal id that is not the daemon-issued shape before it reaches a URL', async () => {
     const { calls, fetcher } = recorder(terminal);
     await expect(renameSessionTerminal(daemonA, scopeA, '../../secrets', 'x', fetcher)).rejects.toThrow();
-    expect(() => terminalStreamUrl(daemonA, scopeA, '../../secrets', 'ticket')).toThrow();
     expect(calls).toHaveLength(0);
   });
 
@@ -148,35 +144,6 @@ describe('web terminal transport', () => {
     await expect(
       listSessionTerminals(daemonA, scopeA, async () => new Response('nope', { status: 503 })),
     ).rejects.toMatchObject({ status: 503, message: 'HTTP 503', code: undefined });
-  });
-
-  it('builds a ticket-only stream URL on the paired daemon, upgrading the scheme', () => {
-    expect(terminalStreamUrl(daemonA, scopeA, TERMINAL_ID, 'one-time')).toBe(
-      `wss://a.example.test/v1/sessions/shared%2Fsession/terminals/${TERMINAL_ID}/stream?ticket=one-time`,
-    );
-    const insecure = daemonConnection({ daemonId: 'daemon-c', baseUrl: 'http://localhost:8787', deviceId: 'c' });
-    expect(terminalStreamUrl(insecure, daemonSessionScope(insecure, 's'), TERMINAL_ID, 't')).toBe(
-      `ws://localhost:8787/v1/sessions/s/terminals/${TERMINAL_ID}/stream?ticket=t`,
-    );
-    expect(() => terminalStreamUrl(daemonA, scopeA, TERMINAL_ID, ' ')).toThrow('ticket must not be empty');
-  });
-
-  it('buys a terminal-scoped socket ticket with the device token kept in the request header', async () => {
-    const { calls, fetcher } = recorder({
-      ticket: `fy_ticket_${'t'.repeat(43)}`,
-      ttlSeconds: 30,
-      expiresAt: '2026-08-04T12:00:30.000Z',
-    });
-
-    await expect(daemonTerminalTicket(daemonA, scopeA, TERMINAL_ID, fetcher)).resolves.toBe(
-      `fy_ticket_${'t'.repeat(43)}`,
-    );
-
-    expect(calls[0]?.url).toBe(
-      `https://a.example.test/v1/sessions/shared%2Fsession/terminals/${TERMINAL_ID}/stream/ticket`,
-    );
-    expect(calls[0]?.init?.method).toBe('POST');
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer token-a');
   });
 
   it('reports the session and box counts in the original wording', () => {

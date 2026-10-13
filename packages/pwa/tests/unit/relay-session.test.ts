@@ -19,9 +19,10 @@ import {
   MAX_PLAINTEXT_BYTES,
   RELAY_CLOSE_CODES,
   RELAY_LIMITS,
-  RELAY_PROTOCOL_ID,
+  SESSION_PROTOCOL_ID,
   utf8Bytes,
 } from '@ferretry/relay';
+import { MAX_TUNNEL_BODY_BYTES, OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import should from 'should';
 import {
   decodeTunnelDaemonMessage,
@@ -34,15 +35,18 @@ import {
 import {
   controlFrame,
   creditFrame,
+  LEASE_ENDS,
   newDaemonIdentity,
   readyFrame,
   relayCrypto,
   ScriptedDaemon,
   ScriptedSocket,
+  testDevice,
   testSessionId,
 } from '../support/relay.ts';
 
-const DEVICE_ID = 'fy_device_secret';
+const device = await testDevice('fy_dev_session');
+const ACCEPTED = { t: 'authenticated', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS } as const;
 const sessionId = testSessionId();
 
 interface Harness {
@@ -58,7 +62,7 @@ const opened = async (overrides: Partial<RelayClientSessionDependencies> = {}): 
   const session = new RelayClientSession({
     crypto: relayCrypto,
     daemonId: identity.daemonId,
-    mode: { kind: 'auth', deviceId: DEVICE_ID },
+    mode: { kind: 'auth', device: device.claim },
     socket,
     ...overrides,
   });
@@ -72,21 +76,23 @@ const serving = async (overrides: Partial<RelayClientSessionDependencies> = {}):
   const hello = harness.socket.sent[0];
   if (hello === undefined) throw new Error('the session sent no hello');
   await harness.session.receiveBinary(await harness.daemon.answer(hello));
-  await harness.session.receiveBinary(await harness.daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
+  await harness.session.receiveBinary(await harness.daemon.record(ACCEPTED));
   return harness;
 };
 
 /** A keyed stream the daemon has accepted: ready to carry frames and conclude. */
 const streaming = async (overrides: Partial<RelayClientSessionDependencies> = {}): Promise<Harness> => {
   const harness = await opened({
-    mode: { kind: 'stream', deviceId: DEVICE_ID, path: '/v1/events' },
+    mode: { kind: 'stream', device: device.claim, path: '/v1/events' },
     ...overrides,
   });
   const hello = harness.socket.sent[0];
   if (hello === undefined) throw new Error('the session sent no hello');
   await harness.session.receiveBinary(await harness.daemon.answer(hello));
   const ready = harness.session.ready();
-  await harness.session.receiveBinary(await harness.daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+  await harness.session.receiveBinary(
+    await harness.daemon.record({ t: 'stream-opened', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS }),
+  );
   await ready;
   return harness;
 };
@@ -107,15 +113,20 @@ describe('the relay tunnel codec', () => {
     should(decodeTunnelDaemonMessage(utf8Bytes('{"t":"nope"}'))).be.null();
     should(decodeTunnelDaemonMessage(utf8Bytes('{"t":"res","id":1,"status":200,"headers":7}'))).be.null();
     should(decodeTunnelDaemonMessage(utf8Bytes('{"t":"res","id":1,"status":200}'))).match({ t: 'res' });
-    should(decodeTunnelDaemonMessage(utf8Bytes(`{"t":"oversize","id":1,"status":200,"byteLength":9}`))).match({
-      byteLength: 9,
-    });
+    should(decodeTunnelDaemonMessage(utf8Bytes('{"t":"res","id":1,"status":200,"more":true}'))).match({ more: true });
+    should(decodeTunnelDaemonMessage(utf8Bytes('{"t":"res-more","id":1,"body":"x"}'))).match({ t: 'res-more' });
+    // `oversize` is gone: a large body travels in parts, so a record claiming one is a stranger.
+    should(decodeTunnelDaemonMessage(utf8Bytes('{"t":"oversize","id":1,"status":200,"byteLength":9}'))).be.null();
+    // The previous dialect is not this one, however it is otherwise shaped.
+    should(
+      decodeTunnelDaemonMessage(utf8Bytes(`{"t":"authenticated","protocol":"ferretry-relay/1","accessExpiresAt":"${LEASE_ENDS}"}`)),
+    ).be.null();
     should(MAX_TUNNEL_REQUEST_ID).equal(0xffff_ffff);
   });
 
   it('should encode a client message as one JSON object', () => {
-    const encoded = encodeTunnelClientMessage({ t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceId: 'token' });
-    should(JSON.parse(new TextDecoder().decode(encoded))).match({ t: 'auth', deviceId: 'token' });
+    const encoded = encodeTunnelClientMessage({ t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof: 'p' });
+    should(JSON.parse(new TextDecoder().decode(encoded))).eql({ t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof: 'p' });
   });
 });
 
@@ -179,7 +190,7 @@ describe('a relay session reading frames from its carrier', () => {
     const session = new RelayClientSession({
       crypto: relayCrypto,
       daemonId: identity.daemonId,
-      mode: { kind: 'auth', deviceId: DEVICE_ID },
+      mode: { kind: 'auth', device: device.claim },
       socket,
     });
     await session.receiveBinary(creditFrame(sessionId, encodeCreditPayload(4)));
@@ -254,7 +265,7 @@ describe('a relay session completing its handshake', () => {
     should((await failure(unreadable.session.ready())).message).match(/unparseable daemon hello/u);
   });
 
-  it('should refuse a daemon whose key is not the pinned fingerprint, before sending the token', async () => {
+  it('should refuse a daemon whose key is not the pinned fingerprint, before signing anything', async () => {
     const impostor = await newDaemonIdentity();
     const { session, socket, daemon } = await opened();
     const hello = socket.sent[0];
@@ -262,7 +273,7 @@ describe('a relay session completing its handshake', () => {
     const answered = await new ScriptedDaemon(impostor, daemon.sessionId).spoof(hello);
     await session.receiveBinary(answered);
     should((await failure(session.ready())).message).match(/pinned fingerprint/u);
-    // One frame only: the hello. The credential never left this browser.
+    // One frame only: the hello. No proof by this device was ever produced for that daemon.
     should(socket.sent).have.length(1);
   });
 
@@ -279,7 +290,7 @@ describe('a relay session completing its handshake', () => {
     const hello = socket.sent[0];
     if (hello === undefined) throw new Error('no hello');
     await session.receiveBinary(await daemon.answer(hello));
-    const record = await daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID });
+    const record = await daemon.record(ACCEPTED);
     const meddled = Uint8Array.from(record);
     meddled[30] = (meddled[30] ?? 0) ^ 0x01;
     await session.receiveBinary(meddled);
@@ -321,7 +332,7 @@ describe('a streaming relay session', () => {
     session.onStreamClosed(closed => observed.push({ source: 'following', ...closed }));
 
     await session.receiveBinary(
-      await daemon.record({ t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
+      await daemon.record({ t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
     );
     session.onStreamClosed(closed => observed.push({ source: 'late', ...closed }));
 
@@ -350,13 +361,15 @@ describe('a serving relay session', () => {
     should(await second).eql({ kind: 'response', status: 201, headers: { etag: 'w/1' }, body: 'made' });
 
     const third = session.request({ method: 'GET', path: '/v1/sessions' });
-    await session.receiveBinary(await daemon.record({ t: 'oversize', id: 3, status: 200, byteLength: 402_641 }));
-    should(await third).eql({ kind: 'oversize', status: 200, byteLength: 402_641 });
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 3, status: 200, body: 'ab', more: true }));
+    await session.receiveBinary(await daemon.record({ t: 'res-more', id: 3, body: 'cd', more: true }));
+    await session.receiveBinary(await daemon.record({ t: 'res-more', id: 3, body: 'ef' }));
+    should(await third).eql({ kind: 'response', status: 200, headers: {}, body: 'abcdef' });
   });
 
   it('should refuse a second acceptance and an answer to a request it never sent', async () => {
     const twice = await serving();
-    await twice.session.receiveBinary(await twice.daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
+    await twice.session.receiveBinary(await twice.daemon.record(ACCEPTED));
     should((await failure(twice.session.request({ method: 'GET', path: '/x' }))).message).match(
       /already authenticated/u,
     );
@@ -395,14 +408,6 @@ describe('a serving relay session', () => {
     await failure(first);
   });
 
-  it('should end the session rather than send a record that cannot fit one frame', async () => {
-    const { session } = await serving();
-    const refusal = await failure(
-      session.request({ method: 'POST', path: '/x', body: 'b'.repeat(MAX_PLAINTEXT_BYTES) }),
-    );
-    should(refusal.code).equal(RELAY_CLOSE_CODES.frameTooLarge);
-  });
-
   it('should end the session rather than queue more than one window of records', async () => {
     const { session } = await serving();
     // No credit is ever returned, so the window fills and the queue is all that grows.
@@ -411,5 +416,206 @@ describe('a serving relay session', () => {
       outstanding.push(session.request({ method: 'GET', path: `/${index}` }).catch(() => 'refused'));
     }
     should(await Promise.all(outstanding)).containEql('refused');
+  });
+});
+
+/** Let sealing and signing, which resolve on the task queue, finish. */
+const drain = async (): Promise<void> => {
+  for (let spin = 0; spin < 20; spin += 1) await new Promise(resolve => setTimeout(resolve, 0));
+};
+
+describe('a relay session proving its device', () => {
+  it('should open with a credential record that proves this session, never one that names a token', async () => {
+    const { socket, daemon } = await serving();
+    const credential = (await daemon.receive(socket.sent[1] as Uint8Array)) as Record<string, unknown>;
+    should(credential).match({ t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceId: 'fy_dev_session' });
+    should(credential.appSession).equal(device.claim.appSession);
+    should(await daemon.proves(credential, device.publicKey)).be.true();
+    // The proof is over THIS transcript: a different daemon key would not accept it.
+    should(await daemon.proves(credential, (await testDevice()).publicKey)).be.false();
+  });
+
+  it('should open a stream with a stream-kind proof naming the route and its query', async () => {
+    const { socket, daemon } = await streaming({
+      mode: { kind: 'stream', device: device.claim, path: '/v1/events', query: [['after', '3']] },
+    });
+    const credential = (await daemon.receive(socket.sent[1] as Uint8Array)) as Record<string, unknown>;
+    should(credential).match({ t: 'stream', path: '/v1/events', query: [['after', '3']] });
+    should(await daemon.proves(credential, device.publicKey)).be.true();
+  });
+
+  it('should register the public key it pairs with and prove it holds the private half', async () => {
+    const pairing = await testDevice();
+    const { session, socket, daemon } = await opened({
+      mode: {
+        kind: 'pair',
+        code: 'ABCD-EFGH',
+        deviceName: 'phone',
+        publicKey: pairing.publicKey,
+        key: pairing.claim.key,
+      },
+    });
+    should(session.credentialSent()).be.false();
+    await session.receiveBinary(await daemon.answer(socket.sent[0] as Uint8Array));
+    await drain();
+    should(session.credentialSent()).be.true();
+    const credential = (await daemon.receive(socket.sent[1] as Uint8Array)) as Record<string, unknown>;
+    should(credential).match({ t: 'pair', code: 'ABCD-EFGH', deviceName: 'phone', deviceKey: pairing.publicKey });
+    should(credential).not.have.property('deviceId');
+    should(await daemon.proves(credential, pairing.publicKey)).be.true();
+  });
+
+  it('should renew its lease by signing the nonce the daemon sent, on a request session', async () => {
+    const { session, socket, daemon } = await serving();
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    await session.receiveBinary(
+      await daemon.record({ t: 'renew', protocol: SESSION_PROTOCOL_ID, nonce: 'bm9uY2Utb25l', expiresAt: LEASE_ENDS }),
+    );
+    await drain();
+    const renewed = (await daemon.receive(socket.sent[2] as Uint8Array)) as Record<string, unknown>;
+    should(renewed).match({ t: 'renewed', protocol: SESSION_PROTOCOL_ID });
+    should(await daemon.proves(renewed, device.publicKey, 'bm9uY2Utb25l')).be.true();
+    should(await daemon.proves(renewed, device.publicKey, 'some-other-nonce')).be.false();
+    should(session.live()).be.true();
+  });
+
+  it('should renew a stream lease the same way, without disturbing the stream', async () => {
+    const { session, socket, daemon } = await streaming();
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    await session.receiveBinary(
+      await daemon.record({ t: 'renew', protocol: SESSION_PROTOCOL_ID, nonce: 'c3RyZWFt', expiresAt: LEASE_ENDS }),
+    );
+    await drain();
+    const renewed = (await daemon.receive(socket.sent[2] as Uint8Array)) as Record<string, unknown>;
+    should(await daemon.proves(renewed, device.publicKey, 'c3RyZWFt')).be.true();
+    should(session.streaming()).be.true();
+  });
+
+  it('should not sign a renewal for a session that ended while it was asked', async () => {
+    const { session, socket, daemon } = await serving();
+    const before = socket.sent.length;
+    const asking = session.receiveBinary(
+      await daemon.record({ t: 'renew', protocol: SESSION_PROTOCOL_ID, nonce: 'bGF0ZQ', expiresAt: LEASE_ENDS }),
+    );
+    session.close();
+    await asking;
+    await drain();
+    should(socket.sent.length).equal(before);
+  });
+
+  it('should say the access lease ended, so a caller can open a new session rather than report a fault', async () => {
+    const { session } = await serving();
+    const waiting = failure(session.request({ method: 'GET', path: '/v1/sessions' }));
+    await session.receiveBinary(controlFrame(sessionId, { t: 'closed', code: 4441, reason: 'the access lease ended' }));
+    const reason = await waiting;
+    should(reason.code).equal(4441);
+    should(reason.message).match(/access lease on this session ended/u);
+  });
+});
+
+describe('a relay session whose daemon is from before device keys', () => {
+  it('should name the daemon as the side to update when it answers in the previous dialect', async () => {
+    const { session } = await opened();
+    await session.receiveBinary(
+      encodeFrame({
+        kind: FRAME_KINDS.handshake,
+        sessionId,
+        sequence: 0,
+        payload: utf8Bytes(JSON.stringify({ t: 'hs2', protocol: 'ferretry-relay/1', epk: 'x', nonce: 'y', spki: 'z', sig: 's' })),
+      }),
+    );
+    const reason = await failure(session.ready());
+    should(reason.message).equal(OLDER_DAEMON_SENTENCE);
+    should(reason.code).equal(RELAY_CLOSE_CODES.versionUnsupported);
+  });
+
+  it('should name the daemon when it refuses this hello in the words an old daemon uses', async () => {
+    const { session } = await opened();
+    await session.receiveBinary(
+      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.protocolError, reason: 'unparseable client hello' }),
+    );
+    should((await failure(session.ready())).message).equal(OLDER_DAEMON_SENTENCE);
+  });
+
+  it('should NOT blame the daemon for the same refusal once the handshake is past', async () => {
+    const { session } = await serving();
+    await session.receiveBinary(
+      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.protocolError, reason: 'unparseable client hello' }),
+    );
+    should((await failure(session.request({ method: 'GET', path: '/x' }))).message).not.equal(OLDER_DAEMON_SENTENCE);
+  });
+});
+
+describe('a relay session carrying a body larger than one record', () => {
+  it('should send a large request body as ordered parts the daemon reassembles exactly', async () => {
+    const { session, socket, daemon } = await serving();
+    const body = `${'a'.repeat(MAX_PLAINTEXT_BYTES)}${'é'.repeat(MAX_PLAINTEXT_BYTES / 2)}tail`;
+    const answer = session.request({ method: 'PUT', path: '/v1/big', body });
+    await drain();
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    const parts: Record<string, unknown>[] = [];
+    for (const frame of socket.sent.slice(2)) parts.push((await daemon.receive(frame)) as Record<string, unknown>);
+    should(parts.length).be.above(2);
+    should(parts[0]).match({ t: 'req', id: 1, method: 'PUT', path: '/v1/big', more: true });
+    should(parts.slice(1, -1).every(part => part.t === 'req-more' && part.more === true)).be.true();
+    should(parts.at(-1)).match({ t: 'req-more', id: 1 });
+    should(parts.at(-1)).not.have.property('more');
+    should(parts.map(part => part.body).join('')).equal(body);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 204 }));
+    should((await answer).status).equal(204);
+  });
+
+  it('should send a request without a body as one record with no body field', async () => {
+    const { session, socket, daemon } = await serving();
+    const answer = session.request({ method: 'GET', path: '/v1/small' });
+    await drain();
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    const record = (await daemon.receive(socket.sent[2] as Uint8Array)) as Record<string, unknown>;
+    should(record).eql({ t: 'req', id: 1, method: 'GET', path: '/v1/small' });
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200 }));
+    await answer;
+  });
+
+  it('should refuse a request body over the session limit before sending any of it', async () => {
+    const { session, socket } = await serving();
+    const before = socket.sent.length;
+    const refusal = await failure(session.request({ method: 'POST', path: '/x', body: 'b'.repeat(MAX_TUNNEL_BODY_BYTES + 1) }));
+    should(refusal.code).equal(RELAY_CLOSE_CODES.frameTooLarge);
+    should(socket.sent.length).equal(before);
+    // Refused, not failed: the session is still good for the next request.
+    should(session.live()).be.true();
+  });
+
+  it('should refuse an answer part that arrives with no answer to continue, or a second start', async () => {
+    const stray = await serving();
+    const strayAnswer = failure(stray.session.request({ method: 'GET', path: '/a' }));
+    await stray.session.receiveBinary(await stray.daemon.record({ t: 'res-more', id: 1, body: 'x' }));
+    should((await strayAnswer).message).match(/answer part out of order/u);
+
+    const restarted = await serving();
+    const restartedAnswer = failure(restarted.session.request({ method: 'GET', path: '/a' }));
+    await restarted.session.receiveBinary(await restarted.daemon.record({ t: 'res', id: 1, status: 200, body: 'x', more: true }));
+    await restarted.session.receiveBinary(await restarted.daemon.record({ t: 'res', id: 1, status: 200, body: 'y' }));
+    should((await restartedAnswer).message).match(/answer part out of order/u);
+  });
+
+  it('should end the session rather than assemble an answer larger than one session carries', async () => {
+    const { session, daemon } = await serving();
+    const answer = failure(session.request({ method: 'GET', path: '/a' }));
+    const chunk = 'z'.repeat(MAX_PLAINTEXT_BYTES - 200);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200, body: chunk, more: true }));
+    let sent = chunk.length;
+    while (sent <= MAX_TUNNEL_BODY_BYTES) {
+      await session.receiveBinary(await daemon.record({ t: 'res-more', id: 1, body: chunk, more: true }));
+      sent += chunk.length;
+    }
+    should((await answer).code).equal(RELAY_CLOSE_CODES.frameTooLarge);
+  });
+
+  it('should refuse a record a request session has no reading for', async () => {
+    const { session, daemon } = await serving();
+    const answer = failure(session.request({ method: 'GET', path: '/a' }));
+    await session.receiveBinary(await daemon.record({ t: 'data', text: 'stray' }));
+    should((await answer).message).match(/cannot read/u);
   });
 });

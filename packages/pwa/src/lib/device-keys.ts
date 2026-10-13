@@ -37,6 +37,24 @@ export class DeviceKeyMissingError extends Error {
   }
 }
 
+/**
+ * This browser could not READ its key store at all — private browsing with storage blocked, a quota
+ * error, a profile the browser itself refuses. Not a missing key: the key may be there, unreachable.
+ *
+ * Final for the attempt, like a missing key. No carrier can do anything about this browser's storage,
+ * and walking on would report a storage fault as "the network did not answer" five times over.
+ */
+export class DeviceKeyUnreadableError extends Error {
+  constructor(cause: unknown) {
+    super(
+      `This browser could not read the key it pairs with (${cause instanceof Error ? cause.message : String(cause)}). ` +
+        'If this is a private window or site storage is blocked, open Ferretry in a normal window.',
+    );
+    this.name = 'DeviceKeyUnreadableError';
+    this.cause = cause;
+  }
+}
+
 /** Where device keys live. A port so the session code never knows it is IndexedDB. */
 export interface DeviceKeyStore {
   load(daemonId: string): Promise<CryptoKey | undefined>;

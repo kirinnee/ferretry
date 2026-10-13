@@ -66,7 +66,7 @@ describe('pin transport', () => {
       'https://a.example.test/v1/sessions/same%2Fsession/pins',
       'https://a.example.test/v1/sessions/same%2Fsession/pins',
     ]);
-    expect(new Headers(calls[0]?.init.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[0]?.init.headers).has('authorization')).toBe(false);
     expect(new Headers(calls[0]?.init.headers).get(FY_REQUEST_ID_HEADER)).toBeNull();
     expect(calls[0]?.init.credentials).toBe('include');
     expect(calls[1]?.init.method).toBe('POST');

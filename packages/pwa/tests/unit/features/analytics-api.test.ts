@@ -41,7 +41,7 @@ describe('analytics transport', () => {
       'https://a.example.test/v1/analytics',
       'https://a.example.test/v1/analytics?q=count+by+%28status%29',
     ]);
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
   });
 
   it('keeps daemon failures and malformed replies explicit', async () => {

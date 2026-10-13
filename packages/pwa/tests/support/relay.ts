@@ -13,6 +13,9 @@
  */
 
 import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/protocol';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import type { SessionDeviceClaim } from '../../src/lib/relay-session.ts';
+import { MemoryDeviceKeyStore } from './device-keys.ts';
 import {
   answerClientHandshake,
   type ChannelState,
@@ -21,6 +24,9 @@ import {
   type DaemonIdentity,
   decodeClientHello,
   decodeFrame,
+  deviceAuthMessage,
+  devicePairMessage,
+  deviceRenewMessage,
   encodeControlMessage,
   encodeFrame,
   encodeHandshakeMessage,
@@ -35,10 +41,12 @@ import {
   RELAY_LIMITS,
   RELAY_PROTOCOL_ID,
   sealRecord,
+  SESSION_PROTOCOL_ID,
   type SessionId,
   sessionIdFromBytes,
   toBase64Url,
   utf8Bytes,
+  verifyDeviceProof,
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { RelayCarrierSocket } from '../../src/lib/relay-carrier.ts';
@@ -61,6 +69,31 @@ export async function newDaemonIdentity(): Promise<DaemonIdentity> {
 }
 
 /** A fixed session identifier, so a transcript is reproducible across a run. */
+/**
+ * A device key minted exactly as a browser mints one at pairing — non-extractable, real Ed25519 — and
+ * the claim a session presents with it. The public half is returned so a scripted daemon can check the
+ * proof the session signed, which is the only way a fixture can tell a real proof from a plausible one.
+ */
+export async function testDevice(deviceId = 'fy_dev_test'): Promise<{
+  readonly claim: SessionDeviceClaim;
+  readonly publicKey: string;
+  readonly privateKey: CryptoKey;
+}> {
+  const minted = await relayCrypto.generateDeviceKey();
+  return {
+    claim: {
+      deviceId,
+      key: relayCrypto.deviceKeyHandle(minted.privateKey),
+      appSession: toBase64Url(new Uint8Array(16).fill(5)),
+    },
+    publicKey: toBase64Url(minted.publicKeySpki),
+    privateKey: minted.privateKey,
+  };
+}
+
+/** When a scripted acceptance says the access lease ends: far enough away that no suite reaches it. */
+export const LEASE_ENDS = '2099-01-01T00:00:00.000Z';
+
 export const testSessionId = (fill = 7): SessionId => {
   const id = sessionIdFromBytes(new Uint8Array(16).fill(fill));
   if (id === null) throw new Error('the session identifier width changed');
@@ -108,6 +141,7 @@ export const creditFrame = (sessionId: SessionId, payload: Uint8Array): Uint8Arr
  */
 export class ScriptedDaemon {
   #channel: ChannelState | undefined;
+  #transcript: Uint8Array | undefined;
 
   constructor(
     readonly identity: DaemonIdentity,
@@ -121,6 +155,7 @@ export class ScriptedDaemon {
     const answered = await answerClientHandshake(relayCrypto, this.identity, this.sessionId, decoded);
     if (!answered.ok) throw new Error(answered.reason);
     this.#channel = openChannel(this.sessionId, answered.keys, 'daemon');
+    this.#transcript = answered.keys.transcriptHash;
     return encodeFrame({
       kind: FRAME_KINDS.handshake,
       sessionId: this.sessionId,
@@ -145,7 +180,7 @@ export class ScriptedDaemon {
     const ephemeral = await relayCrypto.generateEphemeralKeyPair();
     const unsigned = {
       t: 'hs2',
-      protocol: RELAY_PROTOCOL_ID,
+      protocol: SESSION_PROTOCOL_ID,
       epk: toBase64Url(ephemeral.publicKey),
       nonce: toBase64Url(relayCrypto.randomBytes(NONCE_BYTES)),
       spki: toBase64Url(this.identity.publicKeySpki),
@@ -161,6 +196,30 @@ export class ScriptedDaemon {
       sequence: HANDSHAKE_FRAME_SEQUENCE,
       payload: encodeHandshakeMessage({ ...unsigned, sig: toBase64Url(signature) }),
     });
+  }
+
+  /**
+   * Whether a credential or renewal record carries a valid proof by `publicKey` over THIS session.
+   *
+   * The daemon's own check, run with the same message builders, so a client that signed the wrong
+   * transcript, the wrong kind or the wrong identifiers is caught here rather than only end to end.
+   */
+  async proves(record: Readonly<Record<string, unknown>>, publicKey: string, nonce?: string): Promise<boolean> {
+    const transcript = this.#transcript;
+    if (transcript === undefined) throw new Error('this daemon has not keyed a channel');
+    const proof = String(record.proof);
+    const message =
+      record.t === 'pair'
+        ? devicePairMessage(transcript, String(record.deviceKey))
+        : record.t === 'renewed'
+          ? deviceRenewMessage(transcript, String(nonce))
+          : deviceAuthMessage(
+              transcript,
+              record.t === 'stream' ? 'stream' : 'auth',
+              String(record.deviceId),
+              String(record.appSession),
+            );
+    return await verifyDeviceProof(relayCrypto, publicKey, proof, message);
   }
 
   /** Seal one tunnel message. `text` is sent verbatim so a malformed record is possible. */
@@ -200,18 +259,44 @@ export class ScriptedDaemon {
 export interface AutoDaemonAnswer {
   readonly status?: number;
   readonly body?: string;
-  /** Answer every request with §14's `oversize` refusal instead of a body. */
-  readonly oversize?: boolean;
+  /** Answer every request with this body split across `res` + `res-more` parts, in this order. */
+  readonly parts?: readonly string[];
+  /** When set, every credential record's proof is checked against this public key and refused if wrong. */
+  readonly devicePublicKey?: string;
   /** Refuse the device grant, the way a daemon refuses a credential it does not know. */
   readonly rejectDevice?: boolean;
   /** The redemption response a `pair` record is answered with, embedded verbatim as §14 requires. */
   readonly paired?: unknown;
   /** Answer a `pair` record with the one generic sealed refusal instead. */
   readonly pairRefused?: boolean;
+  /** Take a `pair` record and never answer it: a daemon that may have redeemed the code, unheard. */
+  readonly pairSilently?: boolean;
   /** Refuse a `stream` record with the status the direct upgrade would have carried. */
   readonly streamRefused?: { readonly status: number; readonly body: string };
   /** Records to push down an opened stream, in order. */
   readonly streamFrames?: readonly unknown[];
+  /**
+   * End the session instead of answering the request numbered `index` (from 0, across every socket
+   * this dial made) — a lease that ran out, or a carrier that died after the request left.
+   */
+  readonly closeOnRequest?: (index: number) => { readonly code: number; readonly reason: string } | undefined;
+  /** Answer each request by what it asked for, the way a real daemon's route table would. */
+  readonly respond?: (request: ScriptedRequest) => ScriptedAnswer | Promise<ScriptedAnswer>;
+}
+
+/** One `req` as a scripted daemon reads it. */
+export interface ScriptedRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly query?: readonly (readonly [string, string])[];
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+}
+
+/** What a scripted route answers: a status and a body, JSON-encoded unless it is already a string. */
+export interface ScriptedAnswer {
+  readonly status?: number;
+  readonly body?: unknown;
 }
 
 /**
@@ -244,16 +329,26 @@ export const autoDial = (
         }
         if (decoded.frame.kind !== FRAME_KINDS.data) return;
         const message = (await daemon.receive(bytes)) as { t: string; id?: number };
+        const refuseUnproven = async (): Promise<boolean> => {
+          if (answer.devicePublicKey === undefined) return false;
+          if (await daemon.proves(message, answer.devicePublicKey)) return false;
+          socket.onBinary?.(
+            controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.authRejected, reason: 'device proof refused' }),
+          );
+          return true;
+        };
         // §14's other two credential records. A daemon answers each with its own sealed outcome and
         // no other; answering them here is what lets a suite drive a pairing or a stream end to end
         // without the whole rendezvous, which the integration tier already proves.
         if (message.t === 'pair') {
           requests.push(message);
+          if (await refuseUnproven()) return;
+          if (answer.pairSilently === true) return;
           socket.onBinary?.(
             await daemon.record(
               answer.pairRefused === true
-                ? { t: 'pair-refused', protocol: RELAY_PROTOCOL_ID, reason: 'pairing_refused' }
-                : { t: 'paired', protocol: RELAY_PROTOCOL_ID, response: answer.paired },
+                ? { t: 'pair-refused', protocol: SESSION_PROTOCOL_ID, reason: 'pairing_refused' }
+                : { t: 'paired', protocol: SESSION_PROTOCOL_ID, response: answer.paired },
             ),
           );
           // THE CLOSE IS THE PROTOCOL'S, NOT THIS FIXTURE'S. It used to spell `4440` as a literal and
@@ -274,11 +369,12 @@ export const autoDial = (
         }
         if (message.t === 'stream') {
           requests.push(message);
+          if (await refuseUnproven()) return;
           socket.onBinary?.(
             await daemon.record(
               answer.streamRefused === undefined
-                ? { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }
-                : { t: 'stream-refused', protocol: RELAY_PROTOCOL_ID, ...answer.streamRefused },
+                ? { t: 'stream-opened', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS }
+                : { t: 'stream-refused', protocol: SESSION_PROTOCOL_ID, ...answer.streamRefused },
             ),
           );
           for (const frame of answer.streamFrames ?? []) socket.onBinary?.(await daemon.record(frame));
@@ -289,6 +385,7 @@ export const autoDial = (
           return;
         }
         if (message.t === 'auth') {
+          if (await refuseUnproven()) return;
           if (answer.rejectDevice === true) {
             socket.onBinary?.(
               controlFrame(sessionId, {
@@ -299,18 +396,51 @@ export const autoDial = (
             );
             return;
           }
-          socket.onBinary?.(await daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
+          socket.onBinary?.(
+            await daemon.record({ t: 'authenticated', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS }),
+          );
           return;
         }
+        const ended = answer.closeOnRequest?.(requests.length);
         requests.push(message);
+        if (ended !== undefined) {
+          socket.onBinary?.(controlFrame(sessionId, { t: 'closed', ...ended }));
+          return;
+        }
         const id = message.id ?? 1;
+        if (answer.respond !== undefined) {
+          const routed = await answer.respond(message as unknown as ScriptedRequest);
+          const body = typeof routed.body === 'string' ? routed.body : JSON.stringify(routed.body ?? {});
+          socket.onBinary?.(
+            await daemon.record({
+              t: 'res',
+              id,
+              status: routed.status ?? 200,
+              headers: { 'content-type': 'application/json' },
+              body,
+            }),
+          );
+          return;
+        }
         const status = answer.status ?? 200;
+        const parts = answer.parts;
+        if (parts !== undefined && parts.length > 1) {
+          const headers = { 'content-type': 'application/json' };
+          socket.onBinary?.(await daemon.record({ t: 'res', id, status, headers, body: parts[0], more: true }));
+          for (const [index, body] of parts.slice(1).entries()) {
+            const last = index === parts.length - 2;
+            socket.onBinary?.(await daemon.record({ t: 'res-more', id, body, ...(last ? {} : { more: true }) }));
+          }
+          return;
+        }
         socket.onBinary?.(
-          await daemon.record(
-            answer.oversize === true
-              ? { t: 'oversize', id, status, byteLength: 402_641 }
-              : { t: 'res', id, status, headers: { 'content-type': 'application/json' }, body: answer.body ?? '{}' },
-          ),
+          await daemon.record({
+            t: 'res',
+            id,
+            status,
+            headers: { 'content-type': 'application/json' },
+            body: answer.body ?? '{}',
+          }),
         );
       });
     };
@@ -330,3 +460,33 @@ export const autoDial = (
 export const settle = async (times = 40): Promise<void> => {
   for (let spin = 0; spin < times; spin += 1) await new Promise(resolve => setTimeout(resolve, 0));
 };
+
+/** One scripted daemon per address, chosen by the host the browser dialled; every other host refuses. */
+export const dialByHost = (routes: Readonly<Record<string, () => ScriptedSocket>>) => {
+  const dialled: string[] = [];
+  const dial = (url: string): ScriptedSocket => {
+    dialled.push(url);
+    const route = routes[new URL(url).hostname];
+    if (route !== undefined) return route();
+    const refused = new ScriptedSocket();
+    queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
+    return refused;
+  };
+  return { dial, dialled };
+};
+
+/** A daemon this browser is paired with: a real identity, and the device key held for it. */
+export const keyedDaemon = async (baseUrl: string, carriers?: Parameters<typeof daemonConnection>[0]['carriers']) => {
+  const identity = await newDaemonIdentity();
+  const device = await testDevice();
+  const deviceKeys = new MemoryDeviceKeyStore();
+  await deviceKeys.save(identity.daemonId, device.privateKey);
+  const daemon = daemonConnection({
+    daemonId: identity.daemonId,
+    baseUrl,
+    deviceId: 'fy_device_id_keyedDevice00000000001',
+    ...(carriers === undefined ? {} : { carriers }),
+  });
+  return { identity, daemon, deviceKeys };
+};
+

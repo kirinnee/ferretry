@@ -39,7 +39,7 @@ describe('fetchSessionSkills', () => {
     });
 
     expect(seen[0]?.url).toBe('https://a.example.test/v1/sessions/sess-1/skills');
-    expect(seen[0]?.headers.get('authorization')).toBe('Bearer token-a');
+    expect(seen[0]?.headers.has('authorization')).toBe(false);
     expect(catalog.harness).toBe('claude');
     expect(catalog.skills.map(item => item.name)).toEqual(['Floop', 'kteam', 'summary']);
   });

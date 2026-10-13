@@ -69,6 +69,10 @@ export class DaemonEventTransport implements IFyEventTransport {
   }): Promise<void> {
     if (input.signal?.aborted === true) return;
     const target = eventStreamTarget(this.daemon, input.url);
+    // A frame can arrive before the session promise below exists, so a damaged one is remembered here
+    // and the stream is refused the moment there is somebody to refuse it to.
+    let damaged: Error | undefined;
+    let refuse: ((reason: Error) => void) | undefined;
     const session = await this.openStream(this.daemon, {
       path: target.path,
       ...(target.query.length === 0 ? {} : { query: target.query }),
@@ -76,29 +80,46 @@ export class DaemonEventTransport implements IFyEventTransport {
         // The event feed is a text stream: §14 gives `text` records "exactly one complete text
         // frame", which is exactly one event. A `bytes` record on this route is the daemon speaking a
         // shape this stream does not have, and parsing it as text would be inventing the message.
-        if (frame.kind === 'text') input.onMessage(JSON.parse(frame.text));
+        if (frame.kind !== 'text' || damaged !== undefined) return;
+        let value: unknown;
+        try {
+          value = JSON.parse(frame.text);
+        } catch {
+          damaged = new Error('daemon event stream sent a frame that is not JSON');
+          refuse?.(damaged);
+          return;
+        }
+        input.onMessage(value);
       },
     });
     return await new Promise<void>((resolve, reject) => {
       let settled = false;
-      const cancel = (): void => {
-        if (settled) return;
+      const finish = (): boolean => {
+        if (settled) return false;
         settled = true;
         input.signal?.removeEventListener('abort', cancel);
+        return true;
+      };
+      const cancel = (): void => {
+        if (!finish()) return;
         session.closeStream(1000, 'the viewer left this stream');
         resolve();
       };
+      refuse = reason => {
+        if (!finish()) return;
+        session.closeStream(1003, 'the viewer could not read this stream');
+        reject(reason);
+      };
       session.onStreamClosed(closed => {
-        if (settled) return;
-        settled = true;
-        input.signal?.removeEventListener('abort', cancel);
+        if (!finish()) return;
         // `1000` is the daemon agreeing the stream is over; anything else is a reason a viewer is
         // owed, and it is the SEALED code that carries it — never the session's own close.
         if (closed.code === 1000) resolve();
         else reject(new Error(`daemon event stream closed: ${closed.code} ${closed.reason}`));
       });
       input.signal?.addEventListener('abort', cancel, { once: true });
-      if (input.signal?.aborted === true) cancel();
+      if (damaged !== undefined) refuse(damaged);
+      else if (input.signal?.aborted === true) cancel();
     });
   }
 }

@@ -84,7 +84,7 @@ describe('learning transport', () => {
       'https://a.example.test/v1/learning/proposals/proposal%2Fa/patch',
       'https://a.example.test/v1/learning/run',
     ]);
-    expect(new Headers(calls[2]?.init?.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[2]?.init?.headers).has('authorization')).toBe(false);
     expect(JSON.parse(String(calls[4]?.init?.body))).toEqual({ spawn: true });
   });
 

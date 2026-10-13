@@ -22,7 +22,7 @@ describe('loading an attachment blob', () => {
     const seen: string[] = [];
     const blob = await loadAttachmentBlob(daemon, scope, 'a 1', undefined, async (url, init) => {
       seen.push(String(url));
-      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer files-token');
+      expect(new Headers(init?.headers).has('authorization')).toBe(false);
       return new Response('bytes', { headers: { 'content-type': 'image/png' } });
     });
     expect(await blob.text()).toBe('bytes');

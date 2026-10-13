@@ -71,7 +71,7 @@ describe('attention transport', () => {
       'https://a.example.test/v1/sessions/same%2Fsession/attention',
       'https://a.example.test/v1/sessions/same%2Fsession/attention',
     ]);
-    should(new Headers(calls[2]?.init.headers).get('authorization')).equal('Bearer token-a');
+    should(new Headers(calls[2]?.init.headers).has('authorization')).be.false();
     should(new Headers(calls[2]?.init.headers).get('content-type')).equal('application/json');
     should(new Headers(calls[2]?.init.headers).get('x-fy-request-id')).not.be.empty();
     should(calls[2]?.init.method).equal('POST');

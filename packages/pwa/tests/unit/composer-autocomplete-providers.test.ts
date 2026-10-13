@@ -115,8 +115,8 @@ describe('composer skills provider', () => {
       'https://a.example.test/v1/sessions/same%2Fsession/skills',
       'https://b.example.test/v1/sessions/same%2Fsession/skills',
     ]);
-    expect(new Headers(calls[0]?.init.headers).get('authorization')).toBe('Bearer token-a');
-    expect(new Headers(calls[1]?.init.headers).get('authorization')).toBe('Bearer token-b');
+    expect(new Headers(calls[0]?.init.headers).has('authorization')).toBe(false);
+    expect(new Headers(calls[1]?.init.headers).has('authorization')).toBe(false);
     expect(calls.every(call => call.init.credentials === 'include')).toBe(true);
     expect(resultA.contextLabel).toBe('Codex · inserts $name');
     expect(
@@ -254,7 +254,7 @@ describe('composer files provider', () => {
     const ranged = await provider.candidates(context('@', 'src/app.ts:12-20'));
 
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs?path=src');
-    expect(new Headers(calls[0]?.init.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[0]?.init.headers).has('authorization')).toBe(false);
     expect(calls[0]?.init.credentials).toBe('include');
     expect(ranged.filterQuery).toBe('app.ts');
     expect(ranged.candidates[0]).toMatchObject({

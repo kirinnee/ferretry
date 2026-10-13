@@ -83,7 +83,7 @@ describe('requestRemoteEnhancement', () => {
 
     const call = calls[0] as Call;
     should(call.url).equal(`https://alpha.example.test${STT_ENHANCE_PATH}`);
-    should(new Headers(call.init.headers).get('authorization')).equal('Bearer token-alpha');
+    should(new Headers(call.init.headers).has('authorization')).be.false();
     should(new Headers(call.init.headers).get('content-type')).equal('application/json');
   });
 
@@ -92,7 +92,7 @@ describe('requestRemoteEnhancement', () => {
     await requestRemoteEnhancement(beta, ask({ fetchImpl }));
 
     should(calls[0]?.url).startWith('https://beta.example.test');
-    should(new Headers((calls[0] as Call).init.headers).get('authorization')).equal('Bearer token-beta');
+    should(new Headers((calls[0] as Call).init.headers).has('authorization')).be.false();
   });
 
   it('sends the vocabulary but never a credential', async () => {

@@ -96,7 +96,7 @@ describe('daemon-scoped runtime model catalog queries', () => {
 
     should(result.choices[0]?.label).equal('A');
     should(requested?.url).equal('https://a.example.test/v1/sessions/same%2Fsession/runtime-models');
-    should(new Headers(requested?.init.headers).get('authorization')).equal('Bearer token-a');
+    should(new Headers(requested?.init.headers).has('authorization')).be.false();
     should(requested?.init.credentials).equal('include');
   });
 

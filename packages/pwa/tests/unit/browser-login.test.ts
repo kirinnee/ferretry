@@ -162,7 +162,7 @@ describe('browserLoginPort', () => {
 
     const headers = new Headers(stop?.init.headers);
     should(headers.get('content-type')).equal('application/json');
-    should(headers.get('authorization')).equal('Bearer token-a');
+    should(headers.has('authorization')).be.false();
     // Authentication and the mutation request id stay protocol-owned: no
     // ambient token, and none of kteam's hand-rolled `x-kteam-request-id`.
     should(headers.get('x-fy-request-id')).not.be.empty();

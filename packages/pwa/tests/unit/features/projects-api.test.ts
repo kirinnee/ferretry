@@ -45,7 +45,7 @@ describe('registerProject', () => {
 
     expect(seen[0]?.url).toBe(`https://a.example.test${PROJECT_REGISTRY_PATH}`);
     expect(seen[0]?.method).toBe('POST');
-    expect(seen[0]?.headers.get('authorization')).toBe('Bearer token-a');
+    expect(seen[0]?.headers.has('authorization')).toBe(false);
     expect(seen[0]?.headers.get('content-type')).toBe('application/json');
     expect(seen[0]?.body).toEqual({ kind: 'existing-folder', path: '/work/ferretry' });
     expect(project.id).toBe(record.id);

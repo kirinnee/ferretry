@@ -20,8 +20,9 @@ export type DaemonApiClientOptions = Omit<FyClientOptions, 'baseUrl' | 'token' |
  * Browser transport for a paired daemon. It refuses a typed-client URL that
  * leaves the paired origin.
  *
- * IT DROPS THE TYPED CLIENT'S `authorization` HEADER, and that is the whole of
- * device authentication in this transport: there is none to do. The typed client
+ * IT NEVER SEES THE TYPED CLIENT'S `authorization` HEADER — `daemonApiClient`
+ * strips it before any transport is called — and that is the whole of device
+ * authentication here: there is none to do. The typed client
  * is shared with the command line, which really does send the host's token; a
  * browser holds no bearer value at all, and its requests are carried by a session
  * the device key opened (`relay-carrier.ts`). So the header the shared client
@@ -43,11 +44,23 @@ export class DaemonHttpTransport implements IFyHttpTransport {
     // transport as its receiver. The default above also keeps Window.fetch
     // bound to its own realm.
     const fetcher = this.#fetch;
-    const headers = new Headers(init.headers);
-    headers.delete('authorization');
-    return fetcher(target.toString(), { ...init, headers, credentials: 'include' });
+    return fetcher(target.toString(), { ...init, credentials: 'include' });
   }
 }
+
+/**
+ * Whatever transport a client is given, it never sees the placeholder header.
+ *
+ * Wrapped around the INJECTED transport too, not only the default: a placeholder that reached any
+ * transport would be one refactor away from reaching a wire.
+ */
+const withoutPlaceholder = (transport: IFyHttpTransport): IFyHttpTransport => ({
+  send: (url, init) => {
+    const headers = new Headers(init.headers);
+    headers.delete('authorization');
+    return transport.send(url, { ...init, headers });
+  },
+});
 
 /**
  * Connects the shared typed protocol client to exactly one runtime-paired
@@ -60,5 +73,5 @@ export const daemonApiClient = (daemon: DaemonConnection, options: DaemonApiClie
     // The shared client requires SOME token; a browser has none, and the transport drops the header.
     token: SESSION_CARRIED,
     version: PWA_PROTOCOL_VERSION,
-    transport: options.transport ?? new DaemonHttpTransport(daemon),
+    transport: withoutPlaceholder(options.transport ?? new DaemonHttpTransport(daemon)),
   });

@@ -778,6 +778,9 @@ export class RelayClientSession {
       if (index === 0) this.#sendRecord({ ...head, t: 'req', id, ...(part === '' && parts.length === 1 && message.body === undefined ? {} : { body: part }), ...more });
       else this.#sendRecord({ t: 'req-more', id, body: part, ...more }, true);
     });
+    // Watched from here on: the session can end while the outbox drains, and a rejection nobody is
+    // watching yet is an unhandled one — the caller still receives it through the `await` below.
+    answer.catch(() => undefined);
     await this.#outbox;
     return await answer;
   }
@@ -1068,10 +1071,9 @@ export class RelayClientSession {
   async #renew(nonce: string): Promise<void> {
     const transcript = this.#transcript;
     const mode = this.deps.mode;
-    if (transcript === undefined || mode.kind === 'pair') {
-      this.#fail(RELAY_CLOSE_CODES.protocolError, 'the daemon asked a pairing session to renew a lease it never had');
-      return;
-    }
+    // Unreachable rather than refused: only a serving or streaming session reads a `renew`, and both
+    // are keyed and hold a device. The guard is the type system's, so nothing below assumes it.
+    if (transcript === undefined || mode.kind === 'pair') return;
     const proof = await signDeviceProof(this.deps.crypto, mode.device.key, deviceRenewMessage(transcript, nonce));
     if (this.#done()) return;
     this.#sendRecord({ t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });

@@ -63,7 +63,7 @@ import {
   sameDaemonCarrier,
   sameDaemonConnection,
 } from './daemon-connection.ts';
-import { DeviceKeyMissingError } from './device-keys.ts';
+import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -769,6 +769,8 @@ export class DaemonCarrierRouter {
         if (
           reason instanceof RelayStaleEntryError ||
           reason instanceof DeviceKeyMissingError ||
+          reason instanceof DeviceKeyUnreadableError ||
+          reason instanceof DaemonOutdatedError ||
           reason instanceof RelayStreamRefusedError ||
           (reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.rendezvousBusy)
         )
@@ -854,8 +856,9 @@ export class DaemonCarrierRouter {
     if (chosen?.ok === true) {
       try {
         return await this.#over(entry, chosen.method, url, init);
-      } catch (reason) {
-        if (reason instanceof RelayAnswerError) throw reason.cause;
+      } catch (thrown) {
+        if (thrown instanceof RelayAnswerError) throw thrown.cause;
+        const reason = thrown instanceof RelayUnsentError ? thrown.cause : thrown;
         // The remembered carrier stopped carrying. Forget it — the next request walks
         // the set again — and report this failure rather than re-sending a request
         // whose fate on the daemon is unknown.
@@ -881,19 +884,28 @@ export class DaemonCarrierRouter {
         // own protocol come to disagree about what "reachable" means.
         this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: response.status })]);
         return response;
-      } catch (reason) {
-        if (reason instanceof RelayAnswerError) throw reason.cause;
+      } catch (thrown) {
+        if (thrown instanceof RelayAnswerError) throw thrown.cause;
+        // A session that never opened sent nothing, so even a write may try the next carrier.
+        const unsent = thrown instanceof RelayUnsentError;
+        const reason = unsent ? thrown.cause : thrown;
         // A STALE ENTRY IS NOT A TRANSPORT FAILURE AND MUST NOT ADVANCE THE WALK. It says nothing about
         // whether this address works; it says this walk no longer describes a pairing that exists, so
         // every remaining candidate would be dialled with a credential and a set that were replaced.
         if (reason instanceof RelayStaleEntryError) throw reason;
-        if (reason instanceof DeviceKeyMissingError || reason instanceof DaemonOutdatedError) throw reason;
+        if (
+          reason instanceof DeviceKeyMissingError ||
+          reason instanceof DeviceKeyUnreadableError ||
+          reason instanceof DaemonOutdatedError
+        )
+          throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
         if (method.kind === 'direct') await this.#refuseIfOutdated(method);
-        // A direct fetch rejection can follow receipt of a POST/PUT/etc. Record its
-        // failed probe for the same disclosure a completed walk produces, but do not
-        // send that possibly-applied request to the next carrier.
-        if (!replaySafe(init)) {
+        // A session that died AFTER the request left can follow receipt of a POST/PUT/etc. Record
+        // its failed probe for the same disclosure a completed walk produces, but do not send that
+        // possibly-applied request to the next carrier. One whose session never opened was never
+        // sent anywhere, and walking on with it is the whole point of a fallback.
+        if (!unsent && !replaySafe(init)) {
           this.#decide(entry, probes);
           throw reason;
         }
@@ -1028,7 +1040,9 @@ export class DaemonCarrierRouter {
   }
 
   async #over(entry: CarrierEntry, method: ConnectionMethod, url: string, init: RequestInit): Promise<Response> {
-    const session = await this.#session(entry, method);
+    const session = await this.#session(entry, method).catch((reason: unknown) => {
+      throw new RelayUnsentError(reason);
+    });
     try {
       return relayResponse(await session.request(relayTunnelRequest(url, init)));
     } catch (reason) {
@@ -1126,7 +1140,9 @@ export class DaemonCarrierRouter {
    * data, must stop opening sessions the moment it is gone.
    */
   async #claim(entry: CarrierEntry): Promise<SessionDeviceClaim> {
-    const key = await this.#deviceKey(entry.connection.daemonId);
+    const key = await this.#deviceKey(entry.connection.daemonId).catch((reason: unknown) => {
+      throw new DeviceKeyUnreadableError(reason);
+    });
     if (key === undefined) throw new DeviceKeyMissingError();
     return { deviceId: entry.connection.deviceId, key, appSession: this.#appSession };
   }
@@ -1200,6 +1216,14 @@ export class DaemonCarrierRouter {
 
   #announce(): void {
     for (const listener of this.#listeners) listener();
+  }
+}
+
+/** Marks a failure to OPEN a session: nothing of the request left this browser, whatever it was. */
+class RelayUnsentError extends Error {
+  constructor(override readonly cause: unknown) {
+    super('no session opened to carry this request');
+    this.name = 'RelayUnsentError';
   }
 }
 

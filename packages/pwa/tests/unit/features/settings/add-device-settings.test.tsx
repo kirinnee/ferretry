@@ -93,6 +93,7 @@ const device = (overrides: Partial<PairedDevice> = {}): PairedDevice => ({
   platform: 'browser',
   createdAt: '2026-08-01T09:00:00.000Z',
   lastSeenAt: '2026-08-03T11:00:00.000Z',
+  idleExpiresAt: '2026-12-31T00:00:00.000Z',
   ...overrides,
 });
 
