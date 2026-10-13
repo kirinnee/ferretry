@@ -228,7 +228,10 @@ export class HostHarnessScanner {
       },
     );
     if (resolution.store !== 'host' || 'unavailable' in resolution) {
-      return { state: 'not-shareable', reason: 'unavailable' in resolution ? resolution.unavailable : 'not a host login' };
+      return {
+        state: 'not-shareable',
+        reason: 'unavailable' in resolution ? resolution.unavailable : 'not a host login',
+      };
     }
     let material: CredentialMaterial;
     try {

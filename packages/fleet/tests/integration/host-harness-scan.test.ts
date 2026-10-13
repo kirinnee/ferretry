@@ -122,7 +122,10 @@ describe('HostHarnessScanner — a set-up machine', () => {
 
     // The two "review" folders differ (one has a nested file and a link), so their digests do too.
     should(claude?.skills[0]?.digest).not.equal(codex?.skills[0]?.digest);
-    const plan = planImport([claude, codex].filter(scan => scan !== undefined), { digest: text => text });
+    const plan = planImport(
+      [claude, codex].filter(scan => scan !== undefined),
+      { digest: text => text },
+    );
     should(plan.preview.instructionsIdentical).be.true();
   });
 
@@ -230,7 +233,11 @@ describe('HostHarnessScanner — where the setup lives', () => {
     await put(path.join(user, '.claude.json'), '{}');
     await chmod(path.join(user, '.claude.json'), 0o000);
     const [claude] = await scanner(user).scan();
-    should(claude?.instructions).deepEqual({ kind: 'too-large', source: path.join(user, '.claude/CLAUDE.md'), bytes: 5000 });
+    should(claude?.instructions).deepEqual({
+      kind: 'too-large',
+      source: path.join(user, '.claude/CLAUDE.md'),
+      bytes: 5000,
+    });
     should(claude?.settings).deepEqual({
       kind: 'unreadable',
       source: path.join(user, '.claude/settings.json'),
@@ -252,7 +259,8 @@ describe('HostHarnessScanner — where the setup lives', () => {
     await chmod(path.join(user, '.claude/skills'), 0o700);
     if (process.getuid?.() !== 0) should(claude?.problems[0]).match(/^Your skills folder .* could not be read/);
     should(codex?.problems).containEql('Skill "big" has more than 1 files, so it was not imported.');
-    if (process.getuid?.() !== 0) should(codex?.problems.some(problem => problem.startsWith('Skill "locked"'))).be.true();
+    if (process.getuid?.() !== 0)
+      should(codex?.problems.some(problem => problem.startsWith('Skill "locked"'))).be.true();
   });
 
   it('should treat a skills path that is a file as no skills', async () => {

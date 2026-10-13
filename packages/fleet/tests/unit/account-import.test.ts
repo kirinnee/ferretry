@@ -179,7 +179,10 @@ describe('planImport — a machine with both harnesses set up', () => {
     });
     const codexFile = plan.files.find(file => file.path === 'components/settings/codex-settings.toml');
     should(codexFile?.kind === 'write' && codexFile.content).match(/model = "gpt-5.6"/);
-    should(codexFile?.kind === 'write' && /mcp_servers|cli_auth_credentials_store|sqlite_home|OPENAI/.test(codexFile.content)).be.false();
+    should(
+      codexFile?.kind === 'write' &&
+        /mcp_servers|cli_auth_credentials_store|sqlite_home|OPENAI/.test(codexFile.content),
+    ).be.false();
     should(codexFile?.kind === 'write' && codexFile.content).match(/inherit = "all"/);
     should(component(plan, 'hooks', 'claude-hooks')).deepEqual({
       harness: 'claude',
@@ -208,7 +211,9 @@ describe('planImport — a machine with both harnesses set up', () => {
     should(plan.warnings['mcp/notes']).deepEqual([
       'Command not found: uvx. Install it on this machine; the server starts working once it is there.',
     ]);
-    should(plan.warnings['mcp/docs']).deepEqual(['Not imported from your docs server: headers. Add it again yourself.']);
+    should(plan.warnings['mcp/docs']).deepEqual([
+      'Not imported from your docs server: headers. Add it again yourself.',
+    ]);
     should(plan.warnings['mcp/linear']).deepEqual([
       'Not imported from your linear server: startup_timeout_sec. Add it again yourself.',
     ]);
@@ -218,7 +223,11 @@ describe('planImport — a machine with both harnesses set up', () => {
     should(component(plan, 'skills', 'skills')).deepEqual({ items: ['review'] });
     should(component(plan, 'skills', 'claude-skills')).deepEqual({ items: ['deploy', 'solo'], harness: 'claude' });
     should(component(plan, 'skills', 'codex-skills')).deepEqual({ items: ['deploy-codex'], harness: 'codex' });
-    should(plan.files).containEql({ kind: 'copy-directory', path: 'skills/deploy-codex', from: '/h/.codex/skills/deploy' });
+    should(plan.files).containEql({
+      kind: 'copy-directory',
+      path: 'skills/deploy-codex',
+      from: '/h/.codex/skills/deploy',
+    });
     should(plan.notes.map(note => note.text)).containEql(
       'Your Codex skill "deploy" differs from the Claude Code one, so it was kept separately as "deploy-codex".',
     );
@@ -274,10 +283,7 @@ describe('planImport — instructions and harness choices', () => {
   it('should keep different CLAUDE.md and AGENTS.md as two harness-only components (E9)', () => {
     // Act
     const plan = planImport(
-      [
-        claude({ instructions: text('/c', 'claude words') }),
-        codex({ instructions: text('/x', 'codex words') }),
-      ],
+      [claude({ instructions: text('/c', 'claude words') }), codex({ instructions: text('/x', 'codex words') })],
       { digest },
     );
 
@@ -291,7 +297,9 @@ describe('planImport — instructions and harness choices', () => {
       harness: 'codex',
     });
     should(plan.preview.instructionsIdentical).be.false();
-    should(plan.notes.map(note => note.text)).containEql('Instructions: different from your CLAUDE.md · kept separately.');
+    should(plan.notes.map(note => note.text)).containEql(
+      'Instructions: different from your CLAUDE.md · kept separately.',
+    );
   });
 
   it('should narrow the one instructions document found when both harnesses are imported', () => {
@@ -309,7 +317,10 @@ describe('planImport — instructions and harness choices', () => {
 
     // Act
     const plan = planImport(
-      [claude({ instructions: text('/c', 'claude words'), skills: [{ item: 'a', source: '/a', digest: 'a' }] }), uninstalled],
+      [
+        claude({ instructions: text('/c', 'claude words'), skills: [{ item: 'a', source: '/a', digest: 'a' }] }),
+        uninstalled,
+      ],
       { digest },
     );
 
@@ -382,10 +393,12 @@ describe('planImport — logins (E4, E6, G5)', () => {
 
     // Assert
     should(plan.credentials).deepEqual({ 'codex-you': { harness: 'codex', store: 'ferretry' } });
-    should(plan.notes[0]?.text).equal("Your Codex login can't be shared in place (keyring), so this login needs its own sign-in.");
-    should(
-      planImport([codex({ login: { state: 'not-shareable' } })], { digest }).notes[0]?.text,
-    ).match(/\(it is not kept in a file\)/);
+    should(plan.notes[0]?.text).equal(
+      "Your Codex login can't be shared in place (keyring), so this login needs its own sign-in.",
+    );
+    should(planImport([codex({ login: { state: 'not-shareable' } })], { digest }).notes[0]?.text).match(
+      /\(it is not kept in a file\)/,
+    );
   });
 });
 
@@ -407,10 +420,7 @@ describe('planImport — nothing found (E5)', () => {
   });
 
   it('should treat an empty instructions file or settings document as nothing', () => {
-    const plan = planImport(
-      [claude({ instructions: text('/c', '  \n'), settings: text('/s', '   ') })],
-      { digest },
-    );
+    const plan = planImport([claude({ instructions: text('/c', '  \n'), settings: text('/s', '   ') })], { digest });
     should(Object.keys(plan.profiles)).deepEqual(['starter']);
   });
 });
@@ -510,7 +520,9 @@ describe('planImport — documents it could not use', () => {
     // Assert
     should(plan.preview.harnesses[0]?.mcpServers).deepEqual(['withenv']);
     should(component(plan, 'mcp', 'withenv')).deepEqual({ command: 'run' });
-    should(plan.warnings['mcp/withenv']).deepEqual(['Left out: withenv.env.bad-name (not an environment variable name).']);
+    should(plan.warnings['mcp/withenv']).deepEqual([
+      'Left out: withenv.env.bad-name (not an environment variable name).',
+    ]);
     should(plan.preview.harnesses[0]?.problems).deepEqual([
       'MCP server "nothing" names neither a command nor a url, so it was not imported.',
       'MCP server "badurl" has a url that is not a web address, so it was not imported.',
@@ -526,10 +538,9 @@ describe('planImport — documents it could not use', () => {
   });
 
   it('should drop an empty shell environment policy once its set moves out', () => {
-    const plan = planImport(
-      [codex({ settings: text('/t', `[shell_environment_policy.set]\nLOG = "1"\n`) })],
-      { digest },
-    );
+    const plan = planImport([codex({ settings: text('/t', `[shell_environment_policy.set]\nLOG = "1"\n`) })], {
+      digest,
+    });
     should(component(plan, 'settings', 'codex-settings')).deepEqual({ harness: 'codex', env: { LOG: '1' } });
   });
 });
@@ -573,9 +584,7 @@ describe('planImport — Import again (O6)', () => {
     // Assert
     should(again.components).be.empty();
     should(again.updates.map(update => update.reference)).deepEqual(['instructions/main']);
-    should(mergeImport(existing, again).components.instructions.main).deepEqual(
-      existing.components.instructions.main,
-    );
+    should(mergeImport(existing, again).components.instructions.main).deepEqual(existing.components.instructions.main);
     const accepted = mergeImportRecord(again, ['instructions/main']);
     should(accepted.components['instructions/main']?.digest).equal(again.updates[0]?.digest);
     should(mergeImportRecord(again).components['instructions/main']?.digest).equal(
@@ -597,7 +606,9 @@ describe('planImport — Import again (O6)', () => {
     should(update?.secrets.map(secret => secret.name)).deepEqual(['ANTHROPIC_API_KEY_2']);
     should(again.secrets).be.empty();
     const merged = mergeImport(existing, again, ['settings/claude-settings']);
-    should(merged.components.settings['claude-settings']?.env?.ANTHROPIC_API_KEY).equal('${secret:ANTHROPIC_API_KEY_2}');
+    should(merged.components.settings['claude-settings']?.env?.ANTHROPIC_API_KEY).equal(
+      '${secret:ANTHROPIC_API_KEY_2}',
+    );
   });
 
   it('should add what is new and extend the profile the first import made', () => {
@@ -651,7 +662,10 @@ describe('planImport — Import again (O6)', () => {
 
   it('should give a credential a free id when the usual one is taken by another login', () => {
     // Arrange
-    const existingModel = mergeImport(undefined, planImport([codex({ login: { state: 'not-shareable' } })], { digest }));
+    const existingModel = mergeImport(
+      undefined,
+      planImport([codex({ login: { state: 'not-shareable' } })], { digest }),
+    );
 
     // Act
     const plan = planImport([codex({ login: { state: 'not-shareable' } })], { digest, existing: existingModel });
@@ -666,11 +680,14 @@ describe('planImport — Import again (O6)', () => {
     const model = mergeImport(undefined, base);
 
     // Act
-    const again = planImport([claude({ instructions: text('/c', 'x'), skills: [{ item: 'n', source: '/n', digest: 'n' }] })], {
-      digest,
-      existing: model,
-      record: base.record,
-    });
+    const again = planImport(
+      [claude({ instructions: text('/c', 'x'), skills: [{ item: 'n', source: '/n', digest: 'n' }] })],
+      {
+        digest,
+        existing: model,
+        record: base.record,
+      },
+    );
 
     // Assert
     should(again.profiles).deepEqual({
@@ -687,7 +704,11 @@ describe('importPreview', () => {
       ['github', 'notes', 'docs'],
       ['github', 'linear'],
     ]);
-    should(preview.harnesses[0]?.instructions).deepEqual({ name: 'CLAUDE.md', source: '/h/.claude/CLAUDE.md', bytes: 10 });
+    should(preview.harnesses[0]?.instructions).deepEqual({
+      name: 'CLAUDE.md',
+      source: '/h/.claude/CLAUDE.md',
+      bytes: 10,
+    });
   });
 });
 
@@ -738,7 +759,14 @@ describe('scannedMcpServers', () => {
   it('should drop the env of a url server and the args of an empty list', () => {
     should(
       scannedMcpServers(
-        claude({ mcp: text('/m', JSON.stringify({ mcpServers: { a: { url: 'https://x.test', env: { A: 'b' } }, b: { command: 'c', args: [] } } })) }),
+        claude({
+          mcp: text(
+            '/m',
+            JSON.stringify({
+              mcpServers: { a: { url: 'https://x.test', env: { A: 'b' } }, b: { command: 'c', args: [] } },
+            }),
+          ),
+        }),
       ),
     ).deepEqual([
       { name: 'a', url: 'https://x.test', ignored: [] },

@@ -328,7 +328,10 @@ export function looksSecret(name: string, value: string): boolean {
   if (value.length < MIN_SECRET_VALUE_LENGTH || INDIRECT_VALUE.test(value)) return false;
   if (secretReferencesIn(value).length > 0) return false;
   if (SECRET_VALUE_PREFIX.test(value)) return true;
-  const words = name.toUpperCase().split(/[^A-Z0-9]+/u).filter(Boolean);
+  const words = name
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/u)
+    .filter(Boolean);
   if (words.some(word => SECRET_NAME_WORDS.has(word))) return true;
   return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
 }
@@ -396,7 +399,9 @@ function importEnv(
     }
     if (looksSecret(variable, value)) {
       result.secretKeys.push(`${keyPrefix}${variable}`);
-      result.env[variable] = secretReference(names.claim(variable, value, `${from} · ${keyPrefix}${variable}`, secrets));
+      result.env[variable] = secretReference(
+        names.claim(variable, value, `${from} · ${keyPrefix}${variable}`, secrets),
+      );
       continue;
     }
     if (/\$\{secret:/u.test(value) && secretReferencesIn(value).length === 0) {
@@ -660,7 +665,9 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
   const mcp = scannedMcpServers(scan).flatMap(server => {
     const warnings: string[] = [];
     if (server.ignored.length > 0) {
-      warnings.push(`Not imported from your ${server.name} server: ${server.ignored.join(', ')}. Add it again yourself.`);
+      warnings.push(
+        `Not imported from your ${server.name} server: ${server.ignored.join(', ')}. Add it again yourself.`,
+      );
     }
     if (server.command === undefined && server.url === undefined) {
       problems.push(`MCP server "${server.name}" names neither a command nor a url, so it was not imported.`);
@@ -711,7 +718,11 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
     secretKeys,
     problems,
     found:
-      instructions !== undefined || settings !== undefined || hooks !== undefined || mcp.length > 0 || skills.length > 0,
+      instructions !== undefined ||
+      settings !== undefined ||
+      hooks !== undefined ||
+      mcp.length > 0 ||
+      skills.length > 0,
   };
 }
 
@@ -781,7 +792,8 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
   const notes: ImportNote[] = [];
   const byName = new Map<string, { harness: HarnessKind; server: HarnessHarvest['mcp'][number] }[]>();
   for (const entry of harvests) {
-    for (const server of entry.mcp) byName.set(server.name, [...(byName.get(server.name) ?? []), { harness: entry.harness, server }]);
+    for (const server of entry.mcp)
+      byName.set(server.name, [...(byName.get(server.name) ?? []), { harness: entry.harness, server }]);
   }
   const both = harvests.length > 1;
   const candidates: Candidate[] = [];
@@ -829,7 +841,8 @@ function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Ca
   };
   const holders = new Map<string, { harness: HarnessKind; skill: HostSkill }[]>();
   for (const entry of harvests) {
-    for (const skill of entry.skills) holders.set(skill.item, [...(holders.get(skill.item) ?? []), { harness: entry.harness, skill }]);
+    for (const skill of entry.skills)
+      holders.set(skill.item, [...(holders.get(skill.item) ?? []), { harness: entry.harness, skill }]);
   }
   const ownOf = (harness: HarnessKind): string[] => {
     const list = own.get(harness) ?? [];
@@ -1004,7 +1017,9 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const names = new SecretNames(options.existingSecrets ?? []);
   const secrets: ImportedSecret[] = [];
   const imported = importedHarnesses(scans, options.include);
-  const harvests = imported.map(harness => harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets));
+  const harvests = imported.map(harness =>
+    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets),
+  );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
 
   const instructions = instructionsCandidates(harvests);
@@ -1091,7 +1106,10 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
           );
     const value = component.value as { file?: string };
     if (free !== name && value.file !== undefined) {
-      (component as { value: { file?: string } }).value = { ...value, file: value.file.replace(`/${name}.`, `/${free}.`) };
+      (component as { value: { file?: string } }).value = {
+        ...value,
+        file: value.file.replace(`/${name}.`, `/${free}.`),
+      };
     }
     components.push(component);
     files.push(...renamedFiles);
@@ -1123,7 +1141,10 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     profiles[profileName] = { layers: ordered(layers) };
     if (!anyFound) {
       for (const harness of imported) {
-        notes.push({ harness, text: 'Nothing found. A plain Starter profile with only a model set. You can add to it later.' });
+        notes.push({
+          harness,
+          text: 'Nothing found. A plain Starter profile with only a model set. You can add to it later.',
+        });
       }
     }
   }
@@ -1142,11 +1163,13 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
           )?.[0]
         : undefined;
     const credentialId =
-      reuse ??
-      freeName(harnessNamed(harness, 'you'), candidate => existing?.credentials[candidate] !== undefined);
+      reuse ?? freeName(harnessNamed(harness, 'you'), candidate => existing?.credentials[candidate] !== undefined);
     if (reuse === undefined) credentials[credentialId] = wanted;
     if (profileName === undefined) continue;
-    const suggested = freeName(harnessNamed(harness, profileName), candidate => existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined);
+    const suggested = freeName(
+      harnessNamed(harness, profileName),
+      candidate => existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined,
+    );
     const twin = Object.entries(existing?.runtimes ?? {}).find(
       ([, runtime]) => runtime.credential === credentialId && runtime.profile === profileName,
     )?.[0];
