@@ -1,0 +1,43 @@
+name: Harness Contract (latest)
+
+# The CI job `harness-contract` measures the account model's harness mechanisms against the
+# versions this build PINS. This runs the same suite against the newest published `claude` and
+# `codex` from npm, so a release that renames CLAUDE_SECURESTORAGE_CONFIG_DIR or stops rewriting
+# auth.json in place is seen here first — before anyone bumps flake.lock onto it, and while people
+# whose own harness auto-updates are already running it (design §8.5, §9.5).
+#
+# It gates nothing: a red run is a warning to read before the next pin bump, and the remedy for a
+# broken mechanism is per-runtime sign-in (§9.5), never a symlink or a copied credential.
+on:
+  schedule:
+    # Daily, off the hour so it does not queue behind every other scheduled job.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  latest:
+    name: Harness Contract latest (${{ matrix.os }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Measure the latest published harnesses
+        env:
+          FY_CONTRACT_KEYCHAIN: ${{ startsWith(matrix.os, 'macos') && '1' || '' }}
+          FY_CONTRACT_ARTIFACTS: ${{ runner.temp }}/harness-contract
+        run: nix develop .#ci -c ./packages/fleet/tests/contract/run.sh latest
+      - name: Upload the harness contract result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-contract-latest-${{ matrix.os }}
+          path: ${{ runner.temp }}/harness-contract/
+          if-no-files-found: warn
