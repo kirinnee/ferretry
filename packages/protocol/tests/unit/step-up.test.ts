@@ -69,9 +69,21 @@ describe('the passkey step-up wire', () => {
       { name: 'not a URL', schema: stepUp.AppOriginSchema, value: 'not a url' },
       { name: 'a path after the origin', schema: stepUp.AppOriginSchema, value: `${ORIGIN}/app` },
       { name: 'a trailing slash', schema: stepUp.AppOriginSchema, value: `${ORIGIN}/` },
-      { name: 'padded base64url', schema: stepUp.PasskeyRegistrationSchema, value: { credentialId: 'YQ==', clientDataJSON: 'e30', attestationObject: 'o2Nm' } },
-      { name: 'a step-up with no allowed credential', schema: stepUp.StepUpOptionsSchema, value: { challenge: CHALLENGE, rpId: 'x', allowCredentials: [], timeout: 1 } },
-      { name: 'an unknown registration posture', schema: stepUp.PasskeysViewSchema, value: { passkeys: [], registration: 'open' } },
+      {
+        name: 'padded base64url',
+        schema: stepUp.PasskeyRegistrationSchema,
+        value: { credentialId: 'YQ==', clientDataJSON: 'e30', attestationObject: 'o2Nm' },
+      },
+      {
+        name: 'a step-up with no allowed credential',
+        schema: stepUp.StepUpOptionsSchema,
+        value: { challenge: CHALLENGE, rpId: 'x', allowCredentials: [], timeout: 1 },
+      },
+      {
+        name: 'an unknown registration posture',
+        schema: stepUp.PasskeysViewSchema,
+        value: { passkeys: [], registration: 'open' },
+      },
     ]);
   });
 
