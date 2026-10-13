@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
+import { HISTORY_CLAIM_HELD_EXIT_CODE } from '@ferretry/fleet';
 import pkg from '../../package.json' with { type: 'json' };
 import { BinaryCliDriver, type CliDriver, InProcessCliDriver } from './driver';
 
@@ -73,7 +74,7 @@ describe(`history claim (SIT, ${useInProcess ? 'in-process' : 'compiled binary'}
 
     // Assert
     should(claimed).match({ code: 0, out: '', err: '' });
-    should(refused.code).equal(1);
+    should(refused.code).equal(HISTORY_CLAIM_HELD_EXIT_CODE);
     should(refused.err).match(
       new RegExp(
         `conversation ${CONVERSATION} is being written by another claude running as process ${first} since`,
@@ -97,7 +98,7 @@ describe(`history claim (SIT, ${useInProcess ? 'in-process' : 'compiled binary'}
     const refused = await driver.run(claimArgs(writer()), { ...base, FY_SESSION_ID: '', FY_RUNTIME: '' });
 
     // Assert
-    should(refused.code).equal(1);
+    should(refused.code).equal(HISTORY_CLAIM_HELD_EXIT_CODE);
     should(refused.err).match(
       /being written by session ms8-holder01 on claude-review since .*stop or resume session ms8-holder01/u,
     );
@@ -117,5 +118,16 @@ describe(`history claim (SIT, ${useInProcess ? 'in-process' : 'compiled binary'}
     // Assert
     should(result).match({ code: 0, out: '', err: '' });
     should(await Bun.file(path.join(home, 'fleet', 'shared')).exists()).be.false();
+  });
+
+  it('should say in its own help what the held exit status means', async () => {
+    // Act
+    const help = await driver.run(['history', 'claim', '--help'], { FY_TOKEN: '', FY_URL: '', FY_SESSION_ID: '' });
+
+    // Assert
+    should(help.code).equal(0, help.err);
+    should(help.out).containEql(
+      `Exit status ${HISTORY_CLAIM_HELD_EXIT_CODE}: another session is writing this conversation`,
+    );
   });
 });

@@ -864,7 +864,10 @@ Pooling makes two writers on one conversation more likely, so H2 is enforced:
   it launches with. A held lease refuses with the holder named ("being written by session _X_ on
   _claude-review_ since 14:02").
 - **Wrappers:** a wrapper whose arguments name a conversation explicitly (`--resume <id>`, `-r <id>`,
-  `--session-id <id>`, `codex resume <id>`) runs `fy history claim <id> --pid $$` before `exec`.
+  `--session-id <id>`, `codex resume <id>`) runs `fy history claim <id> --pid $$` before `exec`. A held
+  conversation exits 75 (`HISTORY_CLAIM_HELD_EXIT_CODE`), and the wrapper stops only on that status: any
+  other failure of `fy` (missing binary, a damaged store) prints one warning line and launches anyway, so a
+  lease bug can never stop the person's own CLI from starting.
 - **Declared gap:** `--continue`, `codex resume --last` and the in-app picker choose a conversation
   after launch. The daemon additionally refuses to resume a conversation whose file was appended to in
   the last 30 seconds by a process holding no lease, and says why.

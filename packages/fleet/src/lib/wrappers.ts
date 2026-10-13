@@ -386,7 +386,7 @@ const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly st
   return [
     '',
     '# One live writer per conversation: claim the one these arguments resume before handing this pid to',
-    '# the harness. Only a refusal stops the launch; any other failure warns and launches anyway.',
+    `# the harness. Only a refusal (exit ${HISTORY_CLAIM_HELD_EXIT_CODE}: another session is writing it) stops the launch; any other failure warns and launches anyway.`,
     '_fy_claim=0',
     'for _fy_arg in "$@"; do',
     `  case "$_fy_arg" in ${CONVERSATION_ARGUMENT_PATTERNS[harness]}) _fy_claim=1 ;; esac`,

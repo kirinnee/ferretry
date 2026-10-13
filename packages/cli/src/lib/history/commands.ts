@@ -1,3 +1,4 @@
+import { HISTORY_CLAIM_HELD_EXIT_CODE } from '@ferretry/fleet';
 import { type Command, InvalidArgumentError, Option } from 'commander';
 import type { HistoryController } from './controller.ts';
 
@@ -27,6 +28,10 @@ export function registerHistoryCommands(program: Command, controller: Pick<Histo
     )
     .requiredOption('--pid <pid>', 'the process that will write the conversation (a wrapper passes $$)', positivePid)
     .option('--from-arguments', 'read the conversation id from the harness arguments that follow')
+    .addHelpText(
+      'after',
+      `\nExit status ${HISTORY_CLAIM_HELD_EXIT_CODE}: another session is writing this conversation, so do not start it.\nA wrapper stops only on that status; any other failure lets the harness launch anyway.`,
+    )
     .action(async (words: readonly string[], options: ClaimOptions) => {
       await controller.claim({
         harness: options.harness,
