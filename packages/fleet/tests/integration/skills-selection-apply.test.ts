@@ -171,6 +171,32 @@ describe('applying a per-item skills selection', () => {
     should(await itemsIn(root, 'claude-one')).deepEqual(['.fy-fleet-backup-keepme']);
   });
 
+  it('should never remove the Codex built-in skills directory when it sweeps', async () => {
+    // Arrange — Codex installs `.system` inside its own skills directory.
+    const root = await temporaryDirectory();
+    await writeStore(root, '# Review\n');
+    const subject = new FileFleetProvisioner([root]);
+    const layout = layoutIn(root);
+    const codexFleet = (skills: readonly string[]): FleetConfig =>
+      FleetConfigSchema.parse({
+        shared: { skills: { review: 'skills/review' } },
+        variants: { default: {} },
+        agents: [{ name: 'one', kind: 'codex', routes: { default: route(ID_ONE, 'codex-one', skills) } }],
+      });
+    await subject.apply(new FleetPlan().build(codexFleet(['skills/review']), layout, GENERATED_AT));
+    const system = path.join(root, 'fleet', 'homes', 'codex-one', 'skills', '.system', 'builtin', 'SKILL.md');
+    await Bun.write(system, 'built in\n');
+
+    // Act — once with the selection, once with it emptied.
+    await subject.apply(new FleetPlan().build(codexFleet(['skills/review']), layout, GENERATED_AT));
+    const afterSelected = await readFile(system, 'utf8');
+    await subject.apply(new FleetPlan().build(codexFleet([]), layout, GENERATED_AT));
+
+    // Assert
+    should(afterSelected).equal('built in\n');
+    should(await itemsIn(root, 'codex-one')).deepEqual(['.system']);
+  });
+
   it('should sweep nothing when the directory it is bounded to does not exist', async () => {
     // Arrange — a bare sweep with no directory operation before it, which is the only way to reach the
     // case the plan builder itself never produces.

@@ -196,6 +196,50 @@ describe('FleetPlan skills selection', () => {
     should(linksFor(actual, 'claude-work')).deepEqual([]);
   });
 
+  it('should keep the Codex built-in skills directory out of the sweep, whatever is selected', () => {
+    // Arrange
+    const input = config({
+      agents: [
+        {
+          name: 'work',
+          kind: 'codex',
+          routes: {
+            default: route({
+              id: ID_CODEX,
+              wrapper: 'fy-codex-work',
+              home: 'codex-work',
+              layer: { skills: ['skills/review'] },
+            }),
+          },
+        },
+      ],
+      shared: { skills: { review: 'skills/review' } },
+    });
+    const emptied = config({
+      agents: [
+        {
+          name: 'work',
+          kind: 'codex',
+          routes: {
+            default: route({ id: ID_CODEX, wrapper: 'fy-codex-work', home: 'codex-work', layer: { skills: [] } }),
+          },
+        },
+      ],
+    });
+
+    // Act
+    const selected = subject.build(input, LAYOUT, GENERATED_AT);
+    const none = subject.build(emptied, LAYOUT, GENERATED_AT);
+
+    // Assert — the harness owns `.system`; the sweep removing it broke Codex on every apply.
+    should(operationsOf(selected, 'prune-directory')).deepEqual([
+      { kind: 'prune-directory', path: '/state/fleet/homes/codex-work/skills', keep: ['review', '.system'] },
+    ]);
+    should(operationsOf(none, 'prune-directory')).deepEqual([
+      { kind: 'prune-directory', path: '/state/fleet/homes/codex-work/skills', keep: ['.system'] },
+    ]);
+  });
+
   it('should plan nothing for skills when no slot declared a selection', () => {
     // Act
     const actual = subject.build(config(), LAYOUT, GENERATED_AT);

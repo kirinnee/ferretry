@@ -129,6 +129,15 @@ export function declaredAssetFields(account: ResolvedAccount): readonly AssetFie
   return ASSET_FIELDS.filter(field => declared.has(field));
 }
 
+/**
+ * Entries a harness keeps inside its own skills directory, which the sweep must never remove: Codex
+ * installs its built-in skills under `.system`, and deleting them on every apply breaks them.
+ */
+const HARNESS_OWNED_SKILL_ENTRIES: Readonly<Record<HarnessKind, readonly string[]>> = {
+  claude: [],
+  codex: ['.system'],
+};
+
 /** One selected skill item: the document it comes from, and the name it takes inside the home. */
 interface PlannedSkillItem {
   readonly name: string;
@@ -384,7 +393,11 @@ export class FleetPlan implements FleetPlanBuilder {
         this.materializeAsset(account.kind, 'skills', item.reference, joinPath(container, item.name), layout),
       );
     }
-    operations.push({ kind: 'prune-directory', path: container, keep: items.map(item => item.name) });
+    operations.push({
+      kind: 'prune-directory',
+      path: container,
+      keep: [...items.map(item => item.name), ...HARNESS_OWNED_SKILL_ENTRIES[account.kind]],
+    });
     return operations;
   }
 
