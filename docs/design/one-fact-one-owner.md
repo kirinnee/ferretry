@@ -1008,12 +1008,11 @@ If a step above appears to touch one of these, the step is wrong.
 - **Carrier-derived privilege.** Never re-derived from a peer address, a `Host` header or a URL.
   `tunnelApiRequest` keeps hardcoding `loopback: false`, and the #289 policy test — which builds a
   relayed request presenting every loopback-looking signal it can — must pass **unmodified**.
-- **The secret store's use-never-read contract.** No getter, no route, no report. The operator password
-  verifier stays out of `config/daemon.json`.
+- **The secret store's use-never-read contract.** No getter, no route, no report.
 - **Fail-closed everywhere.** `undetermined` ⇒ deny. A capability route on a guardless dispatcher ⇒
   deny. A failed refresh clears the answer rather than keeping a stale one. An unparseable document
   refuses the boot. Damaged state is never empty state.
-- **Permissive defaults with the operator password as the opt-in layer.**
+- **Permissive defaults with the passkey step-up as the confirmation layer.**
 - **The widen/narrow asymmetry and the one-way door**, including `mayGrant` on the wire so a UI warns
   _before_ the door closes, and revoking never being harder than granting.
 - **The capability list stays closed at six.** It must not grow to mirror the route table. mika's

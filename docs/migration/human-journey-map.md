@@ -215,9 +215,8 @@ on the host, where a restriction enforces nothing. A paired browser is not on th
 host: it holds a device-class token minted by pairing, it can be a phone somebody
 left on a train, and a fleet apply writes executables onto `PATH`. So reads and
 composing a change are open to it, and changing the host is governed: `fleet`/
-`configure` is decided by the operator's grants, and where the machine has an
-operator password a governed caller proves it again against that one exact staged
-change. That is a real boundary because the two sides are genuinely different
+`configure` is decided by the operator's grants, and a governed caller needs a
+passkey step-up for it; the apply body carries nothing to prove. That is a real boundary because the two sides are genuinely different
 principals, unlike an agent that could read `api-token` itself.
 
 So: full admin over sessions and processes; narrow capabilities only where state

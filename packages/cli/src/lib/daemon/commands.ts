@@ -22,7 +22,7 @@ import type { DaemonCommandOptions, DaemonController, DaemonResetOptions } from 
  * the process-control verbs — it touches one file and never asks whether anything is running.
  *
  * `reset` IS A VERB HERE RATHER THAN A TOP-LEVEL `reset` OR `wipe`, and the choice is the same one
- * `config` and `password` already made when they mounted onto this noun. What it resets is the
+ * `config` already made when they mounted onto this noun. What it resets is the
  * daemon — its state home, its logs, its configuration, the artifacts this client keeps for it — and
  * it stops the daemon to do it, so it is serialized by the same lifecycle claims as `stop` and
  * `restart` and shares their collaborators. A top-level `reset` would read as though it reset the
@@ -60,17 +60,6 @@ export function registerDaemonCommands(
   daemon
     .command('start')
     .description('start the daemon and wait until it serves')
-    .addHelpText(
-      'after',
-      `
-When run at a terminal on a machine that has no operator password, this offers
-to set one after the daemon is up. It is asked once, it can be skipped with
-Enter, and nothing about using this machine locally depends on it — what needs
-it is pairing another device, which the daemon refuses without one.
-
-Nothing is ever asked when there is no terminal, so a service-managed start at
-login is untouched: a unit runs the daemon executable, never this command.`,
-    )
     .action(async () => {
       await controller().start();
     });
@@ -99,7 +88,7 @@ login is untouched: a unit runs the daemon executable, never this command.`,
 This is the whole installation, not a cache. It removes both trees a Ferretry
 installation occupies — the state home, and the client-owned artifacts under
 XDG_STATE_HOME — so the configuration, the fleet, every session and transcript,
-every stored secret, every paired device and the operator password all go.
+every stored secret and every paired device all go.
 Doing it by hand misses the second tree, which is where an obsolete pinned
 daemon executable hides, and leaves the machine running that instead.
 
@@ -109,11 +98,9 @@ taken — restoring is not something this can offer.
 
 It prints every path, its size, and how many secrets, devices and sessions are
 about to go BEFORE it asks. Read that; those counts are not available anywhere
-else. It never asks for the operator password: forgetting the password is one of
-the reasons to run this, so requiring it would close the door it exists to open.
+else.
 
-Afterwards, \`daemon start\` comes up on a clean slate and offers to set a new
-operator password, exactly as a fresh install does.`,
+Afterwards, \`daemon start\` comes up on a clean slate, exactly as a fresh install does.`,
     )
     .action(async (flags: DaemonResetOptions) => {
       await controller().reset(flags);

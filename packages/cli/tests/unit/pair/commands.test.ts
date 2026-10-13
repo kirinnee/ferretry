@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
 import { registerPairCommands } from '../../../src/lib/pair/commands';
-import { type PairDeps, PairController } from '../../../src/lib/pair/controller';
+import { PairController, type PairDeps } from '../../../src/lib/pair/controller';
 import {
   CapturingExit,
   CapturingScreen,
@@ -39,13 +39,13 @@ function run(argv: string[], binaryName = 'fy') {
 }
 
 describe('pair command surface', () => {
-  it('should name the binary it runs as when it says how to set the password', async () => {
-    // Arrange + Act — not the shipped name, so a help line that spells "fy" cannot pass.
+  it('should say nothing about a password, because minting needs none', async () => {
+    // Arrange + Act
     const { parsed, printed } = run(['pair', '--help'], 'foo');
     await should(parsed).be.rejected();
 
     // Assert
-    should(printed.join('')).containEql('Set one with `foo daemon password set`');
+    should(printed.join('').toLowerCase()).not.containEql('password');
   });
 
   it('should pair with no flags at all', async () => {

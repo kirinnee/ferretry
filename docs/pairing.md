@@ -132,44 +132,26 @@ facts a UI needs before it offers anything — whether this request arrived on t
 the caller's own — are on `GET /v1/pair/devices` as `hostLocal` and `thisDeviceId`. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
-### Pairing requires an operator password, and the DAEMON is what requires it
+### Minting needs no password
 
-**`POST /v1/pair/code` refuses while no operator password exists.** Every caller meets it: a phone, a
-browser on the machine, and `fy pair` on the host — which mints through that same route. The refusal is
-one sentence, composed once, and it names the remedy (`fy daemon password set`, which never asks for an
-old password) at the point of decision.
+**`POST /v1/pair/code` asks for no secret.** A caller that arrived on the host mints freely. A **governed**
+caller — a paired phone, a browser across the network — mints only while the operator leaves `pairing`
+on **and** it holds a current passkey step-up, because `pairing.use` is one of the three `use` demands the
+step-up guards ([grants.md](grants.md)). The refusal is `step-up-required` and the app answers it by raising
+the passkey prompt and retrying once; a remote warden has no device and can never mint.
 
-The reason is `fleet.configure`, which is **on by default** for a governed caller. On a machine with no
-password, any device this exchange creates can therefore provision the host — writing runnable wrappers
-into the operator's accounts — with nothing to prove. Requiring the password at the one moment remote
-access is being created **deletes that state** rather than warning about it, and the safe configuration
-stops depending on somebody noticing a disclosure.
+There is no first-password requirement, because there is no password. What stops a stolen or unattended
+phone from handing out more access is the step-up, not a secret that had to exist before the first
+device did — and a newly paired device is not trusted with the fleet's configuration without one.
 
-**Why it is here and not in the browser.** It was in the browser first, and the guarantee that bought was
-"the browser will not create a passwordless remote device" — silent about the command line, which could
-still hand out a key before the lock existed. Below both doors there is one rule, so which door somebody
-walks through stops mattering, and there is no second copy to fall out of step.
+What this deliberately does **not** do:
 
-What it deliberately does **not** do:
-
-- **It is not a startup requirement, and it can never block a start.** `fy daemon start` OFFERS to set the
-  first password when there is a terminal and a person to answer; it asks nothing otherwise, and a failure
-  to ask or to store is a warning beside a daemon that is already serving. Service managers run the daemon
-  executable — never a CLI verb — so a systemd or launchd start cannot reach a prompt at all. A daemon
-  that refused to start without a password would silently stop running at boot, which is worse than the
-  problem being solved; that is exactly why the promise lives at pairing instead.
-- **It does not gate local use.** A passwordless machine starts, serves and configures itself exactly as
-  before. Nothing else in the daemon consults the requirement, and no other pairing route is affected —
-  the device list, both revocations, code status and redemption are all untouched.
-- **It does not migrate an existing install.** One that already has devices and no password is not nagged
-  and nothing is revoked; the requirement lands at its **next** pairing.
-
-**The browser explains it first rather than enforcing it.** The Add-a-device panel reads `GET /v1/grants`
-beside the device list and, while `passwordSet` is false, the requirement and the control that satisfies
-it stand where the button would be — a remote reader, who cannot set one from there, is told the two
-places that can. A browser that could not **read** the grant view offers the button and renders whatever
-the daemon answers: it has nothing to add by guessing, because the machine that knows refuses on its own
-account.
+- **It does not gate local use.** A machine nobody has paired starts, serves and configures itself with no
+  setup at all.
+- **It does not govern redemption.** The code is the credential, redeemed inside a sealed session; the
+  step-up guards the act of _creating_ a code, and the code's two-minute life bounds the rest.
+- **It does not migrate anything.** A `state/operator-password.json` left by an older build is deleted at
+  boot with one notice line, and nothing is revoked.
 
 ### Who may redeem
 
@@ -226,7 +208,7 @@ sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render tho
 Each remedy below answers **the direct address**, which is the only thing these reasons describe. A
 `local-only` daemon that also dials a discoverable rendezvous is already redeemable from another
 device, so its remedy is the upgrade to a connection with no third party on the path rather than the
-unlock it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
+remedy it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
 this table is the no-rendezvous wording:
 
 | reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -340,8 +322,9 @@ row states what its revoke will do before the press.
 - **Devices paired before device keys were deleted on upgrade.** A `devices.json` from before schema 2
   held only token digests, which no session can prove against, so the daemon drops those grants at boot
   and says so once. Each such device must pair again.
-- **There is no passkey step-up yet.** A paired device's session can do whatever its capabilities
-  allow without a second factor; [design/zero-trust.md](design/zero-trust.md) B adds one.
+- **A step-up bounds who acts, not what the act does.** A governed device holding a step-up may mint a code,
+  open a terminal or apply a fleet change for the length of the window; the step-up says the person holding
+  the device agreed recently, nothing about the act itself ([grants.md](grants.md)).
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first

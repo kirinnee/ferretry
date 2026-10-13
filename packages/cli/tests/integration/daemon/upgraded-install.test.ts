@@ -246,7 +246,6 @@ function deps(
     clientName: 'fy',
     clock: new ImmediateClock(),
     out,
-    firstPassword: { offer: () => Promise.resolve() },
     setupNotice: { say: () => Promise.resolve() },
   };
 }

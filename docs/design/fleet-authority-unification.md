@@ -6,6 +6,10 @@ title: Should the fleet's proposal flow become the capability system?
 # Should the fleet's proposal flow become the capability system?
 
 **Status: DECIDED by the owner, and now BUILT. §9 is what shipped and where this document was wrong.**
+**Superseded in part by ZT-B3 ([design/zero-trust.md](zero-trust.md) B3): the operator password, the
+unlock and the per-change confirmation this record argues about are deleted, and the passkey step-up
+replaced them. Every "password", "unlock", "ungated" and "locked" below describes the system as it was
+decided, not as it is; what the capability layer does today is [grants.md](../grants.md).**
 **§0–§8 were verified against `origin/main` at `27509573` (`Brew cask update for ferretry version v0.176.0`)
 and are left as they were written**, because a decision record that quietly rewrites itself to match the
 code teaches the next reader that nothing was ever in doubt. Every line number below is that commit's;

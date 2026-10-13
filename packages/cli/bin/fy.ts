@@ -24,7 +24,6 @@ import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
-import { StdinOperatorPassword } from '../src/adapters/grants/stdin-operator-password';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
@@ -54,7 +53,6 @@ import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
-import { FirstPasswordOffer } from '../src/lib/daemon/first-password';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { MachineSetupNotice } from '../src/lib/daemon/setup-notice';
@@ -469,29 +467,6 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     clientName: BINARY_NAME,
     clock,
     out,
-    /**
-     * The first-password offer, made after a start somebody typed.
-     *
-     * IT SPEAKS TO THE DAEMON THIS VERB JUST STARTED, through the shared lazy client — which connects
-     * on first use, and its first use is after the readiness wait. That ordering is why the daemon
-     * group can hold a client at all: the address and the admin token both exist by the time this asks
-     * anything. It is the SAME gateway `fy daemon password set` uses, so a password set from the prompt
-     * is one that command can replace.
-     */
-    firstPassword: new FirstPasswordOffer({
-      passwords: {
-        passwordSet: async () => (await new ProtocolGrantGateway(client).read()).passwordSet,
-        setPassword: async password => {
-          await new ProtocolGrantGateway(client).setPassword(password);
-        },
-      },
-      prompt: world.prompt,
-      out,
-      // Read when the question is asked rather than captured at build time, and it is the same answer
-      // every other prompt in this CLI uses: both ends of the terminal, or nobody is there.
-      interactive: () => world.io.interactive(),
-      clientName: BINARY_NAME,
-    }),
     // The machine's own answer, through the same lazy client, after the start has already waited for it.
     setupNotice: new MachineSetupNotice({
       setUp: async () => (await new ProtocolAccountGateway(client).machine()).setUp,
@@ -535,7 +510,6 @@ function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): Accoun
     prompt: world.prompt,
     interactive: world.interactive,
     binaryName: BINARY_NAME,
-    readPasswordFromStdin: () => new StdinOperatorPassword(BINARY_NAME).read(),
     readText: path => Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
     sleep: milliseconds => Bun.sleep(milliseconds),
     now: () => Date.now(),
@@ -680,9 +654,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // to answer "is the daemon up?" on a host that has none, which is exactly what a fresh
   // `daemon install` leaves behind. Its health probe therefore has its own unauthenticated client.
   //
-  // It does hold the shared one, for the first-password offer alone. That is safe because the shared
-  // client is LAZY — it resolves the address and the admin token on first use, and the only thing here
-  // that uses it runs after a start has already waited for the daemon to serve.
+  // It does hold the shared one, for the setup notice alone. That is safe because the shared client is
+  // LAZY — it resolves the address and the admin token on first use, and the only thing here that uses
+  // it runs after a start has already waited for the daemon to serve.
   ({ program, world, client }) =>
     registerDaemonCommands(
       program,
@@ -698,7 +672,6 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new GrantController({
           gateway: new ProtocolGrantGateway(client),
-          passwords: new StdinOperatorPassword(BINARY_NAME),
           out: world.io,
           clientName: BINARY_NAME,
         }),

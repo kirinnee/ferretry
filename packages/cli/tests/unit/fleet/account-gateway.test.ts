@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import { OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
 import should from 'should';
 import type { z } from 'zod';
 import { ProtocolAccountGateway, TOOL_INSTALL_TIMEOUT_MS } from '../../../src/lib/fleet/account-gateway.ts';
@@ -58,20 +57,7 @@ describe('ProtocolAccountGateway', () => {
     ]);
   });
 
-  it('should trade the password for an unlock', async () => {
-    const fake = client({
-      '/v1/grants/unlock': {
-        token: `fy_unlock_${'a'.repeat(22)}`,
-        expiresAt: '2026-10-13T00:05:00.000Z',
-        ttlSeconds: 300,
-      },
-    });
-    should(await new ProtocolAccountGateway(fake).unlock('operator-password-1')).equal(`fy_unlock_${'a'.repeat(22)}`);
-    should(body(fake.sent[0])).eql({ password: 'operator-password-1' });
-    should(headers(fake.sent[0])).eql({ 'content-type': 'application/json' });
-  });
-
-  it('should send the unlock in a header and the password in the body, never the other way round', async () => {
+  it('should carry no credential of any kind, in a header or in a body', async () => {
     // Arrange
     const change = { kind: 'runtime.remove', name: 'old' } as const;
     const fake = client({
@@ -80,20 +66,17 @@ describe('ProtocolAccountGateway', () => {
       '/v1/fleet/credentials/claude%20you/check': credential(),
     });
     const gateway = new ProtocolAccountGateway(fake);
-    const authority = { unlock: 'unlock-token', password: 'operator-password-1' };
 
     // Act
-    await gateway.stage(change, { unlock: 'unlock-token' });
-    await gateway.apply('fy_fprop_AAAAAAAAAAAAAAAAAAAAAA', authority);
-    await gateway.check('claude you', {});
+    await gateway.stage(change);
+    await gateway.apply('fy_fprop_AAAAAAAAAAAAAAAAAAAAAA');
+    await gateway.check('claude you');
 
     // Assert
     should(body(fake.sent[0])).eql({ change });
-    should(headers(fake.sent[0])[OPERATOR_UNLOCK_HEADER]).equal('unlock-token');
-    should(body(fake.sent[1])).eql({ operatorPassword: 'operator-password-1' });
-    should(headers(fake.sent[1])[OPERATOR_UNLOCK_HEADER]).equal('unlock-token');
+    should(body(fake.sent[1])).eql({});
     should(body(fake.sent[2])).eql({});
-    should(headers(fake.sent[2])).not.have.property(OPERATOR_UNLOCK_HEADER);
+    for (const sent of fake.sent) should(headers(sent)).eql({ 'content-type': 'application/json' });
   });
 
   it('should speak the setup routes, with longer patience for the slow ones', async () => {
@@ -106,13 +89,13 @@ describe('ProtocolAccountGateway', () => {
     const gateway = new ProtocolAccountGateway(fake);
 
     // Act
-    await gateway.scan({ unlock: 'u' });
-    await gateway.installTools(['codex'], { password: 'operator-password-1' });
-    await gateway.exportBundle({});
+    await gateway.scan();
+    await gateway.installTools(['codex']);
+    await gateway.exportBundle();
 
     // Assert
     should(fake.sent[0]?.init?.method).equal('GET');
-    should(body(fake.sent[1])).eql({ harnesses: ['codex'], operatorPassword: 'operator-password-1' });
+    should(body(fake.sent[1])).eql({ harnesses: ['codex'] });
     should(fake.sent[1]?.timeoutMs).equal(TOOL_INSTALL_TIMEOUT_MS);
   });
 
@@ -125,17 +108,16 @@ describe('ProtocolAccountGateway', () => {
     const gateway = new ProtocolAccountGateway(fake);
 
     // Act
-    await gateway.startSignIn('claude-you', {});
-    await gateway.signInStatus('flow-1', {});
+    await gateway.startSignIn('claude-you');
+    await gateway.signInStatus('flow-1');
     fake.sent.length = 0;
     const answers = client({ '/v1/fleet/login/flow-1': { outcome: 'refused', reason: 'Codex takes no code.' } });
-    await new ProtocolAccountGateway(answers).submitSignInCode('flow-1', 'abc', {});
-    await gateway.cancelSignIn('flow-1', { unlock: 'u' });
+    await new ProtocolAccountGateway(answers).submitSignInCode('flow-1', 'abc');
+    await gateway.cancelSignIn('flow-1');
 
     // Assert
     should(body(answers.sent[0])).eql({ code: 'abc' });
     should(fake.sent[0]?.init?.method).equal('DELETE');
-    should(headers(fake.sent[0])[OPERATOR_UNLOCK_HEADER]).equal('u');
   });
 });
 
@@ -146,8 +128,8 @@ describe('ProtocolAccountGateway Codex method', () => {
     const gateway = new ProtocolAccountGateway(fake);
 
     // Act
-    await gateway.startSignIn('codex-you', {}, 'link');
-    await gateway.startSignIn('codex-you', {});
+    await gateway.startSignIn('codex-you', 'link');
+    await gateway.startSignIn('codex-you');
 
     // Assert
     should(body(fake.sent[0])).eql({ credentialId: 'codex-you', method: 'link' });

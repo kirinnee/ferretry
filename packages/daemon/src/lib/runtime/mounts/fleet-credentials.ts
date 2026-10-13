@@ -81,12 +81,11 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
       noStore: true,
       handle: async context =>
         await answer(
-          async () =>
-            subsystem.check(
-              credentialId(context),
-              await parseBody(context.request, FleetCredentialCheckRequestSchema),
-              context.governance,
-            ),
+          async () => {
+            // An empty strict body: a field an older client still sends is refused, not ignored.
+            await parseBody(context.request, FleetCredentialCheckRequestSchema);
+            return await subsystem.check(credentialId(context), context.governance);
+          },
           value => FleetCredentialViewSchema.parse(value),
         ),
     },

@@ -1,5 +1,6 @@
 import type { CapabilityAxis, DaemonCapability, GrantRefusal } from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
+import type { SessionDevice } from './http.ts';
 
 /**
  * THE SECOND AUTHORIZATION QUESTION, asked after the first one has already been answered.
@@ -181,12 +182,6 @@ export function grantRefusalCode(refusal: GrantRefusal): string {
   return `grant_${refusal.replaceAll('-', '_')}`;
 }
 
-/** The device-and-session a passkey step-up is held for — `ApiRequest.device`. */
-export interface StepUpSubject {
-  readonly deviceId: string;
-  readonly appSession: string;
-}
-
 /**
  * Whether a session's proven device holds a live step-up. Synchronous, for the reason the guard is.
  *
@@ -194,7 +189,7 @@ export interface StepUpSubject {
  * importing the step-up subsystem; `StepUpService` satisfies it structurally.
  */
 export interface StepUpWitness {
-  held(subject: StepUpSubject): boolean;
+  held(subject: SessionDevice): boolean;
 }
 
 /** The witness for a dispatcher with no step-up subsystem wired: nobody holds one. */

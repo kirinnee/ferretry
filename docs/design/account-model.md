@@ -274,7 +274,7 @@ each one decision.
    installed." Each tool shows Installed · _version_ or Not installed. For missing ones: a checkbox
    per tool showing the **exact command** Ferretry will run on the machine (`brew install --cask
 claude-code`, `npm install -g @openai/codex`, …; §8.6), and, from a phone or any governed
-   caller, the **operator password**, "used once and not stored". Then **Install _n_ tools**, or
+   caller, a **passkey confirmation** on the device. Then **Install _n_ tools**, or
    **Skip, continue without them** (E1). A failed install says why and gives the command to run by
    hand, with **Retry** (E2).
 2. **Claude Code.** "We found Claude Code on _machine_. Use your login and setup?" A **Found on _machine_** list: Account
@@ -555,9 +555,8 @@ did, `fy credential signin <id>` is the sign-in, and a write applies itself.
 ## 7. Daemon routes
 
 Reads are plain GETs. **Every write is a proposal** (`POST /v1/fleet/proposals`, then `…/apply`)
-under `fleet.configure`, with the per-change operator-password confirmation for a governed caller
-([grants.md](../grants.md)). A stepper stages **one** proposal and asks for the password **once**. No
-route returns a credential value.
+under `fleet.configure`, which a governed caller reaches with a passkey step-up ([grants.md](../grants.md)).
+A stepper stages **one** proposal, and one step-up covers it. No route returns a credential value.
 
 | Route                                                          | Verb                   | Capability      | Returns / does                                                                                                                                                                                              |
 | -------------------------------------------------------------- | ---------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -574,8 +573,8 @@ route returns a credential value.
 | `/v1/fleet/proposals` (+ `/:proposalId`, `/:proposalId/apply`) | POST/GET/POST          | fleet.configure | operation kinds: `credential.add/label/remove/signout`, `component.put/remove`, `profile.put/remove`, `runtime.put/remove`, `machine.settings`, `setup.import`, `clone.import {mode: alongside \| replace}` |
 
 There is no `/v1/fleet/permissions` and no `/v1/fleet/migration`: the caller's authority is part of
-`GET /v1/fleet/machine`, and nothing is migrated (§10). `GET /v1/fleet/machine` honours the operator
-unlock header, so a caller that unlocked reads its unlocked authority.
+`GET /v1/fleet/machine`, and nothing is migrated (§10). `GET /v1/fleet/machine` reports the
+caller's own authority, step-up included, so a caller that has stepped up reads its stepped-up authority.
 
 **Clone has no daemon-to-daemon path.** The browser holds both connections: it reads the source's
 `/v1/fleet/export` and stages a `clone.import` proposal on the target with that bundle. Each daemon
@@ -853,8 +852,8 @@ hidden.
 ### 9.6 Installing software from a phone
 
 Installing a tool runs a package manager on the machine, so it is a `fleet.configure` write with the
-per-change operator password for any governed caller — the "from a phone it needs the operator
-password" step in §4.3. The command is shown before it runs, comes only from the declared table
+passkey step-up for any governed caller — the "from a phone it needs a passkey
+confirmation" step in §4.3. The command is shown before it runs, comes only from the declared table
 (§8.6), takes no free-text argument from the browser, and never runs `sudo`: a manager that needs
 admin rights fails and hands the person the command (E2).
 
@@ -902,7 +901,7 @@ screen.
 
 | ID  | Case                                              | What happens                                                                                                                                                                                                                                                                               |
 | --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| E1  | Neither harness installed                         | Check tools lists both Not installed. "Install what's missing": a checkbox per tool showing the exact command, the operator password ("used once and not stored"), **Install 2 tools**. Continue waits; **Skip, continue without them**.                                                   |
+| E1  | Neither harness installed                         | Check tools lists both Not installed. "Install what's missing": a checkbox per tool showing the exact command, a passkey confirmation, **Install 2 tools**. Continue waits; **Skip, continue without them**.                                                                               |
 | E2  | Install fails (needs admin)                       | "Couldn't install on _machine_": npm needs admin rights and the operator account isn't an admin. Shows `sudo npm install -g …` to run yourself, then **Retry** or **Skip, continue without them**.                                                                                         |
 | E3  | Only Claude installed                             | The Codex step is one quiet line, "Codex isn't installed · Install later in Settings", and Continue.                                                                                                                                                                                       |
 | E4  | Installed but not signed in                       | Account reads "Not signed in · Your setup can still be imported"; the sign-in panel is inline; the button reads **Import, sign in later**; the credential lands as Needs sign-in with a note.                                                                                              |

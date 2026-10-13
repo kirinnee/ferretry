@@ -26,10 +26,9 @@
  *
  * ## Governed like every fleet change
  *
- * Who may stage or apply is the route's `fleet.configure`. A caller the boundary says owes a
- * per-change confirmation gives the operator password with the apply, and the order is:
- * read the change, confirm, consume synchronously, check it is still current, then
- * act — restoring it only while it is certain nothing was attempted.
+ * Who may stage or apply is the route's `fleet.configure`, which holds a caller off this host behind a
+ * live passkey step-up. The order is: read the change, consume synchronously, check it is still current,
+ * then act — restoring it only while it is certain nothing was attempted.
  */
 import {
   type AccountModel,
@@ -66,11 +65,10 @@ import type {
   FleetMachineView,
   FleetProfileDraftRequest,
   FleetProfileDraftView,
-  FleetProposalApplyRequest,
   FleetRuntimeCatalog,
   SessionStatus,
 } from '@ferretry/protocol';
-import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts';
+import type { CallerGovernance } from '../api/capability.ts';
 import { ApiError } from '../api/error.ts';
 import {
   type CatalogFacts,
@@ -148,8 +146,6 @@ export interface FleetCatalogServiceDeps {
     list(): Promise<FleetCredentialList>;
     signOut(id: string): Promise<FleetCredentialSignOutOutcome>;
   };
-  /** Proves the operator password for ONE change: the same closure every confirmed act takes. */
-  confirmChange(password: string): Promise<ChangeConfirmation>;
   readonly provisioner: Pick<FleetProvisioner, 'preview' | 'apply'>;
   readonly layout: FleetLayout;
   /** A fresh runtime id (a UUID). */
@@ -288,21 +284,16 @@ const textUsers = (model: AccountModel, change: AccountPlanChange): ReadonlySet<
  * What this caller may do to the machine, as the operator's grants decided it for this request.
  *
  * `mayApply` is `fleet.configure`, and the refusal travels with it because `false` has four different
- * remedies. `confirmation` is reported even when `mayApply` is false: it is a fact about the machine
- * rather than about this attempt, so a caller that unlocks and comes back still owes it.
+ * remedies — `step-up-required` among them, which the caller answers with its passkey.
  *
  * AN ABSENT GOVERNANCE IS THE STRICTER READING. The served route declares a capability and so always
  * has one built — but "nobody could tell me where this caller stands" must never render as an open
  * Apply button.
  */
 export function machineAuthority(governance: CallerGovernance | undefined): FleetMachineAuthority {
-  if (governance === undefined) return { mayApply: false, applyRefusal: 'undetermined', confirmation: 'none' };
+  if (governance === undefined) return { mayApply: false, applyRefusal: 'undetermined' };
   const configure = governance.decide({ capability: 'fleet', axis: 'configure' });
-  return {
-    mayApply: configure.allowed,
-    applyRefusal: configure.refusal,
-    confirmation: governance.confirmChange ? 'operator-password' : 'none',
-  };
+  return { mayApply: configure.allowed, applyRefusal: configure.refusal };
 }
 
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
@@ -374,20 +365,13 @@ export class FleetCatalogService {
   /**
    * Apply exactly the change that was reviewed.
    *
-   * Confirm, then spend, then await: a wrong password must not burn a change the caller was entitled
-   * to apply, and two applies arriving together must not both find it pending. If it never reaches
+   * Spend, then await: two applies arriving together must not both find it pending. If it never reaches
    * the host — the configuration moved — it is put back, because nothing about the host changed.
    */
-  async apply(
-    id: string,
-    request: FleetProposalApplyRequest,
-    governance: CallerGovernance | undefined,
-  ): Promise<FleetAccountChangeOutcome> {
+  async apply(id: string, governance: CallerGovernance | undefined): Promise<FleetAccountChangeOutcome> {
     if (governance === undefined) {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
-    this.#proposals(() => this.#changes.require(id));
-    if (governance.confirmChange) await this.#confirm(id, request.operatorPassword);
     const record = this.#proposals(() => this.#changes.consume(id));
     try {
       await this.#assertCurrent(record);
@@ -651,26 +635,6 @@ export class FleetCatalogService {
   }
 
   // ── Applying ───────────────────────────────────────────────────────────────────────────────────
-
-  async #confirm(id: string, password: string | undefined): Promise<void> {
-    const refuse = (message: string): never => {
-      throw new FleetCatalogRefusal('fleet_change_unauthorized', message);
-    };
-    if (password === undefined) {
-      refuse(`applying change "${id}" from off this machine needs its operator password, entered against this change`);
-    }
-    const outcome = await this.deps.confirmChange(password as string);
-    if (outcome.kind === 'confirmed') return;
-    if (outcome.reason === 'rate-limited') {
-      refuse(
-        `too many wrong operator passwords have been tried on this machine, so it is not checking any more for now; change "${id}" was not applied`,
-      );
-    }
-    if (outcome.reason === 'no-password') {
-      refuse(`this machine has no operator password, so change "${id}" could not be confirmed; review it again`);
-    }
-    refuse(`that is not this machine's operator password, so change "${id}" was not applied and is still open`);
-  }
 
   /** Refuse a change whose configuration moved since it was reviewed. */
   async #assertCurrent(record: ChangeRecord): Promise<void> {
