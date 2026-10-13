@@ -84,7 +84,8 @@ const listing = {
 /** A daemon that answers exactly the routes the deck calls. */
 const daemonFetch =
   (calls: { url: string; method: string }[]) =>
-  async (url: string, init?: RequestInit): Promise<Response> => {
+  async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
     const method = (init?.method ?? 'GET').toUpperCase();
     calls.push({ url, method });
     if (url.endsWith('/terminals') && method === 'GET') return Response.json(listing);

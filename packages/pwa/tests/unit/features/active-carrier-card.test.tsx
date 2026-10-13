@@ -80,7 +80,11 @@ describe('the active carrier card', () => {
 
 describe('subscribing to the measured carrier', () => {
   it('should publish the router’s answer, and undefined until there is one', () => {
-    const router = new DaemonCarrierRouter({ crypto: relayCrypto, network: async () => new Response('ok') });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey: async () => undefined,
+      network: async () => new Response('ok'),
+    });
     const daemonId = 'fy_daemon_x' as DaemonId;
     let seen: unknown = 'unset';
     const Probe = (): null => {

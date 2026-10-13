@@ -828,13 +828,12 @@ describe('the pieces the composition root supplies by default', () => {
   });
 });
 
-describe('leaving a stream, on either carrier', () => {
+describe('leaving a stream', () => {
   const daemon = daemonConnection({
     daemonId: 'fy_daemon_x',
     baseUrl: 'https://studio.example',
     deviceId: PAIRED_DEVICE_ID,
   });
-  const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
 
   /*
    * §14 makes a viewer's leave an explicit sealed record "so that the taxonomy survives in both
@@ -881,21 +880,9 @@ describe('leaving a stream, on either carrier', () => {
       onMessage: () => undefined,
     });
   });
-
-  /*
-   * The DIRECT adapter of the same port: a real socket, driven through open, output, and close. It
-   * is the carrier a browser on the daemon's own network gets, and the port is what stops the deck
-   * knowing which one it has.
-   */
 });
 
 describe('the failure shapes the adversarial review named', () => {
-  const daemon = daemonConnection({
-    daemonId: 'fy_daemon_x',
-    baseUrl: 'https://studio.example',
-    deviceId: PAIRED_DEVICE_ID,
-  });
-  const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
 
   /*
    * P1: a consumer that THROWS used to escape into `void session.receiveBinary(bytes)` and become an
@@ -1022,11 +1009,4 @@ describe('the failure shapes the adversarial review named', () => {
     const next = await router.openStream(paired, { path: '/v1/events', onData: () => undefined });
     should(next).not.equal(stream);
   });
-
-  /*
-   * P3: `openStream` answers `null` both for "the winner is direct" and for "no walk has finished".
-   * Reading the second as direct buys a single-use ticket and opens a socket at the daemon's own
-   * address — the one a relayed browser cannot reach — burning a credential on a socket that can only
-   * fail. The live event feed already had this gate; the terminal did not.
-   */
 });
