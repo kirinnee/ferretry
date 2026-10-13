@@ -409,7 +409,15 @@ export const autoDial = (
         }
         const id = message.id ?? 1;
         if (answer.respond !== undefined) {
-          const routed = await answer.respond(message as unknown as ScriptedRequest);
+          let routed: ScriptedAnswer;
+          try {
+            routed = await answer.respond(message as unknown as ScriptedRequest);
+          } catch (reason) {
+            // A route that THROWS is a carrier that died under the request, not a daemon that answered:
+            // the socket goes, exactly as a dropped connection would take it.
+            socket.onClose?.(1006, reason instanceof Error ? reason.message : String(reason));
+            return;
+          }
           const body = typeof routed.body === 'string' ? routed.body : JSON.stringify(routed.body ?? {});
           socket.onBinary?.(
             await daemon.record({
@@ -490,3 +498,63 @@ export const keyedDaemon = async (baseUrl: string, carriers?: Parameters<typeof 
   return { identity, daemon, deviceKeys };
 };
 
+
+/** One daemon a {@link fetcherDaemons} network serves, on the host its direct address names. */
+export interface FetcherDaemon {
+  readonly host: string;
+  readonly identity: DaemonIdentity;
+  /** What a `pair` record on this daemon is answered with. */
+  readonly paired?: unknown;
+}
+
+/**
+ * A network of scripted daemons whose ROUTE TABLE IS AN ORDINARY FETCH FIXTURE.
+ *
+ * A suite that already describes a daemon as `(url, init) => Response` keeps doing so: each `req` a
+ * session carries is turned back into that URL and init and answered with what the fixture returns.
+ * The session in front of it is entirely real — handshake against the pinned fingerprint, the device
+ * proof, sealed records — so a page under test reaches its daemon exactly as it does in production,
+ * and a suite need not restate every route as a session script.
+ *
+ * `reachable` refuses every socket while it answers false: a carrier that is down, not a daemon that
+ * answered with an error.
+ */
+export const fetcherDaemons = (
+  daemons: readonly FetcherDaemon[],
+  fetcher: (url: string, init: RequestInit) => Promise<Response>,
+  reachable: () => boolean = () => true,
+): {
+  readonly dial: (url: string) => ScriptedSocket;
+  readonly dialled: string[];
+  /** Every credential and request record each daemon received, by host. */
+  readonly requests: (host: string) => readonly unknown[];
+} => {
+  const routes = new Map(
+    daemons.map(daemon => [
+      daemon.host,
+      autoDial(daemon.identity, {
+        ...(daemon.paired === undefined ? {} : { paired: daemon.paired }),
+        respond: async request => {
+          const url = new URL(request.path, `https://${daemon.host}`);
+          for (const [name, value] of request.query ?? []) url.searchParams.append(name, value);
+          const response = await fetcher(url.toString(), {
+            method: request.method,
+            ...(request.headers === undefined ? {} : { headers: request.headers }),
+            ...(request.body === undefined ? {} : { body: request.body }),
+          });
+          return { status: response.status, body: await response.text() };
+        },
+      }),
+    ]),
+  );
+  const dialled: string[] = [];
+  const dial = (url: string): ScriptedSocket => {
+    dialled.push(url);
+    const route = routes.get(new URL(url).hostname);
+    if (route !== undefined && reachable()) return route.dial();
+    const refused = new ScriptedSocket();
+    queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
+    return refused;
+  };
+  return { dial, dialled, requests: host => routes.get(host)?.requests ?? [] };
+};
