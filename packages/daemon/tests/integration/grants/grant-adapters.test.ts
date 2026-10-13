@@ -267,3 +267,113 @@ describe('reading the grant journal back', () => {
     should(read).deepEqual({ entries: [], unreadable: 0, truncated: false });
   });
 });
+
+describe('the journal kind', () => {
+  const SECURITY_PATH = '/state/state/security-audit.jsonl';
+
+  /** A journal over a real-shaped tail read, so what one kind writes another's reader meets. */
+  function shared(text = '') {
+    const files = new Map<string, string>(text === '' ? [] : [[SECURITY_PATH, text]]);
+    const port = {
+      appendLineDurable: async (path: string, line: string) => {
+        files.set(path, `${files.get(path) ?? ''}${line}\n`);
+        return { offset: 0, fingerprint: { device: 0, inode: 0 } };
+      },
+      information: async (path: string) => {
+        const contents = files.get(path);
+        return contents === undefined ? undefined : { size: new TextEncoder().encode(contents).byteLength };
+      },
+      readSlice: async (path: string, offset: number, length: number) =>
+        new TextEncoder().encode(files.get(path) ?? '').slice(offset, offset + length),
+    } as unknown as FileSystemPort;
+    return { port, files };
+  }
+
+  it('should write and read the security journal under its own kind', async () => {
+    // One kind per file, so a reader never mistakes one history for the other.
+    // Arrange
+    const { port, files } = shared();
+    const audit = new JournalGrantAudit(SECURITY_PATH, port, 'security.changed');
+
+    // Act
+    await audit.record({
+      actor: 'device:phone-1',
+      changes: ['security.idleExpiryDays=40->10'],
+      at: '2026-10-01T10:00:00.000Z',
+    });
+    const read = await audit.recent(10);
+
+    // Assert
+    should(JSON.parse(files.get(SECURITY_PATH)?.trim() ?? '{}')).deepEqual({
+      kind: 'security.changed',
+      at: '2026-10-01T10:00:00.000Z',
+      actor: 'device:phone-1',
+      changes: ['security.idleExpiryDays=40->10'],
+    });
+    should(read.entries).deepEqual([
+      { at: '2026-10-01T10:00:00.000Z', actor: 'device:phone-1', changes: ['security.idleExpiryDays=40->10'] },
+    ]);
+    should(read.unreadable).equal(0);
+  });
+
+  it('should let one entry override the journal kind, as `device.key-rotated` does', async () => {
+    // Arrange
+    const { port, files } = shared();
+    const audit = new JournalGrantAudit(SECURITY_PATH, port, 'security.changed');
+
+    // Act
+    await audit.record({
+      actor: 'device:phone-1',
+      changes: ['device.key-rotated'],
+      at: '2026-10-01T10:00:00.000Z',
+      kind: 'device.key-rotated',
+    });
+    await audit.record({
+      actor: 'admin-cli',
+      changes: ['security.presenceOnOpen=true->false'],
+      at: '2026-10-01T11:00:00.000Z',
+    });
+
+    // Assert — each line carries its own kind.
+    const kinds = (files.get(SECURITY_PATH) ?? '')
+      .trim()
+      .split('\n')
+      .map(line => (JSON.parse(line) as { kind: string }).kind);
+    should(kinds).deepEqual(['device.key-rotated', 'security.changed']);
+  });
+
+  it('should have the grant reader ignore, and count, every record of another kind', async () => {
+    // A foreign kind is not this journal's history, and is reported rather than dropped silently.
+    // Arrange
+    const text = [
+      `${JSON.stringify({ kind: 'security.changed', at: '2026-10-01T10:00:00.000Z', actor: 'a', changes: ['x'] })}\n`,
+      `${JSON.stringify({ kind: 'grant.changed', at: '2026-10-01T11:00:00.000Z', actor: 'b', changes: ['fleet.use=off'] })}\n`,
+    ].join('');
+    const { port } = shared(text);
+
+    // Act
+    const grants = await new JournalGrantAudit(SECURITY_PATH, port).recent(10);
+    const security = await new JournalGrantAudit(SECURITY_PATH, port, 'security.changed').recent(10);
+
+    // Assert
+    should(grants.entries.map(entry => entry.actor)).deepEqual(['b']);
+    should(grants.unreadable).equal(1);
+    should(security.entries.map(entry => entry.actor)).deepEqual(['a']);
+    should(security.unreadable).equal(1);
+  });
+
+  it('should keep the grant kind as the default when no kind is given', async () => {
+    // Arrange
+    const { port, files } = shared();
+
+    // Act
+    await new JournalGrantAudit(SECURITY_PATH, port).record({
+      actor: 'a',
+      changes: [],
+      at: '2026-10-01T10:00:00.000Z',
+    });
+
+    // Assert
+    should((JSON.parse(files.get(SECURITY_PATH)?.trim() ?? '{}') as { kind: string }).kind).equal('grant.changed');
+  });
+});

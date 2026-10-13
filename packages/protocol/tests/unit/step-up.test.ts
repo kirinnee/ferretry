@@ -8,6 +8,7 @@ const ORIGIN = 'https://app.ferretry.test';
 const CHALLENGE = 'Y2hhbGxlbmdlLWJ5dGVz';
 const CREDENTIAL = 'Y3JlZGVudGlhbC1pZA';
 const allow = [{ type: 'public-key', id: CREDENTIAL }];
+const rotation = { deviceKey: 'MCowBQYDK2VwAyEAAAAA', proof: 'c2lnbmF0dXJl' };
 
 const stepUpCases: SchemaCase[] = [
   { name: 'app origin', schema: stepUp.AppOriginSchema, value: ORIGIN },
@@ -40,6 +41,17 @@ const stepUpCases: SchemaCase[] = [
     value: { credentialId: CREDENTIAL, clientDataJSON: 'e30', authenticatorData: 'AAAA', signature: 'MEUC' },
   },
   { name: 'granted', schema: stepUp.StepUpGrantedSchema, value: { expiresAt: LATER_INSTANT } },
+  {
+    name: 'granted with a rotated key',
+    schema: stepUp.StepUpGrantedSchema,
+    value: { expiresAt: LATER_INSTANT, keyRotated: true },
+  },
+  { name: 'device key rotation', schema: stepUp.DeviceKeyRotationSchema, value: rotation },
+  {
+    name: 'assertion carrying a rotation',
+    schema: stepUp.StepUpAssertionSchema,
+    value: { credentialId: CREDENTIAL, clientDataJSON: 'e30', authenticatorData: 'AAAA', signature: 'MEUC', rotation },
+  },
   {
     name: 'passkey view',
     schema: stepUp.PasskeyViewSchema,
@@ -84,6 +96,32 @@ describe('the passkey step-up wire', () => {
         schema: stepUp.PasskeysViewSchema,
         value: { passkeys: [], registration: 'open' },
       },
+      {
+        name: 'a rotation with no proof',
+        schema: stepUp.DeviceKeyRotationSchema,
+        value: { deviceKey: rotation.deviceKey },
+      },
+      { name: 'a rotation with no key', schema: stepUp.DeviceKeyRotationSchema, value: { proof: rotation.proof } },
+      {
+        name: 'a rotation with padded base64',
+        schema: stepUp.DeviceKeyRotationSchema,
+        value: { deviceKey: 'YQ==', proof: rotation.proof },
+      },
+      {
+        name: 'a rotation with an oversized key',
+        schema: stepUp.DeviceKeyRotationSchema,
+        value: { deviceKey: 'A'.repeat(65), proof: rotation.proof },
+      },
+      {
+        name: 'a rotation with an oversized proof',
+        schema: stepUp.DeviceKeyRotationSchema,
+        value: { deviceKey: rotation.deviceKey, proof: 'A'.repeat(129) },
+      },
+      {
+        name: 'keyRotated set to false',
+        schema: stepUp.StepUpGrantedSchema,
+        value: { expiresAt: LATER_INSTANT, keyRotated: false },
+      },
     ]);
   });
 
@@ -95,6 +133,7 @@ describe('the passkey step-up wire', () => {
       'step_up_too_many_passkeys',
       'step_up_no_passkey',
       'step_up_not_verified',
+      'step_up_rotation_required',
     ]);
     should(stepUp.STEP_UP_REQUIRED_CODE).equal('grant_step_up_required');
   });

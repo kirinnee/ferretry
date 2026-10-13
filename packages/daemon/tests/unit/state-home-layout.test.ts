@@ -103,6 +103,9 @@ describe('foundation paths', () => {
       // Keyed by daemon by construction: a state home has exactly one owner, so one daemon's record
       // of who changed which grant can never be read as another's.
       grantAudit: '/tmp/fy-home/state/grant-audit.jsonl',
+      // The security settings journal, beside the grant one and for the same reason: one daemon's
+      // record of who changed which setting can never be read as another's.
+      securityAudit: '/tmp/fy-home/state/security-audit.jsonl',
     });
     should(requiredLayoutDirectories(actual)).deepEqual([
       '/tmp/fy-home',

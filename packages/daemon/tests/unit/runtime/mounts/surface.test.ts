@@ -12,9 +12,10 @@ import {
   type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
-import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
+import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
+import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
@@ -447,6 +448,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   grants: grantSubsystem(),
+  security: new SecuritySettingsService({
+    document: { read: async () => undefined, write: async () => {} },
+    audit: { record: async () => {}, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+    clock: { nowMs: () => 1_700_000_000_000 },
+    widenCommand: 'fy daemon security set <field> <value>',
+  }),
 });
 
 describe('the mounted daemon surface', () => {
@@ -474,7 +481,9 @@ describe('the mounted daemon surface', () => {
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
-      5; // the passkey step-up: this device's passkeys, registration and step-up, each with its options
+      5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options
+      2 + // the machine's security settings: the read and the change (zero-trust B6)
+      2; // the passkey confirmation on opening: its options and the verified confirmation (zero-trust B6)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes });
     should(
@@ -513,6 +522,11 @@ describe('the mounted daemon surface', () => {
       'POST /v1/passkeys',
       'POST /v1/step-up/options',
       'POST /v1/step-up',
+      // A confirmation on opening, then the machine's security settings it is tuned by (zero-trust B6).
+      'POST /v1/presence/options',
+      'POST /v1/presence',
+      'GET /v1/security',
+      'PATCH /v1/security',
       // The grant surface. NOTE WHAT IS ABSENT: there is no password to set and nothing to unlock — a
       // governed change is held behind the passkey step-up, so these three are the whole surface.
       'GET /v1/grants',
