@@ -51,6 +51,17 @@ export interface NewDeviceNoticeClients {
 /** How often each machine's device list is read again while the app is open. */
 export const NEW_DEVICE_REFRESH_MS = 5 * 60_000;
 
+/**
+ * Runs `read` again on the refresh cadence, answering how to stop. Injected so a test fires a re-read
+ * by hand instead of waiting on a real timer.
+ */
+export type NewDeviceSchedule = (read: () => void) => () => void;
+
+const everyRefresh: NewDeviceSchedule = read => {
+  const timer = setInterval(read, NEW_DEVICE_REFRESH_MS);
+  return () => clearInterval(timer);
+};
+
 interface Removed {
   readonly device: PairedDevice;
 }
@@ -65,13 +76,13 @@ function MachineNewDevices({
   clients,
   storage,
   now,
-  refreshMs,
+  schedule,
 }: {
   readonly connection: DaemonConnectionRecord;
   readonly clients: NewDeviceNoticeClients;
   readonly storage: DevicesLookedStorage | undefined;
   readonly now: () => number;
-  readonly refreshMs: number;
+  readonly schedule: NewDeviceSchedule;
 }) {
   const daemonId = connection.daemonId;
   const machine = daemonDisplayName(connection);
@@ -119,12 +130,12 @@ function MachineNewDevices({
         });
     };
     read();
-    const timer = setInterval(read, refreshMs);
+    const stop = schedule(read);
     return () => {
       current = false;
-      clearInterval(timer);
+      stop();
     };
-  }, [clients, connection, daemonId, now, refreshMs, storage]);
+  }, [clients, connection, daemonId, now, schedule, storage]);
 
   useEffect(() => {
     const onLooked = (event: Event): void => {
@@ -252,13 +263,13 @@ export function NewDeviceNotices({
   clients,
   storage = browserDevicesLookedStorage(),
   now = Date.now,
-  refreshMs = NEW_DEVICE_REFRESH_MS,
+  schedule = everyRefresh,
 }: {
   readonly connections: readonly DaemonConnectionRecord[];
   readonly clients: NewDeviceNoticeClients;
   readonly storage?: DevicesLookedStorage | undefined;
   readonly now?: () => number;
-  readonly refreshMs?: number;
+  readonly schedule?: NewDeviceSchedule;
 }) {
   if (connections.length === 0) return null;
   return (
@@ -274,7 +285,7 @@ export function NewDeviceNotices({
           clients={clients}
           storage={storage}
           now={now}
-          refreshMs={refreshMs}
+          schedule={schedule}
         />
       ))}
     </section>

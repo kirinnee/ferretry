@@ -11,6 +11,7 @@ import {
   NEW_DEVICE_REFRESH_MS,
   type NewDeviceNoticeClients,
   NewDeviceNotices,
+  type NewDeviceSchedule,
 } from '../../../../src/features/device-notice/new-device-notice.tsx';
 import type { PairingClient } from '../../../../src/features/settings/add-device-api.ts';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
@@ -94,6 +95,22 @@ const until = async (ready: () => boolean, what: string): Promise<void> => {
   await settleUntil(ready, what, runAsync);
 };
 
+/** A schedule the test fires by hand: no real timer, so a loaded runner cannot outrun it. */
+const manualSchedule = () => {
+  const reads = new Set<() => void>();
+  const schedule: NewDeviceSchedule = read => {
+    reads.add(read);
+    return () => reads.delete(read);
+  };
+  return {
+    schedule,
+    fire: () => {
+      for (const read of reads) read();
+    },
+    armed: () => reads.size,
+  };
+};
+
 const lookedAlpha = (at: number): Record<string, string> => ({ [devicesLookedKey(alpha.daemonId)]: String(at) });
 
 describe('the new-device notice', () => {
@@ -110,6 +127,7 @@ describe('the new-device notice', () => {
   });
 
   it('announces a device paired later in the same visit as the first look', async () => {
+    const timer = manualSchedule();
     const storage = memory();
     const alphaMachine = machine([device('old', ago(10 * MINUTE))]);
     const shown = await mount(
@@ -118,11 +136,12 @@ describe('the new-device notice', () => {
         clients={pool({ alpha: alphaMachine })}
         storage={storage}
         now={now}
-        refreshMs={5}
+        schedule={timer.schedule}
       />,
     );
     await until(() => storage.entries.size === 1, 'the first look to be remembered');
     alphaMachine.view = { ...alphaMachine.view, devices: [device('phone', new Date(NOW + MINUTE).toISOString())] };
+    timer.fire();
     await until(() => shown.container.querySelector('[data-new-device]') !== null, 'the notice after a re-read');
     await shown.unmount();
   });
@@ -288,6 +307,7 @@ describe('the new-device notice', () => {
 
   it('works without storage, says nothing for an unreachable machine, and reads again on a timer', async () => {
     const alphaMachine = machine([]);
+    const timer = manualSchedule();
     // Counting READS is not enough on a loaded runner: the read is counted before its answer is applied,
     // and a device swapped in before the first look is seeded is, correctly, "already there".
     let seeded = false;
@@ -301,7 +321,7 @@ describe('the new-device notice', () => {
         clients={pool({ alpha: alphaMachine, beta: 'unreachable' })}
         storage={undefined}
         now={now}
-        refreshMs={5}
+        schedule={timer.schedule}
       />,
     );
     await until(() => seeded, 'the first look to be seeded');
@@ -309,9 +329,10 @@ describe('the new-device notice', () => {
     expect(shown.container.querySelector('[data-new-device]')).toBeNull();
     // A device paired after this page first looked is news even with no storage at all.
     alphaMachine.view = { ...alphaMachine.view, devices: [device('phone', new Date(NOW + MINUTE).toISOString())] };
+    timer.fire();
     await until(() => shown.container.querySelector('[data-new-device]') !== null, 'the notice after a re-read');
-    expect(NEW_DEVICE_REFRESH_MS).toBe(5 * 60_000);
     await shown.unmount();
+    expect(timer.armed()).toBe(0);
   });
 
   it('drops an answer that arrives after it was closed, and renders nothing with no machines', async () => {
@@ -378,5 +399,32 @@ describe('the new-device notice', () => {
     const shown = await mount(<NewDeviceNotices connections={[alpha]} clients={pool({ alpha: 'unreachable' })} />);
     expect(shown.container.querySelector('[data-new-device-notices]')).not.toBeNull();
     await shown.unmount();
+  });
+});
+
+describe('the default refresh schedule', () => {
+  it('reads again every five minutes and stops when the notice goes away', async () => {
+    const realSetInterval = globalThis.setInterval;
+    const realClearInterval = globalThis.clearInterval;
+    const armed: Array<{ readonly ms: number | undefined; readonly id: number }> = [];
+    const cleared: unknown[] = [];
+    globalThis.setInterval = ((_read: () => void, ms?: number) => {
+      const id = armed.length + 1;
+      armed.push({ ms, id });
+      return id;
+    }) as unknown as typeof setInterval;
+    globalThis.clearInterval = ((id: unknown) => void cleared.push(id)) as typeof clearInterval;
+    try {
+      const shown = await mount(
+        <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: machine([]) })} storage={undefined} now={now} />,
+      );
+      await shown.unmount();
+      expect(armed.map(entry => entry.ms)).toEqual([NEW_DEVICE_REFRESH_MS]);
+      expect(cleared).toEqual([1]);
+      expect(NEW_DEVICE_REFRESH_MS).toBe(5 * 60_000);
+    } finally {
+      globalThis.setInterval = realSetInterval;
+      globalThis.clearInterval = realClearInterval;
+    }
   });
 });
