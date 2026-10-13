@@ -30,7 +30,7 @@
  * branch below be proved against fixture paths.
  */
 
-import { FLEET_STARTER_MODELS, parseSettings, type SettingsFormat } from '@ferretry/fleet';
+import { declaredModelIds, FLEET_STARTER_MODELS, parseSettings, type SettingsFormat } from '@ferretry/fleet';
 import type { HarnessDiscovery, HarnessDiscoveryReport, HarnessInstructions, HarnessModels } from '@ferretry/protocol';
 import type { HarnessKind } from '../core/inventory.ts';
 
@@ -118,70 +118,8 @@ export interface HarnessDiscoveryOptions {
  */
 const MODEL_KEY = 'model';
 
-/**
- * An environment name that names a model.
- *
- * A RULE RATHER THAN A TABLE, and that is the whole point. Claude Code takes several model
- * identifiers through its settings `env` block — a primary, a small fast one, a per-family default —
- * and a hardcoded list of those names would be this repository claiming to know a harness's
- * environment surface. It would also go stale silently: a name the harness added would simply never
- * be offered, and nothing would say so. A name ending in `MODEL` holds a model identifier in every
- * spelling either harness uses, so the rule finds them all, and it can never invent one — every
- * candidate it yields is a value somebody wrote in that file.
- */
-const MODEL_ENV_NAME = /(^|_)MODEL$/u;
-
-/** Codex declares a model per named profile, which is a second — and equally declared — place to look. */
-const PROFILES_KEY = 'profiles';
-
 /** What the sentence below has to tell a reader when nothing named a model, since the rule is otherwise invisible. */
 const MODEL_SOURCES = `"${MODEL_KEY}", an env name ending in MODEL, or a profile's own "${MODEL_KEY}"`;
-
-const trimmedString = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') return undefined;
-  const text = value.trim();
-  return text === '' ? undefined : text;
-};
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/**
- * Every model identifier one settings document names, in preference order and without repeats.
- *
- * THE HARNESS'S OWN `model` IS FIRST, because it is the one the harness would use if nobody chose
- * and {@link HarnessModels.defaultModel} has to be one of these. The rest are the further models the
- * SAME document already names: an `env` entry whose name ends in `MODEL`, and the model each named
- * profile declares. Both extra keys are read for both harnesses for the reason {@link MODEL_KEY} is
- * not a layout fact — a per-harness table of where to look is a second declaration that can go stale
- * against a harness, where a rule applied uniformly cannot.
- *
- * WHY IT MATTERS: before this, a fresh host offered the account form exactly ONE card and every
- * further model had to be typed in by hand and marked unverified — which is most of why an account
- * served one model in practice. Somebody who has configured a small fast model or a second profile
- * has already told this host which models their account can serve.
- *
- * NOTHING IS LAUNCHED AND NOTHING IS INVENTED. This is the same single read of the same file, so it
- * cannot cost a provider request. The wire carries ONE `source` for the whole set, which stays
- * literally true because every candidate comes out of the one document that path names. WHICH key
- * named a given model is deliberately not published: saying so per candidate is a wire field and a
- * surface change rather than a read, and it is stated as a limit rather than half-built.
- */
-const namedModels = (settings: Readonly<Record<string, unknown>>): readonly string[] => {
-  const found: string[] = [];
-  const add = (value: unknown): void => {
-    const model = trimmedString(value);
-    if (model !== undefined && !found.includes(model)) found.push(model);
-  };
-
-  add(settings[MODEL_KEY]);
-  const environment = settings.env;
-  if (isRecord(environment))
-    for (const [name, value] of Object.entries(environment)) if (MODEL_ENV_NAME.test(name)) add(value);
-  const profiles = settings[PROFILES_KEY];
-  if (isRecord(profiles)) for (const profile of Object.values(profiles)) if (isRecord(profile)) add(profile[MODEL_KEY]);
-  return found;
-};
 
 /** What one settings document turned out to name: at least one model, or the reason it named none. */
 type DeclaredModels =
@@ -218,7 +156,8 @@ const declaredModels = (read: HarnessDocumentRead, layout: HarnessHomeLayout): D
       why: `${layout.settingsPath} is not valid ${layout.settingsFormat} (${errorText(error)})`,
     };
   }
-  const [first, ...rest] = namedModels(settings);
+  // The rule is the import's (`declaredModelIds`), so the account form and the first run agree.
+  const [first, ...rest] = declaredModelIds(settings);
   if (first === undefined) return { kind: 'none', why: `${layout.settingsPath} names no model in ${MODEL_SOURCES}` };
   return { kind: 'named', ids: [first, ...rest] };
 };
