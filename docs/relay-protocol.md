@@ -1528,7 +1528,8 @@ ending the session:
 { "t": "stream-close", "protocol": "ferretry-relay/2", "code": 1013, "reason": "event stream reader fell behind" }
 ```
 
-followed by `4440`. `1000 terminal viewer disconnected`, `1008 event stream is server-only`, `1009`
+followed by `4440`. `1000 terminal viewer disconnected`, `1008 event stream is server-only` (or `1008 this stream is no
+longer allowed`, when a renewal or a grant change re-asks the socket table and it now refuses), `1009`
 for an oversized frame, `1011` for evidence the daemon could not produce, `1013` for a reader that
 fell behind — a relayed viewer reads the same codes a direct one does, and the code travels inside
 the channel because it is content: a relay that could read close reasons could read why viewers
