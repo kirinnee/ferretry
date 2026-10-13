@@ -1,0 +1,338 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  applyFixedLayer,
+  CLAUDE_NO_QUESTIONS_FLAG,
+  CODEX_NO_ALT_SCREEN_FLAG,
+  codexTrustOverride,
+  type FixedLayer,
+  type FixedLayerInput,
+  fixedLayerFor,
+  tomlString,
+} from '../../src/lib/account/fixed-layer.ts';
+import { type ResolvedProfile, resolveProfile } from '../../src/lib/account/layering.ts';
+import { parseAccountModel } from '../../src/lib/account/schema.ts';
+import type { HarnessKind } from '../../src/lib/manifest.ts';
+
+const CWD = '/home/me/work.repo';
+
+const layerOf = (input: FixedLayerInput): FixedLayer => {
+  const result = fixedLayerFor(input);
+  if (!result.ok) throw new Error(result.refusal.message);
+  return result.layer;
+};
+
+/** A profile of one settings component, resolved for `harness`. */
+const profileWith = (
+  harness: HarnessKind,
+  settings: { flags?: string[]; body?: Record<string, unknown> },
+): ResolvedProfile => {
+  const model = parseAccountModel({
+    version: 2,
+    components: {
+      settings: {
+        mine: {
+          harness,
+          ...(settings.flags === undefined ? {} : { flags: settings.flags }),
+          ...(settings.body === undefined ? { env: { A: 'b' } } : { file: 'mine' }),
+        },
+      },
+    },
+    profiles: { agent: { layers: ['settings/mine'] } },
+  });
+  const result = resolveProfile({
+    model,
+    profile: 'agent',
+    harness,
+    ...(settings.body === undefined ? {} : { settingsBodies: { mine: settings.body } }),
+  });
+  if (!result.ok) throw new Error('unexpected');
+  return result.resolved;
+};
+
+describe('fixedLayerFor — Claude', () => {
+  it('should launch Auto mode explicitly, with no questions and the trust and onboarding keys', () => {
+    // Act
+    const actual = fixedLayerFor({
+      harness: 'claude',
+      agentPermissions: 'auto',
+      cwd: CWD,
+      acceptsAutoPermissionMode: true,
+    });
+
+    // Assert
+    should(actual).deepEqual({
+      ok: true,
+      layer: {
+        harness: 'claude',
+        agentPermissions: 'auto',
+        entries: [
+          {
+            purpose: 'permission-mode',
+            target: 'settings',
+            path: ['permissions', 'defaultMode'],
+            key: 'permissions.defaultMode',
+            value: 'auto',
+          },
+          {
+            purpose: 'trust',
+            target: 'claude-json',
+            path: ['projects', CWD, 'hasTrustDialogAccepted'],
+            key: `projects."${CWD}".hasTrustDialogAccepted`,
+            value: true,
+          },
+          {
+            purpose: 'onboarding',
+            target: 'claude-json',
+            path: ['hasCompletedOnboarding'],
+            key: 'hasCompletedOnboarding',
+            value: true,
+          },
+          {
+            purpose: 'no-questions',
+            target: 'launch',
+            path: [CLAUDE_NO_QUESTIONS_FLAG],
+            key: CLAUDE_NO_QUESTIONS_FLAG,
+            value: true,
+          },
+        ],
+        args: ['--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion'],
+        claudeJson: { hasCompletedOnboarding: true, projects: { [CWD]: { hasTrustDialogAccepted: true } } },
+      },
+    });
+  });
+
+  it('should launch Skip as bypassPermissions with the warning suppressed by an overlay', () => {
+    // Act
+    const actual = layerOf({ harness: 'claude', agentPermissions: 'skip', cwd: CWD, acceptsAutoPermissionMode: false });
+
+    // Assert — Skip needs no Auto support
+    should(actual.args).deepEqual(['--permission-mode', 'bypassPermissions', '--disallowed-tools=AskUserQuestion']);
+    should(actual.claudeSettingsOverlay).deepEqual({ skipDangerousModePermissionPrompt: true });
+    should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
+      ['permission-mode', 'permissions.defaultMode', 'bypassPermissions'],
+      ['skip-prompt', 'skipDangerousModePermissionPrompt', true],
+    ]);
+  });
+
+  it('should refuse Auto mode on a Claude that does not accept it, naming the fix (O4)', () => {
+    // Act
+    const actual = fixedLayerFor({
+      harness: 'claude',
+      agentPermissions: 'auto',
+      cwd: CWD,
+      acceptsAutoPermissionMode: false,
+    });
+
+    // Assert
+    should(actual.ok).be.false();
+    should(!actual.ok && actual.refusal.kind).equal('claude-auto-mode-unsupported');
+    should(!actual.ok && actual.refusal.message).match(
+      /Update Claude Code, or switch this machine's Agent permissions to Skip/,
+    );
+  });
+});
+
+describe('fixedLayerFor — Codex', () => {
+  it('should map Auto mode to on-request in the workspace, with the measured trust table', () => {
+    // Act
+    const actual = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD });
+
+    // Assert
+    should(actual.args).deepEqual([
+      '-c',
+      'approval_policy="on-request"',
+      '-c',
+      'sandbox_mode="workspace-write"',
+      '-c',
+      `projects={"${CWD}"={trust_level="trusted"}}`,
+      '--no-alt-screen',
+    ]);
+    should(actual.claudeJson).be.undefined();
+    should(actual.claudeSettingsOverlay).be.undefined();
+    should(actual.entries.map(entry => [entry.target, entry.key, entry.value])).deepEqual([
+      ['settings', 'approval_policy', 'on-request'],
+      ['settings', 'sandbox_mode', 'workspace-write'],
+      ['settings', `projects."${CWD}".trust_level`, 'trusted'],
+      ['launch', CODEX_NO_ALT_SCREEN_FLAG, true],
+    ]);
+  });
+
+  it('should map Skip to never with full access', () => {
+    // Act
+    const actual = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD });
+
+    // Assert
+    should(actual.args.slice(0, 4)).deepEqual([
+      '-c',
+      'approval_policy="never"',
+      '-c',
+      'sandbox_mode="danger-full-access"',
+    ]);
+  });
+});
+
+describe('tomlString and codexTrustOverride', () => {
+  it('should escape quotes, backslashes and control characters', () => {
+    // Assert
+    should(tomlString('a"b\\c\nd\u007f')).equal('"a\\"b\\\\c\\u000ad\\u007f"');
+    should(tomlString('/plain/ü')).equal('"/plain/ü"');
+  });
+
+  it('should write the trust override as an inline table, whatever the folder holds', () => {
+    // Assert
+    should(codexTrustOverride('/a "b"')).equal('projects={"/a \\"b\\""={trust_level="trusted"}}');
+  });
+});
+
+describe('applyFixedLayer', () => {
+  const claudeAuto = layerOf({
+    harness: 'claude',
+    agentPermissions: 'auto',
+    cwd: CWD,
+    acceptsAutoPermissionMode: true,
+  });
+  const codexSkip = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD });
+
+  it('should append the fixed arguments last and write its settings over the profile', () => {
+    // Arrange
+    const profile = profileWith('claude', {
+      flags: ['--verbose'],
+      body: { permissions: { defaultMode: 'plan', allow: ['Bash(ls)'] }, theme: 'dark' },
+    });
+
+    // Act
+    const actual = applyFixedLayer(profile, claudeAuto);
+
+    // Assert
+    should(actual.args).deepEqual(['--verbose', '--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion']);
+    should(actual.settings).deepEqual({ permissions: { defaultMode: 'auto', allow: ['Bash(ls)'] }, theme: 'dark' });
+    should(actual.fixed).equal(claudeAuto);
+    should(actual.overridden).have.length(1);
+    should(actual.overridden[0]).containDeep({
+      kind: 'setting',
+      key: 'permissions.defaultMode',
+      path: ['permissions', 'defaultMode'],
+      value: 'plan',
+      layer: { name: 'mine' },
+      fixed: { purpose: 'permission-mode', value: 'auto' },
+    });
+  });
+
+  it('should not report a user value equal to the fixed one', () => {
+    // Act
+    const actual = applyFixedLayer(
+      profileWith('claude', { body: { permissions: { defaultMode: 'auto' } } }),
+      claudeAuto,
+    );
+
+    // Assert
+    should(actual.overridden).deepEqual([]);
+  });
+
+  it('should report a user table the fixed key replaces from above', () => {
+    // Arrange — a whole `permissions` scalar, or a deeper key under a fixed scalar
+    const profile = profileWith('codex', { body: { approval_policy: { nested: 1 }, sandbox_mode: 'read-only' } });
+
+    // Act
+    const actual = applyFixedLayer(profile, codexSkip);
+
+    // Assert
+    should(actual.overridden.map(entry => entry.kind === 'setting' && [entry.key, entry.value])).deepEqual([
+      ['approval_policy.nested', 1],
+      ['sandbox_mode', 'read-only'],
+    ]);
+    should(actual.settings).containDeep({
+      approval_policy: 'never',
+      sandbox_mode: 'danger-full-access',
+      projects: { [CWD]: { trust_level: 'trusted' } },
+    });
+  });
+
+  it('should drop the Claude permission flags it replaces, in both spellings, and keep the rest', () => {
+    // Arrange
+    const profile = profileWith('claude', {
+      flags: [
+        '--permission-mode',
+        'plan',
+        '--verbose',
+        '--permission-mode=acceptEdits',
+        '--dangerously-skip-permissions',
+        '--allow-dangerously-skip-permissions',
+        '--disallowed-tools=AskUserQuestion',
+        '--disallowed-tools=WebFetch',
+        'auto',
+        '--permission-mode',
+      ],
+    });
+
+    // Act
+    const actual = applyFixedLayer(profile, claudeAuto);
+
+    // Assert
+    should(actual.args).deepEqual([
+      '--verbose',
+      '--disallowed-tools=WebFetch',
+      'auto',
+      '--permission-mode',
+      'auto',
+      '--disallowed-tools=AskUserQuestion',
+    ]);
+    should(actual.overridden.map(entry => entry.kind === 'flag' && entry.tokens)).deepEqual([
+      ['--permission-mode', 'plan'],
+      ['--permission-mode=acceptEdits'],
+      ['--dangerously-skip-permissions'],
+      ['--allow-dangerously-skip-permissions'],
+      ['--permission-mode'],
+    ]);
+  });
+
+  it('should drop the Codex permission flags and the config keys it sets, keeping other config', () => {
+    // Arrange
+    const profile = profileWith('codex', {
+      flags: [
+        '--full-auto',
+        '-a',
+        'untrusted',
+        '--ask-for-approval=on-failure',
+        '-s',
+        'read-only',
+        '--sandbox',
+        'workspace-write',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-c',
+        'approval_policy="untrusted"',
+        '--config=sandbox_mode=read-only',
+        '-c',
+        'model_reasoning_effort="high"',
+        '--config=tools.web_search=true',
+        '--no-alt-screen',
+        '--search',
+        '-c',
+      ],
+    });
+
+    // Act
+    const actual = applyFixedLayer(profile, codexSkip);
+
+    // Assert
+    should(actual.args).deepEqual([
+      '-c',
+      'model_reasoning_effort="high"',
+      '--config=tools.web_search=true',
+      '--search',
+      '-c',
+      ...codexSkip.args,
+    ]);
+    should(actual.overridden.map(entry => entry.kind === 'flag' && entry.tokens)).deepEqual([
+      ['--full-auto'],
+      ['-a', 'untrusted'],
+      ['--ask-for-approval=on-failure'],
+      ['-s', 'read-only'],
+      ['--sandbox', 'workspace-write'],
+      ['--dangerously-bypass-approvals-and-sandbox'],
+      ['-c', 'approval_policy="untrusted"'],
+      ['--config=sandbox_mode=read-only'],
+    ]);
+  });
+});
