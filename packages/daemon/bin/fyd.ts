@@ -153,6 +153,8 @@ import {
   StateHomeLockedError,
   StatePairingRepository,
   StatePushRepository,
+  StatePasskeyStore,
+  WebCryptoPasskeyCrypto,
   StateVapidKeys,
   SystemClock,
   SystemFrameClock,
@@ -456,6 +458,10 @@ import {
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   PushService,
+  ChallengeLedger,
+  passkeyVerifier,
+  StepUpRegistry,
+  StepUpService,
   packageRole,
   paneShowsActiveWork,
   parseSessionId,
@@ -5301,11 +5307,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // still paired, and its window is measured from the grant's own `createdAt`.
       const stepUp = new StepUpService({
         store: new StatePasskeyStore(paths, stateFiles),
-        verifier: passkeyVerifier,
+        verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
         registry: new StepUpRegistry(),
         challenges: new ChallengeLedger(),
         random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
-        clock,
+        clock: { nowMs: () => Date.now() },
         devices: {
           device: async deviceId => {
             const record = (await repository.list()).find(candidate => candidate.id === deviceId);

@@ -14,6 +14,7 @@ import {
 } from '@ferretry/protocol';
 import { fromBase64Url, toBase64Url } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
+import { type PasskeyCrypto, verifyAssertion, verifyRegistration } from '../passkeys/index.ts';
 import type { ChallengeLedger, StepUpRegistry, StepUpSubject } from './registry.ts';
 import type {
   PasskeyStore,
@@ -248,4 +249,15 @@ const passkeyView = (passkey: StoredPasskey): PasskeyView => ({
   id: passkey.credentialId,
   origin: passkey.origin,
   createdAt: passkey.createdAt,
+});
+
+/**
+ * The WebAuthn verifier (`../passkeys`) as the step-up service consumes it, bound to one crypto port.
+ *
+ * Its verdict passes through whole; the service collapses every refusal reason into `not-verified`
+ * before anything leaves this daemon.
+ */
+export const passkeyVerifier = (crypto: PasskeyCrypto): PasskeyVerifierPort => ({
+  verifyRegistration: async input => await verifyRegistration(crypto, input),
+  verifyAssertion: async input => await verifyAssertion(crypto, input),
 });
