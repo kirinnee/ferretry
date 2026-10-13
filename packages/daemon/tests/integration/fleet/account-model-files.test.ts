@@ -13,8 +13,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { renderConfig } from '@ferretry/fleet/adapters';
-import { parseAccountModel } from '@ferretry/fleet';
+import { parseAccountModel, RETIRED_FLEET_CONFIG_SENTENCE, RetiredFleetConfigError, renderConfig } from '@ferretry/fleet';
 import should from 'should';
 import {
   documentRevision,
@@ -23,9 +22,7 @@ import {
   readComponentText,
 } from '../../../src/adapters/fleet/account-model-files.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
-import { ACCOUNT_MODEL_DISABLED_SENTENCE } from '../../../src/lib/fleet/account-model-switch.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
-import { defaultDaemonConfig } from '../../../src/lib/runtime/config.ts';
 
 const directories: string[] = [];
 
@@ -47,7 +44,7 @@ const LOCAL: CallerGovernance = {
   governed: false,
   passwordSet: false,
   confirmChange: false,
-  decide: () => ({ allowed: true }),
+  decide: () => ({ allowed: true, refusal: 'granted' }),
 } as never;
 
 const MODEL = parseAccountModel({
@@ -62,7 +59,6 @@ interface Machine {
   readonly root: string;
   readonly fleet: string;
   readonly service: FleetCatalogService;
-  enabled: boolean | 'unreadable';
   states: unknown[];
 }
 
@@ -74,20 +70,11 @@ async function machine(): Promise<Machine> {
   await mkdir(fleet, { recursive: true });
   await mkdir(userHome, { recursive: true });
   await writeFile(path.join(fleet, 'config.yaml'), renderConfig(MODEL));
-  const handle: Machine = { root, fleet, service: undefined as never, enabled: true, states: [] };
+  const handle: Machine = { root, fleet, service: undefined as never, states: [] };
   const deps = fileFleetCatalogDeps({
     paths: { home: home as never, fleet, fleetManifest: path.join(fleet, 'manifest.json') },
     userHome,
     hostCodexHome: path.join(userHome, '.codex'),
-    daemonConfig: {
-      peek: async () => {
-        if (handle.enabled === 'unreadable') throw new Error('config/daemon.json is not JSON');
-        return {
-          document: undefined,
-          config: { ...defaultDaemonConfig(), accountModel: { enabled: handle.enabled } },
-        };
-      },
-    },
     sessionStates: async () => handle.states,
     credentials: {
       list: async () => ({ format: 2, machine: 'studio', credentials: [] }),
@@ -120,20 +107,39 @@ describe('reading the account model from disk', () => {
     should(Object.keys(reading.model.runtimes)).deepEqual(['codex-default']);
   });
 
-  it('should read a version-1 configuration through its conversion, and no file as an empty model', async () => {
+  it('should read no file as an empty model', async () => {
     // Arrange
     const root = await temporary();
-    const file = path.join(root, 'config.yaml');
-    await writeFile(file, '');
 
     // Act
-    const legacy = await readAccountDocument(file);
     const none = await readAccountDocument(path.join(root, 'absent.yaml'));
 
     // Assert
-    should(legacy.format).equal('version-1');
     should(none).match({ format: 'none', revision: 'absent' });
     should(Object.keys(none.model.runtimes)).deepEqual([]);
+  });
+
+  it.each([
+    ['version 1', 'version: 1\naccounts: []\n'],
+    ['no version', 'agents: []\n'],
+    ['empty', ''],
+    ['an empty mapping', '{}\n'],
+  ])('should refuse a configuration in the retired format (%s) and leave it byte-for-byte untouched', async (_, text) => {
+    // Arrange
+    const root = await temporary();
+    const file = path.join(root, 'config.yaml');
+    await writeFile(file, text);
+
+    // Act
+    const error = await readAccountDocument(file).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert — refused rather than converted, with the sentence that says how to set the machine up again.
+    should(error).be.instanceOf(RetiredFleetConfigError);
+    should((error as Error).message).equal(RETIRED_FLEET_CONFIG_SENTENCE(file));
+    should(await readFile(file, 'utf8')).equal(text);
   });
 
   it('should throw for a configuration that exists and cannot be read', async () => {
@@ -217,7 +223,7 @@ describe('a reviewed change applied by the real provisioner', () => {
     should(await readlink(path.join(runtimeHome, 'AGENTS.md'))).equal(asset);
     const written = await readAccountDocument(path.join(host.fleet, 'config.yaml'));
     should(written.model.profiles.default?.layers).deepEqual(['mcp/notes', 'instructions/main']);
-    should((await host.service.machine()).runningSessions).equal(1);
+    should((await host.service.machine(LOCAL)).runningSessions).equal(1);
   });
 
   it('should write a component file and link it in the SAME apply, when that apply is what creates the file', async () => {
@@ -264,19 +270,29 @@ describe('a reviewed change applied by the real provisioner', () => {
     should(error).match({ code: 'fleet_change_stale' });
   });
 
-  it('should refuse every write while the switch is off or the daemon configuration cannot be read', async () => {
+  it('should answer the catalogue as unreadable on a retired configuration, naming the sentence, and touch nothing', async () => {
     // Arrange
     const host = await machine();
+    const file = path.join(host.fleet, 'config.yaml');
+    const text = 'version: 1\naccounts: []\n';
+    await writeFile(file, text);
 
     // Act
-    host.enabled = false;
-    const off = await host.service.machine();
-    host.enabled = 'unreadable';
-    const unreadable = await host.service.machine();
+    const [read, staged] = await Promise.all(
+      [host.service.machine(LOCAL), host.service.propose({ kind: 'machine.settings', agentPermissions: 'skip' })].map(
+        async work =>
+          await work.then(
+            () => undefined,
+            (thrown: unknown) => thrown,
+          ),
+      ),
+    );
 
     // Assert
-    should(off.changes).deepEqual({ available: false, reason: ACCOUNT_MODEL_DISABLED_SENTENCE });
-    should(unreadable.changes).deepEqual({ available: false, reason: ACCOUNT_MODEL_DISABLED_SENTENCE });
+    const expected = `this machine's fleet configuration could not be read: ${RETIRED_FLEET_CONFIG_SENTENCE(file)}`;
+    should(read).match({ code: 'fleet_catalog_unreadable', message: expected });
+    should(staged).match({ code: 'fleet_catalog_unreadable', message: expected });
+    should(await readFile(file, 'utf8')).equal(text);
   });
 
   it('should refuse a change when ids.json exists and cannot be read, rather than minting new ids', async () => {

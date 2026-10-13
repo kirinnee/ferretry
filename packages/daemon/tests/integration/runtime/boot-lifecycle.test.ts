@@ -1,8 +1,8 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { buildFleetManifest, FleetHealthSnapshotSchema, FleetManifestSchema } from '@ferretry/fleet';
+import { buildFleetManifest, FleetManifestSchema, RETIRED_FLEET_CONFIG_SENTENCE } from '@ferretry/fleet';
 import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
@@ -54,8 +54,8 @@ import {
 import { NodeTranscriptSource } from '../../../src/adapters/transcript/index.ts';
 import {
   type BootNoticePort,
-  DEFAULT_CALLSIGN_POOL,
   CodexTranscriptParser,
+  DEFAULT_CALLSIGN_POOL,
   digestConversation,
   EXIT_ADDRESS_CONFLICT,
   EXIT_ALREADY_RUNNING,
@@ -66,6 +66,7 @@ import {
   type ProcessInventoryPort,
   type ProcessObservation,
   parseSessionId,
+  RETIRED_ACCOUNT_MODEL_NOTICE,
   type RelayAdvertisement,
   type RelayCarrierSource,
   type ResumeLauncher,
@@ -137,11 +138,11 @@ function relaySocketProbe() {
 /**
  * A resolver that finds everything this host really has EXCEPT an agent harness.
  *
- * A boot now prepares the default fleet for any harness it locates and publishes no account for, so
- * without this the machine running these tests would decide what most of them assert: a developer
- * with Claude Code installed gets a scaffold, an apply and two extra notices that the CI runner never
- * sees, and every `said.stated[n]` below shifts. Clearing `PATH` instead would have made the doctor
- * report every program it needs missing and turned `--check` non-zero, which is a different lie.
+ * The boot preflight reports every harness it locates against the manifest, so without this the
+ * machine running these tests would decide what most of them assert: a developer with Claude Code
+ * installed gets a different preflight and warning than the CI runner, and every `said.stated[n]`
+ * below shifts. Clearing `PATH` instead would have made the doctor report every program it needs
+ * missing and turned `--check` non-zero, which is a different lie.
  *
  * Only `claude` and `codex` are hidden. Everything else resolves exactly as it does in production, so
  * "this host has no agent harness" becomes a property of the fixture rather than of the developer.
@@ -163,47 +164,26 @@ function buildIntegrationWorld(seams: WorldSeams = { userHome: ABSENT_USER_HOME 
   };
 }
 
-/**
- * The same wait, for a condition that has to be READ rather than counted.
- *
- * A separate helper rather than widening {@link waitUntil}'s predicate to `boolean | Promise<boolean>`:
- * a synchronous predicate returning a promise is always truthy, so one signature accepting both would
- * make an async caller's wait return on the first attempt and its assertion race.
- */
-async function waitUntilAsync(predicate: () => Promise<boolean>, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (await predicate()) return;
-    await Bun.sleep(25);
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
-
-/**
- * The instant the persisted health document records for its first account, or `undefined`.
- *
- * Reads the FILE rather than the route, because the route is the thing under suspicion: a test that
- * asked `GET /v1/fleet/health` to learn when the last check happened would be using the read to
- * observe the read. Every failure — absent, mid-rename, unparseable, empty — answers `undefined` so a
- * poll loop keeps waiting instead of throwing on a torn read of an atomically replaced file.
- */
-async function recordedCheckedAt(document: string): Promise<number | undefined> {
-  try {
-    const parsed = JSON.parse(await Bun.file(document).text()) as {
-      accounts?: readonly { lastCheckedAt?: unknown }[];
-    };
-    const at = parsed.accounts?.[0]?.lastCheckedAt;
-    return typeof at === 'number' ? at : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     if (predicate()) return;
     await Bun.sleep(25);
   }
   throw new Error(`timed out waiting for ${what}`);
+}
+
+/**
+ * A `config/daemon.json` body for a case that is not about the first run.
+ *
+ * A boot imports this host's own Claude Code and Codex setup whenever the state home has no fleet
+ * configuration, and that import resolves the harness through the daemon's own locator and reads
+ * `CLAUDE_CONFIG_DIR` / `CODEX_HOME` from the environment — so without this, the machine running the
+ * suite would decide what most of this file asserts: a developer with Claude Code installed gets a
+ * runtime, a republished manifest and an extra notice that the CI runner never sees. A case that
+ * declares its own `fleet` block keeps it, which is how the first-run cases below opt back in.
+ */
+function daemonDocument(document: Record<string, unknown>): string {
+  return JSON.stringify('fleet' in document ? document : { ...document, fleet: { prepareDefaults: false } });
 }
 
 /**
@@ -217,7 +197,7 @@ async function seedHome(home: string, port: number): Promise<void> {
   process.env.FY_HOME = home;
   const opened = await buildIntegrationWorld().storage.open();
   await opened.storage.close();
-  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+  await writeFile(join(home, 'config', 'daemon.json'), daemonDocument({ host: '127.0.0.1', port }), { mode: 0o600 });
 }
 
 const SESSION_ID = 'wire-1';
@@ -736,7 +716,7 @@ async function seedHomeWithoutPort(home: string): Promise<void> {
   process.env.FY_HOME = home;
   const opened = await buildIntegrationWorld().storage.open();
   await opened.storage.close();
-  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1' }), { mode: 0o600 });
+  await writeFile(join(home, 'config', 'daemon.json'), daemonDocument({ host: '127.0.0.1' }), { mode: 0o600 });
 }
 
 async function runCleanups(cleanups: ReadonlyArray<() => void | Promise<void>>): Promise<void> {
@@ -938,7 +918,7 @@ describe('daemon boot lifecycle', () => {
     });
     await writeFile(
       join(home, 'config', 'daemon.json'),
-      JSON.stringify({
+      daemonDocument({
         host: '127.0.0.1',
         port,
         carriers: [{ kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 }],
@@ -4377,7 +4357,7 @@ describe('daemon boot lifecycle', () => {
     const warning = said.stated.find(message => message.includes('no agent harness is ready'));
     should(warning).be.a.String();
     // A diagnosis without a remedy leaves the reader where they were.
-    should(warning).match(/fleet apply/u);
+    should(warning).match(/run `fy setup` to import it/u);
     // And it never overclaims in the other direction either.
     should(warning).match(/can serve its API but cannot start a session/u);
   });
@@ -4453,7 +4433,7 @@ describe('daemon boot lifecycle', () => {
     await writeFile(join(tools, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     await writeFile(
       join(home, 'config', 'daemon.json'),
-      JSON.stringify({
+      daemonDocument({
         host: '127.0.0.1',
         port,
         harness: { searchPaths: [tools], paths: { codex: join(tools, 'not-installed') } },
@@ -4566,7 +4546,7 @@ describe('daemon boot lifecycle', () => {
         await seedHome(home, port);
         await writeFile(
           join(home, 'config', 'daemon.json'),
-          JSON.stringify({
+          daemonDocument({
             carriers: [
               { kind: 'bind', host: '127.0.0.1', port },
               ...relayUrls.map(url => ({ kind: 'relay', url, reconnectSeconds: 3_600 })),
@@ -4620,7 +4600,7 @@ describe('daemon boot lifecycle', () => {
       const relayUrls = ['https://first.example', 'https://second.example'] as const;
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
+        daemonDocument({
           host: '127.0.0.1',
           port,
           carriers: relayUrls.map(url => ({ kind: 'relay', url, reconnectSeconds: 3_600 })),
@@ -4679,7 +4659,7 @@ describe('daemon boot lifecycle', () => {
       await seedHome(home, port);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
+        daemonDocument({
           host: '127.0.0.1',
           port,
           carriers: [
@@ -4723,7 +4703,7 @@ describe('daemon boot lifecycle', () => {
       await seedHome(home, port);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
+        daemonDocument({
           host: '127.0.0.1',
           port,
           carriers: [
@@ -4839,7 +4819,7 @@ describe('daemon boot lifecycle', () => {
       await seedHome(home, port);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
+        daemonDocument({
           carriers: [
             { kind: 'bind', host: '0.0.0.0', port },
             { kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 },
@@ -4900,7 +4880,7 @@ describe('daemon boot lifecycle', () => {
       await seedFleet(home);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
+        daemonDocument({
           host: '127.0.0.1',
           port,
           publicUrl,
@@ -4959,7 +4939,7 @@ describe('daemon boot lifecycle', () => {
       await seedHome(home, port);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
+        daemonDocument({
           host: '127.0.0.1',
           port,
           publicUrl,
@@ -5002,7 +4982,7 @@ describe('daemon boot lifecycle', () => {
       await seedHome(home, port);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
+        daemonDocument({
           host: 'box.invalid',
           carriers: [
             { kind: 'bind', host: '127.0.0.1', port },
@@ -5124,7 +5104,7 @@ describe('daemon boot lifecycle', () => {
       await seedHome(home, port);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'https://mine.example', enabled: false } }),
+        daemonDocument({ host: '127.0.0.1', port, relay: { url: 'https://mine.example', enabled: false } }),
         { mode: 0o600 },
       );
       const cleanups: Array<() => void | Promise<void>> = [];
@@ -5168,14 +5148,35 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
-   * The fleet a host gets for starting a daemon, through the REAL composition root.
+   * The first run a host gets for starting a daemon, through the REAL composition root.
    *
-   * This is the only tier that can catch the failure that mattered most here: the scaffold and the
-   * apply each take the fleet's exclusive apply claim, and the boot is already holding the state
-   * home's lifetime lock. A unit test with fakes proves the decision; only a real boot proves the
-   * three locks do not deadlock, and a deadlock here hangs every start on the machine.
+   * This is the only tier that can prove the import sits INSIDE the boot correctly: after the mounts
+   * it runs through, before the bind, under the state home's lifetime lock and the fleet's exclusive
+   * apply claim at once — a deadlock there hangs every start on the machine — and with every ending
+   * reaching the trail a person actually reads. The decisions themselves are proved in the setup
+   * service's unit tests.
    */
-  describe('the default fleet a start prepares', () => {
+  describe('the first run a start performs', () => {
+    const previousClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
+    const previousCodexHome = process.env.CODEX_HOME;
+
+    /**
+     * The import reads `CLAUDE_CONFIG_DIR` and `CODEX_HOME` from the environment, so a suite run from
+     * inside an agent session would otherwise import THAT session's harness home. Cleared, so every
+     * harness home below is derived from the fixture's own user home.
+     */
+    beforeEach(() => {
+      delete process.env.CLAUDE_CONFIG_DIR;
+      delete process.env.CODEX_HOME;
+    });
+
+    afterEach(() => {
+      if (previousClaudeConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfig;
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+    });
+
     /**
      * A host whose harnesses are exactly the fake ones this case wrote, and no others.
      *
@@ -5184,11 +5185,8 @@ describe('daemon boot lifecycle', () => {
      * rather than prepended, so a real Claude Code installation cannot leak into a case about a host
      * with exactly one harness.
      *
-     * THE USER HOME IS REPLACED TOO, and that one is not cosmetic. A first run copies this host's own
-     * harness login into the accounts it creates, and the directories it reads are derived from the
-     * user home — so without this, every case below would read the credential of whoever ran the suite
-     * and write a copy of it into a temporary directory. `homedir()` ignores `HOME` under this runtime,
-     * which is why the composition root takes the value rather than the environment being set.
+     * THE USER HOME IS REPLACED TOO, and that one is not cosmetic: the harness homes the import reads
+     * are derived from it, so without this every case below would import whoever ran the suite.
      */
     async function harnessOnPath(home: string, kinds: readonly string[]): Promise<DaemonWorld> {
       const binary = join(home, 'harness-bin');
@@ -5202,299 +5200,186 @@ describe('daemon boot lifecycle', () => {
       return { ...buildIntegrationWorld(seams), harnesses: production.harnesses };
     }
 
-    /** A signed-in harness in the fixture's own user home. Never the machine's. */
-    async function hostLogin(home: string, kind: 'claude' | 'codex', blob: string): Promise<void> {
-      const harnessHome = join(home, 'user-home', kind === 'claude' ? '.claude' : '.codex');
-      await mkdir(harnessHome, { recursive: true });
-      await writeFile(join(harnessHome, kind === 'claude' ? '.credentials.json' : 'auth.json'), blob, { mode: 0o600 });
-    }
-
-    it('should create, publish and disclose the default accounts for the harness it found', async () => {
-      // Arrange
-      const home = await tempDirectory('fyd-fleet-prepare');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
-      const found = await harnessOnPath(home, ['claude']);
-      const cleanups: Array<() => void | Promise<void>> = [];
-      const said = recordingNotices();
-      let release = (): void => {};
-      const stopped = new Promise<void>(resolve => {
-        release = resolve;
-      });
-      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
-
-      // Act
-      const booting = start(world, cleanups);
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
-        await Bun.sleep(25);
-      }
-      release();
-      const code = await booting;
-      await runCleanups(cleanups);
-
-      // Assert — the boot completed, so nothing deadlocked on the two claims it took.
-      should(code).equal(0);
-
-      // The manifest a start reads now publishes both lanes, and both wrappers are runnable.
-      const manifest = FleetManifestSchema.parse(
-        JSON.parse(await readFile(join(home, 'fleet', 'manifest.json'), 'utf8')),
-      );
-      should(manifest.accounts.map(account => basename(account.wrapper))).deepEqual([
-        'claude-default',
-        'claude-auto-default',
-      ]);
-      should(manifest.accounts.map(account => account.mode)).deepEqual(['interactive', 'auto']);
-      for (const account of manifest.accounts) {
-        should((await Bun.file(account.wrapper).stat()).mode & 0o111).be.above(0);
-      }
-
-      // Each lane reads its own document, in the home the apply filled.
-      should(await readFile(join(home, 'fleet', 'homes', 'claude-default', 'CLAUDE.md'), 'utf8')).equal(
-        await readFile(join(home, 'fleet', 'assets', 'CLAUDE.md'), 'utf8'),
-      );
-      should(await readFile(join(home, 'fleet', 'homes', 'claude-auto-default', 'CLAUDE.md'), 'utf8')).equal(
-        await readFile(join(home, 'fleet', 'assets', 'CLAUDE-auto.md'), 'utf8'),
-      );
-
-      // The DISCLOSURE, both halves. Creating executables in somebody's home is exactly the act the
-      // fleet's authority model exists to govern, so a first run that said nothing would be
-      // indefensible however local and however convenient.
-      const disclosure = said.stated.join('\n');
-      should(disclosure).containEql('starting this daemon is creating the default accounts');
-      should(disclosure).containEql('created 2 default accounts: claude-default, claude-auto-default');
-      should(disclosure).containEql(join(home, 'fleet', 'bin'));
-      should(disclosure).containEql('"fleet.prepareDefaults": false');
-      should(disclosure).containEql('NOT that they are signed in');
-
-      // And the sentence this whole change exists to make unreachable was NOT said — not before the
-      // preparation (it would have been a lie about to be corrected) and not after it.
-      should(disclosure).not.containEql('this daemon launches the wrappers the manifest declares');
-      should(disclosure).not.containEql('no agent harness is ready on this host');
-      // The trail's LAST word about the fleet is the re-read state, not the state before the apply.
-      const checked = said.steps.filter(step => step.startsWith('harnesses checked'));
-      should(checked).have.length(2);
-      should(checked[0]).containEql('claude: none');
-      should(checked[1]).containEql('claude: claude-default, claude-auto-default');
-    });
-
-    it('should create nothing and say why when the operator switched preparation off', async () => {
-      // Arrange — an explicit false, honoured on a FIRST start: there is no marker to consult, so
-      // somebody who does not want a daemon writing into their home is obeyed before the write.
-      const home = await tempDirectory('fyd-fleet-optout');
+    /** A first-run home: its layout, and a `daemon.json` holding exactly `extra` beside the address. */
+    async function firstRunHome(name: string, extra: Record<string, unknown>): Promise<{ home: string; port: number }> {
+      const home = await tempDirectory(name);
       const port = await freeLoopbackPort();
       await seedHome(home, port);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({ host: '127.0.0.1', port, fleet: { prepareDefaults: false } }),
+        daemonDocument({ host: '127.0.0.1', port, fleet: {}, ...extra }),
         { mode: 0o600 },
       );
-      const found = await harnessOnPath(home, ['claude']);
+      return { home, port };
+    }
+
+    /**
+     * Boots `world` until it answers, runs `during` against the live daemon, then shuts it down.
+     * Returns the exit code, what `during` answered and everything the boot said.
+     */
+    async function bootOnce<T>(
+      world: DaemonWorld,
+      home: string,
+      port: number,
+      during: (base: string, headers: Record<string, string>) => Promise<T>,
+    ): Promise<{ readonly code: number; readonly answer: T; readonly said: ReturnType<typeof recordingNotices> }> {
       const cleanups: Array<() => void | Promise<void>> = [];
       const said = recordingNotices();
       let release = (): void => {};
       const stopped = new Promise<void>(resolve => {
         release = resolve;
       });
-      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
-
-      // Act
-      const booting = start(world, cleanups);
+      const booting = start({ ...world, notices: said.port, untilShutdown: async () => await stopped }, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
       for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
         await Bun.sleep(25);
       }
-      release();
+      let answer: T;
+      try {
+        const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+        answer = await during(base, { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' });
+      } finally {
+        release();
+      }
       const code = await booting;
       await runCleanups(cleanups);
+      return { code, answer, said };
+    }
 
-      // Assert — nothing at all was written, and the boot said both what is missing and why.
+    const nothing = async (): Promise<undefined> => undefined;
+
+    it('should import the harness it found, publish its runtime and say so', async () => {
+      // Arrange
+      const { home, port } = await firstRunHome('fyd-first-run', {});
+      const world = await harnessOnPath(home, ['claude']);
+
+      // Act
+      const { code, said } = await bootOnce(world, home, port, nothing);
+
+      // Assert — the boot completed, so nothing deadlocked on the claims it took.
+      should(code).equal(0);
+      // The configuration it wrote is the account model's, and the manifest publishes its runtime — on
+      // the starter profile, because this host's harness has no settings of its own to import.
+      const written = Bun.YAML.parse(await readFile(join(home, 'fleet', 'config.yaml'), 'utf8')) as {
+        version: unknown;
+      };
+      should(written.version).equal(2);
+      const manifest = FleetManifestSchema.parse(
+        JSON.parse(await readFile(join(home, 'fleet', 'manifest.json'), 'utf8')),
+      );
+      should(manifest.accounts.map(account => basename(account.wrapper))).deepEqual(['claude-starter']);
+      for (const account of manifest.accounts) {
+        should((await stat(account.wrapper)).mode & 0o111).be.above(0);
+      }
+      // One sentence for the whole first run, said as a state so no log level can hide it.
+      const firstRun = said.stated.filter(message => message.startsWith('first run:'));
+      should(firstRun).have.length(1);
+      should(firstRun[0]).match(/1 runtime created: claude-starter\.$/u);
+    });
+
+    it('should run no first run when the operator switched it off', async () => {
+      // Arrange — an explicit false, honoured on a FIRST start, before anything is written.
+      const { home, port } = await firstRunHome('fyd-first-run-off', { fleet: { prepareDefaults: false } });
+      const world = await harnessOnPath(home, ['claude']);
+
+      // Act
+      const { code, said } = await bootOnce(world, home, port, nothing);
+
+      // Assert — nothing was imported and nothing was written, and the boot did not claim a first run.
       should(code).equal(0);
       should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
       should(await Bun.file(join(home, 'fleet', 'manifest.json')).exists()).be.false();
-      const stated = said.stated.join('\n');
-      should(stated).containEql('fleet.prepareDefaults is false');
-      should(stated).containEql('publishes no account for');
-      should(said.stated.join('\n')).not.containEql('created 2 default accounts');
+      should(said.stated.filter(message => message.startsWith('first run:'))).be.empty();
+      should(said.stated.join('\n')).containEql('publishes no account for');
     });
 
-    it('should create nothing on a host with no harness, and still start', async () => {
+    it('should import nothing on a host with no harness, and still start', async () => {
       // Arrange
-      const home = await tempDirectory('fyd-fleet-no-harness');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
-      const found = await harnessOnPath(home, []);
-      const cleanups: Array<() => void | Promise<void>> = [];
-      const said = recordingNotices();
-      let release = (): void => {};
-      const stopped = new Promise<void>(resolve => {
-        release = resolve;
-      });
-      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+      const { home, port } = await firstRunHome('fyd-first-run-empty', {});
+      const world = await harnessOnPath(home, []);
 
       // Act
-      const booting = start(world, cleanups);
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
-        await Bun.sleep(25);
-      }
-      release();
-      const code = await booting;
-      await runCleanups(cleanups);
+      const { code, said } = await bootOnce(world, home, port, nothing);
 
-      // Assert — a warning, never a refusal: somebody may install a harness minutes from now.
+      // Assert — a sentence, never a refusal: somebody may install a harness minutes from now.
       should(code).equal(0);
       should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
-      should(said.stated.join('\n')).containEql('no agent harness could be located');
+      should(said.stated).containEql('first run: nothing was imported, because nothing was found to import.');
     });
 
-    it('should prepare nothing when the published manifest is not reproducible from the configuration', async () => {
-      // Arrange — a host whose manifest publishes one Claude account and whose `config.yaml` does not
-      // exist. This is the reproduction that made the assertion necessary: preparation fired because
-      // CODEX had no account, and the whole-fleet apply republished the manifest from a configuration
-      // that declares only what preparation had just created — taking the Claude account away.
-      const home = await tempDirectory('fyd-fleet-only-add');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
-      const seeded = await seedFleet(home);
+    it('should leave a fleet configuration that already exists exactly as it is', async () => {
+      // Arrange — a machine that has its own account model and a manifest an earlier apply published.
+      const { home, port } = await firstRunHome('fyd-first-run-existing', {});
+      await seedFleet(home);
+      await mkdir(join(home, 'fleet'), { recursive: true });
+      await writeFile(join(home, 'fleet', 'config.yaml'), 'version: 2\n', { mode: 0o600 });
       const before = await readFile(join(home, 'fleet', 'manifest.json'), 'utf8');
-      const found = await harnessOnPath(home, ['codex']);
-      const cleanups: Array<() => void | Promise<void>> = [];
-      const said = recordingNotices();
-      let release = (): void => {};
-      const stopped = new Promise<void>(resolve => {
-        release = resolve;
-      });
-      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+      const world = await harnessOnPath(home, ['claude']);
 
       // Act
-      const booting = start(world, cleanups);
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
-        await Bun.sleep(25);
-      }
-      release();
-      const code = await booting;
-      await runCleanups(cleanups);
+      const { code, said } = await bootOnce(world, home, port, nothing);
 
-      // Assert — the daemon started, and the manifest is byte-identical: the seeded account is still
-      // published and nothing of the fleet was written.
+      // Assert — nothing was re-imported over it, and the boot said why.
       should(code).equal(0);
+      should(await readFile(join(home, 'fleet', 'config.yaml'), 'utf8')).equal('version: 2\n');
       should(await readFile(join(home, 'fleet', 'manifest.json'), 'utf8')).equal(before);
-      should(FleetManifestSchema.parse(JSON.parse(before)).accounts.map(account => account.wrapper)).deepEqual([
-        seeded,
-      ]);
-      should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
-
-      // And it said so, naming the account it would have removed and the deliberate remedy.
-      const stated = said.stated.join('\n');
-      should(stated).containEql('were NOT created, and nothing was written');
-      should(stated).containEql(`${WRAPPER}: it is published now and the configuration does not declare it`);
-      should(stated).containEql('Preparation may only add');
-      should(stated).containEql('`fy fleet apply` publishes the configuration deliberately');
-      should(stated).not.containEql('created 2 default accounts');
-      // The trail's last word about the fleet is still the seeded account, because nothing moved.
-      const checked = said.steps.filter(step => step.startsWith('harnesses checked'));
-      should(checked.at(-1)).containEql(`claude: ${WRAPPER}`);
+      should(said.stated).containEql(
+        'first run: nothing was imported, because this machine already has a fleet configuration, so it was left as it is',
+      );
     });
 
     /**
-     * The fleet arrives signed in, proved on a real boot rather than on a mount.
+     * A `config.yaml` in the RETIRED account format: refused, never converted, never overwritten.
      *
-     * The copy itself and every ending it can reach are proved in
-     * `packages/daemon/tests/unit/runtime/mounts/fleet-defaults.test.ts`. What only this tier can show
-     * is that the seed sits INSIDE the boot correctly: it runs after the apply that creates the homes,
-     * it does not hang the start on any of the three exclusive claims already in play, and the
-     * sentences it produces reach the boot trail a person actually reads.
+     * The daemon still boots — a refused fleet must not take pairing, sessions and every other surface
+     * down with it — but the boot trail and the machine view both name the file and say what to do,
+     * and the file is left byte for byte as the operator wrote it.
      */
-    it('should copy this host own login into the accounts it just created, and say so', async () => {
-      // Arrange — a host whose own Claude Code is signed in and whose fleet does not exist yet.
-      const home = await tempDirectory('fyd-fleet-seed');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
-      const found = await harnessOnPath(home, ['claude']);
-      const credential = JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'fixture-access-token',
-          refreshToken: 'fixture-refresh-token',
-          expiresAt: Date.now() + 86_400_000,
-        },
-      });
-      await hostLogin(home, 'claude', credential);
-      const cleanups: Array<() => void | Promise<void>> = [];
-      const said = recordingNotices();
-      let release = (): void => {};
-      const stopped = new Promise<void>(resolve => {
-        release = resolve;
-      });
-      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+    it('should boot, refuse and name a fleet configuration in the old account format, touching nothing', async () => {
+      // Arrange — a host with a harness to import, so only the refusal stands between it and a first run.
+      const { home, port } = await firstRunHome('fyd-first-run-v1', {});
+      const configPath = join(home, 'fleet', 'config.yaml');
+      const retired = 'accounts: {}\n';
+      await mkdir(join(home, 'fleet'), { recursive: true });
+      await writeFile(configPath, retired, { mode: 0o600 });
+      const world = await harnessOnPath(home, ['claude']);
 
       // Act
-      const booting = start(world, cleanups);
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
-        await Bun.sleep(25);
-      }
-      release();
-      const code = await booting;
-      await runCleanups(cleanups);
+      const { code, said, answer } = await bootOnce(world, home, port, async (base, headers) => {
+        const response = await fetch(`${base}/v1/fleet/machine`, { headers });
+        return { status: response.status, body: (await response.json()) as { code?: string; error?: string } };
+      });
 
-      // Assert — the boot completed and both created homes hold the login, as their own private copy.
+      // Assert — it started anyway.
       should(code).equal(0);
-      for (const wrapper of ['claude-default', 'claude-auto-default']) {
-        const copy = join(home, 'fleet', 'homes', wrapper, '.credentials.json');
-        should(await readFile(copy, 'utf8')).equal(credential);
-        should((await stat(copy)).mode & 0o777).equal(0o600);
-      }
-
-      // The disclosure says WHAT was copied, WHERE FROM, and what it means afterwards. Copying
-      // somebody's provider login is not a detail, and silence about it is what makes people think
-      // this is broken.
-      const disclosure = said.stated.join('\n');
-      should(disclosure).containEql('Signed in without a browser: claude-default, claude-auto-default');
-      should(disclosure).containEql(join(home, 'user-home', '.claude'));
-      should(disclosure).containEql('signing your own Claude out does not sign them out');
-      should(disclosure).containEql('Every one of them starts with a credential in place');
-      // And the sentence that was true before this feature is NOT said, because it no longer is.
-      should(disclosure).not.containEql('NOT that they are signed in');
-      // Not one credential value reaches the trail. The disclosure is built from verdicts.
-      should(disclosure).not.containEql('fixture-access-token');
-      should(disclosure).not.containEql('fixture-refresh-token');
+      // The boot trail names the file and the remedy, in the fleet's own sentence.
+      should(said.stated).containEql(
+        `first run: nothing was imported, because ${RETIRED_FLEET_CONFIG_SENTENCE(configPath)}`,
+      );
+      // The machine view refuses with the same file named, rather than serving an empty machine.
+      should(answer.status).equal(409);
+      should(answer.body.code).equal('fleet_catalog_unreadable');
+      should(answer.body.error).containEql(configPath);
+      // And nothing was converted, written over or published.
+      should(await readFile(configPath, 'utf8')).equal(retired);
+      should(await Bun.file(join(home, 'fleet', 'manifest.json')).exists()).be.false();
     });
 
-    it('should still start, and say what it found nothing to copy from, on a signed-out host', async () => {
-      // Arrange — a harness installed and never logged in. The accounts are still created.
-      const home = await tempDirectory('fyd-fleet-seed-none');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
-      const found = await harnessOnPath(home, ['claude']);
-      const cleanups: Array<() => void | Promise<void>> = [];
-      const said = recordingNotices();
-      let release = (): void => {};
-      const stopped = new Promise<void>(resolve => {
-        release = resolve;
+    it('should boot with the retired accountModel key and say once that it is no longer read', async () => {
+      // Arrange — the switch the account model used to sit behind, left in an old document.
+      const { home, port } = await firstRunHome('fyd-retired-switch', {
+        fleet: { prepareDefaults: false },
+        accountModel: { enabled: true },
       });
-      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+      const world = await harnessOnPath(home, []);
 
       // Act
-      const booting = start(world, cleanups);
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
-        await Bun.sleep(25);
-      }
-      release();
-      const code = await booting;
-      await runCleanups(cleanups);
+      const { code, said } = await bootOnce(world, home, port, nothing);
 
-      // Assert — a seed never fails a preparation, and the boot names the directory it looked in.
+      // Assert — tolerated rather than refused, and said exactly once so the operator can delete it.
       should(code).equal(0);
-      const disclosure = said.stated.join('\n');
-      should(disclosure).containEql('created 2 default accounts: claude-default, claude-auto-default');
-      should(disclosure).containEql(
-        `Nothing was copied for Claude: no usable Claude login was found in ${join(home, 'user-home', '.claude')}`,
-      );
-      should(disclosure).containEql('NOT that they are signed in');
-      should(await Bun.file(join(home, 'fleet', 'homes', 'claude-default', '.credentials.json')).exists()).be.false();
+      should(said.stated.filter(message => message === RETIRED_ACCOUNT_MODEL_NOTICE)).have.length(1);
     });
   });
 
@@ -5502,33 +5387,26 @@ describe('daemon boot lifecycle', () => {
    * WHAT AN UNATTENDED PASS IS ALLOWED TO SPEND, proved against a recorder that a real host would
    * have had to run.
    *
-   * A REAL SENTINEL MODEL PROMPT is what the v3.6 timer reached. `FleetRefreshService` took the
-   * mounted fleet and called its `health()`, which runs `ProcessFleetHealthProbe` — the published
-   * account WRAPPER, launched with a prompt asking for an exact sentinel. The fleet's own
-   * `usage.interval` default is 60 seconds and it drives this timer, so four accounts is a raw
-   * ceiling of 5,760 launches a day; `FLEET_HEALTH_SUCCESS_TTL_MS` is 15 minutes, which reduces the
-   * stable path to roughly 384 billable calls a day, and an unexpected reply or a failed cache write
-   * climbs back to the ceiling. `spendWrapper` records every launch and its full argv, because a
-   * flag can read `false` while a process still starts.
-   *
-   * ## THE FIXTURE HAS TO ASK FOR THE EXPENSIVE THING, OR IT PROVES NOTHING
-   *
-   * `health.enabled: true` is declared for exactly that reason. `usage.enabled: false` switches off
-   * the daemon's own native collector so the chain walks as far as the external endpoint below,
-   * which is what counts the unattended passes.
+   * A REAL SENTINEL MODEL PROMPT is what the v3.6 timer reached: the refresh pass launched each
+   * published account WRAPPER with a prompt asking for an exact sentinel, on the fleet's own
+   * `usage.interval` — a billable model call per account per tick, with nobody watching. That probe is
+   * deleted, and this proves the deletion holds on a booted daemon: `spendWrapper` records every
+   * launch and its full argv, because a flag can read `false` while a process still starts.
    *
    * ## THE TICK IS REAL, NOT A SHORTENED WAIT
    *
-   * `usage.interval: 1` is the fleet's own declaration, and it drives the registered `setInterval`
-   * AND the feed's freshness window. `usageReads` counts requests the DAEMON made to the collector
-   * with nothing calling it, so a second read is a second unattended pass. The elapsed clock is
-   * asserted against the interval too, so the evidence cannot be the boot pass counted twice.
+   * `advanced.usage.interval: 1` is the fleet's own declaration, and it drives the registered
+   * `setInterval` AND the feed's freshness window. `advanced.usage.enabled: false` switches off the
+   * daemon's own credential collector so the chain walks as far as the external endpoint below, and
+   * `usageReads` counts requests the DAEMON made to it with nothing calling it — so a second read is a
+   * second unattended pass. The elapsed clock is asserted against the interval too, so the evidence
+   * cannot be the boot pass counted twice.
    *
    * ## AND THE RECORDER IS PROVED TO WORK
    *
-   * An absent file is only evidence if the thing that writes it would have. The explicit health
-   * request is the wrapper's positive control. A test that could not distinguish "never ran" from
-   * "recorder broken" would be worthless.
+   * An absent file is only evidence if the thing that writes it would have, so the fixture spawns the
+   * wrapper itself afterwards. A control must depend on the fixture, never on the behaviour under
+   * test — no path in the product launches a wrapper for health any more.
    */
   describe('what an unattended fleet pass may spend', () => {
     const SPEND_ACCOUNT = '00000000-0000-4000-8000-0000000005e4';
@@ -5536,7 +5414,7 @@ describe('daemon boot lifecycle', () => {
     /** The fleet's own declared cadence, in seconds. It is the timer period and the cache window. */
     const TICK_SECONDS = 1;
 
-    it('should complete the boot pass and a real scheduled tick with no wrapper launch, while an explicit health request still starts the wrapper', async () => {
+    it('should complete the boot pass and a real scheduled tick with no wrapper launch', async () => {
       // Arrange
       const home = await tempDirectory('fyd-unattended-spend');
       const port = await freeLoopbackPort();
@@ -5584,21 +5462,14 @@ describe('daemon boot lifecycle', () => {
       const collectorUrl = `http://127.0.0.1:${String(boundPort(collector))}/usage`;
 
       await mkdir(join(home, 'fleet'), { recursive: true });
-      // `health.enabled: true` IS DELIBERATE AND MUST NOT BE TIDIED OUT FOR BEING UNUSED. It is the
-      // switch that used to authorise the spend: a flag that was supposed to prevent the sentinel
-      // probe and did not. It is explicitly ON here and nothing spends anyway, because the launching
-      // path is DELETED rather than gated. A test with the flag off would prove far less.
       await writeFile(
         join(home, 'fleet', 'config.yaml'),
-        Bun.YAML.stringify({
-          health: { enabled: true },
-          usage: { enabled: false, interval: TICK_SECONDS },
-        }),
+        Bun.YAML.stringify({ version: 2, advanced: { usage: { enabled: false, interval: TICK_SECONDS } } }),
         { mode: 0o600 },
       );
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({ host: '127.0.0.1', port, usage: { url: collectorUrl } }),
+        daemonDocument({ host: '127.0.0.1', port, usage: { url: collectorUrl } }),
         { mode: 0o600 },
       );
 
@@ -5617,28 +5488,7 @@ describe('daemon boot lifecycle', () => {
       const unattendedReads = usageReads;
       const wrapperAfterUnattended = await Bun.file(wrapperLog).exists();
 
-      // EVERY EXPLICIT PATH IS NOW ALSO FREE, and both of them are exercised. The read and the
-      // collecting check are different routes on different verbs, and neither may launch anything.
-      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
-      const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
-      const explicit = await fetch(`${base}/v1/fleet/health`, { headers });
-      const snapshot = FleetHealthSnapshotSchema.parse(await explicit.json());
-      const checked = await fetch(`${base}/v1/fleet/health/check`, { method: 'POST', headers });
-      const checkedSnapshot = FleetHealthSnapshotSchema.parse(await checked.json());
-      const wrapperAfterExplicit = await Bun.file(wrapperLog).exists();
-
-      /**
-       * THE RECORDER'S OWN CREDIBILITY, proved by the FIXTURE rather than by the product.
-       *
-       * The control this replaces asked `GET /v1/fleet/health` to launch the wrapper, and that was
-       * load-bearing: it is what made the absence above mean something rather than meaning "the log
-       * was never going to appear anyway". But it tied the recorder's credibility to a PRODUCT
-       * FEATURE, so deleting the feature silently deleted the proof.
-       *
-       * Spawning the wrapper directly severs that. A control must depend on the fixture, never on the
-       * behaviour under test — and there is no longer any path in the product that launches a wrapper
-       * for health, so an assertion that one does would pin the billing bug as required behaviour.
-       */
+      // THE RECORDER'S OWN CREDIBILITY, proved by the FIXTURE rather than by the product.
       await Bun.spawn({ cmd: [spendWrapper, 'recorder-proof'], stdout: 'ignore', stderr: 'ignore' }).exited;
       const recorderProof = await readFile(wrapperLog, 'utf8');
       release();
@@ -5664,166 +5514,8 @@ describe('daemon boot lifecycle', () => {
       // sent and no model call was billed.
       should(wrapperAfterUnattended).be.false();
 
-      // AND NEITHER EXPLICIT PATH LAUNCHED ONE EITHER. This is the half that inverted: it used to
-      // assert the wrapper WAS launched with the sentinel prompt, which is the billing bug written
-      // down as required behaviour. Both routes answer with a real verdict and spend nothing.
-      should(explicit.status).equal(200);
-      should(snapshot.accounts).have.length(1);
-      should(snapshot.accounts[0]?.accountId).equal(SPEND_ACCOUNT);
-      should(checked.status).equal(200);
-      should(checkedSnapshot.accounts).have.length(1);
-      // This home holds no credential at all, so the honest verdict is that a login is needed — an
-      // answer reached from a local read and one free provider classification, never from a launch.
-      should(checkedSnapshot.accounts[0]?.verdict).equal('needs_relogin');
-      should(wrapperAfterExplicit).be.false();
-
-      // The recorder works, so every `false` above is evidence rather than an artefact.
+      // The recorder works, so the `false` above is evidence rather than an artefact.
       should(recorderProof).containEql('recorder-proof');
-    });
-
-    /**
-     * HEALTH RIDES THE FREE PASS, AUTOMATICALLY, AND STILL LAUNCHES NOTHING.
-     *
-     * The journey above proves the tick spends nothing. This proves the tick now PRODUCES SOMETHING:
-     * a real per-account verdict with a real last-checked instant, on a booted `fyd`, with nobody
-     * asking. That is the requirement in the human's own words — "is there no auto metring?" — and a
-     * button-only design would have been a failed design.
-     *
-     * THE TIMESTAMP IS PROVED TO PREDATE THE READ. `boundary` is captured before the `GET` is issued
-     * and `lastCheckedAt` must be EARLIER than it. Without that this test cannot tell "the tick
-     * checked automatically" from "reading it checked it", and the automatic claim would be unproven —
-     * which is the one way this could pass for the wrong reason.
-     *
-     * ## What this fixture CANNOT prove — a declared GAP, read it before quoting this test
-     *
-     * This home holds no credential, so `AnthropicUsageProbe` returns `absent` and issues NO HTTP
-     * request at all. That is what keeps the test hermetic, and it means this journey does not
-     * exercise the CREDENTIALED provider path — which is the case a real operator runs. So it cannot
-     * prove that an account with a working credential also costs nothing on a tick.
-     *
-     * That gap is not closable here and closing it would be worse than naming it. The endpoint is
-     * `ANTHROPIC_USAGE_URL`, a module constant the probe uses directly; the composition root builds
-     * the probe inside `createDaemonFleetSubsystem`, which no `DaemonWorld` hook reaches. Making the
-     * base URL injectable would mean a configuration surface that redirects where a BEARER TOKEN is
-     * sent, which is a credential-exfiltration seam added to make a test easier. Writing a real
-     * credential into this fixture instead would point the probe at `api.anthropic.com` from CI.
-     * Neither is acceptable.
-     *
-     * WHAT COVERS IT INSTEAD, and why the pair is not the same as one test:
-     * `packages/fleet/tests/integration/anthropic-usage-probe.test.ts` drives the credentialed path
-     * against a scripted transport and asserts the whole request list — exactly one `GET`, never a
-     * `POST`, on every status including `403`. So "a credentialed account costs one free GET" is
-     * proved there, and "the tick reaches the collector and launches nothing" is proved here. Neither
-     * test alone proves the conjunction on a booted daemon, and that residual is the gap.
-     */
-    it('should record a real per-account verdict from the scheduled tick alone, launching no wrapper', async () => {
-      // Arrange
-      const home = await tempDirectory('fyd-automatic-health');
-      const port = await freeLoopbackPort();
-      const cleanups: Array<() => void | Promise<void>> = [];
-      let release = (): void => {};
-      const world = await worldAt(home, port, async () => {
-        await new Promise<void>(resolve => {
-          release = resolve;
-        });
-      });
-
-      const binary = join(home, 'bin');
-      await mkdir(binary, { recursive: true });
-      const wrapperLog = join(home, 'wrapper-launches.log');
-      const spendWrapper = join(binary, SPEND_WRAPPER);
-      await writeFile(spendWrapper, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${wrapperLog}\n`, { mode: 0o755 });
-      await publishManifest(home, [
-        {
-          id: SPEND_ACCOUNT,
-          kind: 'claude',
-          mode: 'auto',
-          wrapper: spendWrapper,
-          home: join(home, 'harness'),
-          displayName: 'Spend',
-          defaultModel: 'claude-opus-5',
-          models: [{ id: 'claude-opus-5', available: true }],
-          available: true,
-          unavailableReason: null,
-        },
-      ]);
-
-      await mkdir(join(home, 'fleet'), { recursive: true });
-      // `usage.enabled: true` — unlike the journey above, the fleet's OWN collector runs on the timer
-      // here, which is the path health rides. `health.enabled` is left ON for the same reason as
-      // above: the switch that used to authorise a spend is enabled and nothing spends.
-      await writeFile(
-        join(home, 'fleet', 'config.yaml'),
-        Bun.YAML.stringify({ health: { enabled: true }, usage: { enabled: true, interval: TICK_SECONDS } }),
-        { mode: 0o600 },
-      );
-      await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), {
-        mode: 0o600,
-      });
-
-      // Act
-      const exit = start(world, cleanups);
-      const base = `http://127.0.0.1:${String(port)}`;
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
-        await Bun.sleep(25);
-      }
-      // THE BOOT PASS FIRST. `fyd` runs `fleetRefresh.run()` immediately at boot, BEFORE arming the
-      // interval, so the FIRST health document is the boot collection's and waiting for the file to
-      // merely EXIST proves nothing about the timer. Read what the boot pass wrote and keep it.
-      const document = join(home, 'fleet', 'account-health.json');
-      await waitUntilAsync(async () => (await recordedCheckedAt(document)) !== undefined, 'the boot pass to record');
-      const bootCheckedAt = await recordedCheckedAt(document);
-      should(bootCheckedAt).be.a.Number();
-      const afterBootAt = Date.now();
-
-      // THEN A REGISTERED TICK, and this is the assertion that makes the test about the timer at all.
-      // `lastCheckedAt` ADVANCING can only be another `observe()`, and with nothing in this test
-      // calling any route the only remaining trigger is the interval.
-      await waitUntilAsync(
-        async () => ((await recordedCheckedAt(document)) ?? 0) > (bootCheckedAt as number),
-        'a SCHEDULED tick to record account health after the boot pass',
-      );
-      const tickCheckedAt = await recordedCheckedAt(document);
-      const tickElapsedMs = Date.now() - afterBootAt;
-      // Captured BEFORE the read, so the assertion below can prove the instant predates it.
-      const boundary = Date.now();
-      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
-      const read = await fetch(`${base}/v1/fleet/health`, {
-        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
-      });
-      const snapshot = FleetHealthSnapshotSchema.parse(await read.json());
-      const launched = await Bun.file(wrapperLog).exists();
-      release();
-      const code = await exit;
-      await runCleanups(cleanups);
-
-      // Assert
-      should(code).equal(0);
-      should(read.status).equal(200);
-      should(snapshot.accounts).have.length(1);
-      // A REAL verdict, not `never_checked`: an unattended pass established it.
-      should(snapshot.accounts[0]?.verdict).equal('needs_relogin');
-      should(snapshot.accounts[0]?.reason).equal('oauth_credential_missing');
-      const lastCheckedAt = snapshot.accounts[0]?.lastCheckedAt;
-      should(lastCheckedAt).be.a.Number();
-
-      // THE THREE LOAD-BEARING LINES, and they are three because any two of them can hold while the
-      // timer never fires.
-      //
-      // 1. The verdict advanced past what the BOOT pass wrote. Only a second `observe()` moves it,
-      //    and nothing here calls a route — so a timer tick happened. Waiting for the document to
-      //    merely EXIST proved only that the boot collection ran, which is a different claim: this
-      //    test passed with `usage.interval: 600` before this assertion existed.
-      should(tickCheckedAt as number).be.above(bootCheckedAt as number);
-      // 2. That second pass was a REGISTERED TICK rather than a shortened wait — the same standard
-      //    the neighbouring #378 journey holds itself to with `unattendedElapsedMs`.
-      should(tickElapsedMs).be.aboveOrEqual(TICK_SECONDS * 1_000);
-      // 3. The check predates this test asking anything, so the verdict is the timer's and not the
-      //    read's. Without this, "automatic" would be indistinguishable from "reading it checked it".
-      should(lastCheckedAt as number).be.below(boundary);
-      // And no pass — boot or tick — launched anything.
-      should(launched).be.false();
     });
   });
 });

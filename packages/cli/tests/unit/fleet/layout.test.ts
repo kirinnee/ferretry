@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { defaultConfigPath, resolveFleetLayout } from '../../../src/lib/fleet/layout';
+import { resolveFleetLayout } from '../../../src/lib/fleet/layout';
 
 const INPUTS = { stateHome: undefined, userHome: '/home/tester', product: 'ferretry' } as const;
 
@@ -68,10 +68,5 @@ describe('resolving the fleet layout', () => {
     should(() => resolveFleetLayout({ ...INPUTS, userHome: '  ' })).throw(
       'cannot resolve the fleet layout without a home directory',
     );
-  });
-
-  it('should put the default configuration beside everything else the fleet owns', () => {
-    // Act + Assert
-    should(defaultConfigPath(resolveFleetLayout({ ...INPUTS, stateHome: '/state' }))).equal('/state/fleet/config.yaml');
   });
 });

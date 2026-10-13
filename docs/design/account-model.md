@@ -1,18 +1,17 @@
 # Ferretry's account model: Machines, Credentials, Components, Profiles, Runtimes
 
-Status: **design only — nothing here is built.** The owner approved this model after a long
-discussion and a clickable prototype ("looks good -- apply"). It replaces this document's earlier
-"Login / Home / History" draft. From that draft it keeps the verified per-harness mechanisms (§8),
-the safety analysis (§9) and the migration analysis (§10), each restated in the new words.
+Status: **built.** Units U0–U21 shipped as PRs #433–#456 plus the U21 retirement PR, and the account
+model is the only account behaviour there is. The owner approved it after a long discussion and a
+clickable prototype ("looks good -- apply"). The short contract — what each thing is, the routes, the
+verbs, where state lives — is [../account-model.md](../account-model.md); **this document is the
+why**, with the full rules, flows and per-harness mechanisms. The owner's U21 decision ("just clean up
+everything … we dont need to care about backward compatibility") means nothing here is optional or
+switched: the old account system is deleted, not deprecated (§10).
 
 **The prototype is the UX spec:** [account-model-prototype.html](account-model-prototype.html), a
 static reference page that is not shipped. Open it in a browser. Every flow in §4 and every edge case
 in §11 can be clicked through from its catalogue. Where this document and the prototype disagree on
 what a screen shows or says, the prototype wins, and this document is the bug.
-
-It supersedes the copy-based first run in [fleet-defaults.md](../fleet-defaults.md) ("The fleet arrives
-signed in"). It also closes the hazard [credential-seeding.md](credential-seeding.md) describes, by
-removing the need to copy a credential at all.
 
 Every harness claim is marked **VERIFIED** (run, or read in the harness's own code), **INFERRED**
 (follows from code read but not run, or from absence) or **UNKNOWN**. Sources: the Claude Code
@@ -25,24 +24,24 @@ brief, and a read of Ferretry `main` at `fa4312888` / `6eabb2e78`.
 2. [The vocabulary](#2-the-vocabulary)
 3. [Entities and their rules](#3-entities-and-their-rules)
 4. [UX: rules, tabs and flows](#4-ux-rules-tabs-and-flows)
-5. [Configuration and storage: before and after](#5-configuration-and-storage-before-and-after)
-6. [CLI: before and after](#6-cli-before-and-after)
+5. [Configuration and storage](#5-configuration-and-storage)
+6. [CLI](#6-cli)
 7. [Daemon routes](#7-daemon-routes)
 8. [Per-harness mechanisms (hidden implementation)](#8-per-harness-mechanisms-hidden-implementation)
 9. [Safety](#9-safety)
-10. [Migration from today's config and state](#10-migration-from-todays-config-and-state)
+10. [Version 1 is retired](#10-version-1-is-retired)
 11. [Edge cases E1–E32](#11-edge-cases-e1e32)
 12. [Later: moving a conversation between harnesses](#12-later-moving-a-conversation-between-harnesses)
-13. [Build plan](#13-build-plan)
-14. [Declared gaps and open questions](#14-declared-gaps-and-open-questions)
+13. [Build plan (as built)](#13-build-plan-as-built)
+14. [Declared gaps and resolved questions](#14-declared-gaps-and-resolved-questions)
 
 ---
 
 ## 1. Why
 
-Measured on `main` (`packages/pwa/src/features/fleet/**`, `packages/fleet/src/lib/**`):
+What the old account system (version 1, deleted in U21) cost, measured on `main` before the account model was built:
 
-| Cost                          | Today                                                                                                                                                                                                                                                                |
+| Cost                          | Before                                                                                                                                                                                                                                                               |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Reaching Accounts             | gear → Settings section **Daemons** → daemon picker → panel rail **Fleet** → **Accounts** (indented child). Panel selection is component state, so nothing links straight to it.                                                                                     |
 | Adding one Claude account     | Accounts → "Add an account" → "Add account" again → an **8-step** stepper (Harness, Account, Sign-in, Models, Instructions, Skills, Settings, Review) → staged-change review → password modal → back to Accounts to sign in. About **11 screens and 12+ decisions**. |
@@ -52,9 +51,9 @@ Measured on `main` (`packages/pwa/src/features/fleet/**`, `packages/fleet/src/li
 Four structural causes, each removed by a rule in §3:
 
 1. **A login is not an entity.** It is inferred from `identity` grouping, and every home holds its
-   own copy, so a refresh in one copy can kill the others
-   ([credential-seeding.md §2](credential-seeding.md#2-the-hazard)). → a **Credential** is stored
-   once and never copied (C1).
+   own copy, so a refresh in one copy can kill the others (a Codex refresh token is single-use, so
+   one refresh in one copy signs out every other copy). → a **Credential** is stored once and never
+   copied (C1).
 2. **Setup is not reusable.** Instructions, skills, MCP servers and settings are spelled per route.
    → a **Component** is saved once and referenced (K1), and a **Profile** stacks them (P1).
 3. **Interactive and auto are two accounts.** → a **Runtime** is a Credential plus a Profile, and
@@ -109,19 +108,19 @@ instructions", "settings", "MCP servers" and "skills" (§4.3).
 
 ### 3.2 Credential
 
-| Rule | Statement                                                                                                                                                                                                                                                                                                                                                        |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1   | A credential is **stored exactly once** and **never copied**, not even by Clone. Every runtime that uses it reads that one store.                                                                                                                                                                                                                                |
-| C2   | A credential has one harness (`claude` or `codex`) and belongs to one machine.                                                                                                                                                                                                                                                                                   |
-| C3   | A credential's **store** is `host` (the person's own `~/.claude` / `~/.codex` login, **shared in place**: Ferretry keeps a pointer, never a copy), `ferretry` (a login Ferretry signed in, under `<FY_HOME>/fleet/credentials/<id>/`) or `environment` (Advanced: the existing `${secret:NAME}` mechanism of [fleet-env-profiles.md](../fleet-env-profiles.md)). |
-| C4   | `host` is allowed **once per harness per machine**. Every surface that shows a `host` credential says it is **shared with `claude` / `codex` in your terminal**, and its sign-out says that it signs out both (E25).                                                                                                                                             |
-| C5   | Status is exactly one of **Ready**, **Refresh due**, **Needs sign-in**, **Checking**. Usage is the 5-hour and weekly windows. Both are per credential, never per runtime: one credential is one rate-limit pool.                                                                                                                                                 |
-| C6   | Ferretry **never refreshes a token on a timer.** A refresh happens when the harness does it naturally, at a launch that is due, or on an explicit **Check now**.                                                                                                                                                                                                 |
-| C7   | Signing a credential in or out affects **every runtime that uses it**, and every surface says how many ("Finish sign-in for 3 runtimes", "3 runtimes will need sign-in").                                                                                                                                                                                        |
-| C8   | An **empty slot** is a credential with no login yet: status **Needs sign-in**. Clone creates one per credential the source runtimes used (E31). Runtimes keep pointing at the slot, so one sign-in fixes all of them.                                                                                                                                            |
-| C9   | Two credentials of one harness may share an email. Each then carries a **label** the person chose (`personal`, `work`) and the add flow asks for both labels, which must differ (E26). Labels are display only.                                                                                                                                                  |
-| C10  | A credential cannot be removed while a runtime uses it.                                                                                                                                                                                                                                                                                                          |
-| C11  | The sharing mechanism for each harness is pinned by a **CI guard** (§8.5) that fails when a harness update breaks it.                                                                                                                                                                                                                                            |
+| Rule | Statement                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1   | A credential is **stored exactly once** and **never copied**, not even by Clone. Every runtime that uses it reads that one store.                                                                                                                                                                                                                                                                                                        |
+| C2   | A credential has one harness (`claude` or `codex`) and belongs to one machine.                                                                                                                                                                                                                                                                                                                                                           |
+| C3   | A credential's **store** is `host` (the person's own `~/.claude` / `~/.codex` login, **shared in place**: Ferretry keeps a pointer, never a copy), `ferretry` (a login Ferretry signed in, under `<FY_HOME>/fleet/credentials/<id>/`) or `environment` (Advanced: the `${secret:NAME}` references of [secrets.md](../secrets.md): the runtime launches with the variable set from the secret store, and the value never touches a file). |
+| C4   | `host` is allowed **once per harness per machine**. Every surface that shows a `host` credential says it is **shared with `claude` / `codex` in your terminal**, and its sign-out says that it signs out both (E25).                                                                                                                                                                                                                     |
+| C5   | Status is exactly one of **Ready**, **Refresh due**, **Needs sign-in**, **Checking**. Usage is the 5-hour and weekly windows. Both are per credential, never per runtime: one credential is one rate-limit pool.                                                                                                                                                                                                                         |
+| C6   | Ferretry **never refreshes a token on a timer.** A refresh happens when the harness does it naturally, at a launch that is due, or on an explicit **Check now**.                                                                                                                                                                                                                                                                         |
+| C7   | Signing a credential in or out affects **every runtime that uses it**, and every surface says how many ("Finish sign-in for 3 runtimes", "3 runtimes will need sign-in").                                                                                                                                                                                                                                                                |
+| C8   | An **empty slot** is a credential with no login yet: status **Needs sign-in**. Clone creates one per credential the source runtimes used (E31). Runtimes keep pointing at the slot, so one sign-in fixes all of them.                                                                                                                                                                                                                    |
+| C9   | Two credentials of one harness may share an email. Each then carries a **label** the person chose (`personal`, `work`) and the add flow asks for both labels, which must differ (E26). Labels are display only.                                                                                                                                                                                                                          |
+| C10  | A credential cannot be removed while a runtime uses it.                                                                                                                                                                                                                                                                                                                                                                                  |
+| C11  | The sharing mechanism for each harness is pinned by a **CI guard** (§8.5) that fails when a harness update breaks it.                                                                                                                                                                                                                                                                                                                    |
 
 ### 3.3 Component
 
@@ -167,7 +166,7 @@ How each kind merges when several layers carry it (the newer layer is "later"):
 | R3   | A runtime carries one flag: **"Ferretry launches this as an agent"**. Only agent runtimes get the fixed layer (§3.6), and only they may be started unattended (`fy start --agent <runtime>`).                                       |
 | R4   | Two runtimes may share a credential and a profile, but the add flow asks first ("already uses this login and profile. Add another anyway?", E15).                                                                                   |
 | R5   | A runtime whose harness is not installed on the machine still exists; it shows "_Harness_ isn't installed here · Install" and cannot launch (E29). A runtime on a **Needs sign-in** credential cannot launch until it is signed in. |
-| R6   | Runtime ids are opaque and live in Ferretry's state, not the config. Migrated runtimes keep their old route UUIDs and wrapper names (§10), so every session record, task board and pricing row still joins.                         |
+| R6   | Runtime ids are opaque and live in Ferretry's state, not the config. Every session record, task board and pricing row still joins on the id, never on the name a person types.                                                      |
 
 ### 3.6 Fixed layer and Agent permissions
 
@@ -195,7 +194,7 @@ mapping.
 
 | Rule | Statement                                                                                                                                                                                                                                                                                                                                     |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| H1   | There is **one history pool per harness per machine**, `<FY_HOME>/fleet/shared/<harness>/` (the path today's opt-in pool already uses), shared by **every runtime of that harness**. It is always on and not a setting.                                                                                                                       |
+| H1   | There is **one history pool per harness per machine**, `<FY_HOME>/fleet/shared/<harness>/` (the path the old opt-in pool used), shared by **every runtime of that harness**. It is always on and not a setting.                                                                                                                               |
 | H2   | **One live writer per conversation**, enforced by a conversation lease (§9.3).                                                                                                                                                                                                                                                                |
 | H3   | History never carries identity or auth. The pooled entries stay exactly as `shared-history.ts` defines them (Claude: `projects`, `sessions`, `session-env`, `file-history`, `plans`, `tasks`, `todos`, `shell-snapshots`, `paste-cache`, `history.jsonl`; Codex: `sessions`, `archived_sessions`, `history.jsonl`, plus `CODEX_SQLITE_HOME`). |
 | H4   | So a conversation started on one runtime can be resumed on another runtime of the same harness, even on another credential.                                                                                                                                                                                                                   |
@@ -262,7 +261,7 @@ Detail pages (one concept each):
 - **Component**: harness badge, partial-support and warning notes, Content (or Command for an MCP
   server), Used by, **Edit**, **Delete…**.
 
-Where this surface mounts in the PWA's existing navigation is open question O1 (§14).
+Where this surface mounts (open question O1, now resolved, §14): the PWA Settings list has one **Machines** entry, linkable as `#machines/<name>/<tab>`.
 
 ### 4.3 First run (per machine)
 
@@ -295,6 +294,10 @@ claude-code`, `npm install -g @openai/codex`, …; §8.6), and, from a phone or 
    again), "Add another anyway" is unchecked by default.
 5. **Done.** "_machine_ is ready · 2 runtimes created", each with status, email, profile and model,
    then **Go to Runtimes**. With nothing imported: "Nothing was imported. That's fine." (E10).
+
+The runtimes the first run creates are **agent runtimes** (O2). The daemon also runs this import
+itself the first time it boots on a host that has a harness and no configuration (`store: host`, the
+login shared in place); `fleet.prepareDefaults: false` in `config/daemon.json` turns that off.
 
 **Import again** (Settings → Setup) runs steps 2–5 again and only adds what is new.
 
@@ -371,55 +374,16 @@ Settings → Setup → **Clone from another machine**. **Source** → **Preview*
 
 ---
 
-## 5. Configuration and storage: before and after
+## 5. Configuration and storage
 
-### 5.1 Before: a first-run `config.yaml` today (abridged, real shape)
+### 5.1 The old format (version 1) is not read
 
-```yaml
-shared:
-  memory:
-    claude-default: ./CLAUDE.md
-    claude-auto: ./CLAUDE-auto.md
-    codex-default: ./AGENTS.md
-    codex-auto: ./AGENTS-auto.md
-  settings:
-    claude: ./templates/claude/settings.json
-    codex: ./templates/codex/config.toml
-profiles:
-  base:
-    claude: { memory: ./CLAUDE.md, settings: ./templates/claude/settings.json }
-    codex: { memory: ./AGENTS.md, settings: ./templates/codex/config.toml }
-variants:
-  default: {}
-  auto:
-    mode: auto
-    claude:
-      memory: ./CLAUDE-auto.md
-      flags: [--dangerously-skip-permissions, --disallowed-tools=AskUserQuestion]
-      settings: [{ skipDangerousModePermissionPrompt: true }]
-    codex:
-      memory: ./AGENTS-auto.md
-      flags: [--dangerously-bypass-approvals-and-sandbox, --no-alt-screen]
-agents:
-  - name: default
-    kind: claude
-    routes:
-      default:
-        id: 6f1c…-… # minted UUID, must never change
-        wrapper: claude-default
-        home: claude-default
-        defaultModel: claude-opus-5-5
-        models: [claude-opus-5-5]
-      auto: { id: 0b7e…-…, wrapper: claude-auto-default, home: claude-auto-default, … }
-  - name: default
-    kind: codex
-    routes: { default: { … }, auto: { … } } # two more UUIDs, wrappers, homes
-sharedHistory: { claude: false, codex: false }
-```
+The old `config.yaml` had no `version` key. It spelled a UUID, a wrapper name, a home and a mode per
+route, plus variants, profiles, `identity` groups and `sharedHistory` flags: four accounts and four
+credential copies from two logins on a default first run. A machine whose `config.yaml` is still in
+that shape is **refused, never converted** (§10).
 
-Four accounts, four homes, four credential copies, two `identity` groups inferred from agent names.
-
-### 5.2 After: the same machine, imported
+### 5.2 A machine, imported
 
 `<FY_HOME>/fleet/config.yaml`, `version: 2`:
 
@@ -464,8 +428,8 @@ profiles:
       - modelSets/codex-models
 
 runtimes:
-  claude-default: { credential: claude-you, profile: default }
-  codex-default: { credential: codex-you, profile: default }
+  claude-default: { credential: claude-you, profile: default, agent: true } # first-run runtimes are agents (O2)
+  codex-default: { credential: codex-you, profile: default, agent: true }
 ```
 
 A layered agent profile and runtime from the prototype's set-up machine:
@@ -502,7 +466,7 @@ profiles:
   <name>: { layers: [<kind>/<name> | profile/<name>, …] } # oldest first
 runtimes:
   <name>: { credential: <id>, profile: <name>, agent?: false }
-advanced: # everything a beginner never sees; carried over from today
+advanced: # everything a beginner never sees
   secretsFile: ~/.secrets
   aliases: { … }
   commands: [ … ]
@@ -511,7 +475,7 @@ advanced: # everything a beginner never sees; carried over from today
 ```
 
 Component files live in the asset tree, `<FY_HOME>/fleet/assets/components/<kind>/<name>.<ext>`, so
-the existing link-not-copy materialisation ([fleet-sharing.md](../fleet-sharing.md)) makes "editing
+the link-not-copy materialisation (a file in the asset tree is linked into a runtime, never copied) makes "editing
 updates everywhere" true on disk too.
 
 Validation, each with a sentence naming the field (the existing style in `config.ts`):
@@ -524,10 +488,11 @@ Validation, each with a sentence naming the field (the existing style in `config
 - `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `CODEX_SQLITE_HOME` and **`CLAUDE_SECURESTORAGE_CONFIG_DIR`**
   join `RESERVED_ENV_NAMES`: a settings component that set the last one could point a runtime at
   another credential;
-- a version-1 document (`agents`, `routes`, `identity`, `variants`, `sharedHistory`) is **read** by
-  converting it in memory (§10.4) and is never written back.
+- a document with no `version` key, or `version: 1` (`agents`, `routes`, `identity`, `variants`,
+  `sharedHistory`), is **refused whole** with the sentence in §10; nothing reads it and nothing
+  converts it.
 
-### 5.4 State on disk, after
+### 5.4 State on disk
 
 | Path (under `<FY_HOME>/fleet/`) | Holds                                                                                                    | Owner                         |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------- |
@@ -536,99 +501,81 @@ Validation, each with a sentence naming the field (the existing style in `config
 | `credentials/<id>/`             | `store: ferretry` only: Claude secure-storage dir, or Codex canonical `auth.json`; `usage.json` (§8.1.3) | the harness                   |
 | `homes/<runtime id>/`           | the runtime's materialised config dir (§8). **Internal name only**                                       | Ferretry (plan) + the harness |
 | `shared/<harness>/`             | the history pool (H1) and `.leases/`                                                                     | the harness                   |
-| `ids.json`                      | runtime name → opaque id, migrated UUIDs and old wrapper names (R6)                                      | Ferretry                      |
+| `ids.json`                      | runtime name → opaque id (R6)                                                                            | Ferretry                      |
 | `manifest.json`                 | published runtimes: `{id, name, harness, credential, profile, agent, wrapper, models, defaultModel}`     | Ferretry                      |
-| `retired/<timestamp>/`          | migration leftovers until purged (§10.2)                                                                 | Ferretry                      |
 
-What disappears from the config: route UUIDs (→ `ids.json`), `wrapper:` and `home:` (derived from the
+What the config no longer says: route UUIDs (→ `ids.json`), `wrapper:` and `home:` (derived from the
 runtime name and id), `mode:` and `variants` (→ the agent flag and the fixed layer), `identity:` (→
-`credential:`), `sharedHistory:` (always on), `shared:` names (→ components), and copy-and-sync
-(`fy fleet login --sync-only`, `FleetFirstRunSeeder`).
+`credential:`), `sharedHistory:` (always on), `shared:` names (→ components). There is no copy of a
+login to keep in sync, so nothing syncs.
 
 ---
 
-## 6. CLI: before and after
+## 6. CLI
 
 The binary name is derived from `packages/cli/package.json` `bin`; `fy` below is that derived name.
 Every write goes through the same reviewed-proposal path the daemon uses and **applies in one step**,
-so nobody types `apply`.
+so nobody types `apply`. Every verb is a plain word a person would say; a read takes `--json`, a write
+takes `--dry-run` and `--yes`.
 
-### 6.1 Before
+| Command                                                                                                    | Purpose                                                                                                |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `fy setup [--yes] [--skip <tool>] [--name <tool=name>]`                                                    | the first run (§4.3) in a terminal: tools, Claude import, Codex import, names                          |
+| `fy setup import`                                                                                          | Import again: adds what is new and offers updates to what changed                                      |
+| `fy machine` / `fy machine set agent-permissions auto\|skip`                                               | machine facts, tools, Agent permissions                                                                |
+| `fy machine install claude\|codex`                                                                         | install a harness tool (§8.6); shows the command first                                                 |
+| `fy machine export > setup.json` / `fy machine clone setup.json [--replace]`                               | Clone without a browser: export from the source, import on the target                                  |
+| `fy runtimes`                                                                                              | the Runtimes tab                                                                                       |
+| `fy runtime add <name> --credential <id> --profile <name> [--agent] [--add-another]`                       | Add runtime                                                                                            |
+| `fy runtime show <name>` / `set <name> [--credential …] [--profile …] [--agent\|--no-agent]` / `rm <name>` | one runtime: stack, fixed layer, models                                                                |
+| `fy credentials`                                                                                           | the Credentials tab, with status and usage                                                             |
+| `fy credential add claude\|codex [--label L] [--id <id>] [--no-sign-in]`                                   | Add a login (link + code, or device code)                                                              |
+| `fy credential check <id>` / `signin <id>` / `signout <id>` / `label <id> <L>` / `rm <id>`                 | Check now; sign in again; sign out (names every runtime, confirms); label; remove (refused while used) |
+| `fy profiles` / `fy profile show <name>`                                                                   | layers, conflicts, where used                                                                          |
+| `fy profile build <name> --layer <kind>/<name>…` / `edit <name> --layer …` / `rm <name>`                   | Build / Edit layers / Delete (P6)                                                                      |
+| `fy components [<kind>]` / `fy component show\|add\|edit\|rm <kind>/<name>`                                | the Components tab                                                                                     |
+| `fy start --agent <runtime>`                                                                               | refused unless the runtime is an agent runtime                                                         |
+| `fy fleet recommend <task…>`                                                                               | the routing suggestion; **the only verb `fleet` keeps**                                                |
 
-| Command                                                        | Purpose                                             |
-| -------------------------------------------------------------- | --------------------------------------------------- |
-| `fy fleet` / `fleet ls`                                        | list accounts                                       |
-| `fy fleet init [--first-account claude\|codex]`                | write the starter config                            |
-| `fy fleet apply [--dry-run]`                                   | build homes, wrappers, settings, manifest           |
-| `fy fleet usage` / `fy fleet health`                           | quota / credential verdict per account              |
-| `fy fleet sharing`                                             | shared documents report                             |
-| `fy fleet login [id…] [--status] [--sync-only] [--no-refresh]` | sync copies within an identity, refresh, or sign in |
-| `fy fleet recommend <task…>`                                   | routing suggestion                                  |
-| `fy start --agent <wrapper\|uuid>`                             | must be an `*-auto-*` wrapper; refused otherwise    |
-
-### 6.2 After
-
-| Command                                                                                    | Purpose                                                                                                |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `fy setup [--yes]`                                                                         | the first run (§4.3) in a terminal: tools, Claude import, Codex import, names                          |
-| `fy setup import`                                                                          | Import again                                                                                           |
-| `fy machine` / `fy machine set agent-permissions auto\|skip`                               | machine facts, tools, Agent permissions                                                                |
-| `fy machine install claude\|codex`                                                         | install a harness tool (§8.6)                                                                          |
-| `fy machine export > setup.json` / `fy machine clone setup.json [--replace]`               | Clone without a browser: export from the source, import on the target                                  |
-| `fy runtimes`                                                                              | the Runtimes tab                                                                                       |
-| `fy runtime add <name> --credential <id> --profile <name> [--agent]`                       | Add runtime                                                                                            |
-| `fy runtime show <name>` / `set <name> --credential … --profile … --agent=…` / `rm <name>` | one runtime: stack, fixed layer, models                                                                |
-| `fy credentials`                                                                           | the Credentials tab, with status and usage                                                             |
-| `fy credential add claude\|codex [--label L]`                                              | Add a login (link + code, or device code)                                                              |
-| `fy credential check <id>` / `signin <id>` / `signout <id>` / `label <id> <L>` / `rm <id>` | Check now; sign in again; sign out (names every runtime, confirms); label; remove (refused while used) |
-| `fy profiles` / `fy profile show <name>`                                                   | layers, conflicts, where used                                                                          |
-| `fy profile build <name> --layer <kind>/<name>…` / `edit <name> --layer …` / `rm <name>`   | Build / Edit layers / Delete (P6)                                                                      |
-| `fy components [<kind>]` / `fy component show\|add\|edit\|rm <kind>/<name>`                | the Components tab                                                                                     |
-| `fy start --agent <runtime>`                                                               | refused unless the runtime is an agent runtime; old wrapper names and UUIDs still resolve              |
-| `fy fleet migrate [--dry-run] [--purge-retired]`                                           | convert a version-1 config and state (§10)                                                             |
-| `fy fleet recommend <task…>`                                                               | unchanged                                                                                              |
-
-Retired, each kept one release as an alias that prints its replacement:
-
-| Old                                                   | New                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------ |
-| `fy fleet ls`                                         | `fy runtimes`                                          |
-| `fy fleet usage`, `fy fleet health`                   | `fy credentials`                                       |
-| `fy fleet login <id>`                                 | `fy credential signin <its credential>`                |
-| `fy fleet login --status`                             | `fy credentials`                                       |
-| `fy fleet login --sync-only`                          | removed: there is nothing to sync. Prints why          |
-| `fy fleet init`, `fy fleet apply`, `fy fleet sharing` | `fy setup`; applied automatically; `fy component show` |
+The old `fy fleet init`, `apply`, `ls`, `usage`, `health`, `sharing`, `login` and `migrate` are
+deleted, with no alias: `fy runtimes` and `fy credentials` answer what `ls`, `usage` and `health`
+did, `fy credential signin <id>` is the sign-in, and a write applies itself.
 
 ---
 
 ## 7. Daemon routes
 
 Reads are plain GETs. **Every write is a proposal** (`POST /v1/fleet/proposals`, then `…/apply`)
-under `fleet.configure`, with the existing per-change operator-password confirmation for a governed
-caller ([grants.md](../grants.md)). A stepper stages **one** proposal and asks for the password
-**once**. No route returns a credential value (unchanged).
+under `fleet.configure`, with the per-change operator-password confirmation for a governed caller
+([grants.md](../grants.md)). A stepper stages **one** proposal and asks for the password **once**. No
+route returns a credential value.
 
-| Route                                          | Verb     | Capability      | Returns / does                                                                                                                                                                                                            |
-| ---------------------------------------------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/v1/fleet/machine`                            | GET      | fleet.use       | Agent permissions, tools installed + versions, setup state, running-session count                                                                                                                                         |
-| `/v1/fleet/machine/tools/install`              | POST     | fleet.configure | start installing named harness tools (§8.6); progress on the existing fleet event socket                                                                                                                                  |
-| `/v1/fleet/setup/scan`                         | GET      | fleet.configure | first-run preview per harness: account state, what was found, secret-looking key **names**, missing commands, instructions identical? — never a value                                                                     |
-| `/v1/fleet/credentials`                        | GET      | fleet.use       | credentials with status, usage, "used by", `host` disclosure                                                                                                                                                              |
-| `/v1/fleet/credentials/:id/check`              | POST     | fleet.use       | Check now (§8.1.2, §8.2.2)                                                                                                                                                                                                |
-| `/v1/fleet/login`, `/v1/fleet/login/:flowId`   | POST/GET | fleet.configure | the existing harness sign-in flows, now targeting a credential id                                                                                                                                                         |
-| `/v1/fleet/components`                         | GET      | fleet.use       | components by kind, with badges and "used by"                                                                                                                                                                             |
-| `/v1/fleet/profiles`                           | GET      | fleet.use       | **repurposed**: layered profiles, each with its flattened stack and conflicts                                                                                                                                             |
-| `/v1/fleet/runtimes`                           | GET      | fleet.use       | runtimes with the resolved stack per harness, model set, fixed layer, and launchability                                                                                                                                   |
-| `/v1/fleet/export`                             | GET      | fleet.configure | the Clone bundle: components, model sets, profiles, runtimes and credential **descriptors** (harness, email, label) — no credential, no history                                                                           |
-| `/v1/fleet/proposals` (+ `/:id`, `/:id/apply`) | POST/GET | fleet.configure | existing; new operation kinds: `credential.add/label/remove/signout`, `component.put/remove`, `profile.put/remove`, `runtime.put/remove`, `machine.settings`, `setup.import`, `clone.import {mode: alongside \| replace}` |
+| Route                                                          | Verb                   | Capability      | Returns / does                                                                                                                                                                                              |
+| -------------------------------------------------------------- | ---------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/fleet/machine`                                            | GET                    | fleet.use       | Agent permissions, tools installed + versions, setup state, running-session count, and the caller's **authority** (may it apply, why not, does it need the operator password)                               |
+| `/v1/fleet/machine/tools/install`                              | POST                   | fleet.configure | start installing named harness tools (§8.6); progress on the existing fleet event socket                                                                                                                    |
+| `/v1/fleet/setup/scan`                                         | GET                    | fleet.configure | first-run preview per harness: account state, what was found, secret-looking key **names**, missing commands, instructions identical? — never a value                                                       |
+| `/v1/fleet/credentials`                                        | GET                    | fleet.use       | credentials with status, usage, "used by", `host` disclosure                                                                                                                                                |
+| `/v1/fleet/credentials/:credentialId/check`                    | POST                   | fleet.use       | Check now (§8.1.2, §8.2.2)                                                                                                                                                                                  |
+| `/v1/fleet/login`, `/v1/fleet/login/:flowId`                   | POST + GET/POST/DELETE | fleet.configure | the harness sign-in flows, targeting a credential id; there is no readiness read                                                                                                                            |
+| `/v1/fleet/components`                                         | GET                    | fleet.use       | components by kind, with badges and "used by"                                                                                                                                                               |
+| `/v1/fleet/profiles` (+ `/preview`)                            | GET / POST             | fleet.use       | the layered profiles, each with its flattened stack and conflicts; `preview` flattens a stack that is not saved yet                                                                                         |
+| `/v1/fleet/runtimes`                                           | GET                    | fleet.use       | runtimes with their `id` and `wrapper`, the resolved stack per harness, model set, fixed layer, the agent flag and launchability                                                                            |
+| `/v1/fleet/export`                                             | GET                    | fleet.configure | the Clone bundle: components, model sets, profiles, runtimes and credential **descriptors** (harness, email, label) — no credential, no history                                                             |
+| `/v1/fleet/proposals` (+ `/:proposalId`, `/:proposalId/apply`) | POST/GET/POST          | fleet.configure | operation kinds: `credential.add/label/remove/signout`, `component.put/remove`, `profile.put/remove`, `runtime.put/remove`, `machine.settings`, `setup.import`, `clone.import {mode: alongside \| replace}` |
+
+There is no `/v1/fleet/permissions` and no `/v1/fleet/migration`: the caller's authority is part of
+`GET /v1/fleet/machine`, and nothing is migrated (§10). `GET /v1/fleet/machine` honours the operator
+unlock header, so a caller that unlocked reads its unlocked authority.
 
 **Clone has no daemon-to-daemon path.** The browser holds both connections: it reads the source's
 `/v1/fleet/export` and stages a `clone.import` proposal on the target with that bundle. Each daemon
 authorizes its own half.
 
-Retired with their PWA dials in the same change (the route-agreement rule): `/v1/fleet/accounts`,
-`/v1/fleet/health` (+ `/check`), `/v1/fleet/usage`, `/v1/fleet/sharing`, `/v1/fleet/environment`, and
-`/v1/fleet/permissions` (folded into `/v1/fleet/machine`).
+Everything else the old `/v1/fleet/*` surface served — `/accounts`, `/harnesses`, `/config`,
+`/environment`, `/plan`, `/usage`, `/health` (+ `/check`), `/apply`, `/permissions`, `/sharing`,
+`/assets`, `/migration`, `/renew`, and the old readiness read at `GET /v1/fleet/login` — is deleted
+with its dial.
 
 ---
 
@@ -669,17 +616,17 @@ Ferretry's own readers must follow: `credential-store.ts` `keychainService(home)
 **Never symlink a Claude credential file.** Claude writes temp + rename, so the first refresh forks
 the link into a regular file (VERIFIED); locks are per config dir so two runtimes could POST one
 refresh token at once (VERIFIED by reading); and the v5 store reads a symlink with `O_NOFOLLOW` and
-treats `ELOOP` as **logged out** behind a server-side flag (VERIFIED by reading). Copying is today's
-design and is what this replaces.
+treats `ELOOP` as **logged out** behind a server-side flag (VERIFIED by reading). Copying was the old
+design and is what the account model replaced.
 
 #### 8.1.2 Status
 
-| Word            | Claude condition                                                                                                                                                                                          |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Ready`         | credential present, and the last read of `GET /api/oauth/usage` answered `200`, or a confirmed Anthropic JSON `403` (scope-limited, healthy — the existing rule in [fleet-health.md](../fleet-health.md)) |
-| `Refresh due`   | access token expired, refresh token present, nothing has proved it yet. Claude renews it itself on next use; Ferretry does nothing                                                                        |
-| `Needs sign-in` | no credential (an empty slot included), or a proven rejection under the existing digest guard (a stale `401` cannot condemn a fresh credential)                                                           |
-| `Checking`      | a Check now or the first read is in flight                                                                                                                                                                |
+| Word            | Claude condition                                                                                                                                                                                                                          |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Ready`         | credential present, and the last read of `GET /api/oauth/usage` answered `200`, or a confirmed Anthropic JSON `403` (scope-limited, healthy — the token merely lacks the `user:profile` scope, which an inference-scoped token never has) |
+| `Refresh due`   | access token expired, refresh token present, nothing has proved it yet. Claude renews it itself on next use; Ferretry does nothing                                                                                                        |
+| `Needs sign-in` | no credential (an empty slot included), or a proven rejection under the existing digest guard (a stale `401` cannot condemn a fresh credential)                                                                                           |
+| `Checking`      | a Check now or the first read is in flight                                                                                                                                                                                                |
 
 One probe per **credential**. The 15-minute horizon and the HTML/WAF `403` / bare `401` inconclusive
 rules carry over unchanged; an inconclusive check shows the last known word with its age, never a
@@ -693,7 +640,7 @@ fifth word. Check now for Claude is the same free usage read (no refresh, no spe
    `usage.json` (atomic) and then runs the person's own statusLine command, if their settings named
    one, passing stdin through. The wrapper exports `FY_CREDENTIAL=<C>`, which the statusLine child
    inherits (INFERRED). Only interactive TUI sessions render a statusLine.
-2. **Active (today's mechanism):** `GET /api/oauth/usage` on the existing usage pass, used when no
+2. **Active:** `GET /api/oauth/usage` on the existing usage pass, used when no
    passive reading is younger than the pass interval.
 
 ### 8.2 Codex
@@ -725,12 +672,12 @@ This needs one narrow change to `StateFileSystem`'s symlink exemption
 
 #### 8.2.2 Status
 
-| Word            | Codex condition                                                                                                                                                                                                |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Ready`         | `auth.json` present and readable, access JWT not within 5 minutes of `exp`, `last_refresh` younger than 8 days, and no failed refresh recorded since the last success                                          |
-| `Refresh due`   | access JWT `exp` within 5 minutes, **or** `last_refresh` older than 8 days. Codex refreshes at its next start; a launch through Ferretry that is due goes through today's launch renewal (`launch-renewal.ts`) |
-| `Needs sign-in` | no `auth.json` (an empty slot included), or a refresh **observed** to fail permanently (`refresh_token_expired` / `reused` / `invalidated`)                                                                    |
-| `Checking`      | a Check now refresh is in flight                                                                                                                                                                               |
+| Word            | Codex condition                                                                                                                                                                                            |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Ready`         | `auth.json` present and readable, access JWT not within 5 minutes of `exp`, `last_refresh` younger than 8 days, and no failed refresh recorded since the last success                                      |
+| `Refresh due`   | access JWT `exp` within 5 minutes, **or** `last_refresh` older than 8 days. Codex refreshes at its next start; a launch through Ferretry that is due goes through the launch renewal (`launch-renewal.ts`) |
+| `Needs sign-in` | no `auth.json` (an empty slot included), or a refresh **observed** to fail permanently (`refresh_token_expired` / `reused` / `invalidated`)                                                                |
+| `Checking`      | a Check now refresh is in flight                                                                                                                                                                           |
 
 **A Codex login is proved accepted only by a refresh, and a refresh rotates the single-use token.**
 So Ferretry never refreshes on a timer and never reads the usage endpoint as login proof (it answers
@@ -773,12 +720,12 @@ variables and `FY_CREDENTIAL` / `FY_RUNTIME`. An **agent** runtime's wrapper add
 **launch arguments**, which outrank every file the harness or the person can edit — that is what
 makes F1's "always wins" true while the harness rewrites its own settings:
 
-|                    | Claude Code                                                                      | Codex                                                                                               |
-| ------------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| permission mode    | `--permission-mode auto` or `--permission-mode bypassPermissions`                | `-c approval_policy=… -c sandbox_mode=…` (or `--dangerously-bypass-approvals-and-sandbox` for Skip) |
-| fixed settings     | `--settings <dir>/.fy/fixed.json` (`skipDangerousModePermissionPrompt` for Skip) | `-c` pairs                                                                                          |
-| trust / onboarding | `.claude.json` keys re-asserted by the wrapper before `exec` (INFERRED names)    | `-c projects."<cwd>".trust_level="trusted"` (INFERRED)                                              |
-| carried from today | `--disallowed-tools=AskUserQuestion` (open question O3)                          | `--no-alt-screen`                                                                                   |
+|                                   | Claude Code                                                                      | Codex                                                                                               |
+| --------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| permission mode                   | `--permission-mode auto` or `--permission-mode bypassPermissions`                | `-c approval_policy=… -c sandbox_mode=…` (or `--dangerously-bypass-approvals-and-sandbox` for Skip) |
+| fixed settings                    | `--settings <dir>/.fy/fixed.json` (`skipDangerousModePermissionPrompt` for Skip) | `-c` pairs                                                                                          |
+| trust / onboarding                | `.claude.json` keys re-asserted by the wrapper before `exec` (INFERRED names)    | `-c projects."<cwd>".trust_level="trusted"` (INFERRED)                                              |
+| carried from the old auto variant | `--disallowed-tools=AskUserQuestion` (O3, resolved in §14)                       | `--no-alt-screen`                                                                                   |
 
 The machine's Agent permissions is read **at launch**, so a change applies to new sessions only (F5).
 `fy start --agent <runtime>` resolves the runtime by name, then by a recorded old wrapper name, then
@@ -786,8 +733,8 @@ by id; the daemon's unattended-launch policy (`unrunnableAccountRefusal`, `autho
 tests the manifest's `agent: true` instead of matching `/^(?:claude|codex)-auto-/`.
 
 How `--settings` merges with the config dir's own `settings.json` is **INFERRED** overlay, and the CI
-guard asserts it. Whether Claude's pinned version accepts `--permission-mode auto` is asserted by the
-guard too (O4).
+guard asserts it. Whether Claude's pinned version accepts `--permission-mode auto` is asserted by
+the guard too (O4, resolved in §14).
 
 ### 8.5 The CI guard
 
@@ -845,13 +792,12 @@ A failure returns the reason and the command to run by hand (E2). Detection afte
 
 ### 9.2 Races
 
-| Race                                                   | Outcome                                                                                 | Mitigation                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Two Claude runtimes refresh at once                    | One takes the lock; the other re-reads under the lock, sees a new token, skips the POST | Claude's own code (VERIFIED by reading)                                                                                                                                                                                                                                                                                                                                                    |
-| Two Codex runtimes reach "due" in one instant          | Both may POST one single-use token; one gets `refresh_token_reused`                     | Codex reloads before refreshing, so the window is the POST round trip (INFERRED). Ferretry renews a due credential **at launch**, under a per-credential lock in the daemon, so Ferretry's own launches never race each other. A loser is recorded `Needs sign-in` only if the canonical file did not advance. **Declared residual** for two processes the person started outside Ferretry |
-| Check now vs a running Codex refresh                   | Same as above                                                                           | Check now takes the daemon's per-credential lock and re-reads the file first (today's `token-refresh.ts` re-read)                                                                                                                                                                                                                                                                          |
-| Migration moves a credential while a harness writes it | A lost refresh                                                                          | Migration refuses while any session on that credential is live (§10.3)                                                                                                                                                                                                                                                                                                                     |
-| A component edited while sessions run                  | Running sessions keep the old version                                                   | Stated on the edit screen (K1); a link-materialised component changes on disk immediately, and the harness reads it at its own next read — the doc says "until restarted" because that is the only guarantee                                                                                                                                                                               |
+| Race                                          | Outcome                                                                                 | Mitigation                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Two Claude runtimes refresh at once           | One takes the lock; the other re-reads under the lock, sees a new token, skips the POST | Claude's own code (VERIFIED by reading)                                                                                                                                                                                                                                                                                                                                                    |
+| Two Codex runtimes reach "due" in one instant | Both may POST one single-use token; one gets `refresh_token_reused`                     | Codex reloads before refreshing, so the window is the POST round trip (INFERRED). Ferretry renews a due credential **at launch**, under a per-credential lock in the daemon, so Ferretry's own launches never race each other. A loser is recorded `Needs sign-in` only if the canonical file did not advance. **Declared residual** for two processes the person started outside Ferretry |
+| Check now vs a running Codex refresh          | Same as above                                                                           | Check now takes the daemon's per-credential lock and re-reads the file first (today's `token-refresh.ts` re-read)                                                                                                                                                                                                                                                                          |
+| A component edited while sessions run         | Running sessions keep the old version                                                   | Stated on the edit screen (K1); a link-materialised component changes on disk immediately, and the harness reads it at its own next read — the doc says "until restarted" because that is the only guarantee                                                                                                                                                                               |
 
 ### 9.3 One live writer per conversation
 
@@ -892,7 +838,7 @@ hidden.
   says so at boot.
 - The **fallback is per-runtime sign-in**: each runtime gets its own `store: ferretry` credential. It
   costs N sign-ins, never a broken or forked credential.
-- Never the fallback: symlinks (§8.1.1), copies (the credential-seeding hazard), or a central
+- Never the fallback: symlinks (§8.1.1), copies (the hazard in §1), or a central
   refresher injecting `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ### 9.6 Installing software from a phone
@@ -913,76 +859,30 @@ code, QR or token never appears in any wireframe, prototype or capture.
 
 ---
 
-## 10. Migration from today's config and state
+## 10. Version 1 is retired
 
-Goal: **no data loss and no sign-out** for every existing machine.
+The owner's decision for U21 was to clean up everything and not care about backward compatibility,
+because nobody was using the old account system. So the design's earlier migration — credential
+moves, conversion rules, a dry run, a compatibility window — was **never built, and the code that
+read a version-1 configuration is deleted.**
 
-### 10.1 What exists in the wild
+What happens to a machine whose `config.yaml` is still version 1 (no `version` key, or `version: 1`):
 
-| Case                          | Shape                                                                                                                                                            |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A — default first run         | 1 agent per harness named `default`, routes `default` + `auto`, 4 homes, each with a **seeded copy** of the host credential (seed provenance says `seeded_copy`) |
-| B — first run plus edits      | as A, with edited `CLAUDE-auto.md`, extra skills or models per route                                                                                             |
-| C — hand-built fleets         | several agents, `identity` groups, custom variants, profiles, shared documents                                                                                   |
-| D — environment-authenticated | `auth: api-key` or `${secret:…}` env profiles                                                                                                                    |
-| E — shared history on or off  | `sharedHistory.<kind>` either way; a pool may exist already                                                                                                      |
+- It is **refused, never converted, never deleted.** The daemon, `fy` and the browser all say the same
+  sentence, with the real path: "_path_ uses the old account format, which this Ferretry no longer
+  reads. Move it aside (for example rename it to config.yaml.old) and restart the daemon; the first
+  run then sets this machine up again from its own Claude Code and Codex."
+- It reaches people through the paths that already say "this configuration is unreadable": the
+  catalog, setup and credentials refusals, the browser's machine row, and a boot notice. The daemon
+  keeps running, and nothing on disk is touched.
+- An empty document, or `{}`, has no `version` either, so it is refused the same way.
+- Recovery is by hand: move the file aside and restart. The first run (§4.3, run once at boot with
+  `store: host`) imports the person's own Claude Code and Codex again. Old homes, credential copies
+  and history stay where they were, and nothing reads them.
 
-### 10.2 Mapping rules
-
-1. **Credentials** — one per `<kind>:<identity>` group (the key `identity.ts` already computes).
-   - If the host's own login exists and is readable, and seed provenance says every home in the group
-     is a `seeded_copy` of it: `store: host`. The copies are **retired**, not used.
-   - Otherwise `store: ferretry`, and the **freshest** credential in the group is **moved** (not
-     copied) into `fleet/credentials/<C>/` — Claude: the latest `expiresAt`; Codex: the latest
-     `last_refresh` (with single-use rotation, it is the only one still alive). On macOS a move is:
-     read the freshest keychain item → write the item named for the store dir → read it back →
-     delete the old item.
-   - Case D groups become `store: environment` with the profile's `env`.
-2. **Components** — every distinct document the old config referenced becomes one component, named
-   from its file: `shared.memory` / route `memory` → Instructions; skills items → one Skills
-   component per distinct item list; settings templates and settings layers → Settings (inline
-   objects written to files); MCP files → MCP servers; hooks → Hooks; each route's
-   `models`/`defaultModel` → a Model set (identical lists collapse into one).
-3. **Profiles** — each old profile becomes a profile whose layers are its documents in today's
-   composition order (`compositionSlots`), which already means "later overrides earlier". A route's
-   own overrides become one more profile layered on top of its base.
-4. **Runtimes** — **one runtime per route**, so nothing changes name or meaning. A route of the `auto`
-   variant, or any variant with `mode: auto`, gets `agent: true`; its permission flags are dropped in
-   favour of the fixed layer, and the machine's Agent permissions is set from them
-   (`--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox` → **Skip all
-   permission checks**). Its distinct `-auto` instructions document stays as an Instructions layer.
-5. **Identity** — each runtime keeps its route's UUID and wrapper name, recorded in `ids.json`. So
-   `claude-default` and `claude-auto-default` still exist and still mean what they meant, and every
-   session record, task board and pricing row that references an account id still joins. The config
-   dir stays where it is (`fleet/homes/<old home>`), recorded against the runtime id: nothing moves.
-6. **History** — pooling runs for every harness where it was off, using today's rename-based
-   migration (inode-preserving, journaled, collision-quarantining, cross-device refusing).
-7. **Retirement** — retired credential copies move to `fleet/retired/<timestamp>/` (0700,
-   credentials 0600), listed in the migration report, and are deleted by `fy fleet migrate
---purge-retired` or after one release with a boot notice. Retired Claude keychain items are listed by
-   name and deleted only by that purge.
-
-### 10.3 Procedure
-
-1. `fy fleet migrate --dry-run` (also offered as a proposal on the machine's Settings tab): prints
-   credentials, components, profiles, runtimes, which credential is kept and why, which copies
-   retire, the history moves, and the new `config.yaml`.
-2. Refused while any session on an affected credential is live, naming the sessions.
-3. Apply: backs up `config.yaml` to `config.yaml.v1`, writes the mutation journal, moves credentials,
-   pools history, writes the new config, regenerates wrappers, publishes the manifest.
-4. Verify each new credential through the new mechanism (`claude auth status` with the store dir;
-   Codex reads the linked file) **before** any old copy is retired. A credential that fails
-   verification rolls back to its old copies and is reported, leaving the rest migrated.
-5. Report per credential (which login was kept, from where) and per runtime (old and new names).
-
-### 10.4 Compatibility window
-
-- For one release the daemon **reads** a version-1 config by converting it in memory with the same
-  mapping and keeps running; boot and the Settings tab say "this machine uses the old account format —
-  Migrate". It never writes version-1 files.
-- `fy start --agent <old wrapper name | old UUID>` keeps working forever via `ids.json`.
-- A machine with **no** fleet runs the new first run (§4.3), which writes version 2 directly, and
-  `FleetFirstRunSeeder` is deleted: there is nothing to seed.
+One tolerance exists. A `config/daemon.json` that still has an `accountModel` key does not stop
+boot: the key is dropped and the boot says once that it is no longer read, because the account model
+is always on. Delete the key.
 
 ---
 
@@ -1046,83 +946,44 @@ continuing a Claude conversation in Codex, or the reverse.
 
 ---
 
-## 13. Build plan
+## 13. Build plan (as built)
 
-### 13.1 Rules
+The model was built as 22 file-disjoint units, U0–U21, each one PR (#433–#456, then the U21
+retirement PR), in this order. No file belonged to two units, and a route always landed with the
+client file that dials it (the route-agreement gate).
 
-- **File-disjoint:** no file is owned by two units. Each unit lists what it owns; a unit may **read**
-  anything.
-- **One unit = one PR = one Opus 5.5 agent**, with its tests at the 100% unit and integration ledgers.
-- **A route and its dial land in one PR** (the route-agreement gate), so each route unit also owns the
-  PWA client file that dials it.
-- **Seams first.** Barrels, the mount registry and the composition roots are the files every unit
-  would otherwise touch. **U0** adds every new module's barrel line and registration once, pointing at
-  empty seed files, so later units only fill their own files. A seed is the smallest reachable no-op
-  the gates accept (an empty export, an empty route list); U0 proves each passes the gates. **A seed
-  file is owned by the unit that fills it**, never by U0, which only creates it.
-- A unit starts when every unit it depends on has merged. Docs other than this one are rewritten
-  only in **U19**; until then this design is the source.
+| Unit                               | Delivered                                                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| U0 Seams                           | one barrel line, route registration and composition-root line per later unit                                      |
+| U1 Schema                          | the §5.3 schema and validation, reserved environment names, manifest runtime rows                                 |
+| U2 Layering                        | flatten, loops, conflicts, applicability, model-set resolution, the fixed layer (pure)                            |
+| U3 Credential stores               | store resolution (`host` is `""` for Claude), keychain naming, the Codex canonical file and link                  |
+| U4 CI guard                        | §8.5, pinned and latest                                                                                           |
+| U5 Component adaptation            | §8.3: per-harness files, link-or-generate, plumbing keys, partial-support table                                   |
+| U6 Materialise and wrappers        | one config dir and one wrapper per runtime, the fixed layer as launch arguments, `ids.json`                       |
+| U7 Credential status and usage     | the four words, passive and active usage, Check now, `fy statusline`                                              |
+| U8 History pool and lease          | the always-on pool and the lease (§9.3)                                                                           |
+| U9 Migration                       | the conversion in §10's earlier draft — **deleted again in U21**                                                  |
+| U10 Import scan                    | the first-run import of a host's Claude and Codex setup (E4–E9)                                                   |
+| U11 Tool install                   | §8.6                                                                                                              |
+| U12 Launch policy                  | `fy start --agent <runtime>`; `agent: true` replaces the `-auto-` name match                                      |
+| U13 Credential routes and dial     | `/v1/fleet/credentials`, Check now, sign-in by credential id                                                      |
+| U14 Catalogue routes and proposals | `/machine`, `/components`, `/profiles`, `/runtimes`, every proposal kind                                          |
+| U15 Setup and clone routes         | `/setup/scan`, `/machine/tools/install`, `/export`, the `setup.import` and `clone.import` executors               |
+| U16–U19 PWA                        | the Machines shell, Runtimes and Credentials, Profiles and Components, Settings, first run and Clone              |
+| U20 CLI                            | §6                                                                                                                |
+| U21 Retire and document            | everything the old system served is deleted with its dial; this document and `docs/account-model.md` are the docs |
 
-### 13.2 Units
-
-Paths are relative to `packages/` unless they start with `docs/`, `scripts/` or `.github/`. "new"
-marks a file the unit creates (or fills from U0's seed).
-
-| Unit                                        | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                            | Delivers                                                                                                                                                                                                               | Depends on       |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| **U0 Seams**                                | `fleet/src/lib/index.ts`, `daemon/src/lib/runtime/mounts/index.ts`, `daemon/bin/fyd.ts`, `cli/bin/fy.ts`, `pwa/src/lib/index.ts`; creates (but does not own) `daemon/src/lib/fleet/start-resolution.ts` by moving `resolveStartAccount` out of `fyd.ts` unchanged, and every seed file the later units fill                                                                                                                                     | every later unit can land without touching a shared file                                                                                                                                                               | —                |
-| **U1 Schema**                               | `fleet/src/lib/config.ts`, `fleet/src/lib/manifest.ts`; new `fleet/src/lib/account/schema.ts`, `fleet/src/lib/account/legacy.ts` (version-1 → version-2, in memory, pure)                                                                                                                                                                                                                                                                       | §5.3 schema and validation, reserved env names, manifest runtime rows, the converter U9 and the compatibility read use                                                                                                 | U0               |
-| **U2 Layering**                             | new `fleet/src/lib/account/layering.ts`, `fleet/src/lib/account/fixed-layer.ts`                                                                                                                                                                                                                                                                                                                                                                 | flatten (newest position wins), loop detection, conflicts, per-harness applicability and partial support, model-set resolution and fallback, the fixed layer and the Agent-permissions mapping (§3.4, §3.6) — all pure | U1               |
-| **U3 Credential stores**                    | `fleet/src/adapters/credential-store.ts`, `fleet/src/adapters/credential-classifier.ts`, `fleet/src/lib/credential-source.ts`, `daemon/src/adapters/filesystem/state-file-system.ts`; new `fleet/src/lib/account/credentials.ts`                                                                                                                                                                                                                | store resolution (`host` = `""` for Claude), keychain naming from the storage dir, Codex canonical file + link, the narrowed symlink exemption                                                                         | U1               |
-| **U4 CI guard**                             | new `fleet/tests/contract/**`, `.github/workflows/ci.yaml`, new `.github/workflows/harness-contract-latest.yaml`                                                                                                                                                                                                                                                                                                                                | §8.5, pinned and latest                                                                                                                                                                                                | —                |
-| **U5 Component adaptation**                 | `fleet/src/lib/settings.ts`, `fleet/src/lib/sharing.ts`, `fleet/src/lib/assets.ts`; new `fleet/src/lib/account/adapt.ts`                                                                                                                                                                                                                                                                                                                        | §8.3: per-harness files for each kind, link-vs-generate, plumbing keys, partial-support table                                                                                                                          | U2               |
-| **U6 Materialise and wrappers**             | `fleet/src/lib/wrappers.ts`, `fleet/src/lib/plan.ts`, `fleet/src/lib/paths.ts`, `fleet/src/lib/provisioning.ts`, `fleet/src/adapters/file-provisioner.ts`; new `fleet/src/lib/account/materialise.ts`, `fleet/src/lib/account/ids.ts`                                                                                                                                                                                                           | one config dir + wrapper per runtime, credential env vars, the fixed layer as launch arguments (§8.4), `ids.json`                                                                                                      | U3, U4, U5       |
-| **U7 Credential status and usage**          | `fleet/src/lib/health.ts`, `fleet/src/lib/usage.ts`, `fleet/src/lib/quota.ts`, `fleet/src/lib/token-refresh.ts`, `fleet/src/adapters/anthropic-usage-probe.ts`, `fleet/src/adapters/process-token-refresh.ts`; new `fleet/src/lib/account/credential-status.ts`, `fleet/src/adapters/codex-usage-probe.ts`, `fleet/src/adapters/rollout-rate-limits.ts`, `cli/src/lib/statusline/**`                                                            | the four words per credential, passive + active usage, Check now, per-credential refresh lock, `fy statusline`                                                                                                         | U3               |
-| **U8 History pool and lease**               | `fleet/src/lib/shared-history.ts`, `fleet/src/adapters/file-shared-history.ts`, `daemon/src/lib/session/resume/policy.ts`, `daemon/src/lib/session/lifecycle/service.ts`; new `daemon/src/lib/session/conversation-lease.ts`, `cli/src/lib/history/**`                                                                                                                                                                                          | H1–H4 always-on pool, the lease in daemon and wrappers (§9.3)                                                                                                                                                          | U1               |
-| **U9 Migration**                            | `fleet/src/lib/identity.ts`, `fleet/src/lib/seed-provenance.ts`, `fleet/src/adapters/seed-provenance-store.ts`, `fleet/src/adapters/mutation-journal.ts`; new `fleet/src/lib/account/migration.ts`, `fleet/src/adapters/migration-executor.ts`                                                                                                                                                                                                  | §10: dry run, credential moves, verify-before-retire, rollback, purge                                                                                                                                                  | U6, U7, U8       |
-| **U10 Import scan**                         | `fleet/src/lib/defaults.ts`, `fleet/src/lib/scaffold.ts`, `fleet/src/lib/credential-seed.ts` (deleted), `fleet/src/adapters/file-scaffolder.ts`, `daemon/src/lib/fleet/boot-preparation.ts`, `daemon/src/lib/fleet/harness-discovery.ts`; new `fleet/src/lib/account/import.ts`, `fleet/src/adapters/host-harness-scan.ts`                                                                                                                      | read a host's Claude/Codex setup into credentials (`host`), components and a Default/Starter profile: secret detection, instruction dedupe, missing-command warnings (E4–E9); boot no longer seeds                     | U3, U5           |
-| **U11 Tool install**                        | new `daemon/src/lib/fleet/tool-install.ts`, `daemon/src/adapters/process/package-install.ts`                                                                                                                                                                                                                                                                                                                                                    | §8.6 declared table, manager detection, failure reasons (E1, E2)                                                                                                                                                       | U0               |
-| **U12 Launch policy**                       | `daemon/src/lib/fleet/start-resolution.ts`, `daemon/src/lib/session/lifecycle/policy.ts`, `daemon/src/lib/session/lifecycle/settings.ts`, `daemon/src/lib/fleet/launch-environment.ts`, `daemon/src/lib/fleet/launch-renewal.ts`                                                                                                                                                                                                                | `fy start --agent <runtime>` by name / old name / id; `agent: true` replaces the `-auto-` regex; renewal per credential                                                                                                | U6               |
-| **U13 Credential routes + dial**            | `daemon/src/lib/runtime/mounts/fleet-login.ts`, new `daemon/src/lib/runtime/mounts/fleet-credentials.ts`, `daemon/src/lib/fleet/credentials-service.ts`, `pwa/src/features/fleet/harness-login-api.ts`, new `pwa/src/features/fleet/credentials-api.ts`                                                                                                                                                                                         | `/v1/fleet/credentials`, Check now, sign-in targeting a credential id                                                                                                                                                  | U7               |
-| **U14 Catalogue routes + proposals + dial** | `daemon/src/lib/fleet/proposals.ts`, `daemon/src/lib/fleet/mutations.ts`, `daemon/src/lib/fleet/wire.ts`; new `daemon/src/lib/runtime/mounts/fleet-catalog.ts`, `pwa/src/features/fleet/catalog-api.ts`                                                                                                                                                                                                                                         | `/v1/fleet/machine`, `/components`, `/profiles` (repurposed), `/runtimes`; **every** new proposal kind, with ports for the setup and clone executors                                                                   | U2, U6, U12      |
-| **U15 Setup and clone routes + dial**       | new `daemon/src/lib/runtime/mounts/fleet-setup.ts`, `daemon/src/lib/fleet/setup-service.ts`, `fleet/src/lib/account/clone.ts`, `pwa/src/features/fleet/setup-api.ts`                                                                                                                                                                                                                                                                            | `/v1/fleet/setup/scan`, `/machine/tools/install`, `/export`; executors for `setup.import` and `clone.import` (slots, `-2`, Replace keeps logins, path flags)                                                           | U10, U11, U14    |
-| **U16 PWA shell**                           | `pwa/src/features/settings/settings-catalog.ts`, `pwa/src/features/settings/settings-page.tsx`, `pwa/src/features/settings/daemon-settings-frame.tsx`; new `pwa/src/features/fleet/shell/**` (Machines switcher, tabs, stepper primitive with Back / Cancel-confirm / saved-for-reuse / sub-stepper return, offline pause, status shapes)                                                                                                       | §4.1, §4.2 frame                                                                                                                                                                                                       | U13, U14         |
-| **U17 PWA Runtimes + Credentials**          | new `pwa/src/features/fleet/runtimes/**`, `pwa/src/features/fleet/credentials/**`; `pwa/src/features/fleet/claude-login-panel.tsx`, `pwa/src/features/fleet/codex-login-panel.tsx`, `pwa/src/features/fleet/harness-login-model.ts`                                                                                                                                                                                                             | Runtimes and Credentials tabs and pages, Add runtime (§4.4), Add a login (§4.6), sign-out (E12–E17, E23–E26, E31)                                                                                                      | U16              |
-| **U18 PWA Profiles + Components**           | new `pwa/src/features/fleet/profiles/**`, `pwa/src/features/fleet/components/**`                                                                                                                                                                                                                                                                                                                                                                | the two tabs and pages, Build a profile / Edit layers (§4.5), edit and delete (E18–E22)                                                                                                                                | U16              |
-| **U19 PWA Settings, first run, clone**      | new `pwa/src/features/fleet/machine/**`, `pwa/src/features/fleet/setup/**`                                                                                                                                                                                                                                                                                                                                                                      | Settings tab, first run (§4.3), install, Clone (§4.7) (E1–E11, E27–E30, E32)                                                                                                                                           | U15, U16         |
-| **U20 CLI**                                 | `cli/src/lib/fleet/**`; new `cli/src/lib/setup/**`, `cli/src/lib/machine/**`, `cli/src/lib/runtime/**`, `cli/src/lib/credential/**`, `cli/src/lib/profile/**`, `cli/src/lib/component/**`                                                                                                                                                                                                                                                       | §6.2 and the aliases                                                                                                                                                                                                   | U13, U14, U15    |
-| **U21 Retire and document**                 | `daemon/src/lib/runtime/mounts/fleet.ts`, `daemon/src/lib/fleet/sharing.ts`, `pwa/src/features/fleet/fleet-api.ts`, `pwa/src/features/fleet/accounts-*.ts(x)`, `pwa/src/features/fleet/fleet-*.ts(x)`, `scripts/validate/route-agreement-allowlist.txt`, `docs/fleet-defaults.md`, `docs/fleet-health.md`, `docs/fleet-sharing.md`, `docs/fleet-env-profiles.md`, `docs/design/credential-seeding.md`, new `docs/account-model.md`, `CLAUDE.md` | delete the retired routes **with** their dials and the old Accounts UI; promote this design to the contract doc; update the index                                                                                      | U9, U12, U17–U20 |
-
-U16 adds the new Machines surface **beside** today's Daemons → Fleet → Accounts entry, so the old
-Accounts files stay reachable (and knip stays green) until U21 deletes them with their routes.
-
-### 13.3 Waves
-
-```
-W0  U0 Seams ─────────────────────────┐   U4 CI guard
-W1  U1 Schema                          │   U11 Tool install
-W2  U2 Layering   U3 Credential stores   U8 History + lease
-W3  U5 Adaptation   U7 Status + usage
-W4  U6 Materialise + wrappers   U10 Import scan   U13 Credential routes
-W5  U12 Launch policy   U9 Migration
-W6  U14 Catalogue routes + proposals
-W7  U15 Setup + clone routes   U16 PWA shell
-W8  U17 Runtimes + Credentials   U18 Profiles + Components   U19 Settings + first run + clone   U20 CLI
-W9  U21 Retire and document
-```
-
-- **U0 and U4 first.** U4 lands before U6 so the mechanism is guarded from the first release that
-  relies on it.
-- **The pure core (U1, U2) is the spine**: every later unit consumes the model through it, so the
-  layering rules are written once.
-- **Old and new coexist until U21.** U1's in-memory converter means the daemon runs on version-1
-  configs throughout; the old Accounts UI keeps working until U21 deletes it in the same PR as its
-  routes.
-- Widest wave: W8, four agents in parallel.
+U21 deleted, rather than deprecated: the old Accounts UI and its client, `mounts/fleet.ts` and the
+routes in §7's last paragraph, the version-1 reader, converter and migration code, the boot scaffold
+and credential seed, `FleetFirstRunSeeder`, the `accountModel` switch, and the docs
+`fleet-defaults`, `fleet-health`, `fleet-sharing`, `fleet-env-profiles`, `harness-discovery` and
+`design/credential-seeding`. What those documents said about launching, credentials and layering is
+now in this one.
 
 ---
 
-## 14. Declared gaps and open questions
+## 14. Declared gaps and resolved questions
 
 ### Gaps (known, accepted)
 
@@ -1136,24 +997,25 @@ W9  U21 Retire and document
 - **G6 — Passive Claude usage needs an interactive session**; headless sessions fall back to the
   active read.
 - **G7 — Secrets on clone.** References travel, values do not. The prototype does not show a target
-  missing a referenced secret; the build should flag it like a missing command (K6) until designed.
+  missing a referenced secret; the build flags it like a missing command (K6).
 - **G8 — Several INFERRED harness keys** (Claude trust/onboarding keys, Codex trust override, Codex
   skills directory) are pinned only by the CI guard, not by a read of the source.
 
-### Open questions for the owner
+### Questions the owner left open, built with the lead's defaults
 
-- **O1 — Where the surface mounts.** The prototype is the whole surface on a phone. Proposal: the
-  PWA's Settings list gets one **Machines** entry (depth 2, linkable `#machines/<name>/<tab>`) that
-  replaces both "Daemons → Fleet → Accounts" and the per-daemon panel rail.
-- **O2 — First run makes no agent runtime.** The prototype's first run creates `claude-default` and
-  `codex-default` with the agent flag **off**, so `fy start --agent` has nothing to start until one is
-  added. Options: keep it (agents are a deliberate choice), or tick the agent box on the first-run
-  runtimes. This design keeps the prototype.
-- **O3 — `--disallowed-tools=AskUserQuestion`** is in today's auto variant. Should it live in the
-  Claude fixed layer, or become an ordinary Settings component?
-- **O4 — Claude "Auto mode"** assumes the pinned Claude accepts `--permission-mode auto`; the guard
-  asserts it. If a pinned version does not, should Auto mode map to `acceptEdits` or refuse?
-- **O5 — Offline edits.** The prototype's offline banner says "Changes wait until it's back".
-  Proposal: steppers keep their progress (E11) but nothing is queued; a write needs the machine.
-- **O6 — Import again** adds only what is new. Should it also offer to update a component whose
-  source file changed since the last import?
+Each is easy to change later.
+
+- **O1 — Where the surface mounts.** One **Machines** entry in the PWA Settings list (depth 2, linkable
+  `#machines/<name>/<tab>`). The old "Daemons → Fleet → Accounts" path is gone.
+- **O2 — First run makes agent runtimes.** The first-run runtimes (`claude-default`, `codex-default`)
+  are created **with the agent flag on**: running agents is Ferretry's purpose, and the person's own
+  `claude` stays their own CLI.
+- **O3 — `--disallowed-tools=AskUserQuestion`** belongs to the Claude fixed layer (agent runtimes
+  only: nobody is there to answer).
+- **O4 — Claude "Auto mode"** needs `--permission-mode auto`. If the pinned Claude does not accept it,
+  the agent runtime **refuses to launch** with a message naming the fix (switch Agent permissions or
+  update Claude). Auto is never silently mapped to a weaker or stronger mode.
+- **O5 — Offline edits.** Steppers keep their progress (E11), but no change is queued: a write needs
+  the machine awake.
+- **O6 — Import again** adds what is new and **offers** (never applies on its own) to update a
+  component whose source file changed since the last import.

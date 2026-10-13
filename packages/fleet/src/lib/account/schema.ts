@@ -28,7 +28,7 @@ import { HarnessKindSchema } from '../manifest.ts';
 
 const NonEmptyString = z.string().min(1);
 
-/** The version this module parses. A version-1 document is read by `./legacy.ts`, never here. */
+/** The version this module parses. Any other document is refused (`./document.ts`). */
 export const ACCOUNT_MODEL_VERSION = 2 as const;
 
 const NAME_GRAMMAR = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;

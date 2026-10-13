@@ -101,37 +101,14 @@ cannot discover a self-hosted rendezvous, and naming one in the link is deferred
 three modes are built on both ends; read §14 for the state machine and §13 for what is still
 outstanding around it rather than restating either here.
 
-`packages/fleet` gives a fleet **one default set of instructions, skills and base settings** that
-every account uses, with a per-account switch between that shared document and the account's own copy.
-The contract is [docs/fleet-sharing.md](docs/fleet-sharing.md). Sharing was always expressible — two
-accounts referencing one path in the asset tree — so what this adds is a
-**declaration and a report**, not a second mechanism: `config.shared` names documents, the sharing
-report says per account and per field whether the effective value is a declared shared one or its own,
-which slot supplied it, and HOW it reaches the home, and `link` / `unlink` are reviewed mutations like
-any other. **A shared document IS the file in every home that references it**: every single-pick asset
-(`memory`, each `skills` item, `hooks`, `hooksDir`, `mcp`) is materialised as a real symlink into
-`fleet/assets`, so editing the document changes every account immediately with no apply in between —
-which is what made extending `StateFileSystem`'s narrow `fleet/homes` symlink exemption from
-`fleet/shared` to `fleet/assets` necessary, and it admits nothing else. **`settings` is the one
-`generated` field**: a stack deep-merged in memory and written as one file, because a merge of N
-sources cannot be a link to any of them AND each harness rewrites its own settings at runtime, so the
-destination is also an input. A source outside the asset tree (`/`, `~`, `$HOME`, or a `..` that climbs
-out) stays a **copy**, because a link inside a home may only ever resolve into the asset tree.
-`resolveAssetMaterialization` is the single owner of that decision and the plan builder and the report
-both read it, so a surface can never promise a live link the apply then copies. **`skills` is
-per ITEM, not one directory**: the store registers one entry per skill, an account's `skills` is the
-LIST it selected, a later slot replaces that whole list, and each item lands under its own name at
-`<home>/skills/<item>` — so two accounts can overlap on some items and not others, and an item dropped
-from a selection is removed from the home rather than left behind. **Unlink
-materialises a private copy** rather than leaving an account with nothing, and never touches the shared
-document. **Identity and auth are never shared**, enforced by the schema rather than by convention:
-everything shareable is a `Profile` field, and an account's identity and provider login are
-`AccountRoute` / `Agent` fields that no strict profile can express. This is deliberately **not** the
-`shared-history.ts` pool even though both are symlinks — every asset path is a destination the fleet
-plan writes on every apply, which is the exact opposite of the pool's "the harness owns this and
-Ferretry never writes it", and pooling one would give a single inode two owners. Migration is therefore a declaration and moves
-nothing. `settings` is reported but not linkable, and a directory asset cannot be privately
-materialised; the doc names each remaining limit.
+`packages/fleet` and the daemon's fleet routes implement **the account model**: a machine owns
+credentials, components, profiles and runtimes, and a runtime is one credential plus one profile. The
+contract is [docs/account-model.md](docs/account-model.md); the why is
+[docs/design/account-model.md](docs/design/account-model.md). **A credential is stored once and never
+copied**, and the daemon's first run is an import of the host's own Claude Code and Codex setup with
+`store: host`, so the login is shared in place and never seeded. A `config.yaml` that is not
+`version: 2` is **refused, never converted** — the sentence tells the person to move it aside and
+restart. There is no switch, no old reader and no migration: the old account system is deleted.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
@@ -164,33 +141,6 @@ adding a getter would delete the feature. The threat model, the `${secret:NAME}`
 declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing what this protects
 against, because the useful property is narrower than people assume.
 
-A **profile can authenticate an account instead of a login** — the "no login wanted" answer — and the
-contract is [docs/fleet-env-profiles.md](docs/fleet-env-profiles.md). **There is no second profile
-system**: a profile already existed, already composed, and `env` was already one of the fields it
-composed; what it could not carry was a CREDENTIAL, because every value went into a generated wrapper
-in plain text. So this is **one spelling added to the value grammar** — `${secret:NAME}`, the same
-reference `config/daemon.json` already uses, against the same store — and composition needed no work
-at all. Anyone reading it as a parallel mechanism will "simplify" it into one. **Composition is
-therefore the composition it always was**, right-overriding-left through the chain
-`compositionSlots` owns, and the report READS that chain rather than restating it, because two
-orderings would disagree exactly where it matters most — on an account whose credential is not the
-one the report claims. It is **visible** as the origin on each secret-listing row, naming the account,
-the variable, the slot that won AND the slots it beat, in words that never say "layer" or "lane"
-(both removed in `#384`). **Use, never read holds unchanged**: a value reaches exactly one place, the
-environment of the child launched for that one account, so no route, command or error returns one and
-`FleetLaunchEnvironment` is the THIRD thing in the daemon holding a `SecretVault`. **The two halves
-read different documents on purpose** — a launch reads the published manifest so a `config.yaml` typo
-cannot refuse every session, and the reference listing reads the configuration because only it knows
-WHICH profile set a variable; do not unify them. `CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
-`CODEX_SQLITE_HOME` are **refused at parse time, naming the variable**, since a profile that set one
-could point an account at another account's credential, and a malformed `${secret:…}` is refused
-rather than exported as the text of itself. A missing secret **refuses the launch naming every one**,
-never an empty credential; a damaged vault refuses too. A profile is **opt-in** and an account that
-binds none never opens the store, which is what keeps an ordinary fleet working on a host whose vault
-is damaged. Read the GAPs before describing the surface: there is no UI for creating a profile yet,
-the browser's sign-in row is told `environment` rather than `secret-store` on purpose, and a wrapper
-run from a plain shell now fails for a profiled account by design.
-
 `packages/daemon` locates the harness commands (`claude`, `codex`) through **one** rule an operator can
 change: an explicit per-harness path, then declared search directories, then the inherited
 environment — the contract is [docs/harness-paths.md](docs/harness-paths.md). It exists because a
@@ -203,30 +153,6 @@ operator believing they configured something they did not. Boot, `fyd --check` a
 each name the resolved path AND the rule that produced it, and **nothing is ever launched to find
 out**. It is discovery only: a start still launches the absolute wrapper the manifest publishes.
 
-Every fleet account also publishes **whether it is signed in and when that was last established**,
-and the contract is [docs/fleet-health.md](docs/fleet-health.md). It replaces a question that could
-only be answered by spending: health used to mean "can this wrapper answer a sentinel prompt", which
-LAUNCHED the account's agent and asked a model to reply — a billable turn per account, on a timer,
-for nobody. `healthy` now means the current credential was recently accepted, which says nothing
-about quota, entitlement or provider uptime. **Zero spend is structural**: the verdict is a pure
-function of a usage snapshot somebody already collected and a LOCAL credential read, so there is no
-seam to hang a spend on, and `GET /v1/fleet/health` is a store read a browser may hydrate on page
-load. **There is no health timer** — health rides the free read-only `GET /api/oauth/usage` the quota
-pass already makes, so a verdict refreshes as a side effect of a read the daemon was making anyway.
-The single most consequential rule is that a confirmed Anthropic JSON **`403` from that endpoint is
-HEALTHY**: the token merely lacks `user:profile`, permanently, for an inference-scoped token, and
-reading it as a rejection sends somebody to re-login forever on a working account. An HTML/WAF `403`
-and a bare control-plane `401` are inconclusive, with a strict secret-safe response fingerprint
-retained so neither becomes an invented credential verdict. `needs_credentials` is a separate
-verdict from `needs_relogin` because an account authenticated by an environment variable **cannot** be
-fixed by signing in. **Codex is honestly `unknown`** and that is the finished answer, not a gap: its
-usage endpoint answers `200` for stale tokens, and the refresh that would prove liveness rotates a
-single-use token. A stale `401` cannot condemn a fresh login — an opaque credential digest is compared
-before a remote negative commits — and a fifteen-minute horizon expires NEGATIVE verdicts too, so an
-external re-login is never condemned forever. Read the GAPs before describing what this protects
-against; the credentialed provider path is deliberately not proved on a booted daemon, because the
-only way to close that is a setting redirecting where a bearer token is sent.
-
 `packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
 (`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`) and per axis (_use_ / _configure_). **A
 loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"
@@ -237,14 +163,14 @@ narrow what a credential could already do, and an undetermined document fails cl
 the widen/narrow asymmetry and the declared GAPs are [docs/grants.md](docs/grants.md).
 
 A browser can also drive **the harness's own sign-in**, and the daemon holds no token while it does: it
-launches the account's own wrapper with piped stdio and a sanitized environment, publishes a verification
+launches the runtime's own wrapper with piped stdio and a sanitized environment, publishes a verification
 URL — and for Codex a device code — accepts one short-lived authorization code straight into that child's
 stdin, and lets the harness write its own credential into its own store. The contract is
 [docs/design/harness-login.md](docs/design/harness-login.md). **There is one flow PER HARNESS and no shared
 abstraction over them**: Claude prints a URL and reads a pasted code, Codex completes a device grant and has
 no return trip, and a single parameterised flow would have needed both as options — a shape that can express
 a Codex sign-in waiting for a paste. A login is a **declared** per-harness property, and whether one applies
-to an ACCOUNT is decided by where its credential comes from: a token file or an environment variable means
+to a CREDENTIAL is decided by where it comes from: a token file or an environment variable means
 there is nothing to sign in to, so no control is offered and the surface says where the credential DOES come
 from instead. Every route that acts sits on `fleet.configure` with the existing per-change
 operator-password confirmation and **no second gate** — the remote risk is account substitution, not token
@@ -257,37 +183,6 @@ credential**, so its QR is generated locally and never by an image service, neve
 reader, never persisted, and never screenshotted for real (committed captures use a fixed fake code).
 Minting is governed by the `pairing` capability rather than by an admin-token minimum, because a browser is
 always a paired device and could otherwise never add a second one.
-
-The fleet's **New account** form fills itself in from what the host already knows, and the contract for
-that is [docs/harness-discovery.md](docs/harness-discovery.md). `GET /v1/fleet/harnesses` surfaces the
-`PATH` lookup the boot preflight has always done — the **same** resolver, never a second detector — plus
-the model each harness declares in its own settings file and the `CLAUDE.md`/`AGENTS.md` that host already
-has. Two rules make prefilling safe: **a prefilled value carries the file it came from or it is not
-sent** (a fallback says so and is the fleet package's own starter model, never an invented one), and
-**every prefilled field stays editable, losing its provenance note the moment somebody types over it**.
-A host with no harness on `PATH` is a warning and never a refusal, exactly as at boot. Nothing here
-writes: the form hands off to the existing review-and-authorize step at one call.
-
-**Starting the daemon IS the setup**, and the contract is [docs/fleet-defaults.md](docs/fleet-defaults.md).
-A harness the boot detects earns four names and no others — `claude-default` / `claude-auto-default`,
-`codex-default` / `codex-auto-default` — from `packages/fleet/src/lib/defaults.ts`, which is the single
-owner of the naming rule a browser form also uses. **This writes executable wrappers into the operator's
-home, so the boot says what it created, where, and the key that switches it off**; nothing is ever
-replaced, because scaffolding stays create-if-absent and a host that already has a fleet keeps it byte
-for byte. Detection is `locateHarnessCommand`'s and there is no second detector, an unreadable manifest
-prepares nothing rather than guessing, and a preparation that fails is a loud notice and never a refused
-boot. **An account created this way also arrives SIGNED IN** where there was a login to copy: the first
-run seeds each new home from this host's own harness install, which is an **import and never a sync** —
-a harness rewrites its credential by temp-file-and-rename, so a synchroniser would race that forever and
-lose silently, and a symlink would be replaced by the first refresh. **macOS is a keychain
-read-and-rewrite, not a file copy**, because the item name derives from the home path; a file-copy-only
-seed passes every other test and does nothing on a Mac. Only a **`missing`** credential is written —
-`unreadable` is refused and named, never overwritten — the donor is read once per harness, the target is
-read first so a re-run is silent, and **nothing this preparation did not add is ever touched**. Every
-ending is a value, so a locked keychain costs one sentence rather than the fleet, and the boot says per
-account which are signed in, which are not, and the absolute directory each login was read from. **No
-credential value can reach a boot line**: the sentences are built from verdicts and the material never
-leaves the adapter that copied it.
 
 ## Migration context
 

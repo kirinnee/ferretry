@@ -60,7 +60,7 @@ export async function resolveStartAccount(
     );
   // Refused HERE, where the published accounts are in hand, rather than left to the launch: the
   // launch's own authorization sees only a path, so it can say the path is wrong but not which
-  // account would have worked — and the account `fy fleet ls` lists first is one it refuses.
+  // account would have worked — and the account `fy runtimes` lists first is one it refuses.
   const unrunnable = unrunnableAccountRefusal(account, published, defaultSessionLifecycleSettings, clientName);
   if (unrunnable !== undefined) throw new SessionControlError('invalid', unrunnable);
   const launchability = accountLaunchability(account, executables);

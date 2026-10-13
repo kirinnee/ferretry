@@ -13,21 +13,21 @@ import type { z } from 'zod';
 
 import {
   applyFleetChange,
-  FLEET_CHANGES_PATH,
   FLEET_COMPONENTS_PATH,
   FLEET_MACHINE_PATH,
   FLEET_PROFILE_DRAFT_PATH,
-  FLEET_PROFILE_STACKS_PATH,
+  FLEET_PROFILES_PATH,
+  FLEET_PROPOSALS_PATH,
   FLEET_RUNTIMES_PATH,
+  previewFleetProfileDraft,
   readFleetChange,
   readFleetComponents,
   readFleetMachine,
-  readFleetProfileStacks,
-  previewFleetProfileDraft,
+  readFleetProfiles,
   readFleetRuntimes,
   stageFleetChange,
 } from '../../../../src/features/fleet/catalog-api.ts';
-import type { FleetClient } from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
 
 interface Call {
   readonly path: string;
@@ -45,7 +45,7 @@ const MACHINE = {
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
   runtimeCount: 1,
   runningSessions: 0,
-  changes: { available: true },
+  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
 } satisfies FleetMachineView;
 
 const COMPONENTS = {
@@ -100,7 +100,7 @@ describe('the catalogue wire client', () => {
     const answers = [
       await readFleetMachine(machine.client),
       await readFleetComponents(components.client),
-      await readFleetProfileStacks(profiles.client),
+      await readFleetProfiles(profiles.client),
       await readFleetRuntimes(runtimes.client),
     ];
 
@@ -109,7 +109,7 @@ describe('the catalogue wire client', () => {
     expect([machine, components, profiles, runtimes].map(read => read.calls[0]?.path)).toEqual([
       FLEET_MACHINE_PATH,
       FLEET_COMPONENTS_PATH,
-      FLEET_PROFILE_STACKS_PATH,
+      FLEET_PROFILES_PATH,
       FLEET_RUNTIMES_PATH,
     ]);
     expect(headerOf(machine.calls[0], OPERATOR_UNLOCK_HEADER)).toBeUndefined();
@@ -117,7 +117,7 @@ describe('the catalogue wire client', () => {
 
   it('carries the unlock on every read when there is one', async () => {
     // Arrange
-    const reads = [readFleetMachine, readFleetComponents, readFleetProfileStacks, readFleetRuntimes] as const;
+    const reads = [readFleetMachine, readFleetComponents, readFleetProfiles, readFleetRuntimes] as const;
     const answers = [MACHINE, COMPONENTS, PROFILES, RUNTIMES];
 
     // Act
@@ -142,7 +142,7 @@ describe('the catalogue wire client', () => {
 
     // Assert
     expect(view).toEqual(VIEW);
-    expect(calls[0]?.path).toBe(FLEET_CHANGES_PATH);
+    expect(calls[0]?.path).toBe(FLEET_PROPOSALS_PATH);
     expect(calls[0]?.init?.method).toBe('POST');
     expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({
       change: { kind: 'machine.settings', agentPermissions: 'skip' },
@@ -171,7 +171,7 @@ describe('the catalogue wire client', () => {
 
     // Assert
     expect(view).toEqual(VIEW);
-    expect(calls[0]?.path).toBe(`${FLEET_CHANGES_PATH}/${CHANGE_ID}`);
+    expect(calls[0]?.path).toBe(`${FLEET_PROPOSALS_PATH}/${CHANGE_ID}`);
     expect(calls[0]?.init?.method).toBeUndefined();
   });
 
@@ -186,7 +186,7 @@ describe('the catalogue wire client', () => {
 
     // Assert
     expect(outcome).toEqual(OUTCOME);
-    expect(confirmed.calls[0]?.path).toBe(`${FLEET_CHANGES_PATH}/${CHANGE_ID}/apply`);
+    expect(confirmed.calls[0]?.path).toBe(`${FLEET_PROPOSALS_PATH}/${CHANGE_ID}/apply`);
     expect(confirmed.calls[0]?.init?.method).toBe('POST');
     expect(JSON.parse(confirmed.calls[0]?.init?.body as string)).toEqual({ operatorPassword: 'correct horse' });
     expect(headerOf(confirmed.calls[0], OPERATOR_UNLOCK_HEADER)).toBe(TOKEN);

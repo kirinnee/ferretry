@@ -34,18 +34,18 @@ const USER_CODE = '0IER-FFQW6';
 
 const BASE = {
   flowId: 'flow-two',
-  accountId: '00000000-0000-4000-8000-000000000002',
+  credentialId: 'codex-kirin',
   identity: 'codex:kirin',
   startedAt: '2026-08-19T10:00:00.000Z',
   expiresAt: '2026-08-19T10:10:00.000Z',
 } satisfies HarnessLoginFlowBase;
 
 const awaiting: CodexLoginStage = { stage: 'awaiting-approval', verificationUrl: CODEX_URL, userCode: USER_CODE };
-const complete: CodexLoginStage = { stage: 'complete', accounts: [{ accountId: BASE.accountId, status: 'logged-in' }] };
+const complete: CodexLoginStage = { stage: 'complete' };
 const failed: CodexLoginStage = {
   stage: 'failed',
   reason: 'this host’s codex did not offer a sign-in that can be driven from a browser',
-  remedy: 'run `fy fleet login`',
+  remedy: 'run `fy credential signin codex-kirin`',
 };
 
 describe('Codex’s own login argv', () => {
@@ -279,14 +279,13 @@ describe('codexProjection', () => {
     should(actual).deepEqual({ harness: 'codex', ...BASE, state: 'starting' });
   });
 
-  it('should carry the fleet’s per-account outcomes when it finishes', () => {
+  it('should say it finished and carry no per-account outcomes', () => {
     // Act
     const actual = codexProjection(BASE, complete);
 
     // Assert
-    should(actual)
-      .have.property('accounts')
-      .deepEqual([{ accountId: BASE.accountId, status: 'logged-in' }]);
+    should(actual).deepEqual({ harness: 'codex', ...BASE, state: 'complete' });
+    should(actual).not.have.property('accounts');
   });
 
   it('should name the way back on every failure', () => {
@@ -294,7 +293,7 @@ describe('codexProjection', () => {
     const actual = codexProjection(BASE, failed);
 
     // Assert
-    should(actual).have.property('remedy', 'run `fy fleet login`');
+    should(actual).have.property('remedy', 'run `fy credential signin codex-kirin`');
   });
 
   it('should have no state in which it awaits a pasted code', () => {

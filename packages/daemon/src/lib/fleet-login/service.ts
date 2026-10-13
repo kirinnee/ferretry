@@ -3,7 +3,7 @@
  *
  * ## The one property everything else serves
  *
- * **This daemon never holds a token.** It launches the account's own wrapper, publishes at most two
+ * **This daemon never holds a token.** It launches the harness's own login, publishes at most two
  * values out of what that child printed, forwards at most one value in, and lets the harness write its
  * own credential into its own store. There is no field on this object, no field on a record, and no
  * field on the wire that a token could occupy. `docs/design/harness-login.md` §3.2 is the argument and
@@ -23,74 +23,28 @@
  * common is a child process and a deadline, which are this file's business, and what they do not have in
  * common is the entire login.
  *
- * ## What is reused rather than rewritten
+ * ## One credential at a time
  *
- * `FleetLoginService` in the fleet package already walks IDENTITIES rather than accounts: it syncs a
- * sibling's credential first, asks a human only when nobody in the identity has a usable one, and fans
- * the fresh credential out afterwards. That arithmetic — thirty wrappers on six provider accounts costing
- * six interactions — is inherited here for free, by supplying it a `FleetLoginPort` that drives a remote
- * flow instead of a terminal. Two consequences worth knowing:
- *
- * - **A login can complete without a child ever being spawned.** If a sibling has a usable credential the
- *   fleet clones it and nobody is asked for anything; the flow goes straight from `starting` to
- *   `complete`. That is the good case, not a bug.
- * - **A login that exits zero but leaves the identity with no usable credential is a FAILURE**, because
- *   the fleet's own service already decides that, and this flow reports what it decided.
+ * A sign-in names one account-model CREDENTIAL (design §4.6). The harness's own login is launched with
+ * that credential's STORE in its environment, so an empty slot nothing uses yet can be signed in, and
+ * every runtime that names it reads the login this wrote. A sign-in that exits zero but leaves the
+ * store with no usable login is a FAILURE.
  *
  * ## What is refused, and why each refusal is its own
  *
- * - **A harness that declares no interactive login** — nothing to launch.
- * - **An account whose credential comes from a token file, the environment or the configuration** —
- *   nothing to log in to. Offering it would be a control that cannot succeed.
- * - **A second flow for one identity** — two logins into one identity race for the same homes. Note the
- *   pre-existing gap this widens rather than closes: the fleet's only cross-process lock guards `apply`,
- *   so `fy fleet login` on the host and a flow here still have nothing between them. This service can
- *   only be single-flight within itself, and it says so.
- * - **A missing wrapper** — and with NO `PATH` fallback. `process-login.ts` falls back to the bare CLI
- *   because a person on an unprovisioned host still needs to log in; a daemon started by a service
- *   manager inherits no shell profile, so the same fallback here would resolve against a `PATH` that
- *   cannot contain the fleet's bin directory. The refusal names `fy fleet apply` instead.
+ * - **A credential that is not a login** — one from the environment, or one this machine cannot reach.
+ *   The credentials surface says why in words; offering it would be a control that cannot succeed.
+ * - **A second flow for one credential** — two logins into one store race for it. This service can only
+ *   be single-flight within itself, and it says so.
+ * - **A harness that is not installed** — nothing to launch.
  * - **A flow that recognised nothing** — it ends as ITSELF, saying this host's harness did not offer a
- *   remotable login and naming `fy fleet login`. Never a hang, never a bare exit code. Both flows depend
+ *   remotable login and naming the host command. Never a hang, never a bare exit code. Both flows depend
  *   on somebody else's output format, and one of them depends on an UNDOCUMENTED flag
  *   (`codex login --device-auth`, empty description at 0.145.0), so this is the path that keeps a
  *   third-party change from becoming an outage.
  */
-import {
-  buildFleetIdentities,
-  credentialSourceOf,
-  decideLoginApplicability,
-  type FleetCredentialSource,
-  type FleetCredentialStore,
-  type FleetIdentity,
-  type FleetIdentityMember,
-  FleetIdentityService,
-  type FleetIdentityStatus,
-  type FleetLoginResult,
-  FleetLoginService,
-  type FleetLoginTarget,
-  type HarnessKind,
-  type HarnessLoginDeclarations,
-  referencedEnvNames,
-  type FleetTokenRenewal,
-  type ResolvedAccount,
-  resolveAccounts,
-  sanitizeHarnessEnv,
-  wrapperNameOf,
-} from '@ferretry/fleet';
-import type { FleetConfig, FleetManifest } from '@ferretry/fleet';
-import type {
-  FleetCredentialReading,
-  FleetLoginAccount,
-  FleetLoginAccountOutcome,
-  FleetLoginIdentity,
-  FleetLoginReadiness,
-  FleetRenewal,
-  FleetRenewalRequest,
-  HarnessLoginFlow,
-  HarnessLoginStartRequest,
-  HarnessLoginSubmission,
-} from '@ferretry/protocol';
+import { type HarnessKind, sanitizeHarnessEnv } from '@ferretry/fleet';
+import type { HarnessLoginFlow, HarnessLoginStartRequest, HarnessLoginSubmission } from '@ferretry/protocol';
 import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts';
 import { type CredentialSignInTarget, FleetCredentialRefusal } from '../fleet/credentials-service.ts';
 import {
@@ -114,13 +68,7 @@ import {
   decideCodexSubmit,
   observeCodexLine,
 } from './codex-flow.ts';
-import type {
-  HarnessLoginChild,
-  HarnessLoginFlowBase,
-  HarnessLoginSpawn,
-  HarnessLoginTimer,
-  HarnessLoginWrapperSource,
-} from './ports.ts';
+import type { HarnessLoginChild, HarnessLoginFlowBase, HarnessLoginSpawn, HarnessLoginTimer } from './ports.ts';
 
 /** Every refusal this surface answers with, so a client branches on cause rather than on prose. */
 export type HarnessLoginRefusalCode =
@@ -139,31 +87,13 @@ export class HarnessLoginRefusal extends Error {
   }
 }
 
-/**
- * The two reads this needs of the fleet, which the fleet subsystem already serves.
- *
- * Narrowed to two methods rather than taking the whole subsystem: this service must be able to read what
- * the fleet declares and publishes, and must not be able to propose a change, apply one, or write an
- * asset. It is also why no configuration or manifest loading is duplicated here.
- */
-// Not exported: the composition root satisfies it structurally with the fleet subsystem it already
-// builds, so a name on the package surface would be a second way to describe one seam.
-interface HarnessLoginFleetReader {
-  config(): Promise<FleetConfig>;
-  accounts(): Promise<FleetManifest>;
-}
-
 export interface DaemonHarnessLoginOptions {
-  readonly fleet: HarnessLoginFleetReader;
-  /** Reads and clones credentials. Returns classifications and copies bytes; never yields material. */
-  readonly credentials: FleetCredentialStore;
   readonly clock: { now(): number };
   /** A flow handle. Supplied, so identity is never clock-derived and therefore never guessable. */
   readonly mintId: () => string;
   readonly spawn: HarnessLoginSpawn;
   /** This process's environment, which is sanitized before any child sees it. */
   readonly environment: Readonly<Record<string, string | undefined>>;
-  readonly readWrapper: HarnessLoginWrapperSource;
   readonly timer: HarnessLoginTimer;
   /**
    * Proves the operator password for ONE start.
@@ -174,31 +104,14 @@ export interface DaemonHarnessLoginOptions {
    * there is no second budget and no second gate.
    */
   readonly confirmChange: (password: string) => Promise<ChangeConfirmation>;
-  /**
-   * Renewing a credential that can already renew itself, for the surface that has no browser.
-   *
-   * OPTIONAL, and absent means `POST /v1/fleet/renew` refuses in words rather than 500-ing. A renewal
-   * starts a harness process, exactly as a sign-in does, so an embedder gets it by deciding to rather
-   * than by upgrading — the same rule `FleetLoginServiceDeps.renewal` states for the terminal.
-   *
-   * ONE INSTANCE, SHARED WITH EVERY OTHER CALLER IN THIS DAEMON. That is not a composition detail: the
-   * service dedupes concurrent renewals of one identity inside itself, so a second instance would be a
-   * second window in which two spawns can both fire at a refresh token only one of them can spend.
-   */
-  readonly renewal?: FleetTokenRenewal;
   /** What a person types to run this binary, so a refusal names a command they actually have. */
   readonly clientName: string;
   /** How long a flow may live. Bounded in minutes, like the browser login window's one-to-sixty. */
   readonly windowMinutes?: number;
-  /** Which harnesses declare an interactive login. Defaulted to the shipped table. */
-  readonly declarations?: HarnessLoginDeclarations;
-  /**
-   * Signing in by CREDENTIAL (account model §4.6): resolves a credential id to what a sign-in for it
-   * launches. Absent means a start that names a credential refuses in words.
-   */
-  readonly credentialTargets?: { target(credentialId: string): Promise<CredentialSignInTarget> };
-  /** The harness command, by this daemon's one rule. A credential sign-in launches it directly. */
-  readonly locate?: (harness: HarnessKind) => string | undefined;
+  /** Resolves a credential id to what a sign-in for it launches (account model §4.6). */
+  readonly credentialTargets: { target(credentialId: string): Promise<CredentialSignInTarget> };
+  /** The harness command, by this daemon's one rule. A sign-in launches it directly. */
+  readonly locate: (harness: HarnessKind) => string | undefined;
 }
 
 /** The default login window. Long enough to find a phone, short enough that a stray child is not forever. */
@@ -214,8 +127,7 @@ type FlowStage =
 
 interface FlowRecord {
   readonly flowId: string;
-  readonly accountId?: string;
-  readonly credentialId?: string;
+  readonly credentialId: string;
   readonly identityKey: string;
   readonly startedAt: number;
   readonly expiresAt: number;
@@ -228,239 +140,47 @@ interface FlowRecord {
 
 const settled = (stage: FlowStage): boolean => stage.stage.stage === 'complete' || stage.stage.stage === 'failed';
 
-/**
- * The words one authorized act owes a person it refuses.
- *
- * A sign-in and a renewal share every rule and none of the sentences. "That is not this machine's
- * operator password, so \"claude:kirin\" was not signed in" is wrong for a renewal in the way that
- * matters most: it tells somebody a sign-in failed when none was attempted, and sends them to spend a
- * browser approval on a credential that could still have rotated itself.
- *
- * So the RULES are shared and the WORDS are per act, held here rather than composed at each throw —
- * three phrases beside each other are checkable against each other, and three scattered template
- * literals are how one of them ends up saying "sign-in" inside a renewal.
- */
-interface ConfirmedAct {
-  /** When nothing can say where this caller stands. */
-  readonly undecidable: string;
-  /** The act, named: `signing "x" in`. Reads before "from off this host needs …". */
-  readonly asking: (identityKey: string) => string;
-  /** What a confirmation is spent against. Reads after "entered against". */
-  readonly against: string;
-  /** What did not happen: `was not signed in`. Reads after the identity key. */
-  readonly undone: string;
-  /** Why this account cannot be acted on at all, before the daemon's own source clause. */
-  readonly inapplicable: string;
-}
-
-const SIGN_IN: ConfirmedAct = {
-  undecidable: 'this daemon cannot say whether this caller may sign this fleet in',
-  asking: identityKey => `signing "${identityKey}" in`,
-  against: 'this exact sign-in',
-  undone: 'was not signed in',
-  inapplicable: 'there is no sign-in to run for this account',
-};
-
-const RENEWAL: ConfirmedAct = {
-  undecidable: 'this daemon cannot say whether this caller may renew this fleet’s credentials',
-  asking: identityKey => `renewing "${identityKey}"`,
-  against: 'this exact renewal',
-  undone: 'was not renewed',
-  // The same rule as a sign-in and for the same reason: a credential that does not come from a login
-  // has no provider token to rotate, and the harness would never look at its own store for one.
-  inapplicable: 'there is no credential here to renew',
-};
-
 const published = (stage: FlowStage): boolean =>
   stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : stage.stage.stage === 'awaiting-approval';
 
 const instant = (milliseconds: number): string => new Date(Math.trunc(milliseconds)).toISOString();
 
-/**
- * What the credential store found, as the wire says it.
- *
- * `not-read` when a login does not apply, and that is not a cosmetic choice: for an account whose
- * credential comes from a token file, whatever sits in the harness's own store is not this account's
- * credential, so reporting it `missing` would tell a correctly-configured account that it is broken.
- */
-function readingOf(status: FleetIdentityStatus, member: FleetIdentityMember, applies: boolean): FleetCredentialReading {
-  if (!applies) return { state: 'not-read' };
-  const found = status.members.find(entry => entry.member.accountId === member.accountId);
-  if (found === undefined) return { state: 'not-read' };
-  const reading = found.reading;
-  if (reading.state === 'unreadable') {
-    return { state: 'unreadable', reason: reading.reason ?? 'the credential could not be read' };
-  }
-  if (reading.state === 'missing') return { state: 'missing' };
-  return {
-    state: reading.state,
-    ...(reading.expiresAt === undefined ? {} : { expiresAt: instant(reading.expiresAt) }),
-  };
-}
-
-/** The fleet's own per-account outcomes, carried rather than collapsed. */
-const outcomesOf = (results: readonly FleetLoginResult[]): readonly FleetLoginAccountOutcome[] =>
-  results.map(result => ({
-    accountId: result.accountId,
-    status: result.status,
-    ...(result.message === undefined ? {} : { message: result.message }),
-  }));
-
 export class HarnessLoginService {
   readonly #flows = new Map<string, FlowRecord>();
-  readonly #identities: FleetIdentityService;
 
-  constructor(private readonly options: DaemonHarnessLoginOptions) {
-    this.#identities = new FleetIdentityService(options.credentials);
-  }
-
-  /**
-   * Which provider logins this host has, and what each one needs.
-   *
-   * Grouped by IDENTITY because that is what a login is of: one approval covers every lane sharing the
-   * credential, and a surface that offered a per-account button would spend an approval per wrapper and
-   * still leave siblings signed out.
-   */
-  async readiness(): Promise<FleetLoginReadiness> {
-    const { identities, sources } = await this.#context();
-    const rows: FleetLoginIdentity[] = [];
-    for (const identity of identities) {
-      const status = await this.#identities.surveyOne(identity);
-      rows.push(this.#identityRow(identity, status, sources));
-    }
-    return { identities: rows };
-  }
-
-  /** Start one identity's login, confirmed against the operator password when this caller owes one. */
-  async start(request: HarnessLoginStartRequest, governance: CallerGovernance | undefined): Promise<HarnessLoginFlow> {
-    if (request.credentialId !== undefined)
-      return await this.#startCredential(request.credentialId, request, governance);
-    // The schema admits exactly one of the two ids, so an account id is present here.
-    const accountId = request.accountId ?? '';
-    const { identity } = await this.#authorize({ ...request, accountId }, governance, SIGN_IN);
-    return this.#launch(identity, accountId);
-  }
+  constructor(private readonly options: DaemonHarnessLoginOptions) {}
 
   /**
    * Sign one account-model CREDENTIAL in (design §4.6, E12, E31).
    *
-   * A version-1 credential is an identity group, so it goes through the account flow above, which
-   * already walks the group. A version-2 credential is signed in by the harness's OWN login launched
-   * with that credential's store in its environment — so an empty slot nothing uses yet can be signed
+   * The harness's OWN login is launched with that credential's store in its environment — so an empty slot nothing uses yet can be signed
    * in, and every runtime that later names it reads the login this wrote. Same gate, same order: every
    * refusal the document can answer is answered before a password attempt is spent.
    */
-  async #startCredential(
-    credentialId: string,
-    request: HarnessLoginStartRequest,
-    governance: CallerGovernance | undefined,
-  ): Promise<HarnessLoginFlow> {
-    if (governance === undefined) throw new HarnessLoginRefusal('fleet_login_unauthorized', SIGN_IN.undecidable);
-    const targets = this.options.credentialTargets;
-    if (targets === undefined) {
-      throw new HarnessLoginRefusal('fleet_login_unavailable', 'this daemon is not configured to sign logins in by id');
+  async start(request: HarnessLoginStartRequest, governance: CallerGovernance | undefined): Promise<HarnessLoginFlow> {
+    // Absent governance is refused rather than waved through. It cannot arise through the served route,
+    // which declares a capability and therefore always has one built, and the safe reading of "nobody
+    // can tell me where this caller stands" is not "launch a harness on the host".
+    if (governance === undefined) {
+      throw new HarnessLoginRefusal(
+        'fleet_login_unauthorized',
+        'this daemon cannot say whether this caller may sign this machine in',
+      );
     }
+    const credentialId = request.credentialId;
     let target: CredentialSignInTarget;
     try {
-      target = await targets.target(credentialId);
+      target = await this.options.credentialTargets.target(credentialId);
     } catch (error) {
       if (error instanceof FleetCredentialRefusal)
         throw new HarnessLoginRefusal('fleet_login_unavailable', error.message);
       throw error;
     }
     if (target.kind === 'refused') throw new HarnessLoginRefusal('fleet_login_unavailable', target.reason);
-    if (target.kind === 'account') {
-      const { identity } = await this.#authorize({ ...request, accountId: target.accountId }, governance, SIGN_IN);
-      return this.#launch(identity, target.accountId, credentialId);
-    }
-    const key = `credential:${credentialId}`;
-    this.#assertKeyFree(key);
-    if (governance.confirmChange) await this.#confirm(key, request.operatorPassword, SIGN_IN);
-    return this.#launchCredential(target, key);
-  }
-
-  /**
-   * Renew one identity's credential, with no browser and nobody sent anywhere.
-   *
-   * THE OTHER HALF OF THIS SURFACE, and the half that was missing. A browser could start a sign-in and
-   * could never renew — so an account whose access token had merely aged out, with a perfectly good
-   * refresh token beside it, had exactly one remote remedy: a full sign-in, costing a person a browser
-   * approval to replace a credential that could have rotated itself.
-   *
-   * IT IS NOT A FLOW. Nothing is published, nothing is polled, nothing is brought back, and there is no
-   * window to expire — the harness is driven down an authenticated path that invokes no model, and it
-   * rewrites its own store. One request, one answer.
-   *
-   * The gate is not here. `FleetTokenRefreshService` re-reads the chosen home's own credential before it
-   * spawns anything and refuses everything that is not positively expired-with-a-way-back, and it is the
-   * only door to the port. This resolves who is asking and about what; it never decides that a rotation
-   * is safe, because a single-use refresh token is not something two modules get to have opinions about.
-   *
-   * The same authorization as a start, deliberately: a caller who can drive this from off the machine can
-   * leave an identity needing a person, since a rotation the provider REFUSES makes the harness clear its
-   * own tokens. Reusing the sign-in's gate is also why there is no second refusal vocabulary here.
-   */
-  async renew(request: FleetRenewalRequest, governance: CallerGovernance | undefined): Promise<FleetRenewal> {
-    const renewal = this.options.renewal;
-    // Refused in words rather than by a missing method. A daemon composed without a renewal is a daemon
-    // that decided not to start harness processes for this, and a 500 would read as a broken host.
-    if (renewal === undefined) {
-      throw new HarnessLoginRefusal(
-        'fleet_login_unavailable',
-        'this daemon is not configured to renew credentials; run `fy fleet login` on the host',
-      );
-    }
-
-    const { identity } = await this.#authorize(request, governance, RENEWAL);
-    // Surveyed HERE rather than reused from the readiness read, because the readings only CHOOSE: the
-    // renewal re-reads the home it picked before it fires, so a stale survey costs a wasted decision and
-    // never a spent refresh token.
-    const status = await this.#identities.surveyOne(identity);
-    const result = await renewal.renew(identity, status.members);
-    return {
-      identity: result.identity,
-      status: result.status,
-      ...(result.accountId === undefined ? {} : { accountId: result.accountId }),
-      ...(result.reason === undefined ? {} : { reason: result.reason }),
-      ran: result.ran,
-    };
-  }
-
-  /**
-   * Who is asking, about which identity, and may they.
-   *
-   * ONE GATE FOR BOTH ACTS, because they are the same act from the host's point of view: a caller off
-   * this machine causing a credential to be rewritten in a home on it. Two copies of this sequence would
-   * eventually disagree about the order — and the order is the design, since a refusal that could have
-   * been answered from the manifest must never cost somebody a password attempt out of the shared budget.
-   */
-  async #authorize(
-    request: { readonly accountId: string; readonly operatorPassword?: string },
-    governance: CallerGovernance | undefined,
-    act: ConfirmedAct,
-  ): Promise<{ readonly identity: FleetIdentity }> {
-    // Absent governance is refused rather than waved through. It cannot arise through the served route,
-    // which declares a capability and therefore always has one built, and the safe reading of "nobody
-    // can tell me where this caller stands" is not "launch a harness on the host".
-    if (governance === undefined) {
-      throw new HarnessLoginRefusal('fleet_login_unauthorized', act.undecidable);
-    }
-
-    const { identities, sources } = await this.#context();
-    const identity = identities.find(candidate =>
-      candidate.members.some(member => member.accountId === request.accountId),
-    );
-    if (identity === undefined) {
-      throw new HarnessLoginRefusal(
-        'fleet_login_unavailable',
-        `no fleet account "${request.accountId}" is published on this host`,
-      );
-    }
-
-    this.#assertLoginApplies(identity, request.accountId, sources, act);
-    this.#assertSingleFlight(identity);
-    if (governance.confirmChange) await this.#confirm(identity.key, request.operatorPassword, act);
-    return { identity };
+    // Every refusal the document can answer is answered before a password attempt is spent.
+    this.#assertKeyFree(credentialId);
+    if (governance.confirmChange) await this.#confirm(credentialId, request.operatorPassword);
+    return this.#launch(target);
   }
 
   /** This flow as it stands, expiring it first if its window has closed. */
@@ -491,7 +211,7 @@ export class HarnessLoginService {
       : {
           outcome: 'unconfirmed',
           reason:
-            'the harness was no longer reading, so nobody can say whether that code arrived; check whether this account is signed in before trying again',
+            'the harness was no longer reading, so nobody can say whether that code arrived; check whether this login is signed in before trying again',
         };
   }
 
@@ -502,107 +222,14 @@ export class HarnessLoginService {
     return this.#projection(record);
   }
 
-  // ─── reading the fleet ──────────────────────────────────────────────────────────────────────────
-
-  /** The declared configuration and the published manifest, joined the one way that is safe. */
-  async #context(): Promise<{
-    readonly identities: readonly FleetIdentity[];
-    readonly sources: ReadonlyMap<string, FleetCredentialSource>;
-  }> {
-    const [config, manifest] = [await this.options.fleet.config(), await this.options.fleet.accounts()];
-    return { identities: buildFleetIdentities(config, manifest), sources: this.#sources(config) };
-  }
-
-  /**
-   * Where each declared account's credential comes from.
-   *
-   * Read from the configuration, never from the host: nothing is stat-ed and no secret is touched. An
-   * account the configuration no longer declares is absent from this map, and {@link #sourceOf} answers
-   * `undeclared` for it — the fail-closed reading, because a wrapper whose declaration is gone may well
-   * export a credential nobody here can see.
-   */
-  #sources(config: FleetConfig): ReadonlyMap<string, FleetCredentialSource> {
-    const resolved: readonly ResolvedAccount[] = resolveAccounts(config);
-    return new Map(resolved.map(account => [account.id, credentialSourceOf(account, config.secretsFile)] as const));
-  }
-
-  #sourceOf(sources: ReadonlyMap<string, FleetCredentialSource>, accountId: string): FleetCredentialSource {
-    return sources.get(accountId) ?? { source: 'undeclared' };
-  }
-
-  #identityRow(
-    identity: FleetIdentity,
-    status: FleetIdentityStatus,
-    sources: ReadonlyMap<string, FleetCredentialSource>,
-  ): FleetLoginIdentity {
-    const accounts: FleetLoginAccount[] = identity.members.map(member => {
-      const source = this.#sourceOf(sources, member.accountId);
-      const login = decideLoginApplicability(identity.kind, source, this.options.declarations);
-      return {
-        accountId: member.accountId,
-        kind: identity.kind,
-        displayName: member.displayName,
-        // The NAME, not the published path. It is what a person types, and it is the key the daemon's
-        // own usage feed reports under — so a surface can join a quota figure onto this row exactly.
-        // The path is on `/v1/fleet/accounts` for anybody who needs it; this row is a sign-in view.
-        wrapper: wrapperNameOf(member.wrapper),
-        mode: member.mode,
-        available: member.available,
-        credential: readingOf(status, member, login.applies),
-        // The fleet's own answer, unnarrowed. It used to be flattened to `environment` here because
-        // the wire union had no `secret-store` member; it has one now, and the browser has the arm
-        // that renders it, so a profiled account's row names Ferretry's own store rather than a
-        // variable somebody would go looking for in their shell.
-        source,
-        login,
-      };
-    });
-    const verdict = status.verdict;
-    return {
-      identity: identity.key,
-      kind: identity.kind,
-      verdict: verdict.kind,
-      ...('reason' in verdict ? { reason: verdict.reason } : {}),
-      // Non-empty by construction: `buildFleetIdentities` only produces an identity from a member the
-      // manifest published, so there is no identity here with nothing in it.
-      accounts,
-    };
-  }
-
   // ─── refusals ───────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Refuse a login that could not succeed, in the words that say where the credential DOES come from.
+   * One flow per credential at a time.
    *
-   * The account named in the request decides, not the identity: a person clicks a row.
+   * Two logins into one store race for it. So this is single-flight WITHIN this daemon, and the
+   * refusal says which flow holds the credential rather than implying nothing else can.
    */
-  #assertLoginApplies(
-    identity: FleetIdentity,
-    accountId: string,
-    sources: ReadonlyMap<string, FleetCredentialSource>,
-    act: ConfirmedAct,
-  ): void {
-    const source = this.#sourceOf(sources, accountId);
-    const login = decideLoginApplicability(identity.kind, source, this.options.declarations);
-    if (login.applies) return;
-    const because =
-      login.because === 'harness-has-no-login'
-        ? (login.harnessReason ?? `the ${identity.kind} harness has no interactive login`)
-        : describeSource(source);
-    throw new HarnessLoginRefusal('fleet_login_unavailable', `${act.inapplicable}: ${because}`);
-  }
-
-  /**
-   * One flow per identity at a time.
-   *
-   * Two logins into one identity race for the same homes, and the fleet has no cross-process lock over
-   * credential writes — its only lock guards `apply`. So this is single-flight WITHIN this daemon, and the
-   * refusal says which flow holds the identity rather than implying nothing else can.
-   */
-  #assertSingleFlight(identity: FleetIdentity): void {
-    this.#assertKeyFree(identity.key);
-  }
-
   #assertKeyFree(key: string): void {
     for (const record of this.#flows.values()) {
       if (record.identityKey !== key || settled(record.stage)) continue;
@@ -613,21 +240,21 @@ export class HarnessLoginService {
     }
   }
 
-  /** Prove the operator password against THIS act, or refuse in words naming the next step. */
-  async #confirm(identityKey: string, password: string | undefined, act: ConfirmedAct): Promise<void> {
+  /** Prove the operator password against THIS sign-in, or refuse in words naming the next step. */
+  async #confirm(identityKey: string, password: string | undefined): Promise<void> {
     const refuse = (message: string): never => {
       throw new HarnessLoginRefusal('fleet_login_unauthorized', message);
     };
     if (password === undefined) {
       return refuse(
-        `${act.asking(identityKey)} from off this host needs this machine's operator password, entered against ${act.against}`,
+        `signing "${identityKey}" in from off this host needs this machine's operator password, entered against this exact sign-in`,
       );
     }
     const outcome = await this.options.confirmChange(password);
     if (outcome.kind === 'confirmed') return;
     if (outcome.reason === 'rate-limited') {
       return refuse(
-        `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; "${identityKey}" ${act.undone}. Wait for the lockout to pass, or clear it on the host with \`${this.options.clientName} daemon password set\`.`,
+        `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; "${identityKey}" was not signed in. Wait for the lockout to pass, or clear it on the host with \`${this.options.clientName} daemon password set\`.`,
       );
     }
     if (outcome.reason === 'no-password') {
@@ -638,47 +265,32 @@ export class HarnessLoginService {
         `this machine has no operator password, so the confirmation for "${identityKey}" could not be checked`,
       );
     }
-    return refuse(`that is not this machine's operator password, so "${identityKey}" ${act.undone}`);
+    return refuse(`that is not this machine's operator password, so "${identityKey}" was not signed in`);
   }
 
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────
 
-  #launch(identity: FleetIdentity, accountId: string, credentialId?: string): HarnessLoginFlow {
-    // Checked AGAIN, and this is the check that holds: `#authorize`'s copy runs before the password is
-    // proved, and that proof is an await, so two starts for one identity can both pass it. Nothing
+  #launch(target: Extract<CredentialSignInTarget, { kind: 'store' }>): HarnessLoginFlow {
+    // Checked AGAIN, and this is the check that holds: `start`'s copy runs before the password is
+    // proved, and that proof is an await, so two starts for one credential can both pass it. Nothing
     // between here and the record landing in `#flows` awaits, so the later of the two is refused here.
-    this.#assertSingleFlight(identity);
-    const record = this.#record(identity.kind, identity.key, {
-      accountId,
-      ...(credentialId === undefined ? {} : { credentialId }),
-    });
+    this.#assertKeyFree(target.credentialId);
+    const record = this.#record(target.harness, target.credentialId);
     // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the
     // login itself takes as long as a person takes. Every failure is recorded on the record, so nothing
     // here can reject into an unhandled rejection.
-    void this.#run(identity, record);
+    void this.#run(target, record);
     return this.#projection(record);
   }
 
-  /** A credential's sign-in: the same record and window, with the harness launched directly. */
-  #launchCredential(target: Extract<CredentialSignInTarget, { kind: 'store' }>, key: string): HarnessLoginFlow {
-    this.#assertKeyFree(key);
-    const record = this.#record(target.harness, key, { credentialId: target.credentialId });
-    void this.#runCredential(target, record);
-    return this.#projection(record);
-  }
-
-  #record(
-    harness: HarnessKind,
-    identityKey: string,
-    subject: { readonly accountId?: string; readonly credentialId?: string },
-  ): FlowRecord {
+  #record(harness: HarnessKind, credentialId: string): FlowRecord {
     this.#prune();
     const startedAt = this.options.clock.now();
     const window = (this.options.windowMinutes ?? HARNESS_LOGIN_WINDOW_MINUTES) * 60_000;
     const record: FlowRecord = {
       flowId: this.options.mintId(),
-      ...subject,
-      identityKey,
+      credentialId,
+      identityKey: credentialId,
       startedAt,
       expiresAt: startedAt + window,
       stage:
@@ -699,12 +311,12 @@ export class HarnessLoginService {
   /**
    * Launch the harness's own login against one credential's store, and prove the store afterwards.
    *
-   * The environment is sanitized exactly as an account's is, then given the store's variables, so a
-   * sign-in started from inside an agent session cannot authenticate against that session's login.
+   * The environment is sanitized, then given the store's variables, so a sign-in started from inside an
+   * agent session cannot authenticate against that session's login.
    */
-  async #runCredential(target: Extract<CredentialSignInTarget, { kind: 'store' }>, record: FlowRecord): Promise<void> {
+  async #run(target: Extract<CredentialSignInTarget, { kind: 'store' }>, record: FlowRecord): Promise<void> {
     try {
-      const binary = this.options.locate?.(target.harness);
+      const binary = this.options.locate(target.harness);
       if (binary === undefined) {
         this.#end(
           record,
@@ -745,97 +357,10 @@ export class HarnessLoginService {
         this.#end(record, 'the sign-in finished, but no usable login was written for this credential');
         return;
       }
-      this.#finish(record, []);
+      this.#finish(record);
     } catch (error) {
       this.#end(record, error instanceof Error && error.message.length > 0 ? error.message : 'the sign-in failed');
     }
-  }
-
-  /**
-   * Drive the fleet's own login service, with this flow as its interactive port.
-   *
-   * Nothing else decides what happens to the identity: one approval, deliver the credential across the
-   * lanes, report per-account outcomes. This method's whole job is to be the terminal that is not there.
-   *
-   * THE ACCOUNT IS PASSED, and it used to not be. This ran the whole identity with nobody named, so the
-   * fleet service picked the identity's interactive lane, launched THAT wrapper, and the flow went on
-   * reporting `accountId` — the account a person actually clicked — as though the two were the same
-   * thing. Worse, a `full` pass reads what the homes hold: a revoked token still classifies as valid,
-   * so pressing Sign in on the one account the provider is rejecting answered `usable` for every lane
-   * and never launched anything at all. Naming the account makes it the pass's subject, which is both
-   * the thing a `reauthenticate` pass is for and the home it must prove holds a credential at the end.
-   */
-  async #run(identity: FleetIdentity, record: FlowRecord): Promise<void> {
-    const fleetLogin = new FleetLoginService({
-      identities: this.#identities,
-      loginPort: { login: async target => await this.#runChild(record, target) },
-    });
-    try {
-      const results = await fleetLogin.login({
-        identities: [identity],
-        // An account flow always carries its account: `#launch` is its only constructor.
-        accountIds: [record.accountId ?? ''],
-        mode: 'reauthenticate',
-      });
-      this.#finish(record, outcomesOf(results));
-    } catch (error) {
-      this.#end(record, error instanceof Error && error.message.length > 0 ? error.message : 'the sign-in failed');
-    }
-  }
-
-  /**
-   * Launch this account's own wrapper with piped stdio and a sanitized environment.
-   *
-   * The environment is sanitized for the reason `fy fleet login` sanitizes it: a login started from
-   * inside an agent session must not inherit that session's provider credentials, or the login for
-   * account B authenticates against account A's key. The variables the wrapper deliberately references
-   * are read back out of the wrapper itself and preserved.
-   */
-  async #runChild(
-    record: FlowRecord,
-    target: FleetLoginTarget,
-  ): Promise<{ status: 'logged-in' } | { status: 'failed'; message: string }> {
-    if (settled(record.stage)) return { status: 'failed', message: 'this sign-in ended before the harness started' };
-
-    const script = await this.options.readWrapper(target.wrapper);
-    // Asked again after the read: a cancel or a closed window can land during it, and a child spawned
-    // after the flow ended would have nobody left to kill it.
-    if (settled(record.stage)) return { status: 'failed', message: 'this sign-in ended before the harness started' };
-    if (script === undefined) {
-      // NO `PATH` FALLBACK. A daemon started by a service manager inherits no shell profile, so a
-      // name-based lookup cannot resolve the fleet's own bin directory however correctly it was
-      // provisioned — the fallback would launch some other installation, in some other home.
-      const message = `this account's wrapper is not on the host, so there is nothing to sign in — run \`${this.options.clientName} fleet apply\` first`;
-      this.#end(record, message);
-      return { status: 'failed', message };
-    }
-
-    const environment = sanitizeHarnessEnv(this.options.environment, referencedEnvNames(script));
-    const argv = record.stage.harness === 'claude' ? CLAUDE_LOGIN_ARGV : CODEX_LOGIN_ARGV;
-    record.spawned = true;
-    const child = this.options.spawn({
-      command: [target.wrapper, ...argv],
-      environment,
-      onLine: line => this.#observe(record, line),
-    });
-    record.child = child;
-
-    const code = await child.exited;
-    record.child = undefined;
-    if (settled(record.stage)) return { status: 'failed', message: 'this sign-in ended before the harness finished' };
-    if (!published(record.stage)) {
-      // The flow recognised nothing it could publish. It ends as itself rather than as an exit code, and
-      // names the command that works whatever this harness changed about its output.
-      const message = `this host's ${record.stage.harness} did not offer a sign-in that can be driven from a browser`;
-      this.#end(record, message);
-      return { status: 'failed', message };
-    }
-    const ending = this.#ending(record.stage, { exit: code });
-    if (ending !== undefined) {
-      this.#endWith(record, ending);
-      return { status: 'failed', message: ending.reason };
-    }
-    return code === 0 ? { status: 'logged-in' } : { status: 'failed', message: `the sign-in exited with code ${code}` };
   }
 
   /** Feed one raw output line to this harness's own recogniser. Unclassified lines are dropped. */
@@ -847,20 +372,20 @@ export class HarnessLoginService {
         : { harness: 'codex', stage: observeCodexLine(stage.stage, line) };
   }
 
-  /** Record the fleet's outcomes, unless this flow had already ended. */
-  #finish(record: FlowRecord, accounts: readonly FleetLoginAccountOutcome[]): void {
+  /** Record that the sign-in completed, unless this flow had already ended. */
+  #finish(record: FlowRecord): void {
     if (settled(record.stage)) return;
     record.disarm?.();
     record.disarm = undefined;
     record.stage =
       record.stage.harness === 'claude'
-        ? { harness: 'claude', stage: { stage: 'complete', accounts } }
-        : { harness: 'codex', stage: { stage: 'complete', accounts } };
+        ? { harness: 'claude', stage: { stage: 'complete' } }
+        : { harness: 'codex', stage: { stage: 'complete' } };
   }
 
   /** End this flow and its child, keeping whatever outcome it already reached. */
   #end(record: FlowRecord, reason: string): void {
-    const remedy = `sign this account in on the host with \`${this.options.clientName} fleet login\``;
+    const remedy = `sign this login in on the host with \`${this.options.clientName} credential signin ${record.credentialId}\``;
     this.#endWith(record, { stage: 'failed', reason, remedy });
   }
 
@@ -914,8 +439,7 @@ export class HarnessLoginService {
   #projection(record: FlowRecord): HarnessLoginFlow {
     const base: HarnessLoginFlowBase = {
       flowId: record.flowId,
-      ...(record.accountId === undefined ? {} : { accountId: record.accountId }),
-      ...(record.credentialId === undefined ? {} : { credentialId: record.credentialId }),
+      credentialId: record.credentialId,
       identity: record.identityKey,
       startedAt: instant(record.startedAt),
       expiresAt: instant(record.expiresAt),
@@ -938,32 +462,4 @@ export class HarnessLoginService {
       this.#flows.delete(record.flowId);
     }
   }
-}
-
-/**
- * Where a credential comes from, as one clause a refusal can end with.
- *
- * Exported so it can be proved over every member of the source union, including the one
- * {@link HarnessLoginService} never reaches it with: a function that is total over a discriminated union
- * is a function a new member breaks at compile time, and the arm nobody calls is exactly the arm a
- * future reader would otherwise find empty.
- */
-export function describeSource(source: FleetCredentialSource): string {
-  if (source.source === 'token-file') {
-    return `this account's credential comes from ${source.variable} in ${source.path}, so there is nothing to sign in to`;
-  }
-  if (source.source === 'environment') {
-    return `this account's credential comes from the ${source.variable} environment variable, so there is nothing to sign in to`;
-  }
-  if (source.source === 'configured-value') {
-    return `this account's credential is ${source.variable} as the fleet configuration sets it, so there is nothing to sign in to`;
-  }
-  if (source.source === 'secret-store') {
-    const which = `${source.secrets.length === 1 ? 'secret' : 'secrets'} ${source.secrets.join(', ')}`;
-    return `this account's credential is ${source.variable}, which a profile takes from this daemon's secret store (${which}), so there is nothing to sign in to`;
-  }
-  if (source.source === 'undeclared') {
-    return 'nothing in this fleet’s configuration says where this account’s credential comes from';
-  }
-  return 'this account’s credential is written by the harness’s own sign-in';
 }

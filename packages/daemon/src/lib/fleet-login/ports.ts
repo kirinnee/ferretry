@@ -1,8 +1,8 @@
 /**
  * The seams a daemon-side harness login needs, and nothing that decides anything.
  *
- * Two of these carry the whole property change this feature makes. `fy fleet login` today inherits all
- * three of the child's streams and reads none of them (`process-login.ts:89-97`); a remotable login has
+ * Two of these carry the whole property change this feature makes. A terminal sign-in inherits all
+ * three of the child's streams and reads none of them; a remotable login has
  * to PIPE them, which makes the daemon a reader of harness output for the first time. So the port is
  * shaped to bound that: the child is delivered as LINES to a callback, one at a time, and the only thing
  * a caller can do with the child besides read it is write one value and kill it. There is no method that
@@ -12,9 +12,8 @@
 /** Every flow state carries these, whichever harness it is. Facts about the FLOW, not about a harness. */
 export interface HarnessLoginFlowBase {
   readonly flowId: string;
-  /** Absent for a sign-in started from a credential, which launches no account wrapper. */
-  readonly accountId?: string;
-  readonly credentialId?: string;
+  /** The account-model credential being signed in. */
+  readonly credentialId: string;
   readonly identity: string;
   readonly startedAt: string;
   readonly expiresAt: string;
@@ -73,5 +72,3 @@ export interface HarnessLoginTimer {
   after(milliseconds: number, run: () => void): () => void;
 }
 
-/** Reading a generated wrapper, so the sanitizer learns which variables it deliberately references. */
-export type HarnessLoginWrapperSource = (path: string) => Promise<string | undefined>;

@@ -14,6 +14,12 @@ import { CLAUDE_URL, claudeFlow } from './harness-login-support.ts';
 
 type FailedClaudeFlow = Extract<ClaudeLoginFlow, { state: 'failed' }>;
 
+const WORDING = {
+  coverage: 'Every runtime that uses it can launch once it is done.',
+  signedIn: 'Signed in. 3 runtimes can launch now.',
+  finishLabel: 'Finish sign-in for 3 runtimes',
+};
+
 /** A failed render must not leak its mount, or the next test in this file renders into it. */
 let mounted: ReactTestRenderer | null = null;
 
@@ -26,8 +32,8 @@ const mount = (overrides: Partial<Parameters<typeof ClaudeLoginPanel>[0]> = {}):
   mounted = render(
     <ClaudeLoginPanel
       accountLabel="Studio Claude"
-      identity="claude:studio"
-      memberCount={3}
+      loginId="claude-studio"
+      wording={WORDING}
       flow={null}
       busy={false}
       refusal={null}
@@ -44,24 +50,20 @@ const mount = (overrides: Partial<Parameters<typeof ClaudeLoginPanel>[0]> = {}):
 const texts = (view: ReactTestRenderer): string => JSON.stringify(view.toJSON());
 
 describe('ClaudeLoginPanel', () => {
-  it('offers a sign-in and says one covers every sibling lane', () => {
+  it('offers a sign-in and says what one sign-in covers', () => {
     const view = mount();
 
     expect(view.root.findByProps({ 'data-claude-login': 'idle' })).toBeDefined();
-    expect(texts(view)).toContain('2 sibling wrappers too');
+    expect(texts(view)).toContain(WORDING.coverage);
     expect(texts(view)).toContain('Sign in to Claude Code');
   });
 
-  it('says one covers this account only when there is no sibling', () => {
-    expect(texts(mount({ memberCount: 1 }))).toContain('this account only');
-  });
+  it('shows no identity line and no sibling copy', () => {
+    const view = mount();
 
-  it('says one sibling in the singular', () => {
-    expect(texts(mount({ memberCount: 2 }))).toContain('1 sibling wrapper too');
-  });
-
-  it('states that the daemon never holds a credential', () => {
-    expect(texts(mount())).toContain('this daemon never holds one');
+    expect(texts(view)).not.toContain('Identity');
+    expect(texts(view)).not.toContain('sibling');
+    expect(view.root.findAllByType('code')).toHaveLength(0);
   });
 
   it('publishes the link with its PKCE query intact, and asks for a CODE rather than a URL', () => {
@@ -120,44 +122,11 @@ describe('ClaudeLoginPanel', () => {
     expect(texts(mount({ flow: claudeFlow('awaiting-code') }))).toContain('kept nowhere');
   });
 
-  it('reports how many siblings received the credential when it finishes', () => {
-    const view = mount({ flow: claudeFlow('complete') });
-
-    expect(view.root.findByProps({ 'data-claude-login': 'complete' })).toBeDefined();
-    expect(texts(view)).toContain('copied to 1 sibling wrapper');
-  });
-
-  it('says no sibling needed a copy when none did', () => {
-    const flow = claudeFlow('complete');
-    const view = mount({
-      flow: { ...flow, state: 'complete', accounts: [{ accountId: flow.accountId, status: 'logged-in' }] },
-    });
-
-    expect(texts(view)).toContain('No sibling wrapper needed a copy');
-  });
-
-  it('names every account that did not settle rather than claiming success', () => {
-    const flow = claudeFlow('complete');
-    const view = mount({
-      flow: {
-        ...flow,
-        state: 'complete',
-        accounts: [
-          { accountId: flow.accountId, status: 'logged-in' },
-          { accountId: '99999999-9999-4999-8999-999999999999', status: 'indeterminate', message: 'a locked keychain' },
-        ],
-      },
-    });
-
-    expect(texts(view)).toContain('without settling every account');
-    expect(texts(view)).toContain('a locked keychain');
-  });
-
   it('names the way back on a failure, and offers a fresh start', () => {
     const view = mount({ flow: claudeFlow('failed') });
 
     expect(view.root.findByProps({ 'data-claude-login': 'failed' })).toBeDefined();
-    expect(texts(view)).toContain('fy fleet login');
+    expect(texts(view)).toContain('sign this login in on the host');
     expect(texts(view)).toContain('Start a new sign-in');
   });
 
@@ -206,8 +175,8 @@ describe('ClaudeLoginPanel', () => {
 const panelWith = (overrides: Partial<Parameters<typeof ClaudeLoginPanel>[0]>) => (
   <ClaudeLoginPanel
     accountLabel="Studio Claude"
-    identity="claude:studio"
-    memberCount={3}
+    loginId="claude-studio"
+    wording={WORDING}
     flow={null}
     busy={false}
     refusal={null}
@@ -249,7 +218,7 @@ describe('ClaudeLoginPanel when Claude does not take a code', () => {
 
     expect(texts(view)).toContain('Claude didn’t accept that code.');
     expect(texts(view)).toContain('paste the whole code Claude shows you');
-    expect(texts(view)).not.toContain('fy fleet login');
+    expect(texts(view)).not.toContain('sign this login in on the host');
     expect(texts(view)).toContain('Try again');
     run(() => view.root.findAllByType('button').at(-1)?.props.onClick());
     expect(starts).toBe(1);
@@ -260,28 +229,12 @@ describe('ClaudeLoginPanel when Claude does not take a code', () => {
 
     expect(texts(view)).toContain('That sign-in link expired before a code was accepted.');
     expect(texts(view)).toContain('Get a new link');
-    expect(texts(view)).not.toContain('fy fleet login');
+    expect(texts(view)).not.toContain('sign this login in on the host');
   });
 });
 
 describe('ClaudeLoginPanel with the wording of a login', () => {
-  const wording = {
-    coverage: 'Every runtime that uses it can launch once it is done.',
-    signedIn: 'Signed in. 3 runtimes can launch now.',
-    finishLabel: 'Finish sign-in for 3 runtimes',
-  };
-
-  it('hides the identity line and says its own coverage sentence instead of the wrapper one', () => {
-    const plain = texts(mount());
-    expect(plain).toContain('Identity');
-
-    const view = mount({ wording });
-    expect(texts(view)).not.toContain('Identity');
-    expect(view.root.findAllByType('code')).toHaveLength(0);
-    expect(texts(view)).toContain('Every runtime that uses it can launch once it is done.');
-    expect(texts(view)).not.toContain('One sign-in covers');
-    expect(texts(view)).not.toContain('sibling');
-  });
+  const wording = WORDING;
 
   it('labels the finish button with the wording, and falls back to the usual label without one', () => {
     expect(texts(mount({ flow: claudeFlow('awaiting-code'), wording }))).toContain('Finish sign-in for 3 runtimes');

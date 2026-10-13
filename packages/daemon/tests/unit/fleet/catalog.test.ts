@@ -12,6 +12,7 @@ import { type AccountModel, type HarnessKind, parseAccountModel, type SettingsOb
 import {
   FleetComponentCatalogSchema,
   FleetLayeredProfileCatalogSchema,
+  type FleetMachineAuthority,
   FleetMachineViewSchema,
   FleetProfileDraftViewSchema,
   FleetRuntimeCatalogSchema,
@@ -30,8 +31,8 @@ import {
   machineView,
   profileCatalog,
   profileDraftView,
-  redactText,
   profileUsage,
+  redactText,
   runtimeCatalog,
   runtimesUsingCredential,
   runtimesUsingProfile,
@@ -52,6 +53,9 @@ const factsOf = (overrides: Partial<CatalogFacts> = {}): CatalogFacts => ({
   userHome: '/home/me',
   ...overrides,
 });
+
+/** What an unlocked caller with no per-change confirmation may do. */
+const OPEN: FleetMachineAuthority = { mayApply: true, applyRefusal: 'granted', confirmation: 'none' };
 
 const SETTINGS_BODIES: Readonly<Record<string, SettingsObject>> = {
   'claude-a': { permissions: { defaultMode: 'plan' }, theme: 'dark', skipDangerousModePermissionPrompt: false },
@@ -391,7 +395,7 @@ describe('machineView', () => {
     const model = modelOf({ machine: { agentPermissions: 'skip' } });
 
     // Act
-    const actual = machineView(model, factsOf({ runningSessions: 2 }));
+    const actual = machineView(model, factsOf({ runningSessions: 2 }), OPEN);
 
     // Assert
     should(actual).deepEqual({
@@ -405,22 +409,27 @@ describe('machineView', () => {
       ],
       runtimeCount: 6,
       runningSessions: 2,
-      changes: { available: true },
+      authority: OPEN,
     });
     FleetMachineViewSchema.parse(actual);
   });
 
-  it('should say a machine with no runtimes is not set up, a missing tool is not installed, and why changes are refused', () => {
+  it('should say a machine with no runtimes is not set up, a missing tool is not installed, and what a locked caller may not do', () => {
     // Arrange
     const model = modelOf({ profiles: {}, runtimes: {} });
     const facts = factsOf({
       format: 'none',
       tools: { claude: undefined, codex: '/opt/codex' },
-      changesRefusal: 'Another change is being applied.',
     });
 
+    const authority: FleetMachineAuthority = {
+      mayApply: false,
+      applyRefusal: 'locked',
+      confirmation: 'operator-password',
+    };
+
     // Act
-    const actual = machineView(model, facts);
+    const actual = machineView(model, facts, authority);
 
     // Assert
     should(actual.setUp).be.false();
@@ -431,7 +440,7 @@ describe('machineView', () => {
       { harness: 'codex', label: 'Codex', installed: true, command: '/opt/codex' },
     ]);
     should(actual.tools[0]).not.have.property('command');
-    should(actual.changes).deepEqual({ available: false, reason: 'Another change is being applied.' });
+    should(actual.authority).deepEqual(authority);
     FleetMachineViewSchema.parse(actual);
   });
 });
@@ -945,6 +954,16 @@ describe('runtimeCatalog', () => {
       ['helper', 'claude', 'base', false],
       ['models-rt', 'claude', 'models-mixed', false],
     ]);
+    FleetRuntimeCatalogSchema.parse(actual);
+  });
+
+  it('should name each runtime by its ids.json id, falling back to its name, with a wrapper of the same name', () => {
+    // Act
+    const actual = runtimeCatalog(modelOf(), withReadFacts({ runtimeIds: { 'agent-claude': 'rt_0001' } }));
+
+    // Assert — a runtime whose apply never landed has no id yet, so its name stands in.
+    should(runtimeNamed(actual, 'agent-claude')).containDeep({ id: 'rt_0001', name: 'agent-claude', wrapper: 'agent-claude' });
+    should(runtimeNamed(actual, 'helper')).containDeep({ id: 'helper', name: 'helper', wrapper: 'helper' });
     FleetRuntimeCatalogSchema.parse(actual);
   });
 

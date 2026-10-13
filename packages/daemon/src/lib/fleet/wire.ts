@@ -15,10 +15,8 @@
 import type {
   FleetApplyCommittedState,
   FleetApplyFailureError,
-  FleetApplyPreview,
   FleetApplyResult,
   FleetManifest,
-  FleetScaffold,
   FleetWriteOperation,
   SharedHistoryPreview,
 } from '@ferretry/fleet';
@@ -27,8 +25,6 @@ import type {
   FleetApplyOutcome as FleetWireApplyOutcome,
   FleetApplyResult as FleetWireApplyResult,
   FleetManifestSummary,
-  FleetPlanSummary,
-  FleetScaffoldSummary,
   FleetSharedHistorySummary,
   FleetWriteOperation as FleetWireOperation,
 } from '@ferretry/protocol';
@@ -105,7 +101,7 @@ export function operationSummary(operation: FleetWriteOperation): FleetWireOpera
   };
 }
 
-export function manifestSummary(manifest: FleetManifest): FleetManifestSummary {
+function manifestSummary(manifest: FleetManifest): FleetManifestSummary {
   return {
     version: manifest.version,
     generatedAt: manifest.generatedAt,
@@ -138,7 +134,7 @@ export function manifestSummary(manifest: FleetManifest): FleetManifestSummary {
 }
 
 /** What a history migration would move, per harness. Reported, never inferred from a total. */
-export const historySummary = (previews: readonly SharedHistoryPreview[]): readonly FleetSharedHistorySummary[] =>
+const historySummary = (previews: readonly SharedHistoryPreview[]): readonly FleetSharedHistorySummary[] =>
   previews.map(preview => ({
     kind: preview.kind,
     pool: preview.pool,
@@ -146,21 +142,6 @@ export const historySummary = (previews: readonly SharedHistoryPreview[]): reado
     conflicts: preview.conflicts,
     links: preview.links,
   }));
-
-export function planSummary(preview: FleetApplyPreview): FleetPlanSummary {
-  return {
-    manifest: manifestSummary(preview.manifest),
-    manifestPath: preview.manifestPath,
-    operations: preview.operations.map(operationSummary),
-    sharedHistory: historySummary(preview.sharedHistory),
-  };
-}
-
-export const scaffoldSummary = (scaffold: FleetScaffold): FleetScaffoldSummary => ({
-  directories: [...scaffold.directories],
-  files: scaffold.files.map(file => ({ path: file.path })),
-  pathEntry: scaffold.pathEntry,
-});
 
 /** Residue is optional on the wire, so an apply that left none says nothing rather than empty. */
 const residueOf = (value: { readonly backupResidue?: readonly string[]; readonly lockResidue?: string }) => ({
@@ -177,7 +158,7 @@ export const applyResultSummary = (result: FleetApplyResult): FleetWireApplyResu
   ...residueOf(result),
 });
 
-export const committedSummary = (committed: FleetApplyCommittedState): FleetWireCommittedState => ({
+const committedSummary = (committed: FleetApplyCommittedState): FleetWireCommittedState => ({
   accountCount: committed.accountCount,
   operationCount: committed.operationCount,
   manifestPath: committed.manifestPath,
@@ -191,9 +172,6 @@ export const committedSummary = (committed: FleetApplyCommittedState): FleetWire
  * A failed apply as the outcome a person reads: rolled back, rolled back only in part, or committed
  * with the history step failing afterwards.
  *
- * The same reading the old account mount makes of its own failures; it lives here so the account
- * model's changes report an apply in exactly those words, and the older copy can move onto it when
- * that mount is retired.
  */
 export function applyFailureSummary(error: FleetApplyFailureError): FleetWireApplyOutcome {
   const failure = error.failure;

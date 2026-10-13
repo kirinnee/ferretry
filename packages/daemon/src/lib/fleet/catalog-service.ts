@@ -3,20 +3,14 @@
  * (docs/design/account-model.md §4, §7): what the machine has, read fresh on every call, and every
  * change a person can make to it, staged as a preview and applied in a second, explicit step.
  *
- * ## Reads never ask the switch
+ * ## Reads
  *
- * The machine, components, profile-stack and runtime reads answer whichever document the machine has:
- * a version-2 configuration as it is, a version-1 one through the in-memory conversion (§10.4), and no
- * configuration at all as an empty model. Nothing is launched and no provider is called; the only
- * facts outside the configuration are the component files it names, the harness commands this
- * daemon's one rule resolves, and the credential statuses the credentials surface already knows.
- *
- * ## Every write asks the switch, then the format
- *
- * A change is refused while `accountModel.enabled` is off ({@link accountModelWritesRefusal}), and on a
- * version-1 machine, whose every other reader would fail on the version-2 document this writes. Both
- * are asked when the change is staged AND again when it is applied, because either can change in the
- * fifteen minutes a staged change lives.
+ * The machine, components, profile and runtime reads answer the configuration as it is, and no
+ * configuration at all as an empty model. A `config.yaml` still in the old account format is refused
+ * as unreadable, with the sentence saying how to set the machine up again — never converted, never
+ * touched. Nothing is launched and no provider is called; the only facts outside the configuration
+ * are the component files it names, the harness commands this daemon's one rule resolves, and the
+ * credential statuses the credentials surface already knows.
  *
  * ## One change, one plan, one boundary
  *
@@ -33,8 +27,8 @@
  * ## Governed like every fleet change
  *
  * Who may stage or apply is the route's `fleet.configure`. A caller the boundary says owes a
- * per-change confirmation gives the operator password with the apply, and the order is the old
- * fleet mount's: read the change, confirm, consume synchronously, check it is still current, then
+ * per-change confirmation gives the operator password with the apply, and the order is:
+ * read the change, confirm, consume synchronously, check it is still current, then
  * act — restoring it only while it is certain nothing was attempted.
  */
 import {
@@ -51,13 +45,13 @@ import {
   type MaterialiseBodies,
   materialiseFleet,
   parseSettings,
+  renderConfig,
   type RuntimeIds,
   EMPTY_RUNTIME_IDS,
   type SettingsObject,
   skillFrontmatterKeys,
   skillSourceReference,
 } from '@ferretry/fleet';
-import { renderConfig } from '@ferretry/fleet/adapters';
 import type {
   FleetAccountChange,
   FleetAccountChangeOutcome,
@@ -68,6 +62,7 @@ import type {
   FleetComponentCatalog,
   FleetCredentialList,
   FleetLayeredProfileCatalog,
+  FleetMachineAuthority,
   FleetMachineView,
   FleetProfileDraftRequest,
   FleetProfileDraftView,
@@ -110,16 +105,12 @@ export class FleetCatalogRefusal extends Error {
   }
 }
 
-/** What a write says on a machine that still has the old account format. */
-export const VERSION_ONE_WRITES_SENTENCE =
-  'This machine still uses the old account format, so its setup cannot be changed here until it is migrated.';
-
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
 
 /** The machine's configuration as one read: its format, its model, and the digest it was read at. */
 export interface AccountDocumentReading {
   readonly format: FleetCatalogFormat;
-  /** The model itself, the version-1 conversion's, or an empty one when there is no configuration. */
+  /** The model itself, or an empty one when there is no configuration. */
   readonly model: AccountModel;
   /** sha256 of the raw file, or `ABSENT_DOCUMENT_REVISION` when there is none. */
   readonly revision: string;
@@ -145,8 +136,6 @@ export interface FleetCatalogServiceDeps {
   documentRevision(path: string): Promise<string>;
   /** `ids.json`; `undefined` when there is none yet. */
   ids(): Promise<RuntimeIds | undefined>;
-  /** Why account-model writes are refused right now ({@link accountModelWritesRefusal}), read fresh. */
-  writesRefusal(): Promise<string | undefined>;
   /** The harness command this daemon's one rule resolves. Nothing is launched to find it. */
   locate(harness: HarnessKind): string | undefined;
   /** Whether an MCP server's command resolves on this machine (K6). */
@@ -293,6 +282,29 @@ const textUsers = (model: AccountModel, change: AccountPlanChange): ReadonlySet<
     ? new Set(componentUsage(model, `${change.component.kind}/${change.name}`).runtimes)
     : new Set();
 
+// ── Authority ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What this caller may do to the machine, as the operator's grants decided it for this request.
+ *
+ * `mayApply` is `fleet.configure`, and the refusal travels with it because `false` has four different
+ * remedies. `confirmation` is reported even when `mayApply` is false: it is a fact about the machine
+ * rather than about this attempt, so a caller that unlocks and comes back still owes it.
+ *
+ * AN ABSENT GOVERNANCE IS THE STRICTER READING. The served route declares a capability and so always
+ * has one built — but "nobody could tell me where this caller stands" must never render as an open
+ * Apply button.
+ */
+export function machineAuthority(governance: CallerGovernance | undefined): FleetMachineAuthority {
+  if (governance === undefined) return { mayApply: false, applyRefusal: 'undetermined', confirmation: 'none' };
+  const configure = governance.decide({ capability: 'fleet', axis: 'configure' });
+  return {
+    mayApply: configure.allowed,
+    applyRefusal: configure.refusal,
+    confirmation: governance.confirmChange ? 'operator-password' : 'none',
+  };
+}
+
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
 
 export class FleetCatalogService {
@@ -305,10 +317,10 @@ export class FleetCatalogService {
     });
   }
 
-  /** `GET /v1/fleet/machine`. */
-  async machine(): Promise<FleetMachineView> {
+  /** `GET /v1/fleet/machine`, with what this caller may do to it. */
+  async machine(governance: CallerGovernance | undefined): Promise<FleetMachineView> {
     const reading = await this.#read();
-    return machineView(reading.model, await this.#facts(reading));
+    return machineView(reading.model, await this.#facts(reading), machineAuthority(governance));
   }
 
   /** `GET /v1/fleet/components`. */
@@ -317,7 +329,7 @@ export class FleetCatalogService {
     return componentCatalog(reading.model, await this.#facts(reading));
   }
 
-  /** `GET /v1/fleet/profile-stacks`. */
+  /** `GET /v1/fleet/profiles`. */
   async profiles(): Promise<FleetLayeredProfileCatalog> {
     const reading = await this.#read();
     return profileCatalog(reading.model, await this.#facts(reading));
@@ -329,7 +341,7 @@ export class FleetCatalogService {
     return runtimeCatalog(reading.model, await this.#facts(reading));
   }
 
-  /** `POST /v1/fleet/profile-stacks/preview`: a profile's layers before they are saved. Writes nothing. */
+  /** `POST /v1/fleet/profiles/preview`: a profile's layers before they are saved. Writes nothing. */
   async previewProfile(request: FleetProfileDraftRequest): Promise<FleetProfileDraftView> {
     const reading = await this.#read();
     return profileDraftView(reading.model, request, await this.#facts(reading));
@@ -341,14 +353,12 @@ export class FleetCatalogService {
    * worse than a refusal nobody stored.
    */
   async propose(change: FleetAccountChange): Promise<FleetAccountChangeView> {
-    const reading = await this.#writable();
+    const reading = await this.#read();
     const staged = await this.#stage(reading, change);
     const record = this.#proposals(() =>
       this.#changes.open({
         revision: reading.revision,
         mutation: change,
-        assetEdits: [],
-        assetRevisions: [],
         payload: staged.payload,
         summary: staged.summary,
       }),
@@ -356,7 +366,7 @@ export class FleetCatalogService {
     return this.#view(record);
   }
 
-  /** `GET /v1/fleet/changes/:id`. */
+  /** `GET /v1/fleet/proposals/:id`. */
   async read(id: string): Promise<FleetAccountChangeView> {
     return this.#view(this.#proposals(() => this.#changes.require(id)));
   }
@@ -366,8 +376,7 @@ export class FleetCatalogService {
    *
    * Confirm, then spend, then await: a wrong password must not burn a change the caller was entitled
    * to apply, and two applies arriving together must not both find it pending. If it never reaches
-   * the host — the switch went off, the configuration moved — it is put back, because nothing about
-   * the host changed.
+   * the host — the configuration moved — it is put back, because nothing about the host changed.
    */
   async apply(
     id: string,
@@ -400,22 +409,6 @@ export class FleetCatalogService {
         `this machine's fleet configuration could not be read: ${errorMessage(error)}`,
       );
     }
-  }
-
-  /** Why a change is refused on this reading, or `undefined` when it may go ahead. */
-  async #changesRefusal(reading: AccountDocumentReading): Promise<string | undefined> {
-    const disabled = await this.deps.writesRefusal();
-    if (disabled !== undefined) return disabled;
-    return reading.format === 'version-1' ? VERSION_ONE_WRITES_SENTENCE : undefined;
-  }
-
-  async #writable(): Promise<AccountDocumentReading> {
-    const disabled = await this.deps.writesRefusal();
-    if (disabled !== undefined) throw new FleetCatalogRefusal('fleet_change_disabled', disabled);
-    const reading = await this.#read();
-    if (reading.format === 'version-1')
-      throw new FleetCatalogRefusal('fleet_change_refused', VERSION_ONE_WRITES_SENTENCE);
-    return reading;
   }
 
   /** The component bodies the model names, with the documents a change is about to write in their place. */
@@ -467,13 +460,12 @@ export class FleetCatalogService {
         .flatMap(component => (component.command === undefined ? [] : [component.command]))
         .filter(command => !this.deps.commandExists(command)),
     );
-    const changesRefusal = await this.#changesRefusal(reading);
     return {
       format: reading.format,
       machineName: this.deps.machineName(),
       tools: { claude: this.deps.locate('claude'), codex: this.deps.locate('codex') },
       runningSessions: await this.#runningSessions(),
-      ...(changesRefusal === undefined ? {} : { changesRefusal }),
+      runtimeIds: await this.#runtimeIds(),
       settingsBodies: bodies.settings ?? {},
       instructionBodies: bodies.instructions ?? {},
       skillFrontmatter: bodies.skillFrontmatter ?? {},
@@ -483,6 +475,12 @@ export class FleetCatalogService {
       credentialStatus: await this.#credentialStatus(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
     };
+  }
+
+  /** Each runtime's id by name, from `ids.json`. A machine with none yet has no ids to report. */
+  async #runtimeIds(): Promise<Readonly<Record<string, string>>> {
+    const ids = await this.deps.ids();
+    return Object.fromEntries(Object.entries(ids?.runtimes ?? {}).map(([name, entry]) => [name, entry.id]));
   }
 
   /** Each credential's status word, from the credentials surface. A list that fails shows no words. */
@@ -674,10 +672,8 @@ export class FleetCatalogService {
     refuse(`that is not this machine's operator password, so change "${id}" was not applied and is still open`);
   }
 
-  /** Refuse a change whose machine moved since it was reviewed: the switch, or the configuration. */
+  /** Refuse a change whose configuration moved since it was reviewed. */
   async #assertCurrent(record: ChangeRecord): Promise<void> {
-    const disabled = await this.deps.writesRefusal();
-    if (disabled !== undefined) throw new FleetCatalogRefusal('fleet_change_disabled', disabled);
     if ((await this.#read()).revision !== record.revision) {
       throw new FleetCatalogRefusal(
         'fleet_change_stale',

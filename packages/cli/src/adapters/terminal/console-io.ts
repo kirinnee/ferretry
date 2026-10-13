@@ -7,7 +7,7 @@ export interface ICliIo {
    * stdout exactly as given, for a rendering that already carries its own colour.
    *
    * `success` paints its whole message green, which is right for "that worked" and wrong for a
-   * REPORT: a green wrap over `fy fleet health` made a rejected account and a healthy one the same
+   * REPORT: a green wrap over a status listing made a rejected row and a healthy one the same
    * colour, so colour carried nothing and every row had to be read to be triaged. A renderer that
    * decides severity per line has to be the last thing that paints it.
    */

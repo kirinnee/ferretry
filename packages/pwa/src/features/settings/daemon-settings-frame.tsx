@@ -14,15 +14,12 @@ import {
   Gauge,
   KeyRound,
   Lock,
-  LogIn,
   Radar,
   Route,
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
   Stethoscope,
-  Users,
-  Variable,
 } from 'lucide-react';
 import { type ComponentType, type ReactNode, useId, useMemo, useState } from 'react';
 import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
@@ -39,58 +36,18 @@ import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-
 import { WardenStrip } from '../warden/warden-strip.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from './daemon-settings.tsx';
-import { FleetEnvironmentSettings } from './fleet-environment-settings.tsx';
 import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 
 export interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
-  /**
-   * Move to a SIBLING panel of this same frame, by id. Ignored for an id this frame does not mount.
-   *
-   * A panel that sends a reader to another panel used to have to send them to a ROUTE, which is how
-   * Accounts came to be a top-level destination while its data was daemon-scoped. There is no address
-   * for a panel — the selection is this frame's own state, deliberately, so switching daemons cannot
-   * leave one host's panel name over another host's settings — so the frame hands each surface the one
-   * move it could otherwise only fake with a link that goes somewhere else.
-   */
-  readonly openPanel: (id: string) => void;
 }
 
 export interface DaemonSettingsTabDefinition {
   readonly id: string;
   readonly label: string;
   readonly description: string;
-  /**
-   * The panel this one BELONGS TO, when it is a level down rather than an eleventh sibling.
-   *
-   * Declared by the definition rather than by where the composition root happens to list it: the tab
-   * factory knows the relation, `App.tsx` knows the mounting order, and only one of those two facts
-   * survives somebody reordering an array. {@link orderedDaemonPanels} then puts the child directly
-   * under its parent, so the rail's order cannot disagree with the relation it draws.
-   */
-  readonly parentId?: string;
   readonly Surface: ComponentType<DaemonSettingsTabProps>;
 }
-
-/**
- * The panels in rail order: every parent where it was listed, each of its children directly under it.
- *
- * ONE LEVEL, AND NO PANEL CAN EVER FALL OUT OF THE LIST. A row only counts as a child when the id it
- * names belongs to a DIFFERENT panel that is itself top-level, which is what makes this total: a
- * parent that is not mounted, a panel naming itself, and two panels naming each other all come back
- * as ordinary top-level rows rather than disappearing. A settings panel that silently vanished
- * because of how it declared a relation would be unreachable with nothing on screen to say so, and
- * the frame is the last place that should be able to happen.
- */
-export const orderedDaemonPanels = (
-  tabs: readonly DaemonSettingsTabDefinition[],
-): readonly DaemonSettingsTabDefinition[] => {
-  const child = (tab: DaemonSettingsTabDefinition): boolean =>
-    tabs.some(parent => parent.id === tab.parentId && parent.id !== tab.id && parent.parentId === undefined);
-  return tabs.flatMap(tab =>
-    child(tab) ? [] : [tab, ...tabs.filter(candidate => candidate.parentId === tab.id && child(candidate))],
-  );
-};
 
 /** The panel each desktop tab controls; unchanged, because the harness, the app suite and the docs all name it. */
 const DAEMON_PANEL_ID = 'daemon-settings-tab-';
@@ -111,7 +68,7 @@ const PANEL_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm
  *
  * The whole table is here, in the frame that owns the rail, INCLUDING the ids the composition root
  * supplies through `additionalTabs`. That is deliberate: spreading the choices across `App.tsx`,
- * `pricing-settings.tsx`, `fleet-configuration-surface.tsx` and the harness is how a set ends up
+ * `pricing-settings.tsx` and the harness is how a set ends up
  * mixing sources and sizes, and no `additionalTabs` caller has to know this rail draws icons at all.
  *
  * lucide at 16px — the app's HEADING optical size, per `panel-typography.tsx` — laid out by the rail's
@@ -126,17 +83,9 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   // A lock, because this panel is where a refused control is explained — the one glyph that reads as
   // "permission" rather than as an invented category.
   grants: <Lock size={16} aria-hidden="true" />,
-  // The environment is a set of NAMED VALUES, which is what this glyph is; a gear would say
-  // "configuration", and every panel in this rail is configuration.
-  environment: <Variable size={16} aria-hidden="true" />,
   'resource-limits': <Gauge size={16} aria-hidden="true" />,
   doctor: <Stethoscope size={16} aria-hidden="true" />,
   'model-pricing': <CircleDollarSign size={16} aria-hidden="true" />,
-  // Accounts on the host, so the glyph is the accounts rather than the machine.
-  fleet: <Users size={16} aria-hidden="true" />,
-  // The child of Fleet, and the glyph says which half it is: Fleet writes the wrappers, this one is
-  // where a login is signed in. A key would have been the obvious pick and is already Secrets'.
-  accounts: <LogIn size={16} aria-hidden="true" />,
   // The measured PATH the traffic is on, which is exactly what a route is.
   carrier: <Route size={16} aria-hidden="true" />,
   'host-checks': <Radar size={16} aria-hidden="true" />,
@@ -217,8 +166,6 @@ export interface DaemonSettingsFrameProps {
   /** The browser's persisted pairing record; only Host checks needs its local metadata. */
   readonly connectionRecord?: DaemonConnectionRecord;
   readonly name: string;
-  /** All paired daemons are needed only as configuration-copy sources. */
-  readonly connections?: readonly DaemonConnection[];
   readonly readWardenStatus?: WardenStatusReader;
   /** Test and harness seam; production uses the daemon-bound default client. */
   readonly createWardenClient?: WardenClientFactory;
@@ -247,7 +194,6 @@ export function DaemonSettingsFrame({
   connection,
   connectionRecord,
   name,
-  connections = [connection],
   readWardenStatus,
   createWardenClient,
   createSecretClient,
@@ -262,7 +208,7 @@ export function DaemonSettingsFrame({
 }: DaemonSettingsFrameProps) {
   const tabs = useMemo<readonly DaemonSettingsTabDefinition[]>(
     () =>
-      orderedDaemonPanels([
+      [
         {
           id: 'warden',
           label: 'Warden',
@@ -320,17 +266,6 @@ export function DaemonSettingsFrame({
             />
           ),
         },
-        {
-          // Environment carries VALUES between daemons; Secrets deliberately does not — a secret is
-          // copied explicitly and per-secret or not at all, never as a side effect of copying
-          // configuration. See `docs/secrets.md`; that copy path is still a declared GAP.
-          id: 'environment',
-          label: 'Environment',
-          description: 'Copy safe fleet profile environment between daemons.',
-          Surface: ({ connection: activeConnection }) => (
-            <FleetEnvironmentSettings connection={activeConnection} connections={connections} />
-          ),
-        },
         // A product-owned Doctor surface belongs with the daemon configuration,
         // before the connection carrier and browser-local pairing diagnostics.
         ...additionalTabs,
@@ -366,12 +301,11 @@ export function DaemonSettingsFrame({
             );
           },
         },
-      ]),
+      ],
     [
       additionalTabs,
       carrier,
       connectionRecord,
-      connections,
       createGrantClient,
       createPairingClient,
       createSecretClient,
@@ -409,13 +343,8 @@ export function DaemonSettingsFrame({
     label: tab.label,
     detail: tab.description,
     icon: PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON,
-    ...(tab.parentId === undefined ? {} : { parentId: tab.parentId }),
   }));
   const activeIcon = PANEL_ICONS[active.id] ?? FALLBACK_PANEL_ICON;
-  /** Only ever a panel this frame really mounts; an unknown id leaves the reader where they are. */
-  const openPanel = (id: string): void => {
-    if (tabs.some(tab => tab.id === id)) setActiveTab(id);
-  };
 
   return (
     <section
@@ -537,7 +466,7 @@ export function DaemonSettingsFrame({
               it got caught. The rail's second line is redundant on desktop rather than missing: the panel
               is beside the row, already explaining itself. On a phone it is not redundant, because the
               sheet is chosen with the panel hidden behind it, so the sheet keeps it. */}
-          <Surface connection={connection} openPanel={openPanel} />
+          <Surface connection={connection} />
         </div>
       </div>
     </section>

@@ -1,26 +1,22 @@
 /**
  * The routes a machine's setup is read and changed through (docs/design/account-model.md §4.3, §4.7,
- * §7, §10.3). The service is `fleet/setup-service.ts`; the import and the clone themselves are reviewed
- * changes staged at `/v1/fleet/changes`, which run its executors.
+ * §7). The service is `fleet/setup-service.ts`; the import and the clone themselves are reviewed
+ * changes staged at `/v1/fleet/proposals`, which run its executors.
  *
- * ## All five are `fleet.configure`
+ * ## All three are `fleet.configure`
  *
  * The scan reads the person's own harness setup — file names, server names, secret-looking key names —
  * and the export is everything a Clone copies, so neither is a `fleet.use` read even though both write
- * nothing. Installing a tool runs a package manager on this machine, and the migration moves logins:
- * each adds the per-change operator password for a caller the boundary says owes it. No answer carries
+ * nothing. Installing a tool runs a package manager on this machine, so
+ * it adds the per-change operator password for a caller the boundary says owes it. No answer carries
  * a credential or a secret value.
  *
- * ## `noStore` on all five
+ * ## `noStore` on all three
  *
- * Every answer is a statement about now: what is installed, what the host's setup says, what the dry
- * run would do.
+ * Every answer is a statement about now: what is installed, and what the host's setup says.
  */
 import {
   FleetCloneBundleSchema,
-  FleetMigrationApplyRequestSchema,
-  FleetMigrationOutcomeSchema,
-  FleetMigrationViewSchema,
   FleetSetupScanSchema,
   FleetToolInstallRequestSchema,
   FleetToolInstallResultSchema,
@@ -33,10 +29,10 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { FleetSetupRefusal, type FleetSetupService } from '../../fleet/setup-service.ts';
 
-/** First-run scan, tool install, the clone export and the migration. */
+/** First-run scan, tool install and the clone export. */
 export type FleetSetupSubsystem = Pick<
   FleetSetupService,
-  'scan' | 'installTools' | 'exportBundle' | 'migration' | 'migrate' | 'executors' | 'firstRunAtBoot'
+  'scan' | 'installTools' | 'exportBundle' | 'executors' | 'firstRunAtBoot'
 >;
 
 /** `403` for a caller who could not confirm; `409` for every other refusal, as the fleet's own answer. */
@@ -84,25 +80,6 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       capability: CONFIGURE,
       noStore: true,
       handle: async () => await answer(FleetCloneBundleSchema, () => subsystem.exportBundle()),
-    },
-    {
-      method: 'GET',
-      path: '/v1/fleet/migration',
-      minimum: 'operator',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async () => await answer(FleetMigrationViewSchema, () => subsystem.migration()),
-    },
-    {
-      method: 'POST',
-      path: '/v1/fleet/migration/apply',
-      minimum: 'operator',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async context => {
-        const request = await parseBody(context.request, FleetMigrationApplyRequestSchema);
-        return await answer(FleetMigrationOutcomeSchema, () => subsystem.migrate(request, context.governance));
-      },
     },
   ];
 }

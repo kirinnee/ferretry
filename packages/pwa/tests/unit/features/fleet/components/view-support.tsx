@@ -1,13 +1,13 @@
 /** A scripted machine for the Profiles and Components page suites: its catalogue, its change routes, every call. */
 
 import type { FleetMachineView } from '@ferretry/protocol';
+import type { ReactElement } from 'react';
 import type { AccountCatalog } from '../../../../../src/features/fleet/components/account-catalog.ts';
-import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
 import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
-import type { ReactElement } from 'react';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
-import { APPLY_PATH, type Call, OUTCOME, permissions, STAGED, scriptedClient } from '../shell/change-support.ts';
+import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from '../shell/change-support.ts';
 import { studioCatalog, studioMachine } from './catalog-fixture.ts';
 
 const STUDIO = daemonConnection({
@@ -44,11 +44,11 @@ const machineFactory =
     return scriptedClient(
       {
         '/v1/fleet/components': catalog(() => machine.catalog.components),
-        '/v1/fleet/profile-stacks': catalog(() => machine.catalog.profiles),
+        '/v1/fleet/profiles': catalog(() => machine.catalog.profiles),
         '/v1/fleet/runtimes': catalog(() => machine.catalog.runtimes),
-        '/v1/fleet/profile-stacks/preview': () => machine.preview ?? new Error('unreachable'),
-        '/v1/fleet/permissions': permissions(),
-        '/v1/fleet/changes': (call: Call) =>
+        '/v1/fleet/profiles/preview': () => machine.preview ?? new Error('unreachable'),
+        '/v1/fleet/machine': machineAnswer(),
+        '/v1/fleet/proposals': (call: Call) =>
           machine.stage ?? { ...STAGED, change: (call.body as { change: unknown }).change },
         [APPLY_PATH]: () => {
           machine.onApply?.(machine);
@@ -62,7 +62,7 @@ const machineFactory =
 /** The changes the tab staged, in order. */
 export const stagedChanges = (machine: Machine): unknown[] =>
   machine.calls
-    .filter(call => call.path === '/v1/fleet/changes')
+    .filter(call => call.path === '/v1/fleet/proposals')
     .map(call => (call.body as { change: unknown }).change);
 
 export const tabProps = (machine: Machine, overrides: Partial<MachineTabProps> = {}): MachineTabProps => ({

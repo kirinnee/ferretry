@@ -2,23 +2,23 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   absoluteInstantLabel,
-  accountHealthOffersSignIn,
   accountHealthView,
+  lastCheckedAt,
   relativeInstantLabel,
   UNREAD_ACCOUNT_HEALTH,
 } from '../../src/lib/account-health-view.ts';
-import type { PickerAccountHealth, PickerHealthReason } from '../../src/lib/account-picker-catalog.ts';
+import type { PickerAccountHealth } from '../../src/lib/account-picker-catalog.ts';
 
 const NOW = Date.parse('2026-08-24T12:00:00.000Z');
+const FOUR_MINUTES_AGO = new Date(NOW - 240_000).toISOString();
 
 const health = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth => ({
-  accountId: 'acct',
-  kind: 'claude',
-  verdict: 'healthy',
+  credentialId: 'claude-work',
+  word: 'ready',
+  label: 'Ready',
   reason: 'provider_accepted',
-  evidence: 'anthropic_usage',
-  lastCheckedAt: NOW - 240_000,
-  verdictAt: NOW - 240_000,
+  explanation: 'Ready. The provider accepted this login.',
+  lastCheckedAt: FOUR_MINUTES_AGO,
   lastCheckInconclusive: false,
   ...overrides,
 });
@@ -32,280 +32,75 @@ describe('relativeInstantLabel', () => {
   });
 
   it('never renders a future instant as negative', () => {
-    // A daemon clock a little ahead of the browser is ordinary, and "-3m ago" is not a time.
     expect(relativeInstantLabel(NOW + 60_000, NOW)).toBe('just now');
   });
 });
 
 describe('absoluteInstantLabel', () => {
   it('is the exact UTC instant, for the accessible name rather than the visible label', () => {
-    // The visible label is relative and ticks; the machine-readable one must be unambiguous.
     expect(absoluteInstantLabel(NOW)).toBe('2026-08-24T12:00:00.000Z');
   });
 });
 
-describe('accountHealthView', () => {
-  it('prints the verdict, when it was checked, and why', () => {
-    // Act
-    const actual = accountHealthView(health(), NOW);
+describe('lastCheckedAt', () => {
+  it('reads the ISO instant as epoch milliseconds', () => {
+    expect(lastCheckedAt(health())).toBe(NOW - 240_000);
+  });
 
-    // Assert — the time is part of the verdict, not decoration: "Healthy" with no instant is a claim
-    // with no expiry, and the host's evidence has a fifteen-minute horizon.
-    expect(actual).toMatchObject({
-      label: 'Healthy',
+  it('is null when nobody has checked, and for an instant it cannot read', () => {
+    const { lastCheckedAt: _omitted, ...never } = health();
+    expect(lastCheckedAt(never)).toBeNull();
+    expect(lastCheckedAt(health({ lastCheckedAt: 'not a time' }))).toBeNull();
+  });
+});
+
+describe('accountHealthView', () => {
+  it('prints the daemon’s own word and sentence, and when it was checked', () => {
+    expect(accountHealthView(health(), NOW)).toEqual({
+      label: 'Ready',
       checked: 'Checked 4m ago',
-      detail: 'The provider accepted this account’s credential.',
+      detail: 'Ready. The provider accepted this login.',
       tone: 'ok',
       offersSignIn: false,
     });
+  });
+
+  it('says never checked rather than inventing a time', () => {
+    const { lastCheckedAt: _omitted, ...never } = health({ word: 'checking', label: 'Checking' });
+    const actual = accountHealthView(never, NOW);
+    expect(actual.checked).toBe('Never checked');
+    expect(actual.tone).toBe('muted');
     expect(actual.secondary).toBeUndefined();
   });
 
-  it('calls a 403 HEALTHY and says the QUOTA is what is unknown', () => {
-    // Arrange / Act — the rule the whole feature turns on. Reading this as a rejection sends somebody
-    // to re-login forever on an account that works perfectly.
-    const actual = accountHealthView(health({ reason: 'usage_scope_unavailable' }), NOW);
-
-    // Assert
-    expect(actual.label).toBe('Healthy');
-    expect(actual.tone).toBe('ok');
-    expect(actual.detail).toContain('quota is not measurable');
-    expect(actual.offersSignIn).toBeFalse();
-  });
-
-  it('offers a sign-in for a rejected OAuth credential', () => {
-    // Act
-    const actual = accountHealthView(health({ verdict: 'needs_relogin', reason: 'oauth_token_rejected' }), NOW);
-
-    // Assert
-    expect(actual).toMatchObject({ label: 'Needs re-login', tone: 'bad', offersSignIn: true });
-  });
-
-  it('never offers a sign-in for an account no login can fix', () => {
-    // Arrange / Act — the harness reads an environment variable and never consults its own credential
-    // store, so a sign-in would open a browser, write a store nobody reads, and change nothing.
-    const actual = accountHealthView(
-      health({ verdict: 'needs_credentials', reason: 'static_credential_rejected' }),
+  it('paints each status word in its own tone, and offers sign-in only where it can help', () => {
+    const refresh = accountHealthView(health({ word: 'refresh_due', label: 'Refresh due' }), NOW);
+    expect(refresh).toMatchObject({ label: 'Refresh due', tone: 'warn', offersSignIn: false });
+    const signIn = accountHealthView(
+      health({ word: 'needs_sign_in', label: 'Needs sign-in', reason: 'not_signed_in' }),
       NOW,
     );
-
-    // Assert
-    expect(actual.label).toBe('Needs credential');
-    expect(actual.tone).toBe('bad');
-    expect(actual.offersSignIn).toBeFalse();
-    expect(accountHealthOffersSignIn(health({ verdict: 'needs_credentials' }))).toBeFalse();
+    expect(signIn).toMatchObject({ label: 'Needs sign-in', tone: 'bad', offersSignIn: true });
   });
 
-  it('says NEVER CHECKED rather than inventing an instant', () => {
-    // Act
-    const actual = accountHealthView(
-      health({ verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null }),
-      NOW,
-    );
-
-    // Assert — a fabricated "now" would be indistinguishable from a check that just succeeded.
-    expect(actual).toMatchObject({ label: 'Unknown', checked: 'Never checked', tone: 'warn' });
+  it('adds a second clause when the newest check could not conclude', () => {
+    const actual = accountHealthView(health({ lastCheckInconclusive: true }), NOW);
+    expect(actual.secondary).toBe('The check 4m ago was inconclusive.');
   });
 
-  it('dates a live conclusion from the EVIDENCE when the newest check failed', () => {
-    // Arrange — a fresh healthy verdict, then a provider outage one minute ago.
-    const actual = accountHealthView(
-      health({ lastCheckedAt: NOW - 60_000, verdictAt: NOW - 480_000, lastCheckInconclusive: true }),
-      NOW,
-    );
-
-    // Assert — "Confirmed" rather than "Checked", because the claim was last TRUE eight minutes ago
-    // even though a request ran one minute ago. And the failed attempt is published rather than
-    // hidden: a fleet that reads healthy while every provider call fails is the shape this prevents.
-    expect(actual.checked).toBe('Confirmed 8m ago');
-    expect(actual.secondary).toBe('The check 1m ago was inconclusive.');
-  });
-
-  it('does not claim an inconclusive secondary when there is no conclusion behind it', () => {
-    // Arrange / Act — with no standing verdict the row already SAYS it could not be told, so a second
-    // sentence saying the same thing is noise.
-    const actual = accountHealthView(
-      health({ verdict: 'unknown', reason: 'check_timeout', verdictAt: null, lastCheckInconclusive: false }),
-      NOW,
-    );
-
-    // Assert
-    expect(actual.checked).toBe('Checked 4m ago');
-    expect(actual.secondary).toBeUndefined();
-    expect(actual.detail).toBe('The last check timed out.');
-  });
-
-  it('tells a reader what a stale verdict WAS', () => {
-    // Act
-    const actual = accountHealthView(
-      health({ verdict: 'unknown', reason: 'stale', staleVerdict: 'healthy', lastCheckedAt: NOW - 1_320_000 }),
-      NOW,
-    );
-
-    // Assert — a bare Unknown here reads exactly like an account nobody ever checked.
-    expect(actual.label).toBe('Unknown');
-    expect(actual.detail).toBe('The last result is too old to trust. It last read healthy.');
-    expect(actual.checked).toBe('Checked 22m ago');
-  });
-
-  it('publishes Codex as honestly unproven rather than as a fault', () => {
-    // Act
-    const actual = accountHealthView(
-      health({ kind: 'codex', verdict: 'unknown', reason: 'codex_liveness_unproven', evidence: 'none' }),
-      NOW,
-    );
-
-    // Assert — its usage endpoint answers 200 for stale tokens, so no free signal can create healthy.
-    // This is the correct published answer, not a gap.
-    expect(actual.detail).toContain('no free way to prove a sign-in');
-    expect(actual.offersSignIn).toBeFalse();
-  });
-
-  it('has words for every reason the daemon can publish', () => {
-    // Arrange — the copy table is exhaustive over the enum. A reason with no sentence would render as
-    // `undefined` on screen, and "Unknown" with nothing after it is the state this feature exists to
-    // stop showing people.
-    const reasons: readonly PickerHealthReason[] = [
-      'provider_accepted',
-      'usage_scope_unavailable',
-      'oauth_credential_missing',
-      'oauth_access_expired',
-      'oauth_token_rejected',
-      'static_credential_missing',
-      'static_credential_rejected',
-      'never_checked',
-      'credential_unreadable',
-      'oauth_refreshable',
-      'oauth_rejection_unconfirmed',
-      'codex_liveness_unproven',
-      'check_timeout',
-      'provider_unavailable',
-      'provider_not_asked',
-      'credential_changed_during_check',
-      'account_unavailable',
-      'stale',
-    ];
-
-    // Act / Assert
-    for (const reason of reasons) {
-      const view = accountHealthView(health({ reason }), NOW);
-      expect(view.detail.length).toBeGreaterThan(0);
-      expect(view.detail).not.toContain('undefined');
-      // And a decision about that sentence, for every reason. `detailIsImplied` is annotated over the
-      // same enum, so a reason added without one would be `undefined` here — silently falsy, which
-      // means "print it", which is the safe direction but not a decision anybody made.
-      expect(typeof view.detailIsImplied, reason).toBe('boolean');
-    }
-  });
-
-  /**
-   * WHAT A SURFACE WITH ONE LINE MAY LEAVE OUT — and, far more importantly, what it may not.
-   *
-   * The fleet roster spent three of every row's four lines on `Unknown · Never checked · Nothing has
-   * checked this account yet.`, once per account, which is what made a list of accounts a wall. These
-   * two flags are the offer that lets a surface stop doing that. Each assertion below is one thing
-   * the offer must NOT cover.
-   */
-  it('is quiet only where nobody has looked, and never over a verdict', () => {
-    // Nobody looked: three sentences saying the same nothing.
-    expect(
-      accountHealthView(
-        health({ verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null }),
-        NOW,
-      ).quiet,
-    ).toBeTrue();
-    // Somebody looked and could not conclude. SAME verdict, different row, and it must still speak.
-    expect(accountHealthView(health({ verdict: 'unknown', reason: 'check_timeout' }), NOW).quiet).toBeFalse();
-    expect(accountHealthView(health({ verdict: 'unknown', reason: 'codex_liveness_unproven' }), NOW).quiet).toBeFalse();
-    // No verdict a person has to act on is ever silent.
-    for (const verdict of ['healthy', 'needs_relogin', 'needs_credentials'] as const) {
-      expect(accountHealthView(health({ verdict }), NOW).quiet, verdict).toBeFalse();
-    }
-  });
-
-  it('implies only the reasons that restate their own headline', () => {
-    // "The provider accepted this credential" IS `Healthy`, so a one-line surface may drop it.
-    expect(accountHealthView(health(), NOW).detailIsImplied).toBeTrue();
-    // THE PAIR THAT MUST SURVIVE. `Healthy` beside "quota is not measurable" is two facts, and a row
-    // that dropped the second reads an unmeasurable account as a broken one.
-    expect(accountHealthView(health({ reason: 'usage_scope_unavailable' }), NOW).detailIsImplied).toBeFalse();
-    expect(
-      accountHealthView(health({ verdict: 'needs_relogin', reason: 'oauth_token_rejected' }), NOW).detailIsImplied,
-    ).toBeFalse();
-    // A stale row's detail says WHAT went stale, so it is never the reason's own sentence.
-    expect(
-      accountHealthView(health({ verdict: 'unknown', reason: 'stale', staleVerdict: 'healthy' }), NOW).detailIsImplied,
-    ).toBeFalse();
-  });
-
-  it('separates an expired-but-renewable credential from a signed-out one', () => {
-    // Arrange / Act
-    const renewable = accountHealthView(health({ verdict: 'unknown', reason: 'oauth_refreshable' }), NOW);
-    const dead = accountHealthView(health({ verdict: 'needs_relogin', reason: 'oauth_access_expired' }), NOW);
-
-    // Assert — one needs nothing from a person and the other needs a browser.
-    expect(renewable.detail).toBe('Renews itself the first time it’s used.');
-    expect(renewable.offersSignIn).toBeFalse();
-    expect(dead.offersSignIn).toBeTrue();
-  });
-
-  it('calls a renewable credential Ready in the calm tone, never Healthy and never a warning', () => {
-    // Arrange — THE FIRST-RUN SCREEN. Seeding copies the host's own login, whose access token is nearly
-    // always already expired, so every new account arrives in exactly this state. As `Unknown` in the
-    // warning tone, a new user's whole fleet read as broken over a login that was fine.
-    const view = accountHealthView(
-      health({ verdict: 'unknown', reason: 'oauth_refreshable', lastCheckInconclusive: true }),
-      NOW,
-    );
-
-    // Assert — its own headline; the calm tone; and no "the check was inconclusive" beside it, because
-    // an aged-out access token is exactly what the free check cannot use.
-    expect(view.label).toBe('Ready');
-    expect(view.tone).toBe('ok');
-    expect(view.secondary).toBeUndefined();
-    // And never "Confirmed": nothing has confirmed it, which is the one thing its headline admits.
-    expect(view.checked).toBe('Checked 4m ago');
-  });
-
-  it('keeps every other unknown in the warning tone with its own headline', () => {
-    // Arrange / Act — `Ready` is one reason, not the whole verdict.
-    const view = accountHealthView(health({ verdict: 'unknown', reason: 'check_timeout' }), NOW);
-
-    // Assert
-    expect(view.label).toBe('Unknown');
-    expect(view.tone).toBe('warn');
-  });
-
-  it('offers no sign-in for a rejection it could not attribute, and says so in the detail', () => {
-    // Arrange / Act — a `401` from that endpoint cannot tell a dead login from a client the provider
-    // does not accept, so reading it as a rejected login sends somebody to re-authenticate a login
-    // that is fine. That costs a browser approval and fixes nothing, which is the worst outcome here.
-    const view = accountHealthView(health({ verdict: 'unknown', reason: 'oauth_rejection_unconfirmed' }), NOW);
-
-    // Assert — the sentence states the limit AND rules out the wrong action, because a reader who
-    // sees "refused" will otherwise supply that action themselves.
-    expect(view.offersSignIn).toBeFalse();
-    expect(view.detail).toContain('could not tell whether the provider rejected this login or this client');
-    expect(view.detail).toContain('does not mean you need to sign in again');
-    expect(view.detailIsImplied).toBeFalse();
+  it('says nothing about an inconclusive check nobody can date', () => {
+    const { lastCheckedAt: _omitted, ...never } = health({ lastCheckInconclusive: true });
+    expect(accountHealthView(never, NOW).secondary).toBeUndefined();
   });
 });
 
 describe('UNREAD_ACCOUNT_HEALTH', () => {
-  it('is the quietest of the four tones, because it is an absence rather than a warning', () => {
+  it('is unread, not unhealthy', () => {
     expect(UNREAD_ACCOUNT_HEALTH).toMatchObject({
       label: 'Unknown',
       checked: 'Never checked',
       tone: 'muted',
       offersSignIn: false,
-      // The same absence the computed view reports, so a surface that takes the offer treats "no row
-      // published for this account" and "a row that says nobody has looked" identically.
-      quiet: true,
-      detailIsImplied: true,
     });
-  });
-
-  it('is frozen, so one row cannot mutate the fallback every other row reads', () => {
-    expect(Object.isFrozen(UNREAD_ACCOUNT_HEALTH)).toBeTrue();
   });
 });

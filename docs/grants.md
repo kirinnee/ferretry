@@ -88,14 +88,14 @@ operator password. `fy` on the host still can.
 
 ## Six capabilities, two axes
 
-| capability   | what it covers                                                         |
-| ------------ | ---------------------------------------------------------------------- |
-| `fleet`      | the account manifest, plan, usage, assets, proposals and `fleet apply` |
-| `terminal`   | opening, writing to and streaming session terminals                    |
-| `browser`    | the human login window and per-session browser control                 |
-| `filesystem` | reading session working trees and registering projects on the host     |
-| `warden`     | supervision status, sweeps and the warden configuration                |
-| `pairing`    | pairing codes, the paired-device list, and Web Push enrolment          |
+| capability   | what it covers                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------- |
+| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them |
+| `terminal`   | opening, writing to and streaming session terminals                                                 |
+| `browser`    | the human login window and per-session browser control                                              |
+| `filesystem` | reading session working trees and registering projects on the host                                  |
+| `warden`     | supervision status, sweeps and the warden configuration                                             |
+| `pairing`    | pairing codes, the paired-device list, and Web Push enrolment                                       |
 
 Each has two axes, and they are different questions:
 
@@ -340,8 +340,8 @@ more, because a second prompt inside one ceremony is the patchwork this document
 - **The confirmation happens BEFORE the change is spent.** A mistyped password must not burn a staged
   change the caller was entitled to apply, which would make the mechanism a denial of service against the
   person it exists to ask.
-- `GET /v1/fleet/permissions` carries `confirmation: 'none' | 'operator-password'` so a panel says this
-  before somebody clicks, and `applyRefusal` is the shared `GrantRefusal`, so the fleet panel words a
+- `GET /v1/fleet/machine` carries `authority.confirmation: 'none' | 'operator-password'` so a panel says this
+  before somebody clicks, and `authority.applyRefusal` is the shared `GrantRefusal`, so the fleet panel words a
   refusal exactly as the grants panel does.
 
 **Why only the fleet.** Every capability can do damage, and this is not a claim that the fleet's is worse

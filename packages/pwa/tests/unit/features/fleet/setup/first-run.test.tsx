@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetSetupScan } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { MachineFirstRun } from '../../../../../src/features/fleet/setup/first-run.tsx';
 import type { FirstRunMode } from '../../../../../src/features/fleet/setup/first-run-model.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
@@ -9,15 +9,14 @@ import {
   APPLY_PATH,
   type Call,
   FRESH_MACHINE,
+  machineAnswer,
   machineView,
   NOTHING_INSTALLED,
   NOW,
   PASSWORD,
-  permissions,
   runtimes,
   runtimeView,
   STUDIO,
-  SWITCHED_OFF,
   scan,
   scriptedClient,
   UNLOCK_TOKEN,
@@ -26,7 +25,7 @@ import {
 
 const SCAN_PATH = '/v1/fleet/setup/scan';
 const RUNTIMES_PATH = '/v1/fleet/runtimes';
-const CHANGES_PATH = '/v1/fleet/changes';
+const CHANGES_PATH = '/v1/fleet/proposals';
 const INSTALL_PATH = '/v1/fleet/machine/tools/install';
 const UNLOCK_HEADER = 'x-ferretry-operator-unlock';
 
@@ -134,7 +133,7 @@ describe('MachineFirstRun: reading the scan', () => {
       release = resolve;
     });
     const inner = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
+      '/v1/fleet/machine': machineAnswer(),
       [SCAN_PATH]: scan(),
       [RUNTIMES_PATH]: runtimes([]),
     });
@@ -159,10 +158,10 @@ describe('MachineFirstRun: reading the scan', () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': (call: Call) =>
+        '/v1/fleet/machine': (call: Call) =>
           call.headers[UNLOCK_HEADER] === UNLOCK_TOKEN
-            ? permissions()
-            : permissions({ mayApply: false, applyRefusal: 'locked' }),
+            ? machineAnswer()
+            : machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
         '/v1/grants/unlock': UNLOCKED,
         [SCAN_PATH]: scan(),
         [RUNTIMES_PATH]: runtimes([]),
@@ -193,7 +192,7 @@ describe('MachineFirstRun: reading the scan', () => {
   it('a scan that fails says so and Try again reads it again', async () => {
     let up = false;
     const client = scriptedClient({
-      '/v1/fleet/permissions': permissions(),
+      '/v1/fleet/machine': machineAnswer(),
       [SCAN_PATH]: () => (up ? scan() : new Error('unreachable')),
       [RUNTIMES_PATH]: runtimes([]),
     });
@@ -215,7 +214,7 @@ describe('MachineFirstRun: reading the scan', () => {
 describe('MachineFirstRun: Check tools', () => {
   it('everything installed: one row each and Continue', async () => {
     const h = await start(
-      scriptedClient({ '/v1/fleet/permissions': permissions(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
+      scriptedClient({ '/v1/fleet/machine': machineAnswer(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
     );
     try {
       expect(h.text('[data-first-run-step="tools"]')).toContain(
@@ -236,7 +235,7 @@ describe('MachineFirstRun: Check tools', () => {
   it('missing tools: install offered, Continue held, Skip says where to install later', async () => {
     const h = await start(
       scriptedClient({
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         [SCAN_PATH]: NOTHING_INSTALLED,
         [RUNTIMES_PATH]: runtimes([]),
       }),
@@ -284,7 +283,7 @@ describe('MachineFirstRun: Check tools', () => {
     });
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         [SCAN_PATH]: () => (installed ? afterInstall : NOTHING_INSTALLED),
         [RUNTIMES_PATH]: runtimes([]),
         [INSTALL_PATH]: () => {
@@ -324,7 +323,7 @@ describe('MachineFirstRun: the harness steps', () => {
     });
     const h = await start(
       scriptedClient({
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         [SCAN_PATH]: withProblems,
         [RUNTIMES_PATH]: runtimes([]),
       }),
@@ -369,7 +368,7 @@ describe('MachineFirstRun: the harness steps', () => {
 
   it('a skipped harness can be continued past', async () => {
     const h = await start(
-      scriptedClient({ '/v1/fleet/permissions': permissions(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
+      scriptedClient({ '/v1/fleet/machine': machineAnswer(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
       { mode: 'import', machine: machineView() },
     );
     try {
@@ -394,7 +393,7 @@ describe('MachineFirstRun: What changed (O6)', () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         [SCAN_PATH]: withUpdates,
         [RUNTIMES_PATH]: runtimes([]),
         [CHANGES_PATH]: STAGED_IMPORT,
@@ -437,7 +436,7 @@ describe('MachineFirstRun: What changed (O6)', () => {
   it('with no update ticked and nothing imported, Continue reaches Done with nothing', async () => {
     const h = await start(
       scriptedClient({
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         [SCAN_PATH]: withUpdates,
         [RUNTIMES_PATH]: runtimes([]),
       }),
@@ -473,7 +472,7 @@ describe('MachineFirstRun: Name runtimes', () => {
     });
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         [SCAN_PATH]: withDuplicate,
         [RUNTIMES_PATH]: () =>
           runtimes(
@@ -565,7 +564,7 @@ describe('MachineFirstRun: Name runtimes', () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/permissions': permissions(),
+        '/v1/fleet/machine': machineAnswer(),
         [SCAN_PATH]: scan(),
         [RUNTIMES_PATH]: runtimes([runtimeView('claude-default')]),
         [CHANGES_PATH]: STAGED_IMPORT,
@@ -616,33 +615,13 @@ describe('MachineFirstRun: Name runtimes', () => {
     }
   });
 
-  it('a machine whose changes are switched off says so in one sentence and stays on the step', async () => {
-    const calls: Call[] = [];
-    const h = await start(
-      scriptedClient(
-        { '/v1/fleet/permissions': permissions(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) },
-        calls,
-      ),
-      { mode: 'import', machine: machineView({ changes: SWITCHED_OFF }) },
-    );
-    try {
-      await toNames(h);
-      expect(h.text('[data-change-unavailable]')).toBe(SWITCHED_OFF.reason);
-      expect(h.q('[data-change-submit]')).toBeNull();
-      expect(step(h)).toBe('names');
-      expect(changeBodies(calls)).toEqual([]);
-    } finally {
-      await h.view.unmount();
-    }
-  });
-
   it('a change the daemon refuses shows its sentence and stays on the step', async () => {
     const calls: Call[] = [];
     const sentence = 'Import is not available while a migration is running.';
     const h = await start(
       scriptedClient(
         {
-          '/v1/fleet/permissions': permissions(),
+          '/v1/fleet/machine': machineAnswer(),
           [SCAN_PATH]: scan(),
           [RUNTIMES_PATH]: runtimes([]),
           [CHANGES_PATH]: new FyHttpError(sentence, 409, 'fleet_change_refused'),
@@ -668,7 +647,7 @@ describe('MachineFirstRun: Name runtimes', () => {
 describe('MachineFirstRun: pausing and leaving', () => {
   it('offline pauses the step (E11) and keeps the progress', async () => {
     const h = await start(
-      scriptedClient({ '/v1/fleet/permissions': permissions(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
+      scriptedClient({ '/v1/fleet/machine': machineAnswer(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
     );
     try {
       await clickOn(h.q('[data-step-next]'), 'continue');
@@ -688,7 +667,7 @@ describe('MachineFirstRun: pausing and leaving', () => {
 
   it('Cancel asks first, then Leave setup leaves', async () => {
     const h = await start(
-      scriptedClient({ '/v1/fleet/permissions': permissions(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
+      scriptedClient({ '/v1/fleet/machine': machineAnswer(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
     );
     try {
       expect(h.text('h3')).toBe('Set up studio-mac');
@@ -706,7 +685,7 @@ describe('MachineFirstRun: pausing and leaving', () => {
 
   it('Import again: its Cancel names what stops', async () => {
     const h = await start(
-      scriptedClient({ '/v1/fleet/permissions': permissions(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
+      scriptedClient({ '/v1/fleet/machine': machineAnswer(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
       { mode: 'import', machine: machineView() },
     );
     try {
@@ -724,7 +703,7 @@ describe('MachineFirstRun: pausing and leaving', () => {
 
   it('Import again leaves from its first step without asking', async () => {
     const h = await start(
-      scriptedClient({ '/v1/fleet/permissions': permissions(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
+      scriptedClient({ '/v1/fleet/machine': machineAnswer(), [SCAN_PATH]: scan(), [RUNTIMES_PATH]: runtimes([]) }),
       { mode: 'import', machine: machineView() },
     );
     try {

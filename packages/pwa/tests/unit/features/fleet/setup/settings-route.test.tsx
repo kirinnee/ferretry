@@ -57,7 +57,6 @@ describe('settingsFlowFromHash', () => {
     ['#machines/studio/settings/setup', 'setup'],
     ['#machines/studio/settings/import', 'import'],
     ['#machines/studio/settings/clone', 'clone'],
-    ['#machines/studio/settings/migrate', 'migrate'],
     ['#machines/studio/settings/install-claude', 'install-claude'],
     ['#machines/studio/settings/install-codex', 'install-codex'],
   ])('reads %s as the %s flow', (hash, flow) => {
@@ -139,7 +138,7 @@ describe('useSettingsFlow', () => {
   });
 
   it('open(null) closes the flow back to the tab', async () => {
-    const browser = fakeWindow('#machines/studio/settings/migrate');
+    const browser = fakeWindow('#machines/studio/settings/clone');
     const { mounted, current, shown } = await renderProbe('studio', browser);
     try {
       await interact(() => current().open(null));

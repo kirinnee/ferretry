@@ -1,8 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { FleetMutation } from '../../../src/lib/fleet/mutations.ts';
 import {
-  type FleetProposalProblem,
   FleetProposalRefusal,
   FleetProposalStore,
   MAX_OPEN_PROPOSALS,
@@ -10,14 +8,21 @@ import {
   redactProposal,
 } from '../../../src/lib/fleet/proposals.ts';
 
-const INITIALIZE: FleetMutation = { kind: 'initialize' };
+/** The intent a change was derived from; the store treats it as data. */
+interface Intent {
+  readonly kind: string;
+}
+
+const INTENT: Intent = { kind: 'add-runtime' };
+
+type FleetProposalProblem = FleetProposalRefusal['problem'];
 
 interface Clock {
   value: number;
 }
 
 function storeOf(options: { readonly ids?: readonly string[] } = {}): {
-  store: FleetProposalStore<string>;
+  store: FleetProposalStore<string, Intent>;
   clock: Clock;
 } {
   const clock: Clock = { value: 1_000_000 };
@@ -25,19 +30,17 @@ function storeOf(options: { readonly ids?: readonly string[] } = {}): {
   const ids = options.ids ?? [];
   return {
     clock,
-    store: new FleetProposalStore<string>({
+    store: new FleetProposalStore<string, Intent>({
       now: () => clock.value,
       mintId: () => ids[index++] ?? `mint${String(index).padStart(18, '0')}`,
     }),
   };
 }
 
-const open = (store: FleetProposalStore<string>, summary = 'a change') =>
+const open = (store: FleetProposalStore<string, Intent>, summary = 'a change') =>
   store.open({
     revision: 'rev',
-    mutation: INITIALIZE,
-    assetEdits: [],
-    assetRevisions: [],
+    mutation: INTENT,
     payload: 'artifact',
     summary,
   });
@@ -214,22 +217,4 @@ describe('redactProposal', () => {
     should(actual).not.have.property('approval');
   });
 
-  it('should describe edited assets by size rather than by content', () => {
-    // Arrange
-    const { store } = storeOf();
-    const proposal = store.open({
-      revision: 'rev',
-      mutation: INITIALIZE,
-      assetEdits: [{ path: 'CLAUDE.md', content: 'hello' }],
-      assetRevisions: [],
-      payload: 'artifact',
-      summary: 'a change',
-    });
-
-    // Act
-    const actual = redactProposal(proposal, () => 'view');
-
-    // Assert
-    should(actual.assetEdits).deepEqual([{ path: 'CLAUDE.md', bytes: 5 }]);
-  });
 });

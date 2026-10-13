@@ -12,7 +12,7 @@
  * `@ferretry/fleet`'s OWN schema, the one the provisioner writes with, rather than a second
  * declaration of the same file. The second declaration is not hypothetical: this module used to
  * carry one, it required an `agent` field the provisioner has never written, and the daemon
- * therefore read every real manifest as an empty fleet while `fy fleet ls` listed the accounts from
+ * therefore read every real manifest as an empty fleet while the command line listed the accounts from
  * the very same bytes. Two halves that each passed their own tests and disagreed with each other.
  *
  * The opaque {@link CoreAccount.id} is the only join key; `agent`, `displayName` and the rest are
@@ -102,7 +102,7 @@ export interface AccountInventoryPort {
  * was the problem rather than the reader in front of them.
  */
 export function fleetManifestRefusal(error: FleetManifestUnreadableError, clientName: string): string {
-  return `${error.message}. Every session start will be refused until it is repaired — run \`${clientName} fleet apply\` to republish it, or remove the file if this host has no fleet.`;
+  return `${error.message}. Every session start will be refused until it is repaired — apply any change to this machine's runtimes (\`${clientName} runtimes\` lists them) to republish it, or remove the file if this host has no fleet.`;
 }
 
 /** The accounts that may take unattended work: the auto lane, minus anything declared down. */

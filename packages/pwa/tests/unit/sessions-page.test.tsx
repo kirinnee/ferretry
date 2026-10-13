@@ -389,9 +389,9 @@ describe('SessionsPage', () => {
             {
               id: 'claude-id',
               kind: 'claude',
-              mode: 'auto',
+              agent: true,
+              credentialId: 'login-claude',
               wrapper: 'claude',
-              home: '/accounts/claude',
               displayName: 'Studio Claude',
               defaultModel: null,
               models: [],

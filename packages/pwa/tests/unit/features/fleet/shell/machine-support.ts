@@ -1,7 +1,7 @@
 /** Fixtures shared by the Machines shell suites, written out longhand so a schema change fails them. */
 
 import type { FleetMachineView } from '@ferretry/protocol';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 
@@ -13,7 +13,7 @@ export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMac
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
   runtimeCount: 2,
   runningSessions: 0,
-  changes: { available: true },
+  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
   ...overrides,
 });
 

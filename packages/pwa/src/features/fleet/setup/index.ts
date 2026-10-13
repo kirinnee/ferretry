@@ -6,7 +6,6 @@ export * from './first-run.tsx';
 export * from './first-run-model.ts';
 export * from './install-flow.tsx';
 export * from './install-model.ts';
-export * from './migration.tsx';
 export * from './settings-route.ts';
 export * from './setup-access.ts';
 export * from './setup-ui.tsx';

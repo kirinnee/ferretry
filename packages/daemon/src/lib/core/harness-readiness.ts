@@ -460,7 +460,7 @@ export function harnessAbsentWarning(preflight: HarnessPreflight, clientName: st
         ? 'the fleet manifest publishes no agent account at all'
         : `${installed.join(' and ')} ${installed.length === 1 ? 'is' : 'are'} on this host's PATH, but the fleet manifest publishes no account for ${installed.length === 1 ? 'it' : 'either'} — this daemon launches the wrappers the manifest declares, never the harness command directly`
       : `every published account is unusable — ${blocked.join('; ')}`;
-  return `no agent harness is ready on this host, so this daemon can serve its API but cannot start a session: ${cause}. Install Claude Code or Codex, declare an account for it, and run \`${clientName} fleet apply\` to publish the manifest this daemon reads — \`${clientName} fleet ls\` shows what is published now. The daemon does not need restarting for that — it re-reads the manifest on every session start — but this line is what it saw at boot.`;
+  return `no agent harness is ready on this host, so this daemon can serve its API but cannot start a session: ${cause}. Install Claude Code or Codex and run \`${clientName} setup\` to import it — \`${clientName} runtimes\` shows what this machine has now. The daemon does not need restarting for that — it re-reads the manifest on every session start — but this line is what it saw at boot.`;
 }
 
 /**

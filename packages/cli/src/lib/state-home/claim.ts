@@ -11,7 +11,7 @@ import type { IStateHomeFilePort, StateHomeEntry } from './ports.ts';
 /**
  * Creating a Ferretry state home and claiming its layout are ONE operation.
  *
- * They were two, and that shipped a daemon that could never start. `fy fleet init` wrote
+ * They were two, and that shipped a daemon that could never start. An earlier fleet verb wrote
  * `<FY_HOME>/fleet/**` and claimed nothing, so the daemon's next boot met a non-empty home carrying
  * no marker — which is exactly the arrangement it must refuse, because it cannot tell that shape
  * apart from a directory belonging to somebody else. The refusal was permanent and correct, and the

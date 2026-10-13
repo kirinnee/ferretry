@@ -20,12 +20,21 @@
  * Pure: every function here is string in, string out.
  */
 import { secretReferencesIn, type SecretName } from '@ferretry/protocol';
-import { CLAUDE_SECURE_STORAGE_VARIABLE } from './account/credentials.ts';
 import type { HarnessKind } from './manifest.ts';
-import type { ResolvedAccount, ResolvedCommand } from './profiles.ts';
+
+/** A generated executable that runs one runtime's wrapper with flags prepended. */
+export interface ResolvedCommand {
+  readonly wrapper: string;
+  /** The runtime this command runs, by id. */
+  readonly target: string;
+  readonly flags: readonly string[];
+  /** The alias that produced this command, when it was not declared explicitly. */
+  readonly alias: string | undefined;
+}
 
 /** Marks a script as generated, so provisioning can tell its own output from anything else. */
-export const MANAGED_MARKER = '# ferretry-managed — do not edit; regenerate with `fy fleet apply`';
+export const MANAGED_MARKER =
+  "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten";
 
 /** The executable each harness launches. */
 export const HARNESS_BINARIES: Readonly<Record<HarnessKind, string>> = {
@@ -82,20 +91,6 @@ export function shellPath(value: string): string {
 /** The characters a double-quoted shell word still interprets. */
 const DOUBLE_QUOTE_ACTIVE = /[$`\\"]/u;
 
-export interface WrapperRenderOptions {
-  /**
-   * Shell file sourced before any environment is exported, so indirect references resolve.
-   * Absent means the wrapper sources nothing.
-   */
-  readonly secretsFile?: string | undefined;
-  /**
-   * Emit a guard that fails with an actionable message when a referenced variable is unset.
-   * Without it an unset reference silently becomes an empty string and the harness reports a
-   * confusing authentication error instead of a missing secret. Defaults to `true`.
-   */
-  readonly guardEnvReferences?: boolean | undefined;
-}
-
 const sourceSecretsLines = (secretsFile: string | undefined): readonly string[] => {
   if (secretsFile === undefined) return [];
   const quoted = shellPath(secretsFile);
@@ -126,7 +121,7 @@ const secretGuardLine = (name: string, secrets: readonly SecretName[]): string =
 };
 
 /** Set to `0` in the environment to launch without seeding the harness's first-run state. */
-export const FIRST_RUN_SEED_TOGGLE = 'FY_SEED_FIRST_RUN';
+const FIRST_RUN_SEED_TOGGLE = 'FY_SEED_FIRST_RUN';
 
 /**
  * jq filter proving every first-run flag is already what it needs to be, so the usual launch does
@@ -247,51 +242,6 @@ const firstRunSeedLines = (kind: HarnessKind): readonly string[] => {
     'fi',
   ];
 };
-
-/**
- * Render the launch script for one account.
- *
- * Order matters and is fixed: source secrets, guard the references the account depends on, bind the
- * harness to its declared home, export the rest of the environment, seed the harness's first-run
- * state, then exec. Environment keys are emitted in sorted order so re-rendering an unchanged account
- * is byte-identical.
- *
- * Seeding comes last because it reads what the exports above decided — the account's home, and the
- * API key it chose to export.
- */
-export function renderWrapperScript(account: ResolvedAccount, options: WrapperRenderOptions = {}): string {
-  const { secretsFile } = options;
-  const environment = environmentLines(account.env, secretsFile);
-
-  const lines: string[] = [
-    '#!/bin/sh',
-    MANAGED_MARKER,
-    `# account ${account.id} (${account.kind}, ${account.mode})`,
-    '',
-    ...sourceSecretsLines(secretsFile),
-    ...((options.guardEnvReferences ?? true) && environment.guards.length > 0 ? [...environment.guards, ''] : []),
-    `export ${HARNESS_HOME_ENV[account.kind]}=${shellPath(account.home)}`,
-    ...inheritedStoreLines(account.kind),
-    ...environment.exports,
-  ];
-
-  lines.push(...firstRunSeedLines(account.kind));
-
-  const flags = account.flags.map(shellQuote).join(' ');
-  lines.push('', `exec ${HARNESS_BINARIES[account.kind]}${flags === '' ? '' : ` ${flags}`} "$@"`, '');
-  return lines.join('\n');
-}
-
-/**
- * A version-1 Claude account keeps its login in its own config directory, so a secure-storage
- * pointer it INHERITED — from a daemon or a shell started inside a version-2 runtime, whose wrapper
- * exports one — would send it to another credential's store. It is cleared before anything else is
- * exported. A version-2 runtime's wrapper always exports its own value instead
- * ({@link renderRuntimeWrapperScript}), the empty string included.
- */
-function inheritedStoreLines(kind: HarnessKind): readonly string[] {
-  return kind === 'claude' ? [`unset ${CLAUDE_SECURE_STORAGE_VARIABLE}`] : [];
-}
 
 /**
  * The guard and export lines for one launch environment, sorted by variable so re-rendering an
@@ -523,32 +473,4 @@ export function renderCommandScript(input: CommandRenderInput): string {
     `exec ${target}${flags === '' ? '' : ` ${flags}`} "$@"`,
     '',
   ].join('\n');
-}
-
-/** Raised when a command names an account that does not exist. */
-export class UnknownCommandTargetError extends Error {
-  constructor(
-    readonly wrapper: string,
-    readonly target: string,
-  ) {
-    super(`command "${wrapper}" targets unknown account "${target}"`);
-    this.name = 'UnknownCommandTargetError';
-  }
-}
-
-/**
- * Pair each command with its target's wrapper name. Throws on an unknown target rather than
- * emitting a script that would fail only when someone ran it.
- */
-export function resolveCommandTargets(
-  commands: readonly ResolvedCommand[],
-  accounts: readonly ResolvedAccount[],
-  binDir: string,
-): readonly CommandRenderInput[] {
-  const wrapperById = new Map(accounts.map(account => [account.id, account.wrapper]));
-  return commands.map(command => {
-    const targetWrapper = wrapperById.get(command.target);
-    if (targetWrapper === undefined) throw new UnknownCommandTargetError(command.wrapper, command.target);
-    return { command, targetWrapper, binDir };
-  });
 }

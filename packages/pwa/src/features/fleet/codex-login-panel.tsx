@@ -24,8 +24,8 @@
  * and the same caution is worth repeating here rather than a vaguer one about theft.
  */
 
+import type { CodexLoginFlow } from '@ferretry/protocol';
 import { CheckCircle2, KeyRound, Link2, ShieldCheck, TriangleAlert } from 'lucide-react';
-import type { CodexLoginFlow, FleetLoginAccountOutcome } from '@ferretry/protocol';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
@@ -33,32 +33,22 @@ import type { LoginPanelWording } from './harness-login-model.ts';
 
 export interface CodexLoginPanelProps {
   readonly accountLabel: string;
-  readonly identity: string;
-  readonly memberCount: number;
+  /** The login's id, which keeps this panel's element ids unique on a page with several. */
+  readonly loginId: string;
   readonly flow: CodexLoginFlow | null;
   readonly busy: boolean;
   readonly refusal: string | null;
   readonly onStart: () => void;
   readonly onCancel: () => void;
   readonly copy?: ClipboardWriter;
-  /** A login of the account model: no identity line, and these sentences in place of the wrapper ones. */
-  readonly wording?: LoginPanelWording;
+  /** What one sign-in covers, and what to say once it is done. */
+  readonly wording: LoginPanelWording;
   className?: string;
 }
 
-const coverage = (count: number): string =>
-  count <= 1 ? 'this account only' : `${String(count - 1)} sibling wrapper${count === 2 ? '' : 's'} too`;
-
-const syncedCount = (accounts: readonly FleetLoginAccountOutcome[]): number =>
-  accounts.filter(account => account.status === 'synced').length;
-
-const failed = (accounts: readonly FleetLoginAccountOutcome[]): readonly FleetLoginAccountOutcome[] =>
-  accounts.filter(account => account.status === 'failed' || account.status === 'indeterminate');
-
 export function CodexLoginPanel({
   accountLabel,
-  identity,
-  memberCount,
+  loginId,
   flow,
   busy,
   refusal,
@@ -71,9 +61,9 @@ export function CodexLoginPanel({
   const state = flow?.state ?? 'idle';
   return (
     <section
-      aria-labelledby={`codex-login-${identity}`}
+      aria-labelledby={`codex-login-${loginId}`}
       data-codex-login={state}
-      data-codex-login-identity={identity}
+      data-codex-login-identity={loginId}
       className={cn('kt-panel overflow-hidden', className)}
     >
       <header className="border-b border-border bg-surface-2 px-panel py-3">
@@ -83,14 +73,9 @@ export function CodexLoginPanel({
           </span>
           <div className="min-w-0">
             <p className="m-0 text-meta font-semibold text-muted">Codex sign-in</p>
-            <h3 id={`codex-login-${identity}`} className="m-0 mt-0.5 text-title font-semibold text-fg">
+            <h3 id={`codex-login-${loginId}`} className="m-0 mt-0.5 text-title font-semibold text-fg">
               {accountLabel}
             </h3>
-            {wording === undefined ? (
-              <p className="m-0 mt-1 text-ui leading-base text-muted">
-                Identity <code className="font-mono text-meta text-fg">{identity}</code>
-              </p>
-            ) : null}
           </div>
         </div>
       </header>
@@ -98,14 +83,7 @@ export function CodexLoginPanel({
       <div className="space-y-4 p-panel">
         <div className="flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-muted">
           <ShieldCheck size={17} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
-          {wording === undefined ? (
-            <p className="m-0">
-              One sign-in covers <strong className="font-semibold text-fg">{coverage(memberCount)}</strong>. The harness
-              writes its own credential; this daemon never holds one.
-            </p>
-          ) : (
-            <p className="m-0">{wording.coverage}</p>
-          )}
+          <p className="m-0">{wording.coverage}</p>
         </div>
 
         {refusal === null ? null : (
@@ -176,32 +154,7 @@ export function CodexLoginPanel({
           >
             <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
             <div className="min-w-0">
-              {wording !== undefined ? (
-                <p className="m-0 font-semibold">{wording.signedIn}</p>
-              ) : failed(flow.accounts).length === 0 ? (
-                <>
-                  <p className="m-0 font-semibold">Signed in to {accountLabel}</p>
-                  <p className="m-0 mt-1 text-muted">
-                    {syncedCount(flow.accounts) === 0
-                      ? 'No sibling wrapper needed a copy.'
-                      : `The credential was verified and copied to ${String(syncedCount(flow.accounts))} sibling wrapper${syncedCount(flow.accounts) === 1 ? '' : 's'}.`}
-                  </p>
-                </>
-              ) : (
-                <>
-                  {/* "account", not "lane": the list under it is wrapper names, which is what a
-                      person calls these, and `lane` is a word only the configuration schema has. */}
-                  <p className="m-0 font-semibold">This sign-in finished without settling every account</p>
-                  <ul className="m-0 mt-1 list-none space-y-1 p-0 text-muted">
-                    {failed(flow.accounts).map(account => (
-                      <li key={account.accountId} className="m-0">
-                        <code className="font-mono text-meta">{account.accountId}</code> — {account.status}
-                        {account.message === undefined ? '' : `: ${account.message}`}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
+              <p className="m-0 font-semibold">{wording.signedIn}</p>
             </div>
           </div>
         ) : null}

@@ -16,7 +16,7 @@ import { useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
 import type { MachineData } from '../runtimes/machine-data.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
@@ -269,7 +269,6 @@ export function AddLoginStep({
         </div>
         <ChangeApplyPanel
           machineName={machineName}
-          changes={machine?.changes ?? null}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}
@@ -334,7 +333,6 @@ export function AddLoginStep({
       </p>
       <ChangeApplyPanel
         machineName={machineName}
-        changes={machine?.changes ?? null}
         authority={changes.authority}
         busy={changes.busy || busy}
         busyLabel="Starting sign-in…"

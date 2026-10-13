@@ -1,6 +1,6 @@
 /**
  * The browser's half of a machine's setup (docs/design/account-model.md §4.3, §4.7, §7, §10.3): the
- * first-run scan, installing a harness tool, the Clone export, and the migration's dry run and apply.
+ * first-run scan, installing a harness tool, and the Clone export.
  *
  * The import and the clone themselves are reviewed changes — `setup.import` and `clone.import`, staged
  * and applied through `catalog-api.ts` — so nothing here writes a setup. Clone has no daemon-to-daemon
@@ -12,12 +12,6 @@
 import {
   type FleetCloneBundle,
   FleetCloneBundleSchema,
-  type FleetMigrationApplyRequest,
-  FleetMigrationApplyRequestSchema,
-  type FleetMigrationOutcome,
-  FleetMigrationOutcomeSchema,
-  type FleetMigrationView,
-  FleetMigrationViewSchema,
   type FleetSetupScan,
   FleetSetupScanSchema,
   type FleetToolInstallRequest,
@@ -26,12 +20,11 @@ import {
   FleetToolInstallResultSchema,
   OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
-import type { FleetClient } from './fleet-api.ts';
+import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
 export const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
 export const FLEET_EXPORT_PATH = '/v1/fleet/export';
-export const FLEET_MIGRATION_PATH = '/v1/fleet/migration';
 
 const unlockHeaders = (unlock: string | undefined): Record<string, string> =>
   unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock };
@@ -56,18 +49,3 @@ export const installFleetTools = async (
 export const readFleetExport = async (client: FleetClient, unlock?: string): Promise<FleetCloneBundle> =>
   await client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, { headers: unlockHeaders(unlock) });
 
-/** Where this machine is, and the dry run a migration must name. */
-export const readFleetMigration = async (client: FleetClient, unlock?: string): Promise<FleetMigrationView> =>
-  await client.request(FLEET_MIGRATION_PATH, FleetMigrationViewSchema, { headers: unlockHeaders(unlock) });
-
-/** Migrate exactly the dry run that was shown, named by its digest. */
-export const applyFleetMigration = async (
-  client: FleetClient,
-  request: FleetMigrationApplyRequest,
-  unlock?: string,
-): Promise<FleetMigrationOutcome> =>
-  await client.request(`${FLEET_MIGRATION_PATH}/apply`, FleetMigrationOutcomeSchema, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
-    body: JSON.stringify(FleetMigrationApplyRequestSchema.parse(request)),
-  });

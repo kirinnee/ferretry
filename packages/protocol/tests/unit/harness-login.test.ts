@@ -1,60 +1,19 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import * as harnessLogin from '../../src/lib/harness-login.ts';
-import type {
-  ClaudeLoginFlow,
-  CodexLoginFlow,
-  FleetLoginAccount,
-  FleetLoginIdentity,
-  FleetLoginReadiness,
-  FleetRenewal,
-  HarnessLoginSubmission,
-} from '../../src/lib/index.ts';
+import type { ClaudeLoginFlow, CodexLoginFlow, HarnessLoginSubmission } from '../../src/lib/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
-const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
-const SIBLING_ID = '00000000-0000-4000-8000-000000000002';
 
 const CLAUDE_URL =
   'https://claude.com/cai/oauth/authorize?code=true&response_type=code&code_challenge_method=S256&state=abc';
 const CODEX_URL = 'https://auth.openai.com/codex/device';
 
-const loginAccount = {
-  accountId: ACCOUNT_ID,
-  kind: 'claude',
-  displayName: 'Claude Kirin',
-  wrapper: 'claude-kirin',
-  mode: 'interactive',
-  available: true,
-  credential: { state: 'missing' },
-  source: { source: 'interactive-login' },
-  login: { applies: true },
-} satisfies FleetLoginAccount;
-
-const configuredAccount = {
-  ...loginAccount,
-  accountId: SIBLING_ID,
-  wrapper: 'claude-ci',
-  mode: 'auto',
-  credential: { state: 'not-read' },
-  source: { source: 'token-file', variable: 'ANTHROPIC_API_KEY', path: '/etc/ferretry/secrets.sh' },
-  login: { applies: false, because: 'credential-is-not-a-login' },
-} satisfies FleetLoginAccount;
-
-const identity = {
-  identity: 'claude:kirin',
-  kind: 'claude',
-  verdict: 'login',
-  accounts: [loginAccount, configuredAccount],
-} satisfies FleetLoginIdentity;
-
-const readiness = { identities: [identity] } satisfies FleetLoginReadiness;
-
 const flowShape = {
   flowId: 'flow-one',
-  accountId: ACCOUNT_ID,
-  identity: 'claude:kirin',
+  credentialId: 'claude-kirin',
+  identity: 'claude-kirin',
   startedAt: INSTANT,
   expiresAt: LATER_INSTANT,
 } as const;
@@ -79,10 +38,6 @@ const claudeComplete = {
   harness: 'claude',
   ...flowShape,
   state: 'complete',
-  accounts: [
-    { accountId: ACCOUNT_ID, status: 'logged-in' },
-    { accountId: SIBLING_ID, status: 'synced' },
-  ],
 } satisfies ClaudeLoginFlow;
 
 const claudeFailed = {
@@ -95,36 +50,9 @@ const claudeFailed = {
 
 const accepted = { outcome: 'accepted', flow: claudeComplete } satisfies HarnessLoginSubmission;
 
-const renewal = {
-  identity: 'claude:kirin',
-  status: 'renewed',
-  accountId: ACCOUNT_ID,
-  reason: 'the harness renewed it, and no browser was opened',
-  ran: true,
-} satisfies FleetRenewal;
-
 const schemaCases: SchemaCase[] = [
   { name: 'verification url', schema: harnessLogin.HarnessLoginVerificationUrlSchema, value: CODEX_URL },
   { name: 'user code', schema: harnessLogin.HarnessLoginUserCodeSchema, value: '0IER-FFQW6' },
-  {
-    name: 'credential source',
-    schema: harnessLogin.FleetCredentialSourceSchema,
-    value: { source: 'environment', variable: 'OPENAI_API_KEY' },
-  },
-  { name: 'login applicability', schema: harnessLogin.FleetLoginApplicabilitySchema, value: { applies: true } },
-  {
-    name: 'credential reading',
-    schema: harnessLogin.FleetCredentialReadingSchema,
-    value: { state: 'valid', expiresAt: LATER_INSTANT },
-  },
-  { name: 'login account', schema: harnessLogin.FleetLoginAccountSchema, value: loginAccount },
-  { name: 'login identity', schema: harnessLogin.FleetLoginIdentitySchema, value: identity },
-  { name: 'login readiness', schema: harnessLogin.FleetLoginReadinessSchema, value: readiness },
-  {
-    name: 'account outcome',
-    schema: harnessLogin.FleetLoginAccountOutcomeSchema,
-    value: { accountId: ACCOUNT_ID, status: 'logged-in' },
-  },
   { name: 'last code', schema: harnessLogin.HarnessLoginLastCodeSchema, value: 'rejected' },
   { name: 'claude flow', schema: harnessLogin.ClaudeLoginFlowSchema, value: claudeAwaiting },
   { name: 'codex flow', schema: harnessLogin.CodexLoginFlowSchema, value: codexAwaiting },
@@ -132,17 +60,11 @@ const schemaCases: SchemaCase[] = [
   {
     name: 'start request',
     schema: harnessLogin.HarnessLoginStartRequestSchema,
-    value: { accountId: ACCOUNT_ID, operatorPassword: 'the operator password' },
+    value: { credentialId: 'claude-kirin', operatorPassword: 'the operator password' },
   },
   { name: 'submit request', schema: harnessLogin.HarnessLoginSubmitRequestSchema, value: { code: 'pasted-code' } },
   { name: 'submission', schema: harnessLogin.HarnessLoginSubmissionSchema, value: accepted },
   { name: 'renewal status', schema: harnessLogin.FleetRenewalStatusSchema, value: 'renewed' },
-  {
-    name: 'renewal request',
-    schema: harnessLogin.FleetRenewalRequestSchema,
-    value: { accountId: ACCOUNT_ID, operatorPassword: 'the operator password' },
-  },
-  { name: 'renewal', schema: harnessLogin.FleetRenewalSchema, value: renewal },
 ];
 
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
@@ -191,7 +113,7 @@ describe('harness-login schemas', () => {
   it('should carry no field that could hold a token, in either direction', () => {
     // A token would have to arrive under a name, and no schema here declares one. The check is over
     // the rendered JSON shape rather than over the types, because the wire is what a caller sees.
-    const rendered = JSON.stringify([readiness, claudeAwaiting, codexAwaiting, claudeComplete, accepted]);
+    const rendered = JSON.stringify([claudeAwaiting, codexAwaiting, claudeComplete, accepted]);
 
     should(rendered.toLowerCase()).not.match(/"[a-z]*(accesstoken|refreshtoken|apikey|bearer)/u);
   });
@@ -301,71 +223,6 @@ describe('harness-login schemas', () => {
     should(harnessLogin.ClaudeLoginFlowSchema.parse(claudeFailed)).deepEqual(claudeFailed);
   });
 
-  it('should demand a reason from an unreadable credential and refuse one from the others', () => {
-    assertRejects([
-      rejects('unreadable with no reason', harnessLogin.FleetCredentialReadingSchema, { state: 'unreadable' }),
-      rejects('missing with a reason', harnessLogin.FleetCredentialReadingSchema, {
-        state: 'missing',
-        reason: 'a locked keychain',
-      }),
-      rejects('not-read with an expiry', harnessLogin.FleetCredentialReadingSchema, {
-        state: 'not-read',
-        expiresAt: LATER_INSTANT,
-      }),
-    ]);
-  });
-
-  it('should demand a variable from every source that names one', () => {
-    assertRejects([
-      rejects('token file with no path', harnessLogin.FleetCredentialSourceSchema, {
-        source: 'token-file',
-        variable: 'ANTHROPIC_API_KEY',
-      }),
-      rejects('environment with no variable', harnessLogin.FleetCredentialSourceSchema, { source: 'environment' }),
-      rejects('interactive login naming a variable', harnessLogin.FleetCredentialSourceSchema, {
-        source: 'interactive-login',
-        variable: 'ANTHROPIC_API_KEY',
-      }),
-      rejects('undeclared naming a path', harnessLogin.FleetCredentialSourceSchema, {
-        source: 'undeclared',
-        path: '/etc/secrets.sh',
-      }),
-    ]);
-  });
-
-  it('should refuse an applicable login that also carries a refusal', () => {
-    assertRejects([
-      rejects('applies with a because', harnessLogin.FleetLoginApplicabilitySchema, {
-        applies: true,
-        because: 'credential-is-not-a-login',
-      }),
-      rejects('refused with no because', harnessLogin.FleetLoginApplicabilitySchema, { applies: false }),
-    ]);
-  });
-
-  it('should refuse an identity with no accounts, because a login is always of an identity', () => {
-    assertRejects([rejects('empty identity', harnessLogin.FleetLoginIdentitySchema, { ...identity, accounts: [] })]);
-  });
-
-  it('should keep every fleet outcome distinguishable rather than collapsing them to success', () => {
-    const statuses = [
-      'logged-in',
-      // A silent renewal: refreshed with no browser and nobody asked. A SUCCESS, and not a sign-in.
-      'renewed',
-      'synced',
-      'usable',
-      'not-required',
-      'login-needed',
-      'indeterminate',
-      'unavailable',
-      'failed',
-    ] as const;
-
-    for (const status of statuses) {
-      should(harnessLogin.FleetLoginAccountOutcomeSchema.parse({ accountId: ACCOUNT_ID, status }).status).equal(status);
-    }
-  });
-
   it('should keep every renewal outcome distinguishable, because four of them mean nothing was fired', () => {
     // `not-expired`, `not-renewable`, `not-required` and `indeterminate` are four different reasons for
     // having done nothing, and they send a reader four different places: wait, sign in, look at the
@@ -382,40 +239,8 @@ describe('harness-login schemas', () => {
     ] as const;
 
     for (const status of statuses) {
-      should(harnessLogin.FleetRenewalSchema.parse({ identity: 'claude:kirin', status, ran: false }).status).equal(
-        status,
-      );
+      should(harnessLogin.FleetRenewalStatusSchema.parse(status)).equal(status);
     }
-  });
-
-  it('should let a renewal refuse before it chose a home, and carry no field a token could occupy', () => {
-    // An identity that authenticates with a key has no home to name. Inventing one would point a reader
-    // at an account this renewal never looked at.
-    const refused = harnessLogin.FleetRenewalSchema.parse({
-      identity: 'claude:api',
-      status: 'not-required',
-      reason: 'this account authenticates with a key, so it has no provider token to renew',
-      ran: false,
-    });
-
-    should(refused).not.have.property('accountId');
-    assertRejects([
-      rejects('a renewed credential', harnessLogin.FleetRenewalSchema, {
-        identity: 'claude:kirin',
-        status: 'renewed',
-        ran: true,
-        accessToken: 'sk-live',
-      }),
-      rejects('a home to fire at', harnessLogin.FleetRenewalRequestSchema, {
-        accountId: ACCOUNT_ID,
-        home: '/fleet/homes/claude-kirin',
-      }),
-      rejects('a status the domain cannot produce', harnessLogin.FleetRenewalSchema, {
-        identity: 'claude:kirin',
-        status: 'logged-in',
-        ran: true,
-      }),
-    ]);
   });
 
   it('should keep the four submission outcomes apart, including unconfirmed', () => {
@@ -441,20 +266,20 @@ describe('harness-login schemas', () => {
     ]);
   });
 
-  it('should refuse a start request that names anything but an account', () => {
+  it('should refuse a start request that names anything but a credential', () => {
     assertRejects([
       rejects('a command', harnessLogin.HarnessLoginStartRequestSchema, { command: 'claude auth login' }),
       rejects('a wrapper path', harnessLogin.HarnessLoginStartRequestSchema, {
-        accountId: ACCOUNT_ID,
+        credentialId: 'claude-kirin',
         wrapper: '/usr/local/bin/claude-kirin',
       }),
-      rejects('an account name rather than an id', harnessLogin.HarnessLoginStartRequestSchema, {
-        accountId: 'claude-kirin',
+      rejects('a retired account id', harnessLogin.HarnessLoginStartRequestSchema, {
+        accountId: '00000000-0000-4000-8000-000000000001',
       }),
     ]);
   });
 
-  it('should start a sign-in from exactly one of an account and a credential', () => {
+  it('should start a sign-in from a credential', () => {
     // Arrange / Act
     const byCredential = harnessLogin.HarnessLoginStartRequestSchema.parse({
       credentialId: 'claude-work',
@@ -464,31 +289,34 @@ describe('harness-login schemas', () => {
     // Assert
     should(byCredential).deepEqual({ credentialId: 'claude-work', operatorPassword: 'the operator password' });
     assertRejects([
-      rejects('neither id', harnessLogin.HarnessLoginStartRequestSchema, { operatorPassword: 'the operator password' }),
-      rejects('both ids', harnessLogin.HarnessLoginStartRequestSchema, {
-        accountId: ACCOUNT_ID,
-        credentialId: 'claude-work',
-      }),
+      rejects('no credential', harnessLogin.HarnessLoginStartRequestSchema, { operatorPassword: 'the operator password' }),
       rejects('a credential id that is not a slug', harnessLogin.HarnessLoginStartRequestSchema, {
         credentialId: 'Claude Work',
       }),
     ]);
   });
 
-  it('should carry a credential sign-in that launched no account', () => {
+  it('should refuse a flow that names no credential, or a retired account', () => {
     // Arrange
-    const { accountId: _accountId, ...withoutAccount } = flowShape;
+    const { credentialId: _credentialId, ...withoutCredential } = flowShape;
 
-    // Act
-    const flow = harnessLogin.HarnessLoginFlowSchema.parse({
-      harness: 'claude',
-      ...withoutAccount,
-      credentialId: 'claude-work',
-      state: 'starting',
-    });
-
-    // Assert
-    should(flow).not.have.property('accountId');
-    should(flow.credentialId).equal('claude-work');
+    // Act / Assert
+    assertRejects([
+      rejects('no credential', harnessLogin.HarnessLoginFlowSchema, {
+        harness: 'claude',
+        ...withoutCredential,
+        state: 'starting',
+      }),
+      rejects('an account', harnessLogin.HarnessLoginFlowSchema, {
+        harness: 'claude',
+        ...flowShape,
+        accountId: '00000000-0000-4000-8000-000000000001',
+        state: 'starting',
+      }),
+      rejects('a complete flow carrying account outcomes', harnessLogin.ClaudeLoginFlowSchema, {
+        ...claudeComplete,
+        accounts: [],
+      }),
+    ]);
   });
 });

@@ -24,9 +24,9 @@ import type {
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { readFleetComponents, readFleetProfileStacks, readFleetRuntimes } from '../catalog-api.ts';
+import { readFleetComponents, readFleetProfiles, readFleetRuntimes } from '../catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { MACHINES_SECTION, type MachineTabId, machineHash } from '../shell/machine-route.ts';
 
@@ -53,7 +53,7 @@ export const readMachineData = async (
   const [credentials, runtimes, profiles, components] = await Promise.all([
     readFleetCredentials(client),
     readFleetRuntimes(client),
-    readFleetProfileStacks(client),
+    readFleetProfiles(client),
     readFleetComponents(client).catch(() => null),
   ]);
   return { credentials, runtimes, profiles, components };

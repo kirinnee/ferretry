@@ -107,9 +107,5 @@ function renderApply(apply: FleetApplyOutcome): RenderedOutcome {
           ),
         ].join('\n'),
       };
-    case 'initialized':
-      return { ok: true, text: 'Done.' };
-    case 'initialization-partial':
-      return { ok: false, text: `Stopped at ${apply.failedPath}: ${apply.reason}. Run it again to finish.` };
   }
 }

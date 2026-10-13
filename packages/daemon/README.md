@@ -57,8 +57,8 @@ This has shipped wrong three times, each time as "one artefact, two writers, no 
 2. the daemon's own `start()` loaded configuration before claiming, writing `config/daemon.json`
    into an unmarked home and refusing at its own next step — fixed by claiming first, which is the
    remedy generalised here;
-3. `fy fleet init` wrote `fleet/**` unclaimed, so a home the client had just provisioned was refused
-   **permanently** and the only move the product left an owner was `rm -rf`.
+3. an early release's fleet scaffold wrote `fleet/**` unclaimed, so a home the client had just
+   provisioned was refused **permanently** and the only move the product left an owner was `rm -rf`.
 
 Because instance 3 shipped, every home provisioned by an earlier release carries no marker.
 **`fy daemon adopt`** is the upgrade path: it reports what the home holds, then claims it — and

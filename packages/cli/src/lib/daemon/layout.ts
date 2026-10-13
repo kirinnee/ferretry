@@ -182,7 +182,7 @@ function requireDirectory(value: string, field: string): string {
  * `.ferretry` while the fleet one derived `.${product}` from the root manifest. They agree today only
  * because the product happens to be named `ferretry`. `scripts/local/rename.sh --product` rewrites
  * the manifest and a fixed list of static files; it does not rewrite this literal, so the sanctioned
- * rename path would have split one installation in two: `fy fleet` writing `~/.newname` while
+ * rename path would have split one installation in two: the fleet layout writing `~/.newname` while
  * `fy daemon` and the daemon itself used `~/.ferretry`. That is the same "two writers, no agreement"
  * defect this file's neighbours exist to prevent, and the claim added on top of it would have made
  * the split harder to see rather than easier — the CLI would claim one directory and provision into

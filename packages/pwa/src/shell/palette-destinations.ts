@@ -88,9 +88,8 @@ const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   sessions: ['sessions', 'fleet', 'dashboard', 'home', 'teammates', 'list'],
   'new-session': ['new', 'start', 'spawn', 'launch', 'create', 'teammate', 'agent'],
   projects: ['projects', 'project', 'workspace', 'folder', 'repository', 'repo'],
-  // No `accounts` entry: Accounts is no longer a destination. It is Fleet's child panel inside one
-  // daemon's settings, and a panel has no pathname for `destinationExists` to resolve — so the words
-  // that used to find it are gone rather than pointed at a route that would be silently dropped.
+  // No `accounts` entry: Accounts is no longer a destination. Logins and runtimes are Settings ›
+  // Machines, which the Settings palette links find by these words instead.
   analytics: ['analytics', 'usage', 'cost', 'spend', 'tokens', 'graph', 'chart', 'query', 'daily'],
   warden: ['warden', 'supervision', 'verdicts', 'accounts', 'failover', 'quota'],
   learning: ['learning', 'proposals', 'rules', 'lessons', 'scan'],

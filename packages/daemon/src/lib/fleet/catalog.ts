@@ -45,6 +45,7 @@ import type {
   FleetFixedLayerView,
   FleetLayerConflict,
   FleetLayeredProfileCatalog,
+  FleetMachineAuthority,
   FleetMachineView,
   FleetProfileDraftRequest,
   FleetProfileDraftView,
@@ -132,7 +133,7 @@ export function editConsequence(usage: CatalogUsage): string | undefined {
 
 // ── The catalogue projections ────────────────────────────────────────────────────────────────────
 //
-// What `GET /v1/fleet/machine`, `/components`, `/profile-stacks` and `/runtimes` answer, as values: the
+// What `GET /v1/fleet/machine`, `/components`, `/profiles` and `/runtimes` answer, as values: the
 // layering module decides what a stack IS; these only say it in the product's words (§4.2).
 
 /** The facts a projection reads that the configuration does not hold. */
@@ -142,8 +143,8 @@ export interface CatalogFacts {
   /** The command each harness resolves to on this machine, `undefined` when it is not installed. */
   readonly tools: Readonly<Record<HarnessKind, string | undefined>>;
   readonly runningSessions: number;
-  /** Why changes are refused right now, or `undefined` when this machine accepts them. */
-  readonly changesRefusal?: string;
+  /** Each runtime's stable id from `ids.json`, by name. A runtime the last apply never published has none. */
+  readonly runtimeIds?: Readonly<Record<string, string>>;
   /** Each settings component's parsed file, by component name, so conflicts are real ones. */
   readonly settingsBodies?: Readonly<Record<string, SettingsObject>>;
   /** Instructions text and skill frontmatter, for partial support (K5). */
@@ -166,8 +167,12 @@ const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
 const act = (reason: string | undefined): FleetCatalogAct =>
   reason === undefined ? { available: true } : { available: false, reason };
 
-/** `GET /v1/fleet/machine`. */
-export function machineView(model: AccountModel, facts: CatalogFacts): FleetMachineView {
+/** `GET /v1/fleet/machine`, with what the caller asking may do to it. */
+export function machineView(
+  model: AccountModel,
+  facts: CatalogFacts,
+  authority: FleetMachineAuthority,
+): FleetMachineView {
   const runtimeCount = Object.keys(model.runtimes).length;
   return {
     name: facts.machineName,
@@ -185,7 +190,7 @@ export function machineView(model: AccountModel, facts: CatalogFacts): FleetMach
     }),
     runtimeCount,
     runningSessions: facts.runningSessions,
-    changes: act(facts.changesRefusal),
+    authority,
   };
 }
 
@@ -479,7 +484,7 @@ function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind):
   };
 }
 
-/** `GET /v1/fleet/profile-stacks`. */
+/** `GET /v1/fleet/profiles`. */
 export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetLayeredProfileCatalog {
   const partial = partialSupportOf(model, facts);
   return {
@@ -608,7 +613,12 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
                 : stack.available.reason;
         return [
           {
+            // A runtime whose apply never landed has no id yet; its name stands in, and it cannot have
+            // a session for any other id to name.
+            id: facts.runtimeIds?.[name] ?? name,
             name,
+            // The wrapper is named after the runtime (`<bin>/<name>`), and `fy start --agent` takes that name.
+            wrapper: name,
             harness,
             credential: {
               id: runtime.credential,
@@ -686,7 +696,7 @@ export function layersRefusal(model: AccountModel, name: string, layers: readonl
 const DRAFT_NAME = 'draft';
 
 /**
- * `POST /v1/fleet/profile-stacks/preview`: a profile's layers before they are saved, resolved per
+ * `POST /v1/fleet/profiles/preview`: a profile's layers before they are saved, resolved per
  * harness exactly as {@link profileCatalog} resolves a saved one. The draft stands in a copy of the
  * model under the profile being edited, or a name no profile has.
  */

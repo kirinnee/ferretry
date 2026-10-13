@@ -37,14 +37,13 @@ describe('renderMachine', () => {
     should(text).not.match(/fz setup/);
   });
 
-  it('should say when it is not set up, uses the old format, or takes no changes yet', () => {
+  it('should say when it is not set up yet', () => {
     const fresh = renderMachine(
       machine({
         format: 'none',
         setUp: false,
         agentPermissions: 'skip',
         tools: [{ harness: 'claude', label: 'Claude Code', installed: true }],
-        changes: { available: false, reason: 'Changes are switched off.' },
       }),
       'fz',
     );
@@ -52,10 +51,7 @@ describe('renderMachine', () => {
       .match(/Setup: not set up yet\n/)
       .and.match(/skip \(agents are never asked\)/)
       .and.match(/Claude Code: installed\n/);
-    should(fresh)
-      .match(/Changes: Changes are switched off\./)
-      .and.match(/Set it up with `fz setup`\./);
-    should(renderMachine(machine({ format: 'version-1' }), 'fz')).match(/the old account format/);
+    should(fresh).match(/Set it up with `fz setup`\./);
   });
 });
 

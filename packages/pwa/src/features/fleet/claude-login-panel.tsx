@@ -34,21 +34,19 @@
  * about the wrong risk teaches people to distrust the right ones.
  */
 
+import type { ClaudeLoginFlow, HarnessLoginLastCode } from '@ferretry/protocol';
 import { CheckCircle2, KeyRound, Link2, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import type { ClaudeLoginFlow, FleetLoginAccountOutcome, HarnessLoginLastCode } from '@ferretry/protocol';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
 import type { LoginPanelWording } from './harness-login-model.ts';
 
 export interface ClaudeLoginPanelProps {
-  /** The account a person recognises before granting provider access. */
+  /** The login a person recognises before granting provider access. */
   readonly accountLabel: string;
-  /** `<kind>:<identity>`, so a reader can tell two provider accounts apart. */
-  readonly identity: string;
-  /** Includes the account being signed in, so one means no sibling copy. */
-  readonly memberCount: number;
+  /** The login's id, which keeps this panel's element ids unique on a page with several. */
+  readonly loginId: string;
   /** The live flow, or `null` before one is started. */
   readonly flow: ClaudeLoginFlow | null;
   readonly busy: boolean;
@@ -58,20 +56,10 @@ export interface ClaudeLoginPanelProps {
   readonly onSubmitCode: (code: string) => void;
   readonly onCancel: () => void;
   readonly copy?: ClipboardWriter;
-  /** A login of the account model: no identity line, and these sentences in place of the wrapper ones. */
-  readonly wording?: LoginPanelWording;
+  /** What one sign-in covers, and what to say once it is done. */
+  readonly wording: LoginPanelWording;
   className?: string;
 }
-
-const coverage = (count: number): string =>
-  count <= 1 ? 'this account only' : `${String(count - 1)} sibling wrapper${count === 2 ? '' : 's'} too`;
-
-/** How many siblings received the fresh credential, from the fleet's own per-account outcomes. */
-const syncedCount = (accounts: readonly FleetLoginAccountOutcome[]): number =>
-  accounts.filter(account => account.status === 'synced').length;
-
-const failed = (accounts: readonly FleetLoginAccountOutcome[]): readonly FleetLoginAccountOutcome[] =>
-  accounts.filter(account => account.status === 'failed' || account.status === 'indeterminate');
 
 /**
  * What to say when a sign-in ended because of its code, in place of the host command every other failure
@@ -99,8 +87,7 @@ const codeEnding = (
 
 export function ClaudeLoginPanel({
   accountLabel,
-  identity,
-  memberCount,
+  loginId,
   flow,
   busy,
   refusal,
@@ -126,9 +113,9 @@ export function ClaudeLoginPanel({
   const state = flow?.state ?? 'idle';
   return (
     <section
-      aria-labelledby={`claude-login-${identity}`}
+      aria-labelledby={`claude-login-${loginId}`}
       data-claude-login={state}
-      data-claude-login-identity={identity}
+      data-claude-login-identity={loginId}
       className={cn('kt-panel overflow-hidden', className)}
     >
       <header className="border-b border-border bg-surface-2 px-panel py-3">
@@ -138,14 +125,9 @@ export function ClaudeLoginPanel({
           </span>
           <div className="min-w-0">
             <p className="m-0 text-meta font-semibold text-accent">Claude Code sign-in</p>
-            <h3 id={`claude-login-${identity}`} className="m-0 mt-0.5 text-title font-semibold text-fg">
+            <h3 id={`claude-login-${loginId}`} className="m-0 mt-0.5 text-title font-semibold text-fg">
               {accountLabel}
             </h3>
-            {wording === undefined ? (
-              <p className="m-0 mt-1 text-ui leading-base text-muted">
-                Identity <code className="font-mono text-meta text-fg">{identity}</code>
-              </p>
-            ) : null}
           </div>
         </div>
       </header>
@@ -153,14 +135,7 @@ export function ClaudeLoginPanel({
       <div className="space-y-4 p-panel">
         <div className="flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-muted">
           <ShieldCheck size={17} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
-          {wording === undefined ? (
-            <p className="m-0">
-              One sign-in covers <strong className="font-semibold text-fg">{coverage(memberCount)}</strong>. The harness
-              writes its own credential; this daemon never holds one.
-            </p>
-          ) : (
-            <p className="m-0">{wording.coverage}</p>
-          )}
+          <p className="m-0">{wording.coverage}</p>
         </div>
 
         {refusal === null ? null : (
@@ -211,11 +186,11 @@ export function ClaudeLoginPanel({
               </p>
             ) : null}
             <form className="space-y-2" onSubmit={submit}>
-              <label htmlFor={`claude-login-code-${identity}`} className="block text-ui font-semibold text-fg">
+              <label htmlFor={`claude-login-code-${loginId}`} className="block text-ui font-semibold text-fg">
                 2 · Paste the code Claude showed you
               </label>
               <textarea
-                id={`claude-login-code-${identity}`}
+                id={`claude-login-code-${loginId}`}
                 name="claude-login-code"
                 className="kt-input min-h-24 w-full resize-y font-mono text-meta"
                 value={code}
@@ -230,7 +205,7 @@ export function ClaudeLoginPanel({
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
                   <ShieldCheck size={16} aria-hidden="true" />
-                  {busy ? 'Sending…' : (wording?.finishLabel ?? 'Finish sign-in')}
+                  {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
                 </Button>
                 <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
                   Cancel
@@ -251,32 +226,7 @@ export function ClaudeLoginPanel({
           >
             <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
             <div className="min-w-0">
-              {wording !== undefined ? (
-                <p className="m-0 font-semibold">{wording.signedIn}</p>
-              ) : failed(flow.accounts).length === 0 ? (
-                <>
-                  <p className="m-0 font-semibold">Signed in to {accountLabel}</p>
-                  <p className="m-0 mt-1 text-muted">
-                    {syncedCount(flow.accounts) === 0
-                      ? 'No sibling wrapper needed a copy.'
-                      : `The credential was verified and copied to ${String(syncedCount(flow.accounts))} sibling wrapper${syncedCount(flow.accounts) === 1 ? '' : 's'}.`}
-                  </p>
-                </>
-              ) : (
-                <>
-                  {/* "account", not "lane": the list under it is wrapper names, which is what a
-                      person calls these, and `lane` is a word only the configuration schema has. */}
-                  <p className="m-0 font-semibold">This sign-in finished without settling every account</p>
-                  <ul className="m-0 mt-1 list-none space-y-1 p-0 text-muted">
-                    {failed(flow.accounts).map(account => (
-                      <li key={account.accountId} className="m-0">
-                        <code className="font-mono text-meta">{account.accountId}</code> — {account.status}
-                        {account.message === undefined ? '' : `: ${account.message}`}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
+              <p className="m-0 font-semibold">{wording.signedIn}</p>
             </div>
           </div>
         ) : null}

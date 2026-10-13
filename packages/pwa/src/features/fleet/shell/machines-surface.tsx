@@ -7,8 +7,7 @@
  *
  * The shell owns the frame and nothing inside a tab. Each tab's surface is supplied by the composition
  * root (`machineTabs`), and until a unit fills one the tab is an honest empty frame — routable, so a
- * link to it works today, but saying it shows nothing yet. It sits BESIDE the old Daemons → Fleet →
- * Accounts panels (O1) until those are retired.
+ * link to it works today, but saying it shows nothing yet. It is the ONE Settings entry for the account model (O1).
  *
  * Which daemon answers is the page's, never this surface's: picking another machine asks the page to
  * go to that daemon's Settings, so no read for one host can be shown under another host's name.
@@ -22,7 +21,7 @@ import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import { AccountStatus } from './account-status.tsx';
 import { type MachineReach, machineReachSummary, readMachineReach } from './machine-reach.ts';
 import { MACHINE_TABS, type MachineTabId } from './machine-route.ts';
@@ -65,8 +64,7 @@ export function EmptyMachineTab({ tab, machineName }: { readonly tab: MachineTab
       </h3>
       <p className="mb-0 mt-1 text-cell leading-base text-muted">{definition.description}</p>
       <p className="mb-0 mt-3 text-cell leading-base text-muted">
-        Nothing is shown here yet for {machineName}. Until it is, the accounts on this machine are managed under
-        Daemons, in the Fleet and Accounts panels.
+        Nothing is shown here yet for {machineName}.
       </p>
     </section>
   );

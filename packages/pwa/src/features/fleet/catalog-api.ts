@@ -34,19 +34,19 @@ import {
   FleetRuntimeCatalogSchema,
   OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
-import type { FleetClient } from './fleet-api.ts';
+import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_MACHINE_PATH = '/v1/fleet/machine';
 export const FLEET_COMPONENTS_PATH = '/v1/fleet/components';
-export const FLEET_PROFILE_STACKS_PATH = '/v1/fleet/profile-stacks';
+export const FLEET_PROFILES_PATH = '/v1/fleet/profiles';
 export const FLEET_RUNTIMES_PATH = '/v1/fleet/runtimes';
-export const FLEET_CHANGES_PATH = '/v1/fleet/changes';
-export const FLEET_PROFILE_DRAFT_PATH = '/v1/fleet/profile-stacks/preview';
+export const FLEET_PROPOSALS_PATH = '/v1/fleet/proposals';
+export const FLEET_PROFILE_DRAFT_PATH = '/v1/fleet/profiles/preview';
 
 const unlockHeaders = (unlock: string | undefined): Record<string, string> =>
   unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock };
 
-/** Agent permissions, the tools installed, whether it is set up, and whether it accepts changes yet. */
+/** Agent permissions, the tools installed, whether it is set up, and what this caller may change. */
 export const readFleetMachine = async (client: FleetClient, unlock?: string): Promise<FleetMachineView> =>
   await client.request(FLEET_MACHINE_PATH, FleetMachineViewSchema, { headers: unlockHeaders(unlock) });
 
@@ -55,11 +55,11 @@ export const readFleetComponents = async (client: FleetClient, unlock?: string):
   await client.request(FLEET_COMPONENTS_PATH, FleetComponentCatalogSchema, { headers: unlockHeaders(unlock) });
 
 /** Every profile with its layers, its stack per harness and its conflicts. */
-export const readFleetProfileStacks = async (
+export const readFleetProfiles = async (
   client: FleetClient,
   unlock?: string,
 ): Promise<FleetLayeredProfileCatalog> =>
-  await client.request(FLEET_PROFILE_STACKS_PATH, FleetLayeredProfileCatalogSchema, {
+  await client.request(FLEET_PROFILES_PATH, FleetLayeredProfileCatalogSchema, {
     headers: unlockHeaders(unlock),
   });
 
@@ -73,7 +73,7 @@ export const stageFleetChange = async (
   change: FleetAccountChange,
   unlock?: string,
 ): Promise<FleetAccountChangeView> =>
-  await client.request(FLEET_CHANGES_PATH, FleetAccountChangeViewSchema, {
+  await client.request(FLEET_PROPOSALS_PATH, FleetAccountChangeViewSchema, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
     body: JSON.stringify(FleetAccountChangeRequestSchema.parse({ change })),
@@ -85,7 +85,7 @@ export const readFleetChange = async (
   changeId: string,
   unlock?: string,
 ): Promise<FleetAccountChangeView> =>
-  await client.request(`${FLEET_CHANGES_PATH}/${encodeURIComponent(changeId)}`, FleetAccountChangeViewSchema, {
+  await client.request(`${FLEET_PROPOSALS_PATH}/${encodeURIComponent(changeId)}`, FleetAccountChangeViewSchema, {
     headers: unlockHeaders(unlock),
   });
 
@@ -99,7 +99,7 @@ export const applyFleetChange = async (
   request: FleetProposalApplyRequest = {},
   unlock?: string,
 ): Promise<FleetAccountChangeOutcome> =>
-  await client.request(`${FLEET_CHANGES_PATH}/${encodeURIComponent(changeId)}/apply`, FleetAccountChangeOutcomeSchema, {
+  await client.request(`${FLEET_PROPOSALS_PATH}/${encodeURIComponent(changeId)}/apply`, FleetAccountChangeOutcomeSchema, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
     body: JSON.stringify(FleetProposalApplyRequestSchema.parse(request)),

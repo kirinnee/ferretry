@@ -16,8 +16,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { type HeldUnlock, usableUnlock } from '../../../lib/grants.ts';
-import type { FleetClient } from '../fleet-api.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClient, FleetClientFactory } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
 

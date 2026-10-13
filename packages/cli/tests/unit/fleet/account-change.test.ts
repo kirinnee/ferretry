@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { WriteAuthority } from '../../../src/lib/fleet/account-authority.ts';
 import { confirmStep, runChange } from '../../../src/lib/fleet/account-change.ts';
-import { CHANGE_ID, changeView, credential, fakeWorld, permissions } from './account-fakes.ts';
+import { authorityOf, CHANGE_ID, changeView, credential, fakeWorld, machine } from './account-fakes.ts';
 
 const removeRuntime = { kind: 'runtime.remove', name: 'old' } as const;
 
@@ -24,7 +24,10 @@ describe('WriteAuthority', () => {
     // Arrange
     const world = fakeWorld({
       gateway: {
-        permissions: () => permissions({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' }),
+        machine: () =>
+          machine({
+            authority: authorityOf({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' }),
+          }),
       },
     });
 
@@ -41,7 +44,9 @@ describe('WriteAuthority', () => {
 
   it('should ask for the password only at the apply when the caller is not locked', async () => {
     // Arrange
-    const world = fakeWorld({ gateway: { permissions: () => permissions({ confirmation: 'operator-password' }) } });
+    const world = fakeWorld({
+      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
+    });
     const authority = await WriteAuthority.open(world.deps);
 
     // Act
@@ -57,7 +62,7 @@ describe('WriteAuthority', () => {
     const world = fakeWorld({
       interactive: false,
       stdinPassword: 'piped-password-1',
-      gateway: { permissions: () => permissions({ confirmation: 'operator-password' }) },
+      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
     });
 
     // Act
@@ -71,7 +76,7 @@ describe('WriteAuthority', () => {
     // Arrange
     const world = fakeWorld({
       interactive: false,
-      gateway: { permissions: () => permissions({ confirmation: 'operator-password' }) },
+      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
     });
     const authority = await WriteAuthority.open(world.deps);
 
@@ -82,7 +87,7 @@ describe('WriteAuthority', () => {
   it('should refuse a caller the operator has not granted, in words', async () => {
     // Arrange
     const world = fakeWorld({
-      gateway: { permissions: () => permissions({ mayApply: false, applyRefusal: 'not-granted' }) },
+      gateway: { machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'not-granted' }) }) },
     });
 
     // Act + Assert

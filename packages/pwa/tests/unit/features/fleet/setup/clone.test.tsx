@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetMachineView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../src/features/fleet/setup/clone.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
@@ -14,10 +14,10 @@ import {
   credentials,
   credentialView,
   FRESH_MACHINE,
+  machineAnswer,
   machineView,
   NOW,
   PASSWORD,
-  permissions,
   STAGED,
   STUDIO,
   scriptedClient,
@@ -90,19 +90,18 @@ const daemons = ({ target = {}, work = {}, empty = {}, workGate }: Daemons) => {
   const calls: Calls = { target: [], work: [] };
   const clients: Record<string, FleetClient> = {
     studio: scriptedClient(
-      { '/v1/fleet/permissions': permissions(), '/v1/fleet/profile-stacks': stacks(0), ...target },
+      { '/v1/fleet/machine': machineAnswer(), '/v1/fleet/profiles': stacks(0), ...target },
       calls.target,
     ),
     work: scriptedClient(
       {
-        '/v1/fleet/permissions': permissions(),
         '/v1/fleet/machine': WORK_MACHINE,
         '/v1/fleet/export': bundle(),
         ...work,
       },
       calls.work,
     ),
-    empty: scriptedClient({ '/v1/fleet/permissions': permissions(), '/v1/fleet/machine': EMPTY_MACHINE, ...empty }),
+    empty: scriptedClient({ '/v1/fleet/machine': EMPTY_MACHINE, ...empty }),
     // Asleep answers nothing: every path fails like an unreachable machine.
     asleep: scriptedClient({}),
   };
@@ -183,7 +182,7 @@ const toPreview = async (screen: Awaited<ReturnType<typeof render>>) => {
 };
 
 const changeBodies = (calls: readonly Call[]) =>
-  calls.filter(call => call.path === '/v1/fleet/changes').map(call => call.body as { change: unknown });
+  calls.filter(call => call.path === '/v1/fleet/proposals').map(call => call.body as { change: unknown });
 
 // ── Tests ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -333,7 +332,7 @@ describe('CloneMachine · Source', () => {
   it('asks for the SOURCE machine’s password when that machine is locked, and unlocks there', async () => {
     const { calls, createClient } = daemons({
       work: {
-        '/v1/fleet/permissions': permissions({ mayApply: false, applyRefusal: 'locked' }),
+        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
         '/v1/grants/unlock': UNLOCKED,
       },
     });
@@ -363,7 +362,7 @@ describe('CloneMachine · Source', () => {
   it('stays on Source without a second sentence when the source rejects the password', async () => {
     const { calls, createClient } = daemons({
       work: {
-        '/v1/fleet/permissions': permissions({ mayApply: false, applyRefusal: 'locked' }),
+        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
         '/v1/grants/unlock': new FyHttpError('Wrong password.', 401, 'operator_password_invalid'),
       },
     });
@@ -460,7 +459,7 @@ describe('CloneMachine · Preview', () => {
     let retried = 0;
     const { calls, createClient } = daemons({
       target: {
-        '/v1/fleet/changes': STAGED,
+        '/v1/fleet/proposals': STAGED,
         [APPLY_PATH]: () => {
           imported = true;
           return EXECUTED;
@@ -483,7 +482,7 @@ describe('CloneMachine · Preview', () => {
 
       const [body] = changeBodies(calls.target);
       expect(body?.change).toEqual({ kind: 'clone.import', mode: 'alongside', bundle: { ...bundle() } });
-      expect(calls.work.some(call => call.path === '/v1/fleet/changes')).toBe(false);
+      expect(calls.work.some(call => call.path === '/v1/fleet/proposals')).toBe(false);
       expect(retried).toBe(1);
 
       expect(screen.step()).toBe('done');
@@ -521,7 +520,7 @@ describe('CloneMachine · Preview', () => {
   it('stays on the preview when this machine refuses the copy', async () => {
     const { createClient } = daemons({
       target: {
-        '/v1/fleet/changes': new FyHttpError('Clone is switched off on studio-mac.', 409, 'fleet_change_refused'),
+        '/v1/fleet/proposals': new FyHttpError('Clone is switched off on studio-mac.', 409, 'fleet_change_refused'),
       },
     });
     const screen = await render({ createClient });
@@ -540,12 +539,9 @@ describe('CloneMachine · Existing setup (E28)', () => {
   it('asks what to do with the runtimes already here, and copies alongside by default', async () => {
     const { calls, createClient } = daemons({
       target: {
-        '/v1/fleet/profile-stacks': stacks(2),
-        '/v1/fleet/changes': STAGED,
-        [APPLY_PATH]: {
-          outcome: 'applied',
-          apply: { outcome: 'initialized', created: [], kept: [], directories: [], pathEntry: 'export PATH=x' },
-        },
+        '/v1/fleet/profiles': stacks(2),
+        '/v1/fleet/proposals': STAGED,
+        [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Copied the setup' },
       },
     });
     const screen = await render({ machine: machineView({ runtimeCount: 3 }), createClient });
@@ -572,7 +568,7 @@ describe('CloneMachine · Existing setup (E28)', () => {
 
       // No credentials route: the done screen still says what happened, with no slots to sign in to.
       expect(screen.step()).toBe('done');
-      expect(screen.text('[data-setup-note="cloned"]')).toContain(STAGED.summary);
+      expect(screen.text('[data-setup-note="cloned"]')).toContain('Copied the setup');
       expect(screen.q('[data-setup-section="slots"]')).toBeNull();
       expect(screen.q('[data-clone-sign-in]')).toBeNull();
     } finally {
@@ -582,7 +578,7 @@ describe('CloneMachine · Existing setup (E28)', () => {
 
   it('replaces with a danger button when the person picks Replace', async () => {
     const { calls, createClient } = daemons({
-      target: { '/v1/fleet/changes': STAGED, [APPLY_PATH]: EXECUTED, '/v1/fleet/credentials': SLOTS },
+      target: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: EXECUTED, '/v1/fleet/credentials': SLOTS },
     });
     const screen = await render({ machine: machineView({ runtimeCount: 1 }), createClient });
     try {
@@ -606,11 +602,11 @@ describe('CloneMachine · Existing setup (E28)', () => {
     }
   });
 
-  it('counts profiles alone as existing setup, from GET /v1/fleet/profile-stacks', async () => {
-    const { calls, createClient } = daemons({ target: { '/v1/fleet/profile-stacks': stacks(1) } });
+  it('counts profiles alone as existing setup, from GET /v1/fleet/profiles', async () => {
+    const { calls, createClient } = daemons({ target: { '/v1/fleet/profiles': stacks(1) } });
     const screen = await render({ createClient });
     try {
-      expect(calls.target.some(call => call.path === '/v1/fleet/profile-stacks')).toBe(true);
+      expect(calls.target.some(call => call.path === '/v1/fleet/profiles')).toBe(true);
       expect(screen.text('[data-stepper-position]')).toBe('Source · 1 of 4');
       await toPreview(screen);
       expect(screen.text('[data-clone-step="preview"] [data-step-next]')).toBe('Next');

@@ -39,7 +39,7 @@ comes back, scrubbed. There is nothing in the agent's own process to echo into i
 to the browser, not to a debug endpoint. This is enforced by the types rather than by a check: the
 route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only three
 things hold a `SecretVault` — the redactor, the use executor, and the fleet launch environment that
-resolves an account's profile into the pane being started — and none of them returns what it read. A
+resolves a runtime's credential and profile into the pane being started — and none of them returns what it read. A
 getter added "just for testing" would delete the whole property.
 
 ## Redaction
@@ -111,9 +111,9 @@ that asked for a staging key would be handed a header built from the production 
 a 401 twenty minutes later with nothing to point at. The management surface lists every configured
 reference and whether the store holds it, so a broken one is visible before anything runs.
 
-A **fleet profile** is the other place a reference comes from: an account's `env` may bind a variable
-to `${secret:NAME}`, which is how an account authenticates with no login at all. Same grammar, same
-store, same refusal — see [Environment profiles](./fleet-env-profiles.md).
+A **credential with `store: environment`** (and a **settings component**) is the other place a reference
+comes from: its `env` may bind a variable to `${secret:NAME}`, which is how a runtime authenticates with
+no login at all. Same grammar, same store, same refusal — see [the account model](./account-model.md).
 
 ## Damaged is not empty
 

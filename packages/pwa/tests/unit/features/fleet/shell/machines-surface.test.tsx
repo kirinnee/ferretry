@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
 import {
   emptyMachineTab,
-  type MachineTabProps,
   MachinesSurface,
+  type MachineTabProps,
 } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import type { DaemonId } from '../../../../../src/lib/daemon-connection.ts';

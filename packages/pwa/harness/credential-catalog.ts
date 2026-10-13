@@ -144,6 +144,8 @@ const CLAUDE_MODELS = {
 };
 
 const runtime = (fields: Record<string, unknown> & { readonly name: string }) => ({
+  id: `runtime-${fields.name}`,
+  wrapper: fields.name,
   harness: 'claude',
   credential: { id: 'claude-personal', store: 'host', label: 'personal', status: 'ready' },
   profile: 'Default',

@@ -79,7 +79,7 @@ export function QuotaReadout({ quota, className = '', showUnknown = false, now =
     return (
       <span
         className={cn('mono shrink-0 text-warn', className)}
-        title="this wrapper is not logged in — the fleet reports no usage. Sign it in on this daemon’s Accounts panel, under Settings › Daemons › Fleet."
+        title="this wrapper is not logged in — the fleet reports no usage. Sign its login in under Settings › Machines › Credentials."
       >
         quota auth!
       </span>

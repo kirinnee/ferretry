@@ -1,14 +1,14 @@
 /**
  * A machine's setup, as this daemon serves it (docs/design/account-model.md §4.3, §4.7, §7, §10.3):
  * the first-run scan and import, Import again, installing a harness tool, the Clone export and the
- * Clone import, and migrating a machine that still has the old account format.
+ * Clone import.
  *
  * ## The import and the clone are reviewed changes
  *
  * Neither has a route of its own that writes. Each is an EXECUTOR the catalogue's change flow runs
- * (`catalog-service.ts`): `POST /v1/fleet/changes` with `setup.import` or `clone.import` stages it and
+ * (`catalog-service.ts`): `POST /v1/fleet/proposals` with `setup.import` or `clone.import` stages it and
  * {@link FleetSetupService.executors} describes what applying would do; the apply runs it, after the
- * same switch, format, revision and operator-password checks every change gets. What is described is
+ * same revision and operator-password checks every change gets. What is described is
  * what runs: the plan is composed again at the apply and refused when it no longer matches the one the
  * person reviewed, because the host's own setup — or the target machine — can move in between.
  *
@@ -19,13 +19,11 @@
  * the same boundary every other change uses. Secret values an import found go into the secret store
  * first: a reference with no value only refuses a launch, while a value with no reference is harmless.
  *
- * ## Every write asks the switch
+ * ## A configuration in the old account format
  *
- * The import, the clone and the migration are refused while `accountModel.enabled` is off, through the
- * catalogue's own check for the two executors and {@link FleetSetupServiceDeps.writesRefusal} for the
- * migration and the first run at boot. The scan, the export and the migration's dry run are reads and
- * answer either way. Installing a tool writes no configuration, so it asks only for the operator
- * password.
+ * Is refused as unreadable, never converted and never touched: the scan and the import say so with the
+ * sentence that tells a person to move it aside and restart, and the first run at boot skips with it.
+ * Installing a tool writes no configuration, so it asks only for the operator password.
  *
  * ## Nothing here leaves on a timer
  *
@@ -56,6 +54,8 @@ import {
   parseCloneBundle,
   parseSettings,
   planClone,
+  RetiredFleetConfigError,
+  renderConfig,
   planImport,
   EMPTY_RUNTIME_IDS,
   type SettingsObject,
@@ -64,15 +64,10 @@ import {
   buildCloneBundle,
   freeName,
 } from '@ferretry/fleet';
-import { renderConfig } from '@ferretry/fleet/adapters';
 import type {
   FleetAccountChange,
-  FleetCatalogAct,
   FleetCloneBundle,
   FleetCloneFile,
-  FleetMigrationApplyRequest,
-  FleetMigrationOutcome,
-  FleetMigrationView,
   FleetSetupRefusalCode,
   FleetSetupScan,
   FleetSetupTool,
@@ -110,42 +105,6 @@ export interface FolderReading {
   readonly skipped: readonly { readonly path: string; readonly reason: string }[];
 }
 
-/** What the migration executor offers here (`@ferretry/fleet/adapters` `FleetMigration`). */
-export interface SetupMigration {
-  status(): Promise<
-    | { readonly kind: 'version-1' }
-    | { readonly kind: 'version-2' }
-    | { readonly kind: 'in-progress'; readonly digest: string; readonly startedAt: number }
-    | { readonly kind: 'no-fleet' }
-  >;
-  dryRun(): Promise<{
-    readonly plan: { readonly digest: string; readonly blockers: readonly { readonly message: string }[] };
-    readonly lines: readonly string[];
-  }>;
-  migrate(approve: string): Promise<
-    | {
-        readonly kind: 'migrated';
-        readonly resumed: boolean;
-        readonly report: {
-          readonly credentials: readonly {
-            readonly id: string;
-            readonly harness: string;
-            readonly store: string;
-            readonly retired: readonly string[];
-          }[];
-          readonly runtimes: readonly { readonly name: string; readonly formerName?: string | undefined }[];
-        };
-      }
-    | { readonly kind: 'refused'; readonly reasons: readonly string[] }
-    | { readonly kind: 'rolled-back'; readonly reason: string; readonly unrestored: readonly string[] }
-  >;
-}
-
-/** How a migrated model is applied: the same materialise-and-apply every change goes through. */
-export interface SetupModelApply {
-  apply(model: AccountModel): Promise<void>;
-}
-
 /** The catalogue's collaborators this service shares, so both read and write one machine the same way. */
 export type SetupCatalogDeps = Pick<
   FleetCatalogServiceDeps,
@@ -153,7 +112,6 @@ export type SetupCatalogDeps = Pick<
   | 'readAsset'
   | 'documentRevision'
   | 'ids'
-  | 'writesRefusal'
   | 'locate'
   | 'machineName'
   | 'credentials'
@@ -189,8 +147,6 @@ export interface FleetSetupServiceDeps {
   readFolder(path: string): Promise<FolderReading>;
   /** The skill items the asset tree's store already holds. */
   skillItems(): Promise<readonly string[]>;
-  /** The migration executor, bound to the apply this service owns. Absent when it cannot be built here. */
-  migration?(apply: SetupModelApply): SetupMigration;
   /** A content digest (sha256). */
   digest(text: string): string;
 }
@@ -250,28 +206,13 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
 
 // ── The first run at boot ────────────────────────────────────────────────────────────────────────
 
-/**
- * Which first run a booting daemon gives a host. While the account model is switched off, today's
- * first run (the version-1 scaffold and its credential seed) is the released behaviour; once it is on,
- * the version-2 import replaces it, so the two never both run. The operator's opt-out wins over both.
- */
-export type BootFirstRunChoice = 'version-1' | 'version-2' | 'none';
-
-export function bootFirstRunChoice(input: {
-  readonly prepareDefaults: boolean;
-  readonly accountModelEnabled: boolean;
-}): BootFirstRunChoice {
-  if (!input.prepareDefaults) return 'none';
-  return input.accountModelEnabled ? 'version-2' : 'version-1';
-}
-
-/** How the version-2 first run at boot ended. Every ending is a value: a boot never refuses over it. */
+/** How the first run at boot ended. Every ending is a value: a boot never refuses over it. */
 export type BootFirstRun =
   | { readonly kind: 'skipped'; readonly reason: string }
   | { readonly kind: 'imported'; readonly summary: string }
   | { readonly kind: 'failed'; readonly reason: string };
 
-/** What a boot says about its version-2 first run. Built from the verdict, so no value can reach it. */
+/** What a boot says about its first run. Built from the verdict, so no value can reach it. */
 export function bootFirstRunSentence(result: BootFirstRun): string {
   if (result.kind === 'imported') return `first run: ${result.summary}`;
   if (result.kind === 'skipped') return `first run: nothing was imported, because ${lowerFirst(result.reason)}`;
@@ -298,12 +239,7 @@ interface Composed {
 export class FleetSetupService {
   /** The fingerprint each staged change was described with, keyed by the staged change itself. */
   readonly #described = new WeakMap<object, string>();
-  readonly #migration: SetupMigration | undefined;
-  #migrating = false;
-
-  constructor(private readonly deps: FleetSetupServiceDeps) {
-    this.#migration = deps.migration?.({ apply: async model => await this.#applyModel(model, []) });
-  }
+  constructor(private readonly deps: FleetSetupServiceDeps) {}
 
   // ── Scan ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -317,7 +253,6 @@ export class FleetSetupService {
       ...(await this.#recordOption()),
       digest: text => this.deps.digest(text),
     });
-    const refusal = await this.#importRefusal(reading.format);
     return {
       machine: catalog.machineName(),
       format: reading.format,
@@ -341,7 +276,7 @@ export class FleetSetupService {
       updates: plan.updates.map(update => ({ reference: update.reference, sources: [...update.sources] })),
       duplicates: plan.duplicates.map(duplicate => ({ ...duplicate })),
       notes: plan.notes.map(note => ({ ...note })),
-      importing: refusal === undefined ? { available: true } : { available: false, reason: refusal },
+      importing: { available: true },
     };
   }
 
@@ -452,115 +387,6 @@ export class FleetSetupService {
     } catch {
       return {};
     }
-  }
-
-  // ── Migration ──────────────────────────────────────────────────────────────────────────────────
-
-  /** `GET /v1/fleet/migration`: where this machine is, and the dry run a migration must name. */
-  async migration(): Promise<FleetMigrationView> {
-    const migration = this.#requireMigration();
-    const status = await this.#safely(() => migration.status());
-    const disabled = await this.deps.catalog.writesRefusal();
-    const view = { status: status.kind };
-    if (status.kind === 'in-progress') {
-      return {
-        ...view,
-        inProgress: { digest: status.digest, startedAt: new Date(status.startedAt).toISOString() },
-        migrate: disabled === undefined ? { available: true } : { available: false, reason: disabled },
-      };
-    }
-    if (status.kind !== 'version-1') {
-      return {
-        ...view,
-        migrate: {
-          available: false,
-          reason:
-            status.kind === 'no-fleet'
-              ? 'This machine has no setup to migrate.'
-              : 'This machine already uses the new account format.',
-        },
-      };
-    }
-    const dryRun = await this.#safely(() => migration.dryRun());
-    const blockers = dryRun.plan.blockers.map(blocker => blocker.message);
-    const migrate: FleetCatalogAct =
-      disabled !== undefined
-        ? { available: false, reason: disabled }
-        : blockers.length > 0
-          ? { available: false, reason: blockers[0] as string }
-          : { available: true };
-    return { ...view, dryRun: { digest: dryRun.plan.digest, lines: [...dryRun.lines], blockers }, migrate };
-  }
-
-  /** `POST /v1/fleet/migration/apply`: migrate exactly the dry run that was shown, named by its digest. */
-  async migrate(
-    request: FleetMigrationApplyRequest,
-    governance: CallerGovernance | undefined,
-  ): Promise<FleetMigrationOutcome> {
-    const migration = this.#requireMigration();
-    if (governance === undefined) {
-      throw new FleetSetupRefusal(
-        'fleet_setup_unauthorized',
-        'this daemon cannot say whether this caller may change this machine',
-      );
-    }
-    const disabled = await this.deps.catalog.writesRefusal();
-    if (disabled !== undefined) throw new FleetSetupRefusal('fleet_setup_disabled', disabled);
-    if (this.#migrating) {
-      throw new FleetSetupRefusal('fleet_setup_busy', 'a migration is already running on this machine');
-    }
-    this.#migrating = true;
-    try {
-      if (governance.confirmChange) await this.#confirm(request.operatorPassword, 'nothing was migrated');
-      const outcome = await this.#safely(() => migration.migrate(request.digest));
-      if (outcome.kind === 'refused') return { outcome: 'refused', reasons: [...outcome.reasons] };
-      if (outcome.kind === 'rolled-back') {
-        return { outcome: 'rolled-back', reason: outcome.reason, unrestored: [...outcome.unrestored] };
-      }
-      return {
-        outcome: 'migrated',
-        resumed: outcome.resumed,
-        credentials: outcome.report.credentials.map(credential => ({
-          id: credential.id,
-          harness: credential.harness === 'codex' ? 'codex' : 'claude',
-          store: credential.store === 'host' || credential.store === 'environment' ? credential.store : 'ferretry',
-          retired: credential.retired.length,
-        })),
-        runtimes: outcome.report.runtimes.map(runtime => ({
-          name: runtime.name,
-          ...(runtime.formerName === undefined ? {} : { formerName: runtime.formerName }),
-        })),
-      };
-    } finally {
-      this.#migrating = false;
-    }
-  }
-
-  #requireMigration(): SetupMigration {
-    if (this.#migration === undefined) {
-      throw new FleetSetupRefusal('fleet_setup_refused', 'Migrating is not available on this machine.');
-    }
-    return this.#migration;
-  }
-
-  async #confirm(password: string | undefined, consequence: string): Promise<void> {
-    const refuse = (message: string): never => {
-      throw new FleetSetupRefusal('fleet_setup_unauthorized', message);
-    };
-    if (password === undefined) {
-      refuse("doing this from off this machine needs this machine's operator password, entered for this one change");
-    }
-    const outcome = await this.deps.catalog.confirmChange(password as string);
-    if (outcome.kind === 'confirmed') return;
-    if (outcome.reason === 'rate-limited') {
-      refuse(
-        `too many wrong operator passwords have been tried on this machine, so it is not checking any more for now; ${consequence}`,
-      );
-    }
-    if (outcome.reason === 'no-password') {
-      refuse(`this machine has no operator password, so this could not be confirmed; ${consequence}`);
-    }
-    refuse(`that is not this machine's operator password, so ${consequence}`);
   }
 
   // ── The executors ──────────────────────────────────────────────────────────────────────────────
@@ -929,15 +755,19 @@ export class FleetSetupService {
   // ── The first run at boot ──────────────────────────────────────────────────────────────────────
 
   /**
-   * The version-2 first run a booting daemon gives a host with no fleet: import every installed
-   * harness under the suggested names. Only ever called when {@link bootFirstRunChoice} said so, and
-   * asks the switch again anyway, because a write must never go ahead on somebody else's say-so.
+   * The first run a booting daemon gives a host with no fleet: import every installed harness under
+   * the suggested names. A configuration in the old account format is skipped with the sentence that
+   * says how to set the machine up again, and is left exactly as it is.
    */
   async firstRunAtBoot(): Promise<BootFirstRun> {
     try {
-      const disabled = await this.deps.catalog.writesRefusal();
-      if (disabled !== undefined) return { kind: 'skipped', reason: disabled };
-      const reading = await this.#read();
+      let reading: Awaited<ReturnType<SetupCatalogDeps['document']>>;
+      try {
+        reading = await this.deps.catalog.document();
+      } catch (error) {
+        if (error instanceof RetiredFleetConfigError) return { kind: 'skipped', reason: error.message };
+        throw error;
+      }
       if (reading.format !== 'none') {
         return { kind: 'skipped', reason: 'this machine already has a fleet configuration, so it was left as it is' };
       }
@@ -974,23 +804,6 @@ export class FleetSetupService {
         'fleet_setup_unreadable',
         `this machine's own Claude Code and Codex setup could not be read: ${errorMessage(error)}`,
       );
-    }
-  }
-
-  async #importRefusal(format: FleetSetupScan['format']): Promise<string | undefined> {
-    const disabled = await this.deps.catalog.writesRefusal();
-    if (disabled !== undefined) return disabled;
-    return format === 'version-1'
-      ? 'This machine still uses the old account format, so its setup cannot be imported until it is migrated.'
-      : undefined;
-  }
-
-  async #safely<T>(work: () => Promise<T>): Promise<T> {
-    try {
-      return await work();
-    } catch (error) {
-      if (error instanceof FleetSetupRefusal) throw error;
-      throw new FleetSetupRefusal('fleet_setup_refused', errorMessage(error));
     }
   }
 }

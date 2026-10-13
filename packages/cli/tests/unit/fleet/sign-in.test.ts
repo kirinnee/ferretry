@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { runSignIn, SIGN_IN_POLL_MS } from '../../../src/lib/fleet/sign-in.ts';
-import { fakeWorld, flow, LATER, permissions } from './account-fakes.ts';
+import { authorityOf, fakeWorld, flow, LATER, machine } from './account-fakes.ts';
 
 const URL = 'https://claude.ai/oauth/authorize?code=true';
 const awaitingCode = (extra: Record<string, unknown> = {}) =>
@@ -138,7 +138,9 @@ describe('runSignIn', () => {
   });
 
   it('should carry the operator password a caller off this machine owes', async () => {
-    const world = fakeWorld({ gateway: { permissions: () => permissions({ confirmation: 'operator-password' }) } });
+    const world = fakeWorld({
+      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
+    });
     await runSignIn(world.deps, 'claude-you');
     should(world.gateway.called('startSignIn')[0]?.args).eql(['claude-you', { password: 'operator-password-1' }]);
   });

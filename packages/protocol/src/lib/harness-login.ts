@@ -1,6 +1,5 @@
 /**
- * The wire contract for a harness login the UI drives — and for the reads that decide whether one
- * applies at all.
+ * The wire contract for a harness login the UI drives, for one account-model credential.
  *
  * ## What crosses this boundary, and what deliberately never does
  *
@@ -41,11 +40,7 @@ import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema } from './common.ts';
 import { FleetCredentialIdSchema as CredentialIdSchema } from './fleet-credentials.ts';
 import { OperatorPasswordSchema } from './grants.ts';
-import { SecretNameSchema } from './secrets.ts';
 
-const AccountIdSchema = z.uuid();
-const HarnessKindSchema = z.enum(['claude', 'codex']);
-const AccountModeSchema = z.enum(['interactive', 'auto']);
 
 /**
  * A URL a person will be sent to open.
@@ -83,127 +78,6 @@ export const HarnessLoginVerificationUrlSchema = z
 export const HarnessLoginUserCodeSchema = z
   .string()
   .regex(/^[0-9A-Z]{3,8}-[0-9A-Z]{3,8}$/u, 'a device user code is two alphanumeric groups joined by a hyphen');
-
-/**
- * Where one account's provider credential comes from.
- *
- * This is what decides whether a login applies, and it is on the wire so a surface can SAY where the
- * credential comes from instead of greying a control out. A control that cannot succeed with no
- * explanation reads as a broken product; `docs/grants.md:151-184` is the same rule for capabilities.
- *
- * `undeclared` is the fail-closed member: the account authenticates with a key and its configuration
- * says nowhere the key comes from. It is not `interactive-login` (which would offer a login for an
- * API-key account) and not `environment` (which would name a variable nobody declared).
- *
- * `secret-store` is the "no login wanted" answer and it is NOT `environment`, which is what it used to
- * be narrowed to. Both are true of a profiled account — the daemon does put the value into the
- * environment the wrapper is launched with — but they send a reader to two different places: one to a
- * variable they are supposed to set themselves, the other to `fy secret set` and Ferretry's own store.
- * It carries the secret NAMES because a person whose account cannot start needs to know which secret
- * is missing, and a name is not a value: no schema in this package has anywhere to put one.
- */
-export const FleetCredentialSourceSchema = z.discriminatedUnion('source', [
-  z.strictObject({ source: z.literal('interactive-login') }),
-  z.strictObject({
-    source: z.literal('secret-store'),
-    variable: NonEmptyStringSchema,
-    secrets: z.array(SecretNameSchema).min(1).readonly(),
-  }),
-  z.strictObject({
-    source: z.literal('token-file'),
-    variable: NonEmptyStringSchema,
-    /** The shell file the generated wrapper sources. A path, never its contents. */
-    path: NonEmptyStringSchema,
-  }),
-  z.strictObject({ source: z.literal('environment'), variable: NonEmptyStringSchema }),
-  z.strictObject({ source: z.literal('configured-value'), variable: NonEmptyStringSchema }),
-  z.strictObject({ source: z.literal('undeclared') }),
-]);
-export type FleetCredentialSource = z.infer<typeof FleetCredentialSourceSchema>;
-
-/**
- * Whether a login applies to this account, and which rule refused when it does not.
- *
- * The two refusals are kept apart because they send a reader to two different places: a harness with
- * no interactive login is a fact about the tool, and a credential that is not a login is a fact about
- * this account — answered by the {@link FleetCredentialSourceSchema} travelling beside it.
- */
-export const FleetLoginApplicabilitySchema = z.discriminatedUnion('applies', [
-  z.strictObject({ applies: z.literal(true) }),
-  z.strictObject({
-    applies: z.literal(false),
-    because: z.enum(['harness-has-no-login', 'credential-is-not-a-login']),
-    /** The harness's own declared sentence. Present only when the harness is what declined. */
-    harnessReason: NonEmptyStringSchema.optional(),
-  }),
-]);
-export type FleetLoginApplicability = z.infer<typeof FleetLoginApplicabilitySchema>;
-
-/**
- * What the credential store found in one home — a classification, never material.
- *
- * State-discriminated so that an absent expiry renders as absence rather than as a stale countdown,
- * and so `unreadable` cannot arrive without the reason it owes the reader. `not-read` is the fifth
- * member and it is not `missing`: nothing was looked at, because this account's credential does not
- * come from a login, and reporting `missing` would tell a correctly-configured account it is broken.
- */
-export const FleetCredentialReadingSchema = z.discriminatedUnion('state', [
-  z.strictObject({ state: z.literal('valid'), expiresAt: InstantSchema.optional() }),
-  z.strictObject({ state: z.literal('refreshable'), expiresAt: InstantSchema.optional() }),
-  z.strictObject({ state: z.literal('missing') }),
-  z.strictObject({ state: z.literal('unreadable'), reason: NonEmptyStringSchema }),
-  z.strictObject({ state: z.literal('not-read') }),
-]);
-export type FleetCredentialReading = z.infer<typeof FleetCredentialReadingSchema>;
-
-/** One account, and everything a login surface needs to decide what to offer it. */
-export const FleetLoginAccountSchema = z.strictObject({
-  accountId: AccountIdSchema,
-  kind: HarnessKindSchema,
-  displayName: NonEmptyStringSchema,
-  /**
-   * The executable NAME, not the published path.
-   *
-   * Two reasons, and the second is load-bearing: it is the word a person recognises and types, and it is
-   * the key `GET /v1/usage` reports each account under — so a surface can join this row to a quota figure
-   * without deriving a basename of its own. The path is on `/v1/fleet/accounts` for anybody who needs it.
-   */
-  wrapper: NonEmptyStringSchema,
-  mode: AccountModeSchema,
-  available: z.boolean(),
-  credential: FleetCredentialReadingSchema,
-  source: FleetCredentialSourceSchema,
-  login: FleetLoginApplicabilitySchema,
-});
-export type FleetLoginAccount = z.infer<typeof FleetLoginAccountSchema>;
-
-/**
- * What one provider login needs. Accounts, not one account, because the credential is shared.
- *
- * There is no such thing as logging half an identity in: one approval covers every lane, which is why
- * thirty wrappers on six provider accounts cost six interactions rather than thirty. A surface that
- * offered a per-account button would spend an approval per lane and leave siblings signed out.
- *
- * The verdict is the fleet's own, unflattened. `login` and `indeterminate` are not the same state:
- * the first asks for an approval, the second says a home could not be read and refuses to decide —
- * and a surface that offered a login for the second would overwrite a credential that may be fine.
- */
-export const FleetLoginIdentitySchema = z.strictObject({
-  /** `<kind>:<identity>` for a declared identity; `account:<id>` for one the configuration lost. */
-  identity: NonEmptyStringSchema,
-  kind: HarnessKindSchema,
-  verdict: z.enum(['complete', 'sync', 'login', 'indeterminate', 'no-login']),
-  /** Why, for the verdicts that owe a reason. */
-  reason: NonEmptyStringSchema.optional(),
-  accounts: z.array(FleetLoginAccountSchema).min(1).readonly(),
-});
-export type FleetLoginIdentity = z.infer<typeof FleetLoginIdentitySchema>;
-
-/** Which provider logins this host has, and what each one needs. */
-export const FleetLoginReadinessSchema = z.strictObject({
-  identities: z.array(FleetLoginIdentitySchema).readonly(),
-});
-export type FleetLoginReadiness = z.infer<typeof FleetLoginReadinessSchema>;
 
 /**
  * What a renewal did to one identity's credential — the sibling of a login, and never a login.
@@ -244,81 +118,6 @@ export const FleetRenewalStatusSchema = z.enum([
 export type FleetRenewalStatus = z.infer<typeof FleetRenewalStatusSchema>;
 
 /**
- * Ask one account's credential to renew itself.
- *
- * Names an ACCOUNT, exactly as a login start does, because a person clicks a row. The daemon resolves
- * which identity that account belongs to and which home to fire at; there is no shape of request that
- * could name a command, a path, a wrapper or a home.
- */
-export const FleetRenewalRequestSchema = z.strictObject({
-  accountId: AccountIdSchema,
-  /**
-   * The per-change confirmation, for a governed caller that owes one.
-   *
-   * The SAME gate a login start sits behind, and not a second one. A renewal is not a sign-in, but it
-   * does mutate shared credential state on the host, and a rotation the provider refuses makes the
-   * harness clear its own tokens — so a caller who can drive it from off this machine can leave an
-   * identity needing a person. That is a change to how the host behaves, which is what
-   * `fleet`/`configure` plus this confirmation already governs.
-   */
-  operatorPassword: OperatorPasswordSchema.optional(),
-});
-export type FleetRenewalRequest = z.infer<typeof FleetRenewalRequestSchema>;
-
-/**
- * What one renewal did, and to which home.
- *
- * `ran` is NOT a success — a renewal that ran and achieved nothing has `ran` true and a status of
- * `failed`. It says the harness was given its turn, so the credential on disk may have moved in either
- * direction and any reading a caller is holding is now history. A surface that treated it as success
- * would report a spent refresh token as a working login.
- *
- * `accountId` is optional because a refusal can arrive before any home was chosen: an identity that
- * authenticates with a key has no home to name, and inventing one would point a reader at an account
- * this renewal never looked at.
- */
-export const FleetRenewalSchema = z.strictObject({
-  /** `<kind>:<identity>`, because a credential belongs to an identity rather than to an account. */
-  identity: NonEmptyStringSchema,
-  status: FleetRenewalStatusSchema,
-  /** The home that was renewed, or chosen and then refused. Absent when none was chosen. */
-  accountId: AccountIdSchema.optional(),
-  /** Why, in the terms of the credential — never of the credential's contents. */
-  reason: NonEmptyStringSchema.optional(),
-  ran: z.boolean(),
-});
-export type FleetRenewal = z.infer<typeof FleetRenewalSchema>;
-
-/**
- * What happened to one account when a flow finished.
- *
- * The fleet's own outcomes, carried rather than collapsed: `usable`, `login-needed` and
- * `indeterminate` are three different reasons nothing was done, and merging them is how a report ends
- * up implying a fleet is signed in when two of its identities were never checked.
- *
- * `renewed` is a SUCCESS and not a sign-in: the credential was refreshed with no browser and nobody was
- * asked. This flow cannot produce one today — it passes no renewal dependency — and the member is here
- * anyway, because this schema projects the domain's whole union rather than the subset one caller happens
- * to reach. A projection narrower than its source turns a later wiring decision into a 500.
- */
-export const FleetLoginAccountOutcomeSchema = z.strictObject({
-  accountId: AccountIdSchema,
-  status: z.enum([
-    'logged-in',
-    'renewed',
-    'synced',
-    'usable',
-    'not-required',
-    'login-needed',
-    'indeterminate',
-    'unavailable',
-    'failed',
-  ]),
-  message: NonEmptyStringSchema.optional(),
-});
-export type FleetLoginAccountOutcome = z.infer<typeof FleetLoginAccountOutcomeSchema>;
-
-/**
  * What became of the code a sign-in handed out or took in, recognised as a STATE rather than forwarded
  * as text.
  *
@@ -341,13 +140,8 @@ export type HarnessLoginLastCode = z.infer<typeof HarnessLoginLastCodeSchema>;
 /** Every flow state carries these, in every state, so a reader never has to ask which flow it holds. */
 const flowShape = {
   flowId: NonEmptyStringSchema,
-  /**
-   * The account whose wrapper was launched, for a sign-in started from an account. Its identity's other
-   * lanes receive a copy. Absent for a sign-in started from a CREDENTIAL, which launches no wrapper.
-   */
-  accountId: AccountIdSchema.optional(),
-  /** The account-model credential being signed in, for a sign-in started from one. */
-  credentialId: CredentialIdSchema.optional(),
+  /** The account-model credential being signed in. */
+  credentialId: CredentialIdSchema,
   identity: NonEmptyStringSchema,
   startedAt: InstantSchema,
   /** When this flow is abandoned and its child killed. Bounded in minutes, never open-ended. */
@@ -392,12 +186,7 @@ export const ClaudeLoginFlowSchema = z.discriminatedUnion('state', [
      */
     lastCode: HarnessLoginLastCodeSchema.extract(['rejected']).optional(),
   }),
-  z.strictObject({
-    harness: z.literal('claude'),
-    ...flowShape,
-    state: z.literal('complete'),
-    accounts: z.array(FleetLoginAccountOutcomeSchema).readonly(),
-  }),
+  z.strictObject({ harness: z.literal('claude'), ...flowShape, state: z.literal('complete') }),
   z.strictObject({ harness: z.literal('claude'), ...flowShape, state: z.literal('failed'), ...failureShape }),
 ]);
 export type ClaudeLoginFlow = z.infer<typeof ClaudeLoginFlowSchema>;
@@ -418,12 +207,7 @@ export const CodexLoginFlowSchema = z.discriminatedUnion('state', [
     verificationUrl: HarnessLoginVerificationUrlSchema,
     userCode: HarnessLoginUserCodeSchema,
   }),
-  z.strictObject({
-    harness: z.literal('codex'),
-    ...flowShape,
-    state: z.literal('complete'),
-    accounts: z.array(FleetLoginAccountOutcomeSchema).readonly(),
-  }),
+  z.strictObject({ harness: z.literal('codex'), ...flowShape, state: z.literal('complete') }),
   z.strictObject({ harness: z.literal('codex'), ...flowShape, state: z.literal('failed'), ...failureShape }),
 ]);
 export type CodexLoginFlow = z.infer<typeof CodexLoginFlowSchema>;
@@ -439,34 +223,22 @@ export type CodexLoginFlow = z.infer<typeof CodexLoginFlowSchema>;
 export const HarnessLoginFlowSchema = z.union([ClaudeLoginFlowSchema, CodexLoginFlowSchema]);
 export type HarnessLoginFlow = z.infer<typeof HarnessLoginFlowSchema>;
 
-/** Start one login. The caller names an ACCOUNT or a CREDENTIAL — never a command, never a path. */
-export const HarnessLoginStartRequestSchema = z
-  .strictObject({
-    /** The account to sign in. Exactly one of this and `credentialId`. */
-    accountId: AccountIdSchema.optional(),
-    /**
-     * The account-model credential to sign in (design §4.6, §7): every runtime on it, or none yet — an
-     * empty slot is signed in before anything uses it. Exactly one of this and `accountId`.
-     */
-    credentialId: CredentialIdSchema.optional(),
-    /**
-     * The per-change confirmation, for a governed caller that owes one.
-     *
-     * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE, held to the same rule by the same schema the fleet's
-     * proposal apply uses, and spent against this one start. It is not a second gate: `fleet.configure`
-     * decides whether this caller may reach the route at all, and this proves the change.
-     */
-    operatorPassword: OperatorPasswordSchema.optional(),
-  })
-  .check(ctx => {
-    if ((ctx.value.accountId === undefined) !== (ctx.value.credentialId === undefined)) return;
-    ctx.issues.push({
-      code: 'custom',
-      message: 'a sign-in names exactly one of "accountId" and "credentialId"',
-      input: ctx.value,
-      path: [],
-    });
-  });
+/** Start one login. The caller names a CREDENTIAL — never a command, never a path. */
+export const HarnessLoginStartRequestSchema = z.strictObject({
+  /**
+   * The account-model credential to sign in (design §4.6, §7): every runtime on it, or none yet — an
+   * empty slot is signed in before anything uses it.
+   */
+  credentialId: CredentialIdSchema,
+  /**
+   * The per-change confirmation, for a governed caller that owes one.
+   *
+   * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE, held to the same rule by the same schema the fleet's
+   * proposal apply uses, and spent against this one start. It is not a second gate: `fleet.configure`
+   * decides whether this caller may reach the route at all, and this proves the change.
+   */
+  operatorPassword: OperatorPasswordSchema.optional(),
+});
 export type HarnessLoginStartRequest = z.infer<typeof HarnessLoginStartRequestSchema>;
 
 /**

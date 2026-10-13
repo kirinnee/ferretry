@@ -2,19 +2,16 @@
  * One account-model change, from a click to the machine (docs/design/account-model.md §7).
  *
  * Every write on the Machines surface is the same three moves: stage ONE change
- * (`POST /v1/fleet/changes`), which writes nothing and answers with its preview, then apply exactly
- * that change (`POST /v1/fleet/changes/:id/apply`). A caller off the machine may owe the operator
+ * (`POST /v1/fleet/proposals`), which writes nothing and answers with its preview, then apply exactly
+ * that change (`POST /v1/fleet/proposals/:id/apply`). A caller off the machine may owe the operator
  * password; it is typed ONCE and spent on both halves it is needed for — minted into an unlock when
- * this browser is locked out, and sent as the per-change confirmation when the daemon asks for one —
- * exactly as the old fleet panel spends it (`fleet-configuration-surface.tsx`).
+ * this browser is locked out, and sent as the per-change confirmation when the daemon asks for one.
  *
  * Every tab (Runtimes, Credentials, Profiles, Components, Settings) uses this module, so the rules
  * are written once:
  *
  * - **Nothing throws.** Each call answers `applied` or `refused`, and a refusal is ONE sentence a
- *   person can read, in the daemon's own words where it gave some. While the daemon's
- *   `accountModel.enabled` switch is off every change is refused with the sentence the daemon
- *   returns — never a broken screen.
+ *   person can read, in the daemon’s own words where it gave some — never a broken screen.
  * - **The password is a parameter for the whole of its life.** It is never returned, never stored in
  *   a result, and never kept in a view's state past the click that typed it. What can be kept is the
  *   unlock token a mint produced, stamped with the daemon that minted it (`src/lib/grants.ts`).
@@ -25,30 +22,72 @@ import {
   type FleetAccountChange,
   type FleetAccountChangeOutcome,
   type FleetAccountChangeView,
+  type FleetMachineView,
   type FleetProposalApplyRequest,
+  type GrantRefusal,
   OperatorPasswordSchema,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
 import { type HeldUnlock, operatorUnlockFailure, usableUnlock } from '../../../lib/grants.ts';
 import { unlockGrants } from '../../settings/grants-api.ts';
-import { applyFleetChange, stageFleetChange } from '../catalog-api.ts';
-import { type FleetClient, readFleetPermissions } from '../fleet-api.ts';
-import { type FleetApplyAuthority, fleetApplyAuthority, fleetApplyNeedsPassword } from '../fleet-change-model.ts';
+import { applyFleetChange, readFleetMachine, stageFleetChange } from '../catalog-api.ts';
+import type { FleetClient } from '../fleet-client.ts';
 
-export type { FleetApplyAuthority } from '../fleet-change-model.ts';
+/**
+ * What this browser may do with a change on this machine, from the machine view's `authority`.
+ *
+ * ## ONE PASSWORD, TYPED AT MOST ONCE
+ *
+ * `locked` and a confirmation can both be true at the same moment: a remote caller on a machine with a
+ * password, which is locked AND owes a per-change confirmation. `locked` carries `alsoConfirms`, so the
+ * panel spends ONE typed value on both steps — mint the unlock with it, then send it as the
+ * confirmation on the apply.
+ */
+export type FleetApplyAuthority =
+  /** Apply now, and nothing else is asked. The host's own token, or a local browser that has unlocked. */
+  | { readonly kind: 'open' }
+  /** Allowed, and applying proves the operator password once against this one change. */
+  | { readonly kind: 'confirm' }
+  /** Refused until this browser unlocks, which it can do from here. */
+  | { readonly kind: 'locked'; readonly alsoConfirms: boolean }
+  /** Refused for a reason an unlock would not fix — switched off, rate-limited, an unreadable grant document. */
+  | { readonly kind: 'refused'; readonly refusal: GrantRefusal }
+  /**
+   * This browser never learned what it may do here, because the machine read itself failed.
+   *
+   * DELIBERATELY NOT `refused`: that would put a sentence about the operator's decisions on screen on
+   * the strength of no answer at all.
+   */
+  | { readonly kind: 'unreadable' };
 
-/** What this browser may change on this machine, and whether it owes the operator password. Never throws. */
+/** The machine's own answer, as the panel's authority. */
+export const fleetApplyAuthority = (authority: FleetMachineView['authority']): FleetApplyAuthority => {
+  const alsoConfirms = authority.confirmation === 'operator-password';
+  if (!authority.mayApply)
+    return authority.applyRefusal === 'locked'
+      ? { kind: 'locked', alsoConfirms }
+      : { kind: 'refused', refusal: authority.applyRefusal };
+  return alsoConfirms ? { kind: 'confirm' } : { kind: 'open' };
+};
+
+/**
+ * What this browser may change on this machine, and whether it owes the operator password. Never throws.
+ *
+ * The unlock changes the answer: a held unlock makes a loopback caller ungoverned, so the machine is
+ * asked AS the caller this browser currently is.
+ */
 export const readChangeAuthority = async (client: FleetClient, unlock?: string): Promise<FleetApplyAuthority> => {
   try {
-    return fleetApplyAuthority(await readFleetPermissions(client, unlock));
+    return fleetApplyAuthority((await readFleetMachine(client, unlock)).authority);
   } catch {
     return { kind: 'unreadable' };
   }
 };
 
 /** Whether a change on this machine asks for the operator password before it is sent. */
-export const changeNeedsPassword = (authority: FleetApplyAuthority): boolean => fleetApplyNeedsPassword(authority);
+export const changeNeedsPassword = (authority: FleetApplyAuthority): boolean =>
+  authority.kind === 'confirm' || authority.kind === 'locked';
 
 export interface ChangeAttempt {
   /** The machine the client talks to, so an unlock minted by one daemon is never shown to another. */
@@ -76,7 +115,7 @@ export type ChangeResult =
       readonly kind: 'refused';
       /** One sentence for the screen. */
       readonly sentence: string;
-      /** The daemon's refusal code, for a caller that branches on cause (`fleet_change_disabled`). */
+      /** The daemon’s refusal code, for a caller that branches on cause. */
       readonly code?: string;
       /** The typed password was wrong or is being rate-limited: retype it, nothing else changed. */
       readonly passwordRejected: boolean;

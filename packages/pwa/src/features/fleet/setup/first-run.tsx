@@ -7,8 +7,7 @@
  * change, `setup.import`, sent from the last step before Done through the shared change helper. Until
  * then nothing is imported, so Back can change any answer.
  *
- * A machine that is asleep or offline pauses the flow with its progress kept (E11); a machine whose
- * account-model switch is off says so in one sentence where the import would be sent.
+ * A machine that is asleep or offline pauses the flow with its progress kept (E11).
  */
 
 import type { FleetRuntimeView, FleetSetupScan } from '@ferretry/protocol';
@@ -119,7 +118,6 @@ function ScanGate({
         </p>
         <ChangeApplyPanel
           machineName={machineName}
-          changes={null}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}
@@ -150,7 +148,7 @@ function ScanGate({
 }
 
 export function MachineFirstRun(props: MachineFirstRunProps) {
-  const { mode, machineName, machine, connection, createClient, online, checking, onRetry, onDone, onLeave, now } =
+  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, now } =
     props;
   const access = useSetupAccess({ connection, createClient, ...(now === undefined ? {} : { now }) });
   const { changes } = access;
@@ -220,7 +218,6 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
     <div className="mt-4">
       <ChangeApplyPanel
         machineName={machineName}
-        changes={machine?.changes ?? null}
         authority={changes.authority}
         busy={changes.busy}
         refusal={changes.refusal}

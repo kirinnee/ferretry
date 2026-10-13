@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
 import { fsApi, resetFsProbes } from '../../src/components/files-api.ts';
 import { sessionReferenceSurface } from '../../src/components/reference-surface.tsx';
-import { FleetEnvironmentSettings } from '../../src/features/settings/fleet-environment-settings.tsx';
 import { SessionSearchProvider, SessionTasksSearchSurface } from '../../src/features/session-search/session-search.tsx';
 import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -69,39 +68,6 @@ const settle = async (): Promise<void> => {
 };
 
 describe('screens read a relay-only daemon through the carrier', () => {
-  it('Settings environment inspection shows the daemon its carrier reached', async () => {
-    // Arrange
-    const relay = carrier(() => Response.json({ profiles: { portable: { RELAYED: 'yes' } } }));
-
-    // Act
-    const view = await mount(
-      routed(relay.fetch, <FleetEnvironmentSettings connection={daemon} connections={[daemon]} />),
-    );
-    await settle();
-
-    // Assert
-    expect(view.container.querySelector('[role="alert"]')).toBeNull();
-    expect(view.container.textContent).toContain('RELAYED');
-    expect(relay.seen.map(row => row.pathname)).toContain('/v1/fleet/environment');
-    expect(direct).toEqual([]);
-    await view.unmount();
-  });
-
-  it('Settings environment inspection refuses an answer that is not an environment', async () => {
-    // Arrange: the old cast accepted any JSON and failed later inside the render.
-    const relay = carrier(() => Response.json({ profiles: { portable: ['RELAYED=yes'] } }));
-
-    // Act
-    const view = await mount(
-      routed(relay.fetch, <FleetEnvironmentSettings connection={daemon} connections={[daemon]} />),
-    );
-    await settle();
-
-    // Assert
-    expect(must(view.container.querySelector('[role="alert"]'), 'read error').textContent).toContain('cannot read');
-    await view.unmount();
-  });
-
   it('Tasks search reads the board, and Mark done is sent, through the carrier', async () => {
     // Arrange
     const live = {

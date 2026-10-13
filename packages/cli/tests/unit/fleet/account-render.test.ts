@@ -114,30 +114,6 @@ describe('renderChangeOutcome', () => {
       .and.match(/\/q: gone$/m);
   });
 
-  it('should report preparing a machine, whole or partial', () => {
-    should(
-      renderChangeOutcome({
-        outcome: 'applied',
-        apply: { outcome: 'initialized', created: [], kept: [], directories: [], pathEntry: 'x' },
-      }),
-    ).eql({
-      ok: true,
-      text: 'Done.',
-    });
-    const partial = renderChangeOutcome({
-      outcome: 'applied',
-      apply: {
-        outcome: 'initialization-partial',
-        reason: 'denied',
-        failedPath: '/x',
-        created: [],
-        kept: [],
-        directories: [],
-      },
-    });
-    should(partial).eql({ ok: false, text: 'Stopped at /x: denied. Run it again to finish.' });
-  });
-
   it('should report a sign-out', () => {
     should(renderChangeOutcome({ outcome: 'signed-out', credential: credential() })).eql({
       ok: true,

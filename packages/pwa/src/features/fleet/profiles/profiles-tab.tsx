@@ -22,8 +22,8 @@ import {
   RowList,
   Section,
 } from '../components/catalog-ui.tsx';
-import { itemHref, useHashItem } from '../components/machine-links.ts';
 import { counted, listed } from '../components/component-model.ts';
+import { itemHref, useHashItem } from '../components/machine-links.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
@@ -251,7 +251,7 @@ function DetailPage(props: DetailProps) {
 
 /** P6, E21: blocked while it is a base; runtimes on it pick a replacement; its components stay saved. */
 function DeletePanel(props: DetailProps & { onKeep: () => void }) {
-  const { catalog, profile, machine, machineName, online, connection, createClient, onKeep, onDeleted } = props;
+  const { catalog, profile, machineName, online, connection, createClient, onKeep, onDeleted } = props;
   const id = useId();
   const [detached, setDetached] = useState(false);
   const loops = new Set(profile.wouldIncludeItself);
@@ -344,7 +344,6 @@ function DeletePanel(props: DetailProps & { onKeep: () => void }) {
       )}
       <ChangeApplyPanel
         machineName={machineName}
-        changes={machine?.changes ?? null}
         authority={changes.authority}
         busy={changes.busy}
         refusal={changes.refusal}

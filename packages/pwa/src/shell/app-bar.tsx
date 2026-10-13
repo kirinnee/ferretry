@@ -85,11 +85,10 @@ export const UPDATE_CHIP = {
 /**
  * THERE IS NO `ACCOUNTS_ENTRY`, and its absence is the point.
  *
- * Accounts was a top-level destination here while everything it shows belongs to ONE daemon. It is
- * now Fleet's child panel inside that daemon's own settings — same level as Fleet, which this bar has
- * never carried either — so the bar offers no row for it and the palette has no keywords for it. Both
- * were deleted rather than pointed at a path that no longer resolves; `destinationExists` would have
- * dropped such a row silently, which is a worse way to find out.
+ * Accounts was a top-level destination here while everything it shows belongs to ONE machine. Logins
+ * and runtimes now live in Settings › Machines, which this bar has never carried either — so the bar
+ * offers no row for them. The row was deleted rather than pointed at a path that no longer
+ * resolves; `destinationExists` would have dropped such a row silently, which is a worse way to find out.
  */
 export const SETTINGS_ENTRY = { label: 'Settings', title: 'Open appearance and density settings' } as const;
 export const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision and verdicts' } as const;

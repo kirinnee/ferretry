@@ -18,7 +18,7 @@ import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { ClaudeLoginPanel } from '../claude-login-panel.tsx';
 import { CodexLoginPanel } from '../codex-login-panel.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../fleet-client.ts';
 import {
   type CredentialLoginFlow,
   cancelCredentialSignIn,
@@ -166,8 +166,6 @@ export function CredentialSignIn({
         </div>
         <ChangeApplyPanel
           machineName={machineName}
-          // Signing in is not an account-model change: it works while changes are switched off.
-          changes={null}
           authority={changes.authority}
           busy={busy || changes.busy}
           busyLabel="Starting sign-in…"
@@ -185,8 +183,7 @@ export function CredentialSignIn({
   };
   const common = {
     accountLabel: credentialName(credential),
-    identity: credential.id,
-    memberCount: 1,
+    loginId: credential.id,
     busy,
     refusal,
     wording,

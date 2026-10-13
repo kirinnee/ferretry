@@ -1,50 +1,32 @@
 import { describe, expect, it } from 'bun:test';
-import type { FleetManifestSummary, SessionView } from '@ferretry/protocol';
+import type { SessionView } from '@ferretry/protocol';
 
 import {
   checkAccountPickerHealth,
-  type PickerAccountHealth,
   type PickerCatalogClient,
+  pickerAccount,
   readAccountPickerCatalog,
   readAccountPickerHealth,
   recentProjectPaths,
 } from '../../src/lib/account-picker-catalog.ts';
 import { sessionView } from '../support/sessions.ts';
+import {
+  credentialList,
+  credentialStatus,
+  credentialView,
+  runtimeCatalog,
+  runtimeView,
+} from './picker-support.ts';
 
-const account = (id: string, wrapper: string): FleetManifestSummary['accounts'][number] => ({
-  id,
-  kind: wrapper.startsWith('claude') ? 'claude' : 'codex',
-  mode: 'auto',
-  wrapper,
-  home: `/accounts/${id}`,
-  displayName: wrapper === 'claude-auto-a' ? 'Claude Atelier' : 'Codex Forge',
-  defaultModel: wrapper.startsWith('claude') ? 'opus' : 'sol',
-  models: [{ id: wrapper.startsWith('claude') ? 'opus' : 'sol', available: true }],
-  available: true,
-  unavailableReason: null,
-});
+const runtimes = runtimeCatalog(
+  runtimeView({ wrapper: 'claude-auto-a', name: 'Claude Atelier' }),
+  runtimeView({ wrapper: 'codex-auto-b', name: 'Codex Forge' }),
+);
 
-const CLAUDE_ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
-const CODEX_ACCOUNT_ID = '22222222-2222-4222-8222-222222222222';
-
-const manifest: FleetManifestSummary = {
-  version: 1,
-  generatedAt: '2026-08-05T12:00:00.000Z',
-  accounts: [account(CLAUDE_ACCOUNT_ID, 'claude-auto-a'), account(CODEX_ACCOUNT_ID, 'codex-auto-b')],
-};
-
-const CHECKED_AT = Date.parse('2026-08-05T11:59:00.000Z');
-
-const healthAccount: PickerAccountHealth = {
-  accountId: CLAUDE_ACCOUNT_ID,
-  kind: 'claude',
-  verdict: 'healthy',
-  reason: 'provider_accepted',
-  evidence: 'anthropic_usage',
-  lastCheckedAt: CHECKED_AT,
-  verdictAt: CHECKED_AT,
-  lastCheckInconclusive: false,
-};
+const credentials = credentialList(
+  credentialView('login-claude-auto-a'),
+  credentialView('login-codex-auto-b', 'needs_sign_in'),
+);
 
 interface ClientFixture {
   readonly client: PickerCatalogClient;
@@ -56,15 +38,10 @@ interface ClientFixture {
 const clientFixture = (overrides: Partial<Record<string, unknown>> = {}): ClientFixture => {
   const paths: string[] = [];
   const responses: Record<string, unknown> = {
-    '/v1/fleet/accounts': manifest,
-    '/v1/fleet/health': {
-      at: Date.parse('2026-08-05T12:00:00.000Z'),
-      accounts: [healthAccount],
-    },
-    '/v1/fleet/health/check': {
-      at: Date.parse('2026-08-05T12:00:00.000Z'),
-      accounts: [healthAccount],
-    },
+    '/v1/fleet/runtimes': runtimes,
+    '/v1/fleet/credentials': credentials,
+    '/v1/fleet/credentials/login-claude-auto-a/check': credentialView('login-claude-auto-a'),
+    '/v1/fleet/credentials/login-codex-auto-b/check': credentialView('login-codex-auto-b'),
     ...overrides,
   };
   const methods: (string | undefined)[] = [];
@@ -72,8 +49,8 @@ const clientFixture = (overrides: Partial<Record<string, unknown>> = {}): Client
     paths,
     methods,
     client: {
-      // Parses through the caller's own schema, so a fixture cannot smuggle in a
-      // shape the real daemon reader would have refused — or refuse one it accepts.
+      // Parses through the caller's own schema, so a fixture cannot smuggle in a shape the real
+      // daemon reader would have refused — or refuse one it accepts.
       request: async (path, schema, init) => {
         paths.push(path);
         methods.push(init?.method);
@@ -123,172 +100,168 @@ describe('recentProjectPaths', () => {
 });
 
 describe('readAccountPickerCatalog', () => {
-  it('reads only the cheap published roster from one daemon-bound client', async () => {
+  it('reads this machine’s runtimes from one daemon-bound client', async () => {
     const fixture = clientFixture();
     const catalog = await readAccountPickerCatalog(fixture.client);
 
-    expect(fixture.paths).toEqual(['/v1/fleet/accounts']);
+    expect(fixture.paths).toEqual(['/v1/fleet/runtimes']);
+    expect(fixture.methods).toEqual([undefined]);
     expect(catalog.accounts.map(row => row.wrapper)).toEqual(['claude-auto-a', 'codex-auto-b']);
   });
 
   it('keeps a positively empty roster distinct from a rejected read', async () => {
-    const empty = clientFixture({ '/v1/fleet/accounts': { ...manifest, accounts: [] } });
+    const empty = clientFixture({ '/v1/fleet/runtimes': runtimeCatalog() });
     expect((await readAccountPickerCatalog(empty.client)).accounts).toEqual([]);
 
-    const broken = clientFixture({ '/v1/fleet/accounts': new Error('manifest damaged') });
-    await expect(readAccountPickerCatalog(broken.client)).rejects.toThrow('manifest damaged');
-    expect(broken.paths).toEqual(['/v1/fleet/accounts']);
+    const broken = clientFixture({ '/v1/fleet/runtimes': new Error('catalogue damaged') });
+    await expect(readAccountPickerCatalog(broken.client)).rejects.toThrow('catalogue damaged');
+    expect(broken.paths).toEqual(['/v1/fleet/runtimes']);
+  });
+});
+
+describe('pickerAccount', () => {
+  it('reads a runtime’s id, wrapper, name, harness, agent flag and login verbatim', () => {
+    expect(pickerAccount(runtimeView({ wrapper: 'claude-auto-a', name: 'Claude Atelier' }))).toEqual({
+      id: 'rt-claude-auto-a',
+      wrapper: 'claude-auto-a',
+      displayName: 'Claude Atelier',
+      kind: 'claude',
+      agent: true,
+      credentialId: 'login-claude-auto-a',
+      defaultModel: null,
+      models: [],
+      available: true,
+      unavailableReason: null,
+    });
+  });
+
+  it('offers a model set’s models and its resolved default', () => {
+    const account = pickerAccount(
+      runtimeView({
+        wrapper: 'claude-auto-a',
+        modelSet: {
+          source: 'model-set',
+          name: 'Claude models',
+          models: [
+            { id: 'opus', available: true },
+            { id: 'haiku', available: false },
+          ],
+          declaredDefault: 'opus',
+          default: 'opus',
+        },
+      }),
+    );
+    expect(account.defaultModel).toBe('opus');
+    expect(account.models).toEqual([
+      { id: 'opus', available: true },
+      { id: 'haiku', available: false },
+    ]);
+  });
+
+  it('leaves the default blank when the login can use none of a set’s models', () => {
+    const account = pickerAccount(
+      runtimeView({
+        wrapper: 'claude-auto-a',
+        modelSet: {
+          source: 'model-set',
+          name: 'Claude models',
+          models: [{ id: 'opus', available: false }],
+          declaredDefault: 'opus',
+        },
+      }),
+    );
+    expect(account.defaultModel).toBeNull();
+  });
+
+  it('carries the machine’s own reason a runtime cannot launch', () => {
+    const account = pickerAccount(
+      runtimeView({ wrapper: 'claude-auto-a', launch: { available: false, reason: 'Sign in to launch' } }),
+    );
+    expect(account).toMatchObject({ available: false, unavailableReason: 'Sign in to launch' });
   });
 });
 
 describe('readAccountPickerHealth', () => {
-  it('reads the stored snapshot with a plain GET', async () => {
-    // Arrange / Act
+  it('reads every login’s status with a plain GET, keyed by credential id', async () => {
     const fixture = clientFixture();
     const result = await readAccountPickerHealth(fixture.client);
 
-    // Assert — A GET, and only a GET. That is the whole reason the store may now hydrate this on
-    // mount: the daemon answers it from its own file and checks nothing to do so. The reader that
-    // COLLECTS is a different function on a different verb, below.
-    expect(fixture.paths).toEqual(['/v1/fleet/health']);
+    // A GET, and only a GET: the daemon calls no provider to answer it, so the store may hydrate it on
+    // mount. The reader that CHECKS is a different function on a different verb, below.
+    expect(fixture.paths).toEqual(['/v1/fleet/credentials']);
     expect(fixture.methods).toEqual([undefined]);
     expect(result.error).toBeNull();
-    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.verdict).toBe('healthy');
+    expect(result.health.get('login-claude-auto-a')).toMatchObject({ credentialId: 'login-claude-auto-a', word: 'ready' });
+    expect(result.health.get('login-codex-auto-b')?.word).toBe('needs_sign_in');
   });
 
-  it('carries the never-checked case through as null rather than an instant', async () => {
-    // Arrange
+  it('refuses a status word this build does not have', async () => {
     const fixture = clientFixture({
-      '/v1/fleet/health': {
-        at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [
-          { ...healthAccount, verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null },
-        ],
+      '/v1/fleet/credentials': {
+        ...credentials,
+        credentials: [{ ...credentialView('login-claude-auto-a'), status: { ...credentialStatus(), word: 'fine' } }],
       },
     });
-
-    // Act
-    const result = await readAccountPickerHealth(fixture.client);
-
-    // Assert — the schema this replaced required a number, so this case arrived as a fabricated "now"
-    // and was indistinguishable from a check that had just succeeded.
-    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.lastCheckedAt).toBeNull();
-  });
-
-  it('accepts the stale marker so a reader can be told what the verdict WAS', async () => {
-    // Arrange
-    const fixture = clientFixture({
-      '/v1/fleet/health': {
-        at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [{ ...healthAccount, verdict: 'unknown', reason: 'stale', staleVerdict: 'healthy' }],
-      },
-    });
-
-    // Act
-    const result = await readAccountPickerHealth(fixture.client);
-
-    // Assert
-    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.staleVerdict).toBe('healthy');
-  });
-
-  it('keeps a snapshot whose harness kind this build has never heard of', async () => {
-    const unfamiliar: PickerAccountHealth = { ...healthAccount, accountId: CODEX_ACCOUNT_ID, kind: 'gemini' };
-    const fixture = clientFixture({
-      '/v1/fleet/health': {
-        at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [healthAccount, unfamiliar],
-      },
-    });
-    const result = await readAccountPickerHealth(fixture.client);
-
-    expect(result.error).toBeNull();
-    expect(result.health.get(CODEX_ACCOUNT_ID)).toEqual(unfamiliar);
-    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.verdict).toBe('healthy');
-  });
-
-  it('still refuses a health row with no harness kind at all', async () => {
-    const fixture = clientFixture({
-      '/v1/fleet/health': {
-        at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [{ ...healthAccount, kind: '' }],
-      },
-    });
-
     await expect(readAccountPickerHealth(fixture.client)).rejects.toThrow();
-  });
-
-  it('refuses a verdict this build does not have words for', async () => {
-    // Arrange — the copy table is exhaustive over the enum, so an unknown member would render as
-    // `undefined` on screen rather than failing loudly here.
-    const fixture = clientFixture({
-      '/v1/fleet/health': {
-        at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [{ ...healthAccount, verdict: 'probably_fine' }],
-      },
-    });
-
-    // Act / Assert
-    await expect(readAccountPickerHealth(fixture.client)).rejects.toThrow();
-  });
-
-  it('drops every duplicate account row while preserving unambiguous evidence', async () => {
-    const codexHealth: PickerAccountHealth = {
-      ...healthAccount,
-      accountId: CODEX_ACCOUNT_ID,
-      kind: 'codex',
-      verdict: 'unknown',
-      reason: 'codex_liveness_unproven',
-      evidence: 'none',
-      verdictAt: null,
-    };
-    const fixture = clientFixture({
-      '/v1/fleet/health': {
-        at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [
-          healthAccount,
-          { ...healthAccount, verdict: 'needs_relogin', reason: 'oauth_token_rejected' },
-          healthAccount,
-          codexHealth,
-        ],
-      },
-    });
-    const result = await readAccountPickerHealth(fixture.client);
-
-    expect(result.health.has(CLAUDE_ACCOUNT_ID)).toBeFalse();
-    expect(result.health.get(CODEX_ACCOUNT_ID)).toEqual(codexHealth);
-    expect(result.error).toContain('ambiguous');
   });
 });
 
 describe('checkAccountPickerHealth', () => {
-  it('POSTs to the check route and answers with the snapshot', async () => {
-    // Arrange / Act
+  it('reads the list, then POSTs one check per login that offers one', async () => {
     const fixture = clientFixture();
     const result = await checkAccountPickerHealth(fixture.client);
 
-    // Assert — a POST because it RECORDS a reading, on a different path from the read. Two functions
-    // rather than one with a flag: a boolean parameter would put "does this write" behind a call-site
-    // argument, which is the shape that let a read reach a spending probe before.
-    expect(fixture.paths).toEqual(['/v1/fleet/health/check']);
-    expect(fixture.methods).toEqual(['POST']);
-    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.verdict).toBe('healthy');
+    expect(fixture.paths).toEqual([
+      '/v1/fleet/credentials',
+      '/v1/fleet/credentials/login-claude-auto-a/check',
+      '/v1/fleet/credentials/login-codex-auto-b/check',
+    ]);
+    expect(fixture.methods).toEqual([undefined, 'POST', 'POST']);
+    expect(result.error).toBeNull();
+    // The check's own answer replaces what the list read.
+    expect(result.health.get('login-codex-auto-b')?.word).toBe('ready');
   });
 
-  it('applies the same duplicate-row rule as the read', async () => {
-    // Arrange — one parser, one ambiguity rule. Two would eventually disagree about whether a damaged
-    // response is safe to render.
+  it('skips a login the machine offers no check for', async () => {
     const fixture = clientFixture({
-      '/v1/fleet/health/check': {
-        at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [healthAccount, healthAccount],
-      },
+      '/v1/fleet/credentials': credentialList(
+        credentialView('login-claude-auto-a'),
+        credentialView('login-env', 'ready', { checkNow: { available: false, reason: 'From the environment' } }),
+      ),
     });
-
-    // Act
     const result = await checkAccountPickerHealth(fixture.client);
 
-    // Assert
-    expect(result.health.has(CLAUDE_ACCOUNT_ID)).toBeFalse();
-    expect(result.error).toContain('ambiguous');
+    expect(fixture.paths).toEqual(['/v1/fleet/credentials', '/v1/fleet/credentials/login-claude-auto-a/check']);
+    expect(result.health.get('login-env')?.word).toBe('ready');
+  });
+
+  it('keeps the listed status for a login whose check failed, and says why beside the rows', async () => {
+    const fixture = clientFixture({
+      '/v1/fleet/credentials/login-codex-auto-b/check': new Error('the operator password is needed'),
+    });
+    const result = await checkAccountPickerHealth(fixture.client);
+
+    expect(result.health.get('login-claude-auto-a')?.word).toBe('ready');
+    expect(result.health.get('login-codex-auto-b')?.word).toBe('needs_sign_in');
+    expect(result.error).toBe('the operator password is needed');
+  });
+
+  it('names a failure that is not an Error in words', async () => {
+    const fixture = clientFixture();
+    const original = fixture.client.request;
+    const client: PickerCatalogClient = {
+      request: async (path, schema, init) => {
+        if (path.endsWith('/check')) throw 'refused';
+        return await original(path, schema, init);
+      },
+    };
+    const result = await checkAccountPickerHealth(client);
+
+    expect(result.error).toBe('refused; refused');
+  });
+
+  it('fails as a whole when the list itself cannot be read', async () => {
+    const fixture = clientFixture({ '/v1/fleet/credentials': new Error('machine asleep') });
+    await expect(checkAccountPickerHealth(fixture.client)).rejects.toThrow('machine asleep');
   });
 });

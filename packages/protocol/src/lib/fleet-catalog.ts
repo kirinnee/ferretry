@@ -6,21 +6,20 @@
  *
  * ## Reads
  *
- * - `GET /v1/fleet/machine` — Agent permissions, the harness tools, whether it is set up, and whether
- *   it accepts changes yet.
+ * - `GET /v1/fleet/machine` — Agent permissions, the harness tools, whether it is set up, and what
+ *   THIS caller may do to it (its authority).
  * - `GET /v1/fleet/components` — the six kinds, each component with its badges and "used by".
- * - `GET /v1/fleet/profile-stacks` — every profile with its layers, its flattened stack per harness and
- *   its conflicts. (The design names `/v1/fleet/profiles`; the old Accounts screen still reads that
- *   path until it is retired, so this read has its own.)
- * - `POST /v1/fleet/profile-stacks/preview` — a profile's layers before they are saved, resolved the
+ * - `GET /v1/fleet/profiles` — every profile with its layers, its flattened stack per harness and
+ *   its conflicts.
+ * - `POST /v1/fleet/profiles/preview` — a profile's layers before they are saved, resolved the
  *   same way. It is a read with a body: it writes nothing.
  * - `GET /v1/fleet/runtimes` — each runtime with its resolved stack, model set, fixed layer and whether
  *   it can launch.
  *
  * ## Changes
  *
- * `POST /v1/fleet/changes` stages ONE change and writes nothing; `GET /v1/fleet/changes/:id` reads it
- * back; `POST /v1/fleet/changes/:id/apply` applies exactly what was previewed, with the operator
+ * `POST /v1/fleet/proposals` stages ONE change and writes nothing; `GET /v1/fleet/proposals/:id` reads
+ * it back; `POST /v1/fleet/proposals/:id/apply` applies exactly what was previewed, with the operator
  * password for a caller off this machine. A caller never sends a configuration document: it names one
  * intent, and the daemon derives the next configuration from the current one.
  *
@@ -36,6 +35,7 @@ import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import {
   FleetApplyOutcomeSchema,
+  FleetChangeConfirmationSchema,
   FleetDocumentSummarySchema,
   FleetProposalIdSchema,
   FleetWriteOperationSchema,
@@ -45,6 +45,7 @@ import {
   FleetCredentialStatusWordSchema,
   FleetCredentialViewSchema,
 } from './fleet-credentials.ts';
+import { GrantRefusalSchema } from './grants.ts';
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
@@ -67,8 +68,8 @@ export const FleetComponentNameSchema = z
 export const FleetComponentKindSchema = z.enum(['instructions', 'mcp', 'skills', 'settings', 'hooks', 'modelSets']);
 export type FleetComponentKind = z.infer<typeof FleetComponentKindSchema>;
 
-/** Which configuration this machine has: none yet, the old account format, or the account model. */
-export const FleetCatalogFormatSchema = z.enum(['none', 'version-1', 'version-2']);
+/** Which configuration this machine has: none yet, or the account model. */
+export const FleetCatalogFormatSchema = z.enum(['none', 'version-2']);
 export type FleetCatalogFormat = z.infer<typeof FleetCatalogFormatSchema>;
 
 /** Whether an act is offered, and why not when it is not. */
@@ -90,6 +91,29 @@ export const FleetMachineToolSchema = z.strictObject({
 });
 export type FleetMachineTool = z.infer<typeof FleetMachineToolSchema>;
 
+/**
+ * What THIS caller may do to this machine, read before a surface offers a control it cannot use.
+ *
+ * IT IS THE CAPABILITY LAYER'S ANSWER, not a second one. `mayApply` is `fleet.configure` as the
+ * operator's grants decided it for this request (reading the machine is itself `fleet.use`, so
+ * inspecting and proposing are implied), and `confirmation` says whether applying will ask for the
+ * operator password once more.
+ */
+export const FleetMachineAuthoritySchema = z.strictObject({
+  /** `fleet.configure` for this caller, as the operator's grants decided it. */
+  mayApply: z.boolean(),
+  /**
+   * WHY `mayApply` reads the way it does, in the SHARED grant vocabulary. Carried rather than left
+   * to be inferred, because `false` has four different remedies — `not-granted` is a decision
+   * somebody made, `locked` is a password the reader may already have, `rate-limited` is a wait,
+   * and `undetermined` is a broken document.
+   */
+  applyRefusal: GrantRefusalSchema,
+  /** What applying will additionally ask for, so a panel can say so before somebody clicks. */
+  confirmation: FleetChangeConfirmationSchema,
+});
+export type FleetMachineAuthority = z.infer<typeof FleetMachineAuthoritySchema>;
+
 export const FleetMachineViewSchema = z.strictObject({
   name: NonEmptyStringSchema,
   format: FleetCatalogFormatSchema,
@@ -99,8 +123,8 @@ export const FleetMachineViewSchema = z.strictObject({
   tools: z.array(FleetMachineToolSchema).readonly(),
   runtimeCount: NonNegativeIntegerSchema,
   runningSessions: NonNegativeIntegerSchema,
-  /** Whether this machine accepts account-model changes now, and why not when it does not. */
-  changes: FleetCatalogActSchema,
+  /** What this caller may do here. A caller that unlocked reads its unlocked authority. */
+  authority: FleetMachineAuthoritySchema,
 });
 export type FleetMachineView = z.infer<typeof FleetMachineViewSchema>;
 
@@ -265,7 +289,7 @@ export const FleetLayeredProfileCatalogSchema = z.strictObject({
 export type FleetLayeredProfileCatalog = z.infer<typeof FleetLayeredProfileCatalogSchema>;
 
 /**
- * `POST /v1/fleet/profile-stacks/preview`: a profile's layers as the builder has them, before it is
+ * `POST /v1/fleet/profiles/preview`: a profile's layers as the builder has them, before it is
  * named or saved. Writes nothing.
  */
 export const FleetProfileDraftRequestSchema = z.strictObject({
@@ -321,7 +345,11 @@ export const FleetFixedLayerViewSchema = z.strictObject({
 export type FleetFixedLayerView = z.infer<typeof FleetFixedLayerViewSchema>;
 
 export const FleetRuntimeViewSchema = z.strictObject({
+  /** The runtime's stable id: the same id the manifest's account row and a session's account carry. */
+  id: NonEmptyStringSchema,
   name: NonEmptyStringSchema,
+  /** The command name `fy start --agent` takes: the manifest account row's `wrapper`. */
+  wrapper: NonEmptyStringSchema,
   harness: HarnessKindSchema,
   credential: z.strictObject({
     id: NonEmptyStringSchema,
@@ -557,7 +585,6 @@ export type FleetAccountChangeOutcome = z.infer<typeof FleetAccountChangeOutcome
 /** Every refusal the catalogue and its changes answer with, so a client branches on cause. */
 export const FLEET_CATALOG_REFUSAL_CODES = [
   'fleet_catalog_unreadable',
-  'fleet_change_disabled',
   'fleet_change_refused',
   'fleet_change_unknown',
   'fleet_change_expired',

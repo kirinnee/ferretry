@@ -17,7 +17,7 @@
 #                  without this pass ever guessing at the expression that made it unreadable. Pay one off
 #                  by making the verb readable at the dial, never by editing the line.
 #
-# 32 LINES AT SEEDING, 39 NOW, after peaking at 52. Every added line exposed an address the old list
+# 32 LINES AT SEEDING, 26 NOW, after peaking at 52. Every added line exposed an address the old list
 # could not hold anybody to; later fixes then paid thirteen exact exemptions back. The peak arithmetic
 # stays here so that temporary growth cannot be quoted as a relaxation:
 #
@@ -41,6 +41,9 @@
 #   -13 Subsequent fixes made the previously hidden facts readable or aligned the two ends. Nine of
 #       those are this task-board correction: all twelve gateway arms now state their literal method,
 #       retiring every task-board `verb-unproven` line.
+#   -4  The old account routes were deleted (U21) — `GET /v1/fleet/plan`, `GET /v1/fleet/usage`,
+#       `PUT /v1/fleet/environment` and `POST /v1/fleet/apply` with them, the last two of which were
+#       the defect and the dead write this list had been holding open.
 #
 # The rule is unchanged: a new mismatch fails, a stale line fails, and the list may only shrink.
 #
@@ -81,13 +84,6 @@ unreached GET /usage # CORRECT: public usage feed for external readers
 unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
 
 # Surfaces with no shipped client yet. Each is a route somebody built and nobody wired.
-unreached GET /v1/fleet/plan # no client dials it; `fy fleet plan` computes locally
-unreached GET /v1/fleet/usage # no client dials it
-# Found by reading the verb of the call a `new URL(…)` is handed to. The PWA's environment settings
-# surface GETs this address and nothing anywhere WRITES it; while the verb was unreadable, that one
-# read-only dial answered for both routes and the write side looked reached.
-unreached PUT /v1/fleet/environment # DEFECT: the PWA only reads it; no client writes the fleet environment
-unreached POST /v1/fleet/apply # no client dials it; `fy fleet apply` writes locally
 unreached GET /v1/sessions/:sessionId/attachments/:attachmentId # no client asks for attachment metadata alone; list and content paths are the shipped surface
 unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes TerminalView rows from the list/create responses; no client asks for detail alone
 unreached POST /v1/sessions/:sessionId/terminals/:terminalId # DEFECT: the daemon serves rename as POST while the only client uses PATCH

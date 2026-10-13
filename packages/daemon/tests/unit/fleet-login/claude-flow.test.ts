@@ -33,18 +33,15 @@ const URL_LINE = `If the browser didn't open, visit: ${ESC}]8;;${CLAUDE_URL}${BE
 
 const BASE = {
   flowId: 'flow-one',
-  accountId: '00000000-0000-4000-8000-000000000001',
+  credentialId: 'claude-kirin',
   identity: 'claude:kirin',
   startedAt: '2026-08-19T10:00:00.000Z',
   expiresAt: '2026-08-19T10:10:00.000Z',
 } satisfies HarnessLoginFlowBase;
 
 const awaiting: ClaudeLoginStage = { stage: 'awaiting-code', verificationUrl: CLAUDE_URL };
-const complete: ClaudeLoginStage = {
-  stage: 'complete',
-  accounts: [{ accountId: BASE.accountId, status: 'logged-in' }],
-};
-const failed: ClaudeLoginStage = { stage: 'failed', reason: 'the child exited', remedy: 'run `fy fleet login`' };
+const complete: ClaudeLoginStage = { stage: 'complete' };
+const failed: ClaudeLoginStage = { stage: 'failed', reason: 'the child exited', remedy: 'run `fy credential signin claude-kirin`' };
 
 describe('Claude’s own login argv', () => {
   it('should launch the subcommand verified to work with piped stdio, not the slash command', () => {
@@ -223,7 +220,7 @@ describe('claudeProjection', () => {
     should(actual).deepEqual({ harness: 'claude', ...BASE, state: 'starting' });
   });
 
-  it('should carry the fleet’s per-account outcomes when it finishes', () => {
+  it('should say it finished and carry no per-account outcomes', () => {
     // Act
     const actual = claudeProjection(BASE, complete);
 
@@ -232,7 +229,6 @@ describe('claudeProjection', () => {
       harness: 'claude',
       ...BASE,
       state: 'complete',
-      accounts: [{ accountId: BASE.accountId, status: 'logged-in' }],
     });
   });
 
@@ -246,7 +242,7 @@ describe('claudeProjection', () => {
       ...BASE,
       state: 'failed',
       reason: 'the child exited',
-      remedy: 'run `fy fleet login`',
+      remedy: 'run `fy credential signin claude-kirin`',
     });
   });
 

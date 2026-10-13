@@ -6,18 +6,16 @@
  * their raw shapes into option records a combobox can render and search
  * without re-deriving any of that discipline itself.
  *
- * ACCOUNTS. `accountPickerOptions` takes the manifest roster, the cached
- * quota feed and the explicit health map as THREE SEPARATE inputs, because
+ * RUNTIMES. `accountPickerOptions` takes the machine's runtimes, the cached
+ * quota feed and the login health map as THREE SEPARATE inputs, because
  * they are three independent reads with three independent failure modes:
- * automatic hydration reads only the published manifest, quota rides the
- * existing cached `/v1/usage` feed (keyed by wrapper — `UsageAccountView.agent`
- * — because that feed predates the manifest's stable account id), and the
- * expensive wrapper health probe runs only after an explicit reader action.
- * Options are still joined onto each *account* correctly: quota by
- * `account.wrapper`, health by `account.id`. A missing quota or health row
- * stays missing on the option (`null`), never a zero or a healthy guess. An
- * unreadable roster projects to `null`; a positively empty one projects to
- * `[]`.
+ * the runtimes are `GET /v1/fleet/runtimes`, quota rides the existing cached
+ * `/v1/usage` feed (keyed by wrapper — `UsageAccountView.agent`), and health
+ * is each login's status word from `GET /v1/fleet/credentials`. Options are
+ * joined onto each runtime: quota by `wrapper`, health by `credentialId`. A
+ * missing quota or health row stays missing on the option (`null`), never a
+ * zero or a healthy guess. An unreadable roster projects to `null`; a
+ * positively empty one projects to `[]`.
  *
  * PROJECTS. `projectPickerOptions` answers two questions with one call:
  * which folders has this daemon deliberately registered, and which OTHER
@@ -61,7 +59,7 @@ export type AccountUsageRow = Pick<
 >;
 
 export interface AccountPickerOption {
-  /** Stable option identity: the manifest account id. */
+  /** Stable option identity: the runtime's id. */
   readonly key: string;
   /** The value a caller types as `agent` when starting or migrating a session. */
   readonly value: string;
@@ -69,28 +67,29 @@ export interface AccountPickerOption {
   readonly wrapper: string;
   readonly displayName: string;
   readonly kind: PickerAccount['kind'];
-  readonly mode: PickerAccount['mode'];
+  /** An agent runtime: the only kind the daemon starts a session on. */
+  readonly agent: boolean;
+  /** The login it uses; its health is that login's status. */
+  readonly credentialId: string;
   readonly defaultModel: string | null;
   readonly models: PickerAccount['models'];
   readonly available: boolean;
   readonly unavailableReason: string | null;
   /** The cached quota row joined by `wrapper`, or `null` when the feed has none. */
   readonly quota: AccountUsageRow | null;
-  /** The explicit health row joined by `id`, or `null` until a reader checks it. */
+  /** The login's status joined by `credentialId`, or `null` while it is unread. */
   readonly health: PickerAccountHealth | null;
   /** Lowercased haystack: display name, harness, wrapper, default model, declared model ids. */
   readonly searchText: string;
 }
 
 /**
- * How a person reads one account: the name its fleet gave it — the one
- * `fy fleet ls` prints — and, beneath it, the wrapper id a session is started
- * with.
+ * How a person reads one runtime: its name — the one the Runtimes tab shows —
+ * and, beneath it, the wrapper a session is started with.
  *
  * The id is plumbing. It stays reachable because it IS the submitted value and
- * two accounts can share a display name, but it never leads. When the fleet gave
- * no separate name the manifest publishes the id as the name, and printing it
- * twice adds nothing, so `id` is then `null`. Both halves are wire fields read
+ * two runtimes can share a display name, but it never leads. When the wrapper is
+ * the name, printing it twice adds nothing, so `id` is then `null`. Both halves are wire fields read
  * verbatim: nothing here derives a name from an id's spelling.
  *
  * Every surface that names an offered account — the closed box, each row, the
@@ -144,18 +143,19 @@ const accountPickerOption = (
   wrapper: account.wrapper,
   displayName: account.displayName,
   kind: account.kind,
-  mode: account.mode,
+  agent: account.agent,
+  credentialId: account.credentialId,
   defaultModel: account.defaultModel,
   models: account.models,
   available: account.available,
   unavailableReason: account.unavailableReason,
   quota: usage.find(row => row.agent === account.wrapper) ?? null,
-  health: health?.get(account.id) ?? null,
+  health: health?.get(account.credentialId) ?? null,
   searchText: accountSearchText(account),
 });
 
 /**
- * One option per manifest account, in the daemon's own order. `null` when
+ * One option per runtime, in the daemon's own order. `null` when
  * the roster itself could not be read — distinct from a positively empty
  * fleet, which projects to `[]`. Unavailable accounts stay in the list as
  * disabled options carrying their `unavailableReason`; a caller decides how
@@ -181,26 +181,39 @@ export const sameHarnessAccountOptions = (
   options === null ? null : options.filter(option => option.kind === harness);
 
 /**
- * Narrow to the accounts the daemon can run a session on: the manifest's `auto`
- * accounts. An `interactive` account is for a person at a terminal, and the
- * daemon refuses to start a session on it in either session mode, so offering
- * it only sets up a refusal. Read from the manifest's own `mode` field — never
- * from the wrapper's spelling, which is the operator's to choose. An unreadable
- * roster stays unreadable.
+ * Narrow to the runtimes the daemon can run a session on: its AGENT runtimes. A runtime without the
+ * agent flag is the person's own CLI, and offering it only sets up a refusal. Read from the runtime's
+ * own `agent` flag — never from the wrapper's spelling. An unreadable roster stays unreadable.
  */
 export const sessionCapableAccountOptions = (
   options: readonly AccountPickerOption[] | null,
 ): readonly AccountPickerOption[] | null =>
-  options === null ? null : options.filter(option => option.mode === 'auto');
+  options === null ? null : options.filter(option => option.agent);
 
 /**
  * The account a new-session form fills in before anybody chooses: the first one
- * offered that the manifest says is available, in the daemon's own order. `null`
+ * offered that the machine says can launch, in the daemon's own order. `null`
  * when nothing offered is usable — the form then leaves the box empty rather than
  * pre-filling a row that would be refused.
  */
 export const firstUsableAccountOption = (options: readonly AccountPickerOption[] | null): AccountPickerOption | null =>
   options?.find(option => option.available) ?? null;
+
+/**
+ * The runtime a launch hint names (`?agent=<name>`), by wrapper or by runtime name, honoured only
+ * when it is offered AND can launch — a hint never pre-fills a row the daemon would refuse.
+ */
+export const hintedAccountOption = (
+  options: readonly AccountPickerOption[] | null,
+  hint: string | undefined,
+): AccountPickerOption | null =>
+  hint === undefined
+    ? null
+    : (options?.find(option => option.available && (option.wrapper === hint || option.displayName === hint)) ?? null);
+
+/** How a harness reads on screen. */
+export const fleetHarnessLabel = (harness: PickerAccount['kind']): 'Claude' | 'Codex' =>
+  harness === 'claude' ? 'Claude' : 'Codex';
 
 /** The option for a chosen wrapper, or `null` when it is absent or the roster is unread. */
 export const findAccountOption = (

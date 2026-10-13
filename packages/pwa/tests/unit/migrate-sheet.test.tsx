@@ -20,6 +20,7 @@ import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
+import { pickerHealth } from './picker-support.ts';
 
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
@@ -520,34 +521,32 @@ describe('MigrateSheet', () => {
 const pickerAccount = (overrides: Partial<PickerAccount> = {}): PickerAccount => ({
   id: '11111111-1111-4111-8111-111111111111',
   kind: 'codex',
-  mode: 'auto',
+  agent: true,
   wrapper: 'codex-auto-loge',
-  home: '/homes/codex-auto-loge',
   displayName: 'Loge Codex',
   defaultModel: 'gpt-5.6-sol[1m]',
   models: [{ id: 'gpt-5.6-sol[1m]', available: true }],
   available: true,
   unavailableReason: null,
   ...overrides,
+  credentialId: overrides.credentialId ?? `login-${overrides.wrapper ?? 'codex-auto-loge'}`,
 });
 
 const atomi = pickerAccount({
   id: '22222222-2222-4222-8222-222222222222',
   wrapper: 'codex-auto-atomi',
-  home: '/homes/codex-auto-atomi',
   displayName: 'Atomi Codex',
   defaultModel: 'gpt-5.6-terra',
   models: [
     { id: 'gpt-5.6-terra', available: true },
     { id: 'gpt-5.6-sol', available: true },
-    { id: 'gpt-5.5-legacy', available: false, unavailableReason: 'withdrawn from this account' },
+    { id: 'gpt-5.5-legacy', available: false },
   ],
 });
 
 const archived = pickerAccount({
   id: '33333333-3333-4333-8333-333333333333',
   wrapper: 'codex-auto-archive',
-  home: '/homes/codex-auto-archive',
   displayName: 'Archive Codex',
   defaultModel: null,
   models: [],
@@ -559,7 +558,6 @@ const otherHarness = pickerAccount({
   id: '44444444-4444-4444-8444-444444444444',
   kind: 'claude',
   wrapper: 'claude-auto-loge',
-  home: '/homes/claude-auto-loge',
   displayName: 'Loge Claude',
   defaultModel: 'claude-opus-5',
   models: [{ id: 'claude-opus-5', available: true }],
@@ -591,17 +589,8 @@ const roster = (catalog: DaemonAccountPickerPort['catalog'] = async () => ({ acc
   const snapshot = {
     health: new Map([
       [
-        atomi.id,
-        {
-          accountId: atomi.id,
-          kind: 'codex' as const,
-          verdict: 'healthy' as const,
-          reason: 'provider_accepted' as const,
-          evidence: 'anthropic_usage' as const,
-          lastCheckedAt: 1,
-          verdictAt: 1,
-          lastCheckInconclusive: false,
-        },
+        atomi.credentialId,
+        pickerHealth(atomi.credentialId, 'ready', { lastCheckedAt: new Date(1).toISOString() }),
       ],
     ]),
     error: null,

@@ -1,17 +1,16 @@
 import { describe, it } from 'bun:test';
 import { accessSync, constants as fsConstants } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  buildFleetScaffold,
-  FleetPlan,
+  EMPTY_RUNTIME_IDS,
   type FleetLayout,
-  type FleetScaffoldIds,
-  fleetScaffoldIds,
-  FleetConfigSchema,
+  materialiseFleet,
+  parseAccountModel,
+  SharedHistoryMigration,
 } from '@ferretry/fleet';
-import { FileFleetProvisioner, FileFleetScaffolder } from '@ferretry/fleet/adapters';
+import { FileFleetProvisioner, FileSharedHistoryFileSystem } from '@ferretry/fleet/adapters';
 import should from 'should';
 import { ManifestAccountInventory } from '../../../src/adapters/core/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
@@ -32,28 +31,22 @@ import {
  * the released daemon reported "the fleet manifest publishes no account for either" about a file
  * `fy fleet ls` listed a provisioned, available account from.
  *
- * So this test owns neither shape. It runs the REAL provisioner over a real state home and then
- * points the REAL daemon inventory at the file that run produced. Nothing here writes a manifest,
- * and nothing here describes one — which is the only arrangement in which the two cannot disagree
- * while both pass.
- *
- * It fails on `main`: the inventory answers an empty fleet for this exact file.
+ * So this test owns neither shape. It runs the REAL account-model apply — `materialiseFleet` deciding
+ * and the real provisioner writing — over a real state home, and then points the REAL daemon inventory
+ * at the file that run produced. Nothing here writes a manifest, and nothing here describes one, which
+ * is the only arrangement in which the two cannot disagree while both pass.
  */
 
-const CONFIG = (kind: string, ids: FleetScaffoldIds): string => `agents:
-  - name: primary
-    kind: ${kind}
-    auth: oauth
-    routes:
-      default:
-        id: ${kind === 'claude' ? ids.accounts.claude.default : ids.accounts.codex.default}
-        wrapper: ${kind}-primary
-        home: ${kind}-primary
-        displayName: ${kind} (primary)
-        defaultModel: a-model
-        models:
-          - a-model
-`;
+const RUNTIME_ID = '00000000-0000-4000-8000-0000000000c1';
+
+/** One Claude runtime on a Ferretry-kept login, with the one model its profile names. */
+const MODEL = parseAccountModel({
+  version: 2,
+  credentials: { 'claude-primary': { harness: 'claude', store: 'ferretry' } },
+  components: { modelSets: { claude: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } } },
+  profiles: { default: { layers: ['modelSets/claude'] } },
+  runtimes: { 'claude-primary': { credential: 'claude-primary', profile: 'default' } },
+});
 
 /** This host, as the daemon asks about it: can it run the exact file the manifest publishes? */
 const thisHost: ExecutableResolverPort = {
@@ -75,45 +68,47 @@ const thisHost: ExecutableResolverPort = {
  * where the daemon looks — the second half of the agreement, and one an assertion below states
  * outright rather than trusting.
  */
-function layoutFor(home: string): { readonly layout: FleetLayout; readonly manifestPath: string } {
+function layoutFor(home: string): FleetLayout {
   const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
   return {
+    stateHome: paths.home,
+    userHome: home,
+    fleetDirectory: paths.fleet,
+    binDirectory: join(paths.fleet, 'bin'),
+    homesDirectory: join(paths.fleet, 'homes'),
+    assetsDirectory: join(paths.fleet, 'assets'),
     manifestPath: paths.fleetManifest,
-    layout: {
-      stateHome: paths.home,
-      userHome: home,
-      fleetDirectory: paths.fleet,
-      binDirectory: join(paths.fleet, 'bin'),
-      homesDirectory: join(paths.fleet, 'homes'),
-      assetsDirectory: join(paths.fleet, 'assets'),
-      manifestPath: paths.fleetManifest,
-      defaultHomeDirectories: { claude: join(home, '.claude'), codex: join(home, '.codex') },
-    },
+    defaultHomeDirectories: { claude: join(home, '.claude'), codex: join(home, '.codex') },
   };
 }
 
-/** `fy fleet init --first-account` then `fy fleet apply`, through the code both commands run. */
+/** `fleet apply`, through the code it runs: plan the account model, then write the plan. */
 async function provision(home: string): Promise<{ readonly manifestPath: string }> {
-  const { layout, manifestPath } = layoutFor(home);
-  let minted = 0;
-  const ids: FleetScaffoldIds = fleetScaffoldIds(() => `00000000-0000-4000-8000-0000000000c${String(++minted)}`);
-  const configPath = join(layout.fleetDirectory, 'config.yaml');
-  await new FileFleetScaffolder([layout.stateHome, home]).scaffold(
-    buildFleetScaffold({ layout, ids, configPath, firstAccounts: ['claude'] }),
-  );
-  // The starter template is the product's, not this test's: the account below is written over it in
-  // the same shape `--first-account` produces, with a neutral model so no catalog is smuggled in.
-  await Bun.write(configPath, CONFIG('claude', ids));
-  const config = FleetConfigSchema.parse(Bun.YAML.parse(await Bun.file(configPath).text()));
-  const plan = new FleetPlan().build(config, layout, '2027-01-15T08:00:00.000Z');
-  await new FileFleetProvisioner([layout.stateHome, home]).apply(plan);
-  return { manifestPath };
+  const layout = layoutFor(home);
+  const plan = materialiseFleet({
+    model: MODEL,
+    layout,
+    ids: EMPTY_RUNTIME_IDS,
+    mint: () => RUNTIME_ID,
+    generatedAt: '2027-01-15T08:00:00.000Z',
+    claudeStatusline: () => "'fy' statusline",
+    fyCommand: join(home, 'no-such-fy'),
+    acceptsAutoPermissionMode: true,
+  });
+  const roots = [layout.stateHome, home];
+  await new FileFleetProvisioner(roots, new SharedHistoryMigration(new FileSharedHistoryFileSystem(roots))).apply(plan);
+  return { manifestPath: plan.manifestPath };
+}
+
+/** A temporary home, canonical so a path compared against it is not `/var` against `/private/var`. */
+async function temporaryHome(): Promise<string> {
+  return await realpath(await mkdtemp(join(tmpdir(), 'ferretry-agreement-')));
 }
 
 describe('fleet apply and the daemon inventory', () => {
-  it('should let the daemon read the account a real apply published', async () => {
+  it('should let the daemon read the runtime a real apply published', async () => {
     // Arrange
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-agreement-'));
+    const home = await temporaryHome();
     try {
       const { manifestPath } = await provision(home);
       const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
@@ -132,9 +127,9 @@ describe('fleet apply and the daemon inventory', () => {
     }
   });
 
-  it('should call that account launchable on the host the apply ran on', async () => {
+  it('should call that runtime launchable through the executable wrapper the apply wrote', async () => {
     // Arrange
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-agreement-'));
+    const home = await temporaryHome();
     try {
       await provision(home);
       const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
@@ -147,9 +142,8 @@ describe('fleet apply and the daemon inventory', () => {
 
       // Assert — this is the owner's report: `fyd --check` said no wrapper was launchable
       should(launchability.kind).equal('launchable');
-      should(launchability)
-        .have.property('executable')
-        .match(/fleet\/bin\/claude-primary$/u);
+      should(launchability).have.property('executable', join(paths.fleet, 'bin', 'claude-primary'));
+      should(thisHost.runnable(join(paths.fleet, 'bin', 'claude-primary'))).be.true();
       should(preflight.ready).be.true();
       should(preflight.harnesses[0]?.launchable).eql(['claude-primary']);
     } finally {

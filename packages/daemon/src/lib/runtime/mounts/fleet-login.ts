@@ -1,18 +1,5 @@
 /**
- * The routes a browser drives a harness login — and a credential renewal — through.
- *
- * ## Why a renewal is here, and why it is ONE route rather than five
- *
- * A renewal is the sibling of a sign-in and never a sign-in. It asks the harness to rotate a credential
- * it can already rotate: nobody is sent anywhere, no browser opens, no code comes back, and there is no
- * window to expire. So it needs no flow id, no status poll, no submit and no cancel — one request, one
- * answer. Modelling it as a flow would have added four routes that could only ever say "finished".
- *
- * It sits under the same `fleet`/`configure` and the same per-change confirmation as a start, and that
- * is not caution: a rotation the provider REFUSES makes the harness clear its own tokens, so a caller
- * who can drive this from off the machine can leave an identity needing a person. The authorization is
- * literally the same code path — see `#authorize` — so the two cannot drift apart on the ORDER of the
- * checks, which is where a refusal that should have cost nothing starts costing a password attempt.
+ * The routes a browser drives a harness login for one account-model credential through.
  *
  * ## `fleet.configure`, and NOT a second gate
  *
@@ -29,15 +16,10 @@
  * no new attempt budget, and no second refusal vocabulary — the last time a fleet capability grew its own
  * authority system it took a week to remove.
  *
- * The READINESS read is the one exception and it is `fleet`/`use`, beside `/v1/fleet/accounts`, because it
- * is a read: nothing is launched and nothing on the host changes. What it discloses — which accounts are
- * signed in, when a token expires, and where each credential comes from — is the same class of fact the
- * roster already puts on the wire for any caller with `fleet.use`.
- *
  * `minimum: 'operator'` matches every other fleet route. An `admin-token` minimum would 403 the browser,
  * which is always a paired device, and the browser is the whole point of the feature.
  *
- * ## `noStore` on all five
+ * ## `noStore` on all four
  *
  * A live flow's status carries a verification URL somebody is in the middle of completing. A cached one
  * hands a later reader a link into a sign-in that has since finished and hands an intermediary one into a
@@ -54,9 +36,6 @@
  * paste box for a harness that cannot read one.
  */
 import {
-  FleetLoginReadinessSchema,
-  FleetRenewalRequestSchema,
-  FleetRenewalSchema,
   HarnessLoginFlowSchema,
   HarnessLoginStartRequestSchema,
   HarnessLoginSubmissionSchema,
@@ -70,11 +49,8 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { HarnessLoginRefusal, type HarnessLoginService } from '../../fleet-login/service.ts';
 
-/** The subsystem these routes serve. Narrowed to the five calls plus the read. */
-export type HarnessLoginSubsystem = Pick<
-  HarnessLoginService,
-  'readiness' | 'start' | 'status' | 'submit' | 'cancel' | 'renew'
->;
+/** The subsystem these routes serve. Narrowed to the four calls. */
+export type HarnessLoginSubsystem = Pick<HarnessLoginService, 'start' | 'status' | 'submit' | 'cancel'>;
 
 /**
  * Every login refusal, in the transport's own taxonomy.
@@ -109,25 +85,10 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
   return [
     {
       /**
-       * Which provider logins this host has, and what each one needs.
+       * Start one credential's sign-in.
        *
-       * A READ, so `fleet.use`. It is the read the whole feature was blocked on: no route returned a
-       * credential classification, and no wire schema carried the word `refreshable`, so a UI had no way
-       * to say WHICH accounts need signing in — only that some session's quota readout said `auth!`.
-       */
-      method: 'GET',
-      path: '/v1/fleet/login',
-      minimum: 'operator',
-      capability: { capability: 'fleet', axis: 'use' },
-      noStore: true,
-      handle: async () => await respondWith(FleetLoginReadinessSchema, () => subsystem.readiness()),
-    },
-    {
-      /**
-       * Start one identity's sign-in.
-       *
-       * The body names an ACCOUNT and, when this caller owes one, the operator password. It cannot name a
-       * command, a path or a wrapper: the daemon resolves which wrapper to launch from the manifest, so
+       * The body names a CREDENTIAL and, when this caller owes one, the operator password. It cannot name
+       * a command, a path or a wrapper: the daemon resolves what to launch from the configuration, so
        * there is no shape of request that could point this at another program.
        */
       method: 'POST',
@@ -174,33 +135,6 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await respondWith(HarnessLoginFlowSchema, () => subsystem.cancel(flowId(context))),
-    },
-    {
-      /**
-       * Renew one account's credential, with no browser and nobody sent anywhere.
-       *
-       * NOT UNDER `/v1/fleet/login/`, and that is the router's arithmetic rather than taste: every path
-       * there is `:flowId`, so a literal segment beside it would be read as the id of a flow that does
-       * not exist. It is its own address for its own act.
-       *
-       * The body names an ACCOUNT and, when this caller owes one, the operator password. Same shape and
-       * same gate as a start, because from the host's point of view it is the same act: somebody off
-       * this machine causing a credential to be rewritten in a home on it.
-       *
-       * Every ending is a value. `not-expired`, `not-renewable`, `not-required` and `indeterminate` are
-       * `200`s that say nothing was fired and why — a renewal that correctly refused to spend a rotating
-       * refresh token is not an error, and answering `409` for it would teach a surface to show a
-       * failure for the case the whole gate exists to produce.
-       */
-      method: 'POST',
-      path: '/v1/fleet/renew',
-      minimum: 'operator',
-      capability: { capability: 'fleet', axis: 'configure' },
-      noStore: true,
-      handle: async context =>
-        await respondWith(FleetRenewalSchema, async () =>
-          subsystem.renew(await parseBody(context.request, FleetRenewalRequestSchema), context.governance),
-        ),
     },
   ];
 }

@@ -42,7 +42,7 @@
  *
  * Modelled on `FleetApplyLock` in `@ferretry/fleet`, whose docblock argues the same design at length.
  * It is not reused: that lock guards a fleet directory, derives its path from the fleet manifest and
- * refuses in the vocabulary of `fy fleet apply`, so borrowing it would tell an operator waiting on a
+ * refuses in the vocabulary of a fleet apply, so borrowing it would tell an operator waiting on a
  * daemon restart to re-run an apply they never started.
  */
 import { randomUUID } from 'node:crypto';

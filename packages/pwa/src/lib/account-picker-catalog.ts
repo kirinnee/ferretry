@@ -1,38 +1,58 @@
 /**
- * Daemon-owned choices for account wrappers and recently used working
- * directories.
+ * Daemon-owned choices for a session's runtime and recently used working directories.
  *
- * AUTOMATIC HYDRATION NOW READS HEALTH TOO, and that is a change of cost rather
- * than a change of policy. Health used to mean "start every account's agent and
- * ask a model to answer a sentinel" — a real inference call per account, so
- * reading it on mount would have been a bottom sheet quietly spending money on
- * somebody else's machine, and it was a button with a warning beside it. It is
- * now a stored verdict the daemon derived from the free read-only usage GET it
- * already makes every minute, so `GET /v1/fleet/health` is a snapshot read:
- * instant, free, and safe to fetch beside the roster.
+ * THE ROSTER IS THE MACHINE'S RUNTIMES (docs/design/account-model.md §4.1, §7): `GET /v1/fleet/runtimes`,
+ * one row per runtime with its stable `id`, the `wrapper` a session is started with, its harness, its
+ * agent flag, whether it can launch now and the models its model set offers. Nothing here derives a
+ * row from a wrapper's spelling.
  *
- * The explicit action survives as `POST /v1/fleet/health/check`, which asks the
- * host to collect that free evidence NOW. It still spends nothing — one
- * read-only provider GET per credential, no model — and its copy says so.
+ * HEALTH IS THE LOGIN'S STATUS WORD, read from `GET /v1/fleet/credentials` — `ready`, `refresh_due`,
+ * `needs_sign_in`, `checking` — joined onto a runtime through the credential it uses. Reading it is a
+ * store read: the daemon calls no provider to answer it, so hydrating it on mount costs nothing.
+ * **Check now** is `POST /v1/fleet/credentials/:id/check`, once per login the roster uses, and only on
+ * a person's explicit action.
  *
- * Missing evidence stays missing. A fulfilled manifest with `accounts: []`
- * is positively empty; a rejected manifest read is represented by the store's
- * error slice and never converted into that empty array. An account nobody has
- * ever checked carries `lastCheckedAt: null` rather than a fabricated instant,
- * which is why that field is nullable on the wire.
+ * Missing evidence stays missing. A fulfilled read with `runtimes: []` is positively empty; a rejected
+ * read is represented by the store's error slice and never converted into that empty array.
  */
 
 import {
-  type FleetManifestSummary,
-  FleetManifestSummarySchema,
+  FleetCredentialListSchema,
+  type FleetCredentialStatus,
+  FleetCredentialViewSchema,
+  FleetRuntimeCatalogSchema,
+  type FleetRuntimeView,
   type IFyApiClient,
   type SessionView,
 } from '@ferretry/protocol';
-import { z } from 'zod';
 
 import { normalizeProjectPath } from './fleet-grouping.ts';
 
-export type PickerAccount = FleetManifestSummary['accounts'][number];
+/** One model a runtime's model set offers, and whether its login can use it. */
+export interface PickerModel {
+  readonly id: string;
+  readonly available: boolean;
+}
+
+/** One runtime a session can be started on, as the picker reads it. */
+export interface PickerAccount {
+  /** The runtime's stable id. */
+  readonly id: string;
+  /** The value a caller types as `agent` when starting or migrating a session. */
+  readonly wrapper: string;
+  /** The runtime's name, as the Runtimes tab shows it. */
+  readonly displayName: string;
+  readonly kind: FleetRuntimeView['harness'];
+  /** An agent runtime: the only kind the daemon starts a session on. */
+  readonly agent: boolean;
+  /** The login it uses, which is what its health is read from. */
+  readonly credentialId: string;
+  /** `null` = the harness's own default. */
+  readonly defaultModel: string | null;
+  readonly models: readonly PickerModel[];
+  readonly available: boolean;
+  readonly unavailableReason: string | null;
+}
 
 export interface RecentProjectPath {
   readonly path: string;
@@ -44,132 +64,21 @@ export interface AccountPickerCatalog {
   readonly accounts: readonly PickerAccount[];
 }
 
-/** The four verdicts, spelled the same on both ends. */
-export type PickerHealthVerdict = 'healthy' | 'needs_relogin' | 'needs_credentials' | 'unknown';
-
-/**
- * WHY, as a code rather than a sentence.
- *
- * The daemon publishes the code and this app owns the words for it — see
- * `account-health-view.ts`. A daemon that shipped the sentence would be writing
- * browser copy, and the terminal would eventually disagree with the browser
- * about what a `403` means.
- */
-export type PickerHealthReason =
-  | 'provider_accepted'
-  | 'usage_scope_unavailable'
-  | 'oauth_credential_missing'
-  | 'oauth_access_expired'
-  | 'oauth_token_rejected'
-  | 'static_credential_missing'
-  | 'static_credential_rejected'
-  | 'never_checked'
-  | 'credential_unreadable'
-  | 'oauth_refreshable'
-  | 'oauth_rejection_unconfirmed'
-  | 'codex_liveness_unproven'
-  | 'check_timeout'
-  | 'provider_unavailable'
-  | 'provider_not_asked'
-  | 'credential_changed_during_check'
-  | 'account_unavailable'
-  | 'stale';
-
-export interface PickerAccountHealth {
-  readonly accountId: string;
-  /**
-   * THE HARNESS THE DAEMON NAMED, AS IT NAMED IT. The health contract publishes a
-   * non-empty string, not a closed set: a daemon that grows a third harness stays
-   * conformant. Narrowing it here would only mean that an unfamiliar row failed
-   * the schema and took every sibling row in the same snapshot with it — the
-   * reader would lose health it already has, to learn nothing.
-   */
-  readonly kind: string;
-  readonly verdict: PickerHealthVerdict;
-  readonly reason: PickerHealthReason;
-  readonly evidence: 'anthropic_usage' | 'local_credential' | 'none';
-  /**
-   * `null` means NOBODY HAS EVER CHECKED, and it is a different fact from every
-   * number. The contract this replaced required a number, so a never-checked
-   * account arrived with a fabricated "now" — indistinguishable on the wire from
-   * a check that had just succeeded. Telling those two apart is the whole point.
-   */
-  readonly lastCheckedAt: number | null;
-  /** When the evidence behind `verdict` was seen. Can be older than the check. */
-  readonly verdictAt: number | null;
-  /** The newest check could not conclude; `verdict` rests on older evidence. */
-  readonly lastCheckInconclusive: boolean;
-  /** What the verdict WAS before it aged out. Present only when `reason` is `stale`. */
-  readonly staleVerdict?: PickerHealthVerdict;
+/** One login's status, keyed by its credential id. */
+export interface PickerAccountHealth extends FleetCredentialStatus {
+  readonly credentialId: string;
 }
 
 export interface AccountPickerHealthCatalog {
   readonly health: ReadonlyMap<string, PickerAccountHealth>;
-  /** A partial result can still carry unambiguous rows. */
+  /** A partial result can still carry the rows it did read. */
   readonly error: string | null;
 }
 
 export type PickerCatalogClient = Pick<IFyApiClient, 'request'>;
 
-const finiteEpoch = z.number().finite().int().nonnegative();
-const PickerHealthVerdictSchema = z.enum(['healthy', 'needs_relogin', 'needs_credentials', 'unknown']);
-const PickerAccountHealthSchema = z.strictObject({
-  accountId: z.string().min(1),
-  kind: z.string().min(1),
-  verdict: PickerHealthVerdictSchema,
-  reason: z.enum([
-    'provider_accepted',
-    'usage_scope_unavailable',
-    'oauth_credential_missing',
-    'oauth_access_expired',
-    'oauth_token_rejected',
-    'static_credential_missing',
-    'static_credential_rejected',
-    'never_checked',
-    'credential_unreadable',
-    'oauth_refreshable',
-    'oauth_rejection_unconfirmed',
-    'codex_liveness_unproven',
-    'check_timeout',
-    'provider_unavailable',
-    'provider_not_asked',
-    'credential_changed_during_check',
-    'account_unavailable',
-    'stale',
-  ]),
-  evidence: z.enum(['anthropic_usage', 'local_credential', 'none']),
-  lastCheckedAt: finiteEpoch.nullable(),
-  verdictAt: finiteEpoch.nullable(),
-  lastCheckInconclusive: z.boolean(),
-  staleVerdict: PickerHealthVerdictSchema.optional(),
-});
-const PickerHealthSnapshotSchema = z.strictObject({
-  at: finiteEpoch,
-  accounts: z.array(PickerAccountHealthSchema),
-});
-
-interface UniqueIndex<T> {
-  readonly values: ReadonlyMap<string, T>;
-  readonly ambiguous: boolean;
-}
-
-/**
- * A duplicate health row is ambiguous evidence, not permission to pick the
- * last one returned. The duplicate account is removed so it renders unknown.
- */
-const uniqueAccountIndex = <T extends { readonly accountId: string }>(rows: readonly T[]): UniqueIndex<T> => {
-  const values = new Map<string, T>();
-  const duplicates = new Set<string>();
-  for (const row of rows) {
-    if (values.has(row.accountId) || duplicates.has(row.accountId)) {
-      values.delete(row.accountId);
-      duplicates.add(row.accountId);
-    } else {
-      values.set(row.accountId, row);
-    }
-  }
-  return { values, ambiguous: duplicates.size > 0 };
-};
+export const PICKER_RUNTIMES_PATH = '/v1/fleet/runtimes';
+export const PICKER_CREDENTIALS_PATH = '/v1/fleet/credentials';
 
 const activityInstant = (view: SessionView): string => view.state.lastActivityAt ?? view.config.updatedAt;
 
@@ -191,41 +100,65 @@ export const recentProjectPaths = (sessions: readonly SessionView[]): readonly R
     });
 };
 
-/** Read the cheap published roster through one already daemon-bound client. */
-export const readAccountPickerCatalog = async (client: PickerCatalogClient): Promise<AccountPickerCatalog> => ({
-  accounts: (await client.request('/v1/fleet/accounts', FleetManifestSummarySchema)).accounts,
+/** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
+export const pickerAccount = (runtime: FleetRuntimeView): PickerAccount => ({
+  id: runtime.id,
+  wrapper: runtime.wrapper,
+  displayName: runtime.name,
+  kind: runtime.harness,
+  agent: runtime.agent,
+  credentialId: runtime.credential.id,
+  defaultModel: runtime.modelSet.source === 'model-set' ? (runtime.modelSet.default ?? null) : null,
+  models: runtime.modelSet.source === 'model-set' ? runtime.modelSet.models : [],
+  available: runtime.launch.available,
+  unavailableReason: runtime.launch.available ? null : runtime.launch.reason,
 });
 
-/** Shared by both reads: a duplicate row is ambiguous, so the account renders unknown. */
-const healthCatalog = (accounts: readonly PickerAccountHealth[]): AccountPickerHealthCatalog => {
-  const health = uniqueAccountIndex(accounts);
+/** Read this machine's runtimes through one already daemon-bound client. */
+export const readAccountPickerCatalog = async (client: PickerCatalogClient): Promise<AccountPickerCatalog> => ({
+  accounts: (await client.request(PICKER_RUNTIMES_PATH, FleetRuntimeCatalogSchema)).runtimes.map(pickerAccount),
+});
+
+const healthRow = (credentialId: string, status: FleetCredentialStatus): PickerAccountHealth => ({
+  ...status,
+  credentialId,
+});
+
+/** Every login's status word. A store read: the daemon calls no provider to answer it. */
+export const readAccountPickerHealth = async (client: PickerCatalogClient): Promise<AccountPickerHealthCatalog> => {
+  const list = await client.request(PICKER_CREDENTIALS_PATH, FleetCredentialListSchema);
   return {
-    health: health.values,
-    error: health.ambiguous ? 'the daemon returned ambiguous health rows' : null,
+    health: new Map(list.credentials.map(row => [row.id, healthRow(row.id, row.status)] as const)),
+    error: null,
   };
 };
 
-/**
- * Read the stored verdicts. A pure snapshot: the daemon checks nothing to answer it.
- *
- * Safe to hydrate on mount, which is why the store now does. The evidence behind
- * these rows was collected by the host's own free usage pass, so reading them
- * costs one local HTTP call and no provider traffic at all.
- */
-export const readAccountPickerHealth = async (client: PickerCatalogClient): Promise<AccountPickerHealthCatalog> => {
-  const snapshot = await client.request('/v1/fleet/health', PickerHealthSnapshotSchema);
-  return healthCatalog(snapshot.accounts);
-};
+const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
 /**
- * Ask the host to collect the free evidence NOW, and answer with the snapshot.
+ * A person's **Check now**: every login this machine offers a check for, checked once, then the
+ * answers as one health map.
  *
- * The action behind "Check now". It is a POST because it records a reading, and it
- * spends nothing: one read-only `GET /api/oauth/usage` per credential on the
- * host, which is the same request that host's quota pass already makes every
- * minute. No agent is started and no model is asked anything.
+ * A login whose check failed keeps the status the list read, and the failure is reported beside the
+ * rows rather than replacing them: one locked login must not blank every other row.
  */
 export const checkAccountPickerHealth = async (client: PickerCatalogClient): Promise<AccountPickerHealthCatalog> => {
-  const snapshot = await client.request('/v1/fleet/health/check', PickerHealthSnapshotSchema, { method: 'POST' });
-  return healthCatalog(snapshot.accounts);
+  const list = await client.request(PICKER_CREDENTIALS_PATH, FleetCredentialListSchema);
+  const health = new Map(list.credentials.map(row => [row.id, healthRow(row.id, row.status)] as const));
+  const checkable = list.credentials.filter(row => row.checkNow.available);
+  const results = await Promise.allSettled(
+    checkable.map(row =>
+      client.request(`${PICKER_CREDENTIALS_PATH}/${encodeURIComponent(row.id)}/check`, FleetCredentialViewSchema, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }),
+    ),
+  );
+  const failures: string[] = [];
+  for (const result of results) {
+    if (result.status === 'fulfilled') health.set(result.value.id, healthRow(result.value.id, result.value.status));
+    else failures.push(failureMessage(result.reason));
+  }
+  return { health, error: failures.length === 0 ? null : failures.join('; ') };
 };

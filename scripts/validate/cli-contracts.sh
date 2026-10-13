@@ -164,7 +164,7 @@ state-home-layout-claim)
   # THE SECOND INSTANCE OF THE `state-home-log-directory` BUG, pinned the same way its first was.
   #
   # Creating state in a home and CLAIMING that home have to be one operation. They were two, so
-  # `fy fleet init` wrote `<FY_HOME>/fleet/**` without a marker and manufactured exactly the
+  # An old client verb wrote `<FY_HOME>/fleet/**` without a marker and manufactured exactly the
   # arrangement the daemon must refuse — a non-empty directory that might be somebody else's. The
   # daemon then declined to boot FOREVER, and the only move the shipped product left an owner was to
   # delete the installation they had just provisioned. Run the two commands the other way round and
@@ -218,20 +218,17 @@ state-home-layout-claim)
     echo "❌ ${cli_claim} does not apply the SHARED decision, so it could adopt a foreign directory" >&2
     exit 1
   }
-  # Every path that creates state inside the home must go through the claim. These are the three
-  # verified write sites; a fourth that skips the claim reintroduces the whole defect.
+  # Every path that creates state inside the home must go through the claim. The CLI's one remaining
+  # write site is the daemon supervisor's log directory (the fleet writers left with the old account
+  # system); a new one that skips the claim reintroduces the whole defect.
   rg -qF 'claimThenCreateLogDirectory' "${cli_pkg}/src/lib/daemon/supervisor.ts" || {
     echo "❌ the daemon supervisor creates <state home>/logs without claiming the home first" >&2
     exit 1
   }
-  for writer in FileFleetScaffolder 'provisioner.apply'; do
-    rg -qF "${writer}" "${cli_root}" || {
-      echo "❌ ${cli_root} no longer wires ${writer}; re-check that its claim still guards it" >&2
-      exit 1
-    }
-  done
-  rg -qF 'claimStateHome' "${cli_root}" || {
-    echo "❌ ${cli_root} does not claim the state home before the fleet writers run" >&2
+  # The composition root builds the ONE claim service and hands it to every supervisor and to
+  # `daemon adopt`; a second construction is a second spelling of the decision.
+  rg -qF 'buildStateHomeClaims' "${cli_root}" || {
+    echo "❌ ${cli_root} does not build the shared state-home claim service the supervisors use" >&2
     exit 1
   }
   # A refusal that does not name its repair is permanent: every home provisioned before the claim

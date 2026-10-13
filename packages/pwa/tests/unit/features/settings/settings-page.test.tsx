@@ -1,11 +1,10 @@
-import type { ConnectionChoice } from '@ferretry/relay';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { ConnectionChoice } from '@ferretry/relay';
 import { useLayoutEffect, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
-
-import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
-import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-configuration-surface.tsx';
+import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-client.ts';
 import type { MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
+import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
 import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
@@ -13,9 +12,9 @@ import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/c
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
 import { UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
-import { machineClient, machineView } from '../fleet/shell/machine-support.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
+import { machineClient, machineView } from '../fleet/shell/machine-support.ts';
 
 const memoryStorage = (): ControlsStorage => {
   const values = new Map<string, string>();
@@ -784,7 +783,6 @@ describe('daemon settings', () => {
       'secrets',
       'devices',
       'grants',
-      'environment',
       'carrier',
       'host-checks',
     ]);
@@ -804,7 +802,6 @@ describe('daemon settings', () => {
       'Secrets',
       'Add a device',
       'What devices may do',
-      'Environment',
       'Carrier',
       'Host checks',
     ]);
@@ -888,7 +885,6 @@ describe('daemon settings', () => {
       'secrets',
       'devices',
       'grants',
-      'environment',
       'carrier',
       'host-checks',
     ]);
@@ -908,15 +904,7 @@ describe('daemon settings', () => {
     expect(must(choices[0], 'the Warden choice').textContent).toBe(
       'WardenSupervision, account failover, and policy for this daemon.',
     );
-    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual([
-      'page',
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-    ]);
+    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual(['page', null, null, null, null, null]);
 
     await interact(() =>
       must(

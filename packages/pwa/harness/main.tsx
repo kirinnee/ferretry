@@ -17,11 +17,8 @@ import type {
   CgroupConfigView,
   DaemonCapability,
   DoctorReport,
-  FleetLoginReadiness,
-  FleetProfileCatalog,
   GrantRefusal,
   GrantsView,
-  HarnessDiscoveryReport,
   LearningStatus,
   PairedDevicesView,
   PairingCodeMintResponse,
@@ -35,7 +32,6 @@ import type {
   TaskStatus,
   TaskSummary,
   TerminalListView,
-  UsageAccountView,
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
@@ -119,42 +115,7 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
-import { accountsRoster } from '../src/features/fleet/accounts-model.ts';
-import { accountsSettingsTab } from '../src/features/fleet/accounts-page.tsx';
-import { type AccountsReadState, AccountsSurface } from '../src/features/fleet/accounts-surface.tsx';
-import { ClaudeLoginPanel } from '../src/features/fleet/claude-login-panel.tsx';
-import { CodexLoginPanel } from '../src/features/fleet/codex-login-panel.tsx';
-import { FleetAccountStepper } from '../src/features/fleet/fleet-account-stepper.tsx';
-import type {
-  FleetApplyOutcome,
-  FleetConfigView,
-  FleetManifestAccountView,
-  FleetProposalView,
-} from '../src/features/fleet/fleet-api.ts';
-import { FleetLayerForm } from '../src/features/fleet/fleet-change-forms.tsx';
-import {
-  DERIVED_PATH_NOTE,
-  emptyAccountDraft,
-  type FleetAccountDraft,
-  type FleetHarnessDetection,
-  type FleetLayerDraft,
-} from '../src/features/fleet/fleet-change-model.ts';
-import {
-  FleetApplyReport,
-  FleetChangeReview,
-  FleetFirstRunPlan,
-  FleetLiveRoster,
-} from '../src/features/fleet/fleet-change-review.tsx';
-import {
-  type FleetClientFactory,
-  FleetConfigurationSurface,
-  fleetSettingsTab,
-} from '../src/features/fleet/fleet-configuration-surface.tsx';
-import {
-  FLEET_STEP_IDS,
-  type FleetInstructionsControl,
-  type FleetSkillsStoreItem,
-} from '../src/features/fleet/fleet-stepper-model.ts';
+import type { FleetClientFactory } from '../src/features/fleet/fleet-client.ts';
 import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
@@ -335,723 +296,6 @@ const HARNESS_REFERENCE_PROSE = [
 ].join('\n');
 const settingsControls = new DaemonControlsStore();
 
-/**
- * THE ACCOUNTS PAGE, at a fixed instant, with four health states on screen at once.
- *
- * One account per state a verdict can be in — healthy, a 403 whose quota is unreadable and whose
- * account is FINE, one that needs a re-login, and Codex's honest `unknown` — plus an account whose
- * credential comes from a file, so the "there is nothing to press here" arm is visible too. Written
- * out longhand: a fixture derived from the schema the surface parses with proves nothing about it.
- *
- * The roster is built with the page's own `accountsRoster`, deliberately, so this card shows the
- * projection the live page shows rather than a hand-shaped lookalike of it.
- */
-const HARNESS_ACCOUNTS_NOW = Date.parse('2026-08-25T09:00:00.000Z');
-
-const HARNESS_ACCOUNTS_READINESS = {
-  identities: [
-    {
-      identity: 'claude:studio',
-      kind: 'claude',
-      verdict: 'complete',
-      accounts: [
-        {
-          accountId: '11111111-1111-4111-8111-111111111111',
-          kind: 'claude',
-          displayName: 'Studio Claude',
-          wrapper: 'claude-studio',
-          mode: 'interactive',
-          available: true,
-          credential: { state: 'valid', expiresAt: '2026-08-25T17:00:00.000Z' },
-          source: { source: 'interactive-login' },
-          login: { applies: true },
-        },
-        {
-          accountId: '22222222-2222-4222-8222-222222222222',
-          kind: 'claude',
-          displayName: 'Studio Claude, unattended',
-          wrapper: 'claude-auto-studio',
-          mode: 'auto',
-          available: true,
-          credential: { state: 'refreshable' },
-          source: { source: 'interactive-login' },
-          login: { applies: true },
-        },
-      ],
-    },
-    {
-      identity: 'claude:atelier',
-      kind: 'claude',
-      // No `reason`, because the fleet composes none for this verdict — a fixture that invented one
-      // showed a shape the daemon cannot produce (`packages/fleet/src/lib/identity.ts`).
-      verdict: 'login',
-      accounts: [
-        {
-          accountId: '33333333-3333-4333-8333-333333333333',
-          kind: 'claude',
-          displayName: 'Atelier Claude',
-          wrapper: 'claude-atelier',
-          mode: 'interactive',
-          available: true,
-          credential: { state: 'missing' },
-          source: { source: 'interactive-login' },
-          login: { applies: true },
-        },
-      ],
-    },
-    {
-      identity: 'claude:proxy',
-      kind: 'claude',
-      verdict: 'no-login',
-      // The fleet’s OWN words, byte for byte: a lowercase clause with no full stop, which is what the
-      // page has to turn into a sentence without rewording.
-      reason: 'this account authenticates with a key',
-      accounts: [
-        {
-          accountId: '44444444-4444-4444-8444-444444444444',
-          kind: 'claude',
-          displayName: 'Proxy Claude',
-          wrapper: 'claude-proxy',
-          mode: 'auto',
-          available: true,
-          credential: { state: 'not-read' },
-          source: { source: 'token-file', variable: 'ANTHROPIC_API_KEY', path: '/etc/ferretry/secrets.sh' },
-          login: { applies: false, because: 'credential-is-not-a-login' },
-        },
-      ],
-    },
-    {
-      identity: 'codex:archive',
-      kind: 'codex',
-      verdict: 'complete',
-      accounts: [
-        {
-          accountId: '55555555-5555-4555-8555-555555555555',
-          kind: 'codex',
-          displayName: 'Archive Codex',
-          wrapper: 'codex-archive',
-          mode: 'auto',
-          available: false,
-          credential: { state: 'valid' },
-          source: { source: 'interactive-login' },
-          login: { applies: true },
-        },
-      ],
-    },
-  ],
-} satisfies FleetLoginReadiness;
-
-const HARNESS_ACCOUNTS_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map([
-  [
-    '11111111-1111-4111-8111-111111111111',
-    {
-      accountId: '11111111-1111-4111-8111-111111111111',
-      kind: 'claude',
-      verdict: 'healthy' as const,
-      reason: 'provider_accepted' as const,
-      evidence: 'anthropic_usage' as const,
-      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 240_000,
-      verdictAt: HARNESS_ACCOUNTS_NOW - 240_000,
-      lastCheckInconclusive: false,
-    },
-  ],
-  [
-    '22222222-2222-4222-8222-222222222222',
-    {
-      accountId: '22222222-2222-4222-8222-222222222222',
-      kind: 'claude',
-      // The 403 row: the token WORKS and only its quota cannot be read. A surface that painted this
-      // as a problem sends somebody to re-login forever on a working account.
-      verdict: 'healthy' as const,
-      reason: 'usage_scope_unavailable' as const,
-      evidence: 'anthropic_usage' as const,
-      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 60_000,
-      verdictAt: HARNESS_ACCOUNTS_NOW - 60_000,
-      lastCheckInconclusive: false,
-    },
-  ],
-  [
-    '33333333-3333-4333-8333-333333333333',
-    {
-      accountId: '33333333-3333-4333-8333-333333333333',
-      kind: 'claude',
-      verdict: 'needs_relogin' as const,
-      reason: 'oauth_credential_missing' as const,
-      evidence: 'local_credential' as const,
-      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 3_600_000,
-      verdictAt: HARNESS_ACCOUNTS_NOW - 3_600_000,
-      lastCheckInconclusive: false,
-    },
-  ],
-  [
-    '55555555-5555-4555-8555-555555555555',
-    {
-      accountId: '55555555-5555-4555-8555-555555555555',
-      kind: 'codex',
-      // Codex is honestly `unknown`: its usage endpoint answers 200 for a stale token, so nothing
-      // free proves a sign-in. That is the finished answer, not a hole in this fixture.
-      verdict: 'unknown' as const,
-      reason: 'codex_liveness_unproven' as const,
-      evidence: 'none' as const,
-      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 120_000,
-      verdictAt: null,
-      lastCheckInconclusive: false,
-    },
-  ],
-]);
-
-const HARNESS_ACCOUNTS_USAGE: ReadonlyMap<string, UsageAccountView> = new Map([
-  [
-    'claude-studio',
-    {
-      agent: 'claude-studio',
-      usageBased: true,
-      fiveHourPercent: 42,
-      weeklyPercent: 17,
-      fiveHourResetAt: HARNESS_ACCOUNTS_NOW + 5_400_000,
-    },
-  ],
-  ['claude-proxy', { agent: 'claude-proxy', usageBased: false }],
-]);
-
-const HARNESS_ACCOUNTS_STATE: AccountsReadState = {
-  kind: 'ready',
-  roster: accountsRoster(
-    HARNESS_ACCOUNTS_READINESS,
-    HARNESS_ACCOUNTS_HEALTH,
-    HARNESS_ACCOUNTS_USAGE,
-    HARNESS_ACCOUNTS_NOW,
-  ),
-};
-
-/**
- * The fleet CONFIGURATION fixtures: one published host, one staged change against it, one honest
- * failure. Written out longhand and cast at the boundary, because these frames exist to be looked at
- * and a fixture derived from the same schema the surface parses with proves nothing about either.
- */
-const HARNESS_FLEET_ACCOUNTS = [
-  {
-    id: '11111111-1111-4111-8111-111111111111',
-    kind: 'claude',
-    mode: 'auto',
-    wrapper: 'claude-studio',
-    home: '/home/pilot/.ferretry/fleet/homes/claude-studio',
-    displayName: 'Studio Claude',
-    defaultModel: 'claude-opus-5',
-    models: [{ id: 'claude-opus-5', available: true }],
-    available: true,
-    unavailableReason: null,
-  },
-  {
-    id: '22222222-2222-4222-8222-222222222222',
-    kind: 'claude',
-    mode: 'interactive',
-    wrapper: 'claude-auto-atelier',
-    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-atelier',
-    displayName: 'Atelier Claude',
-    defaultModel: 'claude-sonnet-5',
-    models: [{ id: 'claude-sonnet-5', available: true }],
-    available: true,
-    unavailableReason: null,
-  },
-  {
-    id: '33333333-3333-4333-8333-333333333333',
-    kind: 'codex',
-    mode: 'auto',
-    wrapper: 'codex-archive',
-    home: '/home/pilot/.ferretry/fleet/homes/codex-archive',
-    displayName: 'Archive Codex',
-    defaultModel: null,
-    models: [],
-    available: false,
-    unavailableReason: 'the fleet publishes codex-archive but this host has no such executable on its PATH',
-  },
-] satisfies readonly FleetManifestAccountView[];
-
-/**
- * What the daemon last concluded about each of those accounts — for two of the three.
- *
- * The THIRD IS ABSENT on purpose. A roster row with no verdict is the ordinary case on a host nobody
- * has signed into yet, and it is the case this frame exists to show: it renders no health line at
- * all, so the account is the thing you see. A fixture that gave all three a verdict would review a
- * screen that only exists after a check has run.
- */
-const HARNESS_FLEET_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map([
-  [
-    '11111111-1111-4111-8111-111111111111',
-    {
-      accountId: '11111111-1111-4111-8111-111111111111',
-      kind: 'claude' as const,
-      verdict: 'healthy' as const,
-      reason: 'provider_accepted' as const,
-      evidence: 'anthropic_usage' as const,
-      lastCheckedAt: Date.parse('2026-08-05T08:26:00.000Z'),
-      verdictAt: Date.parse('2026-08-05T08:26:00.000Z'),
-      lastCheckInconclusive: false,
-    },
-  ],
-  [
-    '22222222-2222-4222-8222-222222222222',
-    {
-      accountId: '22222222-2222-4222-8222-222222222222',
-      kind: 'claude' as const,
-      verdict: 'needs_relogin' as const,
-      reason: 'oauth_token_rejected' as const,
-      evidence: 'anthropic_usage' as const,
-      lastCheckedAt: Date.parse('2026-08-05T08:28:00.000Z'),
-      verdictAt: Date.parse('2026-08-05T08:28:00.000Z'),
-      lastCheckInconclusive: false,
-    },
-  ],
-]);
-
-/**
- * The create form as a person actually meets it: prefilled from a host that HAS Claude Code, with the
- * provenance visible on every field detection filled in.
- *
- * The gallery is the touch-target and both-theme evidence for this screen, so the fixture has to be the
- * prefilled state rather than a blank form — an empty draft would review a screen nobody sees.
- */
-const HARNESS_FLEET_DRAFT: FleetAccountDraft = {
-  ...emptyAccountDraft('claude'),
-  name: 'atelier',
-  // BOTH modes ticked, which is the widest the identity step and the recap ever get: two lane
-  // selects, two derived wrapper lines, two recap rows and the shared-document warning. The geometry
-  // gate drives this fixture, so a state it cannot reach here is a state it cannot measure.
-  lanes: [
-    { mode: 'interactive', variant: 'default' },
-    { mode: 'auto', variant: 'auto' },
-  ],
-  displayName: 'Atelier Claude',
-  modelsText: 'claude-opus-5\nclaude-sonnet-5',
-  defaultModel: 'claude-opus-5',
-  layer: {
-    ...emptyAccountDraft('claude').layer,
-    instructions: {
-      // THE SHIPPED NAMING SCHEME, not a path this file made up. `instructionsPathFor` builds
-      // `instructions/CLAUDE-<middle>.md`, and `instructionsMiddleOf` returns `undefined` for
-      // anything else — so `instructions/claude-atelier.md` rendered the name box EMPTY and pinned a
-      // blocking "name this document" under a label that already said it, on the one frame anybody
-      // reviewing this flow opens. Production always derives the path, so the two could not diverge
-      // for a real person; the fixture was the only thing lying about it.
-      path: 'instructions/CLAUDE-atelier.md',
-      text: '# Atelier\n\nBe exact. Prefer the smallest change that is provably correct.\n',
-    },
-    // TWO SETTINGS ENTRIES, because one proves nothing about the control that exists to show an ORDER:
-    // a document this fleet shares, then a block typed here that overrides one of its keys. That is the
-    // state where the numbered list, the move controls and the origin list all have something to say.
-    settings: [
-      { id: 'settings-shared', source: 'store', path: 'templates/claude/settings.json', text: '' },
-      { id: 'settings-typed', source: 'inline', path: '', text: '{\n  "model": "claude-opus-5"\n}' },
-    ],
-  },
-  prefilled: {
-    models: 'Detected — read from /home/pilot/.claude/settings.json.',
-    defaultModel: 'Detected — read from /home/pilot/.claude/settings.json.',
-    // THE PRODUCTION SENTENCE, not one written here. A fixture that invents a provenance note makes a
-    // capture of this step evidence about the fixture and nothing else — which is exactly how
-    // "Derived — from the account and lane above" survived a 390px review of this very frame.
-    instructionsPath: DERIVED_PATH_NOTE,
-    instructionsText:
-      'Imported — /home/pilot/.claude/CLAUDE.md (86 bytes). Edit it here; nothing is written until you review and authorize the change.',
-  },
-};
-
-const HARNESS_FLEET_DETECTION: FleetHarnessDetection = {
-  harness: 'claude',
-  detail: 'Detected claude at /usr/local/bin/claude.',
-  noneInstalled: false,
-};
-
-const HARNESS_FLEET_INSTRUCTIONS: FleetInstructionsControl = {
-  choices: [
-    {
-      value: 'new-imported',
-      label: 'New — instructions/CLAUDE-atelier.md, imported',
-      detail:
-        'Imported — /home/pilot/.claude/CLAUDE.md (86 bytes). Edit it here; nothing is written until you review and authorize the change.',
-    },
-    {
-      value: 'new-blank',
-      label: 'New — instructions/CLAUDE-atelier.md, empty',
-      detail: 'A new, empty document written at that path.',
-    },
-    {
-      value: 'asset:instructions/house-rules.md',
-      label: 'instructions/house-rules.md',
-      detail:
-        'Already in this fleet’s asset tree. This account will read it, and an edit here rewrites the one document every account using it reads.',
-    },
-  ],
-  value: 'new-imported',
-  onChoose: () => {},
-  loading: false,
-};
-
-/**
- * A fleet whose store already holds two skills directories and whose operator declared a lane of
- * their own, so the stepper renders both the store picker with real linkers on it and the lane
- * escape hatch that only appears when a fleet has lanes no mode would derive.
- */
-const HARNESS_FLEET_CONFIG: FleetConfigView = {
-  variants: { default: {}, auto: {}, review: {} },
-  // THE `./` SPELLING, exactly as `fy fleet init` writes it into config.yaml. The store canonicalises
-  // it, and a fixture that pre-canonicalised it would make a capture of this step evidence about the
-  // fixture rather than about the host every scaffolded fleet actually has.
-  shared: { settings: { claude: './templates/claude/settings.json', codex: './templates/codex/config.toml' } },
-  agents: [
-    {
-      name: 'studio',
-      kind: 'claude',
-      routes: {
-        default: {
-          id: 'b2f0f0c8-7d3e-4a7d-9a1f-2b4a6d9e1c33',
-          wrapper: 'claude-studio',
-          layer: {
-            skills: 'skills/studio',
-            settings: ['./templates/claude/settings.json', 'templates/claude/strict.json'],
-          },
-        },
-        auto: {
-          id: 'c3a1e1d9-8e4f-4b8e-8b20-3c5b7eaf2d44',
-          wrapper: 'claude-auto-studio',
-          layer: { skills: 'skills/studio' },
-        },
-      },
-    },
-  ],
-};
-
-const HARNESS_FLEET_DISCOVERY: HarnessDiscoveryReport = {
-  harnesses: [
-    {
-      kind: 'claude',
-      command: '/usr/local/bin/claude',
-      absenceImpact:
-        'A wrapper this fleet publishes for a Claude account runs `claude`. Without it on this host, the wrapper exists and no Claude session can start.',
-      models: {
-        origin: 'detected',
-        ids: ['claude-opus-5'],
-        defaultModel: 'claude-opus-5',
-        source: '/home/pilot/.claude/settings.json',
-      },
-      instructions: {
-        found: true,
-        source: '/home/pilot/.claude/CLAUDE.md',
-        text: '# Atelier\n\nBe exact.\n',
-        bytes: 86,
-      },
-    },
-    {
-      kind: 'codex',
-      absenceImpact:
-        'A wrapper this fleet publishes for a Codex account runs `codex`. Without it on this host, the wrapper exists and no Codex session can start.',
-      models: {
-        origin: 'fallback',
-        ids: ['gpt-5.6'],
-        defaultModel: 'gpt-5.6',
-        source:
-          'Ferretry\u2019s starter model for codex, because there is no /home/pilot/.codex/config.toml on this host',
-      },
-      instructions: {
-        found: false,
-        source: '/home/pilot/.codex/AGENTS.md',
-        reason: 'this host has no AGENTS.md there',
-      },
-    },
-  ],
-  noneInstalled: false,
-  limitation:
-    'Every answer here is a PATH lookup and a file read. It does not prove a harness is signed in, has credit, or can reach its provider.',
-};
-
-/** Instructions documents already in the store, so the "use an existing one" branch has options. */
-const HARNESS_FLEET_STORE_DOCUMENTS: readonly string[] = [
-  'instructions/CLAUDE-house-rules.md',
-  'instructions/CLAUDE-studio.md',
-];
-
-/**
- * Three declared profiles: the base one every account composes, one that authenticates, one that does not.
- *
- * NO REAL CREDENTIAL AND NO PLACE TO PUT ONE. Every entry is a SHAPE — the secret's name, the variable
- * an `$NAME` reads, or a literal with no text at all — because that is the whole wire contract, and a
- * fixture that carried a value would be a fixture of something this product cannot produce.
- *
- * `gateway` sets only a base URL on purpose: it is the case that makes the sign-in step's blocker
- * visible, because an account authenticated by it would still need a login.
- */
-const HARNESS_FLEET_PROFILES: FleetProfileCatalog = {
-  profiles: [
-    {
-      name: 'base',
-      appliesToEveryAccount: true,
-      variables: [{ variable: 'FY_FLEET', shape: { shape: 'literal' } }],
-      accounts: ['claude-studio', 'claude-auto-studio'],
-      authenticates: [],
-    },
-    {
-      name: 'work',
-      appliesToEveryAccount: false,
-      variables: [
-        { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } },
-        { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
-      ],
-      accounts: ['claude-studio'],
-      authenticates: ['claude'],
-    },
-    {
-      name: 'gateway',
-      appliesToEveryAccount: false,
-      variables: [
-        { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
-        { variable: 'HTTPS_PROXY', shape: { shape: 'environment-reference', variable: 'HOUSE_PROXY' } },
-      ],
-      accounts: [],
-      authenticates: [],
-    },
-  ],
-  credentialVariables: {
-    claude: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
-    codex: ['OPENAI_API_KEY'],
-  },
-};
-
-/** Two store directories, one of them linked by two accounts and one linked by nothing yet. */
-const HARNESS_FLEET_SKILLS_STORE: readonly FleetSkillsStoreItem[] = [
-  { path: 'skills/studio', accounts: ['claude-studio', 'claude-auto-studio'] },
-  { path: 'skills/research', accounts: [] },
-];
-
-const HARNESS_FLEET_LAYER: FleetLayerDraft = {
-  instructions: {
-    path: 'instructions/studio.md',
-    text: '# Studio\n\nBe exact. Prefer the smallest change that is provably correct.\n',
-  },
-  skillsDirectory: 'skills/studio',
-  skills: [
-    { id: 'skills/studio/review.md', path: 'skills/studio/review.md', text: '# Review\n\nRead the diff twice.\n' },
-  ],
-  // A STACK OF THREE, which is the widest this section ever gets and the state the geometry gate has
-  // to be able to measure: a document this fleet shares, a document this change writes, and one block
-  // of settings typed here — the last of them overriding a key the first also sets, so the origin list
-  // has something to disagree about.
-  settings: [
-    { id: 'settings-shared', source: 'store', path: 'templates/claude/settings.json', text: '' },
-    {
-      id: 'settings-studio',
-      source: 'new',
-      path: 'templates/claude/studio.json',
-      text: '{\n  "permissions": { "allow": ["Bash(git status)"] }\n}',
-    },
-    { id: 'settings-typed', source: 'inline', path: '', text: '{\n  "model": "claude-opus-5"\n}' },
-  ],
-  env: [{ id: 'FY_LANE', name: 'FY_LANE', value: 'studio' }],
-  // Fields this editor does not offer, carried through the change exactly as declared.
-  preserved: { flags: ['--dangerously-skip-permissions'], mcp: 'mcp/studio.json' },
-};
-
-/**
- * What a FIRST RUN creates on a host with no fleet at all, as the daemon derives it.
- *
- * Real paths under a real state home, because the panel exists to show a person exactly where its
- * files land — a fixture of placeholders would capture a screen nobody could check.
- */
-const HARNESS_FLEET_SCAFFOLD = {
-  directories: [
-    '/home/pilot/.ferretry/fleet',
-    '/home/pilot/.ferretry/fleet/bin',
-    '/home/pilot/.ferretry/fleet/homes',
-    '/home/pilot/.ferretry/fleet/assets/instructions',
-    '/home/pilot/.ferretry/fleet/assets/skills',
-  ],
-  files: [
-    { path: '/home/pilot/.ferretry/fleet/config.yaml' },
-    { path: '/home/pilot/.ferretry/fleet/assets/instructions/.keep' },
-  ],
-  pathEntry: 'export PATH="$HOME/.ferretry/fleet/bin:$PATH"',
-} as const;
-
-const HARNESS_FLEET_PROPOSAL = {
-  id: 'fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb',
-  revision: '9f1c4ab77e2d',
-  mutation: {
-    kind: 'create-account',
-    harness: 'claude',
-    name: 'atelier',
-    lanes: [
-      { variant: 'default', mode: 'interactive' },
-      { variant: 'auto', mode: 'auto' },
-    ],
-    models: [{ id: 'claude-opus-5' }],
-    defaultModel: 'claude-opus-5',
-  },
-  summary: 'add claude-atelier, claude-auto-atelier',
-  expiresAt: '2026-08-05T08:41:00.000Z',
-  state: 'pending',
-  assetEdits: [
-    { path: 'instructions/atelier.md', bytes: 482 },
-    { path: 'skills/atelier/review.md', bytes: 1_204 },
-  ],
-  preview: {
-    kind: 'apply',
-    documents: [
-      { path: '/home/pilot/.ferretry/fleet/config.yaml', bytes: 3_918 },
-      { path: '/home/pilot/.ferretry/fleet/assets/instructions/atelier.md', bytes: 482 },
-    ],
-    plan: {
-      manifestPath: '/home/pilot/.ferretry/fleet/manifest.json',
-      manifest: {
-        version: 1,
-        generatedAt: '2026-08-05T08:26:00.000Z',
-        accounts: [
-          ...HARNESS_FLEET_ACCOUNTS,
-          {
-            id: '44444444-4444-4444-8444-444444444444',
-            kind: 'claude',
-            mode: 'auto',
-            wrapper: 'claude-atelier',
-            home: '/home/pilot/.ferretry/fleet/homes/claude-atelier',
-            displayName: 'Atelier Claude',
-            defaultModel: 'claude-opus-5',
-            models: [{ id: 'claude-opus-5', available: true }],
-            available: true,
-            unavailableReason: null,
-          },
-        ],
-      },
-      operations: [
-        { kind: 'directory', path: '/home/pilot/.ferretry/fleet/homes/claude-atelier', mode: 448 },
-        { kind: 'file', path: '/home/pilot/.ferretry/fleet/bin/claude-atelier', mode: 493 },
-        {
-          kind: 'copy',
-          source: '/home/pilot/.ferretry/fleet/assets/instructions/atelier.md',
-          path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/CLAUDE.md',
-          mode: 420,
-        },
-        {
-          kind: 'symlink',
-          source: '/home/pilot/.ferretry/fleet/shared/claude/history',
-          path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/history',
-        },
-        {
-          kind: 'settings',
-          path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json',
-          format: 'json',
-          layerCount: 3,
-          preserveExisting: true,
-          mode: 384,
-        },
-        {
-          kind: 'codex-sqlite-ownership',
-          path: '/home/pilot/.ferretry/fleet/homes/codex-archive/config.toml',
-          markerPath: '/home/pilot/.ferretry/fleet/homes/codex-archive/.fy-sqlite-owner',
-          sqliteHome: '/home/pilot/.ferretry/fleet/shared/codex/sqlite',
-          enabled: true,
-        },
-        {
-          kind: 'prune',
-          path: '/home/pilot/.ferretry/fleet/bin',
-          marker: 'ferretry-managed',
-          keep: ['claude-studio', 'claude-auto-atelier', 'codex-archive', 'claude-atelier'],
-        },
-      ],
-      sharedHistory: [
-        {
-          kind: 'claude',
-          pool: '/home/pilot/.ferretry/fleet/shared/claude/history',
-          migrated: 214,
-          conflicts: 2,
-          links: 4,
-        },
-      ],
-    },
-  },
-} satisfies FleetProposalView;
-
-const HARNESS_FLEET_FAILURE = {
-  outcome: 'rollback-incomplete',
-  failedOperation: 'settings /home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json',
-  reason: 'no space left on device',
-  unrestored: [
-    {
-      path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json',
-      reason: 'the moved-aside original could not be renamed back',
-      backup: '/home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json.fy-backup',
-    },
-  ],
-  displaced: [
-    {
-      path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/CLAUDE.md',
-      movedTo: '/home/pilot/.ferretry/fleet/homes/claude-atelier/CLAUDE.md.fy-displaced',
-    },
-  ],
-  lockResidue: '/home/pilot/.ferretry/fleet/apply.lock',
-} satisfies FleetApplyOutcome;
-
-/**
- * The two sign-in fixtures, one per harness, at the states worth looking at.
- *
- * BOTH URLS AND THE CODE ARE OBVIOUS FIXTURES. The Claude one carries a `code_challenge_method=S256`
- * query exactly as the real one does, because that is the part a narrow renderer breaks on. Nothing
- * here is a credential, and the panels' own clearing behaviour is unchanged by rendering them.
- *
- * TWO HARNESSES, TWO FIXTURES, DELIBERATELY. A shared one would have had to invent a shape neither
- * panel has.
- */
-const HARNESS_CLAUDE_LOGIN_URL =
-  'https://claude.com/cai/oauth/authorize?code=true&code_challenge_method=S256&state=harness';
-const HARNESS_CODEX_LOGIN_URL = 'https://auth.openai.com/codex/device';
-
-const HARNESS_LOGIN_FLOW_BASE = {
-  flowId: 'harness-flow',
-  accountId: '00000000-0000-4000-8000-0000000000aa',
-  startedAt: '2026-08-19T10:00:00.000Z',
-  expiresAt: '2026-08-19T10:10:00.000Z',
-} as const;
-
-function RemoteLoginHarness() {
-  return (
-    <div data-harness="remote-login" className="space-y-3">
-      <ClaudeLoginPanel
-        accountLabel="Studio Claude"
-        identity="claude:studio"
-        memberCount={3}
-        flow={{
-          harness: 'claude',
-          ...HARNESS_LOGIN_FLOW_BASE,
-          identity: 'claude:studio',
-          state: 'awaiting-code',
-          verificationUrl: HARNESS_CLAUDE_LOGIN_URL,
-        }}
-        busy={false}
-        refusal={null}
-        onStart={() => undefined}
-        onSubmitCode={() => undefined}
-        onCancel={() => undefined}
-        copy={async () => {}}
-      />
-      <CodexLoginPanel
-        accountLabel="Studio Codex"
-        identity="codex:studio"
-        memberCount={2}
-        flow={{
-          harness: 'codex',
-          ...HARNESS_LOGIN_FLOW_BASE,
-          identity: 'codex:studio',
-          state: 'awaiting-approval',
-          verificationUrl: HARNESS_CODEX_LOGIN_URL,
-          userCode: '0IER-FFQW6',
-        }}
-        busy={false}
-        refusal={null}
-        onStart={() => undefined}
-        onCancel={() => undefined}
-        copy={async () => {}}
-      />
-    </div>
-  );
-}
 /**
  * A skills catalog covering both scopes and every origin chip, so the row
  * chrome, the group headings and the badge column can all be compared against
@@ -1436,11 +680,11 @@ const harnessCgroupClient = async (connection: DaemonConnection) => {
 };
 
 /**
- * The three panels the composition root supplies, in the order it supplies them.
+ * The panels the composition root supplies, in the order it supplies them (production also
+ * supplies Model pricing, which this fixture leaves out).
  *
- * The fixture renders the production EIGHT — Warden, Secrets, Environment,
- * Resource limits, Doctor, Fleet, Carrier, Host checks — because a fixture with
- * fewer cannot show what eight of them do to the frame that lists them. Each one
+ * The frame then renders EIGHT — Warden, Secrets, Add a device, What devices may do, Resource
+ * limits, Doctor, Carrier, Host checks. Each one
  * is the real surface behind a client that answers from memory: no leaf is faked
  * and nothing here reaches the network, which the screenshot driver enforces by
  * aborting every request that leaves the loopback origin.
@@ -1471,46 +715,6 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
           if (target.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
           return HARNESS_DOCTOR;
         }}
-      />
-    ),
-  },
-  // The real definition the composition root mounts, given the same stub daemon
-  // the fleet cockpit frames use: one published fleet, staging allowed, applying
-  // only with approval.
-  fleetSettingsTab(async connection => {
-    if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-    return fleetCockpitClient(HARNESS_FLEET_COCKPIT_ANSWERS);
-  }),
-  /**
-   * ACCOUNTS, AS THE FRAME REALLY MOUNTS IT — the whole point of this fixture.
-   *
-   * The parent/child relation is the deliverable of this panel, and it is only visible in a rail that
-   * has BOTH rows. A settings walk carrying Fleet and not Accounts would capture the flat list the
-   * change replaced and report it as the new one.
-   *
-   * Its own surface is rendered from the accounts fixture rather than through the cockpit stub: the
-   * roster wants a health snapshot, a usage feed and a readiness read, and this frame exists to be
-   * looked at rather than to prove three transports.
-   */
-  {
-    ...accountsSettingsTab(async () => {
-      throw new Error('the accounts panel reads its fixture in the harness');
-    }),
-    Surface: () => (
-      <AccountsSurface
-        daemonId={daemon.daemonId}
-        state={HARNESS_ACCOUNTS_STATE}
-        flows={{}}
-        refusal={null}
-        busy={false}
-        mayStart={true}
-        healthCheck={{ status: 'ready', error: null, checked: 4, onCheck: () => {} }}
-        onAddAccount={() => {}}
-        onReRead={() => {}}
-        onStart={() => {}}
-        onRenew={() => {}}
-        onSubmitCode={() => {}}
-        onCancel={() => {}}
       />
     ),
   },
@@ -2164,7 +1368,8 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
       tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
       runtimeCount: setUp ? 5 : 0,
       runningSessions: 0,
-      changes: { available: true },
+      // The host's own browser: it may apply, and nothing more is asked.
+      authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
     };
   };
   return {
@@ -2683,40 +1888,14 @@ const HARNESS_DRIVEN_READS: Readonly<Record<string, DrivenRead>> = {
 };
 
 /**
- * The fleet profile environment the harness daemon publishes.
- *
- * The comparison defaults to this daemon against itself — what the surface does
- * at rest — so the difference list is legitimately empty rather than a
- * disagreement invented between two hosts this fixture cannot both answer for.
- */
-const HARNESS_FLEET_ENVIRONMENT = {
-  profiles: {
-    default: {
-      FERRETRY_FLEET: 'studio',
-      FY_HOME: '/home/pilot/.ferretry',
-      PATH: '/nix/var/nix/profiles/default/bin:/usr/bin:/bin',
-      TZ: 'Asia/Singapore',
-    },
-    auto: {
-      FERRETRY_FLEET: 'studio',
-      FY_HOME: '/home/pilot/.ferretry',
-      FY_UNATTENDED: '1',
-      PATH: '/nix/var/nix/profiles/default/bin:/usr/bin:/bin',
-      TZ: 'Asia/Singapore',
-    },
-  },
-};
-
-/**
  * The reads the harness daemon answers beyond the file tabs' `/fs` routes.
  *
  * Most surfaces take a client factory this fixture injects (Warden, resource
- * limits, Fleet). These two cannot: `SecretsSurface` falls back to
+ * limits). The secret store cannot: `SecretsSurface` falls back to
  * `daemonApiClient` because no secret-client seam is forwarded through
- * `SettingsPage` — the GAP `docs/secrets.md` declares — and
- * `FleetEnvironmentSettings` calls `fetch` itself. Unanswered, their captures
- * showed "Reading this daemon's secret store…" and "Failed to fetch": the
- * harness's own aborted request, reviewed as if the product had produced it.
+ * `SettingsPage` — the GAP `docs/secrets.md` declares. Unanswered, its capture
+ * showed "Reading this daemon's secret store…": the harness's own aborted
+ * request, reviewed as if the product had produced it.
  */
 /**
  * The task board the current-session search reads — ONE list of FULL tasks.
@@ -2858,7 +2037,6 @@ const HARNESS_SEARCH_SESSION_IDS: readonly string[] = ['harness-session', HARNES
 
 const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   '/v1/secrets': SECRETS_READY,
-  '/v1/fleet/environment': HARNESS_FLEET_ENVIRONMENT,
 };
 
 /** Which pairing a request is addressed to, taken from the fixtures themselves. */
@@ -3119,9 +2297,9 @@ const HARNESS_SESSION_ACCOUNTS: readonly PickerAccount[] = [
   {
     id: '44444444-4444-4444-8444-444444444444',
     kind: 'codex',
-    mode: 'auto',
+    agent: true,
     wrapper: 'codex',
-    home: '/home/pilot/.ferretry/fleet/homes/codex',
+    credentialId: 'studio-codex',
     displayName: 'Studio Codex',
     defaultModel: 'gpt-5.6-sol',
     models: [{ id: 'gpt-5.6-sol', available: true }],
@@ -3916,9 +3094,9 @@ const HARNESS_PICKER_ACCOUNTS = [
   {
     id: PICKER_ID.studio,
     kind: 'claude',
-    mode: 'auto',
+    agent: true,
     wrapper: 'claude-auto-studio',
-    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-studio',
+    credentialId: 'studio',
     displayName: 'Studio Claude',
     defaultModel: 'claude-opus-5',
     models: [{ id: 'claude-opus-5', available: true }],
@@ -3928,9 +3106,9 @@ const HARNESS_PICKER_ACCOUNTS = [
   {
     id: PICKER_ID.atelier,
     kind: 'claude',
-    mode: 'auto',
+    agent: true,
     wrapper: 'claude-auto-atelier',
-    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-atelier',
+    credentialId: 'atelier',
     displayName: 'Atelier Claude',
     defaultModel: 'claude-sonnet-5',
     models: [{ id: 'claude-sonnet-5', available: true }],
@@ -3940,9 +3118,9 @@ const HARNESS_PICKER_ACCOUNTS = [
   {
     id: PICKER_ID.loge,
     kind: 'claude',
-    mode: 'interactive',
+    agent: false,
     wrapper: 'claude-auto-loge',
-    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-loge',
+    credentialId: 'loge',
     displayName: 'Loge Claude',
     defaultModel: 'claude-opus-5',
     models: [{ id: 'claude-opus-5', available: true }],
@@ -3952,9 +3130,9 @@ const HARNESS_PICKER_ACCOUNTS = [
   {
     id: PICKER_ID.terra,
     kind: 'codex',
-    mode: 'auto',
+    agent: true,
     wrapper: 'codex-auto-terra',
-    home: '/home/pilot/.ferretry/fleet/homes/codex-auto-terra',
+    credentialId: 'terra',
     displayName: 'Terra Codex',
     defaultModel: 'gpt-5.6-terra',
     models: [{ id: 'gpt-5.6-terra', available: true }],
@@ -3964,9 +3142,9 @@ const HARNESS_PICKER_ACCOUNTS = [
   {
     id: PICKER_ID.archive,
     kind: 'codex',
-    mode: 'auto',
+    agent: true,
     wrapper: 'codex-auto-archive',
-    home: '/home/pilot/.ferretry/fleet/homes/codex-auto-archive',
+    credentialId: 'archive',
     displayName: 'Archive Codex',
     defaultModel: null,
     models: [],
@@ -3985,43 +3163,40 @@ const HARNESS_PICKER_USAGE: readonly AccountUsageRow[] = [
 /** The stored verdicts the daemon published. Two accounts are deliberately absent from it. */
 const HARNESS_PICKER_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map([
   [
-    PICKER_ID.studio,
+    'studio',
     {
-      accountId: PICKER_ID.studio,
-      kind: 'claude' as const,
-      verdict: 'healthy' as const,
+      credentialId: 'studio',
+      word: 'ready' as const,
+      label: 'Ready',
       reason: 'provider_accepted' as const,
-      evidence: 'anthropic_usage' as const,
-      lastCheckedAt: HARNESS_NOW - 120_000,
-      verdictAt: HARNESS_NOW - 120_000,
+      explanation: 'The provider accepted this login.',
+      lastCheckedAt: new Date(HARNESS_NOW - 120_000).toISOString(),
       lastCheckInconclusive: false,
     },
   ],
   [
-    PICKER_ID.atelier,
+    'atelier',
     {
-      accountId: PICKER_ID.atelier,
-      kind: 'claude' as const,
-      verdict: 'needs_relogin' as const,
-      reason: 'oauth_token_rejected' as const,
-      evidence: 'anthropic_usage' as const,
-      lastCheckedAt: HARNESS_NOW - 4_000,
-      verdictAt: HARNESS_NOW - 4_000,
+      credentialId: 'atelier',
+      word: 'needs_sign_in' as const,
+      label: 'Needs sign-in',
+      reason: 'provider_rejected' as const,
+      explanation: 'The provider rejected this login. Sign in again to use it.',
+      lastCheckedAt: new Date(HARNESS_NOW - 4_000).toISOString(),
       lastCheckInconclusive: false,
     },
   ],
   [
-    // A 403: HEALTHY, with the quota unmeasurable. Under review here precisely because it is the
+    // A 403: READY, with the quota unmeasurable. Under review here precisely because it is the
     // reading a reviewer is most likely to expect to look like a failure and must not.
-    PICKER_ID.loge,
+    'loge',
     {
-      accountId: PICKER_ID.loge,
-      kind: 'claude' as const,
-      verdict: 'healthy' as const,
+      credentialId: 'loge',
+      word: 'ready' as const,
+      label: 'Ready',
       reason: 'usage_scope_unavailable' as const,
-      evidence: 'anthropic_usage' as const,
-      lastCheckedAt: HARNESS_NOW - 3_000,
-      verdictAt: HARNESS_NOW - 3_000,
+      explanation: 'Accepted, but this login cannot read usage, so quota is not measurable.',
+      lastCheckedAt: new Date(HARNESS_NOW - 3_000).toISOString(),
       lastCheckInconclusive: false,
     },
   ],
@@ -4057,9 +3232,9 @@ const HARNESS_FIRST_RUN_ACCOUNTS = [
   {
     id: 'bbbbbbbb-1111-4111-8111-111111111111',
     kind: 'claude',
-    mode: 'interactive',
+    agent: false,
     wrapper: 'claude-default',
-    home: '/home/pilot/.ferretry/fleet/homes/claude-default',
+    credentialId: 'claude-default',
     displayName: 'Claude (default)',
     defaultModel: 'claude-opus-5',
     models: [{ id: 'claude-opus-5', available: true }],
@@ -4069,9 +3244,9 @@ const HARNESS_FIRST_RUN_ACCOUNTS = [
   {
     id: 'bbbbbbbb-2222-4222-8222-222222222222',
     kind: 'claude',
-    mode: 'auto',
+    agent: true,
     wrapper: 'claude-auto-default',
-    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-default',
+    credentialId: 'claude-default',
     displayName: 'Claude (default, auto)',
     defaultModel: 'claude-opus-5',
     models: [{ id: 'claude-opus-5', available: true }],
@@ -5789,149 +4964,6 @@ function Shell() {
       render: () => <SettingsPageHarness />,
     },
     {
-      label: 'Accounts page preview',
-      render: () => (
-        <Card id="harness-accounts-page" aria-label="Accounts page preview">
-          <PanelBody>
-            <AccountsSurface
-              daemonId={daemon.daemonId}
-              state={HARNESS_ACCOUNTS_STATE}
-              flows={{}}
-              refusal={null}
-              busy={false}
-              mayStart={true}
-              healthCheck={{ status: 'ready', error: null, checked: 4, onCheck: () => {} }}
-              onAddAccount={() => undefined}
-              onReRead={() => {}}
-              onStart={() => {}}
-              onRenew={() => {}}
-              onSubmitCode={() => {}}
-              onCancel={() => {}}
-            />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Fleet account list',
-      render: () => (
-        <Card id="harness-fleet-accounts" aria-label="Fleet account list" className="min-w-0 overflow-hidden">
-          <PanelBody>
-            <FleetLiveRoster
-              accounts={HARNESS_FLEET_ACCOUNTS}
-              generatedAt="2026-08-05T08:26:00.000Z"
-              onEdit={() => {}}
-              editable={true}
-            />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      /**
-       * EVERY STEP OF THE NEW-ACCOUNT SEQUENCE, one card each.
-       *
-       * A single card would prove that step one fits a phone and say nothing about the other six —
-       * and the model step, with a card per model and a custom-value row, is the widest of them. The
-       * step is a PROP rather than component state precisely so this gallery can render each one
-       * directly instead of driving six clicks per viewport per theme.
-       */
-      label: 'Fleet new account stepper',
-      render: () => (
-        <Card id="harness-fleet-stepper" aria-label="Fleet new account stepper" className="min-w-0 overflow-hidden">
-          <PanelBody>
-            <div className="grid gap-4">
-              {FLEET_STEP_IDS.map(step => (
-                <div key={step} className="kt-panel overflow-hidden" data-harness={`fleet-stepper-${step}`}>
-                  <FleetAccountStepper
-                    draft={HARNESS_FLEET_DRAFT}
-                    step={step}
-                    onStep={() => {}}
-                    onChange={() => {}}
-                    onSubmit={() => {}}
-                    onCancel={() => {}}
-                    disabled={false}
-                    loading={false}
-                    detection={HARNESS_FLEET_DETECTION}
-                    instructions={HARNESS_FLEET_INSTRUCTIONS}
-                    instructionsSource="import"
-                    onInstructionsSource={() => {}}
-                    accountSource="existing"
-                    onAccountSource={() => {}}
-                    variants={['default', 'auto', 'review']}
-                    config={HARNESS_FLEET_CONFIG}
-                    discovery={HARNESS_FLEET_DISCOVERY}
-                    published={HARNESS_FLEET_ACCOUNTS}
-                    skillsStore={HARNESS_FLEET_SKILLS_STORE}
-                    storeDocuments={HARNESS_FLEET_STORE_DOCUMENTS}
-                    assetBlockers={[]}
-                    profiles={HARNESS_FLEET_PROFILES}
-                  />
-                </div>
-              ))}
-            </div>
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      /** Every layer concern at once, including an asset the browser could NOT read. */
-      label: 'Fleet layer editor',
-      render: () => (
-        <Card id="harness-fleet-layer" aria-label="Fleet layer editor" className="min-w-0 overflow-hidden">
-          <PanelBody>
-            <div className="kt-panel overflow-hidden">
-              <FleetLayerForm
-                wrapper="claude-studio"
-                layer={HARNESS_FLEET_LAYER}
-                onChange={() => {}}
-                onSubmit={() => {}}
-                onCancel={() => {}}
-                problems={[
-                  '"skills/studio/huge.md" could not be read (over the 65536-byte limit for a single file), so staging a change would overwrite text this browser never saw',
-                ]}
-                disabled={false}
-                loading={false}
-              />
-            </div>
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Fleet plan preview',
-      render: () => (
-        <Card id="harness-fleet-preview" aria-label="Fleet plan preview" className="min-w-0 overflow-hidden">
-          <PanelBody>
-            <FleetChangeReview
-              proposal={HARNESS_FLEET_PROPOSAL}
-              live={HARNESS_FLEET_ACCOUNTS}
-              authority={{ kind: 'open' }}
-              onApply={() => {}}
-              onDiscard={() => {}}
-              busy={false}
-              refusal={null}
-            />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      /** The fail-closed frame: a host that changed and could not be verified back. */
-      label: 'Fleet failed apply',
-      render: () => (
-        <Card id="harness-fleet-failed-apply" aria-label="Fleet failed apply" className="min-w-0 overflow-hidden">
-          <PanelBody>
-            <FleetApplyReport outcome={HARNESS_FLEET_FAILURE} />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Remote provider login',
-      render: () => <RemoteLoginHarness />,
-    },
-    {
       label: 'Attention ledger',
       render: () => (
         <Card className="min-h-[360px] overflow-hidden">
@@ -7481,398 +6513,10 @@ function BrowserFullViewportHarness() {
   );
 }
 
-/**
- * The five fleet frames on a page of their own.
- *
- * They are in the gallery too, but three of them are taller than a desktop viewport, and an element
- * capture of a tall card inside the gallery's scroller clips to the wrong region. Starting at the real
- * top of a page with no sticky chrome is what makes the captures trustworthy.
- */
-type HarnessFleetFrame =
-  | 'accounts'
-  | 'preview'
-  | 'preview-confirm'
-  | 'failed-apply'
-  | 'create'
-  | 'layer'
-  | 'cockpit'
-  | 'cockpit-staged'
-  | 'states'
-  | 'first-run'
-  | 'unlock'
-  | 'unreachable';
-
-/**
- * The COCKPIT itself, driven by a stub daemon rather than by fixtures handed to a leaf.
- *
- * The five frames below exercise the components; this is the screen a person actually opens — the
- * header with the daemon id, the host-state verdict and the authority badge, the live-beside-proposed
- * grid, and the declared limits. Nothing here reaches a network: the client answers from constants and
- * every request stays inside this page.
- */
-function fleetCockpitClient(answers: Readonly<Record<string, unknown>>) {
-  return {
-    request: async <T,>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> => {
-      const tail = path.slice('/v1/fleet'.length);
-      const answer = answers[tail];
-      if (answer === undefined) throw new FyHttpError(`this harness serves no ${tail}`, 409, 'fleet_not_applied');
-      if (answer instanceof FyHttpError) throw answer;
-      return schema.parse(answer);
-    },
-  };
-}
-
-const HARNESS_FLEET_COCKPIT_ANSWERS: Readonly<Record<string, unknown>> = {
-  /**
-   * The OWNER'S OWN CASE: a browser this daemon does not govern, which is every loopback caller and
-   * every local one that has unlocked. One Apply, nothing else in the way.
-   *
-   * It used to be `mayApplyWithApproval` with a command for minting codes, so every fleet capture in
-   * this gallery showed the two stacked gates this frame now exists to prove are gone.
-   */
-  '/permissions': {
-    mayInspect: true,
-    mayPropose: true,
-    mayApply: true,
-    applyRefusal: 'ungated',
-    confirmation: 'none',
-  },
-  '/accounts': { version: 1, generatedAt: '2026-08-05T08:26:00.000Z', accounts: HARNESS_FLEET_ACCOUNTS },
-  // A REAL SETTINGS REGISTRY, because the sequence's Settings step offers what this fleet has and a
-  // fleet that names nothing captures the empty case forever. These are the two names and the two `./`
-  // paths `fy fleet init` scaffolds, so the capture measures the shipped scheme rather than one this
-  // file made up — including the canonicalisation, since a card spelled `./…` could not be ticked.
-  '/config': {
-    variants: { default: {}, auto: {} },
-    shared: { settings: { claude: './templates/claude/settings.json', codex: './templates/codex/config.toml' } },
-    agents: [],
-  },
-  // WHAT THIS HOST HAS. Without it the new-account sequence opens unprefilled, which is the OLD screen:
-  // every capture would show empty boxes and prove nothing about the one property the panel gained.
-  '/harnesses': HARNESS_FLEET_DISCOVERY,
-  // Every compose flow lists the asset tree, because a path the person types has to be judged against
-  // what is already there. A daemon that cannot answer this is a daemon whose tree is unknown, and the
-  // surface then refuses to stage anything — so a harness without this route would capture a blocked
-  // screen rather than the change manifest these frames exist to show.
-  '/assets': { files: [], complete: true },
-};
-
-/** The four states a host can be in that are NOT a published fleet. Each one is its own sentence. */
-const HARNESS_FLEET_STAGED_ANSWERS: Readonly<Record<string, unknown>> = {
-  ...HARNESS_FLEET_COCKPIT_ANSWERS,
-  '/config': {
-    variants: { default: {}, auto: {} },
-    agents: [
-      {
-        name: 'studio',
-        kind: 'claude',
-        routes: { default: { id: HARNESS_FLEET_ACCOUNTS[0]?.id, wrapper: 'claude-studio' } },
-      },
-    ],
-  },
-  '/proposals': HARNESS_FLEET_PROPOSAL,
-};
-
-const HARNESS_FLEET_STATE_ANSWERS: readonly {
-  readonly label: string;
-  readonly answers: Readonly<Record<string, unknown>>;
-}[] = [
-  {
-    label: 'uninitialized',
-    answers: {
-      '/permissions': HARNESS_FLEET_COCKPIT_ANSWERS['/permissions'],
-      '/accounts': new FyHttpError(
-        'no published fleet manifest at /home/pilot/.ferretry/fleet/manifest.json',
-        409,
-        'fleet_not_applied',
-      ),
-      '/config': new FyHttpError(
-        'no fleet config at /home/pilot/.ferretry/fleet/config.yaml; write the declared config before applying the fleet',
-        409,
-        'fleet_config_missing',
-      ),
-    },
-  },
-  {
-    label: 'not-applied',
-    answers: {
-      '/permissions': HARNESS_FLEET_COCKPIT_ANSWERS['/permissions'],
-      '/accounts': new FyHttpError('no published fleet manifest', 409, 'fleet_not_applied'),
-      '/config': HARNESS_FLEET_COCKPIT_ANSWERS['/config'],
-    },
-  },
-  {
-    label: 'damaged',
-    answers: {
-      '/permissions': HARNESS_FLEET_COCKPIT_ANSWERS['/permissions'],
-      '/accounts': new FyHttpError(
-        'fleet manifest at /home/pilot/.ferretry/fleet/manifest.json is unreadable or invalid',
-        409,
-        'fleet_manifest_invalid',
-      ),
-      '/config': HARNESS_FLEET_COCKPIT_ANSWERS['/config'],
-    },
-  },
-  {
-    label: 'forbidden',
-    answers: {
-      '/permissions': new FyHttpError('a paired device may inspect the fleet but may not apply it', 403, 'forbidden'),
-      '/accounts': new FyHttpError('a paired device may inspect the fleet but may not apply it', 403, 'forbidden'),
-      '/config': new FyHttpError('a paired device may inspect the fleet but may not apply it', 403, 'forbidden'),
-    },
-  },
-  /**
-   * THE OWNER'S COMPLAINT, as the panel answers it now: a published fleet whose apply is `locked`.
-   *
-   * The old panel showed a red refusal with no way out of it AND a terminal command underneath. This
-   * frame is here so that the absence of both is a thing somebody can look at, and so the state is
-   * captured beside the four read failures rather than only described in a report.
-   */
-  {
-    label: 'locked',
-    answers: {
-      '/permissions': {
-        mayInspect: true,
-        mayPropose: true,
-        mayApply: false,
-        applyRefusal: 'locked',
-        confirmation: 'operator-password',
-      },
-      '/accounts': HARNESS_FLEET_COCKPIT_ANSWERS['/accounts'],
-      '/config': HARNESS_FLEET_COCKPIT_ANSWERS['/config'],
-      '/assets': HARNESS_FLEET_COCKPIT_ANSWERS['/assets'],
-    },
-  },
-];
-
-function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
-  return (
-    /* NOT `kt-content`: that is the app shell's inner scroller, and a frame taller than the screen
-       would be clipped by it rather than growing the document a full-page capture measures. */
-    <div className="mx-auto w-full max-w-[1400px] space-y-panel self-start p-panel" id="harness-fleet-cockpit">
-      {frame !== 'accounts' ? null : (
-        <section aria-label="Fleet account list" id="harness-fleet-accounts-page">
-          {/* THE THREE HEALTH SHAPES IN ONE FRAME, because the change worth looking at here is which
-              rows speak. One healthy row (verdict and when, no reason — "Healthy" already said it),
-              one that needs a person (verdict, when, and the reason, because that is a second fact),
-              and one nothing has ever checked (SILENT — a roster whose every row said "Unknown ·
-              Never checked · Nothing has checked this account yet." was three of four lines per
-              account spent on nothing happening). `now` is fixed so the relative labels do not drift
-              between captures. */}
-          <FleetLiveRoster
-            accounts={HARNESS_FLEET_ACCOUNTS}
-            generatedAt="2026-08-05T08:26:00.000Z"
-            health={HARNESS_FLEET_HEALTH}
-            now={Date.parse('2026-08-05T08:30:00.000Z')}
-            onEdit={() => {}}
-            editable={true}
-          />
-        </section>
-      )}
-      {frame !== 'preview' ? null : (
-        <section aria-label="Fleet plan preview" id="harness-fleet-preview-page">
-          {/* `open` — the change manifest and ONE Apply, which is what the panel is for. The
-              per-change confirmation has its own frame below, because the two look different and both
-              are worth capturing. */}
-          <FleetChangeReview
-            proposal={HARNESS_FLEET_PROPOSAL}
-            live={HARNESS_FLEET_ACCOUNTS}
-            authority={{ kind: 'open' }}
-            onApply={() => {}}
-            onDiscard={() => {}}
-            busy={false}
-            refusal={null}
-          />
-        </section>
-      )}
-      {frame !== 'preview-confirm' ? null : (
-        <section aria-label="Fleet plan preview, confirmation required" id="harness-fleet-preview-confirm-page">
-          {/* `confirm` — a governed caller on a machine with an operator password, which is the one
-              state where applying still asks for something. ONE field, the shared unlock limit note, and
-              no second gate: the field is what proves the password AND what confirms this exact diff. */}
-          <FleetChangeReview
-            proposal={HARNESS_FLEET_PROPOSAL}
-            live={HARNESS_FLEET_ACCOUNTS}
-            authority={{ kind: 'confirm' }}
-            onApply={() => {}}
-            onDiscard={() => {}}
-            busy={false}
-            refusal={null}
-          />
-        </section>
-      )}
-      {frame !== 'failed-apply' ? null : (
-        <section aria-label="Fleet failed apply" id="harness-fleet-failed-apply-page">
-          <FleetApplyReport outcome={HARNESS_FLEET_FAILURE} />
-        </section>
-      )}
-      {frame !== 'create' ? null : (
-        <section aria-label="Fleet create account" id="harness-fleet-create-page" className="grid gap-4">
-          {/* Every step, each in its own panel with its own hook, so the geometry gate can take one
-              at a time rather than one image of a stack it cannot attribute a failure to. */}
-          {FLEET_STEP_IDS.map(step => (
-            <div key={step} className="kt-panel overflow-hidden" data-harness={`fleet-stepper-${step}`}>
-              <FleetAccountStepper
-                draft={HARNESS_FLEET_DRAFT}
-                step={step}
-                onStep={() => {}}
-                onChange={() => {}}
-                onSubmit={() => {}}
-                onCancel={() => {}}
-                disabled={false}
-                loading={false}
-                detection={HARNESS_FLEET_DETECTION}
-                instructions={HARNESS_FLEET_INSTRUCTIONS}
-                instructionsSource="import"
-                onInstructionsSource={() => {}}
-                accountSource="existing"
-                onAccountSource={() => {}}
-                variants={['default', 'auto', 'review']}
-                config={HARNESS_FLEET_CONFIG}
-                discovery={HARNESS_FLEET_DISCOVERY}
-                published={HARNESS_FLEET_ACCOUNTS}
-                skillsStore={HARNESS_FLEET_SKILLS_STORE}
-                storeDocuments={HARNESS_FLEET_STORE_DOCUMENTS}
-                assetBlockers={[]}
-                profiles={HARNESS_FLEET_PROFILES}
-              />
-            </div>
-          ))}
-        </section>
-      )}
-      {frame !== 'layer' ? null : (
-        <section aria-label="Fleet layer editor" className="kt-panel overflow-hidden" id="harness-fleet-layer-page">
-          <FleetLayerForm
-            wrapper="claude-studio"
-            layer={HARNESS_FLEET_LAYER}
-            onChange={() => {}}
-            onSubmit={() => {}}
-            onCancel={() => {}}
-            problems={[
-              '"skills/studio/huge.md" could not be read (over the 65536-byte limit for a single file), so staging a change would overwrite text this browser never saw',
-            ]}
-            disabled={false}
-            loading={false}
-          />
-        </section>
-      )}
-      {frame !== 'cockpit' ? null : (
-        <section aria-label="Fleet cockpit" id="harness-fleet-cockpit-page">
-          <FleetConfigurationSurface
-            connection={daemon}
-            createClient={async () => fleetCockpitClient(HARNESS_FLEET_COCKPIT_ANSWERS)}
-          />
-        </section>
-      )}
-      {frame !== 'cockpit-staged' ? null : (
-        <section aria-label="Fleet cockpit, change staged" id="harness-fleet-cockpit-staged-page">
-          <FleetConfigurationSurface
-            connection={daemon}
-            createClient={async () => fleetCockpitClient(HARNESS_FLEET_STAGED_ANSWERS)}
-          />
-        </section>
-      )}
-      {frame !== 'unlock' ? null : (
-        /**
-         * THE PASSWORD PROMPT AS A PERSON MEETS IT: a modal, raised by the action, saying that it unlocks
-         * changing settings on this machine.
-         *
-         * The capture is taken with the dialog OPEN, driven by clicking the real control — a posed overlay
-         * would prove nothing about the component that has to produce one. It is the same dialog the grants
-         * panel raises; there is only one.
-         */
-        <section aria-label="Fleet operator unlock" id="harness-fleet-unlock-page">
-          <FleetChangeReview
-            proposal={HARNESS_FLEET_PROPOSAL}
-            live={HARNESS_FLEET_ACCOUNTS}
-            authority={{ kind: 'locked', alsoConfirms: true }}
-            onApply={() => {}}
-            onDiscard={() => {}}
-            busy={false}
-            refusal={null}
-          />
-        </section>
-      )}
-      {frame !== 'first-run' ? null : (
-        /**
-         * PREPARING A HOST: one action and the list it will write.
-         *
-         * This frame exists to be compared with `preview` beside it. There is no EXPIRES row, no CONFIG
-         * REVISION printed as `absent`, no "Staged change" heading over a `pending` badge and no
-         * Confirm-and-Apply — four pieces of transaction ceremony that were on screen for an operation
-         * which creates what is missing and can replace nothing. The paths stay, because they are the
-         * disclosure rather than the ritual.
-         */
-        <section aria-label="Fleet first run" className="kt-panel overflow-hidden" id="harness-fleet-first-run-page">
-          <FleetFirstRunPlan
-            scaffold={HARNESS_FLEET_SCAFFOLD}
-            authority={{ kind: 'open' }}
-            onApply={() => {}}
-            onDiscard={() => {}}
-            busy={false}
-          />
-        </section>
-      )}
-      {frame !== 'unreachable' ? null : (
-        /**
-         * THE OWNER'S SCREENSHOT. A daemon this browser could not reach — which is NOT a daemon that is
-         * stopped, and the whole point of the frame is that the panel no longer says or implies it is.
-         *
-         * The failure is a plain `Error`, because that is what a fetch that never completed throws:
-         * no status, no code, nothing the daemon worded. The page is served over http here, so the
-         * mixed-request sentence is deliberately absent — `pageScheme` decides that, and the state with
-         * it present has its own unit coverage rather than a second near-identical capture.
-         */
-        <section aria-label="Fleet daemon unreachable" id="harness-fleet-unreachable-page">
-          <FleetConfigurationSurface
-            connection={daemon}
-            createClient={async () => {
-              // The SAME address the fixture pairs on, because the real client names the address it dialled:
-              // two different ones on one screen is the confusion this panel exists to remove.
-              throw new Error(`could not reach fyd at ${daemon.baseUrl} (Failed to fetch)`);
-            }}
-          />
-        </section>
-      )}
-      {frame !== 'states' ? null : (
-        <section aria-label="Fleet host states" className="space-y-panel" id="harness-fleet-states-page">
-          {HARNESS_FLEET_STATE_ANSWERS.map(state => (
-            <FleetConfigurationSurface
-              key={state.label}
-              connection={daemon}
-              createClient={async () => fleetCockpitClient(state.answers)}
-            />
-          ))}
-        </section>
-      )}
-    </div>
-  );
-}
-
 /** Hash fragments that replace the whole gallery with one setup screen. */
 const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = {
   '#onboarding-install': 'install',
   '#onboarding-keyboard': 'scan',
-};
-
-/**
- * One fleet frame per page, because three of them are taller than a desktop viewport and a tall
- * element capture inside a scroller clips to the wrong region — the first pass produced a fleet
- * "preview" image showing the secrets cards.
- */
-const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
-  '#fleet-accounts': 'accounts',
-  '#fleet-preview': 'preview',
-  '#fleet-preview-confirm': 'preview-confirm',
-  '#fleet-failed-apply': 'failed-apply',
-  '#fleet-create': 'create',
-  '#fleet-layer': 'layer',
-  '#fleet-cockpit': 'cockpit',
-  '#fleet-cockpit-staged': 'cockpit-staged',
-  '#fleet-states': 'states',
-  '#fleet-first-run': 'first-run',
-  '#fleet-unlock': 'unlock',
-  '#fleet-unreachable': 'unreachable',
 };
 
 /**
@@ -7993,7 +6637,6 @@ const PROJECTS_FRAGMENTS: Readonly<Record<string, HarnessProjectsFrame>> = {
 const host = document.getElementById('root');
 if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
-  const fleetFrame = FLEET_FRAGMENTS[window.location.hash];
   const pickerFrame = PICKER_FRAGMENTS[window.location.hash];
   const projectsFrame = PROJECTS_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
@@ -8007,9 +6650,7 @@ if (host) {
         <SessionSearchHarness />
       ) : window.location.hash === '#browser-full-viewport' ? (
         <BrowserFullViewportHarness />
-      ) : fleetFrame !== undefined ? (
-        <FleetCockpitHarness frame={fleetFrame} />
-      ) : pickerFrame !== undefined ? (
+            ) : pickerFrame !== undefined ? (
         <PickerFrameHarness frame={pickerFrame} />
       ) : projectsFrame !== undefined ? (
         <ProjectsFrameHarness frame={projectsFrame} />

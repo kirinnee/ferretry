@@ -6,9 +6,8 @@
  * routes. This drives the shipped wiring against a small daemon double that answers exactly the
  * routes the commands dial, parsing every request through the shared schema the real daemon uses.
  *
- * It also pins the exit codes a script trusts: a refused unconfirmed removal, a failed check and a
- * migration while the account model is switched off are all non-zero, and none of them changes
- * anything.
+ * It also pins the exit codes a script trusts: a refused unconfirmed removal, and a failed check
+ * are both non-zero, and neither changes anything.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
 import {
@@ -18,15 +17,7 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import pkg from '../../package.json' with { type: 'json' };
-import {
-  CHANGE_ID,
-  changeView,
-  committed,
-  credential,
-  machine,
-  permissions,
-  runtime,
-} from '../unit/fleet/account-fakes';
+import { CHANGE_ID, changeView, committed, credential, machine, runtime } from '../unit/fleet/account-fakes';
 import { BinaryCliDriver, type CliDriver, type CliResult, InProcessCliDriver } from './driver';
 
 const binaryName = Object.keys(pkg.bin)[0] ?? pkg.name;
@@ -41,7 +32,6 @@ const useInProcess =
 class FakeAccountDaemon {
   readonly staged: FleetAccountChange[] = [];
   readonly applied: string[] = [];
-  changesEnabled = true;
   readonly #server: ReturnType<typeof Bun.serve>;
 
   constructor() {
@@ -61,20 +51,14 @@ class FakeAccountDaemon {
     switch (route) {
       case 'GET /v1/fleet/runtimes':
         return Response.json({ format: 'version-2', runtimes: [runtime()] });
-      case 'GET /v1/fleet/permissions':
-        return Response.json(permissions());
       case 'GET /v1/fleet/machine':
-        return Response.json(
-          machine(
-            this.changesEnabled ? {} : { changes: { available: false, reason: 'Account changes are switched off.' } },
-          ),
-        );
-      case 'POST /v1/fleet/changes': {
+        return Response.json(machine());
+      case 'POST /v1/fleet/proposals': {
         const { change } = FleetAccountChangeRequestSchema.parse(await request.json());
         this.staged.push(change);
         return Response.json(changeView(change));
       }
-      case `POST /v1/fleet/changes/${CHANGE_ID}/apply`:
+      case `POST /v1/fleet/proposals/${CHANGE_ID}/apply`:
         FleetProposalApplyRequestSchema.parse(await request.json());
         this.applied.push(CHANGE_ID);
         return Response.json(committed());
@@ -164,18 +148,5 @@ describe(`account model commands (SIT, ${useInProcess ? 'in-process' : 'compiled
     const checked = await cli(['credential', 'check', 'codex-work']);
     should(checked.code).equal(1);
     should(checked.err).containEql(`${binaryName} credential signin codex-work`);
-  });
-
-  it('should refuse to migrate while the account model is switched off', async () => {
-    // Arrange
-    daemon.changesEnabled = false;
-
-    // Act
-    const migrated = await cli(['fleet', 'migrate', '--yes']);
-
-    // Assert
-    should(migrated.code).equal(1);
-    should(migrated.err).containEql('Account changes are switched off.');
-    daemon.changesEnabled = true;
   });
 });

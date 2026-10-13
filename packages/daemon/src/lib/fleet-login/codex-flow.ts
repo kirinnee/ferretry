@@ -32,18 +32,18 @@
  * At 0.145.0 `codex login --help` lists `--device-auth` with an **empty description**. A flag nobody
  * documents can disappear without a deprecation, so this flow is built to fail as ITSELF when it does:
  * no URL and no code recognised means the service ends the flow saying this host's harness did not offer
- * a remotable login, and names `fy fleet login`. What must not happen is a hang, or a bare exit code.
+ * a remotable login, and names `fy credential signin`. What must not happen is a hang, or a bare exit code.
  *
  * ## Everything here is PURE
  *
  * A stage in, a stage out. The child, the clock and the deadline belong to the service.
  */
-import type { CodexLoginFlow, FleetLoginAccountOutcome, HarnessLoginLastCode } from '@ferretry/protocol';
+import type { CodexLoginFlow, HarnessLoginLastCode } from '@ferretry/protocol';
 import { HarnessLoginUserCodeSchema, HarnessLoginVerificationUrlSchema } from '@ferretry/protocol';
 import { stripTerminalEscapes, verificationUrlIn } from './output.ts';
 import type { HarnessLoginFlowBase, HarnessLoginSubmitDecision } from './ports.ts';
 
-/** What to run after the account's own wrapper path. */
+/** What to run after the harness command (and the credential's own arguments). */
 export const CODEX_LOGIN_ARGV: readonly string[] = ['login', '--device-auth'];
 
 /**
@@ -74,7 +74,7 @@ export type CodexLoginStage =
       /** Codex said it stopped waiting for this code. Never published: the exit that follows is. */
       readonly timedOut?: true;
     }
-  | { readonly stage: 'complete'; readonly accounts: readonly FleetLoginAccountOutcome[] }
+  | { readonly stage: 'complete' }
   | CodexLoginFailure;
 
 /** How a Codex login ended badly. `lastCode` is set only when the one-time code is why. */
@@ -197,7 +197,7 @@ export function codexProjection(base: HarnessLoginFlowBase, stage: CodexLoginSta
     };
   }
   if (stage.stage === 'complete') {
-    return { harness: 'codex', ...base, state: 'complete', accounts: stage.accounts };
+    return { harness: 'codex', ...base, state: 'complete' };
   }
   if (stage.stage === 'failed') {
     return {

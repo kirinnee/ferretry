@@ -806,7 +806,6 @@ describe('AddDeviceSurface', () => {
     const view = await mount(
       <DaemonSettingsFrame
         connection={connection()}
-        connections={[connection()]}
         name="Studio workstation"
         createPairingClient={fakeClient({})}
       />,

@@ -1,12 +1,11 @@
 /**
- * The provisioning boundary: what `fy fleet apply` decides, and what it asks an adapter to do.
+ * The provisioning boundary: what an apply of the account model decides, and what it asks an adapter to do.
  *
  * A plan is a complete, inspectable description of every write. Deciding and writing are separate
  * so the decision half stays pure — the plan for a configuration is a value a test can assert on,
- * with no filesystem in sight — and so `--dry-run` is the same code path minus the last step.
+ * with no filesystem in sight — and so a preview is the same code path minus the last step.
  */
 import type { RuntimeIds } from './account/ids.ts';
-import type { FleetConfig } from './config.ts';
 import type { FleetManifest, HarnessKind } from './manifest.ts';
 import type { SettingsFormat, SettingsObject } from './settings.ts';
 import type { SharedHistoryPreview, SharedHistoryRequest } from './shared-history.ts';
@@ -162,10 +161,6 @@ export interface FleetApplyPlan {
 /** A plan plus the exact read-only history migration evidence observed for this invocation. */
 export interface FleetApplyPreview extends FleetApplyPlan {
   readonly sharedHistory: readonly SharedHistoryPreview[];
-}
-
-export interface FleetPlanBuilder {
-  build(config: FleetConfig, layout: FleetLayout, generatedAt: string): FleetApplyPlan;
 }
 
 /**
@@ -353,21 +348,4 @@ export interface FleetApplyResult {
    * but it blocks the next apply until it is cleared, so it is named rather than swallowed.
    */
   readonly lockResidue?: string;
-}
-
-export class FleetApplyService {
-  constructor(
-    private readonly plans: FleetPlanBuilder,
-    private readonly provisioner: FleetProvisioner,
-  ) {}
-
-  async apply(config: FleetConfig, layout: FleetLayout, generatedAt: string): Promise<FleetApplyResult> {
-    const plan = this.plans.build(config, layout, generatedAt);
-    return await this.provisioner.apply(plan);
-  }
-
-  async preview(config: FleetConfig, layout: FleetLayout, generatedAt: string): Promise<FleetApplyPreview> {
-    const plan = this.plans.build(config, layout, generatedAt);
-    return await this.provisioner.preview(plan);
-  }
 }

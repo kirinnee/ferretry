@@ -12,6 +12,11 @@ import { CodexLoginPanel } from '../../../../src/features/fleet/codex-login-pane
 import { render, run } from '../../../support/react.ts';
 import { CODEX_CODE, CODEX_URL, codexFlow } from './harness-login-support.ts';
 
+const WORDING = {
+  coverage: 'Every runtime that uses it can launch once it is done.',
+  signedIn: 'Signed in. 2 runtimes can launch now.',
+};
+
 let mounted: ReactTestRenderer | null = null;
 
 afterEach(() => {
@@ -22,8 +27,8 @@ afterEach(() => {
 const element = (overrides: Partial<Parameters<typeof CodexLoginPanel>[0]> = {}) => (
   <CodexLoginPanel
     accountLabel="Studio Codex"
-    identity="codex:studio"
-    memberCount={2}
+    loginId="codex-studio"
+    wording={WORDING}
     flow={null}
     busy={false}
     refusal={null}
@@ -96,44 +101,10 @@ describe('CodexLoginPanel', () => {
     expect(texts(view)).not.toContain(CODEX_CODE);
   });
 
-  it('reports the sibling copies when it finishes', () => {
-    const flow = codexFlow('complete');
-    const view = mount({
-      flow: {
-        ...flow,
-        state: 'complete',
-        accounts: [
-          { accountId: flow.accountId, status: 'logged-in' },
-          { accountId: '55555555-5555-4555-8555-555555555555', status: 'synced' },
-        ],
-      },
-    });
-
-    expect(texts(view)).toContain('copied to 1 sibling wrapper');
-  });
-
-  it('says no sibling needed a copy when none did', () => {
-    expect(texts(mount({ flow: codexFlow('complete') }))).toContain('No sibling wrapper needed a copy');
-  });
-
-  it('names every account that did not settle rather than claiming success', () => {
-    const flow = codexFlow('complete');
-    const view = mount({
-      flow: {
-        ...flow,
-        state: 'complete',
-        accounts: [{ accountId: flow.accountId, status: 'failed', message: 'the sign-in exited with code 1' }],
-      },
-    });
-
-    expect(texts(view)).toContain('without settling every account');
-    expect(texts(view)).toContain('exited with code 1');
-  });
-
   it('names the way back on a failure', () => {
     const view = mount({ flow: codexFlow('failed') });
 
-    expect(texts(view)).toContain('fy fleet login');
+    expect(texts(view)).toContain('sign this login in on the host');
     expect(texts(view)).toContain('Start a new sign-in');
   });
 
@@ -173,13 +144,6 @@ describe('CodexLoginPanel', () => {
     expect(copied).toEqual([CODEX_URL, CODEX_CODE]);
   });
 
-  it('says one covers this account only when there is no sibling', () => {
-    expect(texts(mount({ memberCount: 1 }))).toContain('this account only');
-  });
-
-  it('says several siblings in the plural', () => {
-    expect(texts(mount({ memberCount: 4 }))).toContain('3 sibling wrappers too');
-  });
 });
 
 describe('CodexLoginPanel when the one-time code expired', () => {
@@ -193,7 +157,7 @@ describe('CodexLoginPanel when the one-time code expired', () => {
     expect(texts(view)).toContain('That one-time code expired before it was approved.');
     expect(texts(view)).toContain('Get a new code');
     expect(texts(view)).not.toContain('reject');
-    expect(texts(view)).not.toContain('fy fleet login');
+    expect(texts(view)).not.toContain('sign this login in on the host');
     run(() => view.root.findAllByType('button').at(-1)?.props.onClick());
     expect(starts).toBe(1);
   });
@@ -208,19 +172,14 @@ describe('CodexLoginPanel when the one-time code expired', () => {
 });
 
 describe('CodexLoginPanel with the wording of a login', () => {
-  const wording = {
-    coverage: 'Every runtime that uses it can launch once it is done.',
-    signedIn: 'Signed in. 2 runtimes can launch now.',
-  };
+  const wording = WORDING;
 
-  it('hides the identity line and says its own coverage sentence instead of the wrapper one', () => {
-    expect(texts(mount())).toContain('Identity');
-
-    const view = mount({ wording });
+  it('shows no identity line and says its own coverage sentence', () => {
+    const view = mount();
     expect(texts(view)).not.toContain('Identity');
     expect(view.root.findAllByType('code')).toHaveLength(0);
-    expect(texts(view)).toContain('Every runtime that uses it can launch once it is done.');
-    expect(texts(view)).not.toContain('One sign-in covers');
+    expect(texts(view)).toContain(wording.coverage);
+    expect(texts(view)).not.toContain('sibling');
   });
 
   it('says the signedIn sentence on complete — and none of the sibling copy report', () => {

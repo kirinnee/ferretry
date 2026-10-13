@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { registerSetupCommands, renderHarnessScan, runSetup } from '../../../src/lib/setup/commands.ts';
-import { fakeWorld, permissions, runCommand, scan } from '../fleet/account-fakes.ts';
+import { authorityOf, fakeWorld, machine, runCommand, scan } from '../fleet/account-fakes.ts';
 
 const bothInstalled = () =>
   scan({
@@ -193,7 +193,10 @@ describe('runSetup', () => {
     const world = fakeWorld({
       answers: ['y', '', ''],
       gateway: {
-        permissions: () => permissions({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' }),
+        machine: () =>
+          machine({
+            authority: authorityOf({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' }),
+          }),
         installTools: () => ({ outcomes: [{ harness: 'codex', outcome: 'installed', command: 'x' }] }),
       },
     });

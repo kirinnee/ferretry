@@ -1,20 +1,37 @@
 /** A scripted daemon for the change suites: one answer (or failure) per path, every call recorded. */
 
-import type { FleetAccountChangeOutcome, FleetAccountChangeView, FleetPermissions } from '@ferretry/protocol';
+import type {
+  FleetAccountChangeOutcome,
+  FleetAccountChangeView,
+  FleetMachineAuthority,
+  FleetMachineView,
+} from '@ferretry/protocol';
 import type { z } from 'zod';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 
 export const UNLOCK_TOKEN = `fy_unlock_${'A'.repeat(22)}`;
 const CHANGE_ID = 'fy_fprop_abcdefghijklmnopqrstuv';
 
-export const permissions = (overrides: Partial<FleetPermissions> = {}): FleetPermissions => ({
-  mayInspect: true,
-  mayPropose: true,
+/** What this caller may do, as `GET /v1/fleet/machine` carries it. */
+const authority = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineAuthority => ({
   mayApply: true,
   applyRefusal: 'granted',
   confirmation: 'none',
   ...overrides,
 });
+
+/** `GET /v1/fleet/machine` with the given authority: where every change suite reads what it may do. */
+export const machineAnswer = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineView => ({
+  name: 'studio-mac',
+  format: 'version-2',
+  setUp: true,
+  agentPermissions: 'auto',
+  tools: [],
+  runtimeCount: 1,
+  runningSessions: 0,
+  authority: authority(overrides),
+});
+
 
 export const STAGED: FleetAccountChangeView = {
   id: CHANGE_ID,
@@ -44,8 +61,8 @@ export interface Call {
 export type Answer = unknown | Error | ((call: Call) => unknown);
 
 /**
- * Answers by path: `/v1/fleet/permissions`, `/v1/grants/unlock`, `/v1/fleet/changes`,
- * `/v1/fleet/changes/<id>/apply`. A path with no answer fails like an unreachable machine.
+ * Answers by path: `/v1/fleet/machine`, `/v1/grants/unlock`, `/v1/fleet/proposals`,
+ * `/v1/fleet/proposals/<id>/apply`. A path with no answer fails like an unreachable machine.
  */
 export const scriptedClient = (answers: Readonly<Record<string, Answer>>, calls: Call[] = []): FleetClient => ({
   request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> => {
@@ -63,4 +80,4 @@ export const scriptedClient = (answers: Readonly<Record<string, Answer>>, calls:
   },
 });
 
-export const APPLY_PATH = `/v1/fleet/changes/${CHANGE_ID}/apply`;
+export const APPLY_PATH = `/v1/fleet/proposals/${CHANGE_ID}/apply`;

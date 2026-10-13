@@ -24,7 +24,6 @@ import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
-import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
@@ -112,14 +111,11 @@ export interface MountedSubsystems {
    *  refreshes cannot be two answers. A daemon that published its carriers only at pairing time had no
    *  way to tell an already-paired phone that its rendezvous had changed. */
   readonly carriers: readonly DaemonCarrier[];
-  /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
-  readonly fleet: FleetSubsystem;
   /** Driving a harness's OWN sign-in from a browser, holding no token. The daemon launches the
-   *  account's own wrapper with piped stdio, publishes a verification URL — and for Codex a device
-   *  code — accepts one short-lived authorization code straight into that child's stdin, and lets the
-   *  harness write its own credential into its own store. A mount of its own because it is a different
-   *  authority question: the fleet table above is mostly reads on `use`, and every route here but the
-   *  readiness read is `configure` with the operator password proved against the start. */
+   *  harness's own login against one credential's store with piped stdio, publishes a verification
+   *  URL — and for Codex a device code — accepts one short-lived authorization code straight into that
+   *  child's stdin, and lets the harness write its own credential into its own store. Every route here
+   *  is `configure`, with the operator password proved against the start. */
   readonly harnessLogin: HarnessLoginSubsystem;
   /** The account model's credentials: one login stored once, its status and usage, Check now, and
    *  sign-in targeting a credential id (docs/design/account-model.md §7). */
@@ -325,18 +321,14 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
     ...daemonHealthRoutes(subsystems.health),
     ...doctorRoutes(subsystems.doctor),
-    // The account model's tables register BEFORE the fleet table so a path the design repurposes
-    // (`GET /v1/fleet/profiles`) is answered by its new owner. Every other path in them is a literal
-    // no older fleet route uses (docs/design/account-model.md §7).
+    // The account model's tables (docs/design/account-model.md §7). Fleet paths are fixed literals
+    // under their own namespace, so they cannot shadow any session route below.
     ...fleetCredentialRoutes(subsystems.fleetCredentials),
     ...fleetCatalogRoutes(subsystems.fleetCatalog),
     ...fleetSetupRoutes(subsystems.fleetSetup),
-    // Fleet paths are fixed literals under their own namespace and disclose operator configuration,
-    // so their mount owns the admin scope and cannot shadow any session route below.
-    ...fleetRoutes(subsystems.fleet),
     // The sign-in surface sits directly beside the fleet it signs in, under `/v1/fleet/login` — a fixed
     // literal with a one-segment id beneath it, so it can neither shadow nor be shadowed by anything in
-    // the fleet table above.
+    // the fleet tables above.
     ...harnessLoginRoutes(subsystems.harnessLogin),
     // Resource limits register beside the fleet they bound, and are governed by the same capability
     // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both

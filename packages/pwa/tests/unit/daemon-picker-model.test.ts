@@ -1,34 +1,36 @@
 import { describe, expect, it } from 'bun:test';
-import type { FleetManifestSummary } from '@ferretry/protocol';
 
 import {
-  accountLabel,
   type AccountUsageRow,
+  accountLabel,
   accountPickerOptions,
   accountQuotaSummary,
   findAccountOption,
   firstUsableAccountOption,
+  fleetHarnessLabel,
+  hintedAccountOption,
   normalizedModelSelection,
   projectPickerOptions,
   sameHarnessAccountOptions,
   sessionAccountLabel,
   sessionCapableAccountOptions,
 } from '../../src/components/daemon-picker-model.ts';
-import type { PickerAccountHealth } from '../../src/lib/account-picker-catalog.ts';
+import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
 import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
 import { sessionView } from '../support/sessions.ts';
+import { pickerHealth } from './picker-support.ts';
 
-const CLAUDE_ID = '11111111-1111-4111-8111-111111111111';
-const CODEX_ID = '22222222-2222-4222-8222-222222222222';
+const CLAUDE_ID = 'rt-claude-auto-atelier';
+const CODEX_ID = 'rt-codex-auto-forge';
 
-type Account = FleetManifestSummary['accounts'][number];
+type Account = PickerAccount;
 
 const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CLAUDE_ID,
   kind: 'claude',
-  mode: 'auto',
+  agent: true,
+  credentialId: 'claude-login',
   wrapper: 'claude-auto-atelier',
-  home: '/accounts/claude',
   displayName: 'Claude Atelier',
   defaultModel: 'opus',
   models: [{ id: 'opus', available: true }],
@@ -40,9 +42,9 @@ const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
 const codexAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CODEX_ID,
   kind: 'codex',
-  mode: 'auto',
+  agent: true,
+  credentialId: 'codex-login',
   wrapper: 'codex-auto-forge',
-  home: '/accounts/codex',
   displayName: 'Codex Forge',
   defaultModel: 'sol',
   models: [{ id: 'sol', available: true }],
@@ -56,28 +58,17 @@ const usageRow = (overrides: Partial<AccountUsageRow> = {}): AccountUsageRow => 
   ...overrides,
 });
 
-const healthRow = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth => ({
-  accountId: CLAUDE_ID,
-  kind: 'claude',
-  verdict: 'healthy',
-  reason: 'provider_accepted',
-  evidence: 'anthropic_usage',
-  lastCheckedAt: 0,
-  verdictAt: 0,
-  lastCheckInconclusive: false,
-  ...overrides,
-});
 
 describe('accountPickerOptions', () => {
-  it('joins quota by wrapper and health by account id, and preserves the daemon order', () => {
+  it('joins quota by wrapper and health by the login it uses, and preserves the daemon order', () => {
     const usage = [usageRow({ agent: 'claude-auto-atelier', fiveHourPercent: 21, atLimit: false })];
-    const health = new Map([[CLAUDE_ID, healthRow({ verdict: 'healthy' })]]);
+    const health = new Map([['claude-login', pickerHealth('claude-login')]]);
 
     const options = accountPickerOptions([claudeAccount(), codexAccount()], usage, health);
 
     expect(options?.map(option => option.wrapper)).toEqual(['claude-auto-atelier', 'codex-auto-forge']);
     expect(options?.[0]?.quota?.fiveHourPercent).toBe(21);
-    expect(options?.[0]?.health?.verdict).toBe('healthy');
+    expect(options?.[0]?.health?.word).toBe('ready');
     // No live row was ever reported for the codex account: it stays missing, not zero or healthy.
     expect(options?.[1]?.quota).toBeNull();
     expect(options?.[1]?.health).toBeNull();
@@ -143,11 +134,11 @@ describe('accountPickerOptions', () => {
     expect(sameHarnessAccountOptions(null, 'codex')).toBeNull();
   });
 
-  it('offers a new session only the accounts the manifest marks auto, never the terminal one', () => {
+  it('offers a new session only agent runtimes, never the person’s own CLI', () => {
     // The default fleet's own shape: the terminal account is published FIRST.
     const terminal = claudeAccount({
       id: '33333333-3333-4333-8333-333333333333',
-      mode: 'interactive',
+      agent: false,
       wrapper: 'claude-default',
       displayName: 'Claude (default)',
     });
@@ -357,5 +348,35 @@ describe('sessionAccountLabel', () => {
 
   it('falls back to the id for a wrapper the roster no longer holds', () => {
     expect(sessionAccountLabel([claudeAccount()], 'claude-removed')).toEqual({ name: 'claude-removed', id: null });
+  });
+});
+
+describe('hintedAccountOption', () => {
+  const options = accountPickerOptions(
+    [
+      claudeAccount(),
+      codexAccount({ available: false, unavailableReason: 'Sign in to launch' }),
+    ],
+    [],
+    null,
+  );
+
+  it('honours a launch hint by wrapper or by runtime name', () => {
+    expect(hintedAccountOption(options, 'claude-auto-atelier')?.id).toBe(CLAUDE_ID);
+    expect(hintedAccountOption(options, 'Claude Atelier')?.id).toBe(CLAUDE_ID);
+  });
+
+  it('ignores a hint naming a runtime that cannot launch, or none at all', () => {
+    expect(hintedAccountOption(options, 'codex-auto-forge')).toBeNull();
+    expect(hintedAccountOption(options, 'nobody')).toBeNull();
+    expect(hintedAccountOption(options, undefined)).toBeNull();
+    expect(hintedAccountOption(null, 'claude-auto-atelier')).toBeNull();
+  });
+});
+
+describe('fleetHarnessLabel', () => {
+  it('names each harness', () => {
+    expect(fleetHarnessLabel('claude')).toBe('Claude');
+    expect(fleetHarnessLabel('codex')).toBe('Codex');
   });
 });

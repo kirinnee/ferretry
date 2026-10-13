@@ -17,9 +17,8 @@ import type {
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { readFleetComponents, readFleetProfileStacks, readFleetRuntimes } from '../catalog-api.ts';
-import type { FleetClient } from '../fleet-api.ts';
-import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
+import { readFleetComponents, readFleetProfiles, readFleetRuntimes } from '../catalog-api.ts';
+import type { FleetClient, FleetClientFactory } from '../fleet-client.ts';
 
 export interface AccountCatalog {
   readonly components: FleetComponentCatalog;
@@ -39,7 +38,7 @@ export async function readAccountCatalog(client: () => Promise<FleetClient>): Pr
     const fleet = await client();
     const [components, profiles, runtimes] = await Promise.all([
       readFleetComponents(fleet),
-      readFleetProfileStacks(fleet),
+      readFleetProfiles(fleet),
       readFleetRuntimes(fleet),
     ]);
     return { kind: 'ready', catalog: { components, profiles, runtimes } };

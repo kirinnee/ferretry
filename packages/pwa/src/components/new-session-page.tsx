@@ -1,30 +1,35 @@
 import type { StartSessionRequest } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-
-import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
-import { projectPickerOptions } from './daemon-picker-model.ts';
-import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
+import { machineHash } from '../features/fleet/shell/machine-route.ts';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { useUsage } from '../hooks/use-usage.ts';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
+import { cn } from '../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import {
   canSubmitNewSession,
   emptyNewSessionDraft,
-  submitNewSession,
   type NewSessionDraft,
+  submitNewSession,
 } from '../lib/pages/new-session.ts';
 import { daemonSessionPath, daemonSessionsPath, daemonSettingsPath } from '../lib/pages/routes.ts';
 import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
-import { cn } from '../lib/class-names.ts';
 import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
+import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
+import { projectPickerOptions } from './daemon-picker-model.ts';
+import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
 
 export interface NewSessionPageProps {
   /** The concrete daemon selected by pairing and matched by the current route. */
   readonly connection: DaemonConnection;
+  /**
+   * The name this browser shows for the machine, so "Open Settings" lands on its Runtimes tab
+   * (`#machines/<machine>/runtimes`). Defaults to the daemon address, as the switcher does.
+   */
+  readonly machineName?: string;
   /**
    * The host's typed-client adapter. Passing the connection through this seam is
    * deliberate: a browser paired to two daemons must never create a session on
@@ -215,6 +220,7 @@ const quotaAdvisory = (slice: DaemonUsageSlice): string | null =>
  */
 export function NewSessionPage({
   connection,
+  machineName = connection.baseUrl,
   startSession,
   onNavigate,
   accounts,
@@ -237,7 +243,9 @@ export function NewSessionPage({
   const blocker = createBlocker(draft, submitting, noRunnableAccount);
   const noAccounts = (
     <NoSessionAccounts
-      onOpenSettings={() => onNavigate(daemonSettingsPath(connection.daemonId))}
+      onOpenSettings={() =>
+        onNavigate(`${daemonSettingsPath(connection.daemonId)}${machineHash(machineName, 'runtimes')}`)
+      }
       onShown={setNoRunnableAccount}
     />
   );
@@ -543,7 +551,7 @@ function QuotaAccountField({ usage, ...field }: QuotaAccountFieldProps) {
  *
  * One sentence and one way forward, rather than an empty list: a new host whose
  * only account is the terminal one would otherwise offer nothing and say nothing
- * about why. Accounts are added in the daemon's Settings, on the Fleet panel.
+ * about why. Runtimes are added in Settings › Machines, on the machine's Runtimes tab.
  */
 function NoSessionAccounts({
   onOpenSettings,
@@ -563,7 +571,7 @@ function NoSessionAccounts({
       data-new-session-no-accounts=""
     >
       <p className="m-0 min-w-0 flex-1 text-ui leading-base text-fg-soft">
-        No account on this daemon can run sessions yet. Add one in Settings, under Fleet.
+        No runtime on this machine can run sessions yet. Add an agent runtime in Settings › Machines.
       </p>
       <Button onClick={onOpenSettings} type="button">
         Open Settings

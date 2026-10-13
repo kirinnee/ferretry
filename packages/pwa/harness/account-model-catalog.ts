@@ -4,11 +4,10 @@
  * and the runtimes behind them. Every answer is parsed by the caller's own schema, so a schema change
  * fails the harness rather than drawing a page the daemon could never send.
  *
- * Changes are previewed by nothing here: staging one answers the refusal a machine gives while the
- * account model is switched off, so a hand review of a write shows that one sentence.
+ * A change stages and applies: staging answers with the change it was sent, previewed as writing
+ * nothing, and applying it answers as a committed apply — so a hand review can walk a write to Done.
  */
 
-import { FyHttpError } from '@ferretry/protocol/client';
 import { harnessCredentialAnswer } from './credential-catalog.ts';
 
 /** A `${secret:NAME}` reference, spelled so it is never mistaken for a template. */
@@ -243,7 +242,9 @@ const PROFILES = {
 };
 
 const runtime = (name: string, harness: 'claude' | 'codex', profile: string, credential: string) => ({
+  id: `runtime-${name}`,
   name,
+  wrapper: name,
   harness,
   credential: { id: credential, store: credential === 'claude-work' ? 'ferretry' : 'host' },
   profile,
@@ -265,12 +266,37 @@ const RUNTIMES = {
   ],
 };
 
-const PERMISSIONS = {
-  mayInspect: true,
-  mayPropose: true,
-  mayApply: true,
-  applyRefusal: 'granted',
-  confirmation: 'none',
+/** The one id every staged change in the harness carries. */
+const HARNESS_CHANGE_ID = 'fy_fprop_harnesspreviewchange00';
+
+/** Staging answers with the change it was sent, previewed as writing nothing: the harness has no disk. */
+const stagedView = (init: RequestInit | undefined) => {
+  const { change } = JSON.parse(String(init?.body ?? '{}')) as { change?: unknown };
+  return {
+    id: HARNESS_CHANGE_ID,
+    revision: 'harness',
+    change,
+    summary: 'Preview of this change on studio-mac',
+    consequences: [],
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    state: 'pending',
+    preview: { kind: 'apply', operations: [], documents: [], runtimes: [] },
+  };
+};
+
+/** Applying it answers as a committed apply that wrote nothing. */
+const APPLIED = {
+  outcome: 'applied',
+  apply: {
+    outcome: 'committed',
+    result: {
+      accountCount: 5,
+      operationCount: 0,
+      manifestPath: '/home/pilot/.ferretry/fleet/manifest.json',
+      prunedWrappers: [],
+      sharedHistory: [],
+    },
+  },
 };
 
 /** A draft's layers, resolved the way the daemon would for the review step: the conflict appears with both bases. */
@@ -280,30 +306,23 @@ const draftView = (init: RequestInit | undefined) => {
   return { harnesses: [stack('claude', { applied: layers, conflicts }), stack('codex')] };
 };
 
-/**
- * The catalogue's answer for `path`, or `undefined` when it is not a catalogue path. A change is refused
- * with the account model's own switched-off sentence.
- */
+/** The catalogue's answer for `path`, or `undefined` when it is not a catalogue path. */
 export function harnessCatalogAnswer(path: string, init?: RequestInit): unknown {
   const login = harnessCredentialAnswer(path, init);
   if (login !== undefined) return login;
   switch (path) {
     case '/v1/fleet/components':
       return COMPONENTS;
-    case '/v1/fleet/profile-stacks':
+    case '/v1/fleet/profiles':
       return PROFILES;
     case '/v1/fleet/runtimes':
       return RUNTIMES;
-    case '/v1/fleet/profile-stacks/preview':
+    case '/v1/fleet/profiles/preview':
       return draftView(init);
-    case '/v1/fleet/permissions':
-      return PERMISSIONS;
-    case '/v1/fleet/changes':
-      throw new FyHttpError(
-        'Account-model changes are switched off on this machine. Turn on accountModel.enabled in its daemon config to make changes here.',
-        409,
-        'fleet_change_disabled',
-      );
+    case '/v1/fleet/proposals':
+      return stagedView(init);
+    case `/v1/fleet/proposals/${HARNESS_CHANGE_ID}/apply`:
+      return APPLIED;
     default:
       return undefined;
   }

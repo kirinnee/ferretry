@@ -12,14 +12,13 @@ import {
   runtimeCatalog,
   stack,
   studioCatalog,
-  studioMachine,
 } from '../components/catalog-fixture.ts';
 import {
-  type Machine,
-  followHash,
-  mountSettled,
   choose,
   click,
+  followHash,
+  type Machine,
+  mountSettled,
   scriptedMachine,
   settle,
   stagedChanges,
@@ -243,7 +242,7 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     expect(layers).toEqual(['instructions/Main instructions', 'profile/Agent work', 'profile/Default']);
     expect(text(root, '[data-conflicts]')).toContain('permissions.defaultMode');
     expect(root.querySelectorAll('[data-conflicts] li')).toHaveLength(1);
-    const preview = machine.calls.find(call => call.path === '/v1/fleet/profile-stacks/preview');
+    const preview = machine.calls.find(call => call.path === '/v1/fleet/profiles/preview');
     expect(preview?.body).toEqual({
       layers: ['profile/Default', 'profile/Agent work', 'instructions/Main instructions'],
     });
@@ -364,19 +363,15 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     expect(text(root, 'h3')).toBe('Profiles');
   });
 
-  it('edits a profile the catalogue no longer has as a fresh draft, and a machine that refuses changes says so', async () => {
+  it('edits a profile the catalogue no longer has as a fresh draft', async () => {
     const machine = scriptedMachine();
-    const root = await open(machine, {
-      machine: studioMachine({ changes: { available: false, reason: 'Account setup changes are switched off.' } }),
-    });
+    const root = await open(machine);
     await click(root, '[data-profile-row="Review"]');
     machine.catalog = studioCatalog({ profiles: profileCatalog([profile('Default', ['mcp/github'])]) });
     await click(root, '[data-profile-edit]');
     expect(root.querySelectorAll('[data-build-base] input:checked')).toHaveLength(0);
     await click(root, '[data-build-next]');
     await tick(root, '[data-build-pick="instructions/Main instructions"]');
-    for (let step = 0; step < 6; step += 1) await click(root, '[data-build-next]');
-    expect(text(root, '[data-change-unavailable]')).toBe('Account setup changes are switched off.');
   });
 });
 

@@ -132,7 +132,6 @@ export function ToolInstall({
         </SetupNote>
         <ChangeApplyPanel
           machineName={machineName}
-          changes={null}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}
@@ -185,7 +184,6 @@ export function ToolInstall({
       {runnable.length === 0 ? null : (
         <ChangeApplyPanel
           machineName={machineName}
-          changes={null}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}

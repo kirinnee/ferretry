@@ -4,9 +4,7 @@
  *
  * One page is one concept. The kinds page says what each kind is for; a list says who uses each one;
  * a component's page shows its badges, what it holds and who it reaches, with **Edit** and
- * **Delete…**. Every write is ONE change the daemon previews and applies — while this machine refuses
- * changes (the account model is switched off, or it still has the old format) the panel says why in
- * one sentence and offers no button, and the pages still read.
+ * **Delete…**. Every write is ONE change the daemon previews and applies.
  */
 
 import type { FleetAccountChange, FleetComponentKind, FleetComponentView, FleetMachineView } from '@ferretry/protocol';
@@ -17,11 +15,11 @@ import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { type AccountCatalog, allComponents, useAccountCatalog } from './account-catalog.ts';
 import {
+  CatalogNote,
   ComponentBadges,
+  Hint,
   LinkRow,
   OpenRow,
-  Hint,
-  CatalogNote,
   PageHead,
   PlainRow,
   Prose,
@@ -30,11 +28,10 @@ import {
   Section,
 } from './catalog-ui.tsx';
 import { ComponentForm } from './component-form.tsx';
-import { itemHref, useHashItem } from './machine-links.ts';
 import {
   blankDraft,
-  type ComponentDraft,
   COMPONENT_KINDS,
+  type ComponentDraft,
   componentBadges,
   componentChange,
   counted,
@@ -47,6 +44,7 @@ import {
   profilesWithLayer,
   SECRET_REFERENCE,
 } from './component-model.ts';
+import { itemHref, useHashItem } from './machine-links.ts';
 
 type Page =
   | { readonly kind: 'kinds' }
@@ -402,7 +400,7 @@ function DetailPage(props: SharedProps & { component: FleetComponentView }) {
 function DeletePanel(
   props: SharedProps & { component: FleetComponentView; layerIn: readonly string[]; onKeep: () => void },
 ) {
-  const { component, layerIn, machine, machineName, online, connection, createClient, done, onKeep } = props;
+  const { component, layerIn, machineName, online, connection, createClient, done, onKeep } = props;
   const [detached, setDetached] = useState(false);
   const changes = useAccountChanges({ connection, createClient });
   const keep = (
@@ -454,7 +452,6 @@ function DeletePanel(
       </span>
       <ChangeApplyPanel
         machineName={machineName}
-        changes={machine?.changes ?? null}
         authority={changes.authority}
         busy={changes.busy}
         refusal={changes.refusal}
@@ -476,7 +473,7 @@ function DeletePanel(
 
 /** Edit (with `component`) or New. */
 function FormPage(props: SharedProps & { kind: FleetComponentKind; component?: FleetComponentView }) {
-  const { catalog, kind, component, machine, machineName, online, connection, createClient, onBack, done } = props;
+  const { catalog, kind, component, machineName, online, connection, createClient, onBack, done } = props;
   const editing = component !== undefined;
   const [draft, setDraft] = useState<ComponentDraft>(() =>
     component === undefined ? blankDraft(kind) : draftFromComponent(component),
@@ -518,7 +515,6 @@ function FormPage(props: SharedProps & { kind: FleetComponentKind; component?: F
       ) : null}
       <ChangeApplyPanel
         machineName={machineName}
-        changes={machine?.changes ?? null}
         authority={changes.authority}
         busy={changes.busy}
         refusal={changes.refusal}

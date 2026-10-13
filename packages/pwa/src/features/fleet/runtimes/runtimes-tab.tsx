@@ -47,9 +47,9 @@ const loginLine = (runtime: FleetRuntimeView, data: MachineData): string => {
   return runtime.credential.label === undefined ? email : `${email} (${runtime.credential.label})`;
 };
 
-/** The link to the New session form with this runtime picked. A hint only: the form decides. */
-export const launchHref = (connection: DaemonConnection, runtime: string): string =>
-  `${daemonNewSessionPath(connection.daemonId)}?agent=${encodeURIComponent(runtime)}`;
+/** The link to the New session form with this runtime picked, by its wrapper. A hint only: the form decides. */
+export const launchHref = (connection: DaemonConnection, wrapper: string): string =>
+  `${daemonNewSessionPath(connection.daemonId)}?agent=${encodeURIComponent(wrapper)}`;
 
 /** Moves inside the app without a reload: the app's router follows the browser's history. */
 const followInApp = (event: MouseEvent<HTMLAnchorElement>, browser: Window = window): void => {
@@ -279,7 +279,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
       <div className="border-t border-border pt-3">
         {canLaunch ? (
           <a
-            href={launchHref(connection, runtime.name)}
+            href={launchHref(connection, runtime.wrapper)}
             onClick={event => followInApp(event)}
             className="kt-btn w-full justify-center no-underline hover:no-underline"
             data-variant="primary"

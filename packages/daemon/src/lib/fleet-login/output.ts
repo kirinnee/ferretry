@@ -68,7 +68,7 @@ const SENTENCE_TAIL = /[.,;:!?)\]}'"»]+$/u;
  * **The host allowlist is not decoration.** Without it the daemon would hand a person whatever address
  * the child happened to print and invite them to sign in there, which is a phishing surface the daemon
  * would be operating on its own host. With it, a provider that moves its sign-in host makes this flow
- * fail as itself and name `fy fleet login` — the outcome §4.5 rule 2 requires — rather than publishing
+ * fail as itself and name `fy credential signin` — the outcome §4.5 rule 2 requires — rather than publishing
  * something arbitrary.
  *
  * `hosts` are matched as the host itself or as a subdomain of it, never as a suffix: `evil-claude.com`

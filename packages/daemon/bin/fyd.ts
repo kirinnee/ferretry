@@ -19,7 +19,6 @@ import {
   AnthropicUsageProbe,
   CodexUsageProbe,
   FileConversationLeaseStore,
-  FileFleetConfigSource,
   FilePassiveUsageStore,
   type FleetBinaryLookup,
   fetchQuota,
@@ -28,7 +27,6 @@ import {
   PlatformFleetCredentialStore,
   StoredCredentialClassifier,
   ProcessFleetTokenRefreshPort,
-  readFleetWrapperScript,
   resolveUserHome,
   SpawnCredentialCommand,
   spawnFleetTokenRefreshProcess,
@@ -36,6 +34,7 @@ import {
 import {
   type Advertisement,
   type DaemonCarrier,
+  type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type LearningConfig,
   localOnlyNotice,
@@ -110,11 +109,9 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
-  FleetUsageSource,
   foreignHistoryRoots,
   HostedRelayDirectory,
   HttpUsageSource,
-  harnessHomeLayouts,
   hostCgroupFacts,
   JournalGrantAudit,
   KeyedSerialExecutor,
@@ -122,7 +119,6 @@ import {
   NodeBrowserLoginRuntime,
   NodeCatalog,
   NodeForeignHistoryFiles,
-  NodeHarnessHomeDocuments,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
   NodeSocketTicketSecrets,
@@ -287,19 +283,10 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
-import { MAX_ASSET_FILE_BYTES } from '../src/lib/fleet/assets.ts';
-import {
-  decideFleetBootPreparation,
-  fleetNothingAddedNotice,
-  fleetPreparationDisclosure,
-  fleetPreparationFailure,
-  fleetPreparationRefusal,
-  fleetPreparedDisclosure,
-} from '../src/lib/fleet/boot-preparation.ts';
 import {
   CredentialEmailReader,
   ensurePrivateDirectory,
-  readFleetDocumentFile,
+  readAccountModelFile,
   rolloutFiles,
   runCredentialHarness,
 } from '../src/adapters/fleet-credentials/credential-facts.ts';
@@ -308,8 +295,7 @@ import {
   credentialPassiveUsage,
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
-import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
-import { bootFirstRunChoice, bootFirstRunSentence, createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
+import { bootFirstRunSentence, createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
@@ -348,6 +334,7 @@ import {
   BrowserSessionService,
   type BrowserViewerHost,
   BrowserViewerStream,
+  CredentialUsageSource,
   CALLSIGN_WINDOW_MS,
   CapabilityGrantService,
   type CatalogSubsystem,
@@ -469,6 +456,7 @@ import {
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
+  RETIRED_ACCOUNT_MODEL_NOTICE,
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
@@ -605,7 +593,6 @@ import {
   WardenSweepService,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
-import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
 import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
@@ -630,6 +617,7 @@ import {
 import { fileFleetCatalogDeps } from '../src/adapters/fleet/account-model-files.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
+import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import {
   RuntimeSupervisedLauncher,
@@ -877,6 +865,8 @@ export interface DaemonWorld {
    *  period is the fleet's declared `usage.interval`, so it is built once both
    *  documents have been read — which is why it resolves rather than returns. */
   readonly createUsageFeed: (config: DaemonConfig) => Promise<UsageFeedPort>;
+  /** The fleet's declared `usage.interval` as a refresh period, or the shared default when there is none. */
+  readonly usageRefreshMs: () => Promise<number>;
   /**
    * Opens this daemon's durable identity and device grants before any remote route is served.
    *
@@ -4432,13 +4422,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // line on a screen before it is a session that dies at start.
     references: combinedReferences(
       secretRecipes,
-      new FleetSecretReferences(async () => {
-        const configPath = join(paths.fleet, 'config.yaml');
-        // Absent is a host with no fleet, which names nothing. Anything else — unreadable, a typo in
-        // the YAML — raises, because a reference list quietly missing half its entries is how
-        // somebody deletes a secret their fleet still wants.
-        return (await Bun.file(configPath).exists()) ? await new FileFleetConfigSource(configPath).load() : undefined;
-      }),
+      // Absent is a host with no fleet, which names nothing. Anything else — unreadable, a typo in the
+      // YAML, the old account format — raises, because a reference list quietly missing half its
+      // entries is how somebody deletes a secret their fleet still wants.
+      new FleetSecretReferences(async () => await readAccountModelFile(join(paths.fleet, 'config.yaml'))),
     ),
     uses: new SecretUseService(secretVault, new BunSecretChildRunner(), secretRecipes),
   };
@@ -4563,80 +4550,31 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
   };
   /**
-   * ONE fleet mount for this daemon, held as a local because two things now read quota through it:
-   * the admin route that answers `GET /v1/fleet/usage`, and the usage feed every session, the
-   * advisor, quota-failover and every scraper read. A second mount would assemble a second collector,
-   * and the two would eventually disagree about whether an account has quota left — which is the one
-   * thing `buildFleetUsageCollector` exists to prevent.
+   * The account model's configuration and the published manifest, read fresh on every call.
    *
-   * The platform and the keychain account are read here because this is the only place allowed to
-   * touch the environment; the mount takes them as values so a test can drive either platform.
+   * ONE reader of each for every in-process consumer — the launch renewal, the usage feed and its
+   * cadence — so none of them can disagree about what this machine declares or has published. A
+   * configuration that is absent is a host with no fleet; one in the old account format refuses.
    */
-  const fleet = createDaemonFleetSubsystem({
-    paths,
-    userHome,
-    clock: millisecondClock,
-    files: stateFiles,
-    platform: process.platform,
-    keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
-    // Identity is minted here for the same reason everything else is: this is the only place
-    // allowed to reach for randomness, and a proposal handle or an account id derived from a clock
-    // would be guessable by anyone who knew roughly when it was made.
-    mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
-    mintUuid: () => crypto.randomUUID(),
-    // The per-change confirmation, routed to the ONE grant service this daemon has. A closure rather
-    // than the service itself, so the mount is given the ability to ask "was this password right"
-    // and nothing else — it cannot read a grant, mint an unlock, or move the password.
-    confirmChange: async password => await grants.confirmChange(password),
-    clientName: CLIENT_NAME,
-    // The same pinner the session file surface uses. A platform that cannot hand an open descriptor
-    // to a path-only API fails here rather than falling back to a name that can be re-pointed.
-    rootPinner: sessionRootPinner(),
-    /**
-     * What the account form fills itself in from: the same `PATH` resolver the preflight uses, this
-     * host's real harness homes, and a reader that may leave the state home to see them.
-     *
-     * Assembled per call rather than captured once, because every one of those facts can change while
-     * this daemon runs — somebody installs Claude Code, or edits the model in their settings — and a
-     * form that showed the state at boot would be confidently wrong for exactly the person who just
-     * fixed it. The ceiling comes from the asset rules so a document too large to be written is never
-     * offered as though it could be.
-     */
-    harnesses: {
-      report: async () =>
-        await readHarnessDiscovery({
-          layouts: harnessHomeLayouts(userHome),
-          executables,
-          documents: new NodeHarnessHomeDocuments(),
-          maxDocumentBytes: MAX_ASSET_FILE_BYTES,
-        }),
-    },
-  });
+  const declaredAccountModel = async () => await readAccountModelFile(join(paths.fleet, 'config.yaml'));
+  const publishedManifest = async () => await readFleetManifest(stateFiles, paths.fleetManifest);
+  /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
+  const declaredUsageRefreshMs = async (): Promise<number> =>
+    usageRefreshMs(await declaredAccountModel().then(
+      model => model?.advanced.usage.interval,
+      () => undefined,
+    ));
   /**
-   * Driving a harness's own sign-in from a browser, holding no token.
-   *
-   * IT READS THE FLEET THROUGH THE FLEET SUBSYSTEM, two methods wide. `config` and `accounts` are
-   * already its public surface, so nothing here re-implements configuration or manifest loading, and
-   * this service cannot propose a change, apply one, or write an asset.
-   *
-   * IT GETS ITS OWN CREDENTIAL STORE, and that is deliberate rather than a missed reuse: the usage
-   * probe's store exists to hand a bearer token to a provider call, and this one exists to CLASSIFY and
-   * to CLONE. The store is stateless and constructed from injected facts, so two instances cannot
-   * disagree; sharing one would only couple two unrelated reasons for holding it.
-   *
-   * IT IS GIVEN THIS PROCESS'S ENVIRONMENT, which the service sanitizes before any child sees it. A
-   * login started from inside an agent session must not inherit that session's provider credentials, or
-   * the sign-in for account B authenticates against account A's key.
-   *
-   * THE CONFIRMATION IS THE SAME CLOSURE THE FLEET TAKES, routed to the one grant service this daemon
-   * has, so the attempt a wrong password spends is one of the same five an unlock spends.
+   * The credentials surface's list, once the subsystems are mounted. The usage feed is built before
+   * them, and reads through this so it answers "could not read" rather than a list it does not have.
    */
+  let credentialList: (() => Promise<FleetCredentialList>) | undefined;
   /**
-   * The one credential store both halves of the sign-in surface read through.
+   * The one credential store the renewal, the credential status and the sign-in read through.
    *
-   * A sign-in CLASSIFIES and CLONES; a renewal classifies and then classifies again, which is what
-   * decides whether it fired and whether it worked. Two stores would be two readings of one home, and
-   * the second reading is the whole of the renewal's verdict — so they share this one.
+   * A renewal classifies and then classifies again, which is what decides whether it fired and whether
+   * it worked. Two stores would be two readings of one home, and the second reading is the whole of
+   * the renewal's verdict — so they share this one.
    */
   const harnessCredentials = new PlatformFleetCredentialStore({
     platform: process.platform,
@@ -4706,11 +4644,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    *
    * It takes the SAME renewal instance everything else does, which is what makes the dedupe real: two
    * panes starting at once on one identity are one rotation of a refresh token only one of them could
-   * spend. It reads through the same store and the same fleet mount, so the reading that authorises a
-   * rotation here is the reading the browser's own renewal would have decided on.
+   * spend. It reads through the same store, so the reading that authorises a rotation here is the
+   * reading Check now would have decided on.
    */
   const accountLaunchRenewal = new FleetLaunchRenewal({
-    fleet,
+    fleet: { manifest: publishedManifest },
     identities: new FleetIdentityService(harnessCredentials),
     renewal: harnessRenewal,
     notices: bootNotices,
@@ -4726,8 +4664,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   });
   const credentialHostCodexHome = hostCodexHome(process.env.CODEX_HOME, userHome);
   const fleetCredentialCatalog = new FleetCredentialCatalog({
-    document: async () => await readFleetDocumentFile(join(paths.fleet, 'config.yaml')),
-    manifest: async () => await fleet.accounts(),
+    document: declaredAccountModel,
     paths: {
       fleetRoot: paths.fleet,
       userHome,
@@ -4737,9 +4674,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     ensureDirectory: ensurePrivateDirectory,
   });
   const locateHarness = (kind: HarnessKind): string | undefined => harnessBinary(HARNESS_BINARIES[kind]);
+  /**
+   * Driving a harness's own sign-in from a browser, holding no token: the harness's own login against
+   * one credential's store. It is given THIS PROCESS'S ENVIRONMENT, which the service sanitizes before
+   * any child sees it, so a sign-in started from inside an agent session cannot authenticate against
+   * that session's login. The confirmation is routed to the one grant service this daemon has, so the
+   * attempt a wrong password spends is one of the same five an unlock spends.
+   */
   const harnessLogin = new HarnessLoginService({
-    fleet,
-    credentials: harnessCredentials,
     credentialTargets: {
       target: async id => fleetCredentialCatalog.signInTarget(await fleetCredentialCatalog.entry(id)),
     },
@@ -4748,12 +4690,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     spawn: spawnHarnessLoginChild,
     environment: process.env,
-    readWrapper: readFleetWrapperScript,
     timer: harnessLoginTimer,
     confirmChange: async password => await grants.confirmChange(password),
-    // Wired here rather than inside the service, exactly as the terminal's login wires it: this is the
-    // surface where starting a harness is unremarkable, because a person pressed something.
-    renewal: harnessRenewal,
     clientName: CLIENT_NAME,
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
@@ -5290,10 +5228,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     createResumeLauncher,
     createSessionResume,
     createUsageFeed: async config => {
-      // THIS HOST'S OWN COLLECTOR FIRST. It asks the provider directly, through the same collector
-      // `GET /v1/fleet/usage` answers with. An external collector endpoint is optional and tried
-      // behind it; a daemon configured without one and with no fleet serves an empty feed and says
-      // so rather than pretending every account is at zero.
+      // THIS HOST'S OWN CREDENTIALS FIRST: what the account model's usage pass already read, joined to
+      // each published runtime. An external collector endpoint is optional and tried behind it; a
+      // daemon configured without one and with no fleet serves an empty feed and says so rather than
+      // pretending every account is at zero.
       //
       // EVERY SOURCE HERE IS A READ, and that is the point of this composition. `FleetRefreshService`
       // drives this feed once at boot and again on every timer tick, with nobody present, so a source
@@ -5302,21 +5240,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // named it, rather than left unmounted behind a default.
       return new CachedUsageFeed(
         [
-          new FleetUsageSource(fleet, accounts),
+          new CredentialUsageSource({
+            enabled: async () => (await declaredAccountModel())?.advanced.usage.enabled ?? true,
+            manifest: publishedManifest,
+            credentials: async () => {
+              if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
+              return await credentialList();
+            },
+          }),
           ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
         ],
         // The fleet's own declared probe interval. A host with no fleet configuration has not asked
         // for a cadence at all, so it keeps the default rather than being given one by a refusal.
-        {
-          refreshMs: usageRefreshMs(
-            await fleet.config().then(
-              declared => declared.usage.interval,
-              () => undefined,
-            ),
-          ),
-        },
+        { refreshMs: await declaredUsageRefreshMs() },
       );
     },
+    usageRefreshMs: declaredUsageRefreshMs,
     createPairing: async (config, pairingClock, carriers, discoveredRelayUrl) => {
       const cryptography = new NodePairingCryptography();
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
@@ -5905,12 +5844,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * observes it with FREE reads only; the one Codex refresh is Check now, which a person presses.
        */
       let credentialUsageIntervalMs = usageRefreshMs(undefined);
-      void fleet.config().then(
-        declared => {
-          credentialUsageIntervalMs = usageRefreshMs(declared.usage.interval);
-        },
-        () => undefined,
-      );
+      void declaredUsageRefreshMs().then(intervalMs => {
+        credentialUsageIntervalMs = intervalMs;
+      });
       const credentialStatus = new CredentialStatusService({
         classify: async resolution => await credentialClassifier.classify(resolution),
         material: async resolution => await harnessCredentials.storedMaterial(resolution),
@@ -5970,7 +5906,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         paths,
         userHome,
         ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
-        daemonConfig: daemonConfigStore,
         sessionStates: async () =>
           await Promise.all(
             storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
@@ -5982,19 +5917,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clientName: CLIENT_NAME,
       });
       /**
-       * First-run import, Import again, tool install, the Clone export and import, and migration
-       * (docs/design/account-model.md §4.3, §4.7, §10.3). A package manager runs only inside an install
+       * First-run import, Import again, tool install, and the Clone export and import
+       * (docs/design/account-model.md §4.3, §4.7). A package manager runs only inside an install
        * a person asked for; nothing here runs on a timer.
        */
       const fleetSetup = createFleetSetupSubsystem(
         fileFleetSetupDeps({
           catalog: fleetCatalogDeps,
-          platform: process.platform,
           ...(process.env.CLAUDE_CONFIG_DIR === undefined ? {} : { claudeConfigDir: process.env.CLAUDE_CONFIG_DIR }),
           ...(process.env.CODEX_HOME === undefined ? {} : { codexHome: process.env.CODEX_HOME }),
           credentials: harnessCredentials,
-          command: new SpawnCredentialCommand(),
-          keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
           tools: new ToolInstallService({
             platform: process.platform,
             executables,
@@ -6005,15 +5937,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             clientName: CLIENT_NAME,
           }),
           secrets: secrets.directory,
-          sessions: async () =>
-            await Promise.all(
-              storage.listSessions().map(async session => ({
-                config: await storage.readConfig(session.id).catch(() => undefined),
-                state: await storage.readState(session.id).catch(() => undefined),
-              })),
-            ),
         }),
       );
+      credentialList = async () => await fleetCredentials.list();
       return {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -6035,9 +5961,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         pairing,
         push,
         carriers,
-        // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
-        // report different quota for the same account on the same host.
-        fleet,
         harnessLogin,
         fleetCredentials,
         // The catalogue runs the setup service's import and clone as two of its reviewed changes.
@@ -6507,41 +6430,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // configured something, this daemon did NOT fall back to a search, and both halves of that have to
   // be said or they are left believing the opposite.
   for (const failure of harnessOverrideFailures(harnesses)) world.notices.state(failure);
-  /**
-   * Whether this start is about to give the host a fleet, decided HERE and acted on after the mounts.
-   *
-   * DECIDED EARLY BECAUSE IT CHANGES WHAT IS SAID NEXT. The absent-harness warning below is the
-   * sentence this whole feature exists to make unreachable — "claude is on this host's PATH, but the
-   * fleet manifest publishes no account for it" — and emitting it a few lines before correcting it
-   * would be a boot trail that argues with itself. So the decision comes first and the warning is
-   * withheld when preparation is going to run; the trail then reports the true FINAL state from a
-   * re-read preflight, further down, rather than the state this line saw.
-   */
-  // Which first run: today's version-1 scaffold while the account model is switched off, and the
-  // version-2 import once it is on — never both (docs/design/account-model.md §10.4).
-  const firstRun = bootFirstRunChoice({
-    prepareDefaults: config.fleet.prepareDefaults,
-    accountModelEnabled: config.accountModel.enabled,
-  });
-  const fleetPreparation = decideFleetBootPreparation({ enabled: firstRun === 'version-1', preflight: harnesses });
-  const fleetLocations = {
-    fleetDirectory: opened.paths.fleet,
-    binDirectory: join(opened.paths.fleet, 'bin'),
-    configPath: world.config.path,
-  };
-  if (fleetPreparation.kind === 'prepare') {
-    // Said BEFORE a byte is written. This is the disclosure the whole change turns on: starting a
-    // daemon is about to create executable wrappers in somebody's home, and a first run that did
-    // that silently would be indefensible however local and however convenient.
-    world.notices.state(fleetPreparationDisclosure(fleetPreparation.harnesses, fleetLocations));
-  } else if (!harnesses.ready) {
-    world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
-    // WHY nothing was created, beside the warning that says nothing can be launched. The two are one
-    // question for the reader — "there is a harness here, why can I not use it" — and the skip reason
-    // is the half that names the key or the file standing in the way. The version-2 first run says
-    // its own below, after the mounts it runs through.
-    if (firstRun !== 'version-2') world.notices.state(fleetPreparation.reason);
-  }
+  if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
+  // The one retired daemon.json key that is tolerated rather than refused: said once, every boot it is
+  // still there, so the operator can delete it.
+  if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
 
   const usage = await world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
@@ -6627,72 +6519,18 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // because the daemon could not measure itself is strictly worse than serving and saying so.
   world.notices.step('subsystems mounted');
   /**
-   * The fleet this host gets for starting a daemon.
+   * The first run this host gets for starting a daemon: its own Claude Code and Codex setup, imported,
+   * with each login shared in place rather than copied (docs/design/account-model.md §4.3).
    *
-   * AFTER THE MOUNTS, because the scaffold and the apply are the fleet subsystem's own two steps and
-   * this is not a third one: the mount already owns the scaffolder, the provisioner, the configuration
-   * path and the exclusive apply claim. BEFORE THE BIND, so the first caller that asks what this
-   * daemon can launch is answered by a published manifest rather than by a race.
+   * AFTER THE MOUNTS, because the import is the setup subsystem's own executor and this is not a
+   * second one. BEFORE THE BIND, so the first caller that asks what this daemon can launch is answered
+   * by a published manifest rather than by a race. `fleet.prepareDefaults: false` switches it off.
    *
-   * A FAILURE NEVER REFUSES THE BOOT. `prepareDefaults` answers with a value for exactly that reason,
-   * and the failure is said as a `state` so no log level can hide a host that was left part-prepared.
+   * A FAILURE NEVER REFUSES THE BOOT: every ending is a sentence, said as a `state` so no log level can
+   * hide it — including a `config.yaml` still in the old account format, which is left untouched.
    */
-  if (firstRun === 'version-2') {
-    // The version-2 first run: this host's own Claude Code and Codex setup, imported, with each login
-    // shared in place rather than copied. A failure is a sentence, never a refused boot.
+  if (config.fleet.prepareDefaults) {
     world.notices.state(bootFirstRunSentence(await subsystems.fleetSetup.firstRunAtBoot()));
-  }
-  if (fleetPreparation.kind === 'prepare') {
-    const prepared = await subsystems.fleet.prepareDefaults(fleetPreparation.harnesses);
-    if (prepared.kind === 'prepared') {
-      world.notices.state(
-        fleetPreparedDisclosure({
-          wrappers: prepared.wrappers,
-          published: prepared.published,
-          // What the first-run credential seed did, per account. Passed through rather than summarised
-          // here: the sentences belong to `src/lib`, which is the layer that may decide what is said.
-          seeded: prepared.seeded,
-          locations: fleetLocations,
-          pathEntry: prepared.pathEntry,
-          clientName: CLIENT_NAME,
-        }),
-      );
-    } else if (prepared.kind === 'refused') {
-      // NOTHING WAS WRITTEN. Applying this configuration would have taken an account away, so the
-      // whole preparation was refused — and the disagreement between the configuration and the
-      // manifest is itself the fact the operator needs.
-      world.notices.state(
-        fleetPreparationRefusal({
-          harnesses: fleetPreparation.harnesses,
-          conflicts: prepared.conflicts,
-          locations: fleetLocations,
-          clientName: CLIENT_NAME,
-        }),
-      );
-    } else if (prepared.kind === 'nothing-added') {
-      world.notices.state(
-        fleetNothingAddedNotice({
-          harnesses: fleetPreparation.harnesses,
-          locations: fleetLocations,
-          clientName: CLIENT_NAME,
-        }),
-      );
-    } else {
-      world.notices.state(
-        fleetPreparationFailure({ reason: prepared.reason, created: prepared.created, clientName: CLIENT_NAME }),
-      );
-    }
-    /**
-     * The preflight taken AGAIN, so the trail reports what is true at the end of this boot.
-     *
-     * The first read happened before the fleet existed and its answer is now stale in the one way
-     * that matters: it said no account was published for a harness that now has four. Re-reading is
-     * a manifest parse and two stats — nothing is launched — and it is the only honest way to leave a
-     * boot trail whose last word about the fleet is the state a session will actually meet.
-     */
-    const after = await readHarnesses(world.harnesses.accounts, world.harnesses.executables, harnessDiscovery);
-    world.notices.step('harnesses checked', harnessPreflightSummary(after));
-    if (!after.ready) world.notices.state(harnessAbsentWarning(after, CLIENT_NAME));
   }
   /**
    * The grants, read BEFORE the address is bound.
@@ -6919,10 +6757,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * The interval is read once per boot: re-arming it inside a tick can cancel a timer while it is
    * running, and retrying immediately after a failure would spend the quota the loop measures.
    */
-  const fleetRefreshIntervalMs = await subsystems.fleet.config().then(
-    declared => usageRefreshMs(declared.usage.interval),
-    () => usageRefreshMs(undefined),
-  );
+  const fleetRefreshIntervalMs = await world.usageRefreshMs();
   // Start a collection after binding but do not make a slow provider probe delay daemon readiness.
   // The loop serializes it with the fixed timer below, and all failures remain in the existing feeds.
   void subsystems.fleetRefresh.run();

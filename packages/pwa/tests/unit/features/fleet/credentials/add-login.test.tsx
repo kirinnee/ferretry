@@ -3,7 +3,7 @@ import { type FleetCredentialList, type FleetCredentialView, OPERATOR_UNLOCK_HEA
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
 import { AddLoginStep, addLoginFlowInput } from '../../../../../src/features/fleet/credentials/add-login.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-api.ts';
+import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { useMachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { MachineStepper } from '../../../../../src/features/fleet/shell/machine-stepper.tsx';
@@ -22,6 +22,7 @@ import {
   claudeFlow,
   credential,
   machine,
+  machineWith,
   NOW,
   PASSWORD,
   READS,
@@ -31,8 +32,8 @@ import {
   UNLOCK_TOKEN,
 } from '../account-support.ts';
 
-const CHANGES = 'POST /v1/fleet/changes';
-const APPLY = `POST /v1/fleet/changes/${CHANGE_ID}/apply`;
+const CHANGES = 'POST /v1/fleet/proposals';
+const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
 const LOGIN = 'POST /v1/fleet/login';
 const FLOW = '/v1/fleet/login/flow-1';
 
@@ -329,7 +330,6 @@ describe('AddLoginStep · Sign in', () => {
               startedAt: '2026-10-13T08:00:00.000Z',
               expiresAt: '2026-10-13T08:10:00.000Z',
               state: 'complete',
-              accounts: [],
             };
           },
         },
@@ -422,10 +422,10 @@ describe('AddLoginStep · Sign in', () => {
         existing: CREDENTIALS.credentials,
         fresh: credential({ id: 'claude', email: 'new@example.com' }),
         routes: {
-          'GET /v1/fleet/permissions': (call: Call) =>
+          'GET /v1/fleet/machine': (call: Call) =>
             call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN
-              ? { mayInspect: true, mayPropose: true, mayApply: true, applyRefusal: 'granted', confirmation: 'none' }
-              : { mayInspect: true, mayPropose: true, mayApply: false, applyRefusal: 'locked', confirmation: 'none' },
+              ? machineWith({})
+              : machineWith({ mayApply: false, applyRefusal: 'locked' }),
           'POST /v1/grants/unlock': () => {
             unlocks += 1;
             return unlocks <= 2
