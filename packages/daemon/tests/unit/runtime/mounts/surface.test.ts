@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
-import { createFleetCredentialsSubsystem } from '../../../../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../../../../src/lib/fleet/setup-service.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
@@ -176,9 +175,16 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
-  // The account model's three tables, through the factories the daemon itself calls. They serve no
-  // route yet, so the inventory below is unchanged by them (docs/design/account-model.md §13.2).
-  fleetCredentials: createFleetCredentialsSubsystem(),
+  fleetCredentials: {
+    list: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    check: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
+  // The account model's other two tables, through the factories the daemon itself calls. They serve
+  // no route yet, so the inventory below is unchanged by them (docs/design/account-model.md §13.2).
   fleetCatalog: createFleetCatalogSubsystem(),
   fleetSetup: createFleetSetupSubsystem(),
   cgroups: {
@@ -465,7 +471,8 @@ describe('the mounted daemon surface', () => {
       5 + // the family that drives a harness sign-in
       1 + // the one free account-health re-check
       1 + // the profile catalog the account stepper reads
-      1; // POST /v1/fleet/renew
+      1 + // POST /v1/fleet/renew
+      2; // the account model's credential list and its Check now
     should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
@@ -510,6 +517,11 @@ describe('the mounted daemon surface', () => {
       'GET /v1/carriers',
       'GET /v1/health',
       'GET /v1/doctor',
+      // The account model's credentials (docs/design/account-model.md §7). NOTE WHAT IS ABSENT: no
+      // route returns a token, a refresh token or a digest — only status and usage — and there is no
+      // sign-out or label route, because both are reviewed changes.
+      'GET /v1/fleet/credentials',
+      'POST /v1/fleet/credentials/:credentialId/check',
       'GET /v1/fleet/accounts',
       'GET /v1/fleet/harnesses',
       'GET /v1/fleet/config',
