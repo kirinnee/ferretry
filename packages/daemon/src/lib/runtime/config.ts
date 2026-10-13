@@ -131,6 +131,23 @@ export const DaemonFleetConfigSchema = z
 export type DaemonFleetConfig = z.output<typeof DaemonFleetConfigSchema>;
 
 /**
+ * Whether this machine accepts changes written in the new account model (docs/design/account-model.md).
+ *
+ * OFF BY DEFAULT, because a version-2 `config.yaml` is unreadable to every part of a release that still
+ * reads version 1 — the old Accounts screen, the CLI, the boot's own preparation — so a release must
+ * not be able to write one until those readers are gone. Reads of the account model work either way.
+ * `fleet/account-model-switch.ts` owns what the switch means; this is only where it is written down.
+ * Removed when the version-1 readers are retired.
+ */
+export const DaemonAccountModelConfigSchema = z
+  .strictObject({
+    enabled: z.boolean().default(false),
+  })
+  .prefault({});
+
+export type DaemonAccountModelConfig = z.output<typeof DaemonAccountModelConfigSchema>;
+
+/**
  * What the operator has agreed the UI may do on this machine, per capability and per axis.
  *
  * EVERY FIELD HAS A DEFAULT, so a document that says nothing is a complete decision rather than an
@@ -251,6 +268,8 @@ export const DaemonConfigDocumentSchema = z
     harness: HarnessDiscoveryDocumentSchema,
     /** What starting this daemon may set up on the host's behalf. See {@link DaemonFleetConfigSchema}. */
     fleet: DaemonFleetConfigSchema,
+    /** Whether account-model changes are switched on. See {@link DaemonAccountModelConfigSchema}. */
+    accountModel: DaemonAccountModelConfigSchema,
     /**
      * Reusable environment recipes for the use-without-read primitive, holding REFERENCES only.
      *

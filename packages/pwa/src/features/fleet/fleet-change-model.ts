@@ -332,6 +332,12 @@ const OPERATION_ACTIONS: Readonly<Record<FleetWriteOperation['kind'], string>> =
   // Said as what it removes rather than as "prune", because this is the line a person reads before
   // approving the removal of a skill an account is no longer selecting.
   'prune-directory': 'remove unselected items',
+  // A link allowed to point at nothing yet: an empty login slot is filled THROUGH it at sign-in.
+  'credential-link': 'link login file',
+  // Only the named keys are replaced; the harness keeps every other key it wrote there.
+  'json-keys': 'set keys',
+  // Only what an earlier apply left there, never something a person put in that folder.
+  retire: 'remove what Ferretry placed',
 };
 
 /** One numbered line of the change manifest. */
@@ -370,6 +376,21 @@ const operationDetails = (operation: FleetWriteOperation): readonly string[] => 
       return [octal(operation.mode)];
     case 'symlink':
       return [];
+    case 'credential-link':
+      return ['the login may not exist yet; signing in writes it through this link'];
+    case 'json-keys':
+      return [
+        octal(operation.mode),
+        `format ${operation.format}`,
+        `replaces ${operation.replaceKeys.join(', ')}`,
+        'keeps every other key already there',
+      ];
+    case 'retire':
+      return [
+        operation.only.length === 0 ? 'removes nothing' : `removes only ${operation.only.join(', ')}`,
+        'each only when Ferretry placed it there',
+        operation.keep.length === 0 ? 'keeps nothing' : `keeps ${operation.keep.join(', ')}`,
+      ];
     case 'settings':
       return [
         octal(operation.mode),

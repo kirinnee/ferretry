@@ -12,15 +12,46 @@
  * configuration schema before it can be previewed.
  */
 import {
+  type AccountModel,
+  AccountModelSchema,
+  type ComponentKind,
+  componentFilePath,
   declaredProfileEnv,
   derivedWrapperName,
   type FleetConfig,
   FleetConfigSchema,
   type FleetManifestModel,
+  freeName,
+  HARNESS_DISPLAY_NAMES,
+  type HarnessKind,
+  isRuntimeName,
+  looksSecret,
   orphanedSharedDocuments,
+  parseLayerReference,
+  parseSettings,
+  resolveProfile,
   SafeNameSchema,
+  type SettingsFormat,
+  slugName,
+  wouldIncludeItself,
 } from '@ferretry/fleet';
-import { type FleetModelDeclaration, type FleetMutation, FleetMutationSchema } from '@ferretry/protocol';
+import {
+  type FleetAccountChange,
+  type FleetComponentInput,
+  type FleetEnvInput,
+  type FleetModelDeclaration,
+  type FleetMutation,
+  FleetMutationSchema,
+} from '@ferretry/protocol';
+import {
+  componentUsage,
+  counted,
+  editConsequence,
+  listed,
+  profileUsage,
+  runtimesUsingCredential,
+  runtimesUsingProfile,
+} from './catalog.ts';
 import { planSharedAssetUnlink, sharedAssetLinkPath } from './sharing.ts';
 
 /**
@@ -577,4 +608,527 @@ function derived(
   if (mutation.kind === 'link-shared-asset') return linkSharedAsset(config, mutation);
   if (mutation.kind === 'unlink-shared-asset') return unlinkSharedAsset(config, mutation);
   return editAccount(config, mutation);
+}
+
+// ── The account model's changes ──────────────────────────────────────────────────────────────────
+//
+// The same rule as above, for version 2: a caller names ONE intent and this derives the next model
+// from the current one. A component's file path is never accepted from a caller — it is
+// `components/<kind>/<name>.<ext>` in the asset tree — and the candidate is validated by the shared
+// schema last, so every cross-reference the model has is checked once, in its own words.
+
+/** The changes that derive a new configuration. Sign-out, setup and clone run their own executors. */
+export type AccountPlanChange = Exclude<
+  FleetAccountChange,
+  { kind: 'credential.signout' } | { kind: 'setup.import' } | { kind: 'clone.import' }
+>;
+
+/** The kinds that are not a configuration edit. */
+const EXECUTED_KINDS: ReadonlySet<FleetAccountChange['kind']> = new Set([
+  'credential.signout',
+  'setup.import',
+  'clone.import',
+]);
+
+/** Whether this change derives a new configuration (and so goes through the plan and its apply). */
+export const isAccountPlanChange = (change: FleetAccountChange): change is AccountPlanChange =>
+  !EXECUTED_KINDS.has(change.kind);
+
+/** One component document a change writes, relative to the asset tree. */
+export interface AccountComponentFile {
+  readonly file: string;
+  readonly content: string;
+}
+
+/** The model a change produces, the files it writes, and what the person approving it is told. */
+export interface AccountModelEdit {
+  readonly model: AccountModel;
+  readonly files: readonly AccountComponentFile[];
+  readonly summary: string;
+  /** The sentences a confirm card shows (E15, E20, E21, E32). */
+  readonly consequences: readonly string[];
+}
+
+/** What a derivation needs to know about the machine that is not in its configuration. */
+export interface AccountChangeFacts {
+  readonly machineName: string;
+  readonly runningSessions: number;
+}
+
+/** The document format each harness's settings file is in. */
+const SETTINGS_FORMAT: Readonly<Record<HarnessKind, SettingsFormat>> = { claude: 'json', codex: 'toml' };
+
+/** The extension each kind's file is written with. */
+const componentExtension = (input: FleetComponentInput): string | undefined => {
+  if (input.kind === 'instructions') return 'md';
+  if (input.kind === 'settings') return SETTINGS_FORMAT[input.harness];
+  if (input.kind === 'hooks') return 'json';
+  return undefined;
+};
+
+/** The product's word for each kind, singular. */
+const KIND_WORDS: Readonly<Record<ComponentKind, string>> = {
+  instructions: 'instructions',
+  mcp: 'MCP server',
+  skills: 'skills',
+  settings: 'settings',
+  hooks: 'hooks',
+  modelSets: 'model set',
+};
+
+const refuse = (message: string): never => {
+  throw new FleetMutationRefusal(message);
+};
+
+/**
+ * E16: a name that is taken or does not fit R1, refused with the name to use instead. A name that is
+ * not in the grammar is offered its nearest slug; a name that is taken is offered `-2`, `-3`, ….
+ */
+function assertFreeRuntimeName(
+  name: string,
+  taken: (candidate: string) => boolean,
+  what: 'runtime' | 'login',
+  machineName: string,
+): void {
+  if (!isRuntimeName(name)) {
+    const suggestion = freeName(slugName(name, what === 'runtime' ? 'runtime' : 'login'), taken);
+    refuse(`Use only letters, digits and dashes. Use ${suggestion}?`);
+  }
+  if (taken(name)) {
+    refuse(`${name} is already a ${what} on ${machineName}. Use ${freeName(name, taken)}?`);
+  }
+}
+
+/** The environment an edit asks for, with every "keep" resolved against what the component has. */
+function resolvedEnv(
+  input: FleetEnvInput | undefined,
+  existing: Readonly<Record<string, string>> | undefined,
+  owner: string,
+): Record<string, string> | undefined {
+  if (input === undefined) return undefined;
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(input)) {
+    if (typeof value !== 'string') {
+      const kept = existing?.[name];
+      if (kept === undefined) refuse(`${owner} has no value for ${name} to keep; type one`);
+      env[name] = kept as string;
+      continue;
+    }
+    // K4, E7: a secret value never sits in a component, only a reference to the secret store.
+    if (looksSecret(name, value)) {
+      refuse(
+        `${name} looks like a secret, and a secret never sits in a component. Save it in this machine's secret store and write \${secret:NAME} here instead.`,
+      );
+    }
+    env[name] = value;
+  }
+  return Object.keys(env).length === 0 ? undefined : env;
+}
+
+/** A parsed settings or hooks document, or a refusal naming what is wrong with it. */
+function assertDocument(text: string, format: SettingsFormat, what: string): void {
+  try {
+    parseSettings(text, format);
+  } catch (error) {
+    refuse(
+      `the ${what} text is not valid ${format.toUpperCase()}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** The component as the configuration stores it, and the file it writes. */
+function componentOf(
+  name: string,
+  input: FleetComponentInput,
+  content: string | undefined,
+  existing: Record<string, unknown> | undefined,
+): { readonly component: Record<string, unknown>; readonly file?: AccountComponentFile } {
+  const extension = componentExtension(input);
+  const ownFile = extension === undefined ? undefined : componentFilePath(input.kind, name, extension);
+  const written = content === undefined || ownFile === undefined ? undefined : { file: ownFile, content };
+  const keptFile = typeof existing?.file === 'string' ? existing.file : undefined;
+  const file = written?.file ?? keptFile;
+  const owner = `${KIND_WORDS[input.kind]} ${name}`;
+  const existingEnv = existing?.env as Readonly<Record<string, string>> | undefined;
+  const harness = 'harness' in input && input.harness !== undefined ? { harness: input.harness } : {};
+  switch (input.kind) {
+    case 'instructions':
+      if (file === undefined) refuse(`${owner} needs its text`);
+      return { component: { file, ...harness }, ...(written === undefined ? {} : { file: written }) };
+    case 'mcp': {
+      const env = resolvedEnv(input.env, existingEnv, owner);
+      return {
+        component: {
+          ...(input.command === undefined ? {} : { command: input.command }),
+          ...(input.args === undefined ? {} : { args: [...input.args] }),
+          ...(input.url === undefined ? {} : { url: input.url }),
+          ...(env === undefined ? {} : { env }),
+          ...harness,
+        },
+      };
+    }
+    case 'skills':
+      return { component: { items: [...input.items], ...harness } };
+    case 'settings': {
+      if (content !== undefined) assertDocument(content, SETTINGS_FORMAT[input.harness], owner);
+      const env = resolvedEnv(input.env, existingEnv, owner);
+      return {
+        component: {
+          harness: input.harness,
+          ...(file === undefined ? {} : { file }),
+          ...(input.flags === undefined || input.flags.length === 0 ? {} : { flags: [...input.flags] }),
+          ...(env === undefined ? {} : { env }),
+        },
+        ...(written === undefined ? {} : { file: written }),
+      };
+    }
+    case 'hooks': {
+      if (content !== undefined) assertDocument(content, 'json', owner);
+      const directory =
+        typeof existing?.directory === 'string' && written === undefined ? existing.directory : undefined;
+      if (directory !== undefined) {
+        return { component: { harness: input.harness, directory } };
+      }
+      if (file === undefined) refuse(`${owner} needs its hooks document`);
+      return { component: { harness: input.harness, file }, ...(written === undefined ? {} : { file: written }) };
+    }
+    default:
+      return { component: { models: [...input.models], default: input.default } };
+  }
+}
+
+/** The plain words for a layer in a refusal: "profile base", "instructions main". */
+const layerWords = (text: string): string => {
+  const reference = parseLayerReference(text);
+  if (reference === undefined) return text;
+  return reference.kind === 'profile'
+    ? `profile ${reference.name}`
+    : `${KIND_WORDS[reference.componentKind]} ${reference.name}`;
+};
+
+/** The layers a profile edit asks for, checked against what exists and against P3 (E19). */
+function assertLayers(model: AccountModel, name: string, layers: readonly string[]): void {
+  const seen = new Set<string>();
+  for (const text of layers) {
+    const reference = parseLayerReference(text);
+    if (reference === undefined) {
+      refuse(`"${text}" is not a layer — write <kind>/<name> or profile/<name>`);
+      return;
+    }
+    if (seen.has(text)) refuse(`${layerWords(text)} is in the layers twice`);
+    seen.add(text);
+    if (reference.kind === 'profile') {
+      if (model.profiles[reference.name] === undefined) refuse(`no profile ${reference.name} exists on this machine`);
+      if (wouldIncludeItself(model.profiles, name, reference.name)) {
+        refuse(`profile ${reference.name} would include itself: it is ${name} or is built on it`);
+      }
+      continue;
+    }
+    if (model.components[reference.componentKind][reference.name] === undefined) {
+      refuse(`no ${KIND_WORDS[reference.componentKind]} ${reference.name} exists on this machine`);
+    }
+  }
+}
+
+/** A label two logins of one harness may not share (C9, E26). */
+function assertLabelFree(model: AccountModel, id: string, harness: HarnessKind, label: string | undefined): void {
+  if (label === undefined) return;
+  const clash = Object.entries(model.credentials).find(
+    ([other, credential]) => other !== id && credential.harness === harness && credential.label === label,
+  );
+  if (clash !== undefined) {
+    refuse(`another ${HARNESS_DISPLAY_NAMES[harness]} login is already labelled ${label}; pick a different label`);
+  }
+}
+
+type Draft = {
+  machine: Record<string, unknown>;
+  credentials: Record<string, Record<string, unknown>>;
+  components: Record<ComponentKind, Record<string, Record<string, unknown>>>;
+  profiles: Record<string, { layers: string[] }>;
+  runtimes: Record<string, Record<string, unknown>>;
+} & Record<string, unknown>;
+
+/**
+ * Derive the model one change asks for, validated by the shared schema, with the files it writes and
+ * the sentences the person approving it reads. Throws {@link FleetMutationRefusal} for anything the
+ * change cannot do, in words naming what to do instead.
+ */
+export function deriveAccountChange(
+  model: AccountModel,
+  change: AccountPlanChange,
+  facts: AccountChangeFacts,
+): AccountModelEdit {
+  const draft = structuredClone(model) as unknown as Draft;
+  const files: AccountComponentFile[] = [];
+  const consequences: string[] = [];
+  const summary = applyAccountChange(model, draft, change, facts, files, consequences);
+  const parsed = AccountModelSchema.safeParse(draft);
+  if (!parsed.success) {
+    refuse(`this change would leave the setup invalid: ${parsed.error.issues.map(issue => issue.message).join('; ')}`);
+  }
+  return { model: (parsed as { data: AccountModel }).data, files, summary, consequences };
+}
+
+function applyAccountChange(
+  model: AccountModel,
+  draft: Draft,
+  change: AccountPlanChange,
+  facts: AccountChangeFacts,
+  files: AccountComponentFile[],
+  consequences: string[],
+): string {
+  switch (change.kind) {
+    case 'runtime.put':
+      return putRuntime(model, draft, change, facts, consequences);
+    case 'runtime.remove': {
+      if (model.runtimes[change.name] === undefined) refuse(`no runtime ${change.name} exists on this machine`);
+      delete draft.runtimes[change.name];
+      consequences.push('Running sessions of it keep going until they end. Its past sessions stay in history.');
+      return `Remove runtime ${change.name}`;
+    }
+    case 'profile.put':
+      return putProfile(model, draft, change, facts, consequences);
+    case 'profile.remove':
+      return removeProfile(model, draft, change, consequences);
+    case 'component.put':
+      return putComponent(model, draft, change, facts, files, consequences);
+    case 'component.remove':
+      return removeComponent(model, draft, change, consequences);
+    case 'credential.add': {
+      assertFreeRuntimeName(change.id, id => model.credentials[id] !== undefined, 'login', facts.machineName);
+      assertLabelFree(model, change.id, change.harness, change.label);
+      draft.credentials[change.id] = {
+        harness: change.harness,
+        store: 'ferretry',
+        ...(change.label === undefined ? {} : { label: change.label }),
+      };
+      consequences.push('It starts as an empty login that needs sign-in.');
+      return `Add a ${HARNESS_DISPLAY_NAMES[change.harness]} login ${change.id}`;
+    }
+    case 'credential.label': {
+      const credential = model.credentials[change.id];
+      if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
+      const target = draft.credentials[change.id] as Record<string, unknown>;
+      if (change.label === null) {
+        delete target.label;
+        return `Remove the label from login ${change.id}`;
+      }
+      assertLabelFree(model, change.id, credential.harness, change.label);
+      target.label = change.label;
+      return `Label login ${change.id} ${change.label}`;
+    }
+    case 'credential.remove': {
+      const credential = model.credentials[change.id];
+      if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
+      // C10: a runtime on it would have nothing to launch with.
+      const users = runtimesUsingCredential(model, change.id);
+      if (users.length > 0) {
+        refuse(
+          `${counted(users.length, 'runtime')} still ${users.length === 1 ? 'uses' : 'use'} this login (${listed(users)}). Move ${users.length === 1 ? 'it' : 'them'} to another login first.`,
+        );
+      }
+      delete draft.credentials[change.id];
+      if (credential.store === 'host') {
+        consequences.push(
+          `Your own ${credential.harness} in your terminal keeps its login; Ferretry only stops using it.`,
+        );
+      } else if (credential.store === 'ferretry') {
+        consequences.push('Its saved login stays on this machine until you sign it out.');
+      }
+      return `Remove login ${change.id}`;
+    }
+    default: {
+      const previous = model.machine.agentPermissions;
+      draft.machine.agentPermissions = change.agentPermissions;
+      // E32: the setting is read at launch, so a running session keeps the mode it started with.
+      const running = facts.runningSessions;
+      consequences.push(
+        running === 0
+          ? 'Applies to new sessions.'
+          : `Applies to new sessions. ${counted(running, 'running session')} ${running === 1 ? 'keeps' : 'keep'} the old mode (${AGENT_PERMISSION_WORDS[previous]}) until restarted.`,
+      );
+      return `Set agent permissions to ${AGENT_PERMISSION_WORDS[change.agentPermissions]}`;
+    }
+  }
+}
+
+/** The product's words for each Agent permissions choice (F4). */
+const AGENT_PERMISSION_WORDS: Readonly<Record<'auto' | 'skip', string>> = {
+  auto: 'Auto mode',
+  skip: 'Skip all permission checks',
+};
+
+function putRuntime(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'runtime.put' }>,
+  facts: AccountChangeFacts,
+  consequences: string[],
+): string {
+  const exists = model.runtimes[change.name] !== undefined;
+  if (change.create) {
+    const commands = new Set(model.advanced.commands.map(command => command.wrapper));
+    assertFreeRuntimeName(
+      change.name,
+      name => model.runtimes[name] !== undefined || commands.has(name),
+      'runtime',
+      facts.machineName,
+    );
+  } else if (!exists) {
+    refuse(`no runtime ${change.name} exists on this machine`);
+  }
+  const credential = model.credentials[change.credential];
+  if (credential === undefined) return refuse(`no login ${change.credential} exists on this machine`);
+  if (model.profiles[change.profile] === undefined)
+    return refuse(`no profile ${change.profile} exists on this machine`);
+  // P5, E14: a profile with nothing for this login's harness launches nothing of the person's setup.
+  const resolved = resolveProfile({ model, profile: change.profile, harness: credential.harness });
+  if (resolved.ok && !resolved.resolved.availability.available) {
+    refuse(
+      `Nothing in profile ${change.profile} applies on ${HARNESS_DISPLAY_NAMES[credential.harness]}. Pick a different profile.`,
+    );
+  }
+  // R4, E15: allowed, but only once the person has seen that it duplicates one.
+  const twins = Object.entries(model.runtimes)
+    .filter(
+      ([name, runtime]) =>
+        name !== change.name && runtime.credential === change.credential && runtime.profile === change.profile,
+    )
+    .map(([name]) => name)
+    .toSorted();
+  if (twins.length > 0 && change.addAnother !== true) {
+    refuse(
+      `${listed(twins)} already ${twins.length === 1 ? 'uses' : 'use'} this login and profile. Add another anyway?`,
+    );
+  }
+  if (twins.length > 0)
+    consequences.push(`${listed(twins)} already ${twins.length === 1 ? 'uses' : 'use'} this login and profile.`);
+  draft.runtimes[change.name] = { credential: change.credential, profile: change.profile, agent: change.agent };
+  if (exists) consequences.push('Running sessions keep the old setup until restarted.');
+  return exists ? `Change runtime ${change.name}` : `Add runtime ${change.name}`;
+}
+
+function putProfile(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'profile.put' }>,
+  facts: AccountChangeFacts,
+  consequences: string[],
+): string {
+  const exists = model.profiles[change.name] !== undefined;
+  if (change.create && exists) {
+    refuse(
+      `${change.name} is already a profile on ${facts.machineName}. Use ${freeName(change.name, name => model.profiles[name] !== undefined)}?`,
+    );
+  }
+  if (!change.create && !exists) refuse(`no profile ${change.name} exists on this machine`);
+  assertLayers(model, change.name, change.layers);
+  draft.profiles[change.name] = { layers: [...change.layers] };
+  if (exists) {
+    const consequence = editConsequence(profileUsage(model, change.name));
+    if (consequence !== undefined) consequences.push(consequence);
+  }
+  return exists ? `Change the layers of profile ${change.name}` : `Add profile ${change.name}`;
+}
+
+function removeProfile(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'profile.remove' }>,
+  consequences: string[],
+): string {
+  if (model.profiles[change.name] === undefined) refuse(`no profile ${change.name} exists on this machine`);
+  // P6, E21: a base is removed from the profiles built on it first; they would lose what it gave them.
+  const usage = profileUsage(model, change.name);
+  if (usage.direct.length > 0) {
+    refuse(
+      `Profile ${change.name} is a base for ${listed(usage.direct)}. Remove it from ${usage.direct.length === 1 ? 'that profile' : 'those profiles'} first.`,
+    );
+  }
+  const runtimes = runtimesUsingProfile(model, change.name);
+  if (runtimes.length > 0) {
+    const target = change.switchRuntimesTo;
+    if (target === undefined) {
+      refuse(
+        `${counted(runtimes.length, 'runtime')} ${runtimes.length === 1 ? 'uses' : 'use'} profile ${change.name} (${listed(runtimes)}). Pick the profile ${runtimes.length === 1 ? 'it switches' : 'they switch'} to.`,
+      );
+    }
+    if (target === change.name) refuse(`pick a profile other than ${change.name} to switch to`);
+    if (model.profiles[target as string] === undefined) refuse(`no profile ${target} exists on this machine`);
+    for (const runtime of runtimes) (draft.runtimes[runtime] as Record<string, unknown>).profile = target;
+    consequences.push(`Switches ${counted(runtimes.length, 'runtime')} to ${target}.`);
+  }
+  delete draft.profiles[change.name];
+  consequences.push('Its components stay saved.');
+  return runtimes.length > 0
+    ? `Switch ${counted(runtimes.length, 'runtime')} and delete profile ${change.name}`
+    : `Delete profile ${change.name}`;
+}
+
+function putComponent(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'component.put' }>,
+  facts: AccountChangeFacts,
+  files: AccountComponentFile[],
+  consequences: string[],
+): string {
+  const kind = change.component.kind;
+  const existing = model.components[kind][change.name] as Record<string, unknown> | undefined;
+  const word = KIND_WORDS[kind];
+  if (change.create && existing !== undefined) {
+    refuse(
+      `${change.name} is already a ${word} on ${facts.machineName}. Use ${freeName(change.name, name => model.components[kind][name] !== undefined)}?`,
+    );
+  }
+  if (!change.create && existing === undefined) refuse(`no ${word} ${change.name} exists on this machine`);
+  if (change.content !== undefined && componentExtension(change.component) === undefined) {
+    refuse(`a ${word} has no text to save; send its fields instead`);
+  }
+  const built = componentOf(change.name, change.component, change.content, existing);
+  draft.components[kind][change.name] = built.component;
+  if (built.file !== undefined) files.push(built.file);
+  if (existing !== undefined) {
+    // E20: where the edit lands, before the person presses Save for all.
+    const consequence = editConsequence(componentUsage(model, `${kind}/${change.name}`));
+    if (consequence !== undefined) consequences.push(consequence);
+  }
+  return existing === undefined ? `Add ${word} ${change.name}` : `Change ${word} ${change.name}`;
+}
+
+function removeComponent(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'component.remove' }>,
+  consequences: string[],
+): string {
+  const kind = change.componentKind;
+  const word = KIND_WORDS[kind];
+  if (model.components[kind][change.name] === undefined) refuse(`no ${word} ${change.name} exists on this machine`);
+  const reference = `${kind}/${change.name}` as const;
+  const usage = componentUsage(model, reference);
+  if (usage.direct.length > 0) {
+    // K7, E21: blocked while a profile has it as a layer, naming those profiles and the runtimes behind them.
+    if (change.removeFromProfiles !== true) {
+      const behind = usage.runtimes.length === 0 ? '' : ` (used by ${listed(usage.runtimes)})`;
+      refuse(
+        `${word.charAt(0).toUpperCase()}${word.slice(1)} ${change.name} is a layer in ${listed(usage.direct)}${behind}. Remove it from those first.`,
+      );
+    }
+    for (const profile of usage.direct) {
+      const layers = (draft.profiles[profile] as { layers: string[] }).layers.filter(layer => layer !== reference);
+      if (layers.length === 0) {
+        refuse(
+          `removing ${word} ${change.name} would leave profile ${profile} with no layers; add another layer to it first`,
+        );
+      }
+      (draft.profiles[profile] as { layers: string[] }).layers = layers;
+    }
+    consequences.push(
+      `Removes it from ${listed(usage.direct)}${usage.runtimes.length === 0 ? '' : `, which changes ${counted(usage.runtimes.length, 'runtime')}`}. Running sessions keep the old version until restarted.`,
+    );
+  }
+  delete draft.components[kind][change.name];
+  return `Delete ${word} ${change.name}`;
 }

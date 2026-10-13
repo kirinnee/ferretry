@@ -1,16 +1,24 @@
 import { describe, it } from 'bun:test';
-import type {
-  FleetApplyCommittedState,
-  FleetApplyPreview,
-  FleetApplyResult,
-  FleetManifest,
-  FleetScaffold,
-  FleetWriteOperation,
-  SharedHistoryPreview,
+import {
+  type FleetApplyCommittedState,
+  FleetApplyFailureError,
+  type FleetApplyPreview,
+  type FleetApplyResult,
+  type FleetManifest,
+  type FleetScaffold,
+  type FleetWriteOperation,
+  type SharedHistoryPreview,
 } from '@ferretry/fleet';
-import { FleetApplyResultSchema, FleetManifestSummarySchema, FleetPlanSummarySchema } from '@ferretry/protocol';
+import {
+  FleetApplyOutcomeSchema,
+  FleetApplyResultSchema,
+  FleetManifestSummarySchema,
+  FleetPlanSummarySchema,
+  FleetWriteOperationSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
+  applyFailureSummary,
   applyResultSummary,
   committedSummary,
   historySummary,
@@ -288,5 +296,148 @@ describe('committedSummary', () => {
     should(actual.manifest.accounts).have.length(1);
     should(actual.manifestPath).equal('/state/fleet/manifest.json');
     should(actual.lockResidue).equal('/state/fleet/.fy-fleet-apply.lock');
+  });
+});
+
+describe('operationSummary for the account model', () => {
+  it('should name a link allowed to point at nothing yet a credential link, so a reviewer is told', () => {
+    // Act
+    const actual = operationSummary({
+      kind: 'symlink',
+      source: '/state/fleet/credentials/codex-slot/auth.json',
+      path: '/state/fleet/homes/one/auth.json',
+      dangling: true,
+    });
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'credential-link',
+      source: '/state/fleet/credentials/codex-slot/auth.json',
+      path: '/state/fleet/homes/one/auth.json',
+    });
+    should(FleetWriteOperationSchema.safeParse(actual).success).be.true();
+  });
+
+  it('should name a document whose listed keys are replaced json-keys, with the keys it replaces', () => {
+    // Act
+    const actual = operationSummary({
+      kind: 'settings',
+      path: '/state/fleet/homes/one/.claude.json',
+      format: 'json',
+      layers: [{ from: 'inline', settings: { mcpServers: {} } }],
+      mode: 0o600,
+      preserveExisting: true,
+      replaceKeys: ['mcpServers'],
+    });
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'json-keys',
+      path: '/state/fleet/homes/one/.claude.json',
+      format: 'json',
+      mode: 0o600,
+      replaceKeys: ['mcpServers'],
+      layerCount: 1,
+    });
+    should(FleetWriteOperationSchema.safeParse(actual).success).be.true();
+  });
+
+  it('should name a sweep limited to what an earlier apply left a retire, with what it may remove', () => {
+    // Act
+    const actual = operationSummary({
+      kind: 'prune-directory',
+      path: '/state/fleet/homes/one',
+      keep: ['CLAUDE.md'],
+      only: ['CLAUDE.md', 'skills'],
+      record: '/state/fleet/homes/one/.fy/materialised.json',
+    });
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'retire',
+      path: '/state/fleet/homes/one',
+      only: ['CLAUDE.md', 'skills'],
+      keep: ['CLAUDE.md'],
+    });
+    should(FleetWriteOperationSchema.safeParse(actual).success).be.true();
+  });
+});
+
+describe('applyFailureSummary', () => {
+  it('should report a rolled-back apply in the words the old account mount uses', () => {
+    // Act
+    const actual = applyFailureSummary(
+      new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' }),
+    );
+
+    // Assert
+    should(actual).deepEqual({ outcome: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' });
+    should(FleetApplyOutcomeSchema.safeParse(actual).success).be.true();
+  });
+
+  it('should carry what could not be restored, and what was set aside, when a rollback was incomplete', () => {
+    // Act
+    const actual = applyFailureSummary(
+      new FleetApplyFailureError(
+        {
+          kind: 'rollback-incomplete',
+          failedOperation: 'write /a',
+          reason: 'disk full',
+          unrestored: [{ path: '/a', reason: 'busy', backup: '/a.fy-backup' }],
+          displaced: [{ path: '/b', movedTo: '/b.fy-displaced' }],
+        },
+        '/state/fleet/.fy-fleet-apply.lock',
+      ),
+    );
+
+    // Assert
+    should(actual).deepEqual({
+      outcome: 'rollback-incomplete',
+      failedOperation: 'write /a',
+      reason: 'disk full',
+      unrestored: [{ path: '/a', reason: 'busy', backup: '/a.fy-backup' }],
+      displaced: [{ path: '/b', movedTo: '/b.fy-displaced' }],
+      lockResidue: '/state/fleet/.fy-fleet-apply.lock',
+    });
+    should(FleetApplyOutcomeSchema.safeParse(actual).success).be.true();
+  });
+
+  it('should leave out displaced state a rollback never had to set aside', () => {
+    // Act
+    const actual = applyFailureSummary(
+      new FleetApplyFailureError({
+        kind: 'rollback-incomplete',
+        failedOperation: 'write /a',
+        reason: 'disk full',
+        unrestored: [{ path: '/a', reason: 'busy' }],
+      }),
+    );
+
+    // Assert
+    should(actual).not.have.property('displaced');
+    should(actual).not.have.property('lockResidue');
+  });
+
+  it('should say the fleet landed when only the history step failed after the commit', () => {
+    // Act
+    const actual = applyFailureSummary(
+      new FleetApplyFailureError({
+        kind: 'history-failed-after-commit',
+        failedHarness: 'codex',
+        reason: 'the pool is not writable',
+        committed: {
+          accountCount: 1,
+          operationCount: 6,
+          manifestPath: '/state/fleet/manifest.json',
+          manifest: manifest(),
+          prunedWrappers: [],
+          sharedHistory: [],
+        },
+      }),
+    );
+
+    // Assert
+    should(actual.outcome).equal('committed-with-history-failure');
+    should(FleetApplyOutcomeSchema.safeParse(actual).success).be.true();
   });
 });

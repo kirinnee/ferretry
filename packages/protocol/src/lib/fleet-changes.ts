@@ -750,6 +750,36 @@ export const FleetWriteOperationSchema = z.discriminatedUnion('kind', [
     path: z.string().min(1),
     keep: z.array(z.string().min(1)).readonly(),
   }),
+  /**
+   * A link to the one file a login lives in (Codex `auth.json`), which may not exist yet: an empty
+   * slot has no login until somebody signs in, and the harness then writes it THROUGH this link.
+   * Its own kind rather than a `symlink` with a flag, because "a link that is allowed to point at
+   * nothing" is exactly what a reviewer needs to be told.
+   */
+  z.strictObject({ kind: z.literal('credential-link'), source: z.string().min(1), path: z.string().min(1) }),
+  /**
+   * Set named top-level keys in a document the harness also writes (Claude's `.claude.json`). The
+   * listed keys are REPLACED whole; every other key in the file is left as the harness wrote it.
+   */
+  z.strictObject({
+    kind: z.literal('json-keys'),
+    path: z.string().min(1),
+    format: z.enum(['json', 'toml']),
+    mode: z.number().int(),
+    replaceKeys: z.array(z.string().min(1)).readonly(),
+    layerCount: z.number().int().nonnegative(),
+  }),
+  /**
+   * Remove what an earlier apply put in a directory the person and the harness also write into, and
+   * nothing else: only the named entries, and each only when it is a link or the earlier apply's
+   * record names it. A file somebody made there stays.
+   */
+  z.strictObject({
+    kind: z.literal('retire'),
+    path: z.string().min(1),
+    only: z.array(z.string().min(1)).readonly(),
+    keep: z.array(z.string().min(1)).readonly(),
+  }),
 ]);
 export type FleetWriteOperation = z.infer<typeof FleetWriteOperationSchema>;
 

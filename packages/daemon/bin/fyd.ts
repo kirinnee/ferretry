@@ -630,6 +630,7 @@ import {
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
+import { fileFleetCatalogDeps } from '../src/adapters/fleet/account-model-files.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import {
@@ -5991,7 +5992,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         fleet,
         harnessLogin,
         fleetCredentials,
-        fleetCatalog: createFleetCatalogSubsystem(),
+        fleetCatalog: createFleetCatalogSubsystem(
+          fileFleetCatalogDeps({
+            paths,
+            userHome,
+            ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
+            daemonConfig: daemonConfigStore,
+            sessionStates: async () =>
+              await Promise.all(
+                storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
+              ),
+            credentials: fleetCredentials,
+            confirmChange: async password => await grants.confirmChange(password),
+            locate: locateHarness,
+            machineName: () => hostname(),
+            clientName: CLIENT_NAME,
+          }),
+        ),
         fleetSetup: createFleetSetupSubsystem(),
         /**
          * How much of this machine the managed fleet may take.

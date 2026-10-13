@@ -373,6 +373,37 @@ describe('the operation ledger', () => {
     expect(operationLedger([])).toHaveLength(0);
   });
 
+  it('names a login link, a keys-only document and a retire by what each actually does', () => {
+    // Act
+    const ledger = operationLedger([
+      { kind: 'credential-link', path: '/homes/x/auth.json', source: '/fleet/credentials/codex/auth.json' },
+      {
+        kind: 'json-keys',
+        path: '/homes/x/.claude.json',
+        format: 'json',
+        mode: 384,
+        replaceKeys: ['mcpServers', 'projects'],
+        layerCount: 1,
+      },
+      { kind: 'retire', path: '/homes/x', only: ['CLAUDE.md'], keep: ['skills'] },
+      { kind: 'retire', path: '/homes/y', only: [], keep: [] },
+    ]);
+
+    // Assert
+    expect(ledger.map(entry => entry.action)).toEqual([
+      'link login file',
+      'set keys',
+      'remove what Ferretry placed',
+      'remove what Ferretry placed',
+    ]);
+    expect(ledger.map(entry => entry.details)).toEqual([
+      ['the login may not exist yet; signing in writes it through this link'],
+      ['mode 0600', 'format json', 'replaces mcpServers, projects', 'keeps every other key already there'],
+      ['removes only CLAUDE.md', 'each only when Ferretry placed it there', 'keeps skills'],
+      ['removes nothing', 'each only when Ferretry placed it there', 'keeps nothing'],
+    ]);
+  });
+
   it('states every operator-relevant field, not just the path it touches', () => {
     const ledger = operationLedger([
       { kind: 'directory', path: '/homes/studio', mode: 448 },
