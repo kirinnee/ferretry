@@ -216,7 +216,14 @@ export type FleetTokenRefreshSettled = () => Promise<boolean>;
  * reason.
  */
 export type FleetTokenRefreshAttempt =
-  | { readonly outcome: 'ran' }
+  | {
+      readonly outcome: 'ran';
+      /**
+       * What the harness's output said about a failure, as closed-set words only. Absent when the path
+       * reads no output (Claude) — never evidence of success, which is read from the credential.
+       */
+      readonly evidence?: CodexRefreshEvidence;
+    }
   | { readonly outcome: 'unavailable'; readonly reason: string }
   | { readonly outcome: 'error'; readonly reason: string };
 
@@ -310,7 +317,7 @@ const AFTER: Readonly<Record<CredentialState, { readonly status: FleetTokenRefre
  */
 export class FleetTokenRefreshService implements FleetTokenRenewal {
   /** One entry per identity being renewed right now. Removed when that renewal settles, never before. */
-  readonly #inFlight = new Map<string, Promise<FleetTokenRefreshResult>>();
+  readonly #inFlight = new SingleFlight<FleetTokenRefreshResult>();
 
   constructor(private readonly deps: FleetTokenRefreshDeps) {}
 
@@ -322,19 +329,14 @@ export class FleetTokenRefreshService implements FleetTokenRenewal {
    * read below is what authorises the spawn, so a stale survey can cost a wasted decision but never a
    * spent refresh token.
    *
-   * The lookup and the registration happen with no `await` between them, which is what makes this a
-   * gate rather than a suggestion: an interleaving caller cannot arrive after the miss and before the
-   * entry exists.
+   * {@link SingleFlight} is what makes this a gate rather than a suggestion: an interleaving caller
+   * cannot arrive after the miss and before the entry exists.
    */
   async renew(
     identity: FleetIdentity,
     members: readonly FleetIdentityMemberStatus[],
   ): Promise<FleetTokenRefreshResult> {
-    const joined = this.#inFlight.get(identity.key);
-    if (joined !== undefined) return await joined;
-    const attempt = this.#renewOnce(identity, members).finally(() => this.#inFlight.delete(identity.key));
-    this.#inFlight.set(identity.key, attempt);
-    return await attempt;
+    return await this.#inFlight.run(identity.key, async () => await this.#renewOnce(identity, members));
   }
 
   async #renewOnce(
@@ -401,4 +403,96 @@ export class FleetTokenRefreshService implements FleetTokenRenewal {
       return { outcome: 'error', reason: failureMessage(error, 'the renewal could not be run') };
     }
   }
+}
+
+/**
+ * One piece of work per key at a time, and every caller asking during it gets ITS answer.
+ *
+ * The primitive both renewals stand on: the identity renewal above, and the account model's
+ * per-credential refresh (design §9.2), where a launch that is due and a person's **Check now** must
+ * never both spend one single-use Codex refresh token. Joined rather than queued, because a second
+ * refresh straight after the first would spend the token the first just minted.
+ *
+ * The lookup and the registration happen with no `await` between them, so an interleaving caller
+ * cannot arrive after the miss and before the entry exists. In-process only — see the module note.
+ */
+export class SingleFlight<T> {
+  readonly #inFlight = new Map<string, Promise<T>>();
+
+  async run(key: string, work: () => Promise<T>): Promise<T> {
+    const joined = this.#inFlight.get(key);
+    if (joined !== undefined) return await joined;
+    const attempt = work().finally(() => this.#inFlight.delete(key));
+    this.#inFlight.set(key, attempt);
+    return await attempt;
+  }
+
+  /** Whether work for this key is running now: what makes a status read "Checking". */
+  busy(key: string): boolean {
+    return this.#inFlight.has(key);
+  }
+}
+
+/**
+ * The words a failed Codex refresh names itself by (codex-rs `RefreshTokenFailedReason`, VERIFIED by
+ * reading). A closed set, because the only thing taken from a harness's output is which of these it
+ * said — never the text around them.
+ */
+export const CODEX_REFRESH_FAILURE_CODES = [
+  'refresh_token_expired',
+  'refresh_token_reused',
+  'refresh_token_invalidated',
+  'invalid_grant',
+] as const;
+export type CodexRefreshFailureCode = (typeof CODEX_REFRESH_FAILURE_CODES)[number];
+
+/** What a refresh's output said about why it failed, reduced to closed-set facts. */
+export interface CodexRefreshEvidence {
+  readonly codes: readonly CodexRefreshFailureCode[];
+  /** A refresh line carried an HTTP `401`. */
+  readonly unauthorized: boolean;
+}
+
+export const NO_CODEX_REFRESH_EVIDENCE: CodexRefreshEvidence = { codes: [], unauthorized: false };
+
+/**
+ * What a failed refresh means for the login.
+ *
+ * - `expired` — the refresh token outlived its lifetime: sign in again.
+ * - `revoked` — it was spent elsewhere (`reused`) or withdrawn (`invalidated`): sign in again.
+ * - `rejected` — `invalid_grant` or a `401` with no more specific word: sign in again.
+ * - `transient` — anything else (offline, a 5xx, a timeout, nothing said): the login is NOT judged,
+ *   and the last known status stands with its age.
+ */
+export type CodexRefreshFailure = 'expired' | 'revoked' | 'rejected' | 'transient';
+
+/** Scan harness output for the closed set above. Pure; the text is never retained or returned. */
+export function scanCodexRefreshEvidence(text: string): CodexRefreshEvidence {
+  const lower = text.toLowerCase();
+  const codes = CODEX_REFRESH_FAILURE_CODES.filter(code => lower.includes(code));
+  const unauthorized = lower
+    .split('\n')
+    .some(line => line.includes('refresh') && /(?:^|[^0-9])401(?:[^0-9]|$)/u.test(line));
+  return { codes, unauthorized };
+}
+
+/** Merge two scans, so evidence split across streams or chunks is one answer. */
+export function mergeCodexRefreshEvidence(
+  left: CodexRefreshEvidence,
+  right: CodexRefreshEvidence,
+): CodexRefreshEvidence {
+  return {
+    codes: CODEX_REFRESH_FAILURE_CODES.filter(code => left.codes.includes(code) || right.codes.includes(code)),
+    unauthorized: left.unauthorized || right.unauthorized,
+  };
+}
+
+/** The table, most specific word first. Only an unmistakable word condemns a login. */
+export function classifyCodexRefreshFailure(evidence: CodexRefreshEvidence): CodexRefreshFailure {
+  if (evidence.codes.includes('refresh_token_expired')) return 'expired';
+  if (evidence.codes.includes('refresh_token_reused') || evidence.codes.includes('refresh_token_invalidated')) {
+    return 'revoked';
+  }
+  if (evidence.codes.includes('invalid_grant') || evidence.unauthorized) return 'rejected';
+  return 'transient';
 }

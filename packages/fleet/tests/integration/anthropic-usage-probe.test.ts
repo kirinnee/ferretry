@@ -7,19 +7,26 @@
  * against both scales in `tests/unit/quota.test.ts`.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import should from 'should';
 import {
   ANTHROPIC_USAGE_URL,
   AnthropicUsageProbe,
   type CredentialMaterialSource,
+  FilePassiveUsageStore,
   fetchQuota,
   MAX_RESPONSE_BODY_BYTES,
   type QuotaFetch,
   type QuotaRequest,
   type QuotaResponse,
+  type StoredMaterialSource,
 } from '../../src/adapters/anthropic-usage-probe.ts';
+import type { StoredCredentialResolution } from '../../src/lib/account/credentials.ts';
 import type { CredentialMaterial } from '../../src/lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../../src/lib/manifest.ts';
+import type { PassiveUsageRecord } from '../../src/lib/usage.ts';
 
 const TOKEN = 'placeholder-access-token';
 
@@ -869,5 +876,142 @@ describe('AnthropicUsageProbe reporting what the answer said about the credentia
     // speaking for a provider it never contacted.
     should(actual).not.have.property('credentialSignal');
     should(requests).be.empty();
+  });
+});
+
+describe('AnthropicUsageProbe reading an account-model credential', () => {
+  const claudeResolution: StoredCredentialResolution = {
+    harness: 'claude',
+    store: 'ferretry',
+    secureStorage: '/fleet/credentials/work',
+    storageDirectory: '/fleet/credentials/work',
+    credentialFile: '/fleet/credentials/work/.credentials.json',
+    ownedDirectory: '/fleet/credentials/work',
+  };
+  const stored = (material: CredentialMaterial): StoredMaterialSource => ({
+    storedMaterial: () => Promise.resolve(material),
+  });
+
+  it('should read the token from the credential store and make the one free read', async () => {
+    // Arrange
+    const { fetch, requests } = transport({
+      [ANTHROPIC_USAGE_URL]: { body: { five_hour: { utilization: 30 }, seven_day: { utilization: 7 } } },
+    });
+    const subject = new AnthropicUsageProbe({
+      fetch,
+      credentials: credentials({ outcome: 'absent' }),
+      stored: stored({ outcome: 'found', blob: JSON.stringify({ claudeAiOauth: { accessToken: TOKEN } }) }),
+    });
+
+    // Act
+    const actual = await subject.probeCredential(claudeResolution);
+
+    // Assert
+    should(requests).have.length(1);
+    should(requests[0]?.headers.Authorization).equal(`Bearer ${TOKEN}`);
+    should(actual.credentialSignal).equal('accepted');
+    should(actual.shortWindow?.usedPercent).equal(30);
+    should(actual.longWindow?.usedPercent).equal(7);
+  });
+
+  it('should decline a Codex credential without asking anybody', async () => {
+    // Arrange
+    const { fetch, requests } = transport({});
+    const subject = new AnthropicUsageProbe({ fetch, credentials: storedCredential });
+
+    // Act
+    const actual = await subject.probeCredential({
+      harness: 'codex',
+      store: 'ferretry',
+      canonicalFile: '/fleet/credentials/codex/auth.json',
+    });
+
+    // Assert
+    should(requests).be.empty();
+    should(actual.usageBased).be.false();
+    should(actual).not.have.property('credentialSignal');
+  });
+
+  it('should report an inconclusive check when built without a store reader', async () => {
+    // Arrange
+    const { fetch, requests } = transport({});
+    const subject = new AnthropicUsageProbe({ fetch, credentials: storedCredential });
+
+    // Act
+    const actual = await subject.probeCredential(claudeResolution);
+
+    // Assert
+    should(requests).be.empty();
+    should(actual.ok).be.false();
+    should(actual.credentialSignal).equal('inconclusive');
+  });
+});
+
+describe('FilePassiveUsageStore', () => {
+  const directories: string[] = [];
+  const fleet = async (): Promise<string> => {
+    const directory = await mkdtemp(join(tmpdir(), 'fy-passive-usage-'));
+    directories.push(directory);
+    return directory;
+  };
+  afterEach(async () => {
+    await Promise.all(directories.splice(0).map(each => rm(each, { recursive: true, force: true })));
+  });
+  const record: PassiveUsageRecord = {
+    version: 1,
+    source: 'claude-statusline',
+    at: 1_800_000_000_000,
+    fiveHour: { usedPercent: 12, resetAt: 1_800_000_100_000 },
+    weekly: { usedPercent: 3 },
+  };
+
+  it('should write the reading atomically under the fleet, owner-only, and read it back', async () => {
+    // Arrange
+    const root = await fleet();
+    const store = new FilePassiveUsageStore(root);
+
+    // Act
+    await store.write('work', record);
+    const actual = await store.read('work');
+
+    // Assert
+    should(store.path('work')).equal(join(root, 'credentials', 'work', 'usage.json'));
+    should(actual).deepEqual(record);
+    should((await stat(store.path('work'))).mode & 0o777).equal(0o600);
+    should((await stat(join(root, 'credentials', 'work'))).mode & 0o777).equal(0o700);
+    should((await readdir(join(root, 'credentials', 'work'))).filter(name => name.endsWith('.tmp'))).be.empty();
+  });
+
+  it('should read nothing from a missing, unparseable or foreign document', async () => {
+    // Arrange
+    const root = await fleet();
+    const store = new FilePassiveUsageStore(root);
+    await mkdir(join(root, 'credentials', 'bad'), { recursive: true });
+    await mkdir(join(root, 'credentials', 'foreign'), { recursive: true });
+    await writeFile(store.path('bad'), 'not json');
+    await writeFile(store.path('foreign'), JSON.stringify({ version: 2 }));
+
+    // Act
+    const actual = await Promise.all([store.read('missing'), store.read('bad'), store.read('foreign')]);
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined, undefined]);
+  });
+
+  it('should leave no temporary file behind when the write cannot land', async () => {
+    // Arrange — a directory where the file belongs makes the rename fail.
+    const root = await fleet();
+    const store = new FilePassiveUsageStore(root);
+    await mkdir(store.path('work'), { recursive: true });
+
+    // Act
+    const failure = await store.write('work', record).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceOf(Error);
+    should((await readdir(join(root, 'credentials', 'work'))).filter(name => name.endsWith('.tmp'))).be.empty();
   });
 });

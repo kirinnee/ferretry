@@ -13,6 +13,9 @@ import {
   UNAUTHORIZED,
   usageEndpointCredentialSignal,
   usageEndpointHttpVerdict,
+  parseClaudeStatuslineRateLimits,
+  parseCodexRateLimits,
+  parseCodexUsageBody,
 } from '../../src/lib/quota.ts';
 
 /** A header table, looked up case-insensitively as a real response would be. */
@@ -296,5 +299,94 @@ describe('usageEndpointCredentialSignal', () => {
     // not, which is exactly why this is a second function rather than a field on the first.
     should(actual).deepEqual(['inconclusive', 'inconclusive', 'inconclusive', 'inconclusive', 'inconclusive']);
     should(usageEndpointHttpVerdict(503).authOk).be.true();
+  });
+});
+
+describe('parseClaudeStatuslineRateLimits', () => {
+  it('should read both named windows as percentages with epoch-second resets', () => {
+    // Arrange
+    const payload = {
+      model: { id: 'claude' },
+      rate_limits: {
+        five_hour: { used_percentage: 42, resets_at: 1_786_000_000 },
+        seven_day: { used_percentage: 0.5, resets_at: 1_786_500_000 },
+      },
+    };
+
+    // Act / Assert — `0.5` is half a percent here, never 50%: this field is already a percentage.
+    should(parseClaudeStatuslineRateLimits(payload)).deepEqual({
+      shortWindow: { usedPercent: 42, resetAt: 1_786_000_000_000 },
+      longWindow: { usedPercent: 0.5, resetAt: 1_786_500_000_000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+  });
+
+  it('should report no signal for a payload without rate limits, or with only a reset', () => {
+    should(parseClaudeStatuslineRateLimits({ model: {} })).deepEqual({ hasQuotaSignal: false, providerAtLimit: false });
+    should(parseClaudeStatuslineRateLimits('not an object').hasQuotaSignal).be.false();
+    should(parseClaudeStatuslineRateLimits({ rate_limits: { five_hour: { resets_at: 1_786_000_000 } } })).deepEqual({
+      shortWindow: { resetAt: 1_786_000_000_000 },
+      hasQuotaSignal: false,
+      providerAtLimit: false,
+    });
+  });
+});
+
+describe('parseCodexRateLimits', () => {
+  it('should read primary as the 5-hour window and secondary as the weekly one', () => {
+    should(
+      parseCodexRateLimits({
+        primary: { used_percent: 12.5, window_minutes: 300, resets_at: 1_786_000_000 },
+        secondary: { used_percent: 60, window_minutes: 10_080, resets_at: 1_786_500_000 },
+      }),
+    ).deepEqual({
+      shortWindow: { usedPercent: 12.5, resetAt: 1_786_000_000_000 },
+      longWindow: { usedPercent: 60, resetAt: 1_786_500_000_000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+  });
+
+  it('should measure an older relative reset from the event, and drop one with no instant to measure from', () => {
+    const limits = { primary: { used_percent: 5, resets_in_seconds: 60 }, secondary: { resets_in_seconds: -1 } };
+    should(parseCodexRateLimits(limits, 1_000)).deepEqual({
+      shortWindow: { usedPercent: 5, resetAt: 61_000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+    should(parseCodexRateLimits(limits)).deepEqual({
+      shortWindow: { usedPercent: 5 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+    should(parseCodexRateLimits(null).hasQuotaSignal).be.false();
+  });
+});
+
+describe('parseCodexUsageBody', () => {
+  it('should read both windows and the provider at-limit flag', () => {
+    should(
+      parseCodexUsageBody(
+        {
+          plan_type: 'pro',
+          rate_limit: {
+            limit_reached: true,
+            primary_window: { used_percent: 100, reset_after_seconds: 30 },
+            secondary_window: { used_percent: 40, reset_at: 1_786_500_000 },
+          },
+        },
+        1_000,
+      ),
+    ).deepEqual({
+      shortWindow: { usedPercent: 100, resetAt: 31_000 },
+      longWindow: { usedPercent: 40, resetAt: 1_786_500_000_000 },
+      hasQuotaSignal: true,
+      providerAtLimit: true,
+    });
+  });
+
+  it('should report no signal for a body without a rate limit', () => {
+    should(parseCodexUsageBody({}, 1_000)).deepEqual({ hasQuotaSignal: false, providerAtLimit: false });
   });
 });
