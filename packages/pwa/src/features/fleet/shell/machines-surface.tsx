@@ -242,25 +242,28 @@ export function MachinesSurface({
       ) : (
         <>
           <nav aria-label={`${name} tabs`} data-machine-tabs="">
-            <ul className="m-0 grid list-none grid-cols-5 gap-1 p-0">
+            {/* EQUAL COLUMNS THAT NEVER CUT A WORD. Every cell grows from the same zero basis but never below its
+                own label, so at the default size five labels fit a 390px phone side by side, and at a larger
+                text size or a wider theme the ROW scrolls inside itself — never the page, and never as "Creden…". */}
+            <ul className="scroll-thin m-0 flex list-none gap-0.5 overflow-x-auto p-0 md:gap-1">
               {MACHINE_TABS.map(definition => {
                 const selected = definition.id === tab;
                 return (
-                  <li key={definition.id} className="min-w-0">
+                  <li key={definition.id} className="flex-1">
                     <button
                       type="button"
                       data-machine-tab={definition.id}
                       aria-current={selected ? 'page' : undefined}
                       onClick={() => onOpen(daemonId, definition.id)}
                       className={cn(
-                        'flex min-h-control w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-control border px-1 py-1 text-meta transition-colors md:flex-row md:gap-2 md:text-ui',
+                        'flex min-h-control w-full flex-col items-center justify-center gap-0.5 rounded-control border whitespace-nowrap px-0.5 py-1 text-meta md:px-2 transition-colors md:flex-row md:gap-2 md:text-ui',
                         selected
                           ? 'border-accent bg-accent-soft text-accent'
                           : 'border-border bg-surface-2 text-fg hover:border-accent',
                       )}
                     >
                       {TAB_ICONS[definition.id]}
-                      <span className="max-w-full truncate">{definition.label}</span>
+                      <span>{definition.label}</span>
                     </button>
                   </li>
                 );
