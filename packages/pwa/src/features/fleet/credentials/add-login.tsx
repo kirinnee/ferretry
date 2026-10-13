@@ -309,7 +309,6 @@ export function AddLoginStep({
         )}
         <CredentialSignIn
           credential={credential}
-          machine={machine}
           machineName={machineName}
           connection={connection}
           createClient={createClient}

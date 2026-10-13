@@ -134,7 +134,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 65;
+const SETTINGS_SIDEWAYS_CHECKS = 85;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1687,10 +1687,10 @@ try {
           // shape most likely to widen a 390px phone once a label is longer than its cell.
           await selectSettingsSection('machines');
           const machinesSurface = settingsPage.locator('[data-machines-surface="harness-daemon"]');
-          await machinesSurface.locator('[data-machine-tab-empty="runtimes"]').waitFor({ state: 'visible' });
+          await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
           for (const tab of ['credentials', 'profiles', 'components', 'settings'] as const) {
             await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
-            await machinesSurface.locator(`[data-machine-tab-empty="${tab}"]`).waitFor({ state: 'visible' });
+            await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
             await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
           }
           const machinesTarget = join(outDir, `settings-machines-${viewport.name}.png`);
@@ -1702,6 +1702,61 @@ try {
           const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
           await page.screenshot({ path: machinesListTarget });
           process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
+
+          // RUNTIMES AND CREDENTIALS (account model U17): ten pages per viewport — the two lists, a runtime
+          // with its fixed layer, one whose model set has models this login cannot use, the three Add a
+          // runtime decisions, a login that needs sign-in, its sign-in link, and a sign-out confirmation.
+          const loginShot = async (name: string, label: string): Promise<void> => {
+            await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
+            const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
+            await page.screenshot({ path: target });
+            process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
+          };
+          await machinesSurface.locator('[data-machines-list] button:has-text("Close")').click();
+          await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
+          const runtimesPanel = machinesSurface.locator('[data-machine-tab-panel="runtimes"]');
+          await runtimesPanel.locator('[data-runtime-row="claude-agent"]').waitFor({ state: 'visible' });
+          await loginShot('runtimes', 'Runtimes list');
+          await runtimesPanel.locator('[data-runtime-row="claude-agent"]').click();
+          await runtimesPanel.locator('[data-runtime-fixed-layer]').waitFor({ state: 'visible' });
+          await loginShot('runtime-agent', 'agent runtime page');
+          await runtimesPanel.locator('[data-page-back]').click();
+          await runtimesPanel.locator('[data-runtime-row="codex-default"]').click();
+          await runtimesPanel.locator('[data-runtime-models]').waitFor({ state: 'visible' });
+          await loginShot('runtime-models', 'runtime page with unavailable models');
+          await runtimesPanel.locator('[data-page-back]').click();
+          await runtimesPanel.locator('[data-add-runtime]').click();
+          await runtimesPanel.locator('[data-add-runtime-credential="claude-personal"]').click();
+          await loginShot('add-runtime-credential', 'Add a runtime login step');
+          await runtimesPanel.locator('[data-step-next]').click();
+          await runtimesPanel.locator('[data-add-runtime-profile="Default"]').click();
+          await runtimesPanel.locator('[data-add-runtime-duplicate]').waitFor({ state: 'visible' });
+          await loginShot('add-runtime-profile', 'Add a runtime profile step');
+          await runtimesPanel.locator('[data-duplicate-ok]').click();
+          await runtimesPanel.locator('[data-step-next]').click();
+          await runtimesPanel.locator('#add-runtime-name').fill('claude-default');
+          await runtimesPanel.locator('[data-runtime-name-problem]').waitFor({ state: 'visible' });
+          await loginShot('add-runtime-name', 'Add a runtime name step');
+          await runtimesPanel.locator('[data-stepper-cancel]').click();
+          await runtimesPanel.locator('[data-stepper-stop]').click();
+
+          await machinesSurface.locator('[data-machine-tab="credentials"]').click();
+          const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="credentials"]');
+          await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
+          await loginShot('credentials', 'Credentials list');
+          await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="start"]').waitFor({ state: 'visible' });
+          await loginShot('credential-slot', 'empty login page');
+          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="awaiting-code"]').waitFor({ state: 'visible' });
+          await loginShot('credential-sign-in', 'login sign-in link');
+          await credentialsPanel.locator('[data-page-back]').click();
+          await credentialsPanel.locator('[data-credential-row="claude-personal"]').click();
+          await credentialsPanel.locator('[data-credential-sign-out-ask]').click();
+          await credentialsPanel.locator('[data-credential-sign-out]').scrollIntoViewIfNeeded();
+          await loginShot('credential-sign-out', 'sign-out confirmation');
+          await credentialsPanel.locator('[data-sign-out-keep]').click();
+          await credentialsPanel.locator('[data-page-back]').click();
 
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh

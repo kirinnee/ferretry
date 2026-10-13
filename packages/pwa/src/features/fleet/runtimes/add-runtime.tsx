@@ -359,7 +359,6 @@ export function AddRuntime({
           {credential?.status.word === 'needs_sign_in' ? (
             <CredentialSignIn
               credential={credential}
-              machine={machine}
               machineName={machineName}
               connection={connection}
               createClient={createClient}
@@ -405,7 +404,7 @@ export function AddRuntime({
                       fit.notes.length === 0 ? null : (
                         <span className="flex flex-wrap gap-1">
                           {fit.notes.map(note => (
-                            <Badge key={note} tone="warn">
+                            <Badge key={note} tone="warn" className="max-w-full whitespace-normal">
                               {note}
                             </Badge>
                           ))}

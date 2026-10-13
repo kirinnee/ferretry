@@ -82,10 +82,10 @@ export function CredentialBadges({ credential }: { readonly credential: FleetCre
   const slot = slotBadge(credential);
   if (credential.label === undefined && terminal === null && slot === null) return null;
   return (
-    <span className="flex flex-wrap gap-1" data-credential-badges="">
+    <span className="flex min-w-0 flex-wrap gap-1" data-credential-badges="">
       {credential.label === undefined ? null : <Badge tone="accent">{credential.label}</Badge>}
-      {slot === null ? null : <Badge>{slot}</Badge>}
-      {terminal === null ? null : <Badge>{terminal}</Badge>}
+      {slot === null ? null : <Badge className="max-w-full whitespace-normal">{slot}</Badge>}
+      {terminal === null ? null : <Badge className="max-w-full whitespace-normal">{terminal}</Badge>}
     </span>
   );
 }
@@ -231,7 +231,6 @@ function CredentialPage({
       {needsSignIn && online ? (
         <CredentialSignIn
           credential={credential}
-          machine={machine}
           machineName={machineName}
           connection={connection}
           createClient={createClient}
@@ -288,7 +287,7 @@ function CredentialPage({
               <li key={runtime.name}>
                 <a
                   href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-                  className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel text-left no-underline hover:border-accent"
+                  className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel text-left no-underline hover:border-accent hover:no-underline"
                   data-credential-runtime={runtime.name}
                 >
                   <AccountStatus word={credential.status.word} />
@@ -379,7 +378,7 @@ function CredentialRow({
   return (
     <a
       href={href}
-      className="kt-panel flex min-h-control min-w-0 items-start gap-3 p-panel text-left no-underline hover:border-accent"
+      className="kt-panel flex min-h-control min-w-0 items-start gap-3 p-panel text-left no-underline hover:border-accent hover:no-underline"
       data-credential-row={credential.id}
     >
       <AccountStatus word={credential.status.word} className="mt-1" />

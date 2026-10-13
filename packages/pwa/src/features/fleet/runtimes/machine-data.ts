@@ -34,7 +34,8 @@ export interface MachineData {
   readonly credentials: FleetCredentialList;
   readonly runtimes: FleetRuntimeCatalog;
   readonly profiles: FleetLayeredProfileCatalog;
-  readonly components: FleetComponentCatalog;
+  /** Only badges come from it, so a machine that cannot answer it still shows its runtimes. */
+  readonly components: FleetComponentCatalog | null;
 }
 
 export type MachineDataState =
@@ -53,7 +54,7 @@ export const readMachineData = async (
     readFleetCredentials(client),
     readFleetRuntimes(client),
     readFleetProfileStacks(client),
-    readFleetComponents(client),
+    readFleetComponents(client).catch(() => null),
   ]);
   return { credentials, runtimes, profiles, components };
 };

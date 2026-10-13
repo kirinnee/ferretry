@@ -38,7 +38,7 @@ import {
 import type { FyApiClient } from '@ferretry/protocol/client';
 // `chooseConnection` is aliased so the relay's carrier choice reads as what it is here: a
 // measurement a live session makes, not a question onboarding asks (it asks none).
-import { carrierProbe, chooseConnection as chooseCarrier, type ConnectionChoice } from '@ferretry/relay';
+import { type ConnectionChoice, carrierProbe, chooseConnection as chooseCarrier } from '@ferretry/relay';
 import { type ReactElement, StrictMode } from 'react';
 
 import {
@@ -359,6 +359,8 @@ interface ShellOptions {
   readonly wardenVerdicts?: () => Promise<WardenVerdictsView>;
   /** The durable project registry this daemon answers `/v1/projects` with. */
   readonly projects?: readonly ProjectInfo[];
+  /** The roster `GET /v1/fleet/accounts` answers with. */
+  readonly accounts?: readonly unknown[];
 }
 
 interface HealthRead {
@@ -503,6 +505,7 @@ const appStore = async (
         }),
         request: async (path: string, schema: unknown, _init: RequestInit, timeout?: number) => {
           healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
+          if (path === '/v1/fleet/accounts' && options.accounts !== undefined) return { accounts: options.accounts };
           return path === '/v1/doctor' ? doctorReport : {};
         },
       } as unknown as FyApiClient;
@@ -1888,6 +1891,52 @@ describe('AppShell', () => {
     } finally {
       await view.unmount();
     }
+  });
+
+  describe('a Launch link to the New session page', () => {
+    const pickerAccount = (wrapper: string, available = true) => ({
+      id: `${wrapper}-id`,
+      kind: 'claude',
+      mode: 'auto',
+      wrapper,
+      home: `/homes/${wrapper}`,
+      displayName: wrapper,
+      defaultModel: null,
+      models: [],
+      available,
+      unavailableReason: available ? null : 'wrapper missing on this host',
+    });
+    const roster = [pickerAccount('claude-auto-first'), pickerAccount('claude-auto-named')];
+
+    afterEach(() => setPath('/'));
+
+    it('puts the runtime named by ?agent= in the Account box, and starts nothing', async () => {
+      const { view } = await renderShell('/d/alpha/new?agent=claude-auto-named', [alpha.daemonId], {
+        accounts: roster,
+      });
+      try {
+        await settle();
+        const box = must(view.container.querySelector<HTMLInputElement>('#fy-new-session-agent'), 'the Account box');
+        expect(box.value).toBe('claude-auto-named');
+        expect(view.container.querySelector('[data-route]')?.textContent).toBe('Sessions, New');
+      } finally {
+        await view.unmount();
+      }
+    });
+
+    it('falls back to the first usable account when there is no hint, an empty one, or one it cannot use', async () => {
+      const accounts = [pickerAccount('claude-auto-first'), pickerAccount('claude-auto-down', false)];
+      for (const search of ['', '?agent=', '?agent=claude-auto-down', '?agent=claude-auto-nobody']) {
+        const { view } = await renderShell(`/d/alpha/new${search}`, [alpha.daemonId], { accounts });
+        try {
+          await settle();
+          const box = must(view.container.querySelector<HTMLInputElement>('#fy-new-session-agent'), 'the Account box');
+          expect(box.value).toBe('claude-auto-first');
+        } finally {
+          await view.unmount();
+        }
+      }
+    });
   });
 
   it('keeps Warden evidence daemon-bound, opens the complete report, and calls a failed refresh stale', async () => {

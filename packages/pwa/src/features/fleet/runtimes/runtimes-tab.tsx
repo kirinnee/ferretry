@@ -155,7 +155,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
       <Section title="Credential">
         <a
           href={machineDetailHash(machineName, 'credentials', runtime.credential.id)}
-          className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent"
+          className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent hover:no-underline"
           data-runtime-credential={runtime.credential.id}
         >
           <AccountStatus word={word} />
@@ -170,7 +170,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
       <Section title="Profile">
         <a
           href={machineDetailHash(machineName, 'profiles', runtime.profile)}
-          className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent"
+          className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent hover:no-underline"
           data-runtime-profile={runtime.profile}
         >
           <span className="flex min-w-0 flex-1 flex-col">
@@ -199,6 +199,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
                           <Badge
                             key={note}
                             tone={note.startsWith('Partly') || note.includes('not found') ? 'warn' : 'pend'}
+                            className="max-w-full whitespace-normal"
                           >
                             {note}
                           </Badge>
@@ -279,7 +280,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
           <a
             href={launchHref(connection, runtime.name)}
             onClick={event => followInApp(event)}
-            className="kt-btn w-full justify-center no-underline"
+            className="kt-btn w-full justify-center no-underline hover:no-underline"
             data-variant="primary"
             data-runtime-launch=""
           >
@@ -310,7 +311,7 @@ function RuntimeRow({
     <div className="flex flex-col gap-1">
       <a
         href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-        className="kt-panel flex min-h-control min-w-0 items-start gap-3 p-panel text-left no-underline hover:border-accent"
+        className="kt-panel flex min-h-control min-w-0 items-start gap-3 p-panel text-left no-underline hover:border-accent hover:no-underline"
         data-runtime-row={runtime.name}
       >
         <AccountStatus word={runtimeWord(runtime)} className="mt-1" />
@@ -358,6 +359,20 @@ export function RuntimesTab({
   const [detail, openDetail] = useMachineDetail(machineName, 'runtimes');
   const [flow, setFlow] = useState<StepperState | null>(null);
   const [draft, setDraft] = useState<AddRuntimeDraft>(EMPTY_ADD_RUNTIME);
+
+  // M3: a machine that is not set up opens the first run, which the Settings tab owns.
+  if (machine !== null && !machine.setUp)
+    return (
+      <div className="kt-panel flex flex-col items-start gap-2 p-panel" data-runtimes-not-set-up="">
+        <h3 className="m-0 text-row font-semibold text-fg">{machineName} isn’t set up yet</h3>
+        <p className="m-0 text-cell leading-base text-muted">
+          Setting it up finds Claude Code and Codex on {machineName} and brings in what they already have.
+        </p>
+        <a href={`${machineDetailHash(machineName, 'settings')}/setup`} className="kt-btn no-underline hover:no-underline" data-variant="primary">
+          Set up {machineName}
+        </a>
+      </div>
+    );
 
   if (data === null)
     return state.kind === 'failed' ? (

@@ -12,7 +12,7 @@
  * somewhere this browser cannot see; it stops the moment the flow ends.
  */
 
-import type { FleetCredentialView, FleetMachineView, HarnessLoginFlow } from '@ferretry/protocol';
+import type { FleetCredentialView, HarnessLoginFlow } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { ClaudeLoginPanel } from '../claude-login-panel.tsx';
@@ -41,7 +41,6 @@ export const SIGN_IN_POLL_MS = 2_000;
 
 export interface CredentialSignInProps {
   readonly credential: FleetCredentialView;
-  readonly machine: FleetMachineView | null;
   readonly machineName: string;
   readonly connection: DaemonConnection;
   readonly createClient: FleetClientFactory;
@@ -61,7 +60,6 @@ const waiting = (flow: HarnessLoginFlow | null): boolean =>
 
 export function CredentialSignIn({
   credential,
-  machine,
   machineName,
   connection,
   createClient,
@@ -173,7 +171,8 @@ export function CredentialSignIn({
         </div>
         <ChangeApplyPanel
           machineName={machineName}
-          changes={machine?.changes ?? null}
+          // Signing in is not an account-model change: it works while changes are switched off.
+          changes={null}
           authority={changes.authority}
           busy={busy || changes.busy}
           busyLabel="Starting sign-in…"

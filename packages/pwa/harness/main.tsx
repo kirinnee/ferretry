@@ -120,6 +120,8 @@ import {
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
 import { FleetAccountStepper } from '../src/features/fleet/fleet-account-stepper.tsx';
+import { harnessCatalogAnswer } from './account-model-catalog.ts';
+import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import type {
   FleetApplyOutcome,
   FleetConfigView,
@@ -1571,6 +1573,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       createPairingClient={HARNESS_PAIRING_CLIENT}
       daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       createMachineClient={HARNESS_MACHINE_CLIENT}
+      machineTabs={HARNESS_MACHINE_TABS}
       // A stand-in router: the path picks the daemon, the hash is kept on THIS page's address, so a
       // Machines tab or switch stays inside the preview instead of loading a route the harness lacks.
       onNavigate={to => {
@@ -2130,17 +2133,21 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   const setUp = connection.daemonId === daemon.daemonId;
   return {
-    request: (async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
-      schema.parse({
-        name: 'studio-mac',
-        format: setUp ? 'version-2' : 'none',
-        setUp,
-        agentPermissions: 'auto',
-        tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
-        runtimeCount: setUp ? 5 : 0,
-        runningSessions: 0,
-        changes: { available: true },
-      })) as Awaited<ReturnType<FleetClientFactory>>['request'],
+    request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
+      schema.parse(
+        path !== '/v1/fleet/machine'
+          ? harnessCatalogAnswer(path, init)
+          : {
+              name: 'studio-mac',
+              format: setUp ? 'version-2' : 'none',
+              setUp,
+              agentPermissions: 'auto',
+              tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
+              runtimeCount: setUp ? 5 : 0,
+              runningSessions: 0,
+              changes: { available: true },
+            },
+      )) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
 };
 

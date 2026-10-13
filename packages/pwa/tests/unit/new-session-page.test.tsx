@@ -1,5 +1,5 @@
-import type { SessionView, StartSessionRequest, UsageFeedView } from '@ferretry/protocol';
 import { afterEach, describe, expect, it } from 'bun:test';
+import type { SessionView, StartSessionRequest, UsageFeedView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 
 import { NewSessionPage, type NewSessionPageProps } from '../../src/components/new-session-page.tsx';
@@ -995,5 +995,41 @@ describe('NewSessionPage with the daemon pickers', () => {
     await press(namedButton('Open Settings'));
     expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings']);
     expect(recorder.starts).toEqual([]);
+  });
+});
+
+describe('NewSessionPage initialAgent', () => {
+  it('fills the Account box with the runtime a Launch button named, over the first usable account', async () => {
+    const { props, recorder } = wire({ accounts: [terminal, studio, atelier] });
+    await show({ ...props, initialAgent: 'codex-auto-atelier' });
+
+    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
+    // It is a hint, not a start: nothing was sent, and the model box suggests that account's models.
+    expect(recorder.starts).toEqual([]);
+    expect(
+      [...root().querySelectorAll('#fy-new-session-model-options option')].map(option => option.getAttribute('value')),
+    ).toEqual(['gpt-5.6-terra']);
+  });
+
+  it('does the same on a surface that has no quota feed', async () => {
+    const { props } = wire({ accounts: [terminal, studio, atelier], quota: 'absent' });
+    await show({ ...props, initialAgent: 'codex-auto-atelier' });
+
+    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
+  });
+
+  it('ignores a runtime the roster does not offer, an unavailable one, and the terminal account', async () => {
+    const down: PickerAccount = { ...atelier, available: false, unavailableReason: 'wrapper missing on this host' };
+    for (const [accounts, hint] of [
+      [[terminal, studio, atelier], 'claude-auto-nobody'],
+      [[terminal, studio, down], 'codex-auto-atelier'],
+      [[terminal, studio, atelier], 'claude-default'],
+    ] as const) {
+      const { props } = wire({ accounts: [...accounts] });
+      await show({ ...props, initialAgent: hint });
+      expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
+      await live?.unmount();
+      live = undefined;
+    }
   });
 });
