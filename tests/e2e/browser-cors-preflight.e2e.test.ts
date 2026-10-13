@@ -5,8 +5,9 @@
  * browser's own tests send their headers to a fixture that answers whatever it is asked; the daemon's
  * integration tests exercise the transport with the headers the transport already knows; both were
  * green for the whole time the hosted PWA could not apply a fleet proposal or change a grant, because
- * `x-ferretry-operator-unlock` was absent from `CORS_REQUEST_HEADERS` and Chrome therefore never sent
- * the POST at all.
+ * the header it sent on those mutations (then the operator-unlock header, deleted with the operator
+ * password) was absent from `CORS_REQUEST_HEADERS` and Chrome therefore never sent the POST at all. The
+ * same contract now holds for `x-fy-request-id`, the idempotency key every such mutation carries.
  *
  * So the claim here is deliberately narrow and deliberately not about authorization:
  *
@@ -47,15 +48,15 @@ import { harnessTeardown, type HarnessTeardown, launchChrome } from './support/r
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../..');
 
-/** The header the PWA sends on every governed mutation the operator password authorizes. */
-const UNLOCK_HEADER = 'x-ferretry-operator-unlock';
+/** The idempotency key the PWA sends on every governed mutation, such as applying a fleet proposal. */
+const REQUEST_ID_HEADER = 'x-fy-request-id';
 /**
  * A name the admitted one is a prefix of.
  *
  * It is here because a wildcard, a prefix test or a `startsWith` would pass the case above and admit
  * this too, and the whole value of the allowlist is that it does not.
  */
-const LOOKALIKE_HEADER = `${UNLOCK_HEADER}-secret`;
+const LOOKALIKE_HEADER = `${REQUEST_ID_HEADER}-secret`;
 
 /** The compiled daemon, named the way `scripts/release/compile.sh` names it. */
 function compiledDaemon(): string {
@@ -128,7 +129,7 @@ function attemptScript(applyUrl: string, header: string): string {
     try {
       const response = await fetch(${JSON.stringify(applyUrl)}, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ${JSON.stringify(header)}: 'operator-password' },
+        headers: { 'content-type': 'application/json', ${JSON.stringify(header)}: 'e2e-probe' },
         body: '{}',
       });
       return { resolved: true, status: response.status, error: null };
@@ -139,7 +140,7 @@ function attemptScript(applyUrl: string, header: string): string {
 }
 
 describe('a real browser at another origin, and a compiled daemon', () => {
-  it('should let a cross-origin page send the operator unlock header and refuse a lookalike', async () => {
+  it('should let a cross-origin page send the request-id header and refuse a lookalike', async () => {
     // Arrange
     const teardown = harnessTeardown();
     try {
@@ -161,7 +162,7 @@ describe('a real browser at another origin, and a compiled daemon', () => {
         await browser.page.goto(page.origin, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
         // Act
-        const admitted = await browser.page.evaluate<Attempt>(attemptScript(applyUrl, UNLOCK_HEADER));
+        const admitted = await browser.page.evaluate<Attempt>(attemptScript(applyUrl, REQUEST_ID_HEADER));
         const lookalike = await browser.page.evaluate<Attempt>(attemptScript(applyUrl, LOOKALIKE_HEADER));
 
         // Assert
