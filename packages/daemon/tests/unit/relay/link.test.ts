@@ -228,6 +228,7 @@ function harness(
     readonly now?: () => number;
     readonly seen?: (deviceId: string) => void;
     readonly deviceKey?: (deviceId: string) => Promise<string | undefined>;
+    readonly reauthorize?: (request: ApiRequest) => boolean;
   } = {},
 ): Harness {
   const sent = wire();
@@ -246,9 +247,12 @@ function harness(
       requests.push(request);
       return await answer(request);
     },
-    sockets: async request => {
-      upgrades.push(request);
-      return await upgrade(request);
+    sockets: {
+      upgrade: async request => {
+        upgrades.push(request);
+        return await upgrade(request);
+      },
+      reauthorize: extra.reauthorize ?? (() => true),
     },
     devices: {
       deviceKey:
@@ -2102,7 +2106,7 @@ async function heldStreamingLink(which: 'open' | 'seal'): Promise<HeldStream> {
     relayHost: HOST,
     socket: sent.socket,
     dispatch: async () => json(200, {}),
-    sockets: accepts(stream),
+    sockets: { upgrade: accepts(stream), reauthorize: () => true },
     connections: new LiveDeviceConnections(),
     devices: {
       deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
@@ -2577,7 +2581,7 @@ async function heldCredentialLink(which: 'handshake' | 'open'): Promise<HeldCred
     relayHost: HOST,
     socket: sent.socket,
     dispatch: async () => json(200, {}),
-    sockets: async () => ({ outcome: 'unclaimed' }),
+    sockets: { upgrade: async () => ({ outcome: 'unclaimed' }), reauthorize: () => true },
     connections: new LiveDeviceConnections(),
     devices: {
       deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
@@ -2797,6 +2801,97 @@ describe('the access lease', () => {
     // Assert
     should(asked.t).equal('renew');
     should(stream.closed).be.empty();
+    should(harnessed.link.report().sessions).equal(1);
+  });
+
+  /** A stream session whose grant answer the test decides, open and past its acceptance. */
+  async function grantedStream(allowed: () => boolean) {
+    const stream = fakeStream();
+    const asked: ApiRequest[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream), undefined, {
+      reauthorize: request => {
+        asked.push(request);
+        return allowed();
+      },
+    });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    await sealed();
+    return { stream, asked, harnessed, opened, channel };
+  }
+
+  it('should end a stream at renewal when its grant no longer allows it, with a sealed 1008 and not 4403', async () => {
+    // Arrange — a grant narrowed after the stream opened.
+    let allowed = true;
+    const { stream, asked, harnessed, opened, channel } = await grantedStream(() => allowed);
+    allowed = false;
+
+    // Act
+    live(harnessed.timers, RENEW_AT_MS)?.fire();
+    await sealed();
+    const renew = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, renew.nonce));
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+    await sealed();
+
+    // Assert — asked about the very request the stream was accepted for; the device stays paired.
+    should(asked.map(request => request.path)).eql(['/v1/events']);
+    should(stream.closed).not.be.empty();
+    const after = await clientReadAll(harnessed.wire, channel);
+    should(after.messages).containDeep([
+      { t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1008, reason: 'this stream is no longer allowed' },
+    ]);
+    const refused = harnessed.wire.frames
+      .filter(frame => frame.kind === FRAME_KINDS.control)
+      .map(controlOf)
+      .some(control => control?.t === 'closed' && control.code === RELAY_CLOSE_CODES.authRejected);
+    should(refused).be.false();
+  });
+
+  it('should ask every live stream again when grants change, and keep the ones still allowed', async () => {
+    // Arrange
+    let allowed = true;
+    const { stream, asked, harnessed } = await grantedStream(() => allowed);
+
+    // Act — a change that still allows it, then one that does not.
+    harnessed.connections.recheckAll();
+    should(stream.closed).be.empty();
+    allowed = false;
+    harnessed.connections.recheckAll();
+    await sealed();
+
+    // Assert
+    should(asked).have.length(2);
+    should(stream.closed).not.be.empty();
+  });
+
+  it('should leave a request session alone when grants change: each request is decided on its own', async () => {
+    // Arrange
+    const asked: ApiRequest[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, {
+      reauthorize: request => {
+        asked.push(request);
+        return false;
+      },
+    });
+    const opened = await keyedSession(harnessed);
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Act
+    harnessed.connections.recheckAll();
+
+    // Assert
+    should(asked).be.empty();
     should(harnessed.link.report().sessions).equal(1);
   });
 

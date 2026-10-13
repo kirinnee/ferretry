@@ -4407,6 +4407,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * ledger, so five wrong guesses at the fleet panel and five at the grants panel would be ten — the
    * exact per-surface budget `UnlockAttemptState` is keyed per daemon to prevent.
    */
+  // Every live socket and relayed session a paired device holds, so revoking it closes them too.
+  // ONE registry, shared by the bound address, every relay carrier and the pairing service.
+  // One step-up registry per process, told by the connection registry when each running copy of the
+  // app opens and closes a session, so a step-up ends with the page that performed it.
+  const stepUpRegistry = new StepUpRegistry({ nowMs: () => Date.now() });
+  const deviceConnections = new LiveDeviceConnections(stepUpRegistry);
   const grants = new CapabilityGrantService({
     document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
     passwords: operatorPassword,
@@ -4414,6 +4420,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     clock: new SystemGrantClock(),
     audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
     clientName: CLIENT_NAME,
+    // A narrowed grant reaches the streams already open, not only the next one.
+    changed: () => deviceConnections.recheckAll(),
   });
   // An operator's own document when they named one, and the state home's otherwise. The confined
   // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -5086,9 +5094,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
       defaultSessionResumeSettings,
     );
-  // Every live socket and relayed session a paired device holds, so revoking it closes them too.
-  // ONE registry, shared by the bound address, every relay carrier and the pairing service.
-  const deviceConnections = new LiveDeviceConnections();
   const browserTransport: BrowserTransportWorld = {
     connectWorker: options => BrowserWorkerClient.connect(options),
     openViewerStream: (host, sessionId, socket) =>
@@ -5308,7 +5313,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const stepUp = new StepUpService({
         store: new StatePasskeyStore(paths, stateFiles),
         verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
-        registry: new StepUpRegistry(),
+        registry: stepUpRegistry,
         challenges: new ChallengeLedger(),
         random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
         clock: { nowMs: () => Date.now() },
@@ -6648,7 +6653,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // which is said out loud rather than left to look like a network fault.
   const direct = await world.createDirectCarrier(
     async request => await dispatcher.dispatch(request),
-    async request => await socketDispatcher.upgrade(request),
+    {
+      upgrade: async request => await socketDispatcher.upgrade(request),
+      reauthorize: request => socketDispatcher.reauthorize(request),
+    },
     sessionDevices,
     pairing.subsystem,
   );
@@ -6707,7 +6715,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const relay = await world.createRelayCarriers(
     relaySources,
     request => dispatcher.dispatch(request),
-    async request => await socketDispatcher.upgrade(request),
+    {
+      upgrade: async request => await socketDispatcher.upgrade(request),
+      reauthorize: request => socketDispatcher.reauthorize(request),
+    },
     sessionDevices,
     // The pairing state machine itself, NOT the route table. A pre-credential session redeems
     // through this port and constructs no request at all, which is what keeps `POST /v1/pair` —

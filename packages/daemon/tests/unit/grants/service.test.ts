@@ -26,7 +26,9 @@ interface World {
   advance(milliseconds: number): void;
 }
 
-function world(options: { grants?: CapabilityGrants; password?: string; broken?: boolean } = {}): World {
+function world(
+  options: { grants?: CapabilityGrants; password?: string; broken?: boolean; changed?: () => void } = {},
+): World {
   let recorded = options.grants ?? DEFAULT_CAPABILITY_GRANTS;
   let written: CapabilityGrants | undefined;
   let stored = options.password;
@@ -70,6 +72,7 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
       recent: async limit => ({ entries: [...audit].reverse().slice(0, limit), unreadable: 0, truncated: false }),
     },
     clientName: 'fy',
+    ...(options.changed === undefined ? {} : { changed: options.changed }),
   });
   return {
     service,
@@ -128,6 +131,23 @@ describe('reading the operator decision', () => {
     // The host command line is unaffected: it holds the admin token and is not governed by this layer at
     // all, whatever the document says or fails to say.
     should(service.decide({ capability: 'fleet', axis: 'use' }, local).allowed).be.true();
+  });
+});
+
+describe('telling open streams the answer moved', () => {
+  it('should say so after a refresh, after a change, and after a refresh that failed', async () => {
+    // Arrange
+    let told = 0;
+    const context = world({ changed: () => (told += 1) });
+    const broken = world({ broken: true, changed: () => (told += 10) });
+
+    // Act
+    await context.service.refresh();
+    await context.service.patch({ fleet: { use: false } }, local);
+    await broken.service.refresh().catch(() => undefined);
+
+    // Assert
+    should(told).equal(12);
   });
 });
 

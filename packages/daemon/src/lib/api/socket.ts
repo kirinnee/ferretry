@@ -164,6 +164,17 @@ export class ApiSocketDispatcher {
     return this.router.lookup(request.method, request.path).kind !== 'not-found';
   }
 
+  /**
+   * Whether a stream this table accepted would still be accepted now, without accepting anything.
+   *
+   * A socket is authorized once, at its upgrade, and a stream can then run for hours. A narrowed grant
+   * must reach the streams already open, so whoever carries one asks this again — on each lease renewal
+   * and on each grant change — and ends the stream when the answer is no.
+   */
+  reauthorize(request: ApiRequest): boolean {
+    return authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies).kind === 'authorized';
+  }
+
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
     const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
