@@ -1522,3 +1522,246 @@ function assertNoRefusals(plan: SharedHistoryPlan): void {
       .join('; ')}`,
   );
 }
+
+// ---------------------------------------------------------------------------------------------------
+// The account model's always-on pool and the conversation lease (docs/design/account-model.md H1–H4,
+// §9.3). Everything below is a pure decision; the files it names are read and written by the lease
+// store adapter, and the harness never sees any of it.
+// ---------------------------------------------------------------------------------------------------
+
+/** `<fleet>/shared`, the directory every harness pool lives under. */
+export function sharedHistoryPoolRoot(fleetDirectory: string): string {
+  return join(fleetDirectory, 'shared');
+}
+
+/** `<fleet>/shared/<harness>`, the one pool every runtime of that harness reads and writes (H1). */
+export function sharedHistoryPoolDirectory(fleetDirectory: string, kind: HarnessKind): string {
+  return join(sharedHistoryPoolRoot(fleetDirectory), kind);
+}
+
+/** `<fleet>/shared/<harness>/.leases`, one file per conversation that has a live writer (§9.3). */
+export function conversationLeaseDirectory(fleetDirectory: string, kind: HarnessKind): string {
+  return join(sharedHistoryPoolDirectory(fleetDirectory, kind), '.leases');
+}
+
+/**
+ * The pool request for EVERY harness, with no switch.
+ *
+ * History is always shared in the account model (H1): there is no `sharedHistory` setting to read,
+ * so a harness is pooled whenever it has a runtime. A harness with no home yet still gets its
+ * request, because the planner treats an empty home list as "create the pool, link nothing" — and a
+ * runtime added later then joins a pool that already exists rather than starting a private one.
+ */
+export function sharedHistoryPoolRequests(
+  fleetDirectory: string,
+  homes: Readonly<Record<HarnessKind, readonly SharedHistoryHome[]>>,
+): readonly SharedHistoryRequest[] {
+  const poolRoot = sharedHistoryPoolRoot(fleetDirectory);
+  return (['claude', 'codex'] as const).map(kind => ({ kind, poolRoot, homes: homes[kind] }));
+}
+
+/**
+ * A harness conversation id as it may be used for a lease file name.
+ *
+ * Both harnesses name conversations with UUIDs. The grammar is wider than a UUID so a future id shape
+ * still leases, and narrow enough that an id can never be a path: no separator, no dot (so neither
+ * `.` nor `..` nor a hidden name), and a leading letter or digit.
+ */
+export const ConversationIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u);
+
+/** Who is writing a conversation. A daemon-launched writer names its session; a terminal one does not. */
+export const ConversationLeaseHolderSchema = z.strictObject({
+  pid: z.number().int().positive(),
+  /**
+   * The holder's start time, compared only with another read on the same host (Linux clock ticks,
+   * macOS epoch seconds). Absent when the platform could not report it: the pid alone then decides.
+   */
+  start: z.number().int().positive().optional(),
+  /** The Ferretry session writing it, when a daemon launched the writer. */
+  session: z.string().min(1).optional(),
+  /** The runtime (wrapper name) it runs on, for the refusal sentence only. */
+  runtime: z.string().min(1).optional(),
+});
+export type ConversationLeaseHolder = z.infer<typeof ConversationLeaseHolderSchema>;
+
+export const ConversationLeaseRecordSchema = z.strictObject({
+  v: z.literal(1),
+  harness: HarnessKindSchema,
+  conversation: ConversationIdSchema,
+  holder: ConversationLeaseHolderSchema,
+  since: z.iso.datetime({ offset: true }),
+});
+export type ConversationLeaseRecord = z.infer<typeof ConversationLeaseRecordSchema>;
+
+/** What a claimant asks for. Its start time is read by the store, never trusted from the caller. */
+export interface ConversationLeaseClaim {
+  readonly harness: HarnessKind;
+  readonly conversation: string;
+  readonly holder: Omit<ConversationLeaseHolder, 'start'>;
+}
+
+/**
+ * Whether the session named on an existing lease is still writing, as far as the caller can tell.
+ *
+ * Only a daemon can answer `live` or `over`: it holds the session records. A terminal claim answers
+ * `unknown`, and the holder's process then decides alone.
+ */
+export type ConversationHolderStanding = 'live' | 'over' | 'unknown';
+
+/** What the store observed about an existing lease before deciding. */
+export interface ConversationLeaseFacts {
+  /** The existing holder's start time read NOW; `undefined` when that pid is gone. */
+  readonly holderStart: number | undefined;
+  readonly holderSession: ConversationHolderStanding;
+}
+
+/**
+ * How a claim lands.
+ *
+ * `renew` is the same writer claiming again (a revive of the same session, or a daemon-launched
+ * wrapper upgrading the daemon's lease to its own pid); `take-over` replaces a stale lease, which
+ * needs nobody's permission because a dead writer cannot be harmed by it.
+ */
+export type ConversationLeaseDecision = 'create' | 'renew' | 'take-over' | 'held';
+
+/**
+ * Whether a lease's holder is the claimant itself.
+ *
+ * A session is compared by session alone: every session one daemon launches carries that daemon's
+ * pid, so a pid match between two of them proves nothing. Only two sessionless claims compare pids.
+ */
+function sameHolder(
+  existing: ConversationLeaseHolder,
+  claim: ConversationLeaseClaim['holder'],
+  facts: ConversationLeaseFacts,
+): boolean {
+  if (existing.session !== undefined || claim.session !== undefined) return existing.session === claim.session;
+  return existing.pid === claim.pid && existing.start !== undefined && existing.start === facts.holderStart;
+}
+
+/** Whether the process recorded on a lease is the one still running under that pid. */
+function holderProcessAlive(existing: ConversationLeaseHolder, facts: ConversationLeaseFacts): boolean {
+  if (facts.holderStart === undefined) return false;
+  return existing.start === undefined || existing.start === facts.holderStart;
+}
+
+/**
+ * The one rule for one live writer per conversation (H2).
+ *
+ * A lease naming a session the daemon knows is decided by that session, NOT by the pid: a daemon
+ * that restarts leaves its own pid dead while the pane it launched keeps writing, so a pid verdict
+ * there would let a second writer in. Everything else is decided by the holder's pid and start time,
+ * so a reused pid is stale. An unreadable lease is `undefined` here and is created over: it proves no
+ * holder, and refusing on it would need a person to delete a file.
+ */
+export function decideConversationLease(
+  existing: ConversationLeaseRecord | undefined,
+  claim: ConversationLeaseClaim,
+  facts: ConversationLeaseFacts,
+): ConversationLeaseDecision {
+  if (existing === undefined) return 'create';
+  if (sameHolder(existing.holder, claim.holder, facts)) return 'renew';
+  if (existing.holder.session !== undefined && facts.holderSession !== 'unknown')
+    return facts.holderSession === 'live' ? 'held' : 'take-over';
+  return holderProcessAlive(existing.holder, facts) ? 'held' : 'take-over';
+}
+
+/** `2026-10-13 14:02 UTC`: a wall time a person can compare with their own, with its zone said. */
+function leaseSince(since: string): string {
+  return `${since.slice(0, 10)} ${since.slice(11, 16)} UTC`;
+}
+
+/** The refusal sentence, naming who holds the conversation and how to free it. */
+export function conversationLeaseRefusal(record: ConversationLeaseRecord): string {
+  const holder = record.holder;
+  const who =
+    holder.session === undefined
+      ? `another ${record.harness} running as process ${holder.pid}`
+      : `session ${holder.session}${holder.runtime === undefined ? '' : ` on ${holder.runtime}`}`;
+  const remedy =
+    holder.session === undefined
+      ? 'close that one first; only one writer may hold a conversation at a time'
+      : `stop or resume session ${holder.session} instead; only one writer may hold a conversation at a time`;
+  return `conversation ${record.conversation} is being written by ${who} since ${leaseSince(record.since)}: ${remedy}`;
+}
+
+/** A claim refused because another live writer holds the conversation. */
+export class ConversationLeaseHeldError extends Error {
+  constructor(readonly lease: ConversationLeaseRecord) {
+    super(conversationLeaseRefusal(lease));
+    this.name = 'ConversationLeaseHeldError';
+  }
+}
+
+/** The value of `flag` in `args`, as `flag value` or `flag=value`; `undefined` when absent or bare. */
+function flagValue(args: readonly string[], flags: readonly string[]): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? '';
+    for (const flag of flags) {
+      if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1);
+      if (arg === flag) {
+        const next = args[index + 1];
+        return next === undefined || next.startsWith('-') ? undefined : next;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** An id that is safe to lease, or nothing. */
+function leasable(candidate: string | undefined): string | undefined {
+  return candidate !== undefined && ConversationIdSchema.safeParse(candidate).success ? candidate : undefined;
+}
+
+/**
+ * The conversation a launch will WRITE, read from its arguments (the executable excluded).
+ *
+ * Claude: `--session-id <id>` names the conversation being written. `--resume <id>` / `-r <id>`
+ * continues one — unless `--fork-session` is also given, which writes a NEW conversation and only
+ * reads the resumed one, so nothing is leased for the resumed id. Codex: `resume <id>` (also under
+ * `exec`). A bare `--resume`, `--continue`, `resume --last` and the in-app picker choose the
+ * conversation after launch, so they name nothing here — declared gap G3.
+ */
+export function conversationFromArguments(kind: HarnessKind, args: readonly string[]): string | undefined {
+  if (kind === 'claude') {
+    const created = leasable(flagValue(args, ['--session-id']));
+    if (created !== undefined) return created;
+    if (args.includes('--fork-session')) return undefined;
+    return leasable(flagValue(args, ['--resume', '-r']));
+  }
+  const resume = args.indexOf('resume');
+  if (resume < 0) return undefined;
+  for (const arg of args.slice(resume + 1)) {
+    if (arg === '--last') return undefined;
+    if (arg.startsWith('-')) continue;
+    const id = leasable(arg);
+    if (id !== undefined) return id;
+  }
+  return undefined;
+}
+
+/**
+ * The lease store: the files under each pool's `.leases`, read and written under one cross-process
+ * mutex so two claimants can never both decide a lease is theirs.
+ */
+export interface ConversationLeaseStore {
+  /**
+   * Claims `claim`, or reports the live holder.
+   *
+   * `standing` answers whether the session an existing lease names is still writing; a caller that
+   * cannot know answers `unknown`.
+   */
+  claim(
+    claim: ConversationLeaseClaim,
+    standing: (session: string) => Promise<ConversationHolderStanding>,
+  ): Promise<
+    | {
+        readonly kind: 'claimed';
+        readonly decision: Exclude<ConversationLeaseDecision, 'held'>;
+        readonly lease: ConversationLeaseRecord;
+      }
+    | { readonly kind: 'held'; readonly lease: ConversationLeaseRecord }
+  >;
+  /** Removes every lease `session` holds, in every pool. Returns the conversations it released. */
+  releaseSession(session: string): Promise<readonly string[]>;
+}

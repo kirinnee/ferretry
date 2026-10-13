@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
+import type { SessionConversationLeases } from '../conversation-lease.ts';
 import type {
   SessionEffectAdmission,
   SessionEffectHeldStanding,
@@ -60,6 +61,12 @@ export interface SessionLifecyclePorts {
    */
   readonly credentials?: SessionCredentialIssuer;
   readonly environment?: SessionEnvironmentStore;
+  /**
+   * One live writer per harness conversation (docs/design/account-model.md §9.3). A launch claims the
+   * conversation its argv names before the pane exists, and a stop or a failure releases it. Optional:
+   * a daemon wired without it launches exactly as before.
+   */
+  readonly leases?: SessionConversationLeases;
 }
 
 function failureMessage(error: unknown): string {
@@ -138,7 +145,14 @@ export class SessionLifecycleService {
           : await this.persist(transitionSessionRecord(current, 'starting', this.ports.clock.now()));
       if (firstTurnStanding === 'unsettled' || firstTurnStanding === 'conflict')
         throw await this.recordFailure(starting, this.firstTurnRefusal(parsed, firstTurnStanding));
-      if (!live) await this.launch(starting);
+      if (!live) {
+        try {
+          await this.ports.leases?.claim(parsed, starting.config.command);
+        } catch (error) {
+          throw await this.recordFailure(starting, error);
+        }
+        await this.launch(starting);
+      }
       if (beforeFirstTurn !== undefined) {
         try {
           // Startup waits HERE, through the launcher's existing prompt owner. Interactive controls
@@ -183,7 +197,9 @@ export class SessionLifecycleService {
         );
         throw error;
       }
-      return await this.persist(transitionSessionRecord(current, 'stopped', this.ports.clock.now(), reason));
+      const stopped = await this.persist(transitionSessionRecord(current, 'stopped', this.ports.clock.now(), reason));
+      await this.releaseLeases(parsed);
+      return stopped;
     });
   }
 
@@ -265,7 +281,17 @@ export class SessionLifecycleService {
       // is served later as absent evidence rather than fabricated as a blank frame.
     }
     await this.persist(transitionSessionRecord(record, 'failed', this.ports.clock.now(), failureMessage(error)));
+    await this.releaseLeases(record.config.id);
     return error;
+  }
+
+  /**
+   * Frees the conversations a session that is over held. A release that fails is not a stop or a
+   * launch failure: the daemon already reads a terminal session's lease as stale, so it can only
+   * delay a terminal claim, never let a second writer in.
+   */
+  private async releaseLeases(id: SessionId): Promise<void> {
+    await this.ports.leases?.release(id).catch(() => undefined);
   }
 
   private async persist(transition: {

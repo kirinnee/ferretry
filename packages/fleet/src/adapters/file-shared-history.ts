@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import {
@@ -17,7 +18,16 @@ import {
   symlink,
 } from 'node:fs/promises';
 import path from 'node:path';
+import type { HarnessKind } from '../lib/manifest.ts';
 import {
+  type ConversationHolderStanding,
+  type ConversationLeaseClaim,
+  type ConversationLeaseRecord,
+  ConversationLeaseRecordSchema,
+  type ConversationLeaseStore,
+  ConversationIdSchema,
+  conversationLeaseDirectory,
+  decideConversationLease,
   SharedHistoryAccessRefusedError,
   type SharedHistoryFileSystem,
   type SharedHistoryNode,
@@ -506,6 +516,215 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
     const roots = await Promise.all(this.allowedRoots.map(async root => await canonicalDirectory(root)));
     if (!roots.some(root => isInside(root, canonical))) {
       throw new SharedHistoryAccessRefusedError(target, roots);
+    }
+  }
+}
+
+/** Tells one run of a pid apart from a later process that reuses the number. */
+export interface ProcessStartSource {
+  /** `undefined` when the pid is gone or its start cannot be read. */
+  startOf(pid: number): Promise<number | undefined>;
+}
+
+/** Field 22 of `/proc/<pid>/stat`, counted after the parenthesised command name, which may hold spaces. */
+function procStatStart(text: string): number | undefined {
+  const fields = text
+    .slice(text.lastIndexOf(')') + 1)
+    .trim()
+    .split(/\s+/u);
+  const start = Number(fields[19]);
+  return Number.isSafeInteger(start) && start > 0 ? start : undefined;
+}
+
+/** `ps -o lstart=` under `LC_ALL=C TZ=UTC0` (`Sat Sep  6 18:48:09 2026`), as epoch seconds. */
+function psStart(text: string): number | undefined {
+  const millis = Date.parse(`${text.trim().replace(/^[A-Z][a-z]{2} /u, '')} UTC`);
+  return Number.isFinite(millis) && millis > 0 ? Math.floor(millis / 1000) : undefined;
+}
+
+/**
+ * The host's own record of when a process started: `/proc` on Linux, `ps` elsewhere.
+ *
+ * The value is only ever compared with another read on the same host, so each platform's own unit is
+ * fine. `ps` is named by absolute path so a minimal `PATH` can neither miss it nor be handed another.
+ */
+export class HostProcessStarts implements ProcessStartSource {
+  constructor(
+    private readonly platform: string,
+    private readonly procRoot = '/proc',
+    private readonly psExecutable = '/bin/ps',
+  ) {}
+
+  async startOf(pid: number): Promise<number | undefined> {
+    if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
+    if (this.platform === 'linux') {
+      const text = await readFile(path.join(this.procRoot, String(pid), 'stat'), 'utf8').catch(() => undefined);
+      return text === undefined ? undefined : procStatStart(text);
+    }
+    const child = Bun.spawn([this.psExecutable, '-o', 'lstart=', '-p', String(pid)], {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'ignore',
+      env: { LC_ALL: 'C', TZ: 'UTC0' },
+    });
+    const [text, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    return code === 0 ? psStart(text) : undefined;
+  }
+}
+
+/** The file one conversation's lease lives in. The id grammar is what keeps this a single name. */
+function leaseFile(directory: string, conversation: string): string {
+  return path.join(directory, ConversationIdSchema.parse(conversation));
+}
+
+/** A lease as stored, or `undefined` when there is none or it is unreadable (which proves no holder). */
+async function readLease(file: string): Promise<ConversationLeaseRecord | undefined> {
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+  try {
+    const parsed = ConversationLeaseRecordSchema.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Replace `file` with `text` in one rename, so a reader sees the old lease or the new one, never part. */
+async function writeLease(file: string, text: string): Promise<void> {
+  const directory = path.dirname(file);
+  const temporary = path.join(directory, `.${path.basename(file)}.${randomUUID()}.tmp`);
+  try {
+    const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+    try {
+      await writeAllBytes(handle, new TextEncoder().encode(text));
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, file);
+    await syncDirectory(directory);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+export interface FileConversationLeaseStoreOptions {
+  /** How long a claim waits for another claimant's read-decide-write to finish. */
+  readonly waitMs?: number;
+  readonly pollMs?: number;
+  readonly now?: () => Date;
+}
+
+/**
+ * Conversation leases as files under `<fleet>/shared/<harness>/.leases/` (docs/design/account-model.md §9.3).
+ *
+ * Every read-decide-write runs under one mutex per pool: an exclusive SQLite transaction on
+ * `.leases/.lock`, the same OS-backed primitive the daemon's state-home lock uses. The kernel drops it
+ * when its holder dies, so a crashed claimant can never wedge the next one, and two claimants can
+ * never both read a stale lease and both believe they took it over. The lease itself is plain JSON
+ * written by rename, so the harness pid it names — not an open file — is what holds it, and a holder
+ * that has exited is stale without anybody removing anything.
+ */
+export class FileConversationLeaseStore implements ConversationLeaseStore {
+  private readonly waitMs: number;
+  private readonly pollMs: number;
+  private readonly now: () => Date;
+
+  constructor(
+    private readonly fleetDirectory: string,
+    private readonly processes: ProcessStartSource,
+    options: FileConversationLeaseStoreOptions = {},
+  ) {
+    this.waitMs = options.waitMs ?? 5_000;
+    this.pollMs = options.pollMs ?? 10;
+    this.now = options.now ?? (() => new Date());
+  }
+
+  async claim(
+    claim: ConversationLeaseClaim,
+    standing: (session: string) => Promise<ConversationHolderStanding>,
+  ): ReturnType<ConversationLeaseStore['claim']> {
+    const directory = conversationLeaseDirectory(this.fleetDirectory, claim.harness);
+    const file = leaseFile(directory, claim.conversation);
+    await makeDirectoryDurable(directory);
+    return await this.exclusive(directory, async () => {
+      const existing = await readLease(file);
+      const decision = decideConversationLease(existing, claim, {
+        holderStart: existing === undefined ? undefined : await this.processes.startOf(existing.holder.pid),
+        holderSession: existing?.holder.session === undefined ? 'unknown' : await standing(existing.holder.session),
+      });
+      // Only an existing lease can be held, so `existing` is defined here.
+      if (decision === 'held') return { kind: 'held', lease: existing as ConversationLeaseRecord };
+      const start = await this.processes.startOf(claim.holder.pid);
+      const lease: ConversationLeaseRecord = {
+        v: 1,
+        harness: claim.harness,
+        conversation: claim.conversation,
+        holder: { ...claim.holder, ...(start === undefined ? {} : { start }) },
+        // A renewal is the same writer, so the conversation has been written by it since it first took it.
+        since: decision === 'renew' && existing !== undefined ? existing.since : this.now().toISOString(),
+      };
+      await writeLease(file, `${JSON.stringify(lease)}\n`);
+      return { kind: 'claimed', decision, lease };
+    });
+  }
+
+  async releaseSession(session: string): Promise<readonly string[]> {
+    const released: string[] = [];
+    for (const kind of ['claude', 'codex'] as const satisfies readonly HarnessKind[]) {
+      const directory = conversationLeaseDirectory(this.fleetDirectory, kind);
+      const names = await readdir(directory).catch((error: unknown) => {
+        if (isMissing(error)) return undefined;
+        throw error;
+      });
+      if (names === undefined) continue;
+      await this.exclusive(directory, async () => {
+        for (const name of names) {
+          if (name.startsWith('.')) continue;
+          const file = path.join(directory, name);
+          const lease = await readLease(file);
+          if (lease?.holder.session !== session) continue;
+          await rm(file, { force: true });
+          released.push(lease.conversation);
+        }
+        if (released.length > 0) await syncDirectory(directory);
+      });
+    }
+    return released;
+  }
+
+  /** Runs `work` while holding this pool's mutex, waiting up to the budget for another claimant. */
+  private async exclusive<T>(directory: string, work: () => Promise<T>): Promise<T> {
+    const database = new Database(path.join(directory, '.lock'), { create: true, strict: true });
+    try {
+      // The database carries no state: its transaction is only an OS-backed lock, and a memory journal
+      // keeps it crash-releasable without leaving sidecar files in the pool.
+      database.exec('PRAGMA busy_timeout = 0');
+      const deadline = Date.now() + this.waitMs;
+      for (;;) {
+        try {
+          // Inside the retry: switching the journal needs the lock another claimant may hold.
+          database.exec('PRAGMA journal_mode = MEMORY');
+          database.exec('BEGIN EXCLUSIVE');
+          break;
+        } catch (error) {
+          if (!String(error).toLowerCase().includes('locked') || Date.now() >= deadline)
+            throw new Error(`the conversation lease store at ${directory} stayed busy: ${String(error)}`);
+          await Bun.sleep(this.pollMs);
+        }
+      }
+      try {
+        return await work();
+      } finally {
+        database.exec('ROLLBACK');
+      }
+    } finally {
+      database.close();
     }
   }
 }

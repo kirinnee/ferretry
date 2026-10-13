@@ -16,12 +16,14 @@ import {
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
+  FileConversationLeaseStore,
   FileFleetConfigSource,
   FileFleetProvisioner,
   FileFleetScaffolder,
   FileSeedProvenanceStore,
   FileSharedHistoryFileSystem,
   fetchQuota,
+  HostProcessStarts,
   harnessKeychainAccount,
   PlatformFleetCredentialStore,
   ProcessFleetLoginPort,
@@ -108,6 +110,7 @@ import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
 import { registerHistoryCommands } from '../src/lib/history/commands';
+import { HistoryController } from '../src/lib/history/controller';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
@@ -662,9 +665,28 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world }) =>
     registerStatuslineCommands(
       program,
-      createStatuslineController({ environment: world.environment, homeDirectory: world.homeDirectory, product: PRODUCT_NAME, io: world.io }),
+      createStatuslineController({ environment: world.environment, homeDirectory: resolveUserHome(world.environment), product: PRODUCT_NAME, io: world.io }),
     ),
-  ({ program }) => registerHistoryCommands(program),
+  // `fy history claim`, which a wrapper runs before `exec` so a conversation has one live writer (§9.3).
+  ({ program, world }) =>
+    registerHistoryCommands(
+      program,
+      new HistoryController(
+        new FileConversationLeaseStore(
+          resolveFleetLayout({
+            stateHome: world.environment.FY_HOME,
+            userHome: resolveUserHome(world.environment),
+            product: PRODUCT_NAME,
+          }).fleetDirectory,
+          new HostProcessStarts(process.platform),
+        ),
+        world.io,
+        {
+          ...(world.environment.FY_SESSION_ID ? { session: world.environment.FY_SESSION_ID } : {}),
+          ...(world.environment.FY_RUNTIME ? { runtime: world.environment.FY_RUNTIME } : {}),
+        },
+      ),
+    ),
   // The operator reads. The marker probe takes the INVOCATION cwd rather than reading `process.cwd()`,
   // so a relative `--until-marker` resolves against the directory the human was in.
   ({ program, world, client }) =>
