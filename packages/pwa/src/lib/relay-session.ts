@@ -165,7 +165,14 @@ const StreamCloseSchema = z.strictObject({
 
 export const RelayTunnelDaemonMessageSchema = z.union([
   z.discriminatedUnion('t', [
-    z.strictObject({ t: z.literal('authenticated'), protocol: Dialect, accessExpiresAt: InstantSchema }),
+    z.strictObject({
+      t: z.literal('authenticated'),
+      protocol: Dialect,
+      accessExpiresAt: InstantSchema,
+      // When this device's key is due for replacement (`docs/design/zero-trust.md` B6). Optional so an
+      // older daemon, which never sends it, still reads as one that asks for no rotation.
+      rotateBy: InstantSchema.optional(),
+    }),
     z.strictObject({
       t: z.literal('res'),
       id: z.number().int().min(1).max(MAX_TUNNEL_REQUEST_ID),
@@ -203,7 +210,12 @@ export const RelayTunnelDaemonMessageSchema = z.union([
       protocol: Dialect,
       reason: z.literal(PAIRING_REFUSED_REASON),
     }),
-    z.strictObject({ t: z.literal('stream-opened'), protocol: Dialect, accessExpiresAt: InstantSchema }),
+    z.strictObject({
+      t: z.literal('stream-opened'),
+      protocol: Dialect,
+      accessExpiresAt: InstantSchema,
+      rotateBy: InstantSchema.optional(),
+    }),
     // `status` and `body` are both REQUIRED: the daemon always has an `ApiResponse` body to send,
     // and an optional one would let a refusal cross with no explanation of itself.
     z.strictObject({

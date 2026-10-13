@@ -12,7 +12,10 @@ import { InstantSchema } from './common.ts';
  * Binary values are unpadded base64url, the encoding every other record in this protocol uses.
  */
 
-/** How long one verified step-up covers the acts that ask for one, for one running copy of the app. */
+/**
+ * How long one verified step-up covers the acts that ask for one, for one running copy of the app, on a
+ * machine whose owner never changed it: the default of the `stepUpWindowMinutes` setting (`./security.ts`).
+ */
 export const STEP_UP_TTL_SECONDS = 900 as const;
 
 /** How long a challenge the daemon issued may be answered. It is spent on its first answer either way. */
@@ -95,17 +98,37 @@ export const StepUpOptionsSchema = z.strictObject({
 });
 export type StepUpOptions = z.infer<typeof StepUpOptionsSchema>;
 
-/** An assertion, as `navigator.credentials.get` produced it. */
+/**
+ * A device key replacing the one that opened this session (`docs/design/zero-trust.md` B6): the NEW
+ * key's SPKI, and its signature over `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey)`
+ * for the transcript of the session carrying it. Bounded here; the daemon checks it is an Ed25519 key.
+ */
+export const DeviceKeyRotationSchema = z.strictObject({
+  deviceKey: Base64UrlSchema(64),
+  proof: Base64UrlSchema(128),
+});
+export type DeviceKeyRotation = z.infer<typeof DeviceKeyRotationSchema>;
+
+/**
+ * An assertion, as `navigator.credentials.get` produced it — and, once the device's key is due for
+ * replacement, the replacement, so one ceremony both confirms the person and rotates the key.
+ */
 export const StepUpAssertionSchema = z.strictObject({
   credentialId: Base64UrlSchema(1_366),
   clientDataJSON: Base64UrlSchema(5_462),
   authenticatorData: Base64UrlSchema(5_462),
   signature: Base64UrlSchema(1_366),
+  rotation: DeviceKeyRotationSchema.optional(),
 });
 export type StepUpAssertion = z.infer<typeof StepUpAssertionSchema>;
 
-/** A verified step-up: when it lapses. Never a value the browser could present — the daemon holds it. */
-export const StepUpGrantedSchema = z.strictObject({ expiresAt: InstantSchema });
+/**
+ * A verified step-up: when it lapses. Never a value the browser could present — the daemon holds it.
+ *
+ * `keyRotated` is present exactly when the assertion carried a rotation and the daemon now holds the
+ * new key: the browser promotes its pending key on it, and the old one opens nothing from then on.
+ */
+export const StepUpGrantedSchema = z.strictObject({ expiresAt: InstantSchema, keyRotated: z.literal(true).optional() });
 export type StepUpGranted = z.infer<typeof StepUpGrantedSchema>;
 
 /** One passkey this device holds, as the device list and the Security panel show it. Never a key. */
@@ -135,7 +158,8 @@ export type PasskeysView = z.infer<typeof PasskeysViewSchema>;
  *
  * Each is a different next step for the person: `registration-closed` means "add it from a device that
  * already has access, or pair again at the machine"; `no-passkey` means this app origin has none;
- * `origin-not-allowed` means this copy of the app is not one the machine serves; `not-verified` means
+ * `origin-not-allowed` means this copy of the app is not one the machine serves; `rotation-required` means
+ * this device's key is overdue for replacement and the assertion did not carry one; `not-verified` means
  * the passkey answer did not check out (a stale challenge, a different authenticator, a rewound
  * counter) — never which of those, because the detail helps an attacker and nobody else.
  */
@@ -146,6 +170,7 @@ export const STEP_UP_REFUSALS = [
   'too-many-passkeys',
   'no-passkey',
   'not-verified',
+  'rotation-required',
 ] as const;
 export type StepUpRefusal = (typeof STEP_UP_REFUSALS)[number];
 

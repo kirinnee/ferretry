@@ -12,8 +12,8 @@
  * something no other session will accept — and it never sees it at all, because the proof travels in
  * the sealed sequence-1 record.
  *
- * ONE LABEL PER ACT. Opening a session, registering a key at pairing and renewing a lease each sign a
- * different domain-separated message, so a proof made for one can never be presented as another.
+ * ONE LABEL PER ACT. Opening a session, registering a key at pairing, renewing a lease and replacing a
+ * key each sign a different domain-separated message, so a proof made for one can never be presented as another.
  */
 
 import { z } from 'zod';
@@ -23,6 +23,7 @@ import {
   DEVICE_AUTH_LABEL,
   DEVICE_PAIR_LABEL,
   DEVICE_RENEW_LABEL,
+  DEVICE_ROTATE_LABEL,
   ED25519_SIGNATURE_BYTES,
   ED25519_SPKI_BYTES,
   NONCE_BYTES,
@@ -94,6 +95,18 @@ export function devicePairMessage(transcriptHash: Uint8Array, deviceKey: string)
 /** `"ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖ LP(nonce as its base64url text)` */
 export function deviceRenewMessage(transcriptHash: Uint8Array, nonce: string): Uint8Array {
   return labelled(DEVICE_RENEW_LABEL, transcriptHash, [nonce]);
+}
+
+/**
+ * `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey as its base64url text)`
+ *
+ * Signed by the NEW key, inside a session the OLD key opened (`docs/design/zero-trust.md` B6): the old
+ * key vouches for the session, the session for the transcript, and this proves the new key's holder is
+ * the one on the other end of it — so a replacement can never be presented in another session or for
+ * another device.
+ */
+export function deviceRotateMessage(transcriptHash: Uint8Array, deviceId: string, deviceKey: string): Uint8Array {
+  return labelled(DEVICE_ROTATE_LABEL, transcriptHash, [deviceId, deviceKey]);
 }
 
 /** Signs one of the messages above with the device key; the signature is returned as base64url. */

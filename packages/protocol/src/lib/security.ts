@@ -96,3 +96,28 @@ export type SecuritySettingsView = z.infer<typeof SecuritySettingsViewSchema>;
 
 /** The refusal a remote widen gets. Its message names the command to run at the machine. */
 export const SECURITY_WIDEN_REFUSED_CODE = 'security_widen_at_machine' as const;
+
+/**
+ * What a change answers: the settings now in force, and how many paired devices the new idle period
+ * will unpair at the next check because nobody has used them for longer than it. `0` for a change that
+ * did not shorten it.
+ */
+export const SecuritySettingsChangeSchema = z.strictObject({
+  view: SecuritySettingsViewSchema,
+  devicesExpiring: z.number().int().min(0),
+});
+export type SecuritySettingsChange = z.infer<typeof SecuritySettingsChangeSchema>;
+
+/**
+ * The refusal every request from a device gets while this machine wants a passkey on opening and the
+ * device has not given one inside the validity period (`presenceOnOpen`). `401`, because the device is
+ * paired and its session is sound: what is missing is the person.
+ */
+export const PRESENCE_REQUIRED_CODE = 'presence_required' as const;
+
+/**
+ * A verified confirmation on opening: when it lapses for this DEVICE, across page loads. It is never a
+ * step-up — the acts that need one still ask for their own.
+ */
+export const PresenceGrantedSchema = z.strictObject({ presentUntil: InstantSchema });
+export type PresenceGranted = z.infer<typeof PresenceGrantedSchema>;

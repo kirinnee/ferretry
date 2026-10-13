@@ -268,8 +268,16 @@ export type RelayTunnelPair = Extract<RelayTunnelClientMessage, { t: 'pair' }>;
 export type RelayTunnelData = Extract<RelayTunnelClientMessage, { t: 'data' }>;
 
 export type RelayTunnelDaemonMessage =
-  /** The device's proof verified. `accessExpiresAt` is when this session's lease ends unless renewed. */
-  | { readonly t: 'authenticated'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly accessExpiresAt: string }
+  /**
+   * The device's proof verified. `accessExpiresAt` is when this session's lease ends unless renewed;
+   * `rotateBy` is when the device's key is due for replacement (`docs/design/zero-trust.md` B6).
+   */
+  | {
+      readonly t: 'authenticated';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly accessExpiresAt: string;
+      readonly rotateBy?: string;
+    }
   | {
       readonly t: 'res';
       readonly id: number;
@@ -314,7 +322,12 @@ export type RelayTunnelDaemonMessage =
       readonly protocol: typeof SESSION_PROTOCOL_ID;
       readonly reason: 'pairing_refused';
     }
-  | { readonly t: 'stream-opened'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly accessExpiresAt: string }
+  | {
+      readonly t: 'stream-opened';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly accessExpiresAt: string;
+      readonly rotateBy?: string;
+    }
   /**
    * The upgrade was refused, with everything a status can say — said BEFORE anything switched.
    *
