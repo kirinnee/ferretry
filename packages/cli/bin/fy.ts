@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import {
   buildFleetHealthCollector,
   buildFleetIdentities,
@@ -89,8 +90,6 @@ import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
-import { registerComponentCommands } from '../src/lib/component/commands';
-import { registerCredentialCommands } from '../src/lib/credential/commands';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
@@ -102,6 +101,8 @@ import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/l
 import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
 import { FilesystemController } from '../src/lib/filesystem/controller';
 import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
+import { ProtocolAccountGateway } from '../src/lib/fleet/account-gateway';
+import { registerAccountModelCommands } from '../src/lib/fleet/account-model';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { FleetController } from '../src/lib/fleet/controller';
 import { ProtocolFleetSharingGateway, ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
@@ -114,7 +115,6 @@ import { HistoryController } from '../src/lib/history/controller';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
-import { registerMachineCommands } from '../src/lib/machine/commands';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
@@ -123,10 +123,8 @@ import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
-import { registerProfileCommands } from '../src/lib/profile/commands';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
-import { registerRuntimeCommands } from '../src/lib/runtime/commands';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
@@ -147,7 +145,6 @@ import {
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
-import { registerSetupCommands } from '../src/lib/setup/commands';
 import { StateHomeClaimService } from '../src/lib/state-home/claim';
 import { StateHomeController } from '../src/lib/state-home/controller';
 import { registerStatuslineCommands } from '../src/lib/statusline/commands';
@@ -654,14 +651,21 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive, world.cwd),
     ),
   ({ program, world, client }) => registerFleetCommands(program, buildFleetController(world, client)),
-  // The account model's command groups (docs/design/account-model.md §6.2). Each is a seed that adds
-  // nothing until its unit fills it; the unit replaces its own line here with the controller it needs.
-  ({ program }) => registerSetupCommands(program),
-  ({ program }) => registerMachineCommands(program),
-  ({ program }) => registerRuntimeCommands(program),
-  ({ program }) => registerCredentialCommands(program),
-  ({ program }) => registerProfileCommands(program),
-  ({ program }) => registerComponentCommands(program),
+  // The account model's command groups (docs/design/account-model.md §6.2): setup, machine, runtimes,
+  // credentials, profiles, components and `fleet migrate`. Every write goes through the daemon's
+  // reviewed changes, so nothing here touches a configuration file.
+  ({ program, world, client }) =>
+    registerAccountModelCommands(program, {
+      gateway: new ProtocolAccountGateway(client),
+      out: world.io,
+      prompt: world.prompt,
+      interactive: world.interactive,
+      binaryName: BINARY_NAME,
+      readPasswordFromStdin: () => new StdinOperatorPassword(BINARY_NAME).read(),
+      readText: path => Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
+      sleep: milliseconds => Bun.sleep(milliseconds),
+      now: () => Date.now(),
+    }),
   ({ program, world }) =>
     registerStatuslineCommands(
       program,
