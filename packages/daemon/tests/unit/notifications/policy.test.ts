@@ -7,6 +7,7 @@ import {
   type DirectNotificationRequest,
 } from '@ferretry/protocol';
 import should from 'should';
+import { DEVICE_PAIRED_EVENT_PREFIX, DEVICE_PAIRED_TITLE } from '../../../src/lib/audit/policy.ts';
 import {
   attentionNotificationAttribution,
   attentionNotificationPayload,
@@ -190,8 +191,8 @@ describe('notification policy', () => {
     const automatic = attentionNotificationPayload('session-1', item, snapshot);
 
     // Assert
-    should(generic).containDeep({ kind: 'question', title: 'Release agent', tag: 'notify-session-1' });
-    should(explicit).containDeep({ kind: 'failed', title: 'Deploy failed', tag: 'notify-session-1' });
+    should(generic).containDeep({ kind: 'question', title: 'Agent “Release agent”', tag: 'notify-session-1' });
+    should(explicit).containDeep({ kind: 'failed', title: 'Agent “Release agent”: Deploy failed', tag: 'notify-session-1' });
     should(automatic).containDeep({
       eventKey: 'attention-raised',
       kind: 'attention',
@@ -203,6 +204,21 @@ describe('notification policy', () => {
     for (const payload of [generic, explicit, automatic]) {
       should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
     }
+  });
+
+  it('should never let an agent payload read as the new-device alert', () => {
+    // Arrange / Act
+    const forged = directNotificationPayload('session-1', 'Release agent', {
+      body: 'Remove it in Settings.',
+      title: DEVICE_PAIRED_TITLE,
+    });
+
+    // Assert
+    should(forged.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
+    should(forged.title).equal(`Agent “Release agent”: ${DEVICE_PAIRED_TITLE}`);
+    should(forged.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
+    should(forged.tag.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
+    should(forged).containDeep({ sessionId: 'session-1', kind: 'question' });
   });
 
   it('should derive every automatic attribution and refuse malformed agent provenance', () => {

@@ -59,7 +59,11 @@ describe('Settings › Security', () => {
     const view: AuditView = {
       records: [
         record({ event: 'pairing.refused', actor: { kind: 'anonymous' }, outcome: 'refused' }),
-        record({ event: 'secrets.used', actor: { kind: 'device', deviceId: 'd', deviceName: 'Pixel 8' } }),
+        record({
+          event: 'secrets.used',
+          actor: { kind: 'device', deviceId: 'fy_device_id_abcdef123456', deviceName: 'Pixel 8' },
+          detail: { carrier: 'relay', count: 2 },
+        }),
         record({ event: 'grants.changed', actor: { kind: 'warden' }, outcome: 'failed', at: 'garbled' }),
       ],
       unreadable: 0,
@@ -72,9 +76,11 @@ describe('Settings › Security', () => {
     const rows = [...shown.container.querySelectorAll('[data-security-event]')];
     expect(rows.map(row => row.textContent)).toEqual([
       'A pairing attempt was refusedRefused5 minutes ago · by someone who is not paired',
-      'A secret was used5 minutes ago · by Pixel 8',
+      'A secret was used5 minutes ago · by device “Pixel 8” (…123456)carrier: relay · count: 2',
       'Remote permissions were changedFailedat an unknown time · by a supervising agent',
     ]);
+    // Only a record with detail carries the detail line.
+    expect(rows.map(row => row.querySelector('[data-security-detail]') !== null)).toEqual([false, true, false]);
     expect(must(rows[0]?.querySelector('time'), 'time').getAttribute('title')).toBe(
       new Date(NOW - 5 * 60_000).toLocaleString(),
     );
@@ -174,10 +180,10 @@ describe('Settings › Security', () => {
         : { records: [record({ event: 'terminal.opened' })], unreadable: 0 },
     );
     const shown = await mount(
-      <SecuritySurface connection={alpha} createClient={createClient} now={now} storage={undefined} />,
+      <SecuritySurface connection={alpha} createClient={createClient} now={now} />,
     );
     expect(shown.container.textContent).toContain('Reading this machine’s security log');
-    await shown.render(<SecuritySurface connection={beta} createClient={createClient} now={now} storage={undefined} />);
+    await shown.render(<SecuritySurface connection={beta} createClient={createClient} now={now} />);
     await settled(shown.container, '[data-security-log]');
     // Alpha's answer arrives late, after the reader moved to beta, and is dropped.
     await runAsync(async () => releaseAlpha({ records: [record({ event: 'secrets.used' })], unreadable: 0 }));
@@ -186,8 +192,8 @@ describe('Settings › Security', () => {
     );
     window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
     expect(seen).toEqual([
-      { daemonId: alpha.daemonId, at: NOW },
-      { daemonId: beta.daemonId, at: NOW },
+      { daemonId: alpha.daemonId },
+      { daemonId: beta.daemonId },
     ]);
     await shown.unmount();
   });

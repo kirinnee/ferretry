@@ -37,13 +37,23 @@ export interface AuditReading {
 }
 
 /**
- * The bounded append-only file pair.
+ * Which of the two stores a line goes to.
  *
- * `append` is ONE write of ONE line — the adapter rotates beforehand when the line would carry the
- * live file past its bound. `recent` reads both files, newest first, and counts what it cannot parse.
+ * `kept` holds the successes a reader must never lose — a pairing, a revocation, a grant change — and
+ * nothing else; `general` holds everything else, refusals included. Each is bounded on its own, so a
+ * flood fills `general` and cannot rotate a single `kept` line away.
+ */
+export type AuditStore = 'kept' | 'general';
+
+/**
+ * The two bounded append-only stores.
+ *
+ * `append` is ONE write of ONE line into one store — the adapter rotates that store beforehand when
+ * the line would carry it past its bound. `recent` reads both stores, newest first by instant, and
+ * counts what it cannot parse.
  */
 export interface AuditJournalPort {
-  append(line: string): Promise<void>;
+  append(line: string, store: AuditStore): Promise<void>;
   recent(limit: number): Promise<AuditReading>;
 }
 
@@ -65,6 +75,9 @@ export interface AuditFailureReporter {
 export interface PairedDeviceNotice {
   readonly deviceId: string;
   readonly deviceName: string;
+  readonly carrier: 'direct' | 'relay';
+  /** The daemon's instant, never a browser's. */
+  readonly createdAt: string;
 }
 
 /**

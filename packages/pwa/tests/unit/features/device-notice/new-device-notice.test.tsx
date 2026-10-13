@@ -1,10 +1,10 @@
 import '../../../support/dom.ts';
 import { describe, expect, it } from 'bun:test';
-import type { PairedDevice, PairedDevicesView } from '@ferretry/protocol';
+import { auditShortId, type PairedDevice, type PairedDevicesView } from '@ferretry/protocol';
 import {
+  announceDevicesLooked,
   type DevicesLookedStorage,
   devicesLookedKey,
-  markDevicesLooked,
 } from '../../../../src/features/device-notice/devices-looked.ts';
 import {
   NEW_DEVICE_REFRESH_MS,
@@ -110,18 +110,55 @@ const manualSchedule = () => {
   };
 };
 
-const lookedAlpha = (at: number): Record<string, string> => ({ [devicesLookedKey(alpha.daemonId)]: String(at) });
+const DAY = 24 * 60 * MINUTE;
+/** Storage that has already seen these devices on alpha. */
+const seenAlpha = (...keys: string[]): Record<string, string> => ({
+  [devicesLookedKey(alpha.daemonId)]: JSON.stringify(keys.map(did).toSorted()),
+});
+const storedAlpha = (storage: { readonly entries: Map<string, string> }): unknown =>
+  JSON.parse(storage.entries.get(devicesLookedKey(alpha.daemonId)) ?? 'null');
+const label = (key: string, name = key): string => `“${name}” (${auditShortId(did(key))})`;
 
 describe('the new-device notice', () => {
   it('seeds the first look without announcing devices that were already there', async () => {
     const storage = memory();
-    const alphaMachine = machine([device('old', ago(10 * MINUTE)), device('me', ago(MINUTE))]);
+    const alphaMachine = machine([device('old', ago(3 * DAY)), device('me', ago(MINUTE))]);
     const shown = await mount(
       <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: alphaMachine })} storage={storage} now={now} />,
     );
     await until(() => storage.entries.size === 1, 'the first look to be remembered');
-    expect(storage.entries.get(devicesLookedKey(alpha.daemonId))).toBe(String(NOW));
+    expect(storedAlpha(storage)).toEqual([did('old')]);
     expect(shown.container.querySelector('[data-new-device]')).toBeNull();
+    await shown.unmount();
+  });
+
+  it('on a first look, still announces a device paired within a day of the newest, whatever this clock says', async () => {
+    // This browser's clock is a year ahead, and nothing is stored. The daemon's own createdAt values
+    // are all that decide: the stranger paired an hour before this browser is news; the old one is not.
+    const skewed = () => NOW + 365 * DAY;
+    const storage = memory();
+    const alphaMachine = machine([
+      device('old', ago(3 * DAY)),
+      device('stranger', ago(60 * MINUTE), 'iPad'),
+      device('me', ago(MINUTE)),
+    ]);
+    const shown = await mount(
+      <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: alphaMachine })} storage={storage} now={skewed} />,
+    );
+    await until(() => shown.container.querySelector('[data-new-device]') !== null, 'the first-look notice');
+    const notices = [...shown.container.querySelectorAll('[data-new-device]')];
+    expect(notices.map(notice => notice.getAttribute('data-new-device'))).toEqual([did('stranger')]);
+    expect(storedAlpha(storage)).toEqual([did('old')]);
+    await shown.unmount();
+  });
+
+  it('ignores a look announced before the list was ever read', async () => {
+    const storage = memory(seenAlpha());
+    const shown = await mount(
+      <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: 'unreachable' })} storage={storage} now={now} />,
+    );
+    await interact(() => announceDevicesLooked(alpha.daemonId));
+    expect(storedAlpha(storage)).toEqual([]);
     await shown.unmount();
   });
 
@@ -139,7 +176,8 @@ describe('the new-device notice', () => {
       />,
     );
     await until(() => storage.entries.size === 1, 'the first look to be remembered');
-    alphaMachine.view = { ...alphaMachine.view, devices: [device('phone', new Date(NOW + MINUTE).toISOString())] };
+    // Its createdAt is a week in the past: a re-read finds a new ID, and no clock is consulted.
+    alphaMachine.view = { ...alphaMachine.view, devices: [device('phone', ago(7 * DAY))] };
     timer.fire();
     await until(() => shown.container.querySelector('[data-new-device]') !== null, 'the notice after a re-read');
     await shown.unmount();
@@ -155,19 +193,21 @@ describe('the new-device notice', () => {
       <NewDeviceNotices
         connections={[alpha]}
         clients={pool({ alpha: alphaMachine })}
-        storage={memory(lookedAlpha(NOW - 30 * MINUTE))}
+        storage={memory(seenAlpha('old'))}
         now={now}
       />,
     );
     await until(() => shown.container.querySelector('[data-new-device]') !== null, 'the notice');
     const notices = [...shown.container.querySelectorAll('[data-new-device]')];
     expect(notices.map(notice => notice.getAttribute('data-new-device'))).toEqual([did('phone')]);
-    expect(notices[0]?.textContent).toContain('A new device, Pixel 8, was paired with workstation 5 minutes ago.');
+    expect(notices[0]?.textContent).toContain(
+      `A device calling itself ${label('phone', 'Pixel 8')} was paired with workstation 5 minutes ago (`,
+    );
     await shown.unmount();
   });
 
   it('“That was me” on the last one marks this machine looked', async () => {
-    const storage = memory(lookedAlpha(NOW - 30 * MINUTE));
+    const storage = memory(seenAlpha());
     const alphaMachine = machine([device('phone', ago(5 * MINUTE))]);
     const shown = await mount(
       <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: alphaMachine })} storage={storage} now={now} />,
@@ -177,12 +217,12 @@ describe('the new-device notice', () => {
       must(shown.container.querySelector<HTMLButtonElement>('[data-new-device-mine]'), 'mine').click(),
     );
     expect(shown.container.querySelector('[data-new-device]')).toBeNull();
-    expect(storage.entries.get(devicesLookedKey(alpha.daemonId))).toBe(String(NOW));
+    expect(storedAlpha(storage)).toEqual([did('phone')]);
     await shown.unmount();
   });
 
   it('“That was me” with others still unanswered hides only that one', async () => {
-    const storage = memory(lookedAlpha(NOW - 30 * MINUTE));
+    const storage = memory(seenAlpha());
     const alphaMachine = machine([device('phone', ago(5 * MINUTE)), device('tablet', ago(2 * MINUTE))]);
     const shown = await mount(
       <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: alphaMachine })} storage={storage} now={now} />,
@@ -196,12 +236,12 @@ describe('the new-device notice', () => {
     );
     const left = [...shown.container.querySelectorAll('[data-new-device]')].map(n => n.getAttribute('data-new-device'));
     expect(left).toEqual([did('phone')]);
-    expect(storage.entries.get(devicesLookedKey(alpha.daemonId))).toBe(String(NOW - 30 * MINUTE));
+    expect(storedAlpha(storage)).toEqual([did('tablet')]);
     await shown.unmount();
   });
 
   it('“Remove it” removes the device in one tap and confirms the result', async () => {
-    const storage = memory(lookedAlpha(NOW - 30 * MINUTE));
+    const storage = memory(seenAlpha('gone'));
     const alphaMachine = machine([device('me', ago(60 * MINUTE)), device('phone', ago(5 * MINUTE), 'Pixel 8')]);
     const shown = await mount(
       <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: alphaMachine })} storage={storage} now={now} />,
@@ -216,8 +256,11 @@ describe('the new-device notice', () => {
     await until(() => shown.container.querySelector('[data-new-device-removed]') !== null, 'the confirmation');
     expect(alphaMachine.revoked).toEqual([did('phone')]);
     expect(shown.container.querySelector('[data-new-device]')).toBeNull();
-    expect(shown.container.textContent).toContain('Pixel 8 was removed. It can no longer reach workstation.');
-    expect(storage.entries.get(devicesLookedKey(alpha.daemonId))).toBe(String(NOW));
+    expect(shown.container.textContent).toContain(
+      `${label('phone', 'Pixel 8')} was removed. It can no longer reach workstation.`,
+    );
+    // Ids the list no longer has are dropped, so the stored set stays bounded by the devices that exist.
+    expect(storedAlpha(storage)).toEqual([]);
     await interact(() =>
       must(shown.container.querySelector<HTMLButtonElement>('[data-new-device-dismiss]'), 'dismiss').click(),
     );
@@ -226,7 +269,7 @@ describe('the new-device notice', () => {
   });
 
   it('removing one of two keeps the other announced', async () => {
-    const storage = memory(lookedAlpha(NOW - 30 * MINUTE));
+    const storage = memory(seenAlpha());
     const alphaMachine = machine([device('phone', ago(5 * MINUTE)), device('tablet', ago(2 * MINUTE))]);
     const shown = await mount(
       <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: alphaMachine })} storage={storage} now={now} />,
@@ -246,7 +289,7 @@ describe('the new-device notice', () => {
     await until(() => shown.container.querySelector('[data-new-device-removed]') !== null, 'the confirmation');
     const left = [...shown.container.querySelectorAll('[data-new-device]')].map(n => n.getAttribute('data-new-device'));
     expect(left).toEqual([did('phone')]);
-    expect(storage.entries.get(devicesLookedKey(alpha.daemonId))).toBe(String(NOW - 30 * MINUTE));
+    expect(storedAlpha(storage)).toEqual([]);
     await shown.unmount();
   });
 
@@ -256,7 +299,7 @@ describe('the new-device notice', () => {
       <NewDeviceNotices
         connections={[alpha]}
         clients={pool({ alpha: alphaMachine })}
-        storage={memory(lookedAlpha(NOW - 30 * MINUTE))}
+        storage={memory(seenAlpha())}
         now={now}
       />,
     );
@@ -269,7 +312,7 @@ describe('the new-device notice', () => {
     );
     await until(() => shown.container.querySelector('[data-new-device-failure]') !== null, 'the failure');
     expect(shown.container.querySelector('[data-new-device-failure]')?.textContent).toBe(
-      'Pixel 8 could not be removed: The machine refused.',
+      `${label('phone', 'Pixel 8')} could not be removed: The machine refused.`,
     );
     expect(shown.container.querySelector('[data-new-device]')).not.toBeNull();
     // Answering it clears the failure along with the notice.
@@ -281,10 +324,7 @@ describe('the new-device notice', () => {
   });
 
   it('hides a machine’s notice when Security marks it looked, and leaves other machines alone', async () => {
-    const storage = memory({
-      ...lookedAlpha(NOW - 30 * MINUTE),
-      [devicesLookedKey(beta.daemonId)]: String(NOW - 30 * MINUTE),
-    });
+    const storage = memory({ ...seenAlpha(), [devicesLookedKey(beta.daemonId)]: '[]' });
     const shown = await mount(
       <NewDeviceNotices
         connections={[alpha, beta]}
@@ -298,9 +338,10 @@ describe('the new-device notice', () => {
     );
     await until(() => shown.container.querySelectorAll('[data-new-device]').length === 2, 'both notices');
     expect(shown.container.textContent).toContain('was paired with https://beta.example.test');
-    await interact(() => markDevicesLooked(storage, alpha.daemonId, NOW));
+    await interact(() => announceDevicesLooked(alpha.daemonId));
     const left = [...shown.container.querySelectorAll('[data-new-device]')].map(n => n.getAttribute('data-new-device'));
     expect(left).toEqual([did('laptop')]);
+    expect(storedAlpha(storage)).toEqual([did('phone')]);
     await shown.unmount();
   });
 
@@ -383,7 +424,7 @@ describe('the new-device notice', () => {
       <NewDeviceNotices
         connections={[alpha]}
         clients={recording}
-        storage={memory(lookedAlpha(NOW - 30 * MINUTE))}
+        storage={memory(seenAlpha())}
         now={now}
       />,
     );

@@ -129,6 +129,17 @@ describe('StatePairingRepository', () => {
     should(after.devices).have.length(1);
   });
 
+  it('should keep the carrier a device paired over, and read a record that predates the field', async () => {
+    const { paths, files, repository } = await fixture('pairing-state-carrier');
+    const opened = await repository.open('workstation');
+    await repository.add({ ...record(opened.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'), pairedOver: 'relay' });
+    await repository.add(record(opened.daemonId, 'fy_device_id_bbbbbbbbbbbbbbbbbbbbbb'));
+
+    const after = await new StatePairingRepository(paths, files).open('workstation');
+
+    should(after.devices.map(device => device.pairedOver)).deepEqual(['relay', undefined]);
+  });
+
   it('should serialize concurrent grants so neither device is lost', async () => {
     const { paths, files, repository } = await fixture('pairing-state-concurrent');
     const state = await repository.open('workstation');

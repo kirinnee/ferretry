@@ -328,6 +328,7 @@ import {
   type AttentionActor,
   AttentionService,
   AuditedPairingService,
+  AUDIT_FOLD_WINDOW_MS,
   AuditLog,
   advertisesForeignAddress,
   answerArguments,
@@ -5328,7 +5329,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           {
             log: auditLog,
             alert: new PushNewDeviceAlert(push, state.daemonName, auditFailures),
-            nowMs: () => Date.now(),
+            failures: auditFailures,
           },
         ),
       };
@@ -5984,6 +5985,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         audit: {
           log: auditLog,
           recent: async limit => await auditLog.recent(limit),
+          flush: async () => await auditLog.flush(),
+          failures: auditFailures,
           deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,
         },
         pairing,
@@ -6810,6 +6813,14 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     void terminalReaper.sweep().catch(() => undefined);
   }, 5_000);
   cleanups.push(() => clearInterval(terminalReapTicks));
+  // The security log's fold windows close on this tick too, not only on the next record like them: a
+  // burst that STOPS must still be written down with its count. Writes a line at most; spawns nothing.
+  const auditFlushTicks = setInterval(() => {
+    void subsystems.audit.flush().catch(() => undefined);
+  }, AUDIT_FOLD_WINDOW_MS);
+  cleanups.push(() => {
+    clearInterval(auditFlushTicks);
+  });
   // The warden sweep, armed only once the daemon is actually serving — like the self-check above, and
   // for the same reason: a sweep spawns sessions, and it must not race the bind it would report on.
   //

@@ -1,13 +1,14 @@
 import '../../../support/dom.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
+  announceDevicesLooked,
   browserDevicesLookedStorage,
   DEVICES_LOOKED_EVENT,
   type DevicesLookedDetail,
   type DevicesLookedStorage,
   devicesLookedKey,
-  markDevicesLooked,
-  readDevicesLooked,
+  readDevicesSeen,
+  rememberDevicesSeen,
 } from '../../../../src/features/device-notice/devices-looked.ts';
 import type { DaemonId } from '../../../../src/lib/daemon-connection.ts';
 
@@ -37,35 +38,47 @@ afterEach(() => {
   if (originalDescriptor) Object.defineProperty(globalThis, 'localStorage', originalDescriptor);
 });
 
-describe('when this browser last looked at the devices', () => {
-  it('keys every instant by the machine it belongs to', () => {
+describe('which devices this browser has already seen', () => {
+  it('keys every set by the machine it belongs to, stored sorted', () => {
     const storage = memory();
-    markDevicesLooked(storage, ALPHA, 1_000);
-    expect(readDevicesLooked(storage, ALPHA)).toBe(1_000);
-    expect(readDevicesLooked(storage, BETA)).toBeNull();
-    expect([...storage.entries.keys()]).toEqual([devicesLookedKey(ALPHA)]);
+    rememberDevicesSeen(storage, ALPHA, new Set(['b', 'a']));
+    expect([...(readDevicesSeen(storage, ALPHA) ?? [])]).toEqual(['a', 'b']);
+    expect(readDevicesSeen(storage, BETA)).toBeNull();
+    expect([...storage.entries.entries()]).toEqual([[devicesLookedKey(ALPHA), '["a","b"]']]);
     expect(devicesLookedKey(ALPHA)).not.toBe(devicesLookedKey(BETA));
   });
 
-  it('reads nothing from a garbled, missing or throwing store', () => {
+  it('ignores the instant the old key held, so an upgrade takes the first-look path', () => {
     const storage = memory();
-    storage.setItem(devicesLookedKey(ALPHA), 'not a number');
-    expect(readDevicesLooked(storage, ALPHA)).toBeNull();
-    expect(readDevicesLooked(undefined, ALPHA)).toBeNull();
-    expect(readDevicesLooked(throwing, ALPHA)).toBeNull();
+    storage.setItem(`ferretry.devices-looked.v1:${String(ALPHA)}`, '1000');
+    expect(readDevicesSeen(storage, ALPHA)).toBeNull();
   });
 
-  it('tells this page about a mark even when storage refuses it', () => {
+  it('reads nothing from a garbled, mistyped, missing or throwing store', () => {
+    const storage = memory();
+    storage.setItem(devicesLookedKey(ALPHA), 'not json');
+    expect(readDevicesSeen(storage, ALPHA)).toBeNull();
+    storage.setItem(devicesLookedKey(ALPHA), '1000');
+    expect(readDevicesSeen(storage, ALPHA)).toBeNull();
+    storage.setItem(devicesLookedKey(ALPHA), '["a",1]');
+    expect(readDevicesSeen(storage, ALPHA)).toBeNull();
+    expect(readDevicesSeen(undefined, ALPHA)).toBeNull();
+    expect(readDevicesSeen(throwing, ALPHA)).toBeNull();
+  });
+
+  it('survives a store that refuses the write', () => {
+    expect(() => rememberDevicesSeen(throwing, ALPHA, new Set(['a']))).not.toThrow();
+    expect(() => rememberDevicesSeen(undefined, ALPHA, new Set(['a']))).not.toThrow();
+  });
+
+  it('tells this page about a look, naming only the machine', () => {
     const seen: DevicesLookedDetail[] = [];
     const listener = (event: Event): void => void seen.push((event as CustomEvent<DevicesLookedDetail>).detail);
     window.addEventListener(DEVICES_LOOKED_EVENT, listener);
-    markDevicesLooked(throwing, ALPHA, 5);
-    markDevicesLooked(undefined, BETA, 6);
+    announceDevicesLooked(ALPHA);
+    announceDevicesLooked(BETA);
     window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
-    expect(seen).toEqual([
-      { daemonId: ALPHA, at: 5 },
-      { daemonId: BETA, at: 6 },
-    ]);
+    expect(seen).toEqual([{ daemonId: ALPHA }, { daemonId: BETA }]);
   });
 
   it('finds the browser store, or nothing when the property itself throws', () => {

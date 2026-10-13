@@ -1,6 +1,6 @@
-import type { PushDeliveryResult, PushDeviceView } from '@ferretry/protocol';
+import { auditShortId, type PushDeliveryResult, type PushDeviceView } from '@ferretry/protocol';
 import type { PushDispatch } from '../push/types.ts';
-import { auditRecord, newDeviceAlert } from './policy.ts';
+import { auditFoldKey, auditRecord, isKeptAuditEntry, newDeviceAlert, withinAuditBounds } from './policy.ts';
 import type {
   AuditClock,
   AuditEntry,
@@ -11,6 +11,26 @@ import type {
   NewDeviceAlertPort,
   PairedDeviceNotice,
 } from './types.ts';
+
+/**
+ * How long repeats of one refusal, or one terminal's keystrokes, are folded into a single count.
+ *
+ * A minute: short enough that a reader sees "it kept happening" close to when it did, long enough that
+ * a flood writes one line a minute per actor rather than one per request.
+ */
+export const AUDIT_FOLD_WINDOW_MS = 60_000;
+
+/**
+ * At most this many windows are open at once. A full table closes every window first, so the memory a
+ * flood can make this hold is bounded too — not only the file.
+ */
+export const AUDIT_MAX_OPEN_FOLDS = 1_024;
+
+interface AuditFold {
+  readonly startedMs: number;
+  repeats: number;
+  readonly entry: AuditEntry;
+}
 
 export interface AuditLogOptions {
   readonly journal: AuditJournalPort;
@@ -34,12 +54,75 @@ export interface AuditLogOptions {
  * reported the same way rather than written as a line the reader would have to count as damage.
  */
 export class AuditLog implements AuditSink {
+  readonly #folds = new Map<string, AuditFold>();
+
   constructor(private readonly options: AuditLogOptions) {}
 
+  /**
+   * Writes one record — or, for a REPEAT, counts it.
+   *
+   * ## REPEATS ARE FOLDED, SO A FLOOD COSTS ONE LINE A MINUTE
+   *
+   * A refused or failed record, and every input record, opens a window of {@link AUDIT_FOLD_WINDOW_MS}
+   * keyed by who did it, what they did and how it ended (see `auditFoldKey`). The first is written;
+   * the rest inside the window are only counted, and the count is written as ONE record — the first
+   * one's event with `detail.repeats` — when the window closes. So "somebody kept trying" survives as
+   * a fact with a number on it, and a device hammering a refused route cannot write its way through
+   * the file's bound. Successes of everything else are never folded: each is a distinct act.
+   */
   async record(entry: AuditEntry): Promise<void> {
+    const at = this.options.clock.now();
+    const key = auditFoldKey(entry);
+    if (key !== undefined) {
+      const atMs = Date.parse(at);
+      const open = this.#folds.get(key);
+      if (open !== undefined && atMs - open.startedMs < AUDIT_FOLD_WINDOW_MS) {
+        open.repeats += 1;
+        return;
+      }
+      if (open !== undefined) await this.#close(key, open, at);
+      if (this.#folds.size >= AUDIT_MAX_OPEN_FOLDS) await this.flush(Number.POSITIVE_INFINITY);
+      this.#folds.set(key, { startedMs: atMs, repeats: 0, entry });
+    }
+    await this.#write(entry, at);
+  }
+
+  /**
+   * Closes every window that has run its length, writing each one's count.
+   *
+   * The composition root calls this on a timer, so a burst that STOPS is still reported: a window is
+   * otherwise closed only by the next record like it, which an attacker who went quiet never sends.
+   * `nowMs` is a parameter so a caller can close every window at once — at shutdown, or when the
+   * table of open windows is full.
+   */
+  async flush(nowMs: number = Date.parse(this.options.clock.now())): Promise<void> {
+    for (const [key, open] of [...this.#folds]) {
+      if (nowMs - open.startedMs < AUDIT_FOLD_WINDOW_MS) continue;
+      await this.#close(key, open, this.options.clock.now());
+    }
+  }
+
+  async #close(key: string, open: AuditFold, at: string): Promise<void> {
+    this.#folds.delete(key);
+    if (open.repeats === 0) return;
+    // The repeats may have named different subjects — a flood of random ids — so the summary names
+    // none unless the subject is part of what was folded (an input record's terminal).
+    const { subject, ...rest } = open.entry;
+    const keepsSubject = open.entry.event.endsWith('.input');
+    await this.#write(
+      {
+        ...rest,
+        ...(keepsSubject && subject !== undefined ? { subject } : {}),
+        detail: { ...open.entry.detail, repeats: open.repeats },
+      },
+      at,
+    );
+  }
+
+  async #write(entry: AuditEntry, at: string): Promise<void> {
     try {
-      const line = JSON.stringify(auditRecord(entry, this.options.clock.now()));
-      await this.options.journal.append(line);
+      const line = JSON.stringify(auditRecord(withinAuditBounds(entry), at));
+      await this.options.journal.append(line, isKeptAuditEntry(entry) ? 'kept' : 'general');
     } catch (error) {
       this.options.failures.auditWriteFailed(
         `the security log could not record a ${entry.event} event, so it has a gap: ${error instanceof Error ? error.message : String(error)}`,
@@ -85,7 +168,7 @@ export class PushNewDeviceAlert implements NewDeviceAlertPort {
       await this.push.notify({ payload: newDeviceAlert(device, this.machineName) }, addressed);
     } catch (error) {
       this.failures.auditWriteFailed(
-        `the other devices could not be told that ${device.deviceName} was paired: ${error instanceof Error ? error.message : String(error)}`,
+        `the other devices could not be told that device ${auditShortId(device.deviceId)} was paired: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

@@ -39,7 +39,23 @@ describe('audit schemas', () => {
 
     // Act / Assert
     for (const event of future) should(audit.AuditEventSchema.parse(event)).equal(event);
-    should(audit.AUDIT_EVENTS).have.length(13);
+    should(audit.AUDIT_EVENTS).have.length(23);
+    should(audit.AuditEventSchema.parse('security.changed')).equal('security.changed');
+    should(audit.AuditEventSchema.parse('device.key-rotated')).equal('device.key-rotated');
+  });
+
+  it('should reserve every fixed actor phrase, whatever its case or spacing', () => {
+    // Arrange / Act / Assert
+    for (const phrase of audit.AUDIT_RESERVED_ACTOR_PHRASES) should(audit.isReservedActorPhrase(phrase)).be.true();
+    should(audit.isReservedActorPhrase('  This   Computer ')).be.true();
+    should(audit.isReservedActorPhrase('This computer (mine)')).be.false();
+    should(audit.isReservedActorPhrase('Pixel 8')).be.false();
+  });
+
+  it('should shorten a device id to its last six characters', () => {
+    // Arrange / Act / Assert
+    should(audit.auditShortId(DEVICE_ID)).equal('…dddddd');
+    should(audit.auditShortId('abc')).equal('abc');
   });
 
   it('should default the page and coerce a query string', () => {

@@ -22,6 +22,7 @@ import {
   type PairingResponse,
   PairingResponseSchema,
   PublishedCarriersSchema,
+  isReservedActorPhrase,
   pairingLinkUrl,
 } from '@ferretry/protocol';
 import { type DeviceCredentialVerifier, secretsMatch } from '../api/authentication.ts';
@@ -75,6 +76,8 @@ export interface PairingDeviceRecord {
   readonly platform: 'browser';
   readonly createdAt: string;
   readonly lastSeenAt: string;
+  /** How the redemption arrived; absent on a grant persisted before this was kept. */
+  readonly pairedOver?: PairingCarrier;
   readonly tokenHash: string;
 }
 
@@ -213,6 +216,30 @@ export interface RelayPairingAttempt {
   readonly deviceName: string;
 }
 
+/** Which way a redemption arrived: at the bound address, or over a rendezvous. */
+export type PairingCarrier = 'direct' | 'relay';
+
+/**
+ * A device that was just granted access, as an observer may learn it.
+ *
+ * NO TOKEN AND NO DIGEST, by construction: this is its own shape rather than the record, so an
+ * observer cannot be handed what it must never hold. `createdAt` is this daemon's instant.
+ */
+export interface PairingGrant {
+  readonly deviceId: string;
+  readonly deviceName: string;
+  readonly carrier: PairingCarrier;
+  readonly createdAt: string;
+}
+
+/**
+ * Told once, after a grant is PERSISTED — the security log and the new-device alert hang off it.
+ *
+ * It may not decide the redemption: whatever it throws or rejects with is swallowed by the caller, so
+ * a full disk cannot turn a pairing that happened into a refusal the device retries.
+ */
+export type PairingGrantObserver = (grant: PairingGrant) => Promise<void>;
+
 /**
  * State this daemon holds ABOUT one device, which must not outlive the device's grant.
  *
@@ -309,6 +336,8 @@ interface PairingServiceOptions {
    * than with the purge above.
    */
   readonly connections?: DeviceConnectionRevoker;
+  /** See {@link PairingGrantObserver}. */
+  readonly onGranted?: PairingGrantObserver;
   readonly rateLimiter?: PairingRateLimiter;
   readonly compare?: (left: string, right: string) => boolean;
   readonly pairingAppUrl?: string;
@@ -533,6 +562,7 @@ export class PairingService {
         platform: record.platform,
         createdAt: record.createdAt,
         lastSeenAt: record.lastSeenAt,
+        ...(record.pairedOver === undefined ? {} : { pairedOver: record.pairedOver }),
       }),
     );
   }
@@ -590,7 +620,10 @@ export class PairingService {
       if (active.attempts >= PAIRING_CODE_MAX_ATTEMPTS) this.expire(active);
       return REFUSED;
     }
-    return await this.grant(active, parsed.data.deviceName, now);
+    // A name that would read as one of the log's fixed actors is refused AFTER the guess is judged,
+    // so a wrong code still spends the budget whatever name it carries. The code survives.
+    if (isReservedActorPhrase(parsed.data.deviceName)) return REFUSED;
+    return await this.grant(active, parsed.data.deviceName, now, 'direct');
   }
 
   /**
@@ -640,7 +673,8 @@ export class PairingService {
       if (active.relayAttempts >= PAIRING_CODE_MAX_ATTEMPTS) active.relayClosed = true;
       return REFUSED;
     }
-    return await this.grant(active, parsed.data.deviceName, now);
+    if (isReservedActorPhrase(parsed.data.deviceName)) return REFUSED;
+    return await this.grant(active, parsed.data.deviceName, now, 'relay');
   }
 
   /**
@@ -650,7 +684,12 @@ export class PairingService {
    * response from the same code here — `carriers` included, which is what the relayed device
    * navigates by afterwards.
    */
-  private async grant(active: ActivePairing, deviceName: string, now: number): Promise<PairingRedemption> {
+  private async grant(
+    active: ActivePairing,
+    deviceName: string,
+    now: number,
+    carrier: PairingCarrier,
+  ): Promise<PairingRedemption> {
     // The consume is the synchronous state change immediately before any persistence await. A
     // concurrent call therefore sees no active code and cannot enter the successful branch.
     this.active = undefined;
@@ -663,6 +702,7 @@ export class PairingService {
       platform: 'browser',
       createdAt,
       lastSeenAt: createdAt,
+      pairedOver: carrier,
       tokenHash: this.options.cryptography.hashDeviceToken(this.daemonId, deviceToken),
     };
 
@@ -681,6 +721,12 @@ export class PairingService {
       redeemedAt: createdAt,
       deviceName,
     });
+    // After the grant is persisted, and unable to undo it: see {@link PairingGrantObserver}.
+    try {
+      await this.options.onGranted?.({ deviceId: record.id, deviceName, carrier, createdAt });
+    } catch {
+      // The observer reports its own failures; the device is paired either way.
+    }
     return {
       kind: 'paired',
       response: PairingResponseSchema.parse({

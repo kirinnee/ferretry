@@ -485,6 +485,11 @@ export const PairedDeviceSchema = z.strictObject({
   platform: z.literal('browser'),
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
+  /**
+   * How the redemption arrived — at the bound address, or over a rendezvous. A fact the person who
+   * paired did not choose, shown beside the name they did. Absent for a grant made before it was kept.
+   */
+  pairedOver: z.enum(['direct', 'relay']).optional(),
 });
 export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
 

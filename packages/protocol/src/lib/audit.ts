@@ -23,7 +23,15 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * `device.expired`, `session.opened`, `step-up.succeeded`, `step-up.failed` and
  * `passkey.registered` belong to the zero-trust work that lands after this log. They are declared now
  * so the units that add them emit into a schema that already accepts them, rather than each widening
- * the contract on its own branch and colliding at the merge.
+ * the contract on its own branch and colliding at the merge. `device.key-rotated` (subject: the device
+ * id) is the same kind of declaration. `security.changed` is emitted today — the operator password set
+ * or unlocked — and its subject is the setting's name while its detail holds only numbers or booleans
+ * (an old and a new value, never text a person typed).
+ *
+ * `terminal.input` is keystrokes reaching a terminal, FOLDED: one record per terminal per window
+ * carrying how many frames arrived, never what they said. The rest name the act on the route that
+ * performs it — a secret put or deleted, a pairing code withdrawn, a push enrolment added or removed,
+ * the warden reconfigured or run, a browser opened or attached, a worktree removed.
  */
 export const AUDIT_EVENTS = [
   'device.paired',
@@ -36,12 +44,42 @@ export const AUDIT_EVENTS = [
   'step-up.failed',
   'passkey.registered',
   'terminal.opened',
+  'terminal.input',
   'fleet.configured',
   'grants.changed',
   'secrets.used',
+  'secrets.changed',
+  'security.changed',
+  'device.key-rotated',
+  'pairing.code-revoked',
+  'push.changed',
+  'warden.configured',
+  'warden.ran',
+  'browser.opened',
+  'worktree.removed',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+/**
+ * The events that must survive a flood.
+ *
+ * A record of one of these that SUCCEEDED is written to its own bounded store, which no refusal and
+ * no ordinary record can rotate: a device that hammers a refused route fills the ordinary store and
+ * cannot push its own pairing, a revocation or a grant change out of view. See `docs/audit.md`.
+ */
+export const AUDIT_KEPT_EVENTS: readonly AuditEvent[] = [
+  'device.paired',
+  'device.revoked',
+  'device.key-rotated',
+  'grants.changed',
+  'fleet.configured',
+  'secrets.used',
+  'secrets.changed',
+  'security.changed',
+  'terminal.opened',
+  'terminal.input',
+];
 
 /**
  * Who did it.
@@ -72,6 +110,36 @@ export const AuditActorSchema = z.strictObject({
   deviceName: AuditTextSchema.optional(),
 });
 export type AuditActor = z.infer<typeof AuditActorSchema>;
+
+/**
+ * The fixed phrases a reader sees for the actors that are NOT a device.
+ *
+ * ONE LIST, OWNED HERE, because two facts must agree about it: every renderer says these words for
+ * `host`, `warden` and `anonymous`, and the pairing service refuses a device NAME equal to any of
+ * them. A device named "this computer" would otherwise read, in every log line it caused, as if the
+ * machine's owner had acted. Renderers also mark a device's name as quoted, untrusted text with a
+ * short id beside it, so this refusal is the second layer rather than the only one.
+ */
+export const AUDIT_RESERVED_ACTOR_PHRASES = [
+  'this computer',
+  'a supervising agent',
+  'someone who is not paired',
+  'a paired device',
+] as const;
+
+/** Whether a device name would read as one of the fixed actor phrases, ignoring case and spacing. */
+export function isReservedActorPhrase(name: string): boolean {
+  const folded = name.trim().replace(/\s+/gu, ' ').toLowerCase();
+  return AUDIT_RESERVED_ACTOR_PHRASES.some(phrase => phrase === folded);
+}
+
+/**
+ * The last six characters of a device id: enough to tell two devices with the same chosen name apart
+ * at a glance, short enough to sit beside the name. A reader compares it with Settings › Devices.
+ */
+export function auditShortId(id: string): string {
+  return id.length <= 6 ? id : `…${id.slice(-6)}`;
+}
 
 /** What happened, in the two words a reader needs: it worked, or it was refused or failed. */
 export const AUDIT_OUTCOMES = ['succeeded', 'refused', 'failed'] as const;

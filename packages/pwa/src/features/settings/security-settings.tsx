@@ -32,16 +32,13 @@ import {
   AUDIT_EVENT_WORDS,
   absoluteWords,
   auditActorWords,
+  auditDetailWords,
   auditOutcomeBadge,
   relativeWords,
   SECURITY_LOG_EMPTY,
   securityLogGapWarning,
 } from '../../lib/security-log.ts';
-import {
-  browserDevicesLookedStorage,
-  type DevicesLookedStorage,
-  markDevicesLooked,
-} from '../device-notice/devices-looked.ts';
+import { announceDevicesLooked } from '../device-notice/devices-looked.ts';
 import { readSecurityLog, type SecurityLogClient } from './security-api.ts';
 
 export type SecurityLogClientFactory = (connection: DaemonConnection) => Promise<SecurityLogClient>;
@@ -61,6 +58,7 @@ export const SECURITY_REFUSED_REMEDY =
 
 function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly nowMs: number }) {
   const badge = auditOutcomeBadge(record.outcome);
+  const detail = auditDetailWords(record);
   return (
     <li
       className="flex min-w-0 flex-col gap-0.5 border-t border-border py-2 first:border-t-0 first:pt-0 last:pb-0"
@@ -84,6 +82,11 @@ function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly
         {' · by '}
         <span className="break-words text-fg">{auditActorWords(record.actor)}</span>
       </p>
+      {detail === '' ? null : (
+        <p className="m-0 min-w-0 break-words text-meta leading-base text-muted" data-security-detail="">
+          {detail}
+        </p>
+      )}
     </li>
   );
 }
@@ -133,12 +136,10 @@ export function SecuritySurface({
   connection,
   createClient = daemonApiClient,
   now = Date.now,
-  storage = browserDevicesLookedStorage(),
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: SecurityLogClientFactory;
   readonly now?: () => number;
-  readonly storage?: DevicesLookedStorage | undefined;
 }) {
   const [state, setState] = useState<{ readonly daemonId: DaemonConnection['daemonId']; readonly load: LoadState }>({
     daemonId: connection.daemonId,
@@ -148,7 +149,8 @@ export function SecuritySurface({
   useEffect(() => {
     let current = true;
     setState({ daemonId: connection.daemonId, load: { status: 'loading' } });
-    markDevicesLooked(storage, connection.daemonId, now());
+    // Opening the log is looking: the notice, which holds the device list, marks what it has read.
+    announceDevicesLooked(connection.daemonId);
     void createClient(connection)
       .then(async client => await readSecurityLog(client))
       .then(view => {
@@ -168,7 +170,7 @@ export function SecuritySurface({
     return () => {
       current = false;
     };
-  }, [connection, createClient, now, storage]);
+  }, [connection, createClient]);
 
   const load: LoadState = state.daemonId === connection.daemonId ? state.load : { status: 'loading' };
   if (load.status === 'loaded') return <SecurityLog view={load.view} nowMs={now()} />;

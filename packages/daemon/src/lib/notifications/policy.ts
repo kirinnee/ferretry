@@ -119,7 +119,13 @@ export function decideNotificationReplay(
   };
 }
 
-/** Composes a filterable direct payload; an absent direct kind is a question. */
+/**
+ * Composes a filterable direct payload; an absent direct kind is a question.
+ *
+ * THE TITLE ALWAYS SAYS WHICH AGENT SENT IT. An agent chooses its own words, so its title is printed
+ * after `Agent “name”:` and can never open with the daemon's own new-device alert title (see
+ * `DEVICE_PAIRED_TITLE`) — nor can its fixed eventKey and tag carry that alert's reserved prefix.
+ */
 export function directNotificationPayload(
   sessionId: string,
   sessionName: string,
@@ -130,7 +136,7 @@ export function directNotificationPayload(
     eventKey: 'direct-notification',
     sessionId,
     kind: request.kind ?? 'question',
-    title: request.title ?? sessionName,
+    title: `Agent “${sessionName}”${request.title === undefined ? '' : `: ${request.title}`}`,
     body: request.body,
     tag: `notify-${sessionId}`,
     url: '/',

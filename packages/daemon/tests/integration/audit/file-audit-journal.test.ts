@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AuditRecord } from '@ferretry/protocol';
@@ -36,7 +36,7 @@ describe('FileAuditJournal', () => {
 
     // Act
     const empty = await journal.recent(10);
-    await Promise.all(['a', 'b', 'c'].map(async subject => await journal.append(line(subject))));
+    await Promise.all(['a', 'b', 'c'].map(async subject => await journal.append(line(subject), 'general')));
     const reading = await journal.recent(2);
     const live = auditJournalPaths(state).live;
 
@@ -54,7 +54,7 @@ describe('FileAuditJournal', () => {
     const { live, rotated } = auditJournalPaths(state);
 
     // Act
-    for (const subject of ['1', '2', '3', '4', '5', '6', '7']) await journal.append(line(subject));
+    for (const subject of ['1', '2', '3', '4', '5', '6', '7']) await journal.append(line(subject), 'general');
     const reading = await journal.recent(200);
 
     // Assert
@@ -90,7 +90,7 @@ describe('FileAuditJournal', () => {
     const journal = new FileAuditJournal(state);
 
     // Act
-    const write = await journal.append(line('x')).then(
+    const write = await journal.append(line('x'), 'general').then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -99,7 +99,7 @@ describe('FileAuditJournal', () => {
       (error: unknown) => error,
     );
     await rm(auditJournalPaths(state).live);
-    await journal.append(line('after'));
+    await journal.append(line('after'), 'general');
 
     // Assert
     should(write).be.instanceOf(Error);
@@ -116,13 +116,92 @@ describe('FileAuditJournal', () => {
     const journal = new FileAuditJournal(notADirectory);
 
     // Act
-    const error = await journal.append(line('x')).then(
+    const error = await journal.append(line('x'), 'general').then(
       () => undefined,
       (failure: unknown) => failure,
     );
 
     // Assert
     should(error).be.instanceOf(Error);
+  });
+
+  it('should keep a kept-store line however many general lines rotate past it', async () => {
+    // Arrange
+    const state = await stateDirectory();
+    const journal = new FileAuditJournal(state, 4 * (line('x').length + 1));
+    await journal.append(line('paired'), 'kept');
+
+    // Act
+    for (let index = 0; index < 40; index += 1) await journal.append(line(`flood-${index}`), 'general');
+    const reading = await journal.recent(200);
+
+    // Assert
+    should(reading.records.map(record => record.subject)).containEql('paired');
+    should((await readFile(auditJournalPaths(state).kept.live, 'utf8')).trim()).equal(line('paired'));
+  });
+
+  it('should refuse a FIFO or a second hard link at the path, and never block on either', async () => {
+    // Arrange
+    const state = await stateDirectory();
+    const { live, kept } = auditJournalPaths(state);
+    const fifo = Bun.spawnSync(['mkfifo', live]);
+    await writeFile(join(state, 'mirror.jsonl'), '', { mode: 0o600 });
+    await link(join(state, 'mirror.jsonl'), kept.live);
+    const journal = new FileAuditJournal(state);
+
+    // Act
+    const general = await journal.append(line('x'), 'general').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const mirrored = await journal.append(line('x'), 'kept').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const read = await journal.recent(1).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(fifo.exitCode).equal(0);
+    should(general).be.instanceOf(Error);
+    should(mirrored).be.instanceOf(Error);
+    should(read).be.instanceOf(Error);
+    should(await readFile(join(state, 'mirror.jsonl'), 'utf8')).equal('');
+  });
+});
+
+/**
+ * H1: a flood of refusals must not rotate a high-value record out of view.
+ */
+describe('a flood of refusals', () => {
+  it('should leave the earlier device.paired readable, and say how many times it was refused', async () => {
+    // Arrange
+    const state = await stateDirectory();
+    let now = Date.parse(AT);
+    const log = new AuditLog({
+      journal: new FileAuditJournal(state, 1_500),
+      clock: { now: () => new Date(now).toISOString() },
+      failures: { auditWriteFailed: () => undefined },
+    });
+    const thief = { kind: 'device' as const, deviceId: `fy_device_id_${'t'.repeat(22)}` };
+    await log.record({ event: 'device.paired', actor: { kind: 'anonymous' }, subject: 'phone', outcome: 'succeeded' });
+
+    // Act
+    for (let index = 0; index < 200; index += 1) {
+      now += 1_000;
+      await log.record({ event: 'grants.changed', actor: thief, subject: `guess-${index}`, outcome: 'refused' });
+    }
+    await log.flush(Number.POSITIVE_INFINITY);
+    const reading = await log.recent(200);
+
+    // Assert
+    should(reading.records.map(record => record.event)).containEql('device.paired');
+    const repeats = reading.records
+      .filter(record => record.event === 'grants.changed')
+      .reduce((total, record) => total + (typeof record.detail?.repeats === 'number' ? record.detail.repeats : 1), 0);
+    should(repeats).equal(200);
   });
 });
 
@@ -152,7 +231,7 @@ describe('the security log on disk', () => {
       argv: secrets.commandLine,
     });
     const log = new AuditLog({
-      journal: new FileAuditJournal(state, 1_200),
+      journal: new FileAuditJournal(state, 2_400),
       clock: { now: () => AT },
       failures: { auditWriteFailed: () => undefined },
     });
@@ -165,7 +244,7 @@ describe('the security log on disk', () => {
     const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
     await grants.refresh();
     const api = new ApiDispatcher(
-      new ApiRouter(auditedRoutes({ log, deviceName: async () => 'Pixel 8' }, routes)),
+      new ApiRouter(auditedRoutes({ log, failures: { auditWriteFailed: () => undefined }, deviceName: async () => 'Pixel 8' }, routes)),
       { admin: 'admin-secret', warden: 'warden-secret' },
       grants,
     );
@@ -183,8 +262,9 @@ describe('the security log on disk', () => {
         }),
       );
     }
-    const { live, rotated } = auditJournalPaths(state);
-    const written = `${await readFile(live, 'utf8')}${await readFile(rotated, 'utf8').catch(() => '')}`;
+    const paths = auditJournalPaths(state);
+    const files = [paths.live, paths.rotated, paths.kept.live, paths.kept.rotated];
+    const written = (await Promise.all(files.map(async file => await readFile(file, 'utf8').catch(() => '')))).join('');
     const reading = await log.recent(200);
 
     // Assert

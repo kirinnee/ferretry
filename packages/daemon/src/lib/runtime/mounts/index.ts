@@ -9,7 +9,7 @@ import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
-import { auditedRoutes } from '../../audit/routes.ts';
+import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
@@ -469,13 +469,15 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
  * sessions.
  */
 export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly SocketRoute[] {
-  return [
+  // Attaching to a live terminal or browser, and typing into a terminal, is recorded like the HTTP
+  // table above. See `auditedSocketRoutes`.
+  return auditedSocketRoutes(subsystems.audit, [
     // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
     // optional session filter one route rather than a second dispatcher.
     ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions),
     ...terminalSocketRoutes(subsystems.terminals),
     ...browserSocketRoutes(subsystems.browser),
-  ];
+  ]);
 }
 
 /**

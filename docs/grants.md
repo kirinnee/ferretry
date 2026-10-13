@@ -492,9 +492,10 @@ command says so at the moment somebody might be tempted to do that instead.
   nothing is revoked; the requirement lands at its **next** pairing, which needs no separate prompt and
   cannot lock anybody out. Such an operator can also set one at any time from a local browser or with
   `fy daemon password set`.
-- **`configure` has no route of its own for `terminal`, `browser` or `pairing`.** Those three
-  subsystems have no host settings the API can change today, so their configure axis governs exactly
-  one thing: whether a remote caller may re-grant that capability. It is not decoration — it is the
+- **`configure` has no route of its own for `terminal` or `browser`, and one READ for `pairing`.**
+  Those subsystems have no host settings the API can change today, so their configure axis governs
+  whether a remote caller may re-grant that capability — and, for `pairing`, whether it may read the
+  security log (`GET /v1/audit`, see [audit.md](audit.md)). It is not decoration — it is the
   coarse switch's own lock. `filesystem.configure` also gates `POST /v1/projects`, because registering
   a project may create a directory, initialise Git or clone a repository at an arbitrary absolute host
   path. Like the real host-changing routes governed by `fleet.configure` and `warden.configure`, this

@@ -3,10 +3,13 @@ import { AUDIT_EVENTS, type PairedDevice, type PairedDevicesView } from '@ferret
 import {
   AUDIT_EVENT_WORDS,
   absoluteWords,
+  allSeen,
   auditActorWords,
+  auditDetailWords,
   auditOutcomeBadge,
-  devicesPairedSince,
-  lookedInstant,
+  deviceLabel,
+  devicesNotSeen,
+  firstLookSeen,
   newDeviceNoticeText,
   relativeWords,
   removedDeviceText,
@@ -31,15 +34,32 @@ describe('security log words', () => {
   it('has a plain sentence for every event the wire can carry', () => {
     expect(Object.keys(AUDIT_EVENT_WORDS).toSorted()).toEqual([...AUDIT_EVENTS].toSorted());
     expect(AUDIT_EVENT_WORDS['device.paired']).toBe('A device was paired');
-    expect(AUDIT_EVENT_WORDS['step-up.failed']).toBe('Password confirmation failed');
+    expect(AUDIT_EVENT_WORDS['step-up.failed']).toBe('Passkey confirmation failed');
+    expect(AUDIT_EVENT_WORDS['step-up.succeeded']).toBe('Passkey confirmation passed');
+    expect(Object.values(AUDIT_EVENT_WORDS).join(' ')).not.toContain('Password confirmation');
   });
 
   it('names who did it the way a person would', () => {
     expect(auditActorWords({ kind: 'host' })).toBe('this computer');
     expect(auditActorWords({ kind: 'warden' })).toBe('a supervising agent');
     expect(auditActorWords({ kind: 'anonymous' })).toBe('someone who is not paired');
-    expect(auditActorWords({ kind: 'device', deviceId: 'd1', deviceName: 'Pixel 8' })).toBe('Pixel 8');
-    expect(auditActorWords({ kind: 'device', deviceId: 'd1' })).toBe('a paired device');
+    const id = 'fy_device_id_abcdef123456';
+    expect(auditActorWords({ kind: 'device', deviceId: id, deviceName: 'Pixel 8' })).toBe('device “Pixel 8” (…123456)');
+    expect(auditActorWords({ kind: 'device', deviceId: id })).toBe('device …123456');
+    expect(auditActorWords({ kind: 'device', deviceName: 'Pixel 8' })).toBe('device “Pixel 8”');
+    expect(auditActorWords({ kind: 'device' })).toBe('a paired device');
+  });
+
+  it('never lets a chosen name read as this computer', () => {
+    const words = auditActorWords({ kind: 'device', deviceId: 'fy_device_id_abcdef123456', deviceName: 'this computer' });
+    expect(words).not.toBe(auditActorWords({ kind: 'host' }));
+    expect(words).toBe('device “this computer” (…123456)');
+  });
+
+  it('reads a record detail as sorted short facts', () => {
+    const base = { at: ago(0), event: 'terminal.input', outcome: 'succeeded', actor: { kind: 'host' } } as const;
+    expect(auditDetailWords(base)).toBe('');
+    expect(auditDetailWords({ ...base, detail: { count: 3, carrier: 'relay' } })).toBe('carrier: relay · count: 3');
   });
 
   it('badges only what was refused or failed', () => {
@@ -71,10 +91,11 @@ describe('security log words', () => {
   });
 });
 
-describe('devices paired since this browser last looked', () => {
+describe('devices this browser has not seen', () => {
   const view: PairedDevicesView = {
     devices: [
-      device('old', ago(DAY)),
+      device('old', ago(2 * DAY)),
+      device('yesterday', ago(DAY)),
       device('me', ago(MINUTE)),
       device('newer', ago(2 * MINUTE)),
       device('newest', ago(MINUTE)),
@@ -83,24 +104,34 @@ describe('devices paired since this browser last looked', () => {
     thisDeviceId: 'me',
   };
 
-  it('lists only later devices, newest first, never this one', () => {
-    expect(devicesPairedSince(view, NOW - HOUR).map(entry => entry.id)).toEqual(['newest', 'newer']);
-    expect(devicesPairedSince(view, NOW)).toEqual([]);
+  it('lists only unseen devices, newest first, never this one', () => {
+    expect(devicesNotSeen(view, new Set(['old'])).map(entry => entry.id)).toEqual(['newest', 'newer', 'yesterday']);
+    expect(devicesNotSeen(view, allSeen(view))).toEqual([]);
+    expect([...allSeen(null)]).toEqual([]);
   });
 
-  it('remembers no earlier than now, and no earlier than the newest device shown', () => {
-    expect(lookedInstant(null, NOW)).toBe(NOW);
-    expect(lookedInstant(view, NOW)).toBe(NOW);
-    const ahead = { ...view, devices: [device('skewed', new Date(NOW + 5_000).toISOString()), device('bad', 'x')] };
-    expect(lookedInstant(ahead, NOW)).toBe(NOW + 5_000);
+  it('on a first look, sees only what was paired over a day before the newest, by the daemon clock', () => {
+    expect([...firstLookSeen(view)]).toEqual(['old']);
+    // A browser clock a year off changes nothing: only the createdAt values on the list are compared.
+    const later: PairedDevicesView = {
+      ...view,
+      devices: view.devices.map(entry => ({ ...entry, createdAt: new Date(Date.parse(entry.createdAt) + 365 * DAY).toISOString() })),
+    };
+    expect([...firstLookSeen(later)]).toEqual(['old']);
+    expect([...firstLookSeen({ ...view, devices: [device('bad', 'x')] })]).toEqual(['bad']);
   });
 
-  it('says what happened and what removing it did', () => {
-    expect(newDeviceNoticeText(device('p', ago(5 * MINUTE), 'Pixel 8'), 'workstation', NOW)).toBe(
-      'A new device, Pixel 8, was paired with workstation 5 minutes ago.',
+  it('says what happened, over what, when, and what removing it did', () => {
+    const pixel = { ...device('fy_device_id_abcdef123456', ago(5 * MINUTE), 'Pixel 8'), pairedOver: 'relay' as const };
+    expect(deviceLabel(pixel)).toBe('“Pixel 8” (…123456)');
+    expect(newDeviceNoticeText(pixel, 'workstation', NOW)).toBe(
+      `A device calling itself “Pixel 8” (…123456) was paired with workstation over the relay 5 minutes ago (${absoluteWords(pixel.createdAt)}).`,
     );
-    expect(removedDeviceText(device('p', ago(0), 'Pixel 8'), 'workstation')).toBe(
-      'Pixel 8 was removed. It can no longer reach workstation.',
+    const { pairedOver: _, ...unknown } = pixel;
+    expect(newDeviceNoticeText(unknown, 'workstation', NOW)).toBe(
+      `A device calling itself “Pixel 8” (…123456) was paired with workstation 5 minutes ago (${absoluteWords(pixel.createdAt)}).`,
     );
+    expect(newDeviceNoticeText({ ...pixel, pairedOver: 'direct' }, 'w', NOW)).toContain('on the local network');
+    expect(removedDeviceText(pixel, 'workstation')).toBe('“Pixel 8” (…123456) was removed. It can no longer reach workstation.');
   });
 });

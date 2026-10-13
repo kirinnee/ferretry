@@ -6,12 +6,14 @@
  * device list is read in the background, and any device added since THIS browser last looked is named,
  * with "That was me" and a one-tap "Remove it" beside it.
  *
- * ## WHAT "SINCE LAST LOOKED" MEANS
+ * ## WHAT "NOT YET SEEN" MEANS
  *
- * One instant per machine, kept by `devices-looked.ts`. The FIRST read on a browser that has never
- * looked seeds that instant without announcing anything: every device already paired on the day this
- * notice shipped is not news, and a wall of them would teach people to dismiss the notice unread. The
- * browser's own device is never news either.
+ * A SET OF DEVICE IDS per machine, kept by `devices-looked.ts` — never an instant, because comparing a
+ * browser instant with the daemon's `createdAt` lets a skewed clock hide exactly the device that matters.
+ * The FIRST read on a browser that has never looked seeds the set with every device paired more than a
+ * day before the newest one on the list, measured on the DAEMON's clock: a wall of long-standing devices
+ * would teach people to dismiss the notice unread, but a pairing from this morning is still news. The
+ * browser's own device is never news.
  *
  * ## A READ THAT FAILS SAYS NOTHING
  *
@@ -26,7 +28,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { devicesPairedSince, lookedInstant, newDeviceNoticeText, removedDeviceText } from '../../lib/security-log.ts';
+import {
+  allSeen,
+  deviceLabel,
+  devicesNotSeen,
+  firstLookSeen,
+  newDeviceNoticeText,
+  removedDeviceText,
+} from '../../lib/security-log.ts';
 import {
   type PairingClient,
   pairingFailure,
@@ -39,8 +48,8 @@ import {
   DEVICES_LOOKED_EVENT,
   type DevicesLookedDetail,
   type DevicesLookedStorage,
-  markDevicesLooked,
-  readDevicesLooked,
+  readDevicesSeen,
+  rememberDevicesSeen,
 } from './devices-looked.ts';
 
 /** The one client capability the notice needs: the app's pool, so every read rides the measured carrier. */
@@ -88,21 +97,18 @@ function MachineNewDevices({
   const machine = daemonDisplayName(connection);
   const [view, setView] = useState<PairedDevicesView | null>(null);
   const [client, setClient] = useState<PairingClient | null>(null);
-  /** This page's own copy of the instant, so the notice works with no storage at all. */
-  const [looked, setLooked] = useState<number | null>(() => readDevicesLooked(storage, daemonId));
-  /** Devices somebody said "That was me" to, while others on the same machine are still unanswered. */
-  const [acknowledged, setAcknowledged] = useState<ReadonlySet<string>>(() => new Set());
+  /** This page's own copy of the set, so the notice works with no storage at all. */
+  const [seen, setSeen] = useState<ReadonlySet<string> | null>(() => readDevicesSeen(storage, daemonId));
   const [removed, setRemoved] = useState<Removed | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Whether this page already has an instant for this machine, so the first read seeds rather than announces. */
-  const seeded = useRef(looked !== null);
+  /** The latest list, for a look announced by a panel that never read it. */
+  const latest = useRef<PairedDevicesView | null>(null);
 
-  const mark = useCallback(
-    (at: number) => {
-      setLooked(at);
-      setAcknowledged(new Set());
-      markDevicesLooked(storage, daemonId, at);
+  const remember = useCallback(
+    (next: ReadonlySet<string>) => {
+      setSeen(next);
+      rememberDevicesSeen(storage, daemonId, next);
     },
     [daemonId, storage],
   );
@@ -117,17 +123,17 @@ function MachineNewDevices({
           // one machine must leave the notice silent, never throw during render and take the app down.
           const answer = PairedDevicesViewSchema.parse(await readPairedDevices(next));
           if (!current) return;
+          latest.current = answer;
           setClient(next);
           setView(answer);
-          // First look on this browser: remember now, announce nothing.
-          if (!seeded.current) {
-            seeded.current = true;
-            const seed = lookedInstant(answer, now());
-            // Held here as well as announced: this machine's own notice must not depend on the page-wide
-            // event reaching it, or a device paired later in this visit would never be announced.
-            setLooked(seed);
-            markDevicesLooked(storage, daemonId, seed);
-          }
+          // First look on this browser: everything but the recently paired is already seen. Held here
+          // as well as stored, so this machine's own notice never depends on storage working.
+          setSeen(previous => {
+            if (previous !== null) return previous;
+            const seeded = firstLookSeen(answer);
+            rememberDevicesSeen(storage, daemonId, seeded);
+            return seeded;
+          });
         })
         .catch(() => {
           // Nothing to announce; see the module comment.
@@ -139,31 +145,25 @@ function MachineNewDevices({
       current = false;
       stop();
     };
-  }, [clients, connection, daemonId, now, schedule, storage]);
+  }, [clients, connection, daemonId, schedule, storage]);
 
   useEffect(() => {
     const onLooked = (event: Event): void => {
       const detail = (event as CustomEvent<DevicesLookedDetail>).detail;
       if (detail.daemonId !== daemonId) return;
-      setLooked(detail.at);
-      setAcknowledged(new Set());
+      // Only what this notice has actually read is marked: a device paired after the last read is
+      // still unseen, whoever looked.
+      if (latest.current !== null) remember(allSeen(latest.current));
     };
     window.addEventListener(DEVICES_LOOKED_EVENT, onLooked);
     return () => window.removeEventListener(DEVICES_LOOKED_EVENT, onLooked);
-  }, [daemonId]);
+  }, [daemonId, remember]);
 
-  const fresh =
-    view === null || looked === null
-      ? []
-      : devicesPairedSince(view, looked).filter(device => !acknowledged.has(device.id));
+  const fresh = view === null || seen === null ? [] : devicesNotSeen(view, seen);
 
   const thatWasMe = (device: PairedDevice): void => {
     setFailure(null);
-    if (fresh.length === 1) {
-      mark(lookedInstant(view, now()));
-      return;
-    }
-    setAcknowledged(previous => new Set([...previous, device.id]));
+    remember(new Set([...(seen ?? []), device.id]));
   };
 
   const removeIt = async (device: PairedDevice): Promise<void> => {
@@ -172,9 +172,12 @@ function MachineNewDevices({
     setFailure(null);
     try {
       const remaining = PairedDevicesViewSchema.parse(await revokePairedDevice(client, device.id));
+      latest.current = remaining;
       setView(remaining);
       setRemoved({ device });
-      if (fresh.length === 1) mark(lookedInstant(remaining, now()));
+      // A removed id is gone from the list, so it needs no entry: dropping ids the list no longer has
+      // keeps the stored set bounded by the devices that exist.
+      remember(new Set([...(seen ?? [])].filter(id => remaining.devices.some(entry => entry.id === id))));
     } catch (cause) {
       setFailure({ deviceId: device.id, message: pairingFailure(cause).message });
     } finally {
@@ -246,7 +249,7 @@ function MachineNewDevices({
             >
               <CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
               <span className="min-w-0">
-                {device.name} could not be removed: {failure.message}
+                {deviceLabel(device)} could not be removed: {failure.message}
               </span>
             </p>
           ) : null}

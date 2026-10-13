@@ -68,8 +68,8 @@ describe('audit render', () => {
     expect(describeActor({ kind: 'host' })).toBe('this computer');
     expect(describeActor({ kind: 'warden' })).toBe('a supervising agent');
     expect(describeActor({ kind: 'anonymous' })).toBe('someone who is not paired');
-    expect(describeActor({ kind: 'device', deviceId: 'dev-1', deviceName: 'Pixel' })).toBe('Pixel');
-    expect(describeActor({ kind: 'device', deviceId: 'dev-1' })).toBe('dev-1');
+    expect(describeActor({ kind: 'device', deviceId: 'dev-000001', deviceName: 'Pixel' })).toBe('device “Pixel” (…000001)');
+    expect(describeActor({ kind: 'device', deviceId: 'dev-000001' })).toBe('device …000001');
     expect(describeActor({ kind: 'device' })).toBe('a paired device');
   });
 
@@ -80,7 +80,8 @@ describe('audit render', () => {
     // Assert
     for (const line of lines) expect(line).toMatch(/^2026-10-13 09:05:07 {2}[A-Z]/u);
     expect(lines.join('\n')).toContain('A device’s access expired');
-    expect(lines.join('\n')).toContain('Password confirmation failed');
+    expect(lines.join('\n')).toContain('Passkey confirmation failed');
+    expect(lines.join('\n')).not.toContain('Password confirmation');
     expect(lines.join('\n')).toContain('A secret was used');
   });
 
@@ -96,7 +97,27 @@ describe('audit render', () => {
     );
 
     // Assert
-    expect(line).toBe('2026-10-13 09:05:07  A pairing attempt was refused (code-7)  by Pixel  refused');
+    expect(line).toBe('2026-10-13 09:05:07  A pairing attempt was refused (code-7)  by device “Pixel” (d1)  refused');
+  });
+
+  it('should never let a device name read as a fixed actor', () => {
+    // Act
+    const forged = describeActor({ kind: 'device', deviceId: 'dev-abcdef', deviceName: 'this computer' });
+
+    // Assert
+    expect(forged).not.toBe(describeActor({ kind: 'host' }));
+    expect(forged).toBe('device “this computer” (…abcdef)');
+  });
+
+  it('should show the facts a record carries, in a stable order', () => {
+    // Act
+    const line = renderAuditRecord(
+      record({ event: 'terminal.input', subject: 'term-1', detail: { repeats: 4, carrier: 'relay' } }),
+    );
+
+    // Assert
+    expect(line.endsWith('  [carrier=relay repeats=4]')).toBe(true);
+    expect(renderAuditRecord(record({ detail: {} }))).not.toContain('[');
   });
 
   it('should say plainly when nothing has been recorded', () => {

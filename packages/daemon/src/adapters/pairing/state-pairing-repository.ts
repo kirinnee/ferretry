@@ -24,6 +24,7 @@ const DeviceRecordSchema = z.strictObject({
   platform: z.literal('browser'),
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
+  pairedOver: z.enum(['direct', 'relay']).optional(),
   tokenHash: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
 });
 

@@ -1,8 +1,9 @@
-import type { AuditDetail, AuditEvent } from '@ferretry/protocol';
+import type { AuditDetail, AuditEvent, AuditOutcome } from '@ferretry/protocol';
 import { decodeParameter } from '../api/http.ts';
 import type { ApiRoute, RouteContext } from '../api/route.ts';
+import type { SocketAttachment, SocketRoute } from '../api/socket.ts';
 import { auditActorOf, auditOutcomeOf } from './policy.ts';
-import type { AuditSink } from './types.ts';
+import type { AuditFailureReporter, AuditSink } from './types.ts';
 
 /**
  * WHICH ROUTES ARE AUDITED, AND WHY THE TABLE IS DECORATED RATHER THAN EACH HANDLER EDITED.
@@ -26,16 +27,22 @@ export interface AuditedRouteRule {
   readonly event: AuditEvent;
   /** The path parameter that names what the request acted on. */
   readonly subject?: string;
+  /** A subject that is the same for every request — the name of the setting a `security.changed` changed. */
+  readonly fixedSubject?: string;
   /** When the subject is a device id: resolve its name BEFORE the handler runs, while it still exists. */
   readonly subjectIsDevice?: true;
   /** Fixed facts about this rule, such as which fleet action it was. */
   readonly detail?: AuditDetail;
-  /** A top-level string-array field of a successful JSON response holding NAMES, joined into `detail`. */
+  /**
+   * A top-level field of a successful JSON response holding a NAME or an array of names, joined into
+   * `detail` under the same key.
+   */
   readonly responseNames?: string;
 }
 
 export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   { method: 'POST', path: '/v1/pair/code', event: 'pairing.code-minted' },
+  { method: 'DELETE', path: '/v1/pair/code/:pairingId', event: 'pairing.code-revoked', subject: 'pairingId' },
   {
     method: 'DELETE',
     path: '/v1/pair/devices/:deviceId',
@@ -43,7 +50,18 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'deviceId',
     subjectIsDevice: true,
   },
+  { method: 'POST', path: '/v1/push/subscriptions', event: 'push.changed', detail: { action: 'enrol' } },
+  {
+    method: 'DELETE',
+    path: '/v1/push/subscriptions/:pushId',
+    event: 'push.changed',
+    subject: 'pushId',
+    detail: { action: 'remove' },
+  },
+  { method: 'POST', path: '/v1/grants/unlock', event: 'security.changed', fixedSubject: 'operator-unlock' },
   { method: 'PATCH', path: '/v1/grants', event: 'grants.changed' },
+  { method: 'PUT', path: '/v1/grants/password', event: 'security.changed', fixedSubject: 'operator-password' },
+  { method: 'POST', path: '/v1/fleet/proposals', event: 'fleet.configured', detail: { action: 'propose' } },
   {
     method: 'POST',
     path: '/v1/fleet/proposals/:proposalId/apply',
@@ -54,17 +72,52 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   { method: 'POST', path: '/v1/fleet/login', event: 'fleet.configured', detail: { action: 'sign-in' } },
   {
     method: 'POST',
+    path: '/v1/fleet/login/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    detail: { action: 'sign-in-answer' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/fleet/login/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    detail: { action: 'sign-in-cancel' },
+  },
+  {
+    method: 'POST',
     path: '/v1/fleet/machine/tools/install',
     event: 'fleet.configured',
     detail: { action: 'install-tool' },
   },
   { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
   { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
+  {
+    method: 'POST',
+    path: '/v1/secrets',
+    event: 'secrets.changed',
+    responseNames: 'name',
+    detail: { action: 'put' },
+  },
+  { method: 'DELETE', path: '/v1/secrets/:name', event: 'secrets.changed', subject: 'name', detail: { action: 'delete' } },
+  { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
+  { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/browser',
+    event: 'browser.opened',
+    subject: 'sessionId',
+    detail: { action: 'control' },
+  },
+  { method: 'POST', path: '/v1/warden/run', event: 'warden.ran' },
+  { method: 'PATCH', path: '/v1/warden/config', event: 'warden.configured' },
 ];
 
 /** What the decorator needs: where to write, and how to name a device id. */
 export interface AuditedRoutesSubsystem {
   readonly log: AuditSink;
+  /** Where a record that could not be made is said out loud, since it may not fail the request. */
+  readonly failures: AuditFailureReporter;
   deviceName(deviceId: string): Promise<string | undefined>;
 }
 
@@ -84,9 +137,12 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
   return {
     ...route,
     handle: async context => {
-      const subject = rule.subject === undefined ? undefined : decodeParameter(context.params.get(rule.subject) ?? '');
+      const subject =
+        rule.subject === undefined ? rule.fixedSubject : decodeParameter(context.params.get(rule.subject) ?? '');
       const subjectName =
-        rule.subjectIsDevice === true && subject !== undefined ? await subsystem.deviceName(subject) : undefined;
+        rule.subjectIsDevice === true && subject !== undefined
+          ? await subsystem.deviceName(subject).catch(() => undefined)
+          : undefined;
       let status: number | undefined;
       let body: string | undefined;
       try {
@@ -98,7 +154,12 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
         status = statusOf(error);
         throw error;
       } finally {
-        await record(subsystem, context, rule, { status, body, subject, subjectName });
+        // A record that throws would turn a request that already WORKED into a 500 from here, and the
+        // person would retry something that happened. `AuditLog` already reports its own failures; this
+        // catches what is left — a device-name lookup, a sink that is not an `AuditLog`.
+        await record(subsystem, context, rule, { status, body, subject, subjectName }).catch(
+          (error: unknown) => subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
+        );
       }
     },
   };
@@ -151,7 +212,8 @@ function statusOf(error: unknown): number | undefined {
  */
 function namesIn(body: string | undefined, field: string): string | undefined {
   try {
-    const value = (JSON.parse(body ?? '') as Record<string, unknown>)[field];
+    const parsed = (JSON.parse(body ?? '') as Record<string, unknown>)[field];
+    const value = typeof parsed === 'string' ? [parsed] : parsed;
     if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) return undefined;
     return value.length === 0 ? undefined : joinedWithin(value, AUDIT_TEXT_MAX);
   } catch {
@@ -178,4 +240,102 @@ function joinedWithin(names: readonly string[], limit: number): string {
     kept.push(name);
   }
   return [...kept, `+${String(names.length - kept.length)}`].join(',');
+}
+
+function describeFailure(rule: { readonly event: AuditEvent }, error: unknown): string {
+  return `the security log could not record a ${rule.event} event, so it has a gap: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+/** One protocol-switching route the log records: opening it, and — for a terminal — typing into it. */
+export interface AuditedSocketRule {
+  readonly path: string;
+  readonly event: AuditEvent;
+  /** The path parameter that names what was attached to. */
+  readonly subject: string;
+  /** Recorded for every BINARY client frame — keystrokes — and folded per subject per window. */
+  readonly inputEvent?: AuditEvent;
+}
+
+/**
+ * The sockets that hand a caller something live. The fleet feed is a read, so it is not here — the
+ * contract in `tests/unit/runtime/mounts/surface.test.ts` holds it to the reviewed list in
+ * `tests/unit/audit/not-audited.ts`.
+ */
+export const AUDITED_SOCKET_ROUTES: readonly AuditedSocketRule[] = [
+  {
+    path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
+    event: 'terminal.opened',
+    subject: 'terminalId',
+    inputEvent: 'terminal.input',
+  },
+  { path: '/v1/sessions/:sessionId/browser/stream', event: 'browser.opened', subject: 'sessionId' },
+];
+
+/**
+ * The socket table, with every attach a rule names recorded as `detail.mode: 'attach'`.
+ *
+ * WHY ATTACH IS ITS OWN RECORD. Opening a terminal is one act; reaching an EXISTING shell somebody
+ * else opened is another, and it is the one a stolen phone would do. A refused upgrade is recorded as
+ * refused, exactly like an HTTP route.
+ *
+ * INPUT IS COUNTED, NEVER CAPTURED. Each binary frame is one `terminal.input` record naming the
+ * terminal and nothing about the bytes; `AuditLog` folds them per terminal per window, so a session of
+ * typing is a handful of lines that say how many frames arrived. The record is not awaited: a
+ * keystroke must never wait on a disk.
+ */
+export function auditedSocketRoutes(
+  subsystem: AuditedRoutesSubsystem,
+  routes: readonly SocketRoute[],
+  rules: readonly AuditedSocketRule[] = AUDITED_SOCKET_ROUTES,
+): readonly SocketRoute[] {
+  return routes.map(route => {
+    const rule = rules.find(candidate => route.method === 'GET' && candidate.path === route.path);
+    return rule === undefined ? route : auditedSocket(subsystem, route, rule);
+  });
+}
+
+function auditedSocket(subsystem: AuditedRoutesSubsystem, route: SocketRoute, rule: AuditedSocketRule): SocketRoute {
+  return {
+    ...route,
+    accept: async context => {
+      const subject = decodeParameter(context.params.get(rule.subject) ?? '');
+      const entry = async (event: AuditEvent, outcome: AuditOutcome, detail?: AuditDetail): Promise<void> => {
+        const credential = context.credential;
+        const actorName =
+          credential?.tokenClass === 'device' ? await subsystem.deviceName(credential.deviceId) : undefined;
+        await subsystem.log.record({
+          event,
+          actor: auditActorOf(credential, actorName),
+          ...(subject === '' ? {} : { subject }),
+          outcome,
+          ...(detail === undefined ? {} : { detail }),
+        });
+      };
+      const said = (event: AuditEvent, outcome: AuditOutcome, detail?: AuditDetail): Promise<void> =>
+        entry(event, outcome, detail).catch((error: unknown) =>
+          subsystem.failures.auditWriteFailed(describeFailure({ event }, error)),
+        );
+      let attach: SocketAttachment;
+      try {
+        attach = await route.accept(context);
+      } catch (error) {
+        await said(rule.event, auditOutcomeOf(statusOf(error)), { mode: 'attach' });
+        throw error;
+      }
+      await said(rule.event, 'succeeded', { mode: 'attach' });
+      const inputEvent = rule.inputEvent;
+      if (inputEvent === undefined) return attach;
+      return async downstream => {
+        const handler = await attach(downstream);
+        return {
+          open: async () => await handler.open(),
+          close: () => handler.close(),
+          fromClient: frame => {
+            if (typeof frame !== 'string') void said(inputEvent, 'succeeded');
+            handler.fromClient(frame);
+          },
+        };
+      };
+    },
+  };
 }

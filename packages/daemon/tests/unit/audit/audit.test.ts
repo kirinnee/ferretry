@@ -3,22 +3,30 @@ import type { AuditRecord, DaemonId, PairingCode, PushDeliveryResult, PushDevice
 import should from 'should';
 import { ApiDispatcher, ApiError, type ApiRoute, ApiRouter, jsonResponse } from '../../../src/lib/api/index.ts';
 import {
+  AUDIT_FOLD_WINDOW_MS,
+  AUDIT_INVALID_TEXT,
   AUDITED_ROUTES,
+  AUDITED_SOCKET_ROUTES,
   type AuditEntry,
   AuditedPairingService,
   type AuditJournalPort,
   AuditLog,
   type AuditReading,
+  type AuditStore,
   auditActorOf,
   auditedRoutes,
+  auditedSocketRoutes,
+  auditFoldKey,
   auditOutcomeOf,
   auditRecord,
+  isKeptAuditEntry,
   type NewDeviceAlertPush,
   newDeviceAlert,
-  PAIRING_REFUSAL_WINDOW_MS,
   type PairedDeviceNotice,
   PushNewDeviceAlert,
+  withinAuditBounds,
 } from '../../../src/lib/audit/index.ts';
+import type { SocketDownstream, SocketFrame, SocketRoute } from '../../../src/lib/api/socket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
 import {
   type PairingCryptography,
@@ -40,11 +48,13 @@ const DEVICE_TOKEN = `fy_device_${'t'.repeat(43)}`;
 
 class MemoryJournal implements AuditJournalPort {
   readonly lines: string[] = [];
+  readonly stores: AuditStore[] = [];
   failure: Error | undefined;
 
-  async append(line: string): Promise<void> {
+  async append(line: string, store: AuditStore): Promise<void> {
     if (this.failure !== undefined) throw this.failure;
     this.lines.push(line);
+    this.stores.push(store);
   }
 
   async recent(limit: number): Promise<AuditReading> {
@@ -56,12 +66,13 @@ class MemoryJournal implements AuditJournalPort {
 function auditLog() {
   const journal = new MemoryJournal();
   const failures: string[] = [];
+  const clock = { nowMs: Date.parse(AT) };
   const log = new AuditLog({
     journal,
-    clock: { now: () => AT },
+    clock: { now: () => new Date(clock.nowMs).toISOString() },
     failures: { auditWriteFailed: message => failures.push(message) },
   });
-  return { journal, failures, log };
+  return { journal, failures, log, tick: (ms: number) => (clock.nowMs += ms) };
 }
 
 const records = (journal: MemoryJournal): AuditRecord[] => journal.lines.map(line => JSON.parse(line) as AuditRecord);
@@ -112,11 +123,23 @@ describe('audit policy', () => {
 
   it('should tell the other devices a new one was paired, in plain words', () => {
     // Arrange / Act
-    const payload = newDeviceAlert({ deviceId: DEVICE_ID, deviceName: 'Pixel 8' }, 'workstation');
+    const payload = newDeviceAlert(
+      { deviceId: DEVICE_ID, deviceName: 'Pixel 8', carrier: 'relay', createdAt: AT },
+      'workstation',
+    );
+    const direct = newDeviceAlert(
+      { deviceId: DEVICE_ID, deviceName: 'this computer', carrier: 'direct', createdAt: AT },
+      'workstation',
+    );
 
     // Assert
     should(payload.title).equal('A new device was paired');
-    should(payload.body).startWith('A new device, Pixel 8, was paired with workstation.');
+    // The chosen name is quoted beside the facts nobody chose: the short id, the carrier, the time.
+    should(payload.body).equal(
+      `A device calling itself “Pixel 8” (…dddddd) was paired with workstation over the relay at ${AT}. If that was not you, remove it in Settings.`,
+    );
+    should(direct.body).startWith('A device calling itself “this computer” (…dddddd) was paired with workstation on the local network');
+    should(payload.eventKey).equal(`device-paired:${DEVICE_ID}`);
     should('kind' in payload).be.false();
   });
 });
@@ -150,7 +173,8 @@ describe('AuditLog', () => {
     await log.record({ event: 'device.revoked', actor: { kind: 'host' }, outcome: 'succeeded' });
     journal.failure = undefined;
     // A record the contract refuses is reported the same way, and a non-Error is still described.
-    await log.record({ event: 'device.revoked', actor: { kind: 'host' }, subject: '', outcome: 'succeeded' });
+    const tooMany = Object.fromEntries(Array.from({ length: 13 }, (_, index) => [`k${String(index)}`, index]));
+    await log.record({ event: 'device.revoked', actor: { kind: 'host' }, detail: tooMany, outcome: 'succeeded' });
     const throwing = new AuditLog({
       journal: {
         append: async () => {
@@ -168,6 +192,145 @@ describe('AuditLog', () => {
     should(failures).have.length(3);
     should(failures[0]).match(/device\.revoked event, so it has a gap: disk full/u);
     should(failures[2]).match(/gap: gone$/u);
+  });
+});
+
+describe('audit folding and bounds', () => {
+  const refusal: AuditEntry = {
+    event: 'grants.changed',
+    actor: { kind: 'device', deviceId: DEVICE_ID },
+    outcome: 'refused',
+    subject: 'one',
+  };
+
+  it('should fold repeats of one refusal into a counted record when the window closes', async () => {
+    // Arrange
+    const { journal, log, tick } = auditLog();
+
+    // Act
+    await log.record(refusal);
+    await log.record({ ...refusal, subject: 'two' });
+    await log.record({ ...refusal, subject: 'three' });
+    await log.flush(Date.parse(AT) + AUDIT_FOLD_WINDOW_MS - 1);
+    const beforeClose = journal.lines.length;
+    tick(AUDIT_FOLD_WINDOW_MS);
+    await log.record(refusal);
+
+    // Assert
+    should(beforeClose).equal(1);
+    should(records(journal).map(record => [record.subject, record.detail])).deepEqual([
+      ['one', undefined],
+      // The summary names no subject: a flood of random ids is one flood.
+      [undefined, { repeats: 2 }],
+      ['one', undefined],
+    ]);
+  });
+
+  it('should close a window that stopped, on the flush timer', async () => {
+    // Arrange
+    const { journal, log, tick } = auditLog();
+    await log.record(refusal);
+    await log.record(refusal);
+    await log.record(refusal);
+
+    // Act
+    tick(AUDIT_FOLD_WINDOW_MS);
+    await log.flush();
+    await log.flush();
+
+    // Assert
+    should(records(journal).map(record => record.detail)).deepEqual([undefined, { repeats: 2 }]);
+  });
+
+  it('should write nothing more for a window that held a single record', async () => {
+    // Arrange
+    const { journal, log } = auditLog();
+    await log.record(refusal);
+
+    // Act
+    await log.flush(Number.POSITIVE_INFINITY);
+
+    // Assert
+    should(journal.lines).have.length(1);
+  });
+
+  it('should count keystrokes per terminal and keep the terminal on the summary', async () => {
+    // Arrange
+    const { journal, log } = auditLog();
+    const input = (subject: string): AuditEntry => ({
+      event: 'terminal.input',
+      actor: { kind: 'host' },
+      subject,
+      outcome: 'succeeded',
+    });
+
+    // Act
+    for (let index = 0; index < 5; index += 1) await log.record(input('term-1'));
+    await log.record(input('term-2'));
+    await log.flush(Number.POSITIVE_INFINITY);
+
+    // Assert
+    should(records(journal).map(record => [record.subject, record.detail])).deepEqual([
+      ['term-1', undefined],
+      ['term-2', undefined],
+      ['term-1', { repeats: 4 }],
+    ]);
+    should(journal.stores).deepEqual(['kept', 'kept', 'kept']);
+  });
+
+  it('should close every window first when the table of open windows is full', async () => {
+    // Arrange
+    const { journal, log } = auditLog();
+    for (let index = 0; index < 1_024; index += 1) {
+      const entry: AuditEntry = { ...refusal, actor: { kind: 'device', deviceId: `d-${String(index)}` } };
+      await log.record(entry);
+      await log.record(entry);
+    }
+
+    // Act
+    await log.record({ ...refusal, actor: { kind: 'device', deviceId: 'd-new' } });
+
+    // Assert: 1024 firsts, 1024 summaries, then the new first.
+    should(journal.lines).have.length(2_049);
+    should(records(journal).at(-1)?.actor.deviceId).equal('d-new');
+  });
+
+  it('should key repeats by who, what, how it ended and the carrier — never the subject', () => {
+    // Arrange / Act / Assert
+    should(auditFoldKey({ ...refusal, outcome: 'succeeded' })).be.undefined();
+    should(auditFoldKey(refusal)).equal(auditFoldKey({ ...refusal, subject: 'other' }));
+    should(auditFoldKey(refusal)).not.equal(auditFoldKey({ ...refusal, outcome: 'failed' }));
+    should(auditFoldKey({ ...refusal, detail: { carrier: 'relay' } })).not.equal(
+      auditFoldKey({ ...refusal, detail: { carrier: 'direct' } }),
+    );
+    should(auditFoldKey({ ...refusal, actor: { kind: 'host' } })).not.equal(auditFoldKey(refusal));
+  });
+
+  it('should keep only SUCCESSES of high-value events out of a flood’s reach', () => {
+    // Arrange / Act / Assert
+    should(isKeptAuditEntry({ ...refusal, outcome: 'succeeded' })).be.true();
+    should(isKeptAuditEntry(refusal)).be.false();
+    should(isKeptAuditEntry({ event: 'pairing.refused', actor: { kind: 'anonymous' }, outcome: 'succeeded' })).be.false();
+  });
+
+  it('should write an over-long or control-character subject as <invalid> with its length', async () => {
+    // Arrange
+    const { journal, failures, log } = auditLog();
+
+    // Act
+    await log.record({ ...refusal, outcome: 'succeeded', subject: 'x'.repeat(161) });
+    await log.record({ ...refusal, outcome: 'succeeded', subject: 'evil\u202Eid' });
+    await log.record({ ...refusal, outcome: 'succeeded', detail: { action: 'a\nb', n: 1 } });
+
+    // Assert
+    should(failures).deepEqual([]);
+    should(records(journal).map(record => [record.subject, record.detail])).deepEqual([
+      [AUDIT_INVALID_TEXT, { subjectLength: 161 }],
+      [AUDIT_INVALID_TEXT, { subjectLength: 7 }],
+      ['one', { action: AUDIT_INVALID_TEXT, n: 1 }],
+    ]);
+    should(journal.lines.join('\n')).not.containEql('xxxxxxxxxx').and.not.containEql('evil');
+    should(withinAuditBounds(refusal)).equal(refusal);
   });
 });
 
@@ -197,7 +360,7 @@ const enrolment = (id: string): PushDeviceView => ({
 });
 
 describe('PushNewDeviceAlert', () => {
-  const device: PairedDeviceNotice = { deviceId: DEVICE_ID, deviceName: 'Pixel 8' };
+  const device: PairedDeviceNotice = { deviceId: DEVICE_ID, deviceName: 'Pixel 8', carrier: 'direct', createdAt: AT };
 
   it('should push to every enrolment that already existed, and to nobody when none did', async () => {
     // Arrange
@@ -213,7 +376,7 @@ describe('PushNewDeviceAlert', () => {
     // Assert
     should(push.sent).have.length(1);
     should(push.sent[0]?.to).deepEqual(['push-1', 'push-2']);
-    should(push.sent[0]?.dispatch.payload.body).match(/Pixel 8, was paired with workstation/u);
+    should(push.sent[0]?.dispatch.payload.body).match(/“Pixel 8” \(…dddddd\) was paired with workstation/u);
     should(failures).deepEqual([]);
   });
 
@@ -231,8 +394,8 @@ describe('PushNewDeviceAlert', () => {
 
     // Assert
     should(failures).deepEqual([
-      'the other devices could not be told that Pixel 8 was paired: offline',
-      'the other devices could not be told that Pixel 8 was paired: gone',
+      'the other devices could not be told that device …dddddd was paired: offline',
+      'the other devices could not be told that device …dddddd was paired: gone',
     ]);
   });
 });
@@ -253,7 +416,7 @@ async function dispatcher(routes: readonly ApiRoute[]) {
 }
 
 function decorated(handlers: Partial<Record<string, ApiRoute['handle']>>) {
-  const { journal, log } = auditLog();
+  const { journal, log, failures } = auditLog();
   const names = new Map([
     [DEVICE_ID, 'Pixel 8'],
     [OTHER_DEVICE_ID, 'Old phone'],
@@ -268,8 +431,11 @@ function decorated(handlers: Partial<Record<string, ApiRoute['handle']>>) {
     })),
     { method: 'GET', path: '/v1/unaudited', minimum: 'operator', handle: ok },
   ];
-  const routes = auditedRoutes({ log, deviceName: async id => names.get(id) }, base);
-  return { journal, routes };
+  const routes = auditedRoutes(
+    { log, deviceName: async id => names.get(id), failures: { auditWriteFailed: message => failures.push(message) } },
+    base,
+  );
+  return { journal, routes, failures };
 }
 
 describe('auditedRoutes', () => {
@@ -338,10 +504,10 @@ describe('auditedRoutes', () => {
     // Assert
     should(refused.status).equal(403);
     should(failed.status).equal(500);
+    // The second fleet failure is a REPEAT of the first by the same actor, so it is counted, not written.
     should(records(journal).map(record => [record.event, record.outcome, record.detail])).deepEqual([
       ['grants.changed', 'refused', { status: 403 }],
       ['fleet.configured', 'failed', { action: 'sign-in' }],
-      ['fleet.configured', 'failed', { action: 'install-tool' }],
     ]);
   });
 
@@ -376,6 +542,69 @@ describe('auditedRoutes', () => {
     should(journal.lines.join('\n')).not.containEql('hunter2');
   });
 
+  it('should never turn a request that worked into a fault when the record throws', async () => {
+    // Arrange: a sink that is not an AuditLog, and a device-name lookup that throws.
+    const failures: string[] = [];
+    const base: ApiRoute[] = [
+      { method: 'PATCH', path: '/v1/grants', minimum: 'operator', handle: async () => jsonResponse({ ok: true }) },
+      {
+        method: 'DELETE',
+        path: '/v1/pair/devices/:deviceId',
+        minimum: 'operator',
+        handle: async () => jsonResponse({ ok: true }),
+      },
+    ];
+    const routes = auditedRoutes(
+      {
+        log: {
+          record: async () => {
+            throw new Error('disk full');
+          },
+        },
+        deviceName: async () => {
+          throw 'gone';
+        },
+        failures: { auditWriteFailed: message => failures.push(message) },
+      },
+      base,
+    );
+    const api = await dispatcher(routes);
+
+    // Act
+    const changed = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, body: '{}' }));
+    const revoked = await api.dispatch(
+      request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, headers: DEVICE }),
+    );
+
+    // Assert
+    should([changed.status, revoked.status]).deepEqual([200, 200]);
+    should(failures).deepEqual([
+      'the security log could not record a grants.changed event, so it has a gap: disk full',
+      'the security log could not record a device.revoked event, so it has a gap: gone',
+    ]);
+  });
+
+  it('should take a single name for a stored secret, and a fixed subject for a setting', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/secrets': async () => jsonResponse({ name: 'API_KEY' }),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(request({ method: 'POST', path: '/v1/secrets', headers: ADMIN, body: '{"value":"hunter2"}' }));
+    await api.dispatch(request({ method: 'PUT', path: '/v1/grants/password', headers: ADMIN, body: '{}' }));
+    await api.dispatch(request({ method: 'DELETE', path: '/v1/secrets/API_KEY', headers: ADMIN }));
+
+    // Assert
+    should(records(journal).map(record => [record.event, record.subject, record.detail])).deepEqual([
+      ['secrets.changed', undefined, { action: 'put', name: 'API_KEY', status: 200 }],
+      ['security.changed', 'operator-password', { status: 200 }],
+      ['secrets.changed', 'API_KEY', { action: 'delete', status: 200 }],
+    ]);
+    should(journal.lines.join('\n')).not.containEql('hunter2');
+  });
+
   it('should keep a non-JSON body out of the names', async () => {
     // Arrange
     const { journal, routes } = decorated({
@@ -397,7 +626,7 @@ describe('GET /v1/audit', () => {
     const { journal, log } = auditLog();
     for (const subject of ['one', 'two', 'three'])
       await log.record({ event: 'terminal.opened', actor: { kind: 'host' }, subject, outcome: 'succeeded' });
-    const api = await dispatcher(auditRoutes({ recent: async limit => await journal.recent(limit) }));
+    const api = await dispatcher(auditRoutes({ recent: async limit => await journal.recent(limit), flush: async () => undefined }));
 
     // Act
     const page = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '2']], headers: ADMIN }));
@@ -423,7 +652,7 @@ describe('GET /v1/audit', () => {
     });
     await grants.refresh();
     const api = new ApiDispatcher(
-      new ApiRouter(auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }) })),
+      new ApiRouter(auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined })),
       CREDENTIALS,
       grants,
     );
@@ -433,6 +662,27 @@ describe('GET /v1/audit', () => {
 
     // Assert
     should(response.status).equal(403);
+  });
+
+  it('should refuse a device trusted only to USE pairing, and still serve the host', async () => {
+    // Arrange
+    const grants = grantSubsystem({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: true, configure: false } },
+    });
+    await grants.refresh();
+    const api = new ApiDispatcher(
+      new ApiRouter(auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined })),
+      CREDENTIALS,
+      grants,
+    );
+
+    // Act
+    const device = await api.dispatch(request({ path: '/v1/audit', headers: DEVICE }));
+    const host = await api.dispatch(request({ path: '/v1/audit', headers: ADMIN, loopback: true }));
+
+    // Assert
+    should(device.status).equal(403);
+    should(host.status).equal(200);
   });
 });
 
@@ -457,9 +707,17 @@ class Cryptography implements PairingCryptography {
   hashDeviceToken = (daemonId: string, token: string): string => `hash:${daemonId}:${token}`;
 }
 
-function pairing(options: { readonly addFails?: boolean } = {}) {
-  const { journal, log } = auditLog();
+function pairing(
+  options: {
+    readonly addFails?: boolean;
+    readonly alert?: (device: PairedDeviceNotice) => Promise<void>;
+    readonly log?: AuditLog;
+  } = {},
+) {
+  const made = auditLog();
+  const log = options.log ?? made.log;
   const alerts: PairedDeviceNotice[] = [];
+  const failures: string[] = [];
   let nowMs = Date.parse(AT);
   const devices = new Devices();
   if (options.addFails === true)
@@ -467,6 +725,8 @@ function pairing(options: { readonly addFails?: boolean } = {}) {
       throw new Error('disk');
     };
   const cryptography = new Cryptography();
+  let minted = 0;
+  cryptography.deviceId = () => `fy_device_id_${String(minted++).padStart(22, 'd')}`;
   const service = new AuditedPairingService(
     {
       daemonId: DAEMON_ID,
@@ -480,10 +740,16 @@ function pairing(options: { readonly addFails?: boolean } = {}) {
       operatorPassword: { isSet: async () => true },
       clientName: 'fy',
     },
-    { log, alert: { newDevicePaired: async device => void alerts.push(device) }, nowMs: () => nowMs },
+    {
+      log,
+      alert: { newDevicePaired: options.alert ?? (async device => void alerts.push(device)) },
+      failures: { auditWriteFailed: message => failures.push(message) },
+    },
   );
-  return { journal, alerts, service, tick: (ms: number) => (nowMs += ms) };
+  return { journal: made.journal, alerts, failures, service, devices, tick: (ms: number) => (nowMs += ms) };
 }
+
+const FIRST_DEVICE = `fy_device_id_${'0'.padStart(22, 'd')}`;
 
 describe('AuditedPairingService', () => {
   it('should record a direct pairing by id and name, and alert the others', async () => {
@@ -500,20 +766,21 @@ describe('AuditedPairingService', () => {
       {
         at: AT,
         event: 'device.paired',
-        actor: { kind: 'device', deviceId: DEVICE_ID, deviceName: 'Pixel 8' },
-        subject: DEVICE_ID,
+        actor: { kind: 'device', deviceId: FIRST_DEVICE, deviceName: 'Pixel 8' },
+        subject: FIRST_DEVICE,
         outcome: 'succeeded',
         detail: { carrier: 'direct' },
       },
     ]);
-    should(alerts).deepEqual([{ deviceId: DEVICE_ID, deviceName: 'Pixel 8' }]);
+    should(journal.stores).deepEqual(['kept']);
+    should(alerts).deepEqual([{ deviceId: FIRST_DEVICE, deviceName: 'Pixel 8', carrier: 'direct', createdAt: AT }]);
     // NAMES AND IDS ONLY: neither the code nor the issued credential reached the log.
     should(journal.lines.join('\n')).not.containEql(CODE).and.not.containEql(DEVICE_TOKEN);
   });
 
   it('should record a relayed pairing as relayed', async () => {
     // Arrange
-    const { journal, service } = pairing();
+    const { journal, alerts, service } = pairing();
     await service.mint();
 
     // Act
@@ -521,59 +788,155 @@ describe('AuditedPairingService', () => {
 
     // Assert
     should(records(journal)[0]?.detail).deepEqual({ carrier: 'relay' });
+    should(alerts[0]?.carrier).equal('relay');
   });
 
-  it('should fold a burst of refusals into one record per window per carrier', async () => {
+  it('should name each device of two concurrent redemptions by its own grant', async () => {
+    // Arrange: the code is single-use, so two grants need two codes; what matters is that each record
+    // names the device ITS redemption created, which a before/after list diff cannot promise.
+    const { journal, service } = pairing();
+    await service.mint();
+    const first = service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const losing = service.redeemOverRelay({ code: CODE, deviceName: 'Tablet' });
+
+    // Act
+    const results = await Promise.all([first, losing]);
+    await service.mint();
+    await service.redeemOverRelay({ code: CODE, deviceName: 'Tablet' });
+
+    // Assert
+    should(results.map(result => result.kind)).deepEqual(['paired', 'refused']);
+    should(
+      records(journal)
+        .filter(record => record.event === 'device.paired')
+        .map(record => [record.subject, record.actor.deviceName, record.detail?.carrier]),
+    ).deepEqual([
+      [FIRST_DEVICE, 'Pixel 8', 'direct'],
+      [`fy_device_id_${'1'.padStart(22, 'd')}`, 'Tablet', 'relay'],
+    ]);
+  });
+
+  it('should fold a burst of refusals per carrier, through the log', async () => {
     // Arrange
-    const { journal, alerts, service, tick } = pairing();
+    const { journal, alerts, service } = pairing();
 
     // Act
     await service.redeem({ code: 'WRONG' }, 'peer');
     await service.redeem({ code: 'WRONG' }, 'peer');
     await service.redeem({ code: 'WRONG' }, 'peer');
     await service.redeemOverRelay({ code: 'WRONG', deviceName: 'x' });
-    tick(PAIRING_REFUSAL_WINDOW_MS);
-    await service.redeem({ code: 'WRONG' }, 'peer');
-    tick(PAIRING_REFUSAL_WINDOW_MS);
-    await service.redeem({ code: 'WRONG' }, 'peer');
 
     // Assert
     should(records(journal).map(record => [record.event, record.actor.kind, record.detail])).deepEqual([
       ['pairing.refused', 'anonymous', { carrier: 'direct' }],
       ['pairing.refused', 'anonymous', { carrier: 'relay' }],
-      ['pairing.refused', 'anonymous', { carrier: 'direct', earlierRefusals: 2 }],
-      ['pairing.refused', 'anonymous', { carrier: 'direct' }],
     ]);
+    should(journal.stores).deepEqual(['general', 'general']);
     should(alerts).deepEqual([]);
     should(journal.lines.join('\n')).not.containEql('WRONG');
   });
 
-  it('should record a pairing it cannot attribute without alerting anybody', async () => {
+  it('should refuse a device name that would read as a fixed actor, without spending the code', async () => {
     // Arrange
-    const { journal, alerts, service } = pairing();
+    const { journal, alerts, service, devices } = pairing();
     await service.mint();
-    // A grant store that never shows the new device stands in for one that cannot be read back.
-    (service as unknown as { devices: () => Promise<never[]> }).devices = async () => [];
 
     // Act
-    await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    const direct = await service.redeem({ code: CODE, deviceName: 'This  Computer' }, 'peer');
+    const relayed = await service.redeemOverRelay({ code: CODE, deviceName: 'a supervising agent' });
+    const honest = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
 
     // Assert
-    should(records(journal)).deepEqual([
-      {
-        at: AT,
-        event: 'device.paired',
-        actor: { kind: 'device' },
-        outcome: 'succeeded',
-        detail: { carrier: 'direct' },
-      },
+    should([direct.kind, relayed.kind, honest.kind]).deepEqual(['refused', 'refused', 'paired']);
+    should(devices.records.map(record => record.name)).deepEqual(['Pixel 8']);
+    should(alerts.map(alert => alert.deviceName)).deepEqual(['Pixel 8']);
+    should(records(journal).map(record => record.event)).deepEqual([
+      'pairing.refused',
+      'pairing.refused',
+      'device.paired',
     ]);
-    should(alerts).deepEqual([]);
+  });
+
+  it('should still spend a guess when a wrong code carries a reserved name', async () => {
+    // Arrange
+    const { service } = pairing();
+    await service.mint();
+
+    // Act: five wrong guesses expire the code, whatever name they carry.
+    for (let index = 0; index < 5; index += 1)
+      await service.redeem({ code: 'AAAA-AAAA', deviceName: 'this computer' }, 'peer');
+    const late = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+
+    // Assert
+    should(late.kind).equal('refused');
+  });
+
+  it('should pair the device even when the log and the alert both fail', async () => {
+    // Arrange: a sink that is not an AuditLog and throws, and an alert that rejects.
+    const throwing = {
+      record: async () => {
+        throw new Error('disk full');
+      },
+      recent: async () => ({ records: [], unreadable: 0 }),
+      flush: async () => undefined,
+    } as unknown as AuditLog;
+    const { service, failures, devices } = pairing({
+      log: throwing,
+      alert: async () => {
+        throw new Error('push down');
+      },
+    });
+    await service.mint();
+
+    // Act
+    const result = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+
+    // Assert
+    should(result.kind).equal('paired');
+    should(devices.records).have.length(1);
+    should(failures).deepEqual([]);
+  });
+
+  it('should answer the device before the alert has been delivered', async () => {
+    // Arrange: an alert that never settles stands in for a push service that hangs.
+    let started = false;
+    const { service } = pairing({
+      alert: async () => {
+        started = true;
+        await new Promise<void>(() => undefined);
+      },
+    });
+    await service.mint();
+
+    // Act
+    const result = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+
+    // Assert
+    should(result.kind).equal('paired');
+    should(started).be.true();
+  });
+
+  it('should report a rejected alert to the operator, not to the device', async () => {
+    // Arrange
+    const { service, failures } = pairing({
+      alert: async () => {
+        throw 'push down';
+      },
+    });
+    await service.mint();
+
+    // Act
+    const result = await service.redeem({ code: CODE, deviceName: 'Pixel 8' }, 'peer');
+    await Bun.sleep(0);
+
+    // Assert
+    should(result.kind).equal('paired');
+    should(failures).deepEqual([`the other devices could not be told that a device was paired: push down`]);
   });
 
   it('should record a redemption the store refused as a refusal', async () => {
     // Arrange
-    const { journal, service } = pairing({ addFails: true });
+    const { journal, alerts, service } = pairing({ addFails: true });
     await service.mint();
 
     // Act
@@ -581,5 +944,135 @@ describe('AuditedPairingService', () => {
 
     // Assert
     should(records(journal).map(record => record.event)).deepEqual(['pairing.refused']);
+    should(alerts).deepEqual([]);
+  });
+});
+
+class FakeDownstream implements SocketDownstream {
+  send(): number {
+    return 1;
+  }
+  close(): void {}
+  bufferedBytes(): number {
+    return 0;
+  }
+}
+
+function socketTable(accept: SocketRoute['accept']) {
+  const { journal, log, failures } = auditLog();
+  const received: SocketFrame[] = [];
+  const routes = AUDITED_SOCKET_ROUTES.map(
+    (rule): SocketRoute => ({ method: 'GET', path: rule.path, minimum: 'operator', accept }),
+  );
+  const fleetFeed: SocketRoute = { method: 'GET', path: '/v1/fleet/events', minimum: 'operator', accept };
+  const wrapped = auditedSocketRoutes(
+    {
+      log,
+      deviceName: async id => (id === DEVICE_ID ? 'Pixel 8' : undefined),
+      failures: { auditWriteFailed: message => failures.push(message) },
+    },
+    [...routes, fleetFeed],
+  );
+  return { journal, failures, received, wrapped, fleetFeed };
+}
+
+function socketContext(params: Record<string, string>, device = true) {
+  return {
+    request: request({ path: '/x' }),
+    params: new Map(Object.entries(params)),
+    ...(device ? { credential: { kind: 'authenticated' as const, tokenClass: 'device' as const, deviceId: DEVICE_ID } } : {}),
+  };
+}
+
+describe('auditedSocketRoutes', () => {
+  it('should record an attach and count binary input per terminal, never its bytes', async () => {
+    // Arrange
+    const received: SocketFrame[] = [];
+    let closed = 0;
+    let opened = 0;
+    const table = socketTable(async () => async () => ({
+      open: async () => void (opened += 1),
+      fromClient: frame => void received.push(frame),
+      close: () => void (closed += 1),
+    }));
+    const terminal = table.wrapped[0];
+
+    // Act
+    const attach = await terminal?.accept(socketContext({ sessionId: 's-1', terminalId: 'term-1' }));
+    const handler = await attach?.(new FakeDownstream());
+    await handler?.open();
+    handler?.fromClient(new TextEncoder().encode('rm -rf secret-keystrokes'));
+    handler?.fromClient(new TextEncoder().encode('ls'));
+    handler?.fromClient('{"type":"resize"}');
+    handler?.close();
+    await Bun.sleep(0);
+
+    // Assert
+    should([opened, closed, received.length]).deepEqual([1, 1, 3]);
+    should(records(table.journal).map(record => [record.event, record.subject, record.actor.deviceName, record.detail])).deepEqual([
+      ['terminal.opened', 'term-1', 'Pixel 8', { mode: 'attach' }],
+      ['terminal.input', 'term-1', 'Pixel 8', undefined],
+    ]);
+    should(table.journal.lines.join('\n')).not.containEql('secret-keystrokes');
+  });
+
+  it('should record a refused attach as refused and still refuse it', async () => {
+    // Arrange
+    const table = socketTable(async () => {
+      throw new ApiError(403, 'no', 'grant_forbidden');
+    });
+
+    // Act
+    const refused = table.wrapped[1]?.accept(socketContext({ sessionId: 's-1' }, false));
+
+    // Assert
+    await should(refused).be.rejectedWith({ status: 403 });
+    should(records(table.journal).map(record => [record.event, record.subject, record.outcome, record.actor])).deepEqual([
+      ['browser.opened', 's-1', 'refused', { kind: 'anonymous' }],
+    ]);
+  });
+
+  it('should pass a browser attach through without wrapping its frames, and leave the fleet feed alone', async () => {
+    // Arrange
+    const attach = async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined });
+    const table = socketTable(async () => attach);
+
+    // Act
+    const browser = await table.wrapped[1]?.accept(socketContext({ sessionId: 's-1' }));
+
+    // Assert
+    should(browser).equal(attach);
+    should(table.wrapped[2]).equal(table.fleetFeed);
+    should(records(table.journal).map(record => record.event)).deepEqual(['browser.opened']);
+  });
+
+  it('should report a record that throws rather than fail the attach', async () => {
+    // Arrange
+    const failures: string[] = [];
+    const attach = async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined });
+    const [route] = auditedSocketRoutes(
+      {
+        log: {
+          record: async () => {
+            throw new Error('disk full');
+          },
+        },
+        deviceName: async () => undefined,
+        failures: { auditWriteFailed: message => failures.push(message) },
+      },
+      [{ method: 'GET', path: AUDITED_SOCKET_ROUTES[0]?.path ?? '', minimum: 'operator', accept: async () => attach }],
+    );
+
+    // Act
+    const handler = await (await route?.accept(socketContext({ sessionId: 's', terminalId: 't' })))?.(new FakeDownstream());
+    handler?.fromClient(new Uint8Array([1]));
+    await Bun.sleep(0);
+
+    // Assert
+    should(handler).not.be.undefined();
+    should(failures).deepEqual([
+      'the security log could not record a terminal.opened event, so it has a gap: disk full',
+      'the security log could not record a terminal.input event, so it has a gap: disk full',
+    ]);
   });
 });

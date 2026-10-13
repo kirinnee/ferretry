@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
+import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../../src/lib/audit/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import {
@@ -16,6 +17,7 @@ import {
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
+import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
   analyticsSubsystem,
@@ -434,6 +436,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     log: { record: async () => undefined },
     recent: async () => ({ records: [], unreadable: 0 }),
     deviceName: async () => undefined,
+    flush: async () => undefined,
+    failures: { auditWriteFailed: () => undefined },
   },
   socketTickets: new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` }),
 });
@@ -902,5 +906,40 @@ describe('the mounted daemon surface', () => {
     // And a LOOPBACK caller is unaffected: somebody at the machine already has the machine.
     const local = await sockets.upgrade(request({ path, headers: human, loopback: true }));
     should(local.outcome === 'refused' ? local.response.status : 0).equal(404);
+  });
+});
+
+describe('the audited surface', () => {
+  const routes = mountedDaemonRoutes(base, subsystems()).map(route => `${route.method} ${route.path}`);
+  const sockets = mountedSocketRoutes(subsystems()).map(route => `${route.method} ${route.path}`);
+  const audited = AUDITED_ROUTES.map(rule => `${rule.method} ${rule.path}`);
+  const auditedSockets = AUDITED_SOCKET_ROUTES.map(rule => `GET ${rule.path}`);
+
+  it('should record or explicitly excuse every route that changes something', () => {
+    const unreviewed = routes
+      .filter(route => !route.startsWith('GET '))
+      .filter(route => !audited.includes(route) && NOT_AUDITED[route] === undefined);
+    should(unreviewed).eql([]);
+  });
+
+  it('should record or explicitly excuse every socket', () => {
+    should(sockets.filter(route => !auditedSockets.includes(route) && NOT_AUDITED_SOCKETS[route] === undefined)).eql(
+      [],
+    );
+  });
+
+  it('should keep no stale rule and no stale excuse', () => {
+    // A rule for a route that is not mounted records nothing, and an excuse for one that is audited, or
+    // is gone, is a review that no longer describes the code.
+    should(audited.filter(route => !routes.includes(route))).eql([]);
+    should(auditedSockets.filter(route => !sockets.includes(route))).eql([]);
+    should(Object.keys(NOT_AUDITED).filter(route => !routes.includes(route) || audited.includes(route))).eql([]);
+    should(
+      Object.keys(NOT_AUDITED_SOCKETS).filter(route => !sockets.includes(route) || auditedSockets.includes(route)),
+    ).eql([]);
+  });
+
+  it('should give every excuse a reason', () => {
+    should(Object.values({ ...NOT_AUDITED, ...NOT_AUDITED_SOCKETS }).filter(reason => reason.length < 20)).eql([]);
   });
 });

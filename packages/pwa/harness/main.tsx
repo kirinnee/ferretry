@@ -726,7 +726,7 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
     label: 'Security',
     description: 'Recent pairings, removals, refused attempts and other security events on this machine.',
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-      <SecuritySurface connection={connection} createClient={harnessSecurityClient} storage={undefined} />
+      <SecuritySurface connection={connection} createClient={harnessSecurityClient} />
     ),
   },
 ];
@@ -805,9 +805,9 @@ const HARNESS_NOTICE_DEVICE = {
   createdAt: harnessMinutesAgo(5),
   lastSeenAt: harnessMinutesAgo(5),
 } as const;
-/** "Looked" an hour ago, in memory only, so the device above is news on every load. */
+/** Nothing seen yet, in memory only, so the device above is news on every load. */
 const HARNESS_NOTICE_STORAGE = {
-  getItem: () => String(Date.now() - 60 * 60_000),
+  getItem: () => '[]',
   setItem: () => undefined,
 };
 

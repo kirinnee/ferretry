@@ -474,6 +474,8 @@ describe('PairingService redemption', () => {
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
         tokenHash: `hash:${DAEMON_ID}:${DEVICE_TOKEN.length}`,
+        // How it arrived, so every other device can be told "over the relay" or "on the local network".
+        pairedOver: 'direct',
       },
     ]);
     should(JSON.stringify(devices.records)).not.containEql(DEVICE_TOKEN);
@@ -781,9 +783,27 @@ describe('PairingService revocation', () => {
         platform: 'browser',
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
+        pairedOver: 'direct',
       },
     ]);
     should(JSON.stringify(listed)).not.containEql('tokenHash');
+  });
+
+  it('should project a device that predates the carrier field without inventing one', async () => {
+    // Arrange
+    const { devices, service, mint } = fixture();
+    await mint();
+    await service.redeem({ code: CODE, deviceName: 'Ernest phone' }, 'peer-one');
+    const stored = devices.records[0];
+    if (stored === undefined) throw new Error('expected a device');
+    const { pairedOver: _carrier, ...older } = stored;
+    devices.records[0] = older;
+
+    // Act
+    const listed = await service.devices();
+
+    // Assert
+    should(listed[0]).not.have.property('pairedOver');
   });
 
   it('should end a revoked device’s access for the very next request', async () => {
@@ -1083,6 +1103,9 @@ describe('PairingService redemption over a relay', () => {
     should(redemption.response.daemonId).equal(DAEMON_ID);
     should(devices.records).have.length(1);
     should(devices.records[0]?.name).equal('phone');
+    // Assert — the carrier is kept and projected, so the other devices' notice can say "over the relay".
+    should(devices.records[0]?.pairedOver).equal('relay');
+    should((await service.devices())[0]?.pairedOver).equal('relay');
     // Assert — single-use, on either carrier.
     should((await service.redeemOverRelay({ code: CODE, deviceName: 'again' })).kind).equal('refused');
   });
