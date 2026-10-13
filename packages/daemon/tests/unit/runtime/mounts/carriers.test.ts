@@ -33,11 +33,7 @@ const asCaller = (headers: Readonly<Record<string, string>>) => ({
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
 
 function dispatcher(carriers: readonly DaemonCarrier[] = CARRIERS): ApiDispatcher {
-  return new ApiDispatcher(
-    new ApiRouter(carrierRoutes(carriers)),
-    CREDENTIALS,
-    NO_GOVERNED_ROUTES_GUARD,
-  );
+  return new ApiDispatcher(new ApiRouter(carrierRoutes(carriers)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 async function ask(headers: Readonly<Record<string, string>>, carriers?: readonly DaemonCarrier[]) {

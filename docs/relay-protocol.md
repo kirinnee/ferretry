@@ -28,10 +28,10 @@ address reachable when the daemon has no inbound route.
 There are two **kinds** of carrier and one security model across both. A daemon may hold several of
 the second kind, and which ones exist is the daemon's answer rather than the browser's.
 
-| Carrier    | What it is                                                                    | Where it belongs                                                              |
-| ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Direct** | The browser opens a WebSocket straight at the daemon, and runs a session on it. | Attempted first, automatically, whenever the daemon is reachable.           |
-| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read. | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
+| Carrier    | What it is                                                                      | Where it belongs                                                              |
+| ---------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Direct** | The browser opens a WebSocket straight at the daemon, and runs a session on it. | Attempted first, automatically, whenever the daemon is reachable.             |
+| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read.   | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
 
 **Neither is a question a conforming product asks.** The required behaviour is: try every direct
 carrier the daemon published first, because direct has fewer hops and fewer observers; then each
@@ -1652,7 +1652,7 @@ device that paired reconnects as an ordinary request session, proving the key it
    machine directly and never constructs an `ApiRequest`: a pre-auth session issues no requests at
    all, so §14's invariant — a session's request carries exactly one credential, the proof its
    session was opened with — stays literally true, and no route is reachable pre-auth, `minimum:
-   'none'` routes included. The alternative — dispatching an anonymous request at a public route —
+'none'` routes included. The alternative — dispatching an anonymous request at a public route —
    would create the credential-less request path whose absence is the whole reason §14's invariant
    is easy to defend.
 2. **Host credentials remain impossible.** The pairing branch reads no `authorization`, resolves no

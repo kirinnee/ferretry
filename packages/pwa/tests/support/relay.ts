@@ -333,7 +333,11 @@ export const autoDial = (
           if (answer.devicePublicKey === undefined) return false;
           if (await daemon.proves(message, answer.devicePublicKey)) return false;
           socket.onBinary?.(
-            controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.authRejected, reason: 'device proof refused' }),
+            controlFrame(sessionId, {
+              t: 'closed',
+              code: RELAY_CLOSE_CODES.authRejected,
+              reason: 'device proof refused',
+            }),
           );
           return true;
         };
@@ -497,7 +501,6 @@ export const keyedDaemon = async (baseUrl: string, carriers?: Parameters<typeof 
   });
   return { identity, daemon, deviceKeys };
 };
-
 
 /** One daemon a {@link fetcherDaemons} network serves, on the host its direct address names. */
 export interface FetcherDaemon {

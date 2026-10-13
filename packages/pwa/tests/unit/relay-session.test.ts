@@ -119,14 +119,20 @@ describe('the relay tunnel codec', () => {
     should(decodeTunnelDaemonMessage(utf8Bytes('{"t":"oversize","id":1,"status":200,"byteLength":9}'))).be.null();
     // The previous dialect is not this one, however it is otherwise shaped.
     should(
-      decodeTunnelDaemonMessage(utf8Bytes(`{"t":"authenticated","protocol":"ferretry-relay/1","accessExpiresAt":"${LEASE_ENDS}"}`)),
+      decodeTunnelDaemonMessage(
+        utf8Bytes(`{"t":"authenticated","protocol":"ferretry-relay/1","accessExpiresAt":"${LEASE_ENDS}"}`),
+      ),
     ).be.null();
     should(MAX_TUNNEL_REQUEST_ID).equal(0xffff_ffff);
   });
 
   it('should encode a client message as one JSON object', () => {
     const encoded = encodeTunnelClientMessage({ t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof: 'p' });
-    should(JSON.parse(new TextDecoder().decode(encoded))).eql({ t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof: 'p' });
+    should(JSON.parse(new TextDecoder().decode(encoded))).eql({
+      t: 'renewed',
+      protocol: SESSION_PROTOCOL_ID,
+      proof: 'p',
+    });
   });
 });
 
@@ -521,7 +527,9 @@ describe('a relay session whose daemon is from before device keys', () => {
         kind: FRAME_KINDS.handshake,
         sessionId,
         sequence: 0,
-        payload: utf8Bytes(JSON.stringify({ t: 'hs2', protocol: 'ferretry-relay/1', epk: 'x', nonce: 'y', spki: 'z', sig: 's' })),
+        payload: utf8Bytes(
+          JSON.stringify({ t: 'hs2', protocol: 'ferretry-relay/1', epk: 'x', nonce: 'y', spki: 'z', sig: 's' }),
+        ),
       }),
     );
     const reason = await failure(session.ready());
@@ -532,7 +540,11 @@ describe('a relay session whose daemon is from before device keys', () => {
   it('should name the daemon when it refuses this hello in the words an old daemon uses', async () => {
     const { session } = await opened();
     await session.receiveBinary(
-      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.protocolError, reason: 'unparseable client hello' }),
+      controlFrame(sessionId, {
+        t: 'closed',
+        code: RELAY_CLOSE_CODES.protocolError,
+        reason: 'unparseable client hello',
+      }),
     );
     should((await failure(session.ready())).message).equal(OLDER_DAEMON_SENTENCE);
   });
@@ -540,7 +552,11 @@ describe('a relay session whose daemon is from before device keys', () => {
   it('should NOT blame the daemon for the same refusal once the handshake is past', async () => {
     const { session } = await serving();
     await session.receiveBinary(
-      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.protocolError, reason: 'unparseable client hello' }),
+      controlFrame(sessionId, {
+        t: 'closed',
+        code: RELAY_CLOSE_CODES.protocolError,
+        reason: 'unparseable client hello',
+      }),
     );
     should((await failure(session.request({ method: 'GET', path: '/x' }))).message).not.equal(OLDER_DAEMON_SENTENCE);
   });
@@ -579,7 +595,9 @@ describe('a relay session carrying a body larger than one record', () => {
   it('should refuse a request body over the session limit before sending any of it', async () => {
     const { session, socket } = await serving();
     const before = socket.sent.length;
-    const refusal = await failure(session.request({ method: 'POST', path: '/x', body: 'b'.repeat(MAX_TUNNEL_BODY_BYTES + 1) }));
+    const refusal = await failure(
+      session.request({ method: 'POST', path: '/x', body: 'b'.repeat(MAX_TUNNEL_BODY_BYTES + 1) }),
+    );
     should(refusal.code).equal(RELAY_CLOSE_CODES.frameTooLarge);
     should(socket.sent.length).equal(before);
     // Refused, not failed: the session is still good for the next request.
@@ -594,7 +612,9 @@ describe('a relay session carrying a body larger than one record', () => {
 
     const restarted = await serving();
     const restartedAnswer = failure(restarted.session.request({ method: 'GET', path: '/a' }));
-    await restarted.session.receiveBinary(await restarted.daemon.record({ t: 'res', id: 1, status: 200, body: 'x', more: true }));
+    await restarted.session.receiveBinary(
+      await restarted.daemon.record({ t: 'res', id: 1, status: 200, body: 'x', more: true }),
+    );
     await restarted.session.receiveBinary(await restarted.daemon.record({ t: 'res', id: 1, status: 200, body: 'y' }));
     should((await restartedAnswer).message).match(/answer part out of order/u);
   });

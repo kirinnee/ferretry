@@ -205,7 +205,10 @@ describe('exchangePairing', () => {
     ).rejects.toThrow('does not match its fingerprint');
 
     await expect(
-      exchangePairing({ ...seed, daemonId: 'not-a-fingerprint' }, { deviceKeys, relayCrypto, relayDial: () => new ScriptedSocket() }),
+      exchangePairing(
+        { ...seed, daemonId: 'not-a-fingerprint' },
+        { deviceKeys, relayCrypto, relayDial: () => new ScriptedSocket() },
+      ),
     ).rejects.toThrow('no carrier could reach this daemon');
     expect(deviceKeys.saved).toEqual([]);
   });
@@ -272,7 +275,13 @@ describe('exchangePairing', () => {
 
     const reason = await exchangePairing(
       { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
-      { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY, directTimeoutMs: 40 },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        directTimeoutMs: 40,
+      },
     ).then(
       () => undefined,
       (thrown: unknown) => thrown,
@@ -358,7 +367,13 @@ describe('exchangePairing', () => {
 
     const connection = await exchangePairing(
       { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
-      { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY, directTimeoutMs: 40 },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        directTimeoutMs: 40,
+      },
     );
 
     expect(String(connection.daemonId)).toBe(identity.daemonId);
@@ -748,7 +763,13 @@ describe('StoreProvider', () => {
       throw new TypeError('Failed to fetch');
     };
     const store = await withRelayDirectory(RELAY_DIRECTORY, async () =>
-      createAppStore({ repository, deviceKeys, relayCrypto, relayDial: route.dial, fetcher: fetcher(HOSTED_RELAY_URL) }),
+      createAppStore({
+        repository,
+        deviceKeys,
+        relayCrypto,
+        relayDial: route.dial,
+        fetcher: fetcher(HOSTED_RELAY_URL),
+      }),
     );
     store.connections.add(daemon);
 

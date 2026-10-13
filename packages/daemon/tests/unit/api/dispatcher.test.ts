@@ -188,7 +188,9 @@ describe('ApiDispatcher authorization', () => {
     const outdated = await dispatcher.dispatch(
       request({ path: '/v1/sessions', headers: { authorization: `Bearer fy_device_${'b'.repeat(43)}` } }),
     );
-    const stranger = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: { authorization: 'Bearer nope' } }));
+    const stranger = await dispatcher.dispatch(
+      request({ path: '/v1/sessions', headers: { authorization: 'Bearer nope' } }),
+    );
 
     should(outdated.status).equal(426);
     should(jsonBody(outdated)).containDeep({ code: 'app_outdated' });
@@ -229,9 +231,7 @@ describe('ApiDispatcher authorization', () => {
   it('should let a paired device use operator routes but never an admin-token route', async () => {
     const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'), echo('/v1/pair/code', 'admin-token', 'POST'));
 
-    const operator = await dispatcher.dispatch(
-      request({ path: '/v1/sessions', device: DEVICE }),
-    );
+    const operator = await dispatcher.dispatch(request({ path: '/v1/sessions', device: DEVICE }));
     const hostOnly = await dispatcher.dispatch(
       request({
         method: 'POST',

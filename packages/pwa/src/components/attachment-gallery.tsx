@@ -69,7 +69,6 @@ const browserBlobUrls: AttachmentBlobUrlPort = {
 /** The daemon read, injected so a test or the visual harness stays offline. */
 export type AttachmentBlobLoader = (daemon: DaemonConnection, scope: DaemonAttachmentScope) => Promise<Blob>;
 
-
 interface GalleryEnvironment {
   readonly cache: DaemonAttachmentBlobCache | null;
   /**

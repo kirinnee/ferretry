@@ -21,7 +21,7 @@ import {
 import should from 'should';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
-const deviceId = `fy_device_id_${"b".repeat(22)}`;
+const deviceId = `fy_device_id_${'b'.repeat(22)}`;
 const pairingId = `fy_pair_${'c'.repeat(22)}`;
 
 const DAEMON_URL = 'https://workstation.example.test';
@@ -132,8 +132,10 @@ describe('pairing protocol', () => {
     should(PairingResponseSchema.safeParse({ ...response, carriers: [], surprise: true }).success).be.false();
     should(PairedDeviceIdSchema.parse(deviceId)).equal(deviceId);
     should(DaemonIdSchema.parse(daemonId)).equal(daemonId);
-    should(PairedDeviceIdSchema.safeParse(`fy_device_${"b".repeat(43)}`).success).be.false();
-    should(PairingResponseSchema.safeParse({ ...response, deviceToken: `fy_device_${"b".repeat(43)}` }).success).be.false();
+    should(PairedDeviceIdSchema.safeParse(`fy_device_${'b'.repeat(43)}`).success).be.false();
+    should(
+      PairingResponseSchema.safeParse({ ...response, deviceToken: `fy_device_${'b'.repeat(43)}` }).success,
+    ).be.false();
     should(DaemonIdSchema.safeParse('fingerprint').success).be.false();
     should(PairingResponseSchema.safeParse({ ...response, daemonName: 'workstation\u202E' }).success).be.false();
   });

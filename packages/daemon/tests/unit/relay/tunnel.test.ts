@@ -37,7 +37,13 @@ const request = (patch: Record<string, unknown> = {}): unknown => ({
 describe('the session tunnel envelope', () => {
   it('should read a device claim and a request, and refuse everything that is not one', () => {
     // Assert — the claim is an identity, an app session and a proof; there is no token to carry.
-    const claim = { t: 'auth', protocol: 'ferretry-relay/2', deviceId: DEVICE_ID, appSession: APP_SESSION, proof: PROOF };
+    const claim = {
+      t: 'auth',
+      protocol: 'ferretry-relay/2',
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof: PROOF,
+    };
     should(decodeTunnelClientMessage(record(claim))).containDeep({ t: 'auth', deviceId: DEVICE_ID });
     should(decodeTunnelClientMessage(record({ ...claim, protocol: 'ferretry-relay/1' }))).be.null();
     should(decodeTunnelClientMessage(record({ ...claim, deviceToken: 'fy_device_x' }))).be.null();
@@ -51,9 +57,11 @@ describe('the session tunnel envelope', () => {
     should(decodeTunnelClientMessage(record(request({ body: 'x', more: true })))).containDeep({ more: true });
     should(decodeTunnelClientMessage(record(request({ more: false })))).be.null();
     should(decodeTunnelClientMessage(record({ t: 'req-more', id: 1, body: 'y' }))).containDeep({ t: 'req-more' });
-    should(decodeTunnelClientMessage(record({ t: 'renewed', protocol: 'ferretry-relay/2', proof: PROOF }))).containDeep({
-      t: 'renewed',
-    });
+    should(decodeTunnelClientMessage(record({ t: 'renewed', protocol: 'ferretry-relay/2', proof: PROOF }))).containDeep(
+      {
+        t: 'renewed',
+      },
+    );
 
     // Assert — a request may not carry its own credential.
     should(decodeTunnelClientMessage(record(request({ headers: { authorization: 'Bearer host-token' } })))).be.null();
@@ -152,7 +160,8 @@ describe('the session tunnel envelope', () => {
       should(messages[0]).containDeep({ t: 'res', id: 4, status: 200, more: true });
       for (const message of messages.slice(1, -1)) should(message).containDeep({ t: 'res-more', id: 4, more: true });
       should(messages.at(-1)).not.have.property('more');
-      for (const message of messages) should(encodeTunnelMessage(message).byteLength).not.be.greaterThan(MAX_PLAINTEXT_BYTES);
+      for (const message of messages)
+        should(encodeTunnelMessage(message).byteLength).not.be.greaterThan(MAX_PLAINTEXT_BYTES);
       should(reassemble(messages)).equal(body);
     });
 

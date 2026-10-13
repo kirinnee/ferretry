@@ -14,13 +14,13 @@ rationale and the threat model are [design/zero-trust.md](design/zero-trust.md) 
 
 ## What travels, and what never does
 
-| value              | where it lives                                                 | who may read it                                         |
-| ------------------ | -------------------------------------------------------------- | ------------------------------------------------------- |
-| pairing code       | the daemon's memory for its TTL, and one screen                | whoever is being shown the code                         |
-| pairing id         | the mint response, and revoke URLs                             | anybody who may reach the pairing API                   |
-| device private key | the redeeming browser's IndexedDB, **non-extractable**         | nobody — the browser will sign with it but never export |
-| device public key  | `state/devices.json` (SPKI), and the sealed `pair` record      | the daemon, to verify each session's proof against      |
-| device id          | the device, and `devices.json`                                 | names a grant; proves nothing on its own                |
+| value              | where it lives                                            | who may read it                                         |
+| ------------------ | --------------------------------------------------------- | ------------------------------------------------------- |
+| pairing code       | the daemon's memory for its TTL, and one screen           | whoever is being shown the code                         |
+| pairing id         | the mint response, and revoke URLs                        | anybody who may reach the pairing API                   |
+| device private key | the redeeming browser's IndexedDB, **non-extractable**    | nobody — the browser will sign with it but never export |
+| device public key  | `state/devices.json` (SPKI), and the sealed `pair` record | the daemon, to verify each session's proof against      |
+| device id          | the device, and `devices.json`                            | names a grant; proves nothing on its own                |
 
 Two properties hold by construction rather than by discipline:
 

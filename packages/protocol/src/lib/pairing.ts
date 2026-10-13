@@ -499,7 +499,7 @@ export const PairedDeviceSchema = z.strictObject({
   lastSeenAt: InstantSchema,
   idleExpiresAt: InstantSchema,
 });
-export type PairedDevice= z.infer<typeof PairedDeviceSchema>;
+export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
 
 /**
  * Who may reach one daemon, plus the two facts a UI needs before it offers to change that.

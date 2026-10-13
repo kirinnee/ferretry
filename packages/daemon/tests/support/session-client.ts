@@ -184,8 +184,15 @@ export class TestSession {
       ...(options.headers === undefined ? {} : { headers: options.headers }),
       ...(options.body === undefined ? {} : { body: options.body }),
     });
-    const answer = (await this.next()) as { t: string; id: number; status: number; headers?: Record<string, string>; body?: string };
-    if (answer.t !== 'res' || answer.id !== id) throw new Error(`expected the answer to ${id}, got ${JSON.stringify(answer)}`);
+    const answer = (await this.next()) as {
+      t: string;
+      id: number;
+      status: number;
+      headers?: Record<string, string>;
+      body?: string;
+    };
+    if (answer.t !== 'res' || answer.id !== id)
+      throw new Error(`expected the answer to ${id}, got ${JSON.stringify(answer)}`);
     return { status: answer.status, headers: answer.headers ?? {}, body: answer.body ?? '' };
   }
 
@@ -246,7 +253,12 @@ export class TestSession {
     if (owed === 0) return;
     this.#receive = recordCredited(this.#receive, owed);
     this.socket.send(
-      encodeFrame({ kind: FRAME_KINDS.credit, sessionId: frame.sessionId, sequence: 0, payload: encodeCreditPayload(owed) }),
+      encodeFrame({
+        kind: FRAME_KINDS.credit,
+        sessionId: frame.sessionId,
+        sequence: 0,
+        payload: encodeCreditPayload(owed),
+      }),
     );
   }
 
@@ -287,6 +299,7 @@ export async function deviceSession(
 ): Promise<TestSession> {
   const session = await TestSession.open(baseUrl, daemonId, { kind: 'auth', deviceId, device }, options);
   const accepted = (await session.next()) as { t: string };
-  if (accepted.t !== 'authenticated') throw new Error(`the daemon did not accept the device: ${JSON.stringify(accepted)}`);
+  if (accepted.t !== 'authenticated')
+    throw new Error(`the daemon did not accept the device: ${JSON.stringify(accepted)}`);
   return session;
 }

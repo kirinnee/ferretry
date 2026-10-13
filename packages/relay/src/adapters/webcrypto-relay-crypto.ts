@@ -161,7 +161,10 @@ export class WebCryptoRelayCrypto implements RelayCrypto {
    * ever stores about this device.
    */
   async generateDeviceKey(): Promise<{ readonly publicKeySpki: Uint8Array; readonly privateKey: CryptoKey }> {
-    const pair = (await this.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+    const pair = (await this.subtle.generateKey({ name: 'Ed25519' }, false, [
+      'sign',
+      'verify',
+    ])) as unknown as CryptoKeyPair;
     return { publicKeySpki: bytesOf(await this.subtle.exportKey('spki', pair.publicKey)), privateKey: pair.privateKey };
   }
 

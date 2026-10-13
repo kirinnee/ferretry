@@ -260,9 +260,9 @@ describe('PairingScreen exchange', () => {
 
     await interact(() => buttonNamed(screen.container, 'Pair this device').click());
 
-    expect(must(screen.container.querySelector('[data-pairing-failure="stated"]'), 'the stated failure').textContent).toBe(
-      UNSUPPORTED_DEVICE_KEY_SENTENCE,
-    );
+    expect(
+      must(screen.container.querySelector('[data-pairing-failure="stated"]'), 'the stated failure').textContent,
+    ).toBe(UNSUPPORTED_DEVICE_KEY_SENTENCE);
     expect(screen.container.textContent).not.toContain('its code is probably still good');
     await screen.unmount();
   });

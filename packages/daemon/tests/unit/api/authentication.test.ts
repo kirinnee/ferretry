@@ -135,7 +135,6 @@ describe('authenticate', () => {
     // Assert
     should(result).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
-
 });
 
 describe('isPreKeyDeviceToken', () => {

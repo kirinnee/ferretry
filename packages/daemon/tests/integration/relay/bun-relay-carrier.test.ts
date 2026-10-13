@@ -632,9 +632,7 @@ describe('what a stopped carrier owes a live stream', () => {
     const sealed = await sealRecord(
       relayCrypto,
       openChannel(sessionId, completed.keys, 'client'),
-      utf8Bytes(
-        JSON.stringify({ ...(await claim('stream', completed.keys.transcriptHash)), path: '/v1/events' }),
-      ),
+      utf8Bytes(JSON.stringify({ ...(await claim('stream', completed.keys.transcriptHash)), path: '/v1/events' })),
     );
     if (!sealed.ok) throw new Error(sealed.reason);
     socket.onmessage?.({ data: encodeFrame(sealed.frame) });

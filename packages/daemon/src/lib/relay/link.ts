@@ -951,7 +951,11 @@ export class RelayLink {
       return;
     }
     if (session.incoming.size >= MAX_INCOMING_BODIES) {
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'too many request bodies are arriving at once');
+      this.#endSession(
+        session.sessionId,
+        RELAY_CLOSE_CODES.protocolError,
+        'too many request bodies are arriving at once',
+      );
       return;
     }
     const bytes = utf8Bytes(first).byteLength;

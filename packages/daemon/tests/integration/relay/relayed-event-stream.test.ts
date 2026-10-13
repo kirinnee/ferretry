@@ -201,7 +201,10 @@ describe('a live event stream carried by a rendezvous', () => {
       socket: sent.socket,
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
       sockets: async request => await socketDispatcher(events).upgrade(request),
-      devices: { deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined), seen: () => undefined },
+      devices: {
+        deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
+        seen: () => undefined,
+      },
       connections: new LiveDeviceConnections(),
       pairing: { redeemInSession: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
       clock: { now: () => Date.now() },
@@ -319,7 +322,10 @@ describe('a live event stream carried by a rendezvous', () => {
       socket: sent.socket,
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
       sockets: async request => await socketDispatcher(events).upgrade(request),
-      devices: { deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined), seen: () => undefined },
+      devices: {
+        deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
+        seen: () => undefined,
+      },
       connections: new LiveDeviceConnections(),
       pairing: { redeemInSession: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
       clock: { now: () => Date.now() },

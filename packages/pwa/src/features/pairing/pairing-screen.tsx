@@ -479,19 +479,19 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
           the only step that was working.
         */}
         {stage.cause !== 'stated' && (
-        <p className="m-0 text-meta leading-base text-muted">
-          {stage.cause === 'refusal' ? (
-            <>
-              Pairing codes are single-use and short-lived. Run <code className="font-mono">fy pair</code> again for a
-              fresh one.
-            </>
-          ) : (
-            <>
-              Nothing reached that daemon, so its code is probably still good. Check that the machine is awake and on a
-              network this device can reach, then try the same link again.
-            </>
-          )}
-        </p>
+          <p className="m-0 text-meta leading-base text-muted">
+            {stage.cause === 'refusal' ? (
+              <>
+                Pairing codes are single-use and short-lived. Run <code className="font-mono">fy pair</code> again for a
+                fresh one.
+              </>
+            ) : (
+              <>
+                Nothing reached that daemon, so its code is probably still good. Check that the machine is awake and on
+                a network this device can reach, then try the same link again.
+              </>
+            )}
+          </p>
         )}
         <button
           type="button"

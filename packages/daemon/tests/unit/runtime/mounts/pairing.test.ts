@@ -1,10 +1,5 @@
 import { describe, it } from 'bun:test';
-import type {
-  PairedDevice,
-  PairingCodeMintResponse,
-  PairingCodeStatusResponse,
-  PairingId,
-} from '@ferretry/protocol';
+import type { PairedDevice, PairingCodeMintResponse, PairingCodeStatusResponse, PairingId } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
@@ -87,7 +82,6 @@ class FakePairing implements PairingSubsystem {
     this.granted = remaining;
     return true;
   }
-
 }
 
 const credentials = {
@@ -126,7 +120,9 @@ describe('pairing routes', () => {
     const body = JSON.stringify({ code: '7F3K-Q2ND', deviceName: 'phone' });
 
     const anonymous = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', body }));
-    const host = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', headers: admin, loopback: true, body }));
+    const host = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair', headers: admin, loopback: true, body }),
+    );
 
     should(anonymous.status).equal(426);
     should(host.status).equal(404);
@@ -380,5 +376,4 @@ describe('pairing routes', () => {
     // Assert
     should([minting.status, listing.status]).deepEqual([403, 403]);
   });
-
 });

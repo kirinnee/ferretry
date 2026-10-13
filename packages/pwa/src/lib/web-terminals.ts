@@ -177,7 +177,10 @@ export type TerminalStreamAttach = (
 ) => Promise<TerminalStream>;
 
 /** Opens one §14 stream session on whichever carrier reaches the daemon. */
-export type TerminalStreamOpener = (daemon: DaemonConnection, request: RelayStreamRequest) => Promise<RelayClientSession>;
+export type TerminalStreamOpener = (
+  daemon: DaemonConnection,
+  request: RelayStreamRequest,
+) => Promise<RelayClientSession>;
 
 /**
  * One terminal as one §14 stream session: no ticket, and the client's own splitting.

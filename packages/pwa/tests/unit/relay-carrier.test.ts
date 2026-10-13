@@ -442,7 +442,9 @@ describe('the carrier router', () => {
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
       deviceId: DEVICE_ID,
-      ...(options.relay === undefined ? {} : { carriers: [{ kind: 'direct' as const, daemonUrl: DAEMON_URL }, options.relay] }),
+      ...(options.relay === undefined
+        ? {}
+        : { carriers: [{ kind: 'direct' as const, daemonUrl: DAEMON_URL }, options.relay] }),
     });
     const carriers = carriersFor(identity, options.reach ?? directOnly, options.answer ?? {});
     const router = new DaemonCarrierRouter({
@@ -476,7 +478,9 @@ describe('the carrier router', () => {
     const { router, daemon, carriers } = await routerFor({ answer: { status: 503 } });
     const stop = router.onConnected(connection => connected.push(connection.daemonId));
 
-    const answers = await Promise.all(['/v1/projects', '/v1/usage', '/v1/sessions'].map(path => router.fetch(`${DAEMON_URL}${path}`)));
+    const answers = await Promise.all(
+      ['/v1/projects', '/v1/usage', '/v1/sessions'].map(path => router.fetch(`${DAEMON_URL}${path}`)),
+    );
     should(answers.map(answer => answer.status)).eql([503, 503, 503]);
     should((await router.fetch(`${DAEMON_URL}/v1/usage`)).status).equal(503);
 
@@ -495,7 +499,12 @@ describe('the carrier router', () => {
       carriers: [{ kind: 'direct', daemonUrl: 'https://other-direct.example' }],
     });
     const carriers = carriersFor(identity, () => 'live');
-    const router = new DaemonCarrierRouter({ crypto: relayCrypto, deviceKey, dial: carriers.dial, heartbeat: () => () => undefined });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: carriers.dial,
+      heartbeat: () => () => undefined,
+    });
     router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
 
     should((await router.fetch(`${DAEMON_URL}/v1/projects?page=2`)).status).equal(200);
@@ -607,7 +616,10 @@ describe('the carrier router', () => {
    */
   it('should try again after a round in which no carrier worked', async () => {
     let reachable = false;
-    const { router, daemon } = await routerFor({ reach: () => (reachable ? 'live' : 'refuse'), answer: { body: 'back' } });
+    const { router, daemon } = await routerFor({
+      reach: () => (reachable ? 'live' : 'refuse'),
+      answer: { body: 'back' },
+    });
 
     await should(router.fetch(`${DAEMON_URL}/v1/projects`)).be.rejectedWith(/No configured connection worked/u);
     should(router.choice(daemon.daemonId)?.ok).be.false();
@@ -725,7 +737,9 @@ describe('the carrier router', () => {
     const socket = carriers.live.sockets[0];
     const withdrawn = daemonConnection({ ...daemon, carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }] });
 
-    await should(router.send(withdrawn, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(/No configured connection worked/u);
+    await should(router.send(withdrawn, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(
+      /No configured connection worked/u,
+    );
     await settle(5);
 
     should(router.choice(daemon.daemonId)?.ok).be.false();
@@ -959,9 +973,9 @@ describe('the carrier router', () => {
     const lease = { code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, reason: 'the access lease ended' };
     const { router, daemon, auto } = await routerFor({ answer: { closeOnRequest: () => lease } });
 
-    await should(
-      router.send(daemon, `${DAEMON_URL}/v1/sessions`, { method: 'POST', body: '{}' }),
-    ).be.rejectedWith(/access lease on this session ended/u);
+    await should(router.send(daemon, `${DAEMON_URL}/v1/sessions`, { method: 'POST', body: '{}' })).be.rejectedWith(
+      /access lease on this session ended/u,
+    );
     should(auto.requests).have.length(1);
   });
 
@@ -1150,12 +1164,24 @@ describe('the carrier router opening a stream', () => {
 
   it('should open a stream on direct first when nothing has been measured, and decide the carrier', async () => {
     const { router, daemon, carriers } = await streamRouter(() => 'live');
-    const session = await router.openStream(daemon, { path: '/v1/events', query: [['after', '1']], onData: () => undefined });
+    const session = await router.openStream(daemon, {
+      path: '/v1/events',
+      query: [['after', '1']],
+      onData: () => undefined,
+    });
     should(session.streaming()).be.true();
     should(carriers.hosts()).eql([DIRECT_HOST]);
     should(router.activeMethod(daemon.daemonId)).eql({ kind: 'direct', daemonUrl: DAEMON_URL });
     should(carriers.live.requests).eql([
-      { t: 'stream', protocol: SESSION_PROTOCOL_ID, deviceId: DEVICE_ID, appSession: (carriers.live.requests[0] as { appSession: string }).appSession, proof: (carriers.live.requests[0] as { proof: string }).proof, path: '/v1/events', query: [['after', '1']] },
+      {
+        t: 'stream',
+        protocol: SESSION_PROTOCOL_ID,
+        deviceId: DEVICE_ID,
+        appSession: (carriers.live.requests[0] as { appSession: string }).appSession,
+        proof: (carriers.live.requests[0] as { proof: string }).proof,
+        path: '/v1/events',
+        query: [['after', '1']],
+      },
     ]);
   });
 
@@ -1189,7 +1215,11 @@ describe('the carrier router opening a stream', () => {
     const identity = await newDaemonIdentity();
     const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const carriers = carriersFor(identity, () => 'live');
-    const router = new DaemonCarrierRouter({ crypto: relayCrypto, deviceKey: async () => undefined, dial: carriers.dial });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey: async () => undefined,
+      dial: carriers.dial,
+    });
     router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
     await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
       DeviceKeyMissingError,

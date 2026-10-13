@@ -131,7 +131,9 @@ describe('end-to-end handshake', () => {
   it('should recognise a peer from before the device key, and only that', async () => {
     const { pending } = await handshake();
     should(speaksPreviousSessionProtocol(encodeHandshakeMessage(pending.hello))).be.false();
-    should(speaksPreviousSessionProtocol(utf8Bytes(JSON.stringify({ ...pending.hello, protocol: 'ferretry-relay/1' })))).be.true();
+    should(
+      speaksPreviousSessionProtocol(utf8Bytes(JSON.stringify({ ...pending.hello, protocol: 'ferretry-relay/1' }))),
+    ).be.true();
     should(speaksPreviousSessionProtocol(utf8Bytes('null'))).be.false();
     should(speaksPreviousSessionProtocol(utf8Bytes('not json'))).be.false();
   });

@@ -592,7 +592,11 @@ describe('a relayed session', () => {
     const session = await openSession(link, sent, sessionOne());
 
     // Act
-    let channel = await clientSend(link, session.channel, { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
     channel = await clientSend(link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/big' });
     const read = await clientReadAll(sent, session.channel);
 
@@ -609,10 +613,21 @@ describe('a relayed session', () => {
     await link.receiveBinary(challenge());
     await link.receiveBinary(claimed());
     const session = await openSession(link, sent, sessionOne());
-    let channel = await clientSend(link, session.channel, { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
 
     // Act
-    channel = await clientSend(link, channel, { t: 'req', id: 2, method: 'PUT', path: '/v1/x', body: 'one-', more: true });
+    channel = await clientSend(link, channel, {
+      t: 'req',
+      id: 2,
+      method: 'PUT',
+      path: '/v1/x',
+      body: 'one-',
+      more: true,
+    });
     channel = await clientSend(link, channel, { t: 'req-more', id: 2, body: 'two-', more: true });
     should(requests).be.empty();
     channel = await clientSend(link, channel, { t: 'req-more', id: 2, body: 'three' });
@@ -631,9 +646,20 @@ describe('a relayed session', () => {
     await link.receiveBinary(challenge());
     await link.receiveBinary(claimed());
     const session = await openSession(link, sent, sessionOne());
-    let channel = await clientSend(link, session.channel, { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
     const part = 'p'.repeat(60_000);
-    channel = await clientSend(link, channel, { t: 'req', id: 4, method: 'PUT', path: '/v1/x', body: part, more: true });
+    channel = await clientSend(link, channel, {
+      t: 'req',
+      id: 4,
+      method: 'PUT',
+      path: '/v1/x',
+      body: part,
+      more: true,
+    });
     const parts = Math.ceil(MAX_TUNNEL_BODY_BYTES / part.length);
     for (let index = 0; index < parts; index += 1) {
       channel = await clientSend(link, channel, { t: 'req-more', id: 4, body: part, more: true });
@@ -654,7 +680,11 @@ describe('a relayed session', () => {
     await link.receiveBinary(challenge());
     await link.receiveBinary(claimed());
     const session = await openSession(link, sent, sessionOne());
-    let channel = await clientSend(link, session.channel, { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
     for (let id = 1; id <= MAX_INCOMING_BODIES + 1; id += 1)
       channel = await clientSend(link, channel, { t: 'req', id, method: 'PUT', path: '/v1/x', body: 'a', more: true });
 
@@ -2052,7 +2082,10 @@ async function heldStreamingLink(which: 'open' | 'seal'): Promise<HeldStream> {
     dispatch: async () => json(200, {}),
     sockets: accepts(stream),
     connections: new LiveDeviceConnections(),
-    devices: { deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined), seen: () => undefined },
+    devices: {
+      deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
+      seen: () => undefined,
+    },
     pairing: { redeemInSession: async () => ({ kind: 'refused' }) },
     clock: TEST_CLOCK,
     scheduler: { after: () => ({ cancel: () => undefined }) },
@@ -2524,7 +2557,10 @@ async function heldCredentialLink(which: 'handshake' | 'open'): Promise<HeldCred
     dispatch: async () => json(200, {}),
     sockets: async () => ({ outcome: 'unclaimed' }),
     connections: new LiveDeviceConnections(),
-    devices: { deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined), seen: () => undefined },
+    devices: {
+      deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
+      seen: () => undefined,
+    },
     pairing: { redeemInSession: async () => ({ kind: 'refused' }) },
     clock: TEST_CLOCK,
     scheduler: {

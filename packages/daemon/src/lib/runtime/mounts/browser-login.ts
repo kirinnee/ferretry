@@ -1,8 +1,4 @@
-import {
-  type BrowserActionResult,
-  BrowserActionSchema,
-  BrowserLoginActionSchema,
-} from '@ferretry/protocol';
+import { type BrowserActionResult, BrowserActionSchema, BrowserLoginActionSchema } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -129,10 +125,7 @@ async function browserAction(browser: BrowserSubsystem, context: RouteContext): 
 /** The real per-session browser routes. The projection is BrowserStatus, which carries the active tab
  * and its complete tab list from the daemon-owned worker rather than a UI-local guess. */
 
-export function browserLoginRoutes(
-  window: BrowserLoginLifecycle,
-  browser?: BrowserSubsystem,
-): readonly ApiRoute[] {
+export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: BrowserSubsystem): readonly ApiRoute[] {
   const sessionRoutes: readonly ApiRoute[] =
     browser === undefined
       ? [

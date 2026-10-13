@@ -1016,13 +1016,18 @@ describe('PairingDeviceRegistry', () => {
   });
 
   it('should answer for a grant by id, forget it, and never resurrect a revoked one on refresh', () => {
-    const registry = new PairingDeviceRegistry(DAEMON_ID, [record(), record({ id: SECOND_DEVICE_ID, publicKey: SECOND_DEVICE_KEY })]);
+    const registry = new PairingDeviceRegistry(DAEMON_ID, [
+      record(),
+      record({ id: SECOND_DEVICE_ID, publicKey: SECOND_DEVICE_KEY }),
+    ]);
     should(registry.get(SECOND_DEVICE_ID)?.publicKey).equal(SECOND_DEVICE_KEY);
     should(registry.remove(FIRST_DEVICE_ID)).be.true();
     should(registry.remove(FIRST_DEVICE_ID)).be.false();
     registry.refresh(record({ lastSeenAt: '2026-08-04T12:00:00.000Z' }));
     should(registry.get(FIRST_DEVICE_ID)).be.undefined();
-    registry.refresh(record({ id: SECOND_DEVICE_ID, publicKey: SECOND_DEVICE_KEY, lastSeenAt: '2026-08-04T12:00:00.000Z' }));
+    registry.refresh(
+      record({ id: SECOND_DEVICE_ID, publicKey: SECOND_DEVICE_KEY, lastSeenAt: '2026-08-04T12:00:00.000Z' }),
+    );
     should(registry.get(SECOND_DEVICE_ID)?.lastSeenAt).equal('2026-08-04T12:00:00.000Z');
     should(registry.all().map(held => held.id)).deepEqual([SECOND_DEVICE_ID]);
   });
@@ -1045,9 +1050,9 @@ describe('PairingService device keys and idle expiry', () => {
     const { service, mint, devices } = fixture();
     await mint();
     for (let attempt = 0; attempt < 5; attempt += 1)
-      should((await redeemDirect(service, { code: CODE, deviceName: 'phone' }, `peer-${attempt}`, { proven: false })).kind).equal(
-        'refused',
-      );
+      should(
+        (await redeemDirect(service, { code: CODE, deviceName: 'phone' }, `peer-${attempt}`, { proven: false })).kind,
+      ).equal('refused');
     // Five unproven attempts spent the code, so even the right one with a proven key is refused now.
     should((await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-last')).kind).equal('refused');
     should(devices.records).be.empty();
@@ -1056,7 +1061,9 @@ describe('PairingService device keys and idle expiry', () => {
   it('should refuse a proven key that is not an Ed25519 public key', async () => {
     const { service, mint } = fixture();
     await mint();
-    const refused = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer', { deviceKey: 'not-a-key' });
+    const refused = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer', {
+      deviceKey: 'not-a-key',
+    });
     should(refused.kind).equal('refused');
   });
 
@@ -1137,7 +1144,9 @@ describe('PairingService device keys and idle expiry', () => {
   it('should expire every idle device at once, and say how many', async () => {
     const { service, clock, mint } = await paired();
     await mint();
-    await redeemDirect(service, { code: SECOND_CODE, deviceName: 'laptop' }, 'peer-two', { deviceKey: SECOND_DEVICE_KEY });
+    await redeemDirect(service, { code: SECOND_CODE, deviceName: 'laptop' }, 'peer-two', {
+      deviceKey: SECOND_DEVICE_KEY,
+    });
     clock.nowMs += 29 * DAY_MS;
     service.seen(SECOND_DEVICE_ID);
     clock.nowMs += DAY_MS;

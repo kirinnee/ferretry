@@ -48,7 +48,19 @@ const ADMIN = 'admin-secret';
 const admin = { authorization: `Bearer ${ADMIN}` };
 /** An Ed25519 SPKI: the fixed DER prefix and 32 key bytes. The session that proved it is not this test's subject. */
 const DEVICE_KEY = Buffer.from([
-  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(5),
+  0x30,
+  0x2a,
+  0x30,
+  0x05,
+  0x06,
+  0x03,
+  0x2b,
+  0x65,
+  0x70,
+  0x03,
+  0x21,
+  0x00,
+  ...new Array(32).fill(5),
 ]).toString('base64url');
 
 /** The push service's own record of what reached it, and what it chooses to answer. */

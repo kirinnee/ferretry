@@ -418,7 +418,10 @@ export const openRelaySession = async ({
 }: OpenRelaySessionOptions): Promise<RelayClientSession> => {
   const url =
     method.kind === 'direct'
-      ? directSessionUrl(daemon, new URL(`/v1/rendezvous/${encodeURIComponent(daemon.daemonId)}/client`, method.daemonUrl))
+      ? directSessionUrl(
+          daemon,
+          new URL(`/v1/rendezvous/${encodeURIComponent(daemon.daemonId)}/client`, method.daemonUrl),
+        )
       : connectionSocketUrl(method, daemon.daemonId, 'client');
   if (url === null) {
     // `connectionSocketUrl` refuses a fingerprint a session cannot be checked against. That
@@ -1135,7 +1138,11 @@ export class DaemonCarrierRouter {
   }
 
   /** One stream session on one carrier, held where unpairing can reach it, evicted when it ends. */
-  async #streamOn(entry: CarrierEntry, method: ConnectionMethod, request: RelayStreamRequest): Promise<RelayClientSession> {
+  async #streamOn(
+    entry: CarrierEntry,
+    method: ConnectionMethod,
+    request: RelayStreamRequest,
+  ): Promise<RelayClientSession> {
     const address = carrierAddress(method);
     const query = request.query ?? [];
     this.#streams += 1;

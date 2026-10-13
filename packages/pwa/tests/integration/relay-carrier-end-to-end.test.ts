@@ -535,7 +535,8 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
 const pairingThatRegisters = (
   bridge: RelayBridge,
   daemonId: string,
-  observe: (attempt: { code: string; deviceName: string; deviceKey: string; proven: boolean }) => void = () => undefined,
+  observe: (attempt: { code: string; deviceName: string; deviceKey: string; proven: boolean }) => void = () =>
+    undefined,
 ): RelayPairingRedeemer => ({
   redeemInSession: async attempt => {
     observe({ ...attempt });
@@ -571,9 +572,13 @@ describe('first pairing and live streams, through the real rendezvous', () => {
     const bridge = new RelayBridge();
     const fresh = await mintDevice(MINTED_DEVICE_ID);
     let redeemed: { code: string; deviceName: string; deviceKey: string; proven: boolean } | undefined;
-    await bridge.admitDaemon(identity, answered('{}'), pairingThatRegisters(bridge, identity.daemonId, attempt => {
-      redeemed = attempt;
-    }));
+    await bridge.admitDaemon(
+      identity,
+      answered('{}'),
+      pairingThatRegisters(bridge, identity.daemonId, attempt => {
+        redeemed = attempt;
+      }),
+    );
 
     const paired = await redeemPairingInSession({
       crypto,

@@ -229,7 +229,12 @@ export const RelayTunnelClientMessageSchema = z.union([
       /** More of this body follows in `req-more` records. */
       more: z.literal(true).optional(),
     }),
-    z.strictObject({ t: z.literal('req-more'), id: RequestIdSchema, body: BodyPartSchema, more: z.literal(true).optional() }),
+    z.strictObject({
+      t: z.literal('req-more'),
+      id: RequestIdSchema,
+      body: BodyPartSchema,
+      more: z.literal(true).optional(),
+    }),
     /** The device's answer to a `renew`: the same key, signing this session's transcript and the nonce. */
     z.strictObject({ t: z.literal('renewed'), protocol: Dialect, proof: DeviceProofSchema }),
     z.strictObject({

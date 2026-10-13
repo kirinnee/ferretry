@@ -274,7 +274,11 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
       // AN OLD MACHINE IS ONE SENTENCE, NOT A CARRIER THAT FAILED. Every other carrier reaches the same
       // daemon, so the walk stops and names the side to update rather than reporting a network fault.
       if (isOutdatedDaemonRefusal(reason)) throw new DaemonOutdatedError();
-      if (method.kind === 'direct' && options.network !== undefined && (await daemonIsOutdated(options.network, method.daemonUrl)))
+      if (
+        method.kind === 'direct' &&
+        options.network !== undefined &&
+        (await daemonIsOutdated(options.network, method.daemonUrl))
+      )
         throw new DaemonOutdatedError();
       if (reason instanceof PairingOutcomeUnknownError) spentUnheard = true;
       first ??= reason instanceof Error ? reason : new Error(String(reason));

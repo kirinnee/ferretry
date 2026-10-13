@@ -170,7 +170,6 @@ export const CREDENTIALS = {
   devices: { has: (_deviceId: string) => true },
 } as const;
 
-
 /** The human's CLI. */
 export const human = { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-client': 'cli' } as const;
 /** An agent calling from inside its own pane. */

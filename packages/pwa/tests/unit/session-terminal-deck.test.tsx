@@ -604,7 +604,12 @@ describe('SessionTerminalDeck theming', () => {
     const repainted = new Promise<void>(resolve => {
       markRepainted = resolve;
     });
-    const stopWatchingTheme = browserTerminalDeckDependencies(async () => new Response(), async () => { throw new Error('unused'); }).watchTheme(() => {
+    const stopWatchingTheme = browserTerminalDeckDependencies(
+      async () => new Response(),
+      async () => {
+        throw new Error('unused');
+      },
+    ).watchTheme(() => {
       repaints += 1;
       markRepainted();
     });

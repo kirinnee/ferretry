@@ -1166,7 +1166,12 @@ describe('a real browser, a compiled daemon and a real relay', () => {
             `the browser still stores a token-shaped field (${stored.tokenFields.join(', ')}); a paired browser holds no bearer value`,
           );
         }
-        if (stored.key === null || !stored.key.isCryptoKey || stored.key.algorithm !== 'Ed25519' || stored.key.extractable) {
+        if (
+          stored.key === null ||
+          !stored.key.isCryptoKey ||
+          stored.key.algorithm !== 'Ed25519' ||
+          stored.key.extractable
+        ) {
           ledger.fail(
             'device-key-only',
             `the device key is not a non-extractable Ed25519 CryptoKey: ${JSON.stringify(stored.key)}. The browser holds: ${stored.shape}`,

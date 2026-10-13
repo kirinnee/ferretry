@@ -41,7 +41,11 @@ import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketDownstream, SocketHandler } from '../../../src/lib/api/socket.ts';
-import { LiveDeviceConnections, type PairingCarrier, type SessionPairingAttempt } from '../../../src/lib/pairing/index.ts';
+import {
+  LiveDeviceConnections,
+  type PairingCarrier,
+  type SessionPairingAttempt,
+} from '../../../src/lib/pairing/index.ts';
 import { MAX_DIRECT_SESSIONS } from '../../../src/lib/relay/direct-carrier.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';
@@ -55,7 +59,10 @@ let deviceKey: PrivateKeyHandle;
 let deviceKeyText: string;
 
 beforeAll(async () => {
-  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as unknown as CryptoKeyPair;
   const der = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
   const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
   identity = await crypto_.importDaemonIdentity(
@@ -303,7 +310,12 @@ describe('the direct carrier', () => {
     const { route } = carrier();
     const spoken = await connect(route);
     spoken.handler.fromClient(
-      encodeFrame({ kind: FRAME_KINDS.control, sessionId: spoken.sessionId, sequence: 0, payload: encodeControlMessage({ t: 'open' }) }),
+      encodeFrame({
+        kind: FRAME_KINDS.control,
+        sessionId: spoken.sessionId,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'open' }),
+      }),
     );
     should(spoken.wire.closes.at(-1)).containDeep({ code: RELAY_CLOSE_CODES.protocolError });
 
@@ -359,4 +371,3 @@ describe('the direct carrier', () => {
     for (const handler of [...held, next.handler]) handler.close();
   });
 });
-

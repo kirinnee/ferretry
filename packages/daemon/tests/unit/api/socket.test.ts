@@ -128,11 +128,7 @@ describe('ApiSocketDispatcher', () => {
     // The device is whoever its SESSION proved — the only way a device is ever a caller now — and that
     // session, not the transport, is what ends the stream when the device is unpaired.
     // Arrange
-    const dispatcher = new ApiSocketDispatcher(
-      new ApiRouter([streamRoute()]),
-      CREDENTIALS,
-      NO_GOVERNED_ROUTES_GUARD,
-    );
+    const dispatcher = new ApiSocketDispatcher(new ApiRouter([streamRoute()]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const device = await dispatcher.upgrade(

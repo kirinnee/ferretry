@@ -63,7 +63,8 @@ class ScriptedIndexedDb implements DeviceKeyDatabaseFactory {
       },
       transaction: (_store: string, _mode: IDBTransactionMode) => ({
         objectStore: () => ({
-          get: (key: string) => (this.failAction !== undefined ? fails(this.failAction) : succeeds(this.values.get(key))),
+          get: (key: string) =>
+            this.failAction !== undefined ? fails(this.failAction) : succeeds(this.values.get(key)),
           put: (value: unknown, key: string) => {
             if (this.failAction !== undefined) return fails(this.failAction);
             this.values.set(key, value);

@@ -276,7 +276,12 @@ describe('the operator password route', () => {
     const credentials = CREDENTIALS;
     const DEVICE = { deviceId: 'device-1', appSession: 'app-one' } as const;
     const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials, NO_GOVERNED_ROUTES_GUARD);
-    const put = (headers: Record<string, string>, password: string, privilegedLoopback?: true, device?: typeof DEVICE) =>
+    const put = (
+      headers: Record<string, string>,
+      password: string,
+      privilegedLoopback?: true,
+      device?: typeof DEVICE,
+    ) =>
       withDevices.dispatch(
         request({
           method: 'PUT',

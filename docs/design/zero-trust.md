@@ -293,10 +293,10 @@ for a while an updated app meets an old `fyd` and an old (cached) app meets an u
 case may surface as a generic connection error. Each is **one plain sentence naming the side to
 update and how**:
 
-| who is newer | what is observed                                                                                                    | the sentence the person reads                                                                                                                                                                                                                |
-| ------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| who is newer | what is observed                                                                                                    | the sentence the person reads                                                                                                                                                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | the app      | the daemon closes the handshake with `4426`, or answers a direct socket upgrade with no session, or `hs2` says `/1` | "This machine is running an older Ferretry than this app. Update it on the machine (brew upgrade --cask ferretry, nix profile upgrade, your apt or dnf upgrade, or the install script again), then run fy daemon restart and pair this device again." |
-| the daemon   | an old app's plain-HTTP request carrying an `fy_device_` bearer token, or an old `hs1` naming `/1`                  | "This app is older than the machine it is talking to. Reload the page (or reopen the installed app) to update it, then pair again."                                                                                                          |
+| the daemon   | an old app's plain-HTTP request carrying an `fy_device_` bearer token, or an old `hs1` naming `/1`                  | "This app is older than the machine it is talking to. Reload the page (or reopen the installed app) to update it, then pair again."                                                                                                                   |
 
 The second row is the daemon's job, because an old app cannot learn new words: an HTTP request with
 a bearer that looks like a pre-key device token is answered `426 Upgrade Required` with that sentence
@@ -429,14 +429,14 @@ Owner decision (2026-10-13). One **Security** section per machine — in the app
 machine, and `fy daemon security` at the host — holds the knobs below. Each has a default and hard
 bounds; a value outside the bounds is refused, never clamped.
 
-| Setting                         | Default    | Bounds                       | Narrower means        |
-| ------------------------------- | ---------- | ---------------------------- | --------------------- |
-| `stepUpWindowMinutes`           | 15         | 0–60 (0 = every time)        | smaller               |
-| `deviceKeyRotationDays`         | 30         | 7–90                         | smaller               |
-| `presenceOnOpen`                | off        | on / off                     | on                    |
-| `presenceValidityHours`         | 8          | 1–24                         | smaller               |
-| `idleExpiryDays`                | 30         | 1–90                         | smaller               |
-| access lease                    | 15 minutes | **fixed, not a setting**     | —                     |
+| Setting                 | Default    | Bounds                   | Narrower means |
+| ----------------------- | ---------- | ------------------------ | -------------- |
+| `stepUpWindowMinutes`   | 15         | 0–60 (0 = every time)    | smaller        |
+| `deviceKeyRotationDays` | 30         | 7–90                     | smaller        |
+| `presenceOnOpen`        | off        | on / off                 | on             |
+| `presenceValidityHours` | 8          | 1–24                     | smaller        |
+| `idleExpiryDays`        | 30         | 1–90                     | smaller        |
+| access lease            | 15 minutes | **fixed, not a setting** | —              |
 
 - **Step-up window.** How long one passkey assertion covers dangerous actions (B1) for one
   `appSession`. `0` asks every time.
@@ -448,7 +448,7 @@ bounds; a value outside the bounds is refused, never clamped.
   sessions with `4441` (so they reopen with the new key), and audits `device.key-rotated`. The old key
   then opens nothing. No extra prompt exists for this: a device that is overdue cannot complete a
   step-up-gated action without rotating in the same ceremony, while plain `fleet.use` keeps working.
-  Lost answer: the browser stores the new key as *pending* before sending and, if the old key is
+  Lost answer: the browser stores the new key as _pending_ before sending and, if the old key is
   refused, tries the pending one once — so a dropped response never strands the device.
 - **Presence on open.** Off by default. When on, a session still opens (the device key is proved as
   always), but every request answers `401 presence_required` until the device completes a passkey
@@ -460,7 +460,7 @@ bounds; a value outside the bounds is refused, never clamped.
   buys a person nothing and only widens how long a revoked or expired device's open channel lives; a
   shorter one costs renewals without a security gain worth a knob. Fixed is simpler and safer.
 
-**Who may change them — the grants.md asymmetry, again.** Changing any setting is a *configure*
+**Who may change them — the grants.md asymmetry, again.** Changing any setting is a _configure_
 action on the `pairing` capability.
 
 - **Narrowing** (a smaller window or period, `presenceOnOpen` → on) is allowed remotely by a device

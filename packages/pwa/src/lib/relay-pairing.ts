@@ -70,7 +70,10 @@ import {
  * session is checked against that fingerprint on BOTH carriers now, and a pairing with nothing to
  * check the daemon against is exactly the session a hostile answerer would like this browser to open.
  */
-export const pairingCandidates = (seed: PairingSeed, hostedRelayUrl: string | undefined): readonly ConnectionMethod[] => {
+export const pairingCandidates = (
+  seed: PairingSeed,
+  hostedRelayUrl: string | undefined,
+): readonly ConnectionMethod[] => {
   if (parseDaemonId(seed.daemonId) === null) return [];
   return [{ kind: 'direct', daemonUrl: seed.daemonUrl }, ...relayPairingCandidates(seed, hostedRelayUrl)];
 };

@@ -397,18 +397,14 @@ describe('a stream session', () => {
   it('should refuse a request answer on a stream session and a data record on a request session', async () => {
     const streaming = await keyed(streamMode);
     const ready = streaming.session.ready();
-    await streaming.session.receiveBinary(
-      await streaming.daemon.record(OPENED),
-    );
+    await streaming.session.receiveBinary(await streaming.daemon.record(OPENED));
     await ready;
     await streaming.session.receiveBinary(await streaming.daemon.record({ t: 'res', id: 1, status: 200 }));
     should(streaming.session.streaming()).be.false();
 
     const serving = await keyed({ kind: 'auth', device: device.claim });
     const authenticated = serving.session.ready();
-    await serving.session.receiveBinary(
-      await serving.daemon.record(ACCEPTED),
-    );
+    await serving.session.receiveBinary(await serving.daemon.record(ACCEPTED));
     await authenticated;
     await serving.session.receiveBinary(await serving.daemon.record({ t: 'data', text: 'x' }));
     should(serving.session.live()).be.false();
@@ -883,7 +879,6 @@ describe('leaving a stream', () => {
 });
 
 describe('the failure shapes the adversarial review named', () => {
-
   /*
    * P1: a consumer that THROWS used to escape into `void session.receiveBinary(bytes)` and become an
    * unhandled rejection, leaving the session in `streaming` with no sealed close and no `4440` — so

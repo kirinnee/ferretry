@@ -768,7 +768,6 @@ export class PairingService {
     };
   }
 
-
   private expire(active: ActivePairing): void {
     if (this.active?.pairingId === active.pairingId) this.active = undefined;
     const current = this.observations.get(active.pairingId);

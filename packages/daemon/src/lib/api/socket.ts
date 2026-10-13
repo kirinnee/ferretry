@@ -165,13 +165,7 @@ export class ApiSocketDispatcher {
   }
 
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
-    const authorized = authorizeRequest(
-      this.router,
-      this.credentials,
-      request,
-      this.guard,
-      this.remedies,
-    );
+    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
     if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
     try {

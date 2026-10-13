@@ -33,7 +33,6 @@ export interface RemoteBrowserTransport {
   ) => Promise<BrowserActionResult>;
 }
 
-
 /** Cancellable repeat, injectable so tests drive the poll instead of waiting. */
 export type RemoteBrowserScheduler = (callback: () => void, intervalMs: number) => () => void;
 

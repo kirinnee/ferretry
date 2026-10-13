@@ -488,7 +488,7 @@ const credentialRecord = async (
 
 /** The widest `req-more` envelope, so a request part is cut to fit beside it. */
 const REQ_MORE_ENVELOPE = utf8Bytes(
-  JSON.stringify({ t: "req-more", id: MAX_TUNNEL_REQUEST_ID, body: "", more: true }),
+  JSON.stringify({ t: 'req-more', id: MAX_TUNNEL_REQUEST_ID, body: '', more: true }),
 ).byteLength;
 
 /** What an OLD daemon says to a `/2` hello it cannot read: its fixed refusal, verbatim. */
@@ -775,7 +775,14 @@ export class RelayClientSession {
     const parts = partitionTunnelBody(body, MAX_PLAINTEXT_BYTES - Math.max(envelope, REQ_MORE_ENVELOPE));
     parts.forEach((part, index) => {
       const more = index < parts.length - 1 ? ({ more: true } as const) : {};
-      if (index === 0) this.#sendRecord({ ...head, t: 'req', id, ...(part === '' && parts.length === 1 && message.body === undefined ? {} : { body: part }), ...more });
+      if (index === 0)
+        this.#sendRecord({
+          ...head,
+          t: 'req',
+          id,
+          ...(part === '' && parts.length === 1 && message.body === undefined ? {} : { body: part }),
+          ...more,
+        });
       else this.#sendRecord({ t: 'req-more', id, body: part, ...more }, true);
     });
     // Watched from here on: the session can end while the outbox drains, and a rejection nobody is
@@ -952,12 +959,19 @@ export class RelayClientSession {
       case 'closed':
         // An old daemon reads a `/2` hello as garbage and says so in its own fixed words. Told
         // which side is old, a person can fix it; told "protocol error", nobody can.
-        if (this.#phase === 'awaiting-hello' && message.code === RELAY_CLOSE_CODES.protocolError && message.reason === PRE_DEVICE_KEY_REFUSAL) {
+        if (
+          this.#phase === 'awaiting-hello' &&
+          message.code === RELAY_CLOSE_CODES.protocolError &&
+          message.reason === PRE_DEVICE_KEY_REFUSAL
+        ) {
           this.#quietly(RELAY_CLOSE_CODES.versionUnsupported, OLDER_DAEMON_SENTENCE);
           return;
         }
         if (message.code === RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE) {
-          this.#quietly(message.code, 'the access lease on this session ended; a new session is opened on the next request');
+          this.#quietly(
+            message.code,
+            'the access lease on this session ended; a new session is opened on the next request',
+          );
           return;
         }
         this.#quietly(message.code, `the rendezvous ended this session: ${message.code} ${message.reason}`);
