@@ -58,6 +58,7 @@ import {
   MAX_DIRECT_UNPROVEN_PER_PEER,
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../../src/lib/relay/direct-carrier.ts';
+import { transcriptKey } from '../../../src/lib/relay/link.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';
 
@@ -523,7 +524,7 @@ describe('a direct session ending for the reasons a relayed one does', () => {
       appSession: APP_SESSION,
       proof: await signDeviceProof(crypto_, deviceKey, deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION)),
     });
-    return { ...harnessed, handler, wire };
+    return { ...harnessed, handler, wire, transcript };
   }
 
   it('should close the socket when its device is revoked, with the same 4403 an unknown device gets', async () => {
@@ -543,6 +544,23 @@ describe('a direct session ending for the reasons a relayed one does', () => {
     should(shared.endDevice(DEVICE_ID)).equal(2);
     should(relayedEnded).equal(1);
     should(wire.closes.at(-1)?.code).equal(RELAY_CLOSE_CODES.authRejected);
+  });
+
+  it('should hand the lapse through to the registry, so a key replacement ends a direct session too', async () => {
+    const { connections, wire } = await provenDirect();
+
+    should(connections.lapseDevice(DEVICE_ID, '')).equal(1);
+
+    should(wire.closes.at(-1)?.code).equal(RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE);
+  });
+
+  it('should spare the direct session that carried the replacement, and keep it open', async () => {
+    const { connections, wire, transcript } = await provenDirect();
+
+    // The carrying session is named by its own transcript hash, hex.
+    should(connections.lapseDevice(DEVICE_ID, transcriptKey(transcript))).equal(0);
+
+    should(wire.closes).be.empty();
   });
 
   it('should close the socket with the lease code when nobody renews', async () => {

@@ -1300,3 +1300,222 @@ describe('the explicit guard for a table that names no capability', () => {
     should(NO_GOVERNED_ROUTES_GUARD.explain({ capability: 'fleet', axis: 'use' }, 'undetermined')).be.undefined();
   });
 });
+
+describe('presence on opening', () => {
+  const route = (path: string, presenceExempt?: true): ApiRoute => ({
+    method: 'GET',
+    path,
+    minimum: 'operator',
+    ...(presenceExempt === true ? { presenceExempt: true } : {}),
+    handle: async () => jsonResponse({ served: path }),
+  });
+
+  /** A witness that wants presence from the named device only, recording every question. */
+  const wanting = (deviceId: string, asked: string[] = []): StepUpWitness => ({
+    held: () => false,
+    presenceRequired: subject => {
+      asked.push(subject.deviceId);
+      return subject.deviceId === deviceId;
+    },
+  });
+
+  const dispatcherWith = (witness: StepUpWitness) =>
+    new ApiDispatcher(
+      new ApiRouter([route('/v1/sessions'), route('/v1/passkeys', true)]),
+      credentials,
+      NO_GOVERNED_ROUTES_GUARD,
+      undefined,
+      witness,
+    );
+
+  it('should answer 401 presence_required to a governed device before it is served anything', async () => {
+    const answered = await dispatcherWith(wanting(DEVICE.deviceId)).dispatch(
+      request({ path: '/v1/sessions', device: DEVICE }),
+    );
+
+    should(answered.status).equal(401);
+    should(jsonBody(answered)).containDeep({ code: 'presence_required' });
+    should(answered.body).match(/confirm it is you with a passkey/u);
+  });
+
+  it('should still serve a device that does not need to confirm, and say nothing about the one that does', async () => {
+    const dispatcher = dispatcherWith(wanting(DEVICE.deviceId));
+
+    const confirmed = await dispatcher.dispatch(
+      request({ path: '/v1/sessions', device: { deviceId: 'device-2', appSession: 'app-one' } }),
+    );
+
+    should(confirmed.status).equal(200);
+  });
+
+  it('should serve a route that carries the exemption, because that is how a device gives the confirmation', async () => {
+    const served = await dispatcherWith(wanting(DEVICE.deviceId)).dispatch(
+      request({ path: '/v1/passkeys', device: DEVICE }),
+    );
+
+    should(served.status).equal(200);
+  });
+
+  it('should not ask the witness about an exempt route at all', async () => {
+    const asked: string[] = [];
+
+    await dispatcherWith(wanting(DEVICE.deviceId, asked)).dispatch(request({ path: '/v1/passkeys', device: DEVICE }));
+
+    should(asked).be.empty();
+  });
+
+  it('should never ask a device that arrived on the host, which is the way back in when everything else is lost', async () => {
+    const asked: string[] = [];
+
+    const served = await dispatcherWith(wanting(DEVICE.deviceId, asked)).dispatch(
+      request({ path: '/v1/sessions', device: DEVICE, loopback: true, privilegedLoopback: true }),
+    );
+
+    should(served.status).equal(200);
+    should(asked).be.empty();
+  });
+
+  it('should still ask a device on a loopback peer the carrier did not prove is the host', async () => {
+    // A PROXIED phone is a loopback peer; only the carrier's proof moves it onto the host.
+    const answered = await dispatcherWith(wanting(DEVICE.deviceId)).dispatch(
+      request({ path: '/v1/sessions', device: DEVICE, loopback: true }),
+    );
+
+    should(answered.status).equal(401);
+  });
+
+  it('should never ask of a bearer caller, which has no passkey to give', async () => {
+    const asked: string[] = [];
+
+    const served = await dispatcherWith(wanting(DEVICE.deviceId, asked)).dispatch(
+      request({ path: '/v1/sessions', headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    should(served.status).equal(200);
+    should(asked).be.empty();
+  });
+
+  it('should refuse an unauthenticated caller as unauthorized rather than as lacking presence', async () => {
+    const asked: string[] = [];
+
+    const answered = await dispatcherWith(wanting(DEVICE.deviceId, asked)).dispatch(request({ path: '/v1/sessions' }));
+
+    should(jsonBody(answered)).containDeep({ code: 'unauthorized' });
+    should(asked).be.empty();
+  });
+
+  it('should refuse a device whose grant is gone as unauthorized before asking about its presence', async () => {
+    const asked: string[] = [];
+
+    const answered = await dispatcherWith(wanting('unpaired-device', asked)).dispatch(
+      request({ path: '/v1/sessions', device: { deviceId: 'unpaired-device', appSession: 'app-one' } }),
+    );
+
+    should(jsonBody(answered)).containDeep({ code: 'unauthorized' });
+    should(asked).be.empty();
+  });
+
+  it('should serve everything when the witness has no opinion on presence', async () => {
+    const served = await dispatcherWith({ held: () => false }).dispatch(
+      request({ path: '/v1/sessions', device: DEVICE }),
+    );
+
+    should(served.status).equal(200);
+    should(NO_STEP_UP_WITNESS.presenceRequired?.(DEVICE)).be.undefined();
+  });
+
+  it('should serve a device the witness says needs nothing', async () => {
+    const served = await dispatcherWith({ held: () => false, presenceRequired: () => false }).dispatch(
+      request({ path: '/v1/sessions', device: DEVICE }),
+    );
+
+    should(served.status).equal(200);
+  });
+});
+
+describe('spending a single-use step-up', () => {
+  const governedRoute = (): ApiRoute => ({
+    method: 'GET',
+    path: '/v1/fleet/plan',
+    minimum: 'operator',
+    capability: { capability: 'fleet', axis: 'use' },
+    handle: async () => jsonResponse({ plan: [] }),
+  });
+
+  const guardDeciding = (decision: ReturnType<CapabilityGuard['decide']>): CapabilityGuard => ({
+    decide: () => decision,
+    governance: () => UNGOVERNED,
+    explain: () => 'refused',
+  });
+
+  const witness = (spent: { deviceId: string; appSession: string }[]): StepUpWitness => ({
+    held: () => true,
+    spend: subject => {
+      spent.push({ deviceId: subject.deviceId, appSession: subject.appSession });
+    },
+  });
+
+  const dispatcherWithGuard = (guard: CapabilityGuard, stepUps: StepUpWitness) =>
+    new ApiDispatcher(new ApiRouter([governedRoute()]), credentials, guard, undefined, stepUps);
+
+  it('should spend the device’s step-up exactly once when an allowed act leaned on it', async () => {
+    const spent: { deviceId: string; appSession: string }[] = [];
+    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), witness(spent));
+
+    const served = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
+    should(served.status).equal(200);
+    should(spent).deepEqual([{ deviceId: 'device-1', appSession: 'app-one' }]);
+  });
+
+  it('should spend once per act, so a second request cannot ride the first one’s confirmation', async () => {
+    const spent: { deviceId: string; appSession: string }[] = [];
+    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), witness(spent));
+
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
+    should(spent).have.length(2);
+  });
+
+  it('should not spend when the act needed no step-up', async () => {
+    const spent: { deviceId: string; appSession: string }[] = [];
+    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted' }), witness(spent));
+
+    const served = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
+    should(served.status).equal(200);
+    should(spent).be.empty();
+  });
+
+  it('should not spend a step-up on a refusal, which served nothing', async () => {
+    const spent: { deviceId: string; appSession: string }[] = [];
+    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: false, refusal: 'not-granted' }), witness(spent));
+
+    const refused = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
+    should(refused.status).equal(403);
+    should(spent).be.empty();
+  });
+
+  it('should not spend for a caller with no device, which can hold no step-up', async () => {
+    const spent: { deviceId: string; appSession: string }[] = [];
+    const dispatcher = dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), witness(spent));
+
+    const served = await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    should(served.status).equal(200);
+    should(spent).be.empty();
+  });
+
+  it('should serve an allowed stepped-up act when the witness has nothing to spend', async () => {
+    const served = await dispatcherWithGuard(
+      guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }),
+      { held: () => true },
+    ).dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
+    should(served.status).equal(200);
+  });
+});

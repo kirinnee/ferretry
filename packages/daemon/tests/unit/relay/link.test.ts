@@ -62,11 +62,11 @@ import {
   sealRecord,
   sessionIdFromBytes,
   signDeviceProof,
-  verifyDeviceProof,
   startClientHandshake,
   toBase64Url,
   utf8Bytes,
   utf8Text,
+  verifyDeviceProof,
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
@@ -91,6 +91,7 @@ import {
   RELAY_MAX_ENDED_SESSIONS,
   RelayLink,
   type RelayLinkSocket,
+  transcriptKey,
   UNKNOWN_DEVICE_KEY,
 } from '../../../src/lib/relay/link.ts';
 import { MAX_TUNNEL_DATA_BYTES } from '../../../src/lib/relay/tunnel.ts';
@@ -231,6 +232,8 @@ function harness(
     readonly seen?: (deviceId: string) => void;
     readonly deviceKey?: (deviceId: string) => Promise<string | undefined>;
     readonly reauthorize?: (request: ApiRequest) => boolean;
+    /** When this device's key is due for replacement; absent means the directory has no opinion at all. */
+    readonly rotateBy?: (deviceId: string) => number | undefined;
   } = {},
 ): Harness {
   const sent = wire();
@@ -261,6 +264,7 @@ function harness(
         extra.deviceKey ??
         (async deviceId => (knownToken === DEVICE_TOKEN && deviceId === DEVICE_ID ? deviceKeyText : undefined)),
       seen: extra.seen ?? (() => undefined),
+      ...(extra.rotateBy === undefined ? {} : { rotateBy: extra.rotateBy }),
     },
     pairing: {
       redeemInSession: async attempt => {
@@ -1191,7 +1195,7 @@ describe('backpressure on a relayed session', () => {
 async function keyedSession(
   harnessed: Harness,
   sessionId: SessionId = sessionOne(),
-): Promise<{ channel: ChannelState }> {
+): Promise<{ channel: ChannelState; keys: SessionKeys }> {
   await harnessed.link.receiveBinary(challenge());
   await harnessed.link.receiveBinary(claimed());
   return await openSession(harnessed.link, harnessed.wire, sessionId);
@@ -1807,6 +1811,216 @@ describe('a stream session', () => {
       reason: 'a stream record carried unusable bytes',
     });
     should(malformed.fromClientFrames).be.empty();
+  });
+});
+
+describe('the key rotation a device is asked for', () => {
+  /** An instant well past the epoch the harness clock stands at, so it reads unmistakably as a due date. */
+  const DUE_MS = Date.parse('2026-10-20T00:00:00.000Z');
+  const AUTH = { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN } as const;
+  const STREAM = {
+    t: 'stream',
+    protocol: SESSION_PROTOCOL_ID,
+    deviceToken: DEVICE_TOKEN,
+    path: '/v1/events',
+    query: [],
+  } as const;
+
+  it('should tell a device when its key is due, in the record that accepts its session', async () => {
+    const asked: string[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, {
+      rotateBy: deviceId => {
+        asked.push(deviceId);
+        return DUE_MS;
+      },
+    });
+    const opened = await keyedSession(harnessed);
+
+    await clientSend(harnessed.link, opened.channel, AUTH);
+
+    should((await clientRead(harnessed.wire, opened.channel)).message).deepEqual({
+      ...AUTHENTICATED,
+      rotateBy: '2026-10-20T00:00:00.000Z',
+    });
+    should(asked).deepEqual([DEVICE_ID]);
+  });
+
+  it('should say nothing about rotation when the directory has no date for the device', async () => {
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { rotateBy: () => undefined });
+    const opened = await keyedSession(harnessed);
+
+    await clientSend(harnessed.link, opened.channel, AUTH);
+
+    should((await clientRead(harnessed.wire, opened.channel)).message).deepEqual(AUTHENTICATED);
+  });
+
+  it('should say nothing about rotation when the directory has no such question to answer', async () => {
+    const harnessed = harness();
+    const opened = await keyedSession(harnessed);
+
+    await clientSend(harnessed.link, opened.channel, AUTH);
+
+    should((await clientRead(harnessed.wire, opened.channel)).message).deepEqual(AUTHENTICATED);
+  });
+
+  it('should tell a stream session the same date in the record that accepts it', async () => {
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream), undefined, { rotateBy: () => DUE_MS });
+    const opened = await keyedSession(harnessed);
+
+    await clientSend(harnessed.link, opened.channel, STREAM);
+
+    should((await clientReadAll(harnessed.wire, opened.channel)).messages[0]).deepEqual({
+      ...STREAM_OPENED,
+      rotateBy: '2026-10-20T00:00:00.000Z',
+    });
+  });
+
+  it('should leave a stream acceptance bare when no rotation is due', async () => {
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream), undefined, { rotateBy: () => undefined });
+    const opened = await keyedSession(harnessed);
+
+    await clientSend(harnessed.link, opened.channel, STREAM);
+
+    should((await clientReadAll(harnessed.wire, opened.channel)).messages[0]).deepEqual(STREAM_OPENED);
+  });
+});
+
+describe('the transcript a request travels in', () => {
+  it('should hand the route table the hash of the session that carried the request', async () => {
+    const harnessed = harness();
+    const opened = await keyedSession(harnessed);
+    const authenticated = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    await clientSend(harnessed.link, authenticated, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+
+    should(harnessed.requests).have.length(1);
+    should(harnessed.requests[0]?.transcriptHash).deepEqual(opened.keys.transcriptHash);
+    should(harnessed.requests[0]?.transcriptHash).deepEqual(transcripts.get(sessionOne().text));
+  });
+
+  it('should give each session its own hash, so a rotation proof cannot be lifted from another', async () => {
+    const harnessed = harness();
+    const first = await keyedSession(harnessed);
+    const second = await openSession(
+      harnessed.link,
+      harnessed.wire,
+      sessionIdFromBytes(new Uint8Array(16).fill(42)) ?? sessionOne(),
+    );
+    const auth = { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN } as const;
+    const firstReady = await clientSend(harnessed.link, first.channel, auth);
+    const secondReady = await clientSend(harnessed.link, second.channel, auth);
+
+    await clientSend(harnessed.link, firstReady, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    await clientSend(harnessed.link, secondReady, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+
+    should(harnessed.requests.map(carried => carried.transcriptHash)).deepEqual([
+      first.keys.transcriptHash,
+      second.keys.transcriptHash,
+    ]);
+    should(first.keys.transcriptHash).not.deepEqual(second.keys.transcriptHash);
+  });
+
+  it('should name a session by its transcript in hex, and by nothing before the handshake keyed it', () => {
+    should(transcriptKey(new Uint8Array([0, 1, 15, 16, 171, 255]))).equal('00010f10abff');
+    should(transcriptKey(new Uint8Array())).equal('');
+    should(transcriptKey(undefined)).equal('');
+  });
+});
+
+describe('a device that replaced its key while other sessions were live', () => {
+  const AUTH = { t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceToken: DEVICE_TOKEN } as const;
+
+  async function twoRequestSessions() {
+    const harnessed = harness();
+    const first = await keyedSession(harnessed);
+    const secondId = sessionIdFromBytes(new Uint8Array(16).fill(42));
+    if (secondId === null) throw new Error('unreachable: 16 bytes');
+    const second = await openSession(harnessed.link, harnessed.wire, secondId);
+    const firstReady = await clientSend(harnessed.link, first.channel, AUTH);
+    await clientSend(harnessed.link, second.channel, AUTH);
+    should(harnessed.link.report().sessions).equal(2);
+    return { harnessed, first, firstReady };
+  }
+
+  const closesOf = (sent: Wire) => sent.frames.map(controlOf).filter(message => message?.t === 'closed');
+
+  it('should end every other session with the lease-ended code, so each reopens with the new key', async () => {
+    const { harnessed, first } = await twoRequestSessions();
+
+    const lapsed = harnessed.connections.lapseDevice(DEVICE_ID, transcriptKey(first.keys.transcriptHash));
+
+    should(lapsed).equal(1);
+    should(harnessed.link.report().sessions).equal(1);
+    should(closesOf(harnessed.wire).at(-1)).containDeep({
+      t: 'closed',
+      code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+      reason: ACCESS_LEASE_ENDED_REASON,
+    });
+    should(RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE).equal(4441);
+  });
+
+  it('should spare the session that carried the replacement, and keep serving it', async () => {
+    const { harnessed, first, firstReady } = await twoRequestSessions();
+    harnessed.connections.lapseDevice(DEVICE_ID, transcriptKey(first.keys.transcriptHash));
+
+    await clientSend(harnessed.link, firstReady, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+
+    should(harnessed.requests).have.length(1);
+    should(harnessed.link.report().sessions).equal(1);
+  });
+
+  it('should end both when nothing is spared, and say nothing that reads as an unpair', async () => {
+    const { harnessed } = await twoRequestSessions();
+
+    should(harnessed.connections.lapseDevice(DEVICE_ID, '')).equal(2);
+
+    should(harnessed.link.report().sessions).equal(0);
+    const closes = closesOf(harnessed.wire);
+    should(closes.slice(-2).every(close => close?.t === 'closed' && close.code === 4441)).be.true();
+    should(closes.some(close => close?.t === 'closed' && close.reason === 'unknown device credential')).be.false();
+  });
+
+  it('should lapse a stream session the same way and release its handler', async () => {
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+      query: [],
+    });
+
+    should(harnessed.connections.lapseDevice(DEVICE_ID, '')).equal(1);
+
+    should(stream.closed).have.length(1);
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ t: 'closed', code: 4441 });
+  });
+
+  it('should not lapse a session that has already ended on its own', async () => {
+    const { harnessed } = await twoRequestSessions();
+    await harnessed.link.receiveBinary(
+      control({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError, reason: 'gone' }, sessionOne()),
+    );
+
+    should(harnessed.connections.lapseDevice(DEVICE_ID, '')).equal(1);
+
+    should(harnessed.link.report().sessions).equal(0);
+  });
+
+  it('should leave another device’s sessions alone', async () => {
+    const { harnessed } = await twoRequestSessions();
+
+    should(harnessed.connections.lapseDevice('fy_device_id_bbbbbbbbbbbbbbbbbbbbbb', '')).equal(0);
+
+    should(harnessed.link.report().sessions).equal(2);
   });
 });
 

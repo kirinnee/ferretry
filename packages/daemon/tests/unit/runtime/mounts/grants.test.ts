@@ -309,6 +309,70 @@ describe('changing the grants over the API', () => {
   });
 });
 
+describe('spending the step-up a patch leaned on', () => {
+  /** A witness that holds a step-up for the phone and records every spend. */
+  const spending = (spent: SessionDevice[]): StepUpWitness => ({
+    held: subject => subject.deviceId === PHONE.deviceId && subject.appSession === PHONE.appSession,
+    spend: subject => {
+      spent.push(subject);
+    },
+  });
+
+  it('should spend the step-up once when a patch is applied, so one confirmation changes the grants once', async () => {
+    const spent: SessionDevice[] = [];
+    const { dispatcher } = await mount({}, spending(spent));
+
+    const answered = await dispatcher.dispatch(fromDevice('PATCH', '/v1/grants', PHONE, { terminal: { use: false } }));
+
+    should(answered.status).equal(200);
+    should(spent).deepEqual([PHONE]);
+  });
+
+  it('should spend again for each patch, so the next one is asked for its own confirmation', async () => {
+    const spent: SessionDevice[] = [];
+    const { dispatcher } = await mount({}, spending(spent));
+
+    await dispatcher.dispatch(fromDevice('PATCH', '/v1/grants', PHONE, { terminal: { use: false } }));
+    await dispatcher.dispatch(fromDevice('PATCH', '/v1/grants', PHONE, { browser: { use: false } }));
+
+    should(spent).have.length(2);
+  });
+
+  it('should not spend when the patch was refused, since nothing changed for it to pay for', async () => {
+    const spent: SessionDevice[] = [];
+    const { dispatcher } = await mount(
+      { grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } } },
+      spending(spent),
+    );
+
+    const widening = await dispatcher.dispatch(fromDevice('PATCH', '/v1/grants', PHONE, { terminal: { use: true } }));
+    const empty = await dispatcher.dispatch(fromDevice('PATCH', '/v1/grants', PHONE, {}));
+
+    should(widening.status).equal(403);
+    should(empty.status).equal(400);
+    should(spent).be.empty();
+  });
+
+  it('should not spend for a read', async () => {
+    const spent: SessionDevice[] = [];
+    const { dispatcher } = await mount({}, spending(spent));
+
+    await dispatcher.dispatch(fromDevice('GET', '/v1/grants', PHONE));
+
+    should(spent).be.empty();
+  });
+
+  it('should not spend for the host command line, which holds no step-up to spend', async () => {
+    const spent: SessionDevice[] = [];
+    const { dispatcher } = await mount({}, spending(spent));
+
+    const answered = await dispatcher.dispatch(fromHost('PATCH', '/v1/grants', { terminal: { use: false } }));
+
+    should(answered.status).equal(200);
+    should(spent).be.empty();
+  });
+});
+
 describe('a failure that is not a grant refusal', () => {
   it('should become a server fault rather than being blamed on the caller', async () => {
     // The taxonomy only restates refusals the subsystem NAMED. Anything else is the daemon's fault.

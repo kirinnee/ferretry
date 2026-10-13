@@ -151,10 +151,26 @@ class RecordingDevices implements PairingDeviceStore {
   readonly touched: { readonly id: string; readonly lastSeenAt: string }[] = [];
   touchFailure: Error | undefined;
 
+  /** Holds every write until released, so a case can land something else while one is in flight. */
+  touchGate: Promise<void> | undefined;
+
   async touch(id: string, lastSeenAt: string): Promise<void> {
     this.touched.push({ id, lastSeenAt });
+    if (this.touchGate !== undefined) await this.touchGate;
     if (this.touchFailure !== undefined) throw this.touchFailure;
     this.records = this.records.map(record => (record.id === id ? { ...record, lastSeenAt } : record));
+  }
+
+  readonly rotated: { readonly id: string; readonly publicKey: string; readonly keyRotatedAt: string }[] = [];
+  rotateResult = true;
+  rotateFailure: Error | undefined;
+
+  async rotateKey(id: string, publicKey: string, keyRotatedAt: string): Promise<boolean> {
+    if (this.rotateFailure !== undefined) throw this.rotateFailure;
+    if (!this.rotateResult) return false;
+    this.rotated.push({ id, publicKey, keyRotatedAt });
+    this.records = this.records.map(record => (record.id === id ? { ...record, publicKey, keyRotatedAt } : record));
+    return true;
   }
 }
 
@@ -189,6 +205,8 @@ function fixture(
     readonly carriers?: readonly DaemonCarrier[];
     /** The rendezvous the composition root proved a fresh device could discover, if any. */
     readonly discoveredRelayUrl?: string;
+    /** The machine's idle period, when a case is about the setting rather than the default. */
+    readonly idleExpiryDays?: () => number;
   } = {},
 ) {
   const clock = new FakeClock();
@@ -213,6 +231,7 @@ function fixture(
     compare: options.compare,
     deviceState: options.deviceState,
     ...(options.connections === undefined ? {} : { connections: options.connections }),
+    ...(options.idleExpiryDays === undefined ? {} : { idleExpiryDays: options.idleExpiryDays }),
   });
   const mint = () => service.mint();
   return { clock, cryptography, devices, credentials, service, mint };
@@ -564,6 +583,7 @@ describe('PairingService redemption', () => {
       list: async () => [],
       remove: async () => false,
       touch: async () => undefined,
+      rotateKey: async () => false,
     };
     const service = new PairingService({
       daemonId: DAEMON_ID,
@@ -1038,6 +1058,191 @@ describe('PairingService device keys and idle expiry', () => {
 
     should(await service.expireIdleDevices()).equal(0);
     should(await service.deviceKey(FIRST_DEVICE_ID)).be.undefined();
+  });
+});
+
+describe('PairingService idle period setting', () => {
+  const DAY_MS = 24 * 60 * 60 * 1_000;
+
+  async function paired(days: { current: number }) {
+    const built = fixture({ idleExpiryDays: () => days.current });
+    built.mint();
+    const redemption = await redeemDirect(built.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    return { ...built, redemption };
+  }
+
+  it('should tell a device the period the machine holds now, not the default', async () => {
+    const { redemption } = await paired({ current: 7 });
+    should(redemption.response.idleExpiryDays).equal(7);
+  });
+
+  it('should project the expiry from the setting and follow it when it is shortened', async () => {
+    const days = { current: 30 };
+    const { service } = await paired(days);
+    should((await service.devices())[0]?.idleExpiresAt).equal('2026-09-02T12:00:00.000Z');
+
+    days.current = 3;
+
+    should((await service.devices())[0]?.idleExpiresAt).equal('2026-08-06T12:00:00.000Z');
+  });
+
+  it('should expire a device at the shortened period when it next tries, not at thirty days', async () => {
+    const days = { current: 30 };
+    const { service, clock, devices } = await paired(days);
+    clock.nowMs += 5 * DAY_MS;
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
+
+    days.current = 5;
+
+    should(await service.deviceKey(FIRST_DEVICE_ID)).be.undefined();
+    should(devices.records).be.empty();
+  });
+
+  it('should sweep at the shortened period, and keep a device the longer period still allows', async () => {
+    const days = { current: 30 };
+    const { service, clock } = await paired(days);
+    clock.nowMs += 10 * DAY_MS;
+    should(await service.expireIdleDevices()).equal(0);
+
+    days.current = 10;
+
+    should(await service.expireIdleDevices()).equal(1);
+  });
+
+  it('should count what a period would end without ending any of it', async () => {
+    const days = { current: 30 };
+    const { service, clock, devices } = await paired(days);
+    clock.nowMs += 10 * DAY_MS;
+
+    should(service.devicesIdleLongerThan(11)).equal(0);
+    should(service.devicesIdleLongerThan(10)).equal(1);
+    should(service.devicesIdleLongerThan(1)).equal(1);
+    should(devices.records).have.length(1);
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
+  });
+
+  it('should count a device seen meanwhile by when it was last seen, not by its last write', async () => {
+    const { service, clock } = await paired({ current: 30 });
+    clock.nowMs += 10 * DAY_MS;
+    service.seen(FIRST_DEVICE_ID);
+    clock.nowMs += 2 * DAY_MS;
+
+    should(service.devicesIdleLongerThan(3)).equal(0);
+    should(service.devicesIdleLongerThan(2)).equal(1);
+  });
+});
+
+describe('PairingService device key rotation', () => {
+  const ROTATED_KEY = toBase64Url(
+    new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(7)]),
+  );
+  const DAY_MS = 24 * 60 * 60 * 1_000;
+
+  async function paired() {
+    const built = fixture();
+    built.mint();
+    const redemption = await redeemDirect(built.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    return built;
+  }
+
+  it('should count a key’s age from the pairing until it is replaced, then from the replacement', async () => {
+    const { service, clock } = await paired();
+    should(service.keyIssuedAt(FIRST_DEVICE_ID)).equal(Date.parse('2026-08-03T12:00:00.000Z'));
+
+    clock.nowMs += 40 * DAY_MS;
+    should(await service.rotateDeviceKey(FIRST_DEVICE_ID, ROTATED_KEY)).be.true();
+
+    should(service.keyIssuedAt(FIRST_DEVICE_ID)).equal(Date.parse('2026-09-12T12:00:00.000Z'));
+  });
+
+  it('should have no key age for a device it never paired', async () => {
+    const { service } = await paired();
+    should(service.keyIssuedAt(SECOND_DEVICE_ID)).be.undefined();
+  });
+
+  it('should write the new key first and then answer with it, keeping the rest of the grant', async () => {
+    const { service, clock, devices, credentials } = await paired();
+    clock.nowMs += DAY_MS;
+
+    should(await service.rotateDeviceKey(FIRST_DEVICE_ID, ROTATED_KEY)).be.true();
+
+    should(devices.rotated).deepEqual([
+      { id: FIRST_DEVICE_ID, publicKey: ROTATED_KEY, keyRotatedAt: '2026-08-04T12:00:00.000Z' },
+    ]);
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(ROTATED_KEY);
+    should(credentials.get(FIRST_DEVICE_ID)).containEql({
+      name: 'phone',
+      createdAt: '2026-08-03T12:00:00.000Z',
+      keyRotatedAt: '2026-08-04T12:00:00.000Z',
+    });
+  });
+
+  it('should report a device that is gone without writing anything', async () => {
+    const { service, devices } = await paired();
+
+    should(await service.rotateDeviceKey(SECOND_DEVICE_ID, ROTATED_KEY)).be.false();
+
+    should(devices.rotated).be.empty();
+  });
+
+  it('should keep the old key when the store says the device was already gone', async () => {
+    const { service, devices, credentials } = await paired();
+    devices.rotateResult = false;
+
+    should(await service.rotateDeviceKey(FIRST_DEVICE_ID, ROTATED_KEY)).be.false();
+
+    should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
+    should(credentials.get(FIRST_DEVICE_ID)?.keyRotatedAt).be.undefined();
+    should(await service.deviceKey(FIRST_DEVICE_ID)).equal(DEVICE_KEY);
+  });
+
+  it('should keep the old key when the write fails, rather than adopting a key it could not keep', async () => {
+    const { service, devices, credentials } = await paired();
+    devices.rotateFailure = new Error('disk unavailable');
+
+    await service.rotateDeviceKey(FIRST_DEVICE_ID, ROTATED_KEY).then(
+      () => should.fail(true, false, 'expected the write failure to surface'),
+      (failure: Error) => should(failure.message).equal('disk unavailable'),
+    );
+
+    should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
+  });
+
+  it('should not roll a rotated key back when a sighting write that began before it lands after', async () => {
+    // THE RACE. A sighting copies the record, writes, then refreshes. A rotation that lands in between
+    // must survive: refreshing with the copy would restore the key this daemon has just forgotten.
+    const { service, clock, devices, credentials } = await paired();
+    let release: (() => void) | undefined;
+    devices.touchGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    clock.nowMs += 2 * 60 * 60 * 1_000;
+    service.seen(FIRST_DEVICE_ID);
+
+    should(await service.rotateDeviceKey(FIRST_DEVICE_ID, ROTATED_KEY)).be.true();
+    release?.();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(ROTATED_KEY);
+    should(credentials.get(FIRST_DEVICE_ID)?.lastSeenAt).equal('2026-08-03T14:00:00.000Z');
+  });
+
+  it('should not bring a device back when it was revoked while its sighting was being written', async () => {
+    const { service, clock, devices, credentials } = await paired();
+    let release: (() => void) | undefined;
+    devices.touchGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    clock.nowMs += 2 * 60 * 60 * 1_000;
+    service.seen(FIRST_DEVICE_ID);
+
+    should(await service.revokeDevice(FIRST_DEVICE_ID)).be.true();
+    release?.();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    should(credentials.get(FIRST_DEVICE_ID)).be.undefined();
   });
 });
 

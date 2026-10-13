@@ -207,7 +207,13 @@ describe('the per-capability decision matrix', () => {
             );
 
             // Assert
-            should(governed).deepEqual({ allowed: governedRefusal === 'granted', refusal: governedRefusal });
+            // A step-up is only SPENT by an act that leaned on one: allowed AND the demand needs it.
+            const leanedOnStepUp = governedRefusal === 'granted' && NEEDS_STEP_UP[capability][axis] && stepUp;
+            should(governed).deepEqual({
+              allowed: governedRefusal === 'granted',
+              refusal: governedRefusal,
+              ...(leanedOnStepUp ? { steppedUp: true } : {}),
+            });
             should(ungoverned).deepEqual({ allowed: true, refusal: 'granted' });
           });
         }
@@ -231,6 +237,23 @@ describe('the per-capability decision matrix', () => {
       }
     }
   }
+
+  it('should mark a decision steppedUp only when an allowed act leaned on the caller’s step-up', () => {
+    // The boundary spends a single-use step-up on exactly this mark, so it must never ride a refusal, an
+    // ungoverned caller, or a demand that needed no step-up (a held one is not consumed by those).
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        for (const stepUp of [true, false]) {
+          const demand = { capability, axis };
+          const needs = NEEDS_STEP_UP[capability][axis];
+          should(decideCapability(demand, evaluation({ stepUp })).steppedUp === true).equal(needs && stepUp);
+          should(decideCapability(demand, evaluation({ stepUp, governed: false })).steppedUp).be.undefined();
+          should(decideCapability(demand, evaluation({ stepUp, grants: undefined })).steppedUp).be.undefined();
+          should(decideCapability(demand, evaluation({ stepUp, grants: SHUT })).steppedUp).be.undefined();
+        }
+      }
+    }
+  });
 
   it('should reach every refusal the protocol declares, and no other', () => {
     // The matrix above is only exhaustive if it produces the whole vocabulary.
