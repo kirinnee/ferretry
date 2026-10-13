@@ -107,16 +107,16 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and thirteen: forty-one MACHINES frames at each viewport, plus seventeen other frames at
- * `mobile` and fourteen at `desktop` (41 + 41 + 17 + 14).
+ * One hundred and nineteen: forty-four MACHINES frames at each viewport, plus seventeen other frames at
+ * `mobile` and fourteen at `desktop` (44 + 44 + 17 + 14).
  *
- * MACHINES, forty-one per viewport: its section, four tab switches, four Settings-tab flows (Import
+ * MACHINES, forty-four per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
- * Credentials pages, two Add a login steps, twelve Profiles and Components pages (a layer stack, a delete
- * card, two stepper steps, a component with every badge, two edit forms), and seven other-machine states
- * (offline; the first run that opens by itself — tools, the Claude Code question, Codex not signed in,
- * Sign in now in place, nothing set up — and the not-set-up Runtimes card it leaves to). Each of these
- * is also a Machines geometry check, below.
+ * Credentials pages, three Codex sign-in screens (device code, link, finishing), two Add a login steps,
+ * twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps, a component with
+ * every badge, two edit forms), and seven other-machine states (offline; the first run that opens by
+ * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
+ * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
  * The rest, fourteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
  * healthy daemon's Warden and its seven other panels, the unreachable daemon's Warden and Carrier, and the
@@ -139,16 +139,16 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 113;
+const SETTINGS_SIDEWAYS_CHECKS = 119;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — the same forty-one as above (the section itself is measured once
- * its Runtimes tab has loaded), so 41 + 41. Same tripwire as the number above, for the same reason — a check
+ * Machines frame, at each viewport — the same forty-four as above (the section itself is measured once
+ * its Runtimes tab has loaded), so 44 + 44. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 82;
+const MACHINES_GEOMETRY_CHECKS = 88;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1961,9 +1961,12 @@ try {
           // PROFILES AND COMPONENTS (account model U18): twelve pages per viewport, each one a different
           // layout — a layer stack, a conflict sentence with a dotted key, a delete card, a stepper with a
           // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
-          const accountShot = async (name: string, label: string): Promise<void> => {
+          // `framed` runs after the checks and before the capture: the geometry check hovers a tab, which
+          // scrolls the page back to it, so a frame that needs a lower part of the page in view says so here.
+          const accountShot = async (name: string, label: string, framed?: () => Promise<void>): Promise<void> => {
             await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
             await assertMachinesGeometry(page, `the Machines ${label} at ${viewport.name}`);
+            await framed?.();
             const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
             await settledShot(target);
             process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
@@ -2006,6 +2009,29 @@ try {
           await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
           await credentialsPanel.locator('[data-credential-sign-in="awaiting-code"]').waitFor({ state: 'visible' });
           await accountShot('credential-sign-in', 'login sign-in link');
+          await credentialsPanel.locator('[data-page-back]').click();
+          // CODEX'S TWO SIGN-INS (S2): the device code with its "didn't work?" way out, the link sign-in
+          // that asks for the address a phone's browser could not load, and the wait after it is pasted.
+          // Each frame starts at the Codex panel, because on a phone its steps sit below the fold.
+          const codexPanelToTop = async (): Promise<void> => {
+            await credentialsPanel
+              .locator('[data-codex-login]')
+              .evaluate(panel => panel.scrollIntoView({ block: 'start', behavior: 'instant' }));
+          };
+          await credentialsPanel.locator('[data-credential-row="codex-team"]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="awaiting-approval"]').waitFor({ state: 'visible' });
+          await accountShot('codex-device-code', 'Codex device code', codexPanelToTop);
+          await credentialsPanel.locator('[data-codex-login-use-link] button').click();
+          await credentialsPanel.locator('[data-credential-sign-in="awaiting-callback"]').waitFor({ state: 'visible' });
+          await accountShot('codex-link', 'Codex link sign-in', codexPanelToTop);
+          await credentialsPanel
+            .locator('textarea[name="codex-login-address"]')
+            .fill('http://localhost:1455/auth/callback?code=harness-preview&state=harness-preview');
+          await credentialsPanel.locator('[data-credential-sign-in="awaiting-callback"] button[type="submit"]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="finishing"]').waitFor({ state: 'visible' });
+          await accountShot('codex-finishing', 'Codex finishing', codexPanelToTop);
+          await credentialsPanel.locator('[data-credential-sign-in="finishing"] button:has-text("Cancel")').click();
           await credentialsPanel.locator('[data-page-back]').click();
           await credentialsPanel.locator('[data-credential-row="claude-personal"]').click();
           await credentialsPanel.locator('[data-credential-sign-out-ask]').click();

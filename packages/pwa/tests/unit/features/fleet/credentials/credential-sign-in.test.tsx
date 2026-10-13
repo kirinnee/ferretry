@@ -381,3 +381,127 @@ describe('CredentialSignIn', () => {
     await view.unmount();
   });
 });
+
+const LINK_URL =
+  'https://auth.openai.com/oauth/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=s';
+const ADDRESS = 'http://localhost:1455/auth/callback?code=code-TESTONLY&state=s';
+
+const codexLink = (state: 'awaiting-callback' | 'finishing' | 'failed', extra: Record<string, unknown> = {}) =>
+  ({
+    ...codexFlow('complete'),
+    state,
+    ...(state === 'awaiting-callback' ? { verificationUrl: LINK_URL } : {}),
+    ...(state === 'failed' ? { reason: 'the sign-in exited with code 1', remedy: 'try again' } : {}),
+    ...extra,
+  }) as HarnessLoginFlow;
+
+describe('CredentialSignIn with a Codex link', () => {
+  it('offers a link on the start screen and starts with one when chosen', async () => {
+    const { view, calls } = await open({ [LOGIN]: codexLink('awaiting-callback') }, { credential: CODEX });
+    expect(view.container.textContent).toContain('Device code didn’t work?');
+    await click(button(view.container, 'Sign in with a link instead'), 'the link choice');
+    expect(view.container.textContent).toContain('Sign in to Codex with a link');
+    await click(button(view.container, 'Use a device code instead'), 'the device choice');
+    expect(
+      view.container.querySelector('[data-credential-sign-in-method]')?.getAttribute('data-credential-sign-in-method'),
+    ).toBe('device-code');
+    await click(button(view.container, 'Sign in with a link instead'), 'the link choice');
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+
+    expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'codex', method: 'link' });
+    expect(state(view.container)).toBe('awaiting-callback');
+    await view.unmount();
+  });
+
+  it('never offers a link for Claude, and never sends a method for it', async () => {
+    const { view, calls } = await open({ [LOGIN]: claudeFlow('awaiting-code') });
+    expect(view.container.querySelector('[data-credential-sign-in-method]')).toBeNull();
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude-work' });
+    await view.unmount();
+  });
+
+  it('moves a device code to a link in the same flow, then hands the address over and finishes', async () => {
+    // The daemon's answer to a re-read follows what was sent, so the poll can never run ahead of the person.
+    let stage: HarnessLoginFlow = codexFlow('awaiting-approval');
+    let delivered = 0;
+    const { view, calls, signedIn } = await open(
+      {
+        [LOGIN]: codexFlow('awaiting-approval'),
+        [`POST ${FLOW}`]: (call: Call) => {
+          stage = 'method' in (call.body as object) ? codexLink('awaiting-callback') : codexLink('finishing');
+          return { outcome: 'accepted', flow: stage };
+        },
+        [`GET ${FLOW}`]: () => {
+          if (stage.state === 'finishing') delivered += 1;
+          return delivered > 1 ? codexFlow('complete') : stage;
+        },
+      },
+      { credential: CODEX, pollMs: 5 },
+    );
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    await click(button(view.container, 'Sign in with a link instead'), 'the switch');
+    expect(only(calls, `POST ${FLOW}`)[0]?.body).toEqual({ method: 'link' });
+    expect(state(view.container)).toBe('awaiting-callback');
+
+    await type(must(view.container.querySelector('textarea'), 'the address field'), ADDRESS);
+    await click(button(view.container, 'Finish sign-in'), 'Finish sign-in');
+    expect(only(calls, `POST ${FLOW}`)[1]?.body).toEqual({ code: ADDRESS });
+    expect(view.container.textContent).toContain('Codex is finishing the sign-in…');
+    expect(view.container.innerHTML).not.toContain('code-TESTONLY');
+
+    // Waits for the outcome rather than for a fixed time, so a slow machine cannot outrun it.
+    for (let slice = 0; slice < 300 && state(view.container) !== 'complete'; slice += 1) await wait(10);
+    expect(state(view.container)).toBe('complete');
+    expect(signedIn).toEqual(['signed-in']);
+    await view.unmount();
+  });
+
+  it('shows a refused or failed switch in the daemon’s words', async () => {
+    const refused = await open(
+      {
+        [LOGIN]: codexFlow('awaiting-approval'),
+        [`POST ${FLOW}`]: { outcome: 'conflict', reason: 'this sign-in is already using a link' },
+      },
+      { credential: CODEX },
+    );
+    await click(refused.view.container.querySelector('[data-change-submit]'), 'the start button');
+    await click(button(refused.view.container, 'Sign in with a link instead'), 'the switch');
+    expect(refused.view.container.textContent).toContain('this sign-in is already using a link');
+    await refused.view.unmount();
+
+    const broken = await open(
+      {
+        [LOGIN]: codexFlow('awaiting-approval'),
+        [`POST ${FLOW}`]: new FyHttpError('This machine could not switch.', 500, 'internal'),
+      },
+      { credential: CODEX },
+    );
+    await click(broken.view.container.querySelector('[data-change-submit]'), 'the start button');
+    await click(button(broken.view.container, 'Sign in with a link instead'), 'the switch');
+    expect(broken.view.container.querySelector('[role="alert"]')).not.toBeNull();
+    await broken.view.unmount();
+  });
+
+  it('keeps a link for the next start once a flow moved to one by itself, or a device code failed', async () => {
+    const moved = await open(
+      {
+        [LOGIN]: codexLink('awaiting-callback', { deviceCode: 'unavailable' }),
+        [`DELETE ${FLOW}`]: codexLink('failed'),
+      },
+      { credential: CODEX },
+    );
+    await click(moved.view.container.querySelector('[data-change-submit]'), 'the start button');
+    expect(moved.view.container.textContent).toContain('This account doesn’t allow device codes');
+    await click(button(moved.view.container, 'Cancel'), 'Cancel');
+    expect(moved.view.container.textContent).toContain('Sign in to Codex with a link');
+    await moved.view.unmount();
+
+    const failed = await open({ [LOGIN]: codexLink('failed') }, { credential: CODEX });
+    await click(failed.view.container.querySelector('[data-change-submit]'), 'the start button');
+    await click(button(failed.view.container, 'Sign in with a link instead'), 'the link restart');
+    expect(state(failed.view.container)).toBe('start');
+    expect(failed.view.container.textContent).toContain('Sign in to Codex with a link');
+    await failed.view.unmount();
+  });
+});

@@ -11,6 +11,7 @@ import type {
   FleetRuntimeCatalog,
   FleetSetupScan,
   FleetToolInstallResult,
+  HarnessLoginCodexMethod,
   HarnessLoginFlow,
   HarnessLoginSubmission,
 } from '@ferretry/protocol';
@@ -54,7 +55,12 @@ export interface IAccountGateway {
   scan(authority: AccountAuthority): Promise<FleetSetupScan>;
   installTools(harnesses: readonly AccountHarness[], authority: AccountAuthority): Promise<FleetToolInstallResult>;
   exportBundle(authority: AccountAuthority): Promise<FleetCloneBundle>;
-  startSignIn(credentialId: string, authority: AccountAuthority): Promise<HarnessLoginFlow>;
+  /** `method` is Codex's choice of sign-in; absent means its default, a device code. */
+  startSignIn(
+    credentialId: string,
+    authority: AccountAuthority,
+    method?: HarnessLoginCodexMethod,
+  ): Promise<HarnessLoginFlow>;
   signInStatus(flowId: string, authority: AccountAuthority): Promise<HarnessLoginFlow>;
   submitSignInCode(flowId: string, code: string, authority: AccountAuthority): Promise<HarnessLoginSubmission>;
   cancelSignIn(flowId: string, authority: AccountAuthority): Promise<HarnessLoginFlow>;
