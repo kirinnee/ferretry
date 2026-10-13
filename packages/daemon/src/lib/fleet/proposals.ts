@@ -41,13 +41,17 @@ export const MISSING_CONFIG_REVISION = 'absent';
 
 type FleetProposalState = 'pending' | 'consumed';
 
-export interface FleetProposalRecord<Payload> {
+/**
+ * One staged change. `Mutation` is the intent it was derived from: the old account surface's
+ * {@link FleetMutation} by default, or the account model's own change. The store treats it as data.
+ */
+export interface FleetProposalRecord<Payload, Mutation = FleetMutation> {
   readonly id: string;
   readonly createdAt: number;
   readonly expiresAt: number;
   /** Digest of the raw configuration this change was derived from, or the missing sentinel. */
   readonly revision: string;
-  readonly mutation: FleetMutation;
+  readonly mutation: Mutation;
   readonly assetEdits: readonly FleetAssetEdit[];
   /** What every edited asset looked like at review time, so a newer one refuses rather than losing. */
   readonly assetRevisions: readonly FleetAssetRevision[];
@@ -64,10 +68,10 @@ export interface FleetProposalRecord<Payload> {
 }
 
 /** What a caller may see about a proposal. */
-export interface FleetProposalView<View> {
+export interface FleetProposalView<View, Mutation = FleetMutation> {
   readonly id: string;
   readonly revision: string;
-  readonly mutation: FleetMutation;
+  readonly mutation: Mutation;
   readonly summary: string;
   readonly expiresAt: string;
   readonly state: FleetProposalState;
@@ -104,13 +108,13 @@ export interface FleetProposalStoreOptions {
  * client cannot keep a stale proposal alive by looking at it, and the bound on open proposals is a
  * bound on live ones rather than on ones ever created.
  */
-export class FleetProposalStore<Payload> {
-  readonly #proposals = new Map<string, FleetProposalRecord<Payload>>();
+export class FleetProposalStore<Payload, Mutation = FleetMutation> {
+  readonly #proposals = new Map<string, FleetProposalRecord<Payload, Mutation>>();
   constructor(private readonly options: FleetProposalStoreOptions) {}
 
   open(
-    input: Omit<FleetProposalRecord<Payload>, 'id' | 'createdAt' | 'expiresAt' | 'state' | 'approval'>,
-  ): FleetProposalRecord<Payload> {
+    input: Omit<FleetProposalRecord<Payload, Mutation>, 'id' | 'createdAt' | 'expiresAt' | 'state' | 'approval'>,
+  ): FleetProposalRecord<Payload, Mutation> {
     this.retireExpired();
     // Only proposals that could still be applied occupy a slot. A consumed one is kept so a repeat
     // apply can be told it already happened, but counting it would mean eight successful changes
@@ -124,7 +128,7 @@ export class FleetProposalStore<Payload> {
     }
     this.retireOldestConsumed();
     const createdAt = this.options.now();
-    const record: FleetProposalRecord<Payload> = {
+    const record: FleetProposalRecord<Payload, Mutation> = {
       ...input,
       id: this.freeId(),
       createdAt,
@@ -160,7 +164,7 @@ export class FleetProposalStore<Payload> {
    * find it would report every timed-out change as one that never existed, and send a person
    * looking for a typo in an id that was correct.
    */
-  require(id: string): FleetProposalRecord<Payload> {
+  require(id: string): FleetProposalRecord<Payload, Mutation> {
     const record = this.#proposals.get(id);
     if (record !== undefined && record.expiresAt <= this.options.now()) {
       this.#proposals.delete(id);
@@ -188,7 +192,7 @@ export class FleetProposalStore<Payload> {
    * that separation is what let the fleet's parallel approval system be deleted without touching
    * anything the transaction guarantees.
    */
-  consume(id: string): FleetProposalRecord<Payload> {
+  consume(id: string): FleetProposalRecord<Payload, Mutation> {
     const record = this.require(id);
     record.state = 'consumed';
     this.retireOldestConsumed();
@@ -196,7 +200,7 @@ export class FleetProposalStore<Payload> {
   }
 
   /** Put a consumed proposal back, when the apply it authorised never reached the host. */
-  restore(record: FleetProposalRecord<Payload>): void {
+  restore(record: FleetProposalRecord<Payload, Mutation>): void {
     if (this.#proposals.has(record.id)) record.state = 'pending';
   }
 
@@ -233,10 +237,10 @@ export class FleetProposalStore<Payload> {
 }
 
 /** The disclosable view of a proposal. */
-export function redactProposal<Payload, View>(
-  record: FleetProposalRecord<Payload>,
+export function redactProposal<Payload, View, Mutation = FleetMutation>(
+  record: FleetProposalRecord<Payload, Mutation>,
   viewOf: (payload: Payload) => View,
-): FleetProposalView<View> {
+): FleetProposalView<View, Mutation> {
   return {
     id: record.id,
     revision: record.revision,

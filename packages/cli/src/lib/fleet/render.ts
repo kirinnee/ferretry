@@ -36,6 +36,18 @@ const INDENT = '    ';
 
 const plural = (count: number, singular: string): string => `${count} ${count === 1 ? singular : `${singular}s`}`;
 
+/**
+ * The word a dry run prints for an operation. Three behaviours the plan spells as options on an older
+ * kind get their own word, the same ones the change review uses: a link allowed to point at nothing
+ * yet, a document whose named keys alone are replaced, and a sweep of only what an earlier apply left.
+ */
+function operationWord(operation: FleetWriteOperation): string {
+  if (operation.kind === 'symlink' && operation.dangling === true) return 'credential-link';
+  if (operation.kind === 'settings' && operation.replaceKeys !== undefined) return 'json-keys';
+  if (operation.kind === 'prune-directory' && operation.only !== undefined) return 'retire';
+  return operation.kind;
+}
+
 /** The path an operation touches; a copy and a symlink name their source too. */
 function operationTarget(operation: FleetWriteOperation): string {
   switch (operation.kind) {
@@ -43,12 +55,18 @@ function operationTarget(operation: FleetWriteOperation): string {
     case 'symlink':
       return `${operation.path} ← ${operation.source}`;
     case 'settings': {
+      if (operation.replaceKeys !== undefined) {
+        return `${operation.path} (replacing ${operation.replaceKeys.join(', ')}; every other key kept)`;
+      }
       const sources = operation.layers.map(layer => (layer.from === 'file' ? layer.path : '[inline settings]'));
       return sources.length === 0 ? operation.path : `${operation.path} ← ${sources.join(' + ')}`;
     }
     case 'prune':
-    case 'prune-directory':
       return `${operation.path} (keeping ${operation.keep.length})`;
+    case 'prune-directory':
+      return operation.only === undefined
+        ? `${operation.path} (keeping ${operation.keep.length})`
+        : `${operation.path} (only what Ferretry placed: ${operation.only.join(', ')})`;
     case 'codex-sqlite-ownership':
       return operation.enabled
         ? `${operation.path} (own sqlite_home=${operation.sqliteHome}; sidecar ${operation.markerPath})`
@@ -228,7 +246,7 @@ const SYMLINK_NOTE: readonly string[] = [
 export function renderApplyPlan(plan: FleetApplyPreview): string {
   const historyChanges = plan.sharedHistory.reduce((total, preview) => total + preview.changes.length, 0);
   const header = `${plural(plan.manifest.accounts.length, 'account')}, ${plural(plan.operations.length, 'operation')}, ${plural(historyChanges, 'history change')} — nothing has been written`;
-  const operations = plan.operations.map(operation => `  ${operation.kind.padEnd(9)} ${operationTarget(operation)}`);
+  const operations = plan.operations.map(operation => `  ${operationWord(operation).padEnd(9)} ${operationTarget(operation)}`);
   const history = plan.sharedHistory.flatMap(preview => [
     `  shared    ${preview.kind} pool ${preview.pool} (${preview.migrated} migrated entries, ${preview.conflicts} collisions, ${preview.links} links)`,
     ...preview.changes.map(change => `    ${historyChange(change)}`),

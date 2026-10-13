@@ -42,11 +42,11 @@ import { FleetCredentialStoreSchema, FleetCredentialStatusWordSchema, FleetCrede
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
-/** A runtime's name or a credential's id (R1): letters, digits and dashes, no dash at either end. */
-export const FleetRuntimeNameSchema = z
-  .string()
-  .max(64)
-  .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u, 'use only letters, digits and dashes');
+/**
+ * A runtime's name or a credential's id as a person typed it. The grammar (R1) is checked by the
+ * daemon rather than here, because a name it refuses comes back with a suggestion (E16).
+ */
+const TypedNameSchema = z.string().min(1).max(200);
 
 /** A component's or a profile's name: one path segment. */
 export const FleetComponentNameSchema = z
@@ -351,7 +351,7 @@ export const MAX_COMPONENT_CONTENT_BYTES = 256 * 1024;
 export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('runtime.put'),
-    name: FleetRuntimeNameSchema,
+    name: TypedNameSchema,
     credential: NonEmptyStringSchema,
     profile: FleetComponentNameSchema,
     agent: z.boolean(),
@@ -390,7 +390,7 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     kind: z.literal('credential.add'),
-    id: FleetRuntimeNameSchema,
+    id: TypedNameSchema,
     harness: HarnessKindSchema,
     label: NonEmptyStringSchema.optional(),
   }),

@@ -529,3 +529,18 @@ describe('the fleet preparation block', () => {
     should(() => parseDaemonConfig({ fleet: { prepareDefaults: 'no' } })).throw();
   });
 });
+
+describe('the account model switch', () => {
+  it('should leave account-model writes off unless the operator switched them on', () => {
+    // Assert — off by default: a version-2 config.yaml is unreadable to every version-1 reader still shipped.
+    should(defaultDaemonConfig().accountModel).deepEqual({ enabled: false });
+    should(defaultDaemonConfigDocument().accountModel).deepEqual({ enabled: false });
+    should(parseDaemonConfig({ accountModel: { enabled: true } }).accountModel).deepEqual({ enabled: true });
+  });
+
+  it('should refuse a key nothing reads', () => {
+    // Assert
+    should(() => parseDaemonConfig({ accountModel: { enable: true } })).throw();
+    should(() => parseDaemonConfig({ accountModel: { enabled: 'yes' } })).throw();
+  });
+});
