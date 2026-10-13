@@ -97,10 +97,24 @@ function pathIsInside(parent: string, candidate: string): boolean {
   return fromParent === '' || (!fromParent.startsWith(`..${sep}`) && fromParent !== '..' && !isAbsolute(fromParent));
 }
 
+/** What the state home's fleet links may additionally resolve to, outside it. */
+export interface StateFileSystemOptions {
+  /**
+   * The person's own Codex `auth.json`, which a runtime on their `store: host` Codex credential links
+   * to. Absent means no such link is admitted: a host whose Codex home could not be named has nothing
+   * a link may point at, and the blanket refusal is the fail-closed answer.
+   */
+  readonly hostCodexAuth?: string;
+}
+
+/** The name of a Codex runtime's credential link, inside its home (design §8.2.1). */
+const CODEX_CREDENTIAL_LINK = 'auth.json';
+
 export class StateFileSystem implements FileSystemPort {
   constructor(
     private readonly paths: FoundationPaths,
     private readonly uniqueId: () => string = randomUUID,
+    private readonly options: StateFileSystemOptions = {},
   ) {}
 
   private contained(path: string): string {
@@ -111,7 +125,7 @@ export class StateFileSystem implements FileSystemPort {
   /**
    * Fleet provisioning owns one deliberately narrow class of links beneath the state home: an entry
    * under `fleet/homes` whose whole chain resolves back into one of the two directories the fleet owns
-   * and writes.
+   * and writes — or, for a Codex runtime's credential link alone, into its credential's one file.
    *
    * TWO DESTINATIONS, and they are two different contracts rather than one widened rule:
    *
@@ -135,12 +149,35 @@ export class StateFileSystem implements FileSystemPort {
       const resolved = await realpath(path);
       return (
         pathIsInside(join(this.paths.fleet, 'shared'), resolved) ||
-        pathIsInside(join(this.paths.fleet, 'assets'), resolved)
+        pathIsInside(join(this.paths.fleet, 'assets'), resolved) ||
+        (await this.isCodexCredentialLink(homes, path, resolved))
       );
     } catch {
       // A dangling, unreadable, or cyclic link is not provisioner-owned evidence. Fail closed.
       return false;
     }
+  }
+
+  /**
+   * The third destination, and the narrowest: a Codex runtime's `auth.json` linked to its credential's
+   * ONE canonical file (design §8.2.1), so a refresh in any runtime lands in the file every runtime reads.
+   *
+   * Exactly `fleet/homes/<id>/auth.json`, and its resolved target exactly one of two files:
+   * `fleet/credentials/<C>/auth.json` for a credential Ferretry keeps, or the person's own Codex
+   * `auth.json` for their `store: host` login when the composition root named it. Not a directory
+   * of either, not a deeper file, and not a link at any other name.
+   */
+  private async isCodexCredentialLink(homes: string, path: string, resolved: string): Promise<boolean> {
+    const fromHomes = relative(homes, path).split(sep);
+    if (fromHomes.length !== 2 || fromHomes[1] !== CODEX_CREDENTIAL_LINK) return false;
+    const credentials = await realpath(join(this.paths.fleet, 'credentials')).catch(() => undefined);
+    if (credentials !== undefined && pathIsInside(credentials, resolved)) {
+      const fromCredentials = relative(credentials, resolved).split(sep);
+      if (fromCredentials.length === 2 && fromCredentials[1] === CODEX_CREDENTIAL_LINK) return true;
+    }
+    const host = this.options.hostCodexAuth;
+    if (host === undefined) return false;
+    return resolved === (await realpath(host).catch(() => undefined));
   }
 
   private async checked(path: string): Promise<string> {

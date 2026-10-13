@@ -1,8 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CredentialSchema } from '../../src/lib/account/schema.ts';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import {
   credentialSourceOf,
+  credentialSourceOfCredential,
   decideLoginApplicability,
   type FleetCredentialSource,
   HARNESS_CREDENTIAL_ENV,
@@ -342,5 +344,43 @@ describe('an account a profile authenticates', () => {
 
     // Assert
     should(actual).deepEqual({ applies: false, because: 'credential-is-not-a-login' });
+  });
+});
+
+describe('credentialSourceOfCredential', () => {
+  const parseCredential = (input: Record<string, unknown>) => CredentialSchema.parse(input);
+
+  it.each([
+    ['host', 'claude'],
+    ['ferretry', 'codex'],
+  ])('should read a %s %s credential as a login', (store, harness) => {
+    should(credentialSourceOfCredential(parseCredential({ harness, store }))).deepEqual({
+      source: 'interactive-login',
+    });
+  });
+
+  it('should name the secret store for an environment credential holding a secret reference', () => {
+    const actual = credentialSourceOfCredential(
+      parseCredential({ harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }),
+    );
+
+    should(actual).deepEqual({ source: 'secret-store', variable: 'ANTHROPIC_API_KEY', secrets: ['WORK_KEY'] });
+  });
+
+  it('should name the secrets file for an environment reference when one is declared', () => {
+    const actual = credentialSourceOfCredential(
+      parseCredential({ harness: 'codex', store: 'environment', env: { OPENAI_API_KEY: '$OPENAI_API_KEY' } }),
+      '/secrets.sh',
+    );
+
+    should(actual).deepEqual({ source: 'token-file', variable: 'OPENAI_API_KEY', path: '/secrets.sh' });
+  });
+
+  it('should be undeclared when the env names no credential variable this harness reads', () => {
+    const actual = credentialSourceOfCredential(
+      parseCredential({ harness: 'codex', store: 'environment', env: { LOG_LEVEL: 'debug' } }),
+    );
+
+    should(actual).deepEqual({ source: 'undeclared' });
   });
 });

@@ -3,7 +3,13 @@ import { createHash } from 'node:crypto';
 import { accessSync, existsSync, constants as fsConstants, statSync, writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { FleetIdentityService, FleetTokenRefreshService, HARNESS_BINARIES, type HarnessKind } from '@ferretry/fleet';
+import {
+  FleetIdentityService,
+  FleetTokenRefreshService,
+  HARNESS_BINARIES,
+  type HarnessKind,
+  hostCodexCredentialFile,
+} from '@ferretry/fleet';
 import {
   FileFleetConfigSource,
   type FleetBinaryLookup,
@@ -4320,7 +4326,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     lastSweepAt: undefined,
   };
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
-  const stateFiles = new StateFileSystem(paths);
+  const stateFiles = new StateFileSystem(paths, undefined, {
+    hostCodexAuth: hostCodexCredentialFile(process.env.CODEX_HOME, userHome),
+  });
   // The login window is created before a state home is opened, while browser sessions are created
   // from that opened home. Keep the callback live so a human login always closes the real workers
   // that currently hold the shared profile rather than racing their lease.
