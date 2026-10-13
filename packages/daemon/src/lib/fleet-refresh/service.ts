@@ -22,6 +22,12 @@ export interface FleetRefreshLoop {
 
 export interface FleetRefreshParts {
   readonly usage: UsageFeedPort;
+  /**
+   * The account model's credentials, observed on this SAME pass (docs/design/account-model.md
+   * §8.1.3): each one's passive reading and, only when that is stale, its one free usage read. Never
+   * a refresh and never a harness launch, which is what lets it ride an unattended timer at all.
+   */
+  readonly credentials?: { observeAll(): Promise<void> };
 }
 
 export class FleetRefreshService implements FleetRefreshLoop {
@@ -43,6 +49,6 @@ export class FleetRefreshService implements FleetRefreshLoop {
     // A collector failure is evidence that its existing feed should mark its prior snapshot stale,
     // never a reason to manufacture an empty fleet or to make the timer retry early. The fixed
     // daemon timer chooses the next attempt; this pass only asks the established feed to refresh.
-    await Promise.allSettled([this.parts.usage.accounts()]);
+    await Promise.allSettled([this.parts.usage.accounts(), this.parts.credentials?.observeAll()]);
   }
 }

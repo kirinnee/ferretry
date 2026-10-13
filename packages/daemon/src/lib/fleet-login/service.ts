@@ -69,6 +69,7 @@ import {
   type FleetLoginResult,
   FleetLoginService,
   type FleetLoginTarget,
+  type HarnessKind,
   type HarnessLoginDeclarations,
   referencedEnvNames,
   type FleetTokenRenewal,
@@ -91,6 +92,7 @@ import type {
   HarnessLoginSubmission,
 } from '@ferretry/protocol';
 import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts';
+import { type CredentialSignInTarget, FleetCredentialRefusal } from '../fleet/credentials-service.ts';
 import {
   CLAUDE_LOGIN_ARGV,
   CLAUDE_LOGIN_START,
@@ -190,6 +192,13 @@ export interface DaemonHarnessLoginOptions {
   readonly windowMinutes?: number;
   /** Which harnesses declare an interactive login. Defaulted to the shipped table. */
   readonly declarations?: HarnessLoginDeclarations;
+  /**
+   * Signing in by CREDENTIAL (account model §4.6): resolves a credential id to what a sign-in for it
+   * launches. Absent means a start that names a credential refuses in words.
+   */
+  readonly credentialTargets?: { target(credentialId: string): Promise<CredentialSignInTarget> };
+  /** The harness command, by this daemon's one rule. A credential sign-in launches it directly. */
+  readonly locate?: (harness: HarnessKind) => string | undefined;
 }
 
 /** The default login window. Long enough to find a phone, short enough that a stray child is not forever. */
@@ -205,7 +214,8 @@ type FlowStage =
 
 interface FlowRecord {
   readonly flowId: string;
-  readonly accountId: string;
+  readonly accountId?: string;
+  readonly credentialId?: string;
   readonly identityKey: string;
   readonly startedAt: number;
   readonly expiresAt: number;
@@ -323,8 +333,50 @@ export class HarnessLoginService {
 
   /** Start one identity's login, confirmed against the operator password when this caller owes one. */
   async start(request: HarnessLoginStartRequest, governance: CallerGovernance | undefined): Promise<HarnessLoginFlow> {
-    const { identity } = await this.#authorize(request, governance, SIGN_IN);
-    return this.#launch(identity, request.accountId);
+    if (request.credentialId !== undefined)
+      return await this.#startCredential(request.credentialId, request, governance);
+    // The schema admits exactly one of the two ids, so an account id is present here.
+    const accountId = request.accountId ?? '';
+    const { identity } = await this.#authorize({ ...request, accountId }, governance, SIGN_IN);
+    return this.#launch(identity, accountId);
+  }
+
+  /**
+   * Sign one account-model CREDENTIAL in (design §4.6, E12, E31).
+   *
+   * A version-1 credential is an identity group, so it goes through the account flow above, which
+   * already walks the group. A version-2 credential is signed in by the harness's OWN login launched
+   * with that credential's store in its environment — so an empty slot nothing uses yet can be signed
+   * in, and every runtime that later names it reads the login this wrote. Same gate, same order: every
+   * refusal the document can answer is answered before a password attempt is spent.
+   */
+  async #startCredential(
+    credentialId: string,
+    request: HarnessLoginStartRequest,
+    governance: CallerGovernance | undefined,
+  ): Promise<HarnessLoginFlow> {
+    if (governance === undefined) throw new HarnessLoginRefusal('fleet_login_unauthorized', SIGN_IN.undecidable);
+    const targets = this.options.credentialTargets;
+    if (targets === undefined) {
+      throw new HarnessLoginRefusal('fleet_login_unavailable', 'this daemon is not configured to sign logins in by id');
+    }
+    let target: CredentialSignInTarget;
+    try {
+      target = await targets.target(credentialId);
+    } catch (error) {
+      if (error instanceof FleetCredentialRefusal)
+        throw new HarnessLoginRefusal('fleet_login_unavailable', error.message);
+      throw error;
+    }
+    if (target.kind === 'refused') throw new HarnessLoginRefusal('fleet_login_unavailable', target.reason);
+    if (target.kind === 'account') {
+      const { identity } = await this.#authorize({ ...request, accountId: target.accountId }, governance, SIGN_IN);
+      return this.#launch(identity, target.accountId, credentialId);
+    }
+    const key = `credential:${credentialId}`;
+    this.#assertKeyFree(key);
+    if (governance.confirmChange) await this.#confirm(key, request.operatorPassword, SIGN_IN);
+    return this.#launchCredential(target, key);
   }
 
   /**
@@ -548,11 +600,15 @@ export class HarnessLoginService {
    * refusal says which flow holds the identity rather than implying nothing else can.
    */
   #assertSingleFlight(identity: FleetIdentity): void {
+    this.#assertKeyFree(identity.key);
+  }
+
+  #assertKeyFree(key: string): void {
     for (const record of this.#flows.values()) {
-      if (record.identityKey !== identity.key || settled(record.stage)) continue;
+      if (record.identityKey !== key || settled(record.stage)) continue;
       throw new HarnessLoginRefusal(
         'fleet_login_in_progress',
-        `a sign-in for "${identity.key}" is already running as flow "${record.flowId}"; finish or cancel it first`,
+        `a sign-in for "${key}" is already running as flow "${record.flowId}"; finish or cancel it first`,
       );
     }
   }
@@ -587,22 +643,46 @@ export class HarnessLoginService {
 
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────
 
-  #launch(identity: FleetIdentity, accountId: string): HarnessLoginFlow {
+  #launch(identity: FleetIdentity, accountId: string, credentialId?: string): HarnessLoginFlow {
     // Checked AGAIN, and this is the check that holds: `#authorize`'s copy runs before the password is
     // proved, and that proof is an await, so two starts for one identity can both pass it. Nothing
     // between here and the record landing in `#flows` awaits, so the later of the two is refused here.
     this.#assertSingleFlight(identity);
+    const record = this.#record(identity.kind, identity.key, {
+      accountId,
+      ...(credentialId === undefined ? {} : { credentialId }),
+    });
+    // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the
+    // login itself takes as long as a person takes. Every failure is recorded on the record, so nothing
+    // here can reject into an unhandled rejection.
+    void this.#run(identity, record);
+    return this.#projection(record);
+  }
+
+  /** A credential's sign-in: the same record and window, with the harness launched directly. */
+  #launchCredential(target: Extract<CredentialSignInTarget, { kind: 'store' }>, key: string): HarnessLoginFlow {
+    this.#assertKeyFree(key);
+    const record = this.#record(target.harness, key, { credentialId: target.credentialId });
+    void this.#runCredential(target, record);
+    return this.#projection(record);
+  }
+
+  #record(
+    harness: HarnessKind,
+    identityKey: string,
+    subject: { readonly accountId?: string; readonly credentialId?: string },
+  ): FlowRecord {
     this.#prune();
     const startedAt = this.options.clock.now();
     const window = (this.options.windowMinutes ?? HARNESS_LOGIN_WINDOW_MINUTES) * 60_000;
     const record: FlowRecord = {
       flowId: this.options.mintId(),
-      accountId,
-      identityKey: identity.key,
+      ...subject,
+      identityKey,
       startedAt,
       expiresAt: startedAt + window,
       stage:
-        identity.kind === 'claude'
+        harness === 'claude'
           ? { harness: 'claude', stage: CLAUDE_LOGIN_START }
           : { harness: 'codex', stage: CODEX_LOGIN_START },
       child: undefined,
@@ -613,12 +693,62 @@ export class HarnessLoginService {
     record.disarm = this.options.timer.after(window, () => {
       this.#expire(record);
     });
+    return record;
+  }
 
-    // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the
-    // login itself takes as long as a person takes. Every failure is recorded on the record, so nothing
-    // here can reject into an unhandled rejection.
-    void this.#run(identity, record);
-    return this.#projection(record);
+  /**
+   * Launch the harness's own login against one credential's store, and prove the store afterwards.
+   *
+   * The environment is sanitized exactly as an account's is, then given the store's variables, so a
+   * sign-in started from inside an agent session cannot authenticate against that session's login.
+   */
+  async #runCredential(target: Extract<CredentialSignInTarget, { kind: 'store' }>, record: FlowRecord): Promise<void> {
+    try {
+      const binary = this.options.locate?.(target.harness);
+      if (binary === undefined) {
+        this.#end(
+          record,
+          `the ${target.harness} command is not installed on this machine, so there is nothing to sign in with`,
+        );
+        return;
+      }
+      await target.prepare();
+      if (settled(record.stage)) return;
+      const argv = record.stage.harness === 'claude' ? CLAUDE_LOGIN_ARGV : CODEX_LOGIN_ARGV;
+      record.spawned = true;
+      const child = this.options.spawn({
+        command: [binary, ...target.arguments, ...argv],
+        environment: { ...sanitizeHarnessEnv(this.options.environment), ...target.environment },
+        onLine: line => this.#observe(record, line),
+      });
+      record.child = child;
+      const code = await child.exited;
+      record.child = undefined;
+      if (settled(record.stage)) return;
+      if (!published(record.stage)) {
+        this.#end(
+          record,
+          `this host's ${record.stage.harness} did not offer a sign-in that can be driven from a browser`,
+        );
+        return;
+      }
+      const ending = this.#ending(record.stage, { exit: code });
+      if (ending !== undefined) {
+        this.#endWith(record, ending);
+        return;
+      }
+      if (code !== 0) {
+        this.#end(record, `the sign-in exited with code ${code}`);
+        return;
+      }
+      if (!(await target.signedIn())) {
+        this.#end(record, 'the sign-in finished, but no usable login was written for this credential');
+        return;
+      }
+      this.#finish(record, []);
+    } catch (error) {
+      this.#end(record, error instanceof Error && error.message.length > 0 ? error.message : 'the sign-in failed');
+    }
   }
 
   /**
@@ -643,7 +773,8 @@ export class HarnessLoginService {
     try {
       const results = await fleetLogin.login({
         identities: [identity],
-        accountIds: [record.accountId],
+        // An account flow always carries its account: `#launch` is its only constructor.
+        accountIds: [record.accountId ?? ''],
         mode: 'reauthenticate',
       });
       this.#finish(record, outcomesOf(results));
@@ -783,7 +914,8 @@ export class HarnessLoginService {
   #projection(record: FlowRecord): HarnessLoginFlow {
     const base: HarnessLoginFlowBase = {
       flowId: record.flowId,
-      accountId: record.accountId,
+      ...(record.accountId === undefined ? {} : { accountId: record.accountId }),
+      ...(record.credentialId === undefined ? {} : { credentialId: record.credentialId }),
       identity: record.identityKey,
       startedAt: instant(record.startedAt),
       expiresAt: instant(record.expiresAt),

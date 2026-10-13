@@ -453,4 +453,42 @@ describe('harness-login schemas', () => {
       }),
     ]);
   });
+
+  it('should start a sign-in from exactly one of an account and a credential', () => {
+    // Arrange / Act
+    const byCredential = harnessLogin.HarnessLoginStartRequestSchema.parse({
+      credentialId: 'claude-work',
+      operatorPassword: 'the operator password',
+    });
+
+    // Assert
+    should(byCredential).deepEqual({ credentialId: 'claude-work', operatorPassword: 'the operator password' });
+    assertRejects([
+      rejects('neither id', harnessLogin.HarnessLoginStartRequestSchema, { operatorPassword: 'the operator password' }),
+      rejects('both ids', harnessLogin.HarnessLoginStartRequestSchema, {
+        accountId: ACCOUNT_ID,
+        credentialId: 'claude-work',
+      }),
+      rejects('a credential id that is not a slug', harnessLogin.HarnessLoginStartRequestSchema, {
+        credentialId: 'Claude Work',
+      }),
+    ]);
+  });
+
+  it('should carry a credential sign-in that launched no account', () => {
+    // Arrange
+    const { accountId: _accountId, ...withoutAccount } = flowShape;
+
+    // Act
+    const flow = harnessLogin.HarnessLoginFlowSchema.parse({
+      harness: 'claude',
+      ...withoutAccount,
+      credentialId: 'claude-work',
+      state: 'starting',
+    });
+
+    // Assert
+    should(flow).not.have.property('accountId');
+    should(flow.credentialId).equal('claude-work');
+  });
 });

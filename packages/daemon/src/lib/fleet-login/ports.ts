@@ -12,7 +12,9 @@
 /** Every flow state carries these, whichever harness it is. Facts about the FLOW, not about a harness. */
 export interface HarnessLoginFlowBase {
   readonly flowId: string;
-  readonly accountId: string;
+  /** Absent for a sign-in started from a credential, which launches no account wrapper. */
+  readonly accountId?: string;
+  readonly credentialId?: string;
   readonly identity: string;
   readonly startedAt: string;
   readonly expiresAt: string;

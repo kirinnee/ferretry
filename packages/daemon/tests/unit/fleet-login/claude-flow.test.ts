@@ -31,13 +31,13 @@ const CLAUDE_URL =
 /** The line as it actually arrives: the address inside an OSC 8 hyperlink and again as visible text. */
 const URL_LINE = `If the browser didn't open, visit: ${ESC}]8;;${CLAUDE_URL}${BEL}${CLAUDE_URL}${ESC}]8;;${BEL}`;
 
-const BASE: HarnessLoginFlowBase = {
+const BASE = {
   flowId: 'flow-one',
   accountId: '00000000-0000-4000-8000-000000000001',
   identity: 'claude:kirin',
   startedAt: '2026-08-19T10:00:00.000Z',
   expiresAt: '2026-08-19T10:10:00.000Z',
-};
+} satisfies HarnessLoginFlowBase;
 
 const awaiting: ClaudeLoginStage = { stage: 'awaiting-code', verificationUrl: CLAUDE_URL };
 const complete: ClaudeLoginStage = {
