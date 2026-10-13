@@ -4,6 +4,7 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import {
   applyAccountChange,
   applyStagedChange,
+  authorizeChange,
   type ChangeAttempt,
   changeNeedsPassword,
   changeRefusalSentence,
@@ -228,6 +229,43 @@ describe('stage then apply, separately', () => {
       kind: 'refused',
       sentence: 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.',
     });
+  });
+});
+
+describe('authorizeChange', () => {
+  it('hands back nothing extra when nothing is owed, the confirmation when it is, and mints for a locked browser', async () => {
+    expect(await authorizeChange(scriptedClient(ROUTES), attempt())).toEqual({ kind: 'authorized', held: null });
+    expect(
+      await authorizeChange(
+        scriptedClient(ROUTES),
+        attempt({ authority: { kind: 'confirm' }, operatorPassword: 'correct-horse-battery' }),
+      ),
+    ).toEqual({ kind: 'authorized', operatorPassword: 'correct-horse-battery', held: null });
+    const calls: Call[] = [];
+    const locked = await authorizeChange(
+      scriptedClient(ROUTES, calls),
+      attempt({ authority: { kind: 'locked', alsoConfirms: false }, operatorPassword: 'correct-horse-battery' }),
+    );
+    expect(locked).toMatchObject({ kind: 'authorized', unlock: UNLOCK_TOKEN, held: { token: UNLOCK_TOKEN } });
+    expect(locked).not.toHaveProperty('operatorPassword');
+    expect(paths(calls)).toEqual(['/v1/grants/unlock']);
+  });
+
+  it('refuses a missing or malformed password, and a wrong one in the unlock’s words', async () => {
+    expect(await authorizeChange(scriptedClient(ROUTES), attempt({ authority: { kind: 'confirm' } }))).toMatchObject({
+      kind: 'refused',
+      passwordRejected: false,
+    });
+    expect(
+      await authorizeChange(scriptedClient(ROUTES), attempt({ authority: { kind: 'confirm' }, operatorPassword: 'x' })),
+    ).toMatchObject({ kind: 'refused', passwordRejected: true });
+    const wrong = new FyHttpError('Wrong. 3 attempts remaining.', 403, 'grant_wrong_password');
+    expect(
+      await authorizeChange(
+        scriptedClient({ '/v1/grants/unlock': wrong }),
+        attempt({ authority: { kind: 'locked', alsoConfirms: true }, operatorPassword: 'not-the-password' }),
+      ),
+    ).toMatchObject({ kind: 'refused', code: 'grant_wrong_password', passwordRejected: true });
   });
 });
 

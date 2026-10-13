@@ -203,6 +203,45 @@ export const applyStagedChange = async (
   }
 };
 
+/** What a guarded act that is NOT a staged change sends: a sign-in start, a Check now. */
+export type Authorization =
+  | {
+      readonly kind: 'authorized';
+      /** The unlock header, when this browser holds one for this machine. */
+      readonly unlock?: string;
+      /** The per-change confirmation, when the machine asks for one. */
+      readonly operatorPassword?: string;
+      readonly held: HeldUnlock | null;
+    }
+  | Extract<ChangeResult, { kind: 'refused' }>;
+
+/**
+ * Gets this browser past the gate for one guarded act that is not a staged change (starting a
+ * sign-in, a Check now): mints an unlock when it is locked out, and hands back the confirmation the
+ * act should carry. The caller sends both with its own request.
+ */
+export const authorizeChange = async (client: FleetClient, attempt: ChangeAttempt): Promise<Authorization> => {
+  const held = attempt.held ?? null;
+  const owesConfirmation = confirms(attempt.authority);
+  const owesUnlock = attempt.authority.kind === 'locked' && !hasUnlock(attempt, held);
+  if ((owesConfirmation || owesUnlock) && !typed(attempt)) return passwordFirst(held);
+  const malformed = malformedPassword(attempt, held);
+  if (malformed !== null) return malformed;
+  try {
+    const next = await unlockFor(client, attempt);
+    return {
+      kind: 'authorized',
+      ...(next === null ? {} : { unlock: next.token }),
+      ...(owesConfirmation && attempt.operatorPassword !== undefined
+        ? { operatorPassword: attempt.operatorPassword }
+        : {}),
+      held: next,
+    };
+  } catch (error) {
+    return refused(error, held);
+  }
+};
+
 /** Stage one change and apply it at once: the common case, one click and at most one password. */
 export const applyAccountChange = async (
   client: FleetClient,

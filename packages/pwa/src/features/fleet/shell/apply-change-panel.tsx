@@ -18,6 +18,8 @@ import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
 import {
   applyAccountChange,
   applyStagedChange,
+  type Authorization,
+  authorizeChange,
   type ChangeResult,
   changeNeedsPassword,
   type FleetApplyAuthority,
@@ -40,6 +42,13 @@ export interface AccountChanges {
   readonly applyStaged: (staged: FleetAccountChangeView, operatorPassword?: string) => Promise<ChangeResult>;
   /** Forget the last refusal. */
   readonly clear: () => void;
+  /**
+   * Run one guarded act that is not a staged change (a sign-in start, a Check now) with what it must
+   * send. A refusal is shown like any other; the act's own failure is the caller's to word.
+   */
+  readonly authorize: (operatorPassword?: string) => Promise<Authorization>;
+  /** Show a sentence the caller worded (an act's own refusal) where a change's refusal shows. */
+  readonly refuse: (sentence: string) => void;
 }
 
 export interface UseAccountChangesOptions {
@@ -73,7 +82,7 @@ export function useAccountChanges({ connection, createClient, now }: UseAccountC
   }, [connection, createClient]);
 
   const run = useCallback(
-    async <R extends ChangeResult | StageResult>(
+    async <R extends ChangeResult | StageResult | Authorization>(
       work: (client: Awaited<ReturnType<FleetClientFactory>>, current: FleetApplyAuthority) => Promise<R>,
     ): Promise<R | Extract<ChangeResult, { kind: 'refused' }>> => {
       setBusy(true);
@@ -122,6 +131,8 @@ export function useAccountChanges({ connection, createClient, now }: UseAccountC
     applyStaged: (staged, password) =>
       run((client, current) => applyStagedChange(client, staged, attempt(current, password))),
     clear: () => setRefusal(null),
+    authorize: password => run((client, current) => authorizeChange(client, attempt(current, password))),
+    refuse: sentence => setRefusal(sentence),
   };
 }
 

@@ -302,6 +302,19 @@ describe('useAccountChanges', () => {
     await view.unmount();
   });
 
+  it('authorizes a guarded act, and shows a sentence the caller worded', async () => {
+    const client = scriptedClient({ '/v1/fleet/permissions': permissions({ confirmation: 'operator-password' }) });
+    const { view, hooks } = await hookView(async () => client);
+    let answer: unknown;
+    await interact(async () => {
+      answer = await hooks().authorize(PASSWORD);
+    });
+    expect(answer).toEqual({ kind: 'authorized', operatorPassword: PASSWORD, held: null });
+    await interact(() => hooks().refuse('Claude didn’t accept that code.'));
+    expect(view.container.querySelector('p')?.textContent).toBe('Claude didn’t accept that code.');
+    await view.unmount();
+  });
+
   it('an unreachable machine reads as unreadable authority and a refused change', async () => {
     const { view, hooks } = await hookView(async () => Promise.reject(new Error('no carrier')));
     expect(view.container.querySelector('[data-authority]')?.getAttribute('data-authority')).toBe('unreadable');
