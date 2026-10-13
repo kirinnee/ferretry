@@ -18,6 +18,15 @@ and one settings layer each, all generated from a single declared configuration.
 this leaves the host: only "recommend", which needs the routing catalog, and
 "sharing", which reads the report the Fleet tab reads, talk to the daemon.`;
 
+/** What replaces one `fleet login` invocation on the account model. */
+function loginReplacement(bin: string, accountIds: readonly string[], options: FleetLoginOptions): string {
+  if (options.syncOnly)
+    return 'on the new account format there is nothing to sync: every runtime on a login shares it.';
+  if (options.status || accountIds.length === 0)
+    return `\`${bin} credentials\` shows every login and whether it works.`;
+  return `\`${bin} credential signin <login>\` signs one login in; \`${bin} credentials\` names each one.`;
+}
+
 /** Add the shared flags every fleet verb carries. */
 function scoped(command: Command): Command {
   return command.option(JSON_FLAG, JSON_HELP);
@@ -51,7 +60,9 @@ export function registerFleetCommands(program: Command, controller: FleetControl
       .alias('list')
       .description('the accounts provisioning last published'),
   ).action(async (_flags: unknown, command: Command) => {
-    await controller.list(merged(command));
+    const options = merged(command);
+    controller.replaced(`\`${bin} runtimes\` replaces \`${bin} fleet ls\`.`, options);
+    await controller.list(options);
   });
 
   scoped(
@@ -75,6 +86,7 @@ export function registerFleetCommands(program: Command, controller: FleetControl
     if (firstAccount !== undefined && firstAccount !== true && firstAccount !== 'claude' && firstAccount !== 'codex') {
       throw new Error(`first account must be "claude" or "codex": ${bin} fleet init --first-account=claude`);
     }
+    controller.replaced(`\`${bin} setup\` replaces \`${bin} fleet init\`.`, options);
     await controller.init({
       ...options,
       ...(firstAccount === undefined ? {} : { firstAccount: firstAccount === true ? 'detected' : firstAccount }),
@@ -87,12 +99,19 @@ export function registerFleetCommands(program: Command, controller: FleetControl
       .description('realize the declared configuration: homes, wrappers, settings and the manifest')
       .option('--dry-run', 'print every write the configuration implies and stop'),
   ).action(async (_flags: unknown, command: Command) => {
-    await controller.apply(merged<FleetApplyOptions>(command));
+    const options = merged<FleetApplyOptions>(command);
+    controller.replaced(
+      `changes made with \`${bin} runtime\`, \`${bin} profile\` and \`${bin} component\` apply by themselves.`,
+      options,
+    );
+    await controller.apply(options);
   });
 
   scoped(fleet.command('usage').description("probe every account's remaining quota")).action(
     async (_flags: unknown, command: Command) => {
-      await controller.usage(merged(command));
+      const options = merged(command);
+      controller.replaced(`\`${bin} credentials\` shows each login's usage.`, options);
+      await controller.usage(options);
     },
   );
   scoped(
@@ -112,7 +131,9 @@ export function registerFleetCommands(program: Command, controller: FleetControl
           'is nothing to run. It is not HEALTHY: nothing has confirmed it with the provider yet.',
       ),
   ).action(async (_flags: unknown, command: Command) => {
-    await controller.health(merged(command));
+    const options = merged(command);
+    controller.replaced(`\`${bin} credentials\` shows whether each login works.`, options);
+    await controller.health(options);
   });
 
   scoped(
@@ -130,7 +151,9 @@ export function registerFleetCommands(program: Command, controller: FleetControl
           'browser cannot disagree about whether an account is sharing something.',
       ),
   ).action(async (_flags: unknown, command: Command) => {
-    await controller.sharing(merged(command));
+    const options = merged(command);
+    controller.replaced(`\`${bin} component show <kind>/<name>\` says where a component is used.`, options);
+    await controller.sharing(options);
   });
 
   scoped(
@@ -169,7 +192,9 @@ export function registerFleetCommands(program: Command, controller: FleetControl
           'authenticate against that session’s account instead of this one.',
       ),
   ).action(async (accountIds: string[], _flags: unknown, command: Command) => {
-    await controller.login(accountIds, merged<FleetLoginOptions>(command));
+    const options = merged<FleetLoginOptions>(command);
+    controller.replaced(loginReplacement(bin, accountIds, options), options);
+    await controller.login(accountIds, options);
   });
 
   scoped(

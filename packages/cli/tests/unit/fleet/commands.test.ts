@@ -297,3 +297,35 @@ describe('the fleet sharing verb', () => {
     should(JSON.parse(out.text)).have.property('accounts');
   });
 });
+
+describe('old fleet verbs on the account model', () => {
+  it('should name the command that replaces each one, and still run it', async () => {
+    // Arrange
+    const cases: [string[], RegExp][] = [
+      [['fleet', 'ls'], /`fz runtimes` replaces `fz fleet ls`/],
+      [['fleet', 'init'], /`fz setup` replaces `fz fleet init`/],
+      [['fleet', 'apply', '--dry-run'], /apply by themselves/],
+      [['fleet', 'usage'], /`fz credentials` shows each login's usage/],
+      [['fleet', 'health'], /`fz credentials` shows whether each login works/],
+      [['fleet', 'sharing'], /`fz component show <kind>\/<name>`/],
+      [['fleet', 'login', '--status'], /`fz credentials` shows every login/],
+      [['fleet', 'login', '--sync-only'], /nothing to sync/],
+      [['fleet', 'login', 'acct-1'], /`fz credential signin <login>`/],
+    ];
+
+    for (const [argv, note] of cases) {
+      // Act
+      const { parsed, out } = run(argv, 'fz');
+      await parsed.catch(() => undefined);
+
+      // Assert
+      should(out.warnings.join('\n')).match(note);
+    }
+  });
+
+  it('should keep JSON clean of the note', async () => {
+    const { parsed, out } = run(['fleet', 'ls', '--json'], 'fz');
+    await parsed;
+    should(out.warnings.join('\n')).not.match(/replaces/);
+  });
+});
