@@ -679,8 +679,7 @@ describe('component content and the draft-profile preview', () => {
   it('should show each component file it read, and a check path against this machine’s home', async () => {
     // Arrange
     const { service } = world({
-      readAsset: async path =>
-        path.endsWith('watch.json') ? '{"hooks":{"run":"/home/other/bin/x"}}' : ASSETS[path],
+      readAsset: async path => (path.endsWith('watch.json') ? '{"hooks":{"run":"/home/other/bin/x"}}' : ASSETS[path]),
     });
 
     // Act
@@ -695,15 +694,23 @@ describe('component content and the draft-profile preview', () => {
       redacted: false,
     });
     should(named('hooks', 'watch')?.checkPath).equal('/home/other/bin/x');
-    should(named('settings', 'claude')?.content).deepEqual({ form: 'entries', entries: [{ key: 'theme', value: 'dark' }] });
-    should(named('instructions', 'main')?.content).deepEqual({ form: 'text', text: 'Main guidance.\n', redacted: false });
+    should(named('settings', 'claude')?.content).deepEqual({
+      form: 'entries',
+      entries: [{ key: 'theme', value: 'dark' }],
+    });
+    should(named('instructions', 'main')?.content).deepEqual({
+      form: 'text',
+      text: 'Main guidance.\n',
+      redacted: false,
+    });
     should(named('settings', 'broken')).not.have.property('content');
   });
 
   it('should keep a hidden settings value from the file the component has when an edit sends entries', async () => {
     // Arrange
     const { service } = world({
-      readAsset: async path => (path.endsWith('claude.json') ? '{"env":{"API_TOKEN":"sk-abcdefghijklmnop"}}' : ASSETS[path]),
+      readAsset: async path =>
+        path.endsWith('claude.json') ? '{"env":{"API_TOKEN":"sk-abcdefghijklmnop"}}' : ASSETS[path],
     });
 
     // Act

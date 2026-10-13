@@ -1161,9 +1161,7 @@ describe('deriveAccountChange: profile.remove from the profiles built on it (E21
     const edit = derive({ kind: 'profile.remove', name: 'base', removeFromProfiles: true }, model);
 
     // Assert
-    should(edit.consequences[0]).equal(
-      'Removes it from crew. Running sessions keep the old version until restarted.',
-    );
+    should(edit.consequences[0]).equal('Removes it from crew. Running sessions keep the old version until restarted.');
   });
 
   it('should refuse when it would leave a profile with no layers', () => {

@@ -221,7 +221,13 @@ const cases: readonly SchemaCase[] = [
   {
     name: 'FleetComponentContentSchema',
     schema: catalog.FleetComponentContentSchema,
-    value: { form: 'entries', entries: [{ key: 'env.API_TOKEN', hidden: true }, { key: 'theme', value: 'dark' }] },
+    value: {
+      form: 'entries',
+      entries: [
+        { key: 'env.API_TOKEN', hidden: true },
+        { key: 'theme', value: 'dark' },
+      ],
+    },
   },
   {
     name: 'FleetSettingsEntriesInputSchema',
@@ -314,7 +320,9 @@ describe('the account-model catalogue wire contract', () => {
         value: 'fake',
         hidden: true,
       }),
-      rejects('an entry value that is not JSON', catalog.FleetSettingsEntriesInputSchema, { theme: { value: () => 1 } }),
+      rejects('an entry value that is not JSON', catalog.FleetSettingsEntriesInputSchema, {
+        theme: { value: () => 1 },
+      }),
       rejects('a draft past the layer limit', catalog.FleetProfileDraftRequestSchema, {
         layers: Array.from({ length: 201 }, (_, index) => `mcp/m${String(index)}`),
       }),

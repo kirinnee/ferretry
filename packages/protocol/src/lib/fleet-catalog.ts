@@ -194,7 +194,7 @@ export const FleetComponentViewSchema = z.strictObject({
   /** E30: a path under somebody else's home that this component names, to check on this machine. */
   checkPath: NonEmptyStringSchema.optional(),
 });
-export type FleetComponentView =z.infer<typeof FleetComponentViewSchema>;
+export type FleetComponentView = z.infer<typeof FleetComponentViewSchema>;
 
 export const FleetComponentGroupSchema = z.strictObject({
   kind: FleetComponentKindSchema,

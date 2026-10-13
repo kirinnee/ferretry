@@ -243,7 +243,6 @@ const partialSupportOf = (model: AccountModel, facts: CatalogFacts): readonly Pa
     ...(facts.skillFrontmatter === undefined ? {} : { skillFrontmatter: facts.skillFrontmatter }),
   });
 
-
 // ── Component content ────────────────────────────────────────────────────────────────────────────
 //
 // What a component's file says, for the edit screen: instructions and hooks as text, settings as
