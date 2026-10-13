@@ -60,7 +60,7 @@ field() { jq -e "$1" "${manifest}" >/dev/null 2>&1 || fail "$2"; }
 
 field '(keys - ["version","commit","sequence","createdAt","worker","files","nextKey"]) == []' \
   "the release list has a field the release format does not"
-field '.version | type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")' \
+field '.version | type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$") and (contains("\n") | not)' \
   "the release version is not x.y.z"
 field ".sequence == ${sequence}" "the release sequence is not this run's number (${sequence})"
 field ".commit == \"${commit}\"" "the release commit is not this run's commit (${commit})"
@@ -76,15 +76,18 @@ else
   field 'has("nextKey") | not' "the release announces a next key, and ${next_public_key} does not exist"
 fi
 
+# jq's `$` also matches before a trailing newline, so every anchored test also refuses a newline
+# outright rather than depending on the jq version.
 segment='[A-Za-z0-9_-][A-Za-z0-9._-]*'
-field ".files | keys | all(test(\"^${segment}(/${segment})*\$\"))" "the release lists a path that is not plain"
+field ".files | keys | all(test(\"^${segment}(/${segment})*\$\") and (contains(\"\\n\") | not))" \
+  "the release lists a path that is not plain"
 field '.files | keys | all((startswith("_") or startswith("functions/") or . == "functions") | not)' \
   "the release lists Pages configuration or server code (_worker.js, _routes.json, functions/)"
-field '.files | all(type == "string" and test("^[A-Za-z0-9_-]{43}$"))' "the release lists a hash that is not SHA-256"
+field '.files | all(type == "string" and test("^[A-Za-z0-9_-]{43}$") and (contains("\n") | not))' "the release lists a hash that is not SHA-256"
 
 [[ -z "$(find "${dist}" ! -type f ! -type d)" ]] || fail "${dist} holds something that is neither a file nor a directory"
 listed="$(jq -r '.files | keys[]' "${manifest}" | LC_ALL=C sort)"
-present="$(cd "${dist}" && find . -type f ! -path ./_headers ! -path ./_redirects ! -path './release-manifest.*' |
+present="$(cd "${dist}" && find . -type f ! -path ./_headers ! -path ./_redirects ! -path ./release-manifest.json ! -path ./release-manifest.sig |
   sed 's|^\./||' | LC_ALL=C sort)"
 [[ ${listed} == "${present}" ]] || {
   diff <(printf '%s\n' "${listed}") <(printf '%s\n' "${present}") >&2 || true

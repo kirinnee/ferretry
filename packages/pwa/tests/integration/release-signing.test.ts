@@ -203,6 +203,30 @@ describe('sign-pwa-release.sh', () => {
       false,
     ],
     [
+      'an unlisted file under a release-manifest.<x>/ directory',
+      base => ({ ...base, extra: { 'release-manifest.x/evil.html': '<script>evil()</script>' } }),
+      /exactly the files/u,
+      false,
+    ],
+    [
+      'an unlisted release-manifest.html',
+      base => ({ ...base, extra: { 'release-manifest.html': '<script>evil()</script>' } }),
+      /exactly the files/u,
+      false,
+    ],
+    [
+      'a path ending in a newline',
+      base => ({ ...base, files: { ...base.files, 'evil.html\n': 'x' } }),
+      /not plain/u,
+      false,
+    ],
+    [
+      'a version ending in a newline',
+      base => ({ ...base, manifest: { ...base.manifest, version: '1.2.3\n' } }),
+      /version/u,
+      false,
+    ],
+    [
       'a file in dist the list does not name',
       base => ({ ...base, extra: { '_worker.js': 'export default {}' } }),
       /exactly the files/u,
