@@ -18,6 +18,8 @@ import {
   renderFleetUsageJson,
   renderFleetUsageMetrics,
   usedPercentFromRemaining,
+  claudeStatuslineCommand,
+  PassiveUsageRecordSchema,
 } from '../../src/lib/usage.ts';
 
 const manifest = (accounts: readonly Record<string, unknown>[]): FleetManifest =>
@@ -498,5 +500,30 @@ describe('FleetUsageCollector probing once per credential', () => {
     // Assert — one dead credential takes out every lane on it, which is the truth.
     should(snapshot.accounts.map(row => row.unavailable)).deepEqual([true, true]);
     should(snapshot.accounts.map(row => row.atLimit)).deepEqual([true, true]);
+  });
+});
+
+describe('claudeStatuslineCommand', () => {
+  it('should spell the plain command from the derived binary name', () => {
+    should(claudeStatuslineCommand('fy')).equal("'fy' statusline");
+    should(claudeStatuslineCommand('fy', '   ')).equal("'fy' statusline");
+  });
+
+  it("should chain the person's own command as one inert word, never replace it", () => {
+    should(claudeStatuslineCommand('fy', " echo 'hi' $(whoami) ")).equal(
+      "'fy' statusline --then 'echo '\\''hi'\\'' $(whoami)'",
+    );
+  });
+});
+
+describe('PassiveUsageRecordSchema', () => {
+  it('should accept a reading with unknown windows and refuse an unknown version or source', () => {
+    should(PassiveUsageRecordSchema.parse({ version: 1, source: 'codex-rollout', at: 5 })).deepEqual({
+      version: 1,
+      source: 'codex-rollout',
+      at: 5,
+    });
+    should(PassiveUsageRecordSchema.safeParse({ version: 2, source: 'codex-rollout', at: 5 }).success).be.false();
+    should(PassiveUsageRecordSchema.safeParse({ version: 1, source: 'guess', at: 5 }).success).be.false();
   });
 });

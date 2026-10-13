@@ -41,7 +41,10 @@
  * completely.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { ferretryCredentialDirectory, type StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
 import {
@@ -51,8 +54,11 @@ import {
   usageEndpointHttpVerdict,
 } from '../lib/quota.ts';
 import {
+  CREDENTIAL_USAGE_FILE,
   type FleetUsageProbe,
   type FleetUsageProbeResult,
+  type PassiveUsageRecord,
+  PassiveUsageRecordSchema,
   type ProviderAuthenticationShape,
   type ProviderResponseCode,
   ProviderResponseCodeSchema,
@@ -131,9 +137,16 @@ export interface CredentialMaterialSource {
   material(kind: HarnessKind, home: string): Promise<CredentialMaterial>;
 }
 
+/** Reading one account-model credential's raw material from its one store. Satisfied by the platform store. */
+export interface StoredMaterialSource {
+  storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
+}
+
 export interface AnthropicUsageProbeDeps {
   readonly fetch: QuotaFetch;
   readonly credentials: CredentialMaterialSource;
+  /** The account model's reader, by credential store rather than by home. */
+  readonly stored?: StoredMaterialSource;
   readonly timeoutMs?: number;
 }
 
@@ -417,7 +430,25 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
       return failure(`no Anthropic quota probe applies to a ${account.kind} account`, { usageBased: false });
     }
 
-    const token = bearerToken(await this.deps.credentials.material('claude', account.home));
+    return await this.#withMaterial(await this.deps.credentials.material('claude', account.home));
+  }
+
+  /**
+   * The same single free read for an account-model CREDENTIAL (design §8.1.2): one read per credential
+   * however many runtimes use it, with the token taken from the credential's one store.
+   */
+  async probeCredential(resolution: StoredCredentialResolution): Promise<FleetUsageProbeResult> {
+    if (resolution.harness !== 'claude') {
+      return failure('no Anthropic quota probe applies to a codex credential', { usageBased: false });
+    }
+    if (this.deps.stored === undefined) {
+      return failure('this probe was built without a credential store reader', { credentialSignal: 'inconclusive' });
+    }
+    return await this.#withMaterial(await this.deps.stored.storedMaterial(resolution));
+  }
+
+  async #withMaterial(material: CredentialMaterial): Promise<FleetUsageProbeResult> {
+    const token = bearerToken(material);
     if (token === undefined) {
       // Not logged in, or a credential this build could not read. Either way there is nothing to ask
       // with, and saying so beats reporting 0% spent. `absent` rather than `rejected`: nothing was
@@ -579,4 +610,44 @@ async function readBoundedBody(body: ReadableStream<Uint8Array> | null): Promise
     offset += chunk.byteLength;
   }
   return { bytes, truncated };
+}
+
+/**
+ * The passive usage file of one credential, `<fleet>/credentials/<id>/usage.json` (design §8.1.3).
+ *
+ * `fy statusline` WRITES it on every Claude turn and the daemon READS it, so the write is atomic —
+ * a temp file in the same directory, then a rename — and a reader never sees half a document. The
+ * directory is created 0700 when missing, which for a `host` credential is a directory under the
+ * fleet and NEVER the person's `~/.claude`. A file that is absent, unreadable or not this schema is
+ * "no passive reading", because a reading that cannot be trusted is not one.
+ */
+export class FilePassiveUsageStore {
+  constructor(private readonly fleetRoot: string) {}
+
+  path(id: string): string {
+    return `${ferretryCredentialDirectory(this.fleetRoot, id)}/${CREDENTIAL_USAGE_FILE}`;
+  }
+
+  async read(id: string): Promise<PassiveUsageRecord | undefined> {
+    try {
+      const parsed = PassiveUsageRecordSchema.safeParse(JSON.parse(await readFile(this.path(id), 'utf8')) as unknown);
+      return parsed.success ? parsed.data : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async write(id: string, record: PassiveUsageRecord): Promise<void> {
+    const target = this.path(id);
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(PassiveUsageRecordSchema.parse(record))}\n`, { mode: 0o600 });
+      await chmod(temporary, 0o600);
+      await rename(temporary, target);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+  }
 }
