@@ -44,7 +44,7 @@ import {
  * secret to type: it is a touch on this device, it lasts a short while, and it never widens.
  */
 export const STEP_UP_NOTE =
-  'Changing how a capability behaves, or opening a terminal, the browser or a pairing code, asks you to confirm with your passkey on this device. It covers this open copy of the app for a short while and never turns anything on that was switched off.';
+  'Changing how a capability behaves, or opening a terminal, the browser, a pairing code or a stored secret, asks you to confirm with your passkey on this device. It covers this open copy of the app for a short while and never turns anything on that was switched off.';
 
 /**
  * The capability as an operator reads it, so a refusal names a thing rather than a key.
@@ -61,6 +61,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   filesystem: 'the project filesystem',
   warden: 'fleet supervision',
   pairing: 'device pairing',
+  secrets: 'the secret store',
 };
 
 export const capabilityNoun = (capability: DaemonCapability): string => CAPABILITY_NOUNS[capability];
@@ -73,6 +74,7 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
   filesystem: 'Project filesystem',
   warden: 'Fleet supervision',
   pairing: 'Device pairing',
+  secrets: 'Secrets',
 };
 
 export const capabilityLabel = (capability: DaemonCapability): string => CAPABILITY_LABELS[capability];
@@ -93,6 +95,8 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
   warden: 'Supervision status, sweeps, and how much quota the daemon may spend unattended.',
   pairing:
     'Minting pairing codes that let another device reach this machine. A device that can mint credentials for more devices turns one stolen phone into standing access, so switching this off is the one decision a remote browser can never undo.',
+  secrets:
+    'Runs a command with a stored secret in its environment — code on this machine; and sets or deletes stored secrets.',
 };
 
 export const capabilityReach = (capability: DaemonCapability): string => CAPABILITY_REACH[capability];
@@ -159,6 +163,15 @@ export function remoteRevokeWarning(capability: DaemonCapability, clientName = '
 export function grantOnlyAtMachine(capability: DaemonCapability, clientName = 'fy'): string {
   return `${capabilityLabel(capability)} is switched off, and can only be switched on at the machine — a passkey confirmation does not let a paired device turn it on. Run \`${clientName} daemon config set ${capability} --use\` there.`;
 }
+
+/**
+ * The host command that widens ONE device, the only remedy for a widen this browser may not make.
+ *
+ * `<device>` is a placeholder on purpose: a device's name is untrusted text, and a command line is the
+ * one place it must not be spliced into unquoted.
+ */
+export const deviceGrantCommand = (capability: DaemonCapability, axis: CapabilityAxis, clientName = 'fy'): string =>
+  `${clientName} device grant <device> ${capability} --${axis}`;
 
 // ─── how this browser reached this daemon ───────────────────────────────────────────────────────
 
@@ -236,7 +249,7 @@ const POSTURE_COPY = {
     badge: 'Remote — governed',
     headline: 'This browser reached the machine from somewhere else, so the operator’s limits apply to it.',
     detail:
-      'Every capability below is open only because the operator allowed it, and can be closed on the host. Changing how one behaves, and opening a terminal, the browser or a pairing code, also asks you to confirm with your passkey. This is the case the limits exist for: possession of the machine is exactly what this connection does not have.',
+      'Every capability below is open only because the operator allowed it, and can be closed on the host. Changing how one behaves, and opening a terminal, the browser, a pairing code or a stored secret, also asks you to confirm with your passkey. This is the case the limits exist for: possession of the machine is exactly what this connection does not have.',
     tone: 'disclosure',
   },
   unknown: {
@@ -312,6 +325,9 @@ const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
   // host by itself; what it hands out is a credential that carries every other capability, so weighing it
   // by its own reach would rate it `narrow` and read as the mildest switch on the screen.
   pairing: 'broad',
+  // Running a command is code execution on the host, with credentials in its environment: the same tier
+  // as a terminal, whatever the secret store holds.
+  secrets: 'broad',
 };
 
 export const capabilityWeight = (capability: DaemonCapability): AccessWeight => CAPABILITY_WEIGHTS[capability];
@@ -395,6 +411,18 @@ const GUIDANCE = {
     offersStepUp: false,
   },
   /**
+   * The machine allows it and THIS device was never given it. A passkey does not help: the next step
+   * is widening this one device, at the machine or from a device that holds the capability and
+   * `pairing.configure`.
+   */
+  'device-not-granted': {
+    tone: 'limit',
+    badge: 'Not given to this device',
+    explanation:
+      'The machine allows this, but this device has not been given it. Widen this device at the machine, or from a device that holds it and can configure pairing.',
+    offersStepUp: false,
+  },
+  /**
    * A passkey touch on THIS device stands between the person and a dangerous act. It never buys
    * widening — a remote caller still cannot turn a capability on.
    */
@@ -427,6 +455,11 @@ export function grantGuidance(refusal: GrantRefusal, capability?: DaemonCapabili
     return {
       ...base,
       explanation: `The operator of this machine switched off ${capabilityNoun(capability)} for callers that are not on the host. It is turned back on on the host.`,
+    };
+  if (refusal === 'device-not-granted')
+    return {
+      ...base,
+      explanation: `This machine allows ${capabilityNoun(capability)}, but this device has not been given it. Widen this device at the machine with \`${deviceGrantCommand(capability, 'use')}\`, or from a device that holds it and can configure pairing.`,
     };
   if (refusal === 'step-up-required')
     return {
@@ -573,6 +606,7 @@ interface HttpFailure {
 const REFUSAL_BY_CODE: Readonly<Record<string, GrantRefusal>> = {
   grant_not_granted: 'not-granted',
   [STEP_UP_REQUIRED_CODE]: 'step-up-required',
+  grant_device_not_granted: 'device-not-granted',
   grant_undetermined: 'undetermined',
   grants_undetermined: 'undetermined',
   grant_forbidden: 'not-granted',
@@ -602,4 +636,20 @@ export function grantRefusalNotice(error: unknown): GrantRefusalNotice | null {
   if (failure.status !== 403 && failure.status !== 503) return null;
   const detail = typeof failure.message === 'string' && failure.message !== '' ? failure.message : '';
   return { refusal, detail, guidance: grantGuidance(refusal) };
+}
+
+/**
+ * Which axes THIS device's own grant withholds although the machine allows them, as one sentence.
+ *
+ * `null` when the caller is not a governed device (`deviceGranted` is absent on the host) or when its
+ * grant withholds nothing the machine allows. It names only what the device grant adds to the daemon-wide
+ * answer, because the daemon-wide refusal already has its own sentence.
+ */
+export function deviceGrantNote(entry: CapabilityGrantView, clientName = 'fy'): string | null {
+  const device = entry.deviceGranted;
+  if (device === undefined) return null;
+  const withheld = (['use', 'configure'] as const).filter(axis => entry.granted[axis] && !device[axis]);
+  const first = withheld[0];
+  if (first === undefined) return null;
+  return `This device has not been given ${withheld.map(axisLabel).join(' or ').toLowerCase()} of ${capabilityNoun(entry.capability)}, although the machine allows it. Widen this device at the machine with \`${deviceGrantCommand(entry.capability, first, clientName)}\`, or from a device that holds it and can configure pairing.`;
 }

@@ -12,6 +12,8 @@ import type {
   AnalyticsResponse,
   AttentionSnapshot,
   BrowserStatus,
+  CapabilityGrant,
+  CapabilityGrants,
   CapabilityGrantView,
   CgroupConfigPatch,
   CgroupConfigView,
@@ -1267,6 +1269,25 @@ const HARNESS_INVITE: PairingCodeMintResponse = {
   reach: 'any-device',
 };
 
+const harnessGrants = (
+  held: Partial<Record<DaemonCapability, Partial<CapabilityGrant>>>,
+): CapabilityGrants =>
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false, ...held[capability] }]),
+  ) as CapabilityGrants;
+
+const HARNESS_DEVICE_GRANTS_DEFAULT = harnessGrants({ fleet: { use: true } });
+const HARNESS_DEVICE_GRANTS_WIDENED = harnessGrants({
+  fleet: { use: true, configure: true },
+  terminal: { use: true },
+  secrets: { use: true },
+});
+const HARNESS_MAY_WIDEN = harnessGrants({
+  fleet: { use: true, configure: true },
+  terminal: { use: true },
+  pairing: { configure: true },
+});
+
 /** Two devices, one of them the browser doing the looking, so the "this device" mark is reviewable. */
 const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
   devices: [
@@ -1277,6 +1298,9 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
       createdAt: '2025-12-20T18:22:00.000Z',
       lastSeenAt: '2025-12-31T22:04:00.000Z',
       idleExpiresAt: '2026-12-31T00:00:00.000Z',
+      // The default a fresh device holds — fleet.use alone — so the browser doing the looking can be
+      // seen holding the least, with every widen it may not make explained beside its switch.
+      grants: HARNESS_DEVICE_GRANTS_DEFAULT,
     },
     {
       id: `fy_device_id_${'Ee'.repeat(11)}`,
@@ -1285,10 +1309,14 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
       createdAt: '2025-11-02T09:15:00.000Z',
       lastSeenAt: '2025-11-02T09:15:00.000Z',
       idleExpiresAt: '2026-12-31T00:00:00.000Z',
+      grants: HARNESS_DEVICE_GRANTS_WIDENED,
     },
   ],
-  hostLocal: true,
+  hostLocal: false,
   thisDeviceId: `fy_device_id_${'Dd'.repeat(11)}`,
+  // A remote caller holding terminal and fleet (and pairing.configure): it may widen those, and no more,
+  // so the rest render their reason and the host command instead of a switch that would fail.
+  mayWiden: HARNESS_MAY_WIDEN,
 };
 
 /**
@@ -1330,6 +1358,27 @@ const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
       if (path === '/v1/pair/code' && init?.method === 'POST') return HARNESS_INVITE;
       if (path.startsWith('/v1/pair/code/') && init?.method === 'DELETE')
         return { pairingId: HARNESS_INVITE.pairingId, status: 'expired', expiresAt: HARNESS_INVITE.expiresAt };
+      if (path.endsWith('/grants') && init?.method === 'PATCH') {
+        const id = decodeURIComponent(path.slice('/v1/pair/devices/'.length, -'/grants'.length));
+        const patch = JSON.parse(String(init.body)) as Record<string, Partial<CapabilityGrant>>;
+        devices = {
+          ...devices,
+          devices: devices.devices.map(device =>
+            device.id === id
+              ? {
+                  ...device,
+                  grants: Object.fromEntries(
+                    DAEMON_CAPABILITIES.map(capability => [
+                      capability,
+                      { ...device.grants[capability], ...patch[capability] },
+                    ]),
+                  ) as CapabilityGrants,
+                }
+              : device,
+          ),
+        };
+        return devices;
+      }
       if (path.startsWith('/v1/pair/devices/') && init?.method === 'DELETE') {
         const id = decodeURIComponent(path.slice('/v1/pair/devices/'.length));
         devices = { ...devices, devices: devices.devices.filter(device => device.id !== id) };
@@ -5782,6 +5831,7 @@ function Shell() {
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
             onRevokeDevice={() => {}}
+            onChangeDeviceGrants={() => {}}
           />
         </div>
       ),
@@ -5812,6 +5862,7 @@ function Shell() {
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
             onRevokeDevice={() => {}}
+            onChangeDeviceGrants={() => {}}
           />
         </div>
       ),
@@ -5851,6 +5902,7 @@ function Shell() {
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
             onRevokeDevice={() => {}}
+            onChangeDeviceGrants={() => {}}
           />
         </div>
       ),
@@ -5863,13 +5915,14 @@ function Shell() {
         <div data-harness="pair-empty">
           <AddDeviceCard
             connection={daemon}
-            view={{ devices: [], hostLocal: true }}
+            view={{ devices: [], hostLocal: true, mayWiden: HARNESS_MAY_WIDEN }}
             invite={null}
             nowMs={HARNESS_PAIR_NOW_MS}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
             onRevokeDevice={() => {}}
+            onChangeDeviceGrants={() => {}}
           />
         </div>
       ),

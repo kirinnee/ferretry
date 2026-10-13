@@ -298,6 +298,42 @@ describe('how much each capability hands over', () => {
     expect(capabilityWeight('filesystem')).toBe('broad');
   });
 
+  it('lists the secret store as a seventh row with its own label and the dangerous tier', () => {
+    // Arrange, Act
+    const renderer = render(
+      <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
+    );
+
+    // Assert
+    const rows = marked(renderer, 'data-capability-row');
+    expect(rows).toHaveLength(7);
+    expect(rows[6]?.props['data-capability-row']).toBe('secrets');
+    expect(text(renderer)).toContain('Secrets');
+    expect(text(renderer)).toContain('code on this machine');
+    expect(rowWeights(renderer)[6]).toBe('broad');
+  });
+
+  it('says which axis THIS device’s own grant withholds, only on a row where that is true', () => {
+    // Arrange
+    const renderer = render(
+      <CapabilityList
+        connection={localLookingConnection()}
+        capabilities={[
+          entry({ capability: 'fleet', deviceGranted: { use: true, configure: true } }),
+          entry({ capability: 'terminal', deviceGranted: { use: false, configure: false } }),
+          entry({ capability: 'browser' }),
+        ]}
+        governed
+      />,
+    );
+
+    // Assert — one note, on the terminal row alone, and it names the remedy.
+    expect(marked(renderer, 'data-capability-device-note')).toHaveLength(1);
+    expect(attr(renderer, 'data-capability-device-note')).toBe('terminal');
+    expect(text(renderer)).toContain('has not been given use or configure of session terminals');
+    expect(text(renderer)).toContain('fy device grant <device> terminal --use');
+  });
+
   it('declares a weight for every capability the protocol has, so a sixth cannot render unmarked', () => {
     for (const capability of DAEMON_CAPABILITIES) expect(capabilityWeight(capability)).toBeTruthy();
   });

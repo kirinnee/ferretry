@@ -47,6 +47,7 @@ import {
   capabilityReach,
   capabilityWeight,
   connectionPosture,
+  deviceGrantNote,
   grantOnlyAtMachine,
   LOCAL_TWO_WAY_NOTE,
   mayGrantCapability,
@@ -189,6 +190,7 @@ function CapabilityRow({
   readonly posture: ConnectionPosture;
 }) {
   const headingId = useId();
+  const deviceNote = deviceGrantNote(entry);
   return (
     <li
       className="flex min-w-0 flex-col gap-1.5 border-t border-border-soft py-3 first:border-t-0 first:pt-0"
@@ -209,6 +211,14 @@ function CapabilityRow({
           <ReasonMark key={axis} entry={entry} axis={axis} posture={posture} />
         ))}
       </div>
+      {deviceNote === null ? null : (
+        <p
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+          data-capability-device-note={entry.capability}
+        >
+          {deviceNote}
+        </p>
+      )}
       {/* THE ONE-WAY DOOR, said where the switch would be. An off capability this caller may not turn
           on is not a control — it is a statement with a remedy, and the remedy is the machine itself.
           Rendering a toggle here would fail on press and teach somebody the product is broken rather
