@@ -90,6 +90,9 @@ import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
+import { registerSecurityCommands } from '../src/lib/security/commands';
+import { SecurityController } from '../src/lib/security/controller';
+import { ProtocolSecurityGateway } from '../src/lib/security/gateway';
 import {
   AnswerQuestionController,
   InterruptSessionController,
@@ -672,6 +675,17 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new GrantController({
           gateway: new ProtocolGrantGateway(client),
+          out: world.io,
+          clientName: BINARY_NAME,
+        }),
+    ),
+  // The security verbs mount onto the same group, after it, and take the shared client for the same reason.
+  ({ program, world, client }) =>
+    registerSecurityCommands(
+      program,
+      () =>
+        new SecurityController({
+          gateway: new ProtocolSecurityGateway(client),
           out: world.io,
           clientName: BINARY_NAME,
         }),
