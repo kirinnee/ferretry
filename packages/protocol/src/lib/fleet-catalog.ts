@@ -469,6 +469,10 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('machine.settings'), agentPermissions: z.enum(['auto', 'skip']) }),
   z.strictObject({
     kind: z.literal('setup.import'),
+    /** The harnesses the person chose to import ("Skip Claude Code"). Default: every installed one. */
+    include: z.array(HarnessKindSchema).max(2).optional(),
+    /** The runtime name the person gave each imported harness (§4.3 step 4). Default: the suggestion. */
+    names: z.strictObject({ claude: TypedNameSchema.optional(), codex: TypedNameSchema.optional() }).optional(),
     /** Components whose source changed since the last import that the person chose to update (O6). */
     acceptedUpdates: z.array(NonEmptyStringSchema).optional(),
     /** Add a runtime even where an identical one exists (E15 during Import again). */
