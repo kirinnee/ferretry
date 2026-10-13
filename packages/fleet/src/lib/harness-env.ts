@@ -31,6 +31,9 @@ export const INHERITED_HARNESS_ENV: readonly string[] = [
   'ANTHROPIC_BASE_URL',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'CLAUDE_CONFIG_DIR',
+  // A pointer to a credential store, exactly like CLAUDE_CONFIG_DIR: an inherited one would read or
+  // refresh another login. A version-2 runtime's wrapper exports its own, the empty string included.
+  'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   'CLAUDECODE',
   'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CODE_SESSION_ID',

@@ -35,26 +35,50 @@ export function sessionTmuxName(id: SessionId, settings: SessionLifecycleSetting
 }
 
 /**
- * The daemon launches fleet auto-wrappers, nothing else. Without this an `agent` of `/bin/sh` with
- * a `-c` payload is a remote shell holding the daemon's privileges.
+ * Whether `path` is a launcher the fleet generated: a version-1 auto-wrapper name, or a version-2
+ * runtime wrapper in a fleet's `bin` directory.
+ *
+ * This is the PATH half of the rule, the only half a launch can check: it sees an argv, not the
+ * manifest. Whether that launcher is an AGENT runtime is the other half, and it is decided where the
+ * published runtimes are in hand — {@link unrunnableAccountRefusal}, through `resolveStartAccount` —
+ * from the manifest's own declaration rather than from anything in a name.
+ */
+export function isFleetLauncher(path: string, settings: SessionLifecycleSettings): boolean {
+  return settings.agentWrapperPattern.test(basename(path)) || settings.runtimeLauncherPattern.test(path);
+}
+
+/**
+ * The daemon launches fleet launchers, nothing else. Without this an `agent` of `/bin/sh` with a
+ * `-c` payload is a remote shell holding the daemon's privileges.
  */
 export function authorizeSessionCommand(
   agent: string,
   command: readonly string[],
   settings: SessionLifecycleSettings,
 ): readonly string[] {
-  if (!settings.agentWrapperPattern.test(basename(agent)))
-    throw new Error(`agent is not a fleet auto wrapper: ${agent}`);
+  if (!isFleetLauncher(agent, settings)) throw new Error(`agent is not a fleet auto wrapper: ${agent}`);
   if (command[0] !== agent) throw new Error(`command must start with the agent wrapper: ${agent}`);
   return command;
+}
+
+/**
+ * Whether a published account may run unattended sessions: the manifest declares it an agent
+ * (`mode: auto` — a version-2 runtime with "Ferretry launches this as an agent" is published so, and a
+ * version-1 auto route always was) AND its wrapper is one {@link authorizeSessionCommand} accepts.
+ *
+ * Both, so the two halves can never disagree: an account this calls runnable is one the launch
+ * accepts, and a launcher the launch accepts is runnable only when the manifest says it is an agent.
+ * The `-auto-` name is no longer the test — a runtime's name is the person's choice (§8.4).
+ */
+export function isAgentAccount(account: CoreAccount, settings: SessionLifecycleSettings): boolean {
+  return account.mode === 'auto' && isFleetLauncher(account.wrapper, settings);
 }
 
 /**
  * Why a published account cannot run a session, in words that name the ones that can — or
  * `undefined` when it can.
  *
- * The rule is {@link authorizeSessionCommand}'s own pattern, not a second opinion about which
- * accounts are runnable: an account this refuses is exactly one the launch would refuse, and every
+ * The rule is {@link isAgentAccount}, not a second opinion about which accounts are runnable: every
  * account it names is one the launch would accept. Asking here, where the published accounts are in
  * hand, is the point — the launch sees only a path and can only say the path is wrong.
  *
@@ -71,7 +95,7 @@ export function unrunnableAccountRefusal(
   settings: SessionLifecycleSettings,
   clientName: string,
 ): string | undefined {
-  const runnable = (account: CoreAccount): boolean => settings.agentWrapperPattern.test(account.agent);
+  const runnable = (account: CoreAccount): boolean => isAgentAccount(account, settings);
   if (runnable(requested)) return undefined;
   const candidates = published.filter(account => account.available && runnable(account));
   const sameHarness = candidates.filter(account => account.kind === requested.kind);

@@ -60,6 +60,8 @@ import {
   type FleetManifest,
   type FleetTokenRefreshResult,
   type FleetTokenRenewal,
+  fleetIdentityMemberOf,
+  manifestRuntimes,
   wrapperNameOf,
 } from '@ferretry/fleet';
 
@@ -180,11 +182,15 @@ export class FleetLaunchRenewal implements AccountLaunchRenewal {
   async decide(wrapper: string): Promise<LaunchRenewalOutcome> {
     let identity: FleetIdentity | undefined;
     try {
-      const [config, manifest] = [await this.deps.fleet.config(), await this.deps.fleet.accounts()];
-      const name = wrapperNameOf(wrapper);
-      identity = buildFleetIdentities(config, manifest).find(candidate =>
-        candidate.members.some(member => member.wrapper === wrapper || wrapperNameOf(member.wrapper) === name),
-      );
+      const manifest = await this.deps.fleet.accounts();
+      const runtime = credentialIdentity(manifest, wrapper);
+      if (runtime === 'claude') return { kind: 'not-a-fleet-account' };
+      // A version-1 account: which accounts share a login is declared in the configuration.
+      identity =
+        runtime ??
+        buildFleetIdentities(await this.deps.fleet.config(), manifest).find(candidate =>
+          candidate.members.some(member => matches(member.wrapper, wrapper)),
+        );
     } catch (error) {
       return { kind: 'undecided', reason: reasonOf(error, 'this host’s fleet could not be read') };
     }
@@ -212,6 +218,45 @@ export class FleetLaunchRenewal implements AccountLaunchRenewal {
     if (NOTICE[outcome.result.status] === 'step') notices.step('credential renewed', sentence);
     if (NOTICE[outcome.result.status] === 'state') notices.state(`a session started on ${sentence}`);
   }
+}
+
+const matches = (published: string, wrapper: string): boolean =>
+  published === wrapper || wrapperNameOf(published) === wrapperNameOf(wrapper);
+
+/**
+ * RENEWAL PER CREDENTIAL, for a version-2 runtime (docs/design/account-model.md §8.2.2, §9.2): the
+ * identity is the runtime's CREDENTIAL, read from the published runtime rows, and its members are
+ * every runtime on that credential — so one renewal serves them all, and the service's single flight
+ * keyed on `credential:<id>` is the per-credential lock that keeps two of Ferretry's own launches
+ * from spending one single-use refresh token.
+ *
+ * Answers `'claude'` for a Claude runtime: Claude renews its own login under its own lock in the
+ * one shared store (§8.1.2, "Refresh due — Ferretry does nothing"), so a launch has nothing to add.
+ * Answers `undefined` when `wrapper` is not a published runtime, which leaves the version-1 reading.
+ *
+ * A Codex runtime's config directory holds a LINK to the credential's one canonical `auth.json`, so
+ * reading or renewing through any member's home reads or rotates that one file.
+ */
+function credentialIdentity(manifest: FleetManifest, wrapper: string): FleetIdentity | 'claude' | undefined {
+  const runtimes = manifestRuntimes(manifest);
+  const runtime = runtimes.find(candidate => matches(candidate.wrapper, wrapper));
+  if (runtime === undefined) return undefined;
+  if (runtime.harness === 'claude') return 'claude';
+  const sharing = new Set(
+    runtimes
+      .filter(candidate => candidate.harness === runtime.harness && candidate.credential === runtime.credential)
+      .map(candidate => candidate.id),
+  );
+  const members = manifest.accounts.filter(account => sharing.has(account.id));
+  return {
+    key: `credential:${runtime.credential}`,
+    kind: runtime.harness,
+    identity: runtime.credential,
+    // A credential authenticated by the environment publishes its references; it has no token to renew.
+    auth: members.some(account => Object.keys(account.secretEnv).length > 0) ? 'api-key' : 'oauth',
+    declared: true,
+    members: members.map(fleetIdentityMemberOf),
+  };
 }
 
 function reasonOf(error: unknown, fallback: string): string {

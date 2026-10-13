@@ -137,6 +137,21 @@ describe('renderWrapperScript', () => {
     should(actual.trimEnd().endsWith('exec claude "$@"')).be.true();
   });
 
+  it('should clear an inherited Claude secure-storage pointer before exporting anything', () => {
+    // Arrange — a version-1 account keeps its login in its own config directory.
+    const subject = account({ env: { LOG_LEVEL: 'debug' } });
+
+    // Act
+    const actual = renderWrapperScript(subject);
+
+    // Assert
+    const lines = actual.split('\n');
+    const unset = lines.indexOf('unset CLAUDE_SECURESTORAGE_CONFIG_DIR');
+    should(unset).be.greaterThan(lines.indexOf('export CLAUDE_CONFIG_DIR="$HOME/.state/fleet/homes/auto-kirin"'));
+    should(unset).be.lessThan(lines.indexOf("export LOG_LEVEL='debug'"));
+    should(renderWrapperScript(account({ kind: 'codex', home: '/state/codex' }))).not.containEql('unset');
+  });
+
   it('should use the codex home variable and binary for a codex account', () => {
     // Arrange
     const subject = account({ kind: 'codex', home: '/state/fleet/homes/loge', flags: ['--full-auto'] });

@@ -193,4 +193,12 @@ describe('launchEnvironment', () => {
     // Assert
     should(actual).deepEqual({ ANTHROPIC_API_KEY: 'fixture-value', FY_SESSION_ID: 'abc' });
   });
+
+  it("should never hand the pane a HOME, so a runtime keeps the person's real one", () => {
+    // Act
+    const actual = launchEnvironment({ HOME: '/elsewhere', A: '1' }, { HOME: '/also-elsewhere', B: '2' });
+
+    // Assert
+    should(actual).deepEqual({ A: '1', B: '2' });
+  });
 });

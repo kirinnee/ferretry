@@ -102,10 +102,18 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
  * it. A profile able to overwrite them would let one shared document take a teammate's board
  * capability away from it — so the precedence runs the only direction that cannot do that, and the
  * session id the launcher derives afterwards is still written last.
+ *
+ * NEITHER MAY SET `HOME`. A runtime keeps the person's real home on macOS and Linux alike: that is
+ * where their own Claude and Codex logins are found, and where Claude finds the macOS keychain
+ * (docs/design/account-model.md §8.1.1). The config directory the wrapper exports is what keeps a
+ * runtime separate, and the wrapper never sets `HOME` — so a value handed to the pane here would be
+ * the only one, and it would sign the runtime out. The pane inherits the daemon's own instead.
  */
 export function launchEnvironment(
   account: Readonly<Record<string, string>>,
   session: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
-  return { ...account, ...session };
+  const { HOME: _accountHome, ...fromAccount } = account;
+  const { HOME: _sessionHome, ...fromSession } = session;
+  return { ...fromAccount, ...fromSession };
 }

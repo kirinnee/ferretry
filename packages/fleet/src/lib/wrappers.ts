@@ -20,6 +20,7 @@
  * Pure: every function here is string in, string out.
  */
 import { secretReferencesIn, type SecretName } from '@ferretry/protocol';
+import { CLAUDE_SECURE_STORAGE_VARIABLE } from './account/credentials.ts';
 import type { HarnessKind } from './manifest.ts';
 import type { ResolvedAccount, ResolvedCommand } from './profiles.ts';
 
@@ -270,6 +271,7 @@ export function renderWrapperScript(account: ResolvedAccount, options: WrapperRe
     ...sourceSecretsLines(secretsFile),
     ...((options.guardEnvReferences ?? true) && environment.guards.length > 0 ? [...environment.guards, ''] : []),
     `export ${HARNESS_HOME_ENV[account.kind]}=${shellPath(account.home)}`,
+    ...inheritedStoreLines(account.kind),
     ...environment.exports,
   ];
 
@@ -278,6 +280,17 @@ export function renderWrapperScript(account: ResolvedAccount, options: WrapperRe
   const flags = account.flags.map(shellQuote).join(' ');
   lines.push('', `exec ${HARNESS_BINARIES[account.kind]}${flags === '' ? '' : ` ${flags}`} "$@"`, '');
   return lines.join('\n');
+}
+
+/**
+ * A version-1 Claude account keeps its login in its own config directory, so a secure-storage
+ * pointer it INHERITED — from a daemon or a shell started inside a version-2 runtime, whose wrapper
+ * exports one — would send it to another credential's store. It is cleared before anything else is
+ * exported. A version-2 runtime's wrapper always exports its own value instead
+ * ({@link renderRuntimeWrapperScript}), the empty string included.
+ */
+function inheritedStoreLines(kind: HarnessKind): readonly string[] {
+  return kind === 'claude' ? [`unset ${CLAUDE_SECURE_STORAGE_VARIABLE}`] : [];
 }
 
 /**

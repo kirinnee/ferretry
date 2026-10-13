@@ -12,10 +12,17 @@ export interface SessionLifecycleSettings {
   /** Reason recorded when a client stops a session without giving one. */
   readonly defaultStopReason: string;
   /**
-   * The only programs the daemon may launch: a fleet auto-wrapper basename. Without this the
+   * A version-1 fleet auto-wrapper basename (`claude-auto-<name>`). Without a launcher rule the
    * lifecycle is a remote shell — `agent: '/bin/sh'` would be accepted verbatim.
    */
   readonly agentWrapperPattern: RegExp;
+  /**
+   * A version-2 runtime launcher: the ABSOLUTE path of a wrapper the fleet generated, which always
+   * lives directly in a fleet's `bin` directory and is named by the runtime-name grammar (R1). A
+   * runtime's name is free text, so its basename alone cannot say it is a launcher; where it lives
+   * can. `/bin/sh` and a relative `sh` both fail it.
+   */
+  readonly runtimeLauncherPattern: RegExp;
 }
 
 export const defaultSessionLifecycleSettings: SessionLifecycleSettings = {
@@ -24,4 +31,5 @@ export const defaultSessionLifecycleSettings: SessionLifecycleSettings = {
   launchAttempts: 3,
   defaultStopReason: 'stopped by client',
   agentWrapperPattern: /^(?:claude|codex)-auto-[a-z0-9][a-z0-9-]*$/u,
+  runtimeLauncherPattern: /^\/(?:(?!\.\.?\/)[^/\0]+\/)*fleet\/bin\/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u,
 };
