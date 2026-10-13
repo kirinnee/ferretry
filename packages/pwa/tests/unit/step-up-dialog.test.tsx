@@ -1,0 +1,209 @@
+/**
+ * The passkey prompt, tested against a REAL document: a modal's contract (what the scrim does, what a
+ * disabled button does) is made of document facts, and its focus hook needs a `document` to mount at all.
+ */
+
+import { describe, expect, it } from 'bun:test';
+import { STEP_UP_SCOPE_NOTE, StepUpDialog } from '../../src/features/step-up/step-up-dialog.tsx';
+import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { StepUpGate } from '../../src/lib/step-up-gate.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
+
+const studio = daemonConnection({ daemonId: 'daemon-studio', baseUrl: 'https://studio.example', deviceId: 'device-one' });
+
+/** A gate whose ceremony the test settles by hand, so a busy prompt can be looked at. */
+function harness() {
+  const ceremonies: DaemonConnection[] = [];
+  let release: () => void = () => undefined;
+  let refuse: (reason: unknown) => void = () => undefined;
+  const gate = new StepUpGate({
+    ceremony: daemon => {
+      ceremonies.push(daemon);
+      return new Promise<void>((resolve, reject) => {
+        release = resolve;
+        refuse = reject;
+      });
+    },
+    describe: reason => (reason instanceof Error ? reason.message : 'unknown'),
+  });
+  return {
+    gate,
+    ceremonies,
+    finish: () => release(),
+    fail: (message: string) => refuse(new Error(message)),
+  };
+}
+
+/** Mounts, runs the body, and unmounts even when it throws: a failed test would otherwise leak its mount. */
+async function withDialog(gate: StepUpGate, body: (mounted: Mounted) => Promise<void>): Promise<void> {
+  const mounted = await mount(<StepUpDialog gate={gate} machineName={id => `Name of ${id}`} />);
+  try {
+    await body(mounted);
+  } finally {
+    await mounted.unmount();
+  }
+}
+
+const named = (container: HTMLElement, text: string): HTMLButtonElement =>
+  must(
+    [...container.querySelectorAll('button')].find(candidate => candidate.textContent?.includes(text)),
+    `the "${text}" button`,
+  );
+
+const backdrop = (container: HTMLElement): HTMLButtonElement =>
+  must(
+    container.querySelector<HTMLButtonElement>('button[aria-label="Cancel the passkey confirmation"]'),
+    'the backdrop button',
+  );
+
+const confirmButton = (container: HTMLElement): HTMLButtonElement =>
+  must(container.querySelector<HTMLButtonElement>('[data-step-up-confirm]'), 'the confirm button');
+
+describe('the passkey prompt', () => {
+  it('renders nothing while no machine is asking', async () => {
+    const { gate } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+      expect(container.innerHTML).toBe('');
+    });
+  });
+
+  it('names the machine, states what a confirmation covers and offers both buttons', async () => {
+    const { gate } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      // Act
+      await interact(() => void gate.require(studio));
+
+      // Assert
+      const dialog = must(container.querySelector('[role="dialog"]'), 'the dialog');
+      expect(dialog.getAttribute('aria-modal')).toBe('true');
+      expect(dialog.textContent).toContain('Confirm it’s you');
+      expect(dialog.textContent).toContain('Name of daemon-studio');
+      expect(must(container.querySelector('[data-step-up-scope]'), 'the scope note').textContent).toBe(
+        STEP_UP_SCOPE_NOTE,
+      );
+      expect(container.querySelector('[data-step-up-failure]')).toBeNull();
+      expect(confirmButton(container).textContent).toContain('Use passkey');
+      expect(confirmButton(container).disabled).toBe(false);
+      expect(named(container, 'Cancel').disabled).toBe(false);
+    });
+  });
+
+  it('shows a failed attempt as an alert and lets the person try again', async () => {
+    const { gate, fail } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      await interact(() => void gate.require(studio));
+      let confirming: Promise<void> = Promise.resolve();
+      await interact(() => {
+        confirming = gate.confirm();
+      });
+
+      // Act — the ceremony throws instead of finishing.
+      await interact(async () => {
+        fail('That passkey confirmation did not check out. Try again.');
+        await confirming;
+      });
+
+      // Assert
+      const alert = must(container.querySelector('[data-step-up-failure]'), 'the failure alert');
+      expect(alert.getAttribute('role')).toBe('alert');
+      expect(alert.textContent).toBe('That passkey confirmation did not check out. Try again.');
+      expect(confirmButton(container).textContent).toContain('Use passkey');
+      expect(confirmButton(container).disabled).toBe(false);
+    });
+  });
+
+  it('shows the busy label and disables every button while the passkey sheet is up', async () => {
+    const { gate, finish } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      await interact(() => void gate.require(studio));
+
+      // Act
+      let confirming: Promise<void> = Promise.resolve();
+      await interact(() => {
+        confirming = gate.confirm();
+      });
+
+      // Assert
+      expect(confirmButton(container).textContent).toContain('Waiting for your passkey…');
+      expect(confirmButton(container).disabled).toBe(true);
+      expect(named(container, 'Cancel').disabled).toBe(true);
+      expect(backdrop(container).disabled).toBe(true);
+
+      await interact(async () => {
+        finish();
+        await confirming;
+      });
+    });
+  });
+
+  it('runs the ceremony for the machine on screen when Use passkey is pressed', async () => {
+    const { gate, ceremonies, finish } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      let answer: boolean | undefined;
+      await interact(() => {
+        void gate.require(studio).then(value => {
+          answer = value;
+        });
+      });
+
+      // Act
+      await interact(() => confirmButton(container).click());
+      expect(ceremonies).toEqual([studio]);
+      await interact(async () => {
+        finish();
+        await Promise.resolve();
+      });
+
+      // Assert — the request resolves true and the prompt goes away.
+      expect(answer).toBe(true);
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+    });
+  });
+
+  it('dismisses the prompt from Cancel, resolving the request false', async () => {
+    const { gate } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      let answer: boolean | undefined;
+      await interact(() => {
+        void gate.require(studio).then(value => {
+          answer = value;
+        });
+      });
+
+      // Act
+      await interact(() => named(container, 'Cancel').click());
+
+      // Assert
+      expect(answer).toBe(false);
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+    });
+  });
+
+  it('dismisses the prompt from the backdrop button, resolving the request false', async () => {
+    const { gate, ceremonies } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      let answer: boolean | undefined;
+      await interact(() => {
+        void gate.require(studio).then(value => {
+          answer = value;
+        });
+      });
+
+      // Act
+      await interact(() => backdrop(container).click());
+
+      // Assert — dismissed, and no ceremony ever ran.
+      expect(answer).toBe(false);
+      expect(ceremonies).toEqual([]);
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+    });
+  });
+});
