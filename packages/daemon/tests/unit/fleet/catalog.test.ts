@@ -13,6 +13,7 @@ import {
   FleetComponentCatalogSchema,
   FleetLayeredProfileCatalogSchema,
   FleetMachineViewSchema,
+  FleetProfileDraftViewSchema,
   FleetRuntimeCatalogSchema,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -22,13 +23,19 @@ import {
   componentUsage,
   counted,
   editConsequence,
+  flattenSettings,
+  layersRefusal,
+  layerWords,
   listed,
   machineView,
   profileCatalog,
+  profileDraftView,
+  redactText,
   profileUsage,
   runtimeCatalog,
   runtimesUsingCredential,
   runtimesUsingProfile,
+  settingsValueText,
 } from '../../../src/lib/fleet/catalog.ts';
 
 const TOOLS: Readonly<Record<HarnessKind, string | undefined>> = {
@@ -42,6 +49,7 @@ const factsOf = (overrides: Partial<CatalogFacts> = {}): CatalogFacts => ({
   tools: TOOLS,
   runningSessions: 0,
   acceptsAutoPermissionMode: true,
+  userHome: '/home/me',
   ...overrides,
 });
 
@@ -1338,5 +1346,262 @@ describe('runtimeCatalog', () => {
     // Assert
     should(actual).deepEqual({ format: 'none', runtimes: [] });
     FleetRuntimeCatalogSchema.parse(actual);
+  });
+});
+
+// ── Component content, E30 and the draft preview ─────────────────────────────────────────────────
+
+const FAKE_TOKEN = ['sk-', 'abcdefghijklmnop'].join('');
+const FAKE_PASSWORD = ['correct', '-horse-battery'].join('');
+
+const contentModel = (): AccountModel =>
+  parseAccountModel({
+    version: 2,
+    credentials: { work: { harness: 'claude' }, codex: { harness: 'codex' } },
+    components: {
+      instructions: { main: { file: 'instructions/main.md' }, unread: { file: 'instructions/unread.md' } },
+      mcp: {
+        local: { command: '/home/me/bin/notes', args: ['--root', '/home/me/notes'] },
+        copied: { command: 'uvx', args: ['--root', '/Users/other/notes'] },
+        remote: { url: 'https://mcp.example.com/home/other/mcp' },
+      },
+      skills: { tools: { items: ['alpha'] } },
+      settings: {
+        claude: { harness: 'claude', file: 'settings/claude.json' },
+        flags: { harness: 'claude', flags: ['--verbose'] },
+      },
+      hooks: {
+        hooks: { harness: 'claude', file: 'hooks/hooks.json' },
+        scripts: { harness: 'claude', directory: 'hooks/scripts' },
+      },
+      modelSets: { fast: { models: ['claude-sonnet-5'], default: 'claude-sonnet-5' } },
+    },
+    profiles: {
+      base: { layers: ['instructions/main'] },
+      agent: { layers: ['profile/base', 'settings/claude'] },
+    },
+    runtimes: { 'claude-agent': { credential: 'work', profile: 'agent' } },
+  });
+
+const CONTENT_SETTINGS: Readonly<Record<string, SettingsObject>> = {
+  claude: {
+    theme: 'dark',
+    permissions: { defaultMode: 'plan', allow: ['Bash'] },
+    env: { API_TOKEN: FAKE_TOKEN, NOTES: '/home/other/notes' },
+    empty: {},
+    verbose: true,
+  },
+};
+
+const contentFacts = (overrides: Partial<CatalogFacts> = {}): CatalogFacts =>
+  factsOf({
+    settingsBodies: CONTENT_SETTINGS,
+    instructionBodies: { main: `Read /home/me/notes first.\nexport API_TOKEN=${FAKE_TOKEN}\n` },
+    hooksTexts: { hooks: `{ "command": "notify", "password": "${FAKE_PASSWORD}" }\n` },
+    ...overrides,
+  });
+
+describe('componentCatalog content', () => {
+  it('should show instructions and hooks text with every secret-looking value cut out', () => {
+    // Act
+    const actual = componentCatalog(contentModel(), contentFacts());
+
+    // Assert
+    should(componentNamed(actual, 'instructions/main').content).deepEqual({
+      form: 'text',
+      text: 'Read /home/me/notes first.\nexport API_TOKEN=‹hidden›\n',
+      redacted: true,
+    });
+    should(componentNamed(actual, 'hooks/hooks').content).deepEqual({
+      form: 'text',
+      text: '{ "command": "notify", "password": "‹hidden›" }\n',
+      redacted: true,
+    });
+    FleetComponentCatalogSchema.parse(actual);
+  });
+
+  it('should say text was not redacted when nothing in it looks like a secret', () => {
+    // Act
+    const actual = componentCatalog(contentModel(), contentFacts({ instructionBodies: { main: 'Be brief.\n' } }));
+
+    // Assert
+    should(componentNamed(actual, 'instructions/main').content).deepEqual({
+      form: 'text',
+      text: 'Be brief.\n',
+      redacted: false,
+    });
+  });
+
+  it('should show settings as sorted dotted entries, hiding a secret-looking one', () => {
+    // Act
+    const actual = componentCatalog(contentModel(), contentFacts());
+
+    // Assert
+    should(componentNamed(actual, 'settings/claude').content).deepEqual({
+      form: 'entries',
+      entries: [
+        { key: 'empty', value: '{}' },
+        { key: 'env.API_TOKEN', hidden: true },
+        { key: 'env.NOTES', value: '/home/other/notes' },
+        { key: 'permissions.allow', value: '["Bash"]' },
+        { key: 'permissions.defaultMode', value: 'plan' },
+        { key: 'theme', value: 'dark' },
+        { key: 'verbose', value: 'true' },
+      ],
+    });
+  });
+
+  it('should carry no content for a kind with no file, or a file that was not read', () => {
+    // Act
+    const actual = componentCatalog(contentModel(), contentFacts());
+
+    // Assert
+    for (const reference of [
+      'instructions/unread',
+      'mcp/local',
+      'skills/tools',
+      'settings/flags',
+      'hooks/scripts',
+      'modelSets/fast',
+    ]) {
+      should(componentNamed(actual, reference)).not.have.property('content');
+    }
+    should(componentNamed(componentCatalog(contentModel(), factsOf()), 'hooks/hooks')).not.have.property('content');
+  });
+
+  it('should never let a hidden value reach the answer, in text, entries or a check path', () => {
+    // Act
+    const body = JSON.stringify(componentCatalog(contentModel(), contentFacts()));
+
+    // Assert
+    should(body).not.containEql(FAKE_TOKEN);
+    should(body).not.containEql(FAKE_PASSWORD);
+  });
+
+  it('should name the first path under somebody else’s home, and none under this machine’s', () => {
+    // Act
+    const actual = componentCatalog(contentModel(), contentFacts());
+
+    // Assert
+    should(componentNamed(actual, 'mcp/copied').checkPath).equal('/Users/other/notes');
+    should(componentNamed(actual, 'mcp/remote').checkPath).equal('/home/other/mcp');
+    should(componentNamed(actual, 'settings/claude').checkPath).equal('/home/other/notes');
+    should(componentNamed(actual, 'mcp/local')).not.have.property('checkPath');
+    should(componentNamed(actual, 'instructions/main')).not.have.property('checkPath');
+    should(componentNamed(actual, 'skills/tools')).not.have.property('checkPath');
+  });
+
+  it('should find a check path in instructions and hooks text, and treat the home itself as its own', () => {
+    // Act
+    const actual = componentCatalog(
+      contentModel(),
+      contentFacts({
+        instructionBodies: { main: 'See /home/me and /home/meadow/notes.' },
+        hooksTexts: { hooks: '{ "command": "/Users/other/bin/hook" }' },
+      }),
+    );
+
+    // Assert
+    should(componentNamed(actual, 'instructions/main').checkPath).equal('/home/meadow/notes.');
+    should(componentNamed(actual, 'hooks/hooks').checkPath).equal('/Users/other/bin/hook');
+  });
+});
+
+describe('redactText', () => {
+  it('should hide a token by its own shape even with no name beside it', () => {
+    // Act
+    const actual = redactText(`curl -H "x: y" ${FAKE_TOKEN}`);
+
+    // Assert
+    should(actual).deepEqual({ text: 'curl -H "x: y" ‹hidden›', redacted: true });
+  });
+});
+
+describe('flattenSettings', () => {
+  it('should treat an empty document as no entries', () => {
+    // Act & Assert
+    should(flattenSettings({})).deepEqual([]);
+    should(settingsValueText(3)).equal('3');
+  });
+});
+
+describe('layersRefusal', () => {
+  it('should refuse each kind of bad layer in its own words, and accept good ones', () => {
+    // Arrange
+    const model = contentModel();
+
+    // Act
+    const actual = [
+      layersRefusal(model, 'x', ['nonsense']),
+      layersRefusal(model, 'x', ['mcp/local', 'mcp/local']),
+      layersRefusal(model, 'x', ['profile/ghost']),
+      layersRefusal(model, 'base', ['profile/agent']),
+      layersRefusal(model, 'x', ['hooks/ghost']),
+      layersRefusal(model, 'x', ['profile/base', 'mcp/local']),
+    ];
+
+    // Assert
+    should(actual).deepEqual([
+      '"nonsense" is not a layer — write <kind>/<name> or profile/<name>',
+      'MCP server local is in the layers twice',
+      'no profile ghost exists on this machine',
+      'profile agent would include itself: it is base or is built on it',
+      'no hooks ghost exists on this machine',
+      undefined,
+    ]);
+    should(layerWords('nonsense')).equal('nonsense');
+    should(layerWords('profile/base')).equal('profile base');
+  });
+});
+
+describe('profileDraftView', () => {
+  it('should resolve a draft exactly as the saved profile with those layers resolves', () => {
+    // Arrange
+    const model = contentModel();
+    const facts = contentFacts();
+
+    // Act
+    const draft = profileDraftView(model, { layers: ['profile/base', 'settings/claude'] }, facts);
+    const saved = profileNamed(profileCatalog(model, facts), 'agent');
+
+    // Assert
+    should(draft).deepEqual({ harnesses: saved.harnesses });
+    FleetProfileDraftViewSchema.parse(draft);
+  });
+
+  it('should replace the edited profile’s own layers, and stand a new draft under a free name', () => {
+    // Arrange
+    const model = parseAccountModel({
+      version: 2,
+      components: { instructions: { main: { file: 'main.md' } } },
+      profiles: { draft: { layers: ['instructions/main'] } },
+    });
+
+    // Act
+    const edited = profileDraftView(model, { layers: [], editing: 'draft' }, factsOf());
+    const fresh = profileDraftView(model, { layers: ['profile/draft'] }, factsOf());
+
+    // Assert
+    should(edited.harnesses.map(stack => stack.available)).deepEqual([
+      { available: false, reason: 'This profile has no layers yet.' },
+      { available: false, reason: 'This profile has no layers yet.' },
+    ]);
+    should(fresh.harnesses[0]?.applied).deepEqual(['instructions/main']);
+    should(fresh).not.have.property('refusal');
+  });
+
+  it('should report a layer that would include the edited profile itself, and a missing one', () => {
+    // Arrange
+    const model = contentModel();
+
+    // Act
+    const loop = profileDraftView(model, { layers: ['profile/agent'], editing: 'base' }, contentFacts());
+    const ghost = profileDraftView(model, { layers: ['mcp/ghost'] }, contentFacts());
+
+    // Assert
+    should(loop.refusal).equal('profile agent would include itself: it is base or is built on it');
+    should(loop.harnesses.map(stack => stack.available.available)).deepEqual([false, false]);
+    should(ghost.refusal).equal('no MCP server ghost exists on this machine');
+    FleetProfileDraftViewSchema.parse(loop);
   });
 });

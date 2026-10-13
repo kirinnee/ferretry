@@ -5,6 +5,7 @@ import {
   type FleetComponentCatalog,
   type FleetLayeredProfileCatalog,
   type FleetMachineView,
+  type FleetProfileDraftView,
   type FleetRuntimeCatalog,
   OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
@@ -15,12 +16,14 @@ import {
   FLEET_CHANGES_PATH,
   FLEET_COMPONENTS_PATH,
   FLEET_MACHINE_PATH,
+  FLEET_PROFILE_DRAFT_PATH,
   FLEET_PROFILE_STACKS_PATH,
   FLEET_RUNTIMES_PATH,
   readFleetChange,
   readFleetComponents,
   readFleetMachine,
   readFleetProfileStacks,
+  previewFleetProfileDraft,
   readFleetRuntimes,
   stageFleetChange,
 } from '../../../../src/features/fleet/catalog-api.ts';
@@ -188,5 +191,35 @@ describe('the catalogue wire client', () => {
     expect(JSON.parse(confirmed.calls[0]?.init?.body as string)).toEqual({ operatorPassword: 'correct horse' });
     expect(headerOf(confirmed.calls[0], OPERATOR_UNLOCK_HEADER)).toBe(TOKEN);
     expect(JSON.parse(local.calls[0]?.init?.body as string)).toEqual({});
+  });
+
+  it('previews a draft profile as a POST of its layers, with the unlock and with none', async () => {
+    // Arrange
+    const draft = {
+      harnesses: [
+        {
+          harness: 'claude',
+          available: { available: false, reason: 'This profile has no layers yet.' },
+          applied: [],
+          skipped: [],
+          conflicts: [],
+          partial: [],
+        },
+      ],
+    } satisfies FleetProfileDraftView;
+    const unlocked = clientFor(draft);
+    const local = clientFor(draft);
+
+    // Act
+    const view = await previewFleetProfileDraft(unlocked.client, { layers: [], editing: 'agent' }, TOKEN);
+    await previewFleetProfileDraft(local.client, { layers: ['mcp/notes'] });
+
+    // Assert
+    expect(view).toEqual(draft);
+    expect(unlocked.calls[0]?.path).toBe(FLEET_PROFILE_DRAFT_PATH);
+    expect(unlocked.calls[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(unlocked.calls[0]?.init?.body as string)).toEqual({ layers: [], editing: 'agent' });
+    expect(headerOf(unlocked.calls[0], OPERATOR_UNLOCK_HEADER)).toBe(TOKEN);
+    expect(headerOf(local.calls[0], OPERATOR_UNLOCK_HEADER)).toBeUndefined();
   });
 });
