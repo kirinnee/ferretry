@@ -3,11 +3,11 @@ import type { Command } from 'commander';
 import type { GrantCommandOptions, GrantController } from './controller.ts';
 
 /**
- * Mounts `fy daemon config …` and `fy daemon password …` onto the existing `daemon` command.
+ * Mounts `fy daemon config …` onto the existing `daemon` command.
  *
  * ONTO THE EXISTING SHAPE, deliberately. `fy daemon` already reads
  * `install|uninstall|start|stop|restart|status|logs`, and inventing a second grammar for the same
- * subject is how a command line stops being learnable. These are two more verbs on the noun that
+ * subject is how a command line stops being learnable. This is one more verb on the noun that
  * already owns the daemon.
  *
  * `list` IS AN ALIAS FOR `ls` EVERYWHERE, because `fy fleet list` failing confusingly is a mistake
@@ -24,8 +24,7 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
   // commander two commands with one name and silently lose half the verbs; throwing here turns a
   // wiring mistake into a startup failure instead of a command that quietly does not exist.
   const daemon = program.commands.find(command => command.name() === 'daemon');
-  if (daemon === undefined)
-    throw new Error('the daemon command group must be registered before its config and password verbs');
+  if (daemon === undefined) throw new Error('the daemon command group must be registered before its config verbs');
   const config = daemon
     .command('config')
     .description('read and change what a caller NOT on this host may do')
@@ -35,9 +34,7 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
         '',
         'THIS COMMAND LINE is ungoverned: it holds the admin token, and somebody who can read that file',
         'already has the machine, so gating it would add friction and no safety. These grants apply to a',
-        'paired phone, a browser across the network, a session carried over the relay — and to a browser on',
-        'this machine until it enters the operator password once, because a browser is a paired device',
-        'wherever it runs.',
+        'paired phone, a browser across the network, a session carried over the relay.',
         '',
         'Two axes per capability:',
         '  use        may it exercise the capability at all',
@@ -45,7 +42,8 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
         '',
         `Capabilities: ${DAEMON_CAPABILITIES.join(', ')}`,
         '',
-        'Turning something ON needs the operator password when one is set; turning it OFF never does.',
+        'A paired device confirms a dangerous change with a passkey on that device. Turning something ON',
+        'is only ever done from this host.',
       ].join('\n'),
     );
 
@@ -80,39 +78,10 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
         '',
         `  ${bin} daemon config set warden --no-configure`,
         `  ${bin} daemon config set browser --no-use --no-configure`,
-        '',
-        'Widening reads the operator password from stdin when this machine has one:',
-        `  printf %s "$FY_OPERATOR_PASSWORD" | ${bin} daemon config set fleet --configure`,
+        `  ${bin} daemon config set fleet --configure`,
       ].join('\n'),
     )
     .action(async (capability: string, options: GrantCommandOptions) => {
       await controller().set(capability, options);
-    });
-
-  const password = daemon
-    .command('password')
-    .description('the operator password that gates changes made from off this host')
-    .addHelpText(
-      'after',
-      [
-        '',
-        'THIS IS NOT THE SYSTEM ROOT PASSWORD. It is a Ferretry operator secret for this daemon; no',
-        'command here touches sudo, and none of them can be used to elevate anything on this machine.',
-        '',
-        'It is stored as an argon2id verifier, never in plaintext, and no route, command or report can',
-        'read it back. Set it, or replace it — there is no way to see it.',
-        '',
-        'SETTING ONE IS ONE-WAY. There is no verb that removes it, because removing it while devices are',
-        'paired leaves this machine with paired devices and nothing gating them. Replacing it never asks',
-        'for the old one, so a forgotten password is repaired here rather than being a lockout.',
-      ].join('\n'),
-    );
-
-  password
-    .command('set')
-    .description('set or replace the operator password, reading it from stdin')
-    .addHelpText('after', `\n  printf %s "$FY_OPERATOR_PASSWORD" | ${bin} daemon password set\n`)
-    .action(async () => {
-      await controller().setPassword();
     });
 }

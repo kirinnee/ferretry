@@ -44,7 +44,6 @@ import {
   sessionSearchTaskHaystack,
   TASK_SCHEMA_VERSION,
 } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -1171,9 +1170,8 @@ const SECRETS_DAMAGED: SecretList = {
  * The grant fixtures, as a PAIRED REMOTE browser sees them.
  *
  * A loopback caller reads five allowed rows and has nothing to review, so the interesting states are
- * all on this side of the boundary: a capability the operator switched off, a `configure` axis behind
- * the operator password, and a machine with no password at all — where every configure reason comes
- * back `ungated` and the disclosure is the whole point of the screen.
+ * all on this side of the boundary: a capability the operator switched off, a configure axis waiting on
+ * a passkey confirmation, and the same machine after that confirmation.
  */
 const grantEntry = (
   capability: DaemonCapability,
@@ -1182,12 +1180,12 @@ const grantEntry = (
   configureRefusal: GrantRefusal,
   origin: 'default' | 'config file' = 'default',
   /** Whether this fixture's caller may turn the capability ON. False models a remote browser, which
-   *  is the interesting case: widening is a local act and no password buys it. */
+   *  is the interesting case: widening is a local act and no passkey buys it. */
   mayGrant = false,
 ): CapabilityGrantView => ({
   capability,
-  use: useRefusal === 'granted' || useRefusal === 'ungated',
-  configure: configureRefusal === 'granted' || configureRefusal === 'ungated',
+  use: useRefusal === 'granted',
+  configure: configureRefusal === 'granted',
   granted,
   mayGrant,
   useRefusal,
@@ -1197,49 +1195,44 @@ const grantEntry = (
 
 const on = { use: true, configure: true };
 
-/** Frozen, so an unlock countdown renders the same number in every capture. */
-const HARNESS_GRANT_NOW_MS = Date.parse('2026-01-01T00:00:00.000Z');
-
-/** A cautious operator: a password is set, so every configure axis is behind an unlock. */
-const HARNESS_GRANTS_LOCKED: GrantsView = {
+/** A paired phone that has not confirmed with its passkey: every dangerous demand reads `step-up-required`. */
+const HARNESS_GRANTS_STEP_UP: GrantsView = {
   capabilities: [
-    grantEntry('fleet', on, 'granted', 'locked'),
+    grantEntry('fleet', on, 'granted', 'step-up-required'),
     grantEntry('terminal', { use: false, configure: false }, 'not-granted', 'not-granted', 'config file'),
-    grantEntry('browser', on, 'granted', 'locked'),
-    grantEntry('filesystem', on, 'granted', 'locked', 'config file'),
+    grantEntry('browser', on, 'step-up-required', 'step-up-required'),
+    grantEntry('filesystem', on, 'granted', 'step-up-required', 'config file'),
     grantEntry('warden', { use: true, configure: false }, 'granted', 'not-granted', 'config file'),
-    grantEntry('pairing', on, 'granted', 'locked', 'config file'),
+    grantEntry('pairing', on, 'step-up-required', 'step-up-required', 'config file'),
   ],
   governed: true,
   hostLocal: false,
-  passwordSet: true,
-  unlocked: false,
-  attemptsRemaining: 5,
+  steppedUp: false,
 };
 
-/** The permissive default: nothing is standing behind the configure controls, and the screen says so. */
-const HARNESS_GRANTS_UNGATED: GrantsView = {
-  // `mayGrant: true` — this fixture is the caller standing AT the machine, the only one that may widen.
-  // It is what makes the "direct local" capability-list frame a real loopback view rather than a remote
-  // view wearing a local badge, and `governed: false` is the same fact on the view itself.
+/** The same phone after one passkey touch: what the operator allowed is open, and the view says so. */
+const HARNESS_GRANTS_STEPPED_UP: GrantsView = {
+  capabilities: [
+    grantEntry('fleet', on, 'granted', 'granted'),
+    grantEntry('terminal', { use: false, configure: false }, 'not-granted', 'not-granted', 'config file'),
+    grantEntry('browser', on, 'granted', 'granted'),
+    grantEntry('filesystem', on, 'granted', 'granted', 'config file'),
+    grantEntry('warden', { use: true, configure: false }, 'granted', 'not-granted', 'config file'),
+    grantEntry('pairing', on, 'granted', 'granted', 'config file'),
+  ],
+  governed: true,
+  hostLocal: false,
+  steppedUp: true,
+};
+
+/** A browser ON the machine: ungoverned, every axis open, and the only caller that may widen. */
+const HARNESS_GRANTS_LOCAL: GrantsView = {
   capabilities: DAEMON_CAPABILITIES.map(capability =>
-    grantEntry(capability, on, 'granted', 'ungated', 'default', true),
+    grantEntry(capability, on, 'granted', 'granted', 'default', true),
   ),
   governed: false,
   hostLocal: true,
-  passwordSet: false,
-  unlocked: false,
-};
-
-/** Five wrong passwords: the daemon has stopped checking, so no prompt is offered at all. */
-const HARNESS_GRANTS_RATE_LIMITED: GrantsView = {
-  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'rate-limited')),
-  governed: true,
-  hostLocal: false,
-  passwordSet: true,
-  unlocked: false,
-  attemptsRemaining: 0,
-  lockedUntil: '2026-01-01T00:15:00.000Z',
+  steppedUp: false,
 };
 
 /** A daemon that cannot read its own grant document: denied, loudly, and not shown as permissive. */
@@ -1247,38 +1240,7 @@ const HARNESS_GRANTS_UNDETERMINED: GrantsView = {
   capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'undetermined', 'undetermined')),
   governed: true,
   hostLocal: false,
-  passwordSet: true,
-  unlocked: false,
-};
-
-/**
- * A BROWSER ON THE MACHINE THAT HAS NOT UNLOCKED YET — governed and local at once.
- *
- * The connection the two fields were split for. `mayGrant` stays true because locality decides widening
- * and this caller is at the machine; the configure axes read `locked` because it has not proved the
- * password. A fixture that moved the two together could not express this state at all, which is exactly
- * why it earns a capture of its own.
- */
-const HARNESS_GRANTS_LOCAL_LOCKED: GrantsView = {
-  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'locked', 'default', true)),
-  governed: true,
-  hostLocal: true,
-  passwordSet: true,
-  unlocked: false,
-  attemptsRemaining: 5,
-};
-
-/** The same browser after one unlock: ungoverned, and the password control is live. */
-const HARNESS_GRANTS_LOCAL_UNLOCKED: GrantsView = {
-  capabilities: DAEMON_CAPABILITIES.map(capability =>
-    grantEntry(capability, on, 'granted', 'granted', 'default', true),
-  ),
-  governed: false,
-  hostLocal: true,
-  passwordSet: true,
-  unlocked: true,
-  unlockExpiresAt: '2026-01-01T00:05:00.000Z',
-  attemptsRemaining: 5,
+  steppedUp: false,
 };
 
 /**
@@ -1405,7 +1367,7 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
       runtimeCount: setUp ? 5 : 0,
       runningSessions: 0,
       // The host's own browser: it may apply, and nothing more is asked.
-      authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+      authority: { mayApply: true, applyRefusal: 'granted' },
     };
   };
   return {
@@ -1507,22 +1469,9 @@ const HARNESS_SETUP_SCAN = {
 
 const HARNESS_GRANT_CLIENT: GrantClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-  let view = HARNESS_GRANTS_LOCKED;
+  let view = HARNESS_GRANTS_STEPPED_UP;
   return {
-    request: (async (path: string, _schema: unknown, init?: RequestInit) => {
-      if (path.endsWith('/unlock')) {
-        const password = String(JSON.parse(String(init?.body)).password);
-        // One password works, so the unlock path and the wrong-password path are both reviewable by
-        // hand when this harness is served rather than screenshotted.
-        if (password !== 'ferretry-operator')
-          throw new FyHttpError(
-            'that is not this machine’s operator password; 4 attempts remaining before this daemon stops checking',
-            401,
-            'grant_wrong_password',
-          );
-        view = { ...view, unlocked: true, capabilities: HARNESS_GRANTS_UNGATED.capabilities, passwordSet: true };
-        return { token: 'fy_unlock_harnessharnessharness1', expiresAt: '2026-01-01T00:05:00.000Z', ttlSeconds: 300 };
-      }
+    request: (async (_path: string, _schema: unknown, init?: RequestInit) => {
       if (init?.method === 'PATCH') {
         const patch = JSON.parse(String(init.body)) as Partial<Record<DaemonCapability, Partial<typeof on>>>;
         view = {
@@ -5754,99 +5703,31 @@ function Shell() {
       ),
     },
     {
-      // A cautious operator's machine: `terminal` switched off entirely, `warden` readable but not
-      // configurable, and every other configure axis behind the operator password. Each disabled
-      // control carries its own reason — that is the whole unit, in one frame.
-      label: 'Capability limits — password set',
+      // A paired phone that has not confirmed with its passkey: `terminal` switched off entirely,
+      // `warden` readable but not configurable, and every dangerous demand waiting on the passkey.
+      // Each disabled control carries its own reason, and the one button that asks is beside them.
+      label: 'Capability limits — passkey needed',
       render: () => (
-        <div data-harness="grants-locked">
-          <GrantsCard
-            connection={daemon}
-            view={HARNESS_GRANTS_LOCKED}
-            nowMs={HARNESS_GRANT_NOW_MS}
-            onChange={() => {}}
-            onUnlock={() => {}}
-            onSetPassword={() => {}}
-          />
+        <div data-harness="grants-step-up-needed">
+          <GrantsCard connection={daemon} view={HARNESS_GRANTS_STEP_UP} onChange={() => {}} onStepUp={() => {}} />
         </div>
       ),
     },
     {
-      // The permissive default, and the sentence that is owed exactly once: nothing is standing
-      // behind these configure controls. It is stated where the controls are, not as a modal.
-      label: 'Capability limits — nothing behind them',
+      // The same phone after one passkey touch: the panel says so and offers nothing more to press.
+      label: 'Capability limits — passkey confirmed',
       render: () => (
-        <div data-harness="grants-ungated">
-          <GrantsCard
-            connection={daemon}
-            view={HARNESS_GRANTS_UNGATED}
-            nowMs={HARNESS_GRANT_NOW_MS}
-            onChange={() => {}}
-            onUnlock={() => {}}
-            onSetPassword={() => {}}
-          />
+        <div data-harness="grants-step-up-held">
+          <GrantsCard connection={daemon} view={HARNESS_GRANTS_STEPPED_UP} onChange={() => {}} onStepUp={() => {}} />
         </div>
       ),
     },
     {
-      // Five wrong passwords. No prompt is offered at all — one here would invite five more guesses
-      // at a daemon that has already stopped listening — and the deadline is on screen instead.
-      label: 'Capability limits — locked out',
+      // A browser on the machine: ungoverned, every axis open, no passkey panel because nothing asks.
+      label: 'Capability limits — on the machine',
       render: () => (
-        <div data-harness="grants-rate-limited">
-          <GrantsCard
-            connection={daemon}
-            view={HARNESS_GRANTS_RATE_LIMITED}
-            nowMs={HARNESS_GRANT_NOW_MS}
-            unlockFailure={{ message: 'too many wrong operator passwords', retryable: false, attemptsRemaining: 0 }}
-            onChange={() => {}}
-            onUnlock={() => {}}
-            onSetPassword={() => {}}
-          />
-        </div>
-      ),
-    },
-    {
-      // A BROWSER ON THE MACHINE THAT HAS NOT UNLOCKED. The badge says "on this machine — locked", the
-      // switches that would widen carry the password as their reason rather than a command to run on a
-      // host the reader is already sitting at, and the password control states what it needs before
-      // anybody taps it. The way back — a terminal that never asks for the old password — is on screen.
-      label: 'Capability limits — local, not yet unlocked',
-      render: () => (
-        <div data-harness="grants-local-locked">
-          <GrantsCard
-            connection={daemon}
-            view={HARNESS_GRANTS_LOCAL_LOCKED}
-            nowMs={HARNESS_GRANT_NOW_MS}
-            onChange={() => {}}
-            onUnlock={() => {}}
-            onSetPassword={() => {}}
-          />
-        </div>
-      ),
-    },
-    {
-      // The same browser one unlock later: ungoverned, full authority, and the password control live —
-      // set, replace or remove, with the consequence of removing it beside the button.
-      label: 'Capability limits — local, unlocked',
-      render: () => (
-        <div data-harness="grants-local-unlocked">
-          <GrantsCard
-            connection={daemon}
-            view={HARNESS_GRANTS_LOCAL_UNLOCKED}
-            nowMs={HARNESS_GRANT_NOW_MS}
-            // The held token as well as the view, because they are separate inputs: `unlocked` is what the
-            // DAEMON says and `held` is what this tab actually has. A frame with one and not the other
-            // would show a prompt asking for a password the same card claims to be past.
-            held={{
-              daemonId: daemon.daemonId,
-              token: `fy_unlock_${'a'.repeat(22)}`,
-              expiresAtMs: HARNESS_GRANT_NOW_MS + 300_000,
-            }}
-            onChange={() => {}}
-            onUnlock={() => {}}
-            onSetPassword={() => {}}
-          />
+        <div data-harness="grants-local">
+          <GrantsCard connection={daemon} view={HARNESS_GRANTS_LOCAL} onChange={() => {}} />
         </div>
       ),
     },
@@ -5856,14 +5737,7 @@ function Shell() {
       label: 'Capability limits — daemon cannot say',
       render: () => (
         <div data-harness="grants-undetermined">
-          <GrantsCard
-            connection={daemon}
-            view={HARNESS_GRANTS_UNDETERMINED}
-            nowMs={HARNESS_GRANT_NOW_MS}
-            onChange={() => {}}
-            onUnlock={() => {}}
-            onSetPassword={() => {}}
-          />
+          <GrantsCard connection={daemon} view={HARNESS_GRANTS_UNDETERMINED} onChange={() => {}} />
         </div>
       ),
     },
@@ -5889,7 +5763,7 @@ function Shell() {
       label: 'Capability list — direct local',
       render: () => (
         <div data-harness="capability-list-local">
-          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_UNGATED.capabilities} governed={false} />
+          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_LOCAL.capabilities} governed={false} />
         </div>
       ),
     },
@@ -5902,10 +5776,8 @@ function Shell() {
           <AddDeviceCard
             connection={daemon}
             view={HARNESS_PAIRED_DEVICES}
-            gate={{ kind: 'open' }}
             invite={null}
             nowMs={HARNESS_PAIR_NOW_MS}
-            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
@@ -5921,7 +5793,7 @@ function Shell() {
       label: 'Capability list — governed remote',
       render: () => (
         <div data-harness="capability-list-remote">
-          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_LOCKED.capabilities} governed />
+          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_STEP_UP.capabilities} governed />
         </div>
       ),
     },
@@ -5934,10 +5806,8 @@ function Shell() {
           <AddDeviceCard
             connection={daemon}
             view={HARNESS_PAIRED_DEVICES}
-            gate={{ kind: 'open' }}
             invite={HARNESS_INVITE}
             nowMs={HARNESS_PAIR_NOW_MS}
-            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
@@ -5952,7 +5822,7 @@ function Shell() {
        * evidence is not evidence of loopback.
        *
        * THE FIXTURE HAS TO CARRY NO CAPABILITIES TO REACH THIS. The posture is derived from `mayGrant`,
-       * so a list of capabilities always determines one — passing the locked fixture here rendered
+       * so a list of capabilities always determines one — passing the step-up fixture here rendered
        * "Remote — governed" under a frame labelled "cannot tell", which is a screenshot that quietly
        * documents the wrong thing. An empty list is the honest way to model a daemon that said nothing,
        * and it is also the real case: `unknown` is what a caller sees when the read produced no
@@ -5975,10 +5845,8 @@ function Shell() {
           <AddDeviceCard
             connection={daemon}
             view={HARNESS_PAIRED_DEVICES}
-            gate={{ kind: 'open' }}
             invite={HARNESS_INVITE}
             nowMs={Date.parse('2026-01-01T00:03:00.000Z')}
-            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
@@ -5990,44 +5858,14 @@ function Shell() {
     {
       // Nothing but the machine itself can reach this daemon. Said as a fact with the way forward, never
       // as a bare empty list — an empty list reads as "something was removed".
-      //
-      // AND IT IS THE FIRST-PAIRING FRAME: no password is set, so there is no Add-a-device button yet —
-      // the requirement and the control that satisfies it are what stand in its place.
       label: 'Add a device — nothing paired yet',
       render: () => (
         <div data-harness="pair-empty">
           <AddDeviceCard
             connection={daemon}
             view={{ devices: [], hostLocal: true }}
-            gate={{ kind: 'needs-password', local: true }}
             invite={null}
             nowMs={HARNESS_PAIR_NOW_MS}
-            onSetPassword={() => {}}
-            onMint={() => {}}
-            onDiscardInvite={() => {}}
-            onRevokeCode={() => {}}
-            onRevokeDevice={() => {}}
-          />
-        </div>
-      ),
-    },
-    {
-      // The same requirement met by a reader who cannot satisfy it from where they are: an install with
-      // devices already paired, no password, and a browser that is not on the machine. It names the two
-      // places that can set one instead of offering a button that would be refused.
-      label: 'Add a device — password needed, away from the machine',
-      render: () => (
-        <div data-harness="pair-needs-password-remote">
-          <AddDeviceCard
-            connection={daemon}
-            // `hostLocal: false` deliberately: this reader is AWAY from the machine, and a frame whose
-            // badge said "you are at this machine" beside "only the machine itself can set one" would be a
-            // committed screenshot of two contradictory claims.
-            view={{ ...HARNESS_PAIRED_DEVICES, hostLocal: false }}
-            gate={{ kind: 'needs-password', local: false }}
-            invite={null}
-            nowMs={HARNESS_PAIR_NOW_MS}
-            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}

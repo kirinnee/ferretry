@@ -40,7 +40,7 @@ export function resetRoots(layout: DaemonLayout): readonly [ResetRoot, ResetRoot
   return [
     {
       label: `${layout.daemonName} state home`,
-      holds: 'config, fleet, sessions, secrets, paired devices, the operator password, logs',
+      holds: 'config, fleet, sessions, secrets, paired devices, logs',
       path: layout.stateHome,
     },
     {
@@ -216,14 +216,12 @@ function inventoryLines(daemon: string, inventory: ResetInventory | undefined): 
     return [
       `  every secret, paired device and session in the paths above — ${daemon} is not running,`,
       '  so they cannot be counted; the paths and their sizes above are still exact',
-      '  the operator password, so this machine has none afterwards',
     ];
   }
   return [
     `  ${String(inventory.secrets)} secret(s) — the values, not just the names`,
     `  ${String(inventory.devices)} paired device(s), each of which has to be paired again`,
     `  ${String(inventory.sessions)} session(s), with their transcripts`,
-    '  the operator password, so this machine has none afterwards',
   ];
 }
 
@@ -265,7 +263,6 @@ export function renderResetOutcome(daemon: string, removals: readonly ResetSurve
       ? `${daemon} had no persistent data on this host; nothing was removed`
       : `${daemon} reset: removed ${String(removed.length)} path(s), ${String(files)} files, ${megabytes(bytes)}`,
     ...removals.map(removal => `  ${removal.measure.kind === 'absent' ? 'absent ' : 'removed'} ${removal.root.path}`),
-    `Run \`${clientName} daemon start\` to bring ${daemon} up on a clean slate. It will offer to set this`,
-    'machine a new operator password, exactly as a fresh install does.',
+    `Run \`${clientName} daemon start\` to bring ${daemon} up on a clean slate, exactly as a fresh install does.`,
   ].join('\n');
 }

@@ -1,9 +1,8 @@
 import { describe, it } from 'bun:test';
 import type { PairedDevice, PairingCodeMintResponse, PairingCodeStatusResponse, PairingId } from '@ferretry/protocol';
 import should from 'should';
-import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
+import { ApiDispatcher, ApiRouter, type StepUpWitness } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
-import type { PairingMint } from '../../../../src/lib/pairing/index.ts';
 import { type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { grantSubsystem } from './support.ts';
@@ -44,17 +43,12 @@ class FakePairing implements PairingSubsystem {
   };
   granted: PairedDevice[] = [device(deviceOneId, 'Pixel 8'), device(deviceTwoId, 'iPad')];
 
-  /**
-   * What the subsystem answered, refusal included.
-   *
-   * A FIELD RATHER THAN A FIXED CODE, because the requirement's refusal is the subsystem's answer and
-   * this mount's job is to render it. A fake that could only mint would let a route that dropped the
-   * refusal on the floor pass.
-   */
-  minting: PairingMint = { kind: 'minted', response: minted };
+  /** How many codes the subsystem was actually asked for, so a refusal at the boundary is visible. */
+  mints = 0;
 
-  async mint(): Promise<PairingMint> {
-    return this.minting;
+  mint(): PairingCodeMintResponse {
+    this.mints += 1;
+    return minted;
   }
 
   status(): PairingCodeStatusResponse | undefined {
@@ -93,6 +87,12 @@ const credentials = {
 const admin = { authorization: 'Bearer admin-secret' };
 /** A paired browser: whoever its session proved. It sends no credential of its own. */
 const browser = { deviceId: deviceOneId, appSession: 'app-one' } as const;
+/**
+ * A paired browser ON THE HOST: loopback AND the carrier's host proof. Loopback alone is not enough
+ * for a device — a phone behind a locally bound proxy is a loopback peer too — so only
+ * `privilegedLoopback` makes it ungoverned.
+ */
+const localBrowser = { device: browser, loopback: true, privilegedLoopback: true } as const;
 
 /**
  * The mount over the REAL grant subsystem.
@@ -102,12 +102,12 @@ const browser = { deviceId: deviceOneId, appSession: 'app-one' } as const;
  * daemon enforced something else. `pairing` is permissive by default, so `allow: false` is how a fixture
  * states that the operator switched it off.
  */
-async function mount(subject: PairingSubsystem, allow = true) {
+async function mount(subject: PairingSubsystem, allow = true, stepUps?: StepUpWitness) {
   const grants = grantSubsystem({
     grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: allow, configure: allow } },
   });
   await grants.refresh();
-  return new ApiDispatcher(new ApiRouter(pairingRoutes(subject)), credentials, grants);
+  return new ApiDispatcher(new ApiRouter(pairingRoutes(subject)), credentials, grants, undefined, stepUps);
 }
 
 describe('pairing routes', () => {
@@ -139,9 +139,7 @@ describe('pairing routes', () => {
 
     // Act
     const anonymous = await surface.dispatch(request({ method: 'POST', path: '/v1/pair/code', loopback: true }));
-    const fromBrowser = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', loopback: true, device: browser }),
-    );
+    const fromBrowser = await surface.dispatch(request({ method: 'POST', path: '/v1/pair/code', ...localBrowser }));
     const fromHostCli = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
     );
@@ -154,76 +152,83 @@ describe('pairing routes', () => {
     should(jsonBody(fromBrowser)).deepEqual(minted);
   });
 
-  it('should refuse the mint for BOTH doors with the subsystem’s one sentence when no password exists', async () => {
-    // THE TWO-DOORS PROBLEM, DISSOLVED. The requirement used to live in the browser's pairing panel, so
-    // `fy pair` on the host could still hand out a code on a passwordless machine. It is now below both:
-    // the host's own command line and a browser reach the SAME route, get the SAME status, the SAME code
-    // and the SAME sentence — because there is one rule, in the subsystem, and this mount only renders
-    // what it answered. A second check here is what this asserts the absence of.
+  it('should hold a REMOTE mint behind the passkey step-up, and release it once the device has confirmed', async () => {
+    // THE GOVERNED MINT. A phone adding another device is handing out a credential, so the policy holds
+    // `pairing.use` behind a step-up even when the operator's grant says yes. The code never runs
+    // without one — the refusal is the boundary's, and the subsystem is not even asked.
     // Arrange
     const subject = new FakePairing();
-    subject.minting = { kind: 'refused', reason: 'this machine has no operator password, so it will not…' };
-    const surface = await mount(subject);
+    const remote = { method: 'POST' as const, path: '/v1/pair/code', device: browser, loopback: false };
+
+    // Act
+    const unconfirmed = await (await mount(subject)).dispatch(request(remote));
+    const confirmed = await (await mount(subject, true, { held: () => true })).dispatch(request(remote));
+
+    // Assert
+    should(unconfirmed.status).equal(403);
+    should(jsonBody(unconfirmed).code).equal('grant_step_up_required');
+    should(subject.mints).equal(1);
+    should(confirmed.status).equal(201);
+    should(jsonBody(confirmed)).deepEqual(minted);
+  });
+
+  it('should ask a caller on the host for no step-up at all, however the operator set pairing', async () => {
+    // Somebody at the machine already has the machine, so neither the grant nor the step-up stands in
+    // front of them — `fy pair` and a local browser reach the same route and get the same code.
+    // Arrange
+    const subject = new FakePairing();
+    const surface = await mount(subject, false);
 
     // Act
     const fromHostCli = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
     );
     const fromLocalBrowser = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', ...localBrowser }),
+    );
+    // A loopback peer WITHOUT the host proof is a proxied remote phone, and is governed like one.
+    const fromProxiedPhone = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, device: browser }),
-    );
-    const fromRemoteBrowser = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', loopback: false, device: browser }),
-    );
-
-    // Assert — byte-identical bodies, which is the strongest available statement that one rule answered.
-    should([fromHostCli.status, fromLocalBrowser.status, fromRemoteBrowser.status]).deepEqual([403, 403, 403]);
-    should([fromLocalBrowser.body, fromRemoteBrowser.body]).deepEqual([fromHostCli.body, fromHostCli.body]);
-    should(jsonBody(fromHostCli)).deepEqual({
-      // NOT `grant_not_granted`. This is a refusal about the MACHINE's state, not about the caller's
-      // credential, so a client can tell "set a password" from "your operator said no".
-      code: 'pairing_needs_operator_password',
-      error: 'this machine has no operator password, so it will not…',
-    });
-    should(fromHostCli.headers.get('cache-control')).equal('no-store');
-  });
-
-  it('should leave every other pairing route alone on a machine with no password', async () => {
-    // LOCAL USE IS NEVER BLOCKED BY THIS. The requirement stands in front of the one act that creates
-    // remote access; a daemon with no password still lists its devices, revokes one, reports a code's
-    // fate. A gate that spread to the rest of this surface would have locked an operator
-    // out of revoking the very device they were worried about.
-    // Arrange
-    const subject = new FakePairing();
-    subject.minting = { kind: 'refused', reason: 'no password' };
-    const surface = await mount(subject);
-    const host = { loopback: true, headers: admin };
-
-    // Act
-    const listed = await surface.dispatch(request({ method: 'GET', path: '/v1/pair/devices', ...host }));
-    const fate = await surface.dispatch(request({ method: 'GET', path: `/v1/pair/code/${pairingId}`, ...host }));
-    const revokedCode = await surface.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/code/${pairingId}`, ...host }),
-    );
-    const revokedDevice = await surface.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceOneId}`, ...host }),
     );
 
     // Assert
-    should([listed.status, fate.status, revokedCode.status, revokedDevice.status]).deepEqual([200, 200, 200, 200]);
+    should([fromHostCli.status, fromLocalBrowser.status]).deepEqual([201, 201]);
+    should(fromLocalBrowser.body).equal(fromHostCli.body);
+    should(fromProxiedPhone.status).equal(403);
   });
 
-  it('should let a REMOTE browser mint while the operator leaves pairing on, and explain it when they do not', async () => {
+  it('should hold the rest of the pairing surface behind the same step-up for a remote caller', async () => {
+    // Listing and revoking are `pairing.use` too: a stolen, unconfirmed phone can neither mint nor read
+    // who else holds a key, and the host still lists and revokes with nothing asked.
+    // Arrange
+    const subject = new FakePairing();
+    const surface = await mount(subject);
+    const remote = { device: browser, loopback: false };
+
+    // Act
+    const listed = await surface.dispatch(request({ path: '/v1/pair/devices', ...remote }));
+    const revoked = await surface.dispatch(
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, ...remote }),
+    );
+    const host = await surface.dispatch(request({ path: '/v1/pair/devices', loopback: true, headers: admin }));
+
+    // Assert
+    should([listed.status, revoked.status, host.status]).deepEqual([403, 403, 200]);
+    should(subject.revokedDevices).deepEqual([]);
+  });
+
+  it('should let a REMOTE browser mint once confirmed, and explain it when the operator switched pairing off', async () => {
     // Adding a device from a phone is the case the owner asked for, so the default is permissive. The
     // protection is elsewhere: a remote caller may switch `pairing` off and can never switch it back on
     // — enforced by the grant layer, tested there. What this proves is the two answers this mount gives.
     // Arrange
     const subject = new FakePairing();
     const remote = { method: 'POST' as const, path: '/v1/pair/code', device: browser, loopback: false };
+    const confirmed = { held: () => true };
 
     // Act
-    const allowed = await (await mount(subject)).dispatch(request(remote));
-    const refused = await (await mount(subject, false)).dispatch(request(remote));
+    const allowed = await (await mount(subject, true, confirmed)).dispatch(request(remote));
+    const refused = await (await mount(subject, false, confirmed)).dispatch(request(remote));
 
     // Assert — and the refusal names what to do next rather than saying "forbidden".
     should(allowed.status).equal(201);
@@ -255,12 +260,10 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
     const path = `/v1/pair/code/${pairingId}`;
 
-    const local = await surface.dispatch(request({ path, device: browser, loopback: true }));
+    const local = await surface.dispatch(request({ path, ...localBrowser }));
     subject.observation = undefined;
-    const absent = await surface.dispatch(request({ path, device: browser, loopback: true }));
-    const malformed = await surface.dispatch(
-      request({ path: '/v1/pair/code/not-an-id', device: browser, loopback: true }),
-    );
+    const absent = await surface.dispatch(request({ path, ...localBrowser }));
+    const malformed = await surface.dispatch(request({ path: '/v1/pair/code/not-an-id', ...localBrowser }));
 
     should(local.status).equal(200);
     should(local.headers.get('cache-control')).equal('no-store');
@@ -275,11 +278,11 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
     const path = `/v1/pair/code/${pairingId}`;
 
-    const revoked = await surface.dispatch(request({ method: 'DELETE', path, device: browser, loopback: true }));
+    const revoked = await surface.dispatch(request({ method: 'DELETE', path, ...localBrowser }));
     subject.observation = undefined;
-    const unknown = await surface.dispatch(request({ method: 'DELETE', path, device: browser, loopback: true }));
+    const unknown = await surface.dispatch(request({ method: 'DELETE', path, ...localBrowser }));
     const malformed = await surface.dispatch(
-      request({ method: 'DELETE', path: '/v1/pair/code/not-an-id', device: browser, loopback: true }),
+      request({ method: 'DELETE', path: '/v1/pair/code/not-an-id', ...localBrowser }),
     );
 
     should(revoked.status).equal(200);
@@ -298,9 +301,13 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
 
     // Act
-    const fromBrowser = await surface.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: true }));
+    const fromBrowser = await surface.dispatch(request({ path: '/v1/pair/devices', ...localBrowser }));
     const fromHostCli = await surface.dispatch(request({ path: '/v1/pair/devices', headers: admin, loopback: true }));
-    const fromRemote = await surface.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: false }));
+    // A remote caller reads the list only once confirmed, and is told it is NOT on the host.
+    const confirmed = await mount(subject, true, { held: () => true });
+    const fromRemote = await confirmed.dispatch(
+      request({ path: '/v1/pair/devices', device: browser, loopback: false }),
+    );
 
     // Assert
     should(jsonBody(fromBrowser)).deepEqual({
@@ -320,13 +327,13 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
 
     const removed = await surface.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, device: browser, loopback: true }),
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, ...localBrowser }),
     );
     const again = await surface.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, device: browser, loopback: true }),
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, ...localBrowser }),
     );
     const malformed = await surface.dispatch(
-      request({ method: 'DELETE', path: '/v1/pair/devices/not-an-id', device: browser, loopback: true }),
+      request({ method: 'DELETE', path: '/v1/pair/devices/not-an-id', ...localBrowser }),
     );
 
     should(removed.status).equal(200);

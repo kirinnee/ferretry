@@ -14,13 +14,20 @@
  */
 
 import type { ApiCredentials } from './authentication.ts';
-import type { CapabilityGuard } from './capability.ts';
+import type { CapabilityGuard, StepUpWitness } from './capability.ts';
 import { authorizeRequest } from './dispatcher.ts';
 import { ApiError } from './error.ts';
 import type { ApiRequest, ApiResponse } from './http.ts';
 import { errorResponse } from './responses.ts';
 import type { RouteContext, ScopedRoute, WardenRemedyAuthorizer } from './route.ts';
 import type { ApiRouter } from './router.ts';
+
+/**
+ * The witness a re-check of an ALREADY-OPEN stream reads: whatever device its session proved has
+ * confirmed, because the upgrade being re-checked could not have been accepted otherwise. A caller with
+ * no device still holds nothing — the boundary never asks a witness about one.
+ */
+const STANDING_STEP_UP: StepUpWitness = { held: () => true };
 
 /** A client frame as the transport delivers it: text control JSON, or binary bytes. */
 export type SocketFrame = string | ArrayBuffer | ArrayBufferView;
@@ -150,6 +157,8 @@ export class ApiSocketDispatcher {
      * prohibition.
      */
     private readonly remedies?: WardenRemedyAuthorizer,
+    /** Whose passkey step-up is live — the same witness the request/response table reads. */
+    private readonly stepUps?: StepUpWitness,
   ) {}
 
   /**
@@ -170,13 +179,27 @@ export class ApiSocketDispatcher {
    * A socket is authorized once, at its upgrade, and a stream can then run for hours. A narrowed grant
    * must reach the streams already open, so whoever carries one asks this again — on each lease renewal
    * and on each grant change — and ends the stream when the answer is no.
+   *
+   * The step-up is counted as STANDING here: it was spent on the upgrade that opened this stream, so a
+   * stream outlives the confirmation that admitted it. Asking for a live one again would end every
+   * remote terminal at the first renewal after its step-up lapsed. Everything else is re-decided.
    */
   reauthorize(request: ApiRequest): boolean {
-    return authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies).kind === 'authorized';
+    return (
+      authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies, STANDING_STEP_UP).kind ===
+      'authorized'
+    );
   }
 
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
+    const authorized = authorizeRequest(
+      this.router,
+      this.credentials,
+      request,
+      this.guard,
+      this.remedies,
+      this.stepUps,
+    );
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
     if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
     try {

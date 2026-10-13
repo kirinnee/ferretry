@@ -116,17 +116,20 @@ async function daemon(label: string) {
   await files.ensureDirectory(paths.state, 0o700);
 
   /**
-   * ONE verifier for both subsystems, exactly as the composition root holds one.
+   * WHETHER THE PAIRED BROWSER HAS CONFIRMED WITH ITS PASSKEY, and the one switch this file turns.
    *
-   * It reports a password because this daemon has to be able to PAIR for anything below to exist —
-   * the mint refuses on a passwordless machine, which is proved where that rule lives. Giving pairing
-   * and the grant subsystem different answers would be a fixture that cannot happen in production.
+   * Enrolment is governed by `pairing.use`, and the policy holds that behind a step-up for a caller
+   * who did not arrive on the host — which is every browser below, since none of them sets
+   * `loopback`. So the journeys run CONFIRMED (the state a person is in after tapping the passkey
+   * prompt) and one case flips it to prove the same route refuses an unconfirmed device. The witness
+   * is a fake of the step-up SERVICE, not of the gate: the real policy, grant service, dispatcher and
+   * routes are all in play, and `StepUpService`'s own ceremony is proved where it lives.
    */
-  const operatorPassword = {
-    isSet: async () => true,
-    set: async () => undefined,
-    clear: async () => undefined,
-    verify: async () => false,
+  const stepUp = {
+    confirmed: true,
+    held(): boolean {
+      return this.confirmed;
+    },
   };
   const cryptography = new NodePairingCryptography();
   const pairingRepository = new StatePairingRepository(paths, files, cryptography);
@@ -153,8 +156,6 @@ async function daemon(label: string) {
     devices: pairingRepository,
     credentials,
     deviceState: [push],
-    operatorPassword,
-    clientName: 'fy',
   });
 
   const grants = new CapabilityGrantService({
@@ -163,8 +164,6 @@ async function daemon(label: string) {
       written: async () => DAEMON_CAPABILITIES,
       write: async () => undefined,
     },
-    passwords: operatorPassword,
-    tokens: { mint: () => `fy_unlock_${'a'.repeat(22)}` },
     clock: { nowMs: () => Date.now() },
     audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
     clientName: 'fy',
@@ -175,8 +174,10 @@ async function daemon(label: string) {
     new ApiRouter([...pairingRoutes(pairing), ...pushRoutes(push)]),
     { admin: ADMIN, warden: 'warden-secret', devices: { has: deviceId => credentials.get(deviceId) !== undefined } },
     grants,
+    undefined,
+    stepUp,
   );
-  return { paths, files, surface, pairing, pushService, document: join(paths.state, 'push.json') };
+  return { paths, files, surface, pairing, pushService, stepUp, document: join(paths.state, 'push.json') };
 }
 
 /**
@@ -341,6 +342,34 @@ describe('push enrolment over the real route surface', () => {
     const listed = await world.surface.dispatch(
       request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
+    should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).be.empty();
+  });
+
+  it('should refuse a paired browser that has not confirmed with its passkey, and store nothing', async () => {
+    // THE GOVERNED ENROLMENT, HONESTLY. Enrolment is `pairing.use`, which the policy holds behind a
+    // step-up for a caller that did not arrive on the host. The same device, route and body succeed
+    // above once confirmed; here the only thing that differs is the witness, so the refusal is the
+    // step-up gate and nothing else.
+    const world = await daemon('push-unconfirmed');
+    const browser = await pair(world, 'Pixel 8');
+    world.stepUp.confirmed = false;
+    const body = JSON.stringify({
+      deviceName: 'Pixel 8',
+      subscription: await subscribed('https://push.example.test/send/unconfirmed'),
+      prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
+    });
+
+    const refused = await world.surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser.device, body }),
+    );
+    world.stepUp.confirmed = true;
+    const listed = await world.surface.dispatch(
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
+    );
+
+    should(refused.status).equal(403);
+    should(JSON.parse(refused.body).code).equal('grant_step_up_required');
+    should(world.pushService.received).be.empty();
     should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).be.empty();
   });
 

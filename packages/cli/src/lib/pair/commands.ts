@@ -1,8 +1,8 @@
 import type { Command } from 'commander';
 import type { PairController, PairOptions } from './controller.ts';
 
-/** The help overview, naming the command by the name the program was given. */
-function overview(bin: string): string {
+/** The help overview. */
+function overview(): string {
   return `Pairing gives one device its own token for this host. The daemon mints a code that
 lives for two minutes and works once; the QR here carries that code, the
 daemon's address and its key fingerprint in a URL fragment, which browsers
@@ -10,13 +10,6 @@ never send to a server. Scanning it with the phone's own camera app opens
 Ferretry already filled in.
 
 The device names itself when it redeems, so there is nothing to name here.
-
-This machine will not hand out a code until it has an operator password. A
-paired device can change the settings of whatever is already switched on
-here, and the password is what stands in front of that; the daemon refuses
-the mint and says so, whether the request came from here or from a browser.
-Set one with \`${bin} daemon password set\` — using this machine locally needs no
-password at all.
 
 When the daemon and the browser are the SAME machine there is nobody to
 scan anything, so --open hands the link to this host's browser and the
@@ -46,7 +39,7 @@ export function registerPairCommands(program: Command, controller: PairControlle
       '--open',
       "open the pairing link in this host's browser — for when the daemon and the browser are the same machine",
     )
-    .addHelpText('after', `\n${overview(program.name())}`)
+    .addHelpText('after', `\n${overview()}`)
     .action(async (flags: PairOptions) => {
       await controller.pair(flags);
     });

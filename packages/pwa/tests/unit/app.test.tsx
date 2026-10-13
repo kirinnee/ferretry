@@ -911,6 +911,33 @@ describe('AppShell', () => {
     await second.view.unmount();
   });
 
+  it('names the machine asking in the one passkey prompt, and a machine it no longer holds plainly', async () => {
+    // Arrange
+    const { store, view } = await renderShell('/', [alpha.daemonId]);
+    const ghost = daemonConnection({
+      daemonId: GAMMA_ID,
+      baseUrl: 'https://gamma.example.test',
+      deviceId: GAMMA_TOKEN,
+    });
+    const purpose = (): string | null | undefined =>
+      view.container.querySelector('[data-step-up-dialog] p')?.textContent;
+
+    // Act — a paired machine asks, then one this browser holds no record of.
+    void store.stepUp.require(alpha);
+    await settle();
+    const named = purpose();
+    await interact(() => store.stepUp.dismiss());
+    void store.stepUp.require(ghost);
+    await settle();
+    const unnamed = purpose();
+    await interact(() => store.stepUp.dismiss());
+
+    // Assert
+    expect(named).toContain(alpha.baseUrl);
+    expect(unnamed).toContain('This machine');
+    await view.unmount();
+  });
+
   it('mounts the daemon-scoped projects registry from its routed destination', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/projects`, [alpha.daemonId]);
     await settle();

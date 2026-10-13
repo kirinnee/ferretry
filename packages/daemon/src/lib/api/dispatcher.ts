@@ -7,7 +7,13 @@ import {
   bearerToken,
   isPreKeyDeviceToken,
 } from './authentication.ts';
-import { type CallerGovernance, type CapabilityGuard, grantRefusalCode } from './capability.ts';
+import {
+  type CallerGovernance,
+  type CapabilityGuard,
+  grantRefusalCode,
+  NO_STEP_UP_WITNESS,
+  type StepUpWitness,
+} from './capability.ts';
 import { ApiError } from './error.ts';
 import {
   type ApiRequest,
@@ -36,9 +42,6 @@ export const CLIENT_HEADER = 'x-ferretry-client';
 /** Query parameter carrying a token for WebSocket upgrades, which cannot set headers. Honoured for
  *  loopback peers only. */
 export const TOKEN_QUERY_PARAMETER = 'token';
-/** The unlock a `configure`-axis caller presents. A header, never a query parameter: a URL reaches
- *  every proxy's access log, and an unlock in a log outlives its five minutes. */
-export const OPERATOR_UNLOCK_HEADER = 'x-ferretry-operator-unlock';
 /**
  * The per-assignment capability a warden presents to exercise a remedy.
  *
@@ -111,6 +114,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
    * quietly acquiring a bypass — the same rule the capability guard already states for itself.
    */
   remedies?: WardenRemedyAuthorizer,
+  /** Whose passkey step-up is live. Absent means nobody holds one, which can only refuse more. */
+  stepUps: StepUpWitness = NO_STEP_UP_WITNESS,
 ): RouteAuthorization<TRoute> {
   const lookup = router.lookup(request.method, request.path);
   // The public shortcut answers before authentication is even attempted, which is the whole point of
@@ -222,11 +227,12 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       // read as local and hand a remote caller the machine.
       loopback: onHost,
       // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
-      // headers and would make this decision movable by a header. The host's command line holds this
-      // token and is ungoverned; a browser on the same machine does not and is gated until it unlocks.
+      // headers and would make this decision movable by a header. Attribution only.
       adminToken: authentication.tokenClass === 'admin',
       actor,
-      unlock: headerValue(request, OPERATOR_UNLOCK_HEADER),
+      // The SESSION's proven device, never a header's claim. No device — a bearer caller, a warden —
+      // holds no step-up and never can.
+      stepUp: request.device !== undefined && stepUps.held(request.device),
     };
     const decision = guard.decide(demand, presentation) ?? { allowed: false, refusal: 'undetermined' as const };
     if (!decision.allowed)
@@ -384,10 +390,19 @@ export class ApiDispatcher {
     /** The administrator's per-remedy decision. Absent while this table declares no remedy — and a
      *  table that declares one without it refuses every warden, rather than serving one unchecked. */
     private readonly remedies?: WardenRemedyAuthorizer,
+    /** Whose passkey step-up is live. Absent on a table that wires no step-up subsystem. */
+    private readonly stepUps?: StepUpWitness,
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
+    const authorized = authorizeRequest(
+      this.router,
+      this.credentials,
+      request,
+      this.guard,
+      this.remedies,
+      this.stepUps,
+    );
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
     if (authorized.kind === 'refused') return authorized.response;
     return await run(authorized.route, authorized.context);

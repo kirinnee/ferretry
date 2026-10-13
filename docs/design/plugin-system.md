@@ -504,22 +504,21 @@ described.
 
 **Option A — install is a local act, full stop.** `fy plugin install <path>` on the host. No remote
 route, no `plugin.install` axis, nothing to gate, nothing to phish. A person at the machine could
-already run any program they like (`docs/grants.md:14-19`), so this adds no exposure whatsoever, and
+already run any program they like ([grants.md](../grants.md)), so this adds no exposure whatsoever, and
 "what does installing mean" gets an answer a person can hold: _somebody standing at this machine put
 a program here._
 
-**Option B — remote install under `plugin.configure`, confirmed by the operator password against the
-exact artifact.** This is no longer a mechanism to design. `docs/grants.md:259-288` describes the
-per-change confirmation as shipped: the **same** secret, the **same** five-try budget and
-fifteen-minute lockout, checked by `CapabilityGrantService.confirmChange`, minting nothing and spent
-inside the one request that carries it (`:265-274`). And the section closes with an invitation this
-document is the first caller of:
+**Option B — remote install under `plugin.configure`, behind the passkey step-up.** _Superseded in part:
+the per-change operator-password confirmation this option was written against is deleted, and a governed
+`configure` now needs only a passkey step-up ([grants.md](../grants.md)). Nothing below is built; read the
+quotation as the doctrine it was, not as a mechanism that exists._ The section it quotes closed with an
+invitation this document was the first caller of:
 
 > **Why only the fleet.** … a fleet apply is a discrete, reviewable artifact — a numbered manifest of
 > writes a person reads before agreeing — so there is something for a confirmation to be _bound to_.
 > `terminal.use` is a stream of arbitrary code with no such boundary … If a second capability ever
 > grows a reviewable artifact, the machinery is `CallerGovernance.confirmChange` and it is not
-> fleet-specific. — `docs/grants.md:290-295`
+> fleet-specific. — the grants document at that commit
 
 **A plugin install is exactly that artifact**: a manifest, a digest, a declared capability list and a
 path — a thing a person can read before agreeing. **A plugin action is not**, and the distinction
@@ -527,9 +526,9 @@ matters more than it looks: confirming every plugin call would be the per-keystr
 section rules out by name. So if Option B is ever taken, the confirmation belongs on **install**, and
 nowhere else.
 
-Its one inherited limitation is unchanged and stated at `docs/grants.md:279-282`: on a machine with
-no operator password — the default — there is no secret to bind an artifact to, and a control that
-cannot refuse is theatre.
+That limitation is gone with the password: there is no per-artifact confirmation to bind, so an install
+would rest on the step-up window alone — a weaker property than the one this option assumed, which Option
+A does not need.
 
 **Recommend A for v1 anyway**, and say why in one sentence: the first version of a plugin system
 should not also be the product's second remote code-installation path — and Option B stays available
@@ -541,7 +540,7 @@ Three further v1 refusals, each because it converts one decision into a standing
 - **No auto-update.** An installed plugin is the bytes that were installed. A plugin that updates
   itself is a plugin whose review expired silently.
 - **A plugin is enabled explicitly after install, and disabling is never harder than enabling** —
-  the asymmetry the whole grant model rests on (`docs/grants.md:324-326`).
+  the asymmetry the whole grant model rests on ([grants.md](../grants.md)).
 
 ---
 

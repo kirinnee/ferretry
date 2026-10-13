@@ -1,5 +1,4 @@
 import { CAPABILITY_AXES, DAEMON_CAPABILITIES, isLoopbackHost } from '@ferretry/protocol';
-import { NO_PASSWORD_DISCLOSURE } from '../grants/policy.ts';
 import { dialledRelayUrl, type RelayCarrierSource } from '../relay/discovery.ts';
 import type { RunOverrides } from './arguments.ts';
 import { foreignAdvertisementNotice } from './boot.ts';
@@ -131,9 +130,8 @@ export function describeConfiguration(report: ConfigurationReport): readonly Res
  *
  * THE ROW SAYS WHO IT APPLIES TO. `--print-config` is read by somebody trying to work out why
  * something is refused, and the commonest wrong answer would be to see `configure off` and conclude
- * their own command line is blocked. It is not — the admin token is ungoverned — so the heading says so
- * once, and says the other half too: a BROWSER on this machine is a paired device and is governed by
- * these rows until it enters the operator password. Arrival alone stopped being the answer.
+ * their own command line is blocked. It is not — anything that arrived on this host is ungoverned, a
+ * browser on this machine included — so the heading says so once.
  */
 function describeGrants(report: ConfigurationReport): readonly ResolvedValue[] {
   const document = (report.document ?? {}) as { readonly grants?: Record<string, Record<string, unknown>> };
@@ -160,11 +158,6 @@ function describeGrants(report: ConfigurationReport): readonly ResolvedValue[] {
  * IT DECIDES WHETHER THE GRANTS MATTER TO ANOTHER MACHINE, which is why `--check` asks it before
  * printing them. A daemon bound to loopback with no relay can be reached by nothing off this host, so
  * reciting five capabilities at that operator as a REMOTE boundary would be noise dressed as security.
- *
- * IT IS NOT THE SAME AS "nothing is governed here". A browser on this very machine is a paired device
- * and is governed by those rows until it enters the operator password — the gate that makes an
- * unattended tab deliberate rather than one tap from the fleet. What this predicate answers is the
- * narrower question it has always answered: can anything reach this daemon from somewhere else.
  *
  * TWO WAYS IN, and the second is the one people forget. The bind address is the obvious one. The
  * relay is the other: the daemon DIALS OUT to a rendezvous, so a loopback bind is still reachable
@@ -200,39 +193,29 @@ export function reachableOffHost(
  * passing, what it will let a phone do once it has — without having to know the grant surface exists.
  *
  * IT READS THE DOCUMENT, NOT A SECOND COPY. `grants` comes from the same parsed configuration
- * `--print-config` reports and the daemon enforces; `passwordSet` comes from the same verifier port
- * the grant service asks. There is no third answer to drift.
+ * `--print-config` reports and the daemon enforces. There is no second answer to drift.
  */
 export function describeGrantPosture(input: {
   readonly config: DaemonConfig;
-  readonly passwordSet: boolean;
-  readonly clientName: string;
   /** The carrier that was actually resolved, so a discovered relay counts as a way in. */
   readonly carrier?: RelayCarrierSource;
 }): readonly string[] {
   const reach = reachableOffHost(input.config, input.carrier);
   // Nothing off this host can reach it — so the rows are not a REMOTE boundary today, and reciting five
-  // capabilities as one would be noise dressed as security. It no longer says "no grant applies": a
-  // browser on this machine is a paired device and is governed until it enters the password, so the line
-  // names the gate that IS doing something rather than claiming there is none.
+  // capabilities as one would be noise dressed as security.
   if (!reach.reachable)
     return [
       `grants       nothing off this host can reach this daemon (${reach.how}), so no grant governs another machine today`,
-      input.passwordSet
-        ? `             a browser on this machine still enters the operator password once before it changes anything`
-        : `             a browser on this machine is ungoverned too, because there is no operator password to enter`,
     ];
   const used = DAEMON_CAPABILITIES.filter(capability => input.config.grants[capability]?.use === true);
   const configurable = DAEMON_CAPABILITIES.filter(capability => input.config.grants[capability]?.configure === true);
   const lines = [
     `grants       reachable off this host (${reach.how}) — a remote caller may use ${listed(used)}, and change settings for ${listed(configurable)}`,
   ];
-  // The disclosure, ONCE, and only where it is both true and load-bearing: a machine nothing can
-  // reach off-loopback has nothing to disclose, and a machine with a password has a gate to name.
+  // The gate, ONCE, and only where it is load-bearing: a machine nothing can reach off-loopback has
+  // nothing to confirm.
   lines.push(
-    input.passwordSet
-      ? `             an operator password gates every one of those changes`
-      : `             ! ${NO_PASSWORD_DISCLOSURE}; set one with \`${input.clientName} daemon password set\``,
+    `             every change, and any terminal, browser or pairing use, also needs a passkey confirmation from the paired device`,
   );
   return lines;
 }
@@ -264,8 +247,8 @@ export function renderConfiguration(rows: readonly ResolvedValue[], config: Daem
   if (rows.some(row => row.name.startsWith('grants.')))
     lines.push(
       '',
-      'grants apply to callers that are NOT on this host; this command line is ungoverned, and a browser on',
-      'this machine is governed until it enters the operator password once.',
+      'grants apply to callers that are NOT on this host; this command line and a browser on this machine',
+      'are ungoverned.',
     );
   if (advertisesForeignAddress(config))
     lines.push('', `! ${foreignAdvertisementNotice(config.bindUrl, config.publicUrl, configFile)}`);

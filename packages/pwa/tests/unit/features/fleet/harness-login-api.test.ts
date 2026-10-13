@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
 import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
@@ -17,9 +16,6 @@ interface Call {
   readonly path: string;
   readonly init: RequestInit | undefined;
 }
-
-/** An unlock token that satisfies the shared grammar, so a fixture cannot be laxer than the daemon. */
-const TOKEN = `fy_unlock_${'A'.repeat(22)}`;
 
 const clientFor = (answer: unknown): { client: FleetClient; calls: Call[] } => {
   const calls: Call[] = [];
@@ -47,53 +43,25 @@ describe('signing in a credential', () => {
     expect(bodyOf(calls[0]?.init)).toEqual({ credentialId: CLAUDE_CREDENTIAL_ID });
   });
 
-  it('sends the operator password in the BODY, never in the path', async () => {
-    // A query parameter reaches every proxy's access log, and this one is the machine's own password.
-    const { client, calls } = clientFor(claudeFlow('starting'));
-
-    await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID, operatorPassword: 'the password' });
-
-    expect(bodyOf(calls[0]?.init).operatorPassword).toBe('the password');
-    expect(calls[0]?.path).not.toContain('the password');
-  });
-
-  it('reads, cancels and submits on the flow path, carrying the unlock on every call', async () => {
+  it('reads, cancels and submits on the flow path', async () => {
     const flow = claudeFlow('awaiting-code');
     const cases: readonly (readonly [unknown, (client: FleetClient) => Promise<unknown>, string | undefined])[] = [
-      [
-        flow,
-        async client => await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, TOKEN),
-        'POST',
-      ],
-      [flow, async client => await readCredentialSignIn(client, flow.flowId, TOKEN), undefined],
-      [flow, async client => await cancelCredentialSignIn(client, flow.flowId, TOKEN), 'DELETE'],
+      [flow, async client => await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }), 'POST'],
+      [flow, async client => await readCredentialSignIn(client, flow.flowId), undefined],
+      [flow, async client => await cancelCredentialSignIn(client, flow.flowId), 'DELETE'],
       [
         { outcome: 'accepted', flow },
-        async client => await submitCredentialSignInCode(client, flow.flowId, 'x', TOKEN),
+        async client => await submitCredentialSignInCode(client, flow.flowId, 'x'),
         'POST',
       ],
-      [
-        { outcome: 'accepted', flow },
-        async client => await switchCredentialSignInToLink(client, flow.flowId, TOKEN),
-        'POST',
-      ],
+      [{ outcome: 'accepted', flow }, async client => await switchCredentialSignInToLink(client, flow.flowId), 'POST'],
     ];
     for (const [answer, call, method] of cases) {
       const { client, calls } = clientFor(answer);
       await call(client);
-      const headers = (calls[0]?.init?.headers ?? {}) as Record<string, string>;
-      expect(headers[OPERATOR_UNLOCK_HEADER]).toBe(TOKEN);
       expect(calls[0]?.init?.method).toBe(method);
       expect(calls[0]?.path.startsWith(FLEET_LOGIN_PATH)).toBe(true);
     }
-  });
-
-  it('sends no unlock header at all when there is no unlock to send', async () => {
-    const { client, calls } = clientFor(claudeFlow('awaiting-code'));
-
-    await readCredentialSignIn(client, 'flow-one');
-
-    expect(calls[0]?.init?.headers).toEqual({});
   });
 
   it('reads one flow by id, percent-encoding it into the path', async () => {

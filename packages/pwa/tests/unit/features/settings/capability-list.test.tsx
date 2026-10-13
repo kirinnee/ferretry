@@ -204,11 +204,11 @@ describe('why each capability is open', () => {
       expect(mark.props['data-capability-reason']).toBe('closed');
   });
 
-  it('distinguishes an axis nothing is standing behind from one the operator allowed', () => {
+  it('distinguishes an axis waiting on a passkey from one the operator allowed outright', () => {
     const renderer = render(
       <CapabilityList
         connection={localLookingConnection()}
-        capabilities={[entry({ capability: 'fleet', configureRefusal: 'ungated' })]}
+        capabilities={[entry({ capability: 'fleet', configure: false, configureRefusal: 'step-up-required' })]}
         governed
       />,
     );
@@ -218,8 +218,55 @@ describe('why each capability is open', () => {
     ]);
     expect(reasons).toEqual([
       ['fleet.use', 'granted'],
-      ['fleet.configure', 'ungated'],
+      ['fleet.configure', 'step-up'],
     ]);
+  });
+
+  it('labels a step-up row with the passkey, and never with a password', () => {
+    const renderer = render(
+      <CapabilityList
+        connection={localLookingConnection()}
+        capabilities={[entry({ capability: 'terminal', use: false, useRefusal: 'step-up-required' })]}
+        governed
+      />,
+    );
+    const rendered = text(renderer);
+    expect(rendered).toContain('Open — after your passkey');
+    expect(rendered).not.toMatch(/password|unlock/iu);
+  });
+
+  it('shows the one-way notice to a governed caller and the two-way notice to one at the machine', () => {
+    const remote = render(
+      <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
+    );
+    expect(attr(remote, 'data-capability-direction')).toBe('governed-remote');
+    expect(text(remote)).toContain('never back on');
+    const local = render(
+      <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed={false} />,
+    );
+    expect(attr(local, 'data-capability-direction')).toBe('direct-local');
+    expect(text(local)).toContain('both ways');
+  });
+
+  it('says a switched-off capability a remote caller may not widen can only be turned on at the machine', () => {
+    const renderer = render(
+      <CapabilityList
+        connection={localLookingConnection()}
+        capabilities={[
+          entry({
+            capability: 'terminal',
+            use: false,
+            configure: false,
+            granted: { use: false, configure: false },
+            useRefusal: 'not-granted',
+            configureRefusal: 'not-granted',
+            mayGrant: false,
+          }),
+        ]}
+        governed
+      />,
+    );
+    expect(marked(renderer, 'data-capability-only-at-machine')).toHaveLength(1);
   });
 
   it('computes the reason from the axis and the posture, never from one alone', () => {

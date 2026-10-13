@@ -117,7 +117,7 @@ export interface MountedSubsystems {
    *  harness's own login against one credential's store with piped stdio, publishes a verification
    *  URL — and for Codex a device code — accepts one short-lived authorization code straight into that
    *  child's stdin, and lets the harness write its own credential into its own store. Every route here
-   *  is `configure`, with the operator password proved against the start. */
+   *  is `configure`, which a caller off this host passes only behind the passkey step-up. */
   readonly harnessLogin: HarnessLoginSubsystem;
   /** The account model's credentials: one login stored once, its status and usage, Check now, and
    *  sign-in targeting a credential id (docs/design/account-model.md §7). */
@@ -311,7 +311,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // registered EARLY and is itself ungoverned so a restricted UI can always read the reason it is
     // restricted — a grant report a restricted caller could not fetch would be the greyed control
     // with no explanation this whole feature exists to remove.
-    ...grantRoutes(subsystems.grants),
+    ...grantRoutes(subsystems.grants, subsystems.stepUp),
     // The carrier refresh sits beside pairing because it is the SECOND half of one exchange: pairing
     // hands a device the set of ways to reach this daemon, and this is where that device asks again
     // when the set has changed. `/v1/carriers` is a fixed literal no other subsystem uses, so it can
@@ -445,7 +445,15 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
 export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
   // The guard is the SUBSYSTEM itself, so the answer a route enforces and the answer the report shows
   // are one object rather than two that can drift.
-  return new ApiDispatcher(new ApiRouter(mountedDaemonRoutes(base, subsystems)), base.credentials, subsystems.grants);
+  // The step-up witness is the subsystem the step-up routes mint into, so a confirmation is visible to
+  // the very next request on the same session.
+  return new ApiDispatcher(
+    new ApiRouter(mountedDaemonRoutes(base, subsystems)),
+    base.credentials,
+    subsystems.grants,
+    undefined,
+    subsystems.stepUp,
+  );
 }
 
 /**
@@ -486,6 +494,8 @@ export function createMountedSocketDispatcher(
     // The SAME guard the request/response table uses. A terminal socket that skipped it would let a
     // browser drive a shell this machine had refused to let it open.
     subsystems.grants,
+    undefined,
+    subsystems.stepUp,
   );
 }
 

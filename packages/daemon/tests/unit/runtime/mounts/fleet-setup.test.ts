@@ -110,7 +110,7 @@ describe('the fleet setup mount', () => {
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {
     // Arrange
     const { subsystem, calls } = stub();
-    const body = { harnesses: ['claude'], operatorPassword: 'correct horse battery' };
+    const body = { harnesses: ['claude'] };
 
     // Act
     const response = await dispatcher(subsystem).dispatch(
@@ -122,14 +122,14 @@ describe('the fleet setup mount', () => {
     should(response.headers.get('cache-control')).equal('no-store');
     should(jsonBody(response)).deepEqual(INSTALL);
     should(calls.installs.map(call => call.request)).deepEqual([body as FleetToolInstallRequest]);
-    should(calls.installs[0]?.governance).containDeep({ confirmChange: false });
+    should(calls.installs[0]?.governance).containDeep({ governed: false });
   });
 
   it('should answer 403 for a caller who could not confirm and 409 with the code for every other refusal', async () => {
     // Arrange
     const { subsystem } = stub({
       scan: async () => {
-        throw new FleetSetupRefusal('fleet_setup_unauthorized', 'the operator password is wrong');
+        throw new FleetSetupRefusal('fleet_setup_unauthorized', 'confirm with your passkey first');
       },
       installTools: async () => {
         throw new FleetSetupRefusal('fleet_setup_unreadable', 'config.yaml could not be read');
@@ -149,7 +149,7 @@ describe('the fleet setup mount', () => {
     // Assert
     should(unauthorized.status).equal(403);
     should(jsonBody(unauthorized)).deepEqual({
-      error: 'the operator password is wrong',
+      error: 'confirm with your passkey first',
       code: 'fleet_setup_unauthorized',
     });
     should(unreadable.status).equal(409);

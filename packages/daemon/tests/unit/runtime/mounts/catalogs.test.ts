@@ -25,6 +25,13 @@ interface FilesystemGrant {
 const FILESYSTEM_GRANTED: FilesystemGrant = DEFAULT_CAPABILITY_GRANTS.filesystem;
 const FILESYSTEM_DISABLED: FilesystemGrant = { use: false, configure: false };
 
+/**
+ * A remote paired browser that has confirmed with its passkey. Registering a project is
+ * `filesystem.configure`, which a remote caller reaches only with a live step-up — so a case about what
+ * the route does once past the gate is told from this device rather than from a bearer with none.
+ */
+const phone = { deviceId: 'fy_device_id_phone', appSession: 'app-one' } as const;
+
 async function dispatcher(
   catalogs: CatalogSubsystem,
   filesystem: FilesystemGrant = FILESYSTEM_GRANTED,
@@ -36,7 +43,9 @@ async function dispatcher(
     },
   });
   await grants.refresh();
-  return new ApiDispatcher(new ApiRouter(catalogRoutes(catalogs, sessionDirectory())), CREDENTIALS, grants);
+  return new ApiDispatcher(new ApiRouter(catalogRoutes(catalogs, sessionDirectory())), CREDENTIALS, grants, undefined, {
+    held: device => device.deviceId === phone.deviceId,
+  });
 }
 
 describe('the project catalog mount', () => {
@@ -55,7 +64,7 @@ describe('the project catalog mount', () => {
       request({
         method: 'POST',
         path: '/v1/projects',
-        headers: human,
+        device: phone,
         body: JSON.stringify({ kind: 'existing-folder', path: '/work/ferretry', name: 'Ferretry' }),
       }),
     );
@@ -161,7 +170,7 @@ describe('the project catalog mount', () => {
         request({
           method: 'POST',
           path: '/v1/projects',
-          headers: human,
+          device: phone,
           body: JSON.stringify({ kind: 'new-folder', path: '/work/new', initializeGit: true }),
         }),
       );
@@ -193,7 +202,7 @@ describe('the project catalog mount', () => {
       request({
         method: 'POST',
         path: '/v1/projects',
-        headers: human,
+        device: phone,
         body: JSON.stringify({ kind: 'existing-folder', path: 'relative/path' }),
       }),
     );
@@ -222,7 +231,7 @@ describe('the project catalog mount', () => {
       request({
         method: 'POST',
         path: '/v1/projects',
-        headers: human,
+        device: phone,
         body: '{not json',
       }),
     );
@@ -248,7 +257,7 @@ describe('the project catalog mount', () => {
       request({
         method: 'POST',
         path: '/v1/projects',
-        headers: human,
+        device: phone,
         body: JSON.stringify({ kind: 'existing-folder' }),
       }),
     );

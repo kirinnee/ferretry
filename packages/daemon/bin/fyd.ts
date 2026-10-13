@@ -113,7 +113,6 @@ import {
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
-  FileOperatorPassword,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
@@ -140,7 +139,6 @@ import {
   ProcCgroupPlacements,
   ProcessSecretReader,
   quotaFailoverRoot,
-  RandomUnlockTokens,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
   SocketViewerDownstream,
@@ -441,13 +439,11 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
-  NO_PASSWORD_DISCLOSURE,
   NotificationService,
   normalizeCallsign,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
   type OperatorMessageSource,
-  type OperatorPasswordPort,
   OperatorReadService,
   observedRuntimeStatePatch,
   overriddenBy,
@@ -510,6 +506,7 @@ import {
   renderHarnessPreflight,
   renderInitialAttachmentSection,
   resolveStateHome,
+  retireOperatorPassword,
   runtimeQuarantineState,
   type ScratchReclamation,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
@@ -718,15 +715,6 @@ export interface DaemonWorld {
     readonly preferredPort: number;
   };
   readonly config: DaemonConfigStore;
-  /**
-   * Whether this machine has an operator password, for the queries that report it.
-   *
-   * THE SAME PORT THE GRANT SERVICE USES, deliberately: `--check` must not answer from a second copy
-   * of a fact the running daemon decides differently. It is exposed as the whole port rather than a
-   * boolean so it stays use-never-read — there is no getter to reach for, here or anywhere above it,
-   * so no query can grow into one that prints a password.
-   */
-  readonly operatorPassword: OperatorPasswordPort;
   /** What this invocation said on the command line, overriding the document for this run only. */
   readonly overrides: RunOverrides;
   /**
@@ -4381,31 +4369,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // that currently hold the shared profile rather than racing their lease.
   let closeAgentBrowsers: () => Promise<void> = async () => undefined;
   const daemonConfigMutations = new KeyedSerialExecutor();
-  /**
-   * THE OPERATOR PASSWORD'S VERIFIER, held once for this daemon, read by three collaborators.
-   *
-   * The grant subsystem asks it whether a candidate matches, the boot disclosure asks whether one
-   * exists, and PAIRING asks the same question before it hands out a code. Hoisted so all three ask
-   * ONE object about one file: the class is stateless and a second instance would answer identically
-   * today, but "how many places read this fact" is exactly the question that goes wrong later, and
-   * this is the fact that decides whether a new device may exist. Nothing here can read a password —
-   * see `FileOperatorPassword` for why that is structural rather than a convention.
-   */
-  const operatorPassword = new FileOperatorPassword(paths.operatorPassword, stateFiles);
   const stateHomeDaemonConfigStore = new FileDaemonConfig(paths, stateFiles);
   /**
    * What this machine has agreed a caller who is NOT on it may do.
    *
    * Built from the SAME configuration document `--print-config` reports, so the grants an operator
-   * reads and the grants the authorization boundary enforces are one value rather than two. The
-   * password verifier is deliberately NOT in that document — it lives in its own mode-0600 file under
-   * `state`, because the configuration document is the one that travels into backups and screen
-   * shares.
-   *
-   * HOISTED, because ONE service has to answer for two things: the boundary's per-request decision,
-   * and the fleet's per-change confirmation. A second instance would keep a second wrong-password
-   * ledger, so five wrong guesses at the fleet panel and five at the grants panel would be ten — the
-   * exact per-surface budget `UnlockAttemptState` is keyed per daemon to prevent.
+   * reads and the grants the authorization boundary enforces are one value rather than two.
    */
   // Every live socket and relayed session a paired device holds, so revoking it closes them too.
   // ONE registry, shared by the bound address, every relay carrier and the pairing service.
@@ -4415,8 +4384,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const deviceConnections = new LiveDeviceConnections(stepUpRegistry);
   const grants = new CapabilityGrantService({
     document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
-    passwords: operatorPassword,
-    tokens: new RandomUnlockTokens(),
     clock: new SystemGrantClock(),
     audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
     clientName: CLIENT_NAME,
@@ -4710,8 +4677,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * Driving a harness's own sign-in from a browser, holding no token: the harness's own login against
    * one credential's store. It is given THIS PROCESS'S ENVIRONMENT, which the service sanitizes before
    * any child sees it, so a sign-in started from inside an agent session cannot authenticate against
-   * that session's login. The confirmation is routed to the one grant service this daemon has, so the
-   * attempt a wrong password spends is one of the same five an unlock spends.
+   * that session's login. Who may start one is the route's `fleet.configure`, which holds a caller
+   * off this host behind the passkey step-up.
    */
   const harnessLogin = new HarnessLoginService({
     credentialTargets: {
@@ -4724,7 +4691,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     deliverCallback: deliverCodexCallback,
     environment: process.env,
     timer: harnessLoginTimer,
-    confirmChange: async password => await grants.confirmChange(password),
     clientName: CLIENT_NAME,
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
@@ -5128,8 +5094,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
     // and wrong for a file a person named, so the two are different adapters.
     config: daemonConfigStore,
-    // The same verifier the grant service and the pairing mint ask. Reading it here creates nothing.
-    operatorPassword,
     overrides,
     stateHome: { path: paths.home, fromEnvironment: (environment.stateHomeInput().fyHome ?? '').trim() !== '' },
     // The SAME two collaborators a start resolves an account from, so the preflight cannot report
@@ -5352,14 +5316,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           deviceState: [push, stepUp],
           // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
           connections: deviceConnections,
-          // WHY PAIRING HOLDS THE VERIFIER. A machine with no operator password will not hand out a
-          // pairing code, because pairing is the moment access leaves this host and a device paired
-          // without one arrives able to configure the fleet. It is the SAME object the grant subsystem
-          // verifies against, so the requirement and the gate cannot disagree about whether a password
-          // exists. Nothing about local use is gated by it — see `PairingService.mint`.
-          operatorPassword,
-          // So the refusal names the command a person actually types rather than inventing one.
-          clientName: CLIENT_NAME,
         }),
       };
     },
@@ -5969,9 +5925,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalog: fleetCredentialCatalog,
         status: credentialStatus,
         email: async source => await new CredentialEmailReader(harnessCredentials).email(source),
-        confirmChange: async password => await grants.confirmChange(password),
         machineName: () => hostname(),
-        clientName: CLIENT_NAME,
         locate: locateHarness,
         run: async spec => await runCredentialHarness(spec),
         baseEnvironment: () => sanitizeHarnessEnv(process.env),
@@ -5987,7 +5941,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
           ),
         credentials: fleetCredentials,
-        confirmChange: async password => await grants.confirmChange(password),
         locate: locateHarness,
         machineName: () => hostname(),
         clientName: CLIENT_NAME,
@@ -6009,8 +5962,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             locate: kind => locateHarnessCommand(kind, harnessDiscovery, executables),
             run: runPackageInstall,
             environment: process.env,
-            confirmChange: async password => await grants.confirmChange(password),
-            clientName: CLIENT_NAME,
           }),
           secrets: secrets.directory,
         }),
@@ -6621,13 +6572,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * to repair instead of discovering it as a UI that stopped working.
    */
   await subsystems.grants.refresh();
-  // Said ONCE, at boot, and only when it is true. Nobody is interrogated at install time — a person
-  // on this host is governed by none of this — but a machine that will accept a paired device with
-  // nothing standing behind its configure routes should have said so somewhere a human reads.
-  world.notices.step(
-    'capability grants read',
-    subsystems.grants.hasPassword() ? 'an operator password gates remote configuration' : NO_PASSWORD_DISCLOSURE,
-  );
+  world.notices.step('capability grants read');
+  // The operator password is gone; a passkey step-up from the paired device replaced it. A verifier an
+  // older daemon left behind gates nothing now, so it is deleted rather than left looking like a lock —
+  // and said ONCE, so an operator who remembers setting a password learns where it went.
+  if (await retireOperatorPassword(opened.paths.retiredOperatorPassword, opened.fileSystem))
+    world.notices.step(
+      'operator password retired',
+      'deleted state/operator-password.json — a passkey confirmation from the paired device replaced it',
+    );
   await health.selfCheck().catch(() => undefined);
   world.notices.step('first self-check done');
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
@@ -7086,8 +7039,8 @@ export async function checkConfiguration(
    * not change the exit code, exactly as the harness preflight does not: a daemon with any grant
    * posture starts perfectly, and this reports rather than judges.
    *
-   * IT READS, IT DOES NOT CREATE. `passwordSet` is one existence check through the same verifier
-   * port the grant service uses, so a query stays a query and there is no second source to drift.
+   * IT READS, IT DOES NOT CREATE: the posture is a function of the document already read, so a query
+   * stays a query and there is no second source to drift.
    */
   /**
    * THE CARRIER POSTURE, BEFORE THE ADDRESS AND BEFORE THE GRANTS.
@@ -7158,8 +7111,6 @@ export async function checkConfiguration(
   } else {
     for (const line of describeGrantPosture({
       config,
-      passwordSet: await world.operatorPassword.isSet().catch(() => false),
-      clientName: CLIENT_NAME,
       carrier: carrierForGrants,
     }))
       say(line);

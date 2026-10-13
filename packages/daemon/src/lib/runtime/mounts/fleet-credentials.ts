@@ -10,8 +10,8 @@
  *
  * Check now is governed like a sign-in, not like a read, and that is the design's §8.2.2 taken at its
  * word: for Codex it is a REFRESH, which rotates a single-use token, and a refresh the provider refuses
- * leaves the login needing a person. So a caller off this machine needs `fleet.configure` and the
- * per-change operator password, exactly as `POST /v1/fleet/login` and `POST /v1/fleet/renew` do — one
+ * leaves the login needing a person. So a caller off this machine needs `fleet.configure` and so a live
+ * passkey step-up, exactly as `POST /v1/fleet/login` and `POST /v1/fleet/renew` do — one
  * rule for every act that can rewrite a credential on the host. Claude's Check now is only a free read,
  * and it sits on the same gate anyway so the button means one thing.
  *
@@ -81,12 +81,11 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
       noStore: true,
       handle: async context =>
         await answer(
-          async () =>
-            subsystem.check(
-              credentialId(context),
-              await parseBody(context.request, FleetCredentialCheckRequestSchema),
-              context.governance,
-            ),
+          async () => {
+            // An empty strict body: a field an older client still sends is refused, not ignored.
+            await parseBody(context.request, FleetCredentialCheckRequestSchema);
+            return await subsystem.check(credentialId(context), context.governance);
+          },
           value => FleetCredentialViewSchema.parse(value),
         ),
     },

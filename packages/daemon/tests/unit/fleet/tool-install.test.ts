@@ -3,13 +3,12 @@
  *
  * The claims: the command comes only from the declared table and never contains `sudo`; the manager is
  * picked per system from what the machine has; a machine without one, and a manager that needs admin
- * rights, each answer with the exact command for a person; a caller off this machine owes the operator
- * password once per request, and every refusal facts can answer is given before it is spent; one
- * install runs at a time; "installed" means the daemon can find the tool afterwards.
+ * rights, each answer with the exact command for a person; one install runs at a time; "installed"
+ * means the daemon can find the tool afterwards.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
+import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import type { ExecutableResolverPort, HarnessLocation } from '../../../src/lib/core/harness-readiness.ts';
 import type { HarnessKind } from '../../../src/lib/core/inventory.ts';
 import {
@@ -33,14 +32,12 @@ function machine(onPath: Record<string, string> = {}, files: readonly string[] =
   return { resolve: name => onPath[name], runnable: path => files.includes(path) };
 }
 
-const governed = (confirmChange = true): CallerGovernance => ({
+const governed: CallerGovernance = {
   governed: true,
-  passwordSet: true,
-  confirmChange,
   decide: () => ({ allowed: true }) as never,
-});
+};
 
-const loopback: CallerGovernance = { ...governed(false), governed: false };
+const loopback: CallerGovernance = { ...governed, governed: false };
 
 type Runnable = Extract<ToolInstallPlan, { kind: 'runnable' }>;
 
@@ -65,7 +62,6 @@ const brewPlan: Runnable = {
 interface Harness {
   readonly service: ToolInstallService;
   readonly runs: PackageInstallRun[];
-  readonly confirmations: string[];
   readonly installed: Map<HarnessKind, string>;
 }
 
@@ -73,13 +69,11 @@ interface Harness {
 function harness(
   patch: Partial<ToolInstallServiceOptions> & {
     readonly result?: PackageInstallResult;
-    readonly confirmation?: ChangeConfirmation;
     readonly installs?: Partial<Record<HarnessKind, string>>;
     readonly present?: Partial<Record<HarnessKind, string>>;
   } = {},
 ): Harness {
   const runs: PackageInstallRun[] = [];
-  const confirmations: string[] = [];
   const installed = new Map<HarnessKind, string>(Object.entries(patch.present ?? {}) as [HarnessKind, string][]);
   const locate = (kind: HarnessKind): HarnessLocation => {
     const path = installed.get(kind);
@@ -104,14 +98,9 @@ function harness(
       return result;
     },
     environment: { PATH: '/usr/bin', HOME: '/home/op' },
-    confirmChange: async password => {
-      confirmations.push(password);
-      return patch.confirmation ?? { kind: 'confirmed' };
-    },
-    clientName: 'fy',
     ...patch,
   });
-  return { service, runs, confirmations, installed };
+  return { service, runs, installed };
 }
 
 async function refusal(work: Promise<unknown>): Promise<ToolInstallRefusal> {
@@ -318,48 +307,18 @@ describe('ToolInstallService.install — who may', () => {
     should(runs).be.empty();
   });
 
-  it('refuses an empty request without spending a password attempt', async () => {
-    const { service, confirmations } = harness();
-    const refused = await refusal(service.install({ harnesses: [], operatorPassword: 'pw' }, governed()));
-    should(refused.code).equal('tool_install_invalid');
-    should(confirmations).be.empty();
-  });
-
-  it('asks a governed caller for the operator password and runs nothing without it', async () => {
+  it('refuses an empty request', async () => {
     const { service, runs } = harness();
-    const refused = await refusal(service.install({ harnesses: ['claude'] }, governed()));
-    should(refused).containEql({
-      code: 'tool_install_unauthorized',
-      message:
-        "installing software from off this machine needs this machine's operator password, entered for this install",
-    });
+    const refused = await refusal(service.install({ harnesses: [] }, governed));
+    should(refused.code).equal('tool_install_invalid');
     should(runs).be.empty();
   });
 
-  it('refuses a wrong password, a lockout and a machine with no password, each in its own words', async () => {
-    const wrong = harness({ confirmation: { kind: 'refused', reason: 'wrong-password' } });
-    should(
-      (await refusal(wrong.service.install({ harnesses: ['claude'], operatorPassword: 'no' }, governed()))).message,
-    ).equal("that is not this machine's operator password, so nothing was installed");
-    should(wrong.runs).be.empty();
-    const locked = harness({ confirmation: { kind: 'refused', reason: 'rate-limited' } });
-    should(
-      (await refusal(locked.service.install({ harnesses: ['claude'], operatorPassword: 'no' }, governed()))).message,
-    ).equal(
-      'too many wrong operator passwords have been tried on this machine, so it is not checking any more for now; nothing was installed. Wait for the lockout to pass, or clear it on the machine with `fy daemon password set`.',
-    );
-    const none = harness({ confirmation: { kind: 'refused', reason: 'no-password' } });
-    should(
-      (await refusal(none.service.install({ harnesses: ['claude'], operatorPassword: 'x' }, governed()))).message,
-    ).equal('this machine has no operator password, so this install could not be confirmed');
-  });
-
-  it('spends ONE password attempt for a request naming two tools (E1)', async () => {
-    const { service, confirmations, runs } = harness({
+  it('runs one request naming two tools, one after another (E1)', async () => {
+    const { service, runs } = harness({
       installs: { claude: '/opt/homebrew/bin/claude', codex: '/opt/homebrew/bin/codex' },
     });
-    const outcomes = await service.install({ harnesses: ['claude', 'codex'], operatorPassword: 'pw' }, governed());
-    should(confirmations).eql(['pw']);
+    const outcomes = await service.install({ harnesses: ['claude', 'codex'] }, governed);
     should(runs.map(run => [run.executable, ...run.args].join(' '))).eql([
       '/opt/homebrew/bin/brew install --cask claude-code',
       '/opt/homebrew/bin/brew install --cask codex',
@@ -367,10 +326,10 @@ describe('ToolInstallService.install — who may', () => {
     should(outcomes.map(outcome => outcome.outcome)).eql(['installed', 'installed']);
   });
 
-  it('asks a caller on this machine for nothing', async () => {
-    const { service, confirmations } = harness({ installs: { claude: '/opt/homebrew/bin/claude' } });
+  it('installs for a caller on this machine', async () => {
+    const { service, runs } = harness({ installs: { claude: '/opt/homebrew/bin/claude' } });
     await service.install({ harnesses: ['claude'] }, loopback);
-    should(confirmations).be.empty();
+    should(runs).have.length(1);
   });
 });
 
@@ -452,58 +411,26 @@ describe('ToolInstallService.install — what happens', () => {
 });
 
 describe('ToolInstallService.install — one at a time', () => {
-  it('refuses a second install while one runs, before spending its password, and frees up afterwards', async () => {
+  it('refuses a second install while one runs, and frees up afterwards', async () => {
     let release: (result: PackageInstallResult) => void = () => undefined;
-    const confirmations: string[] = [];
     const { service } = harness({
       run: () =>
         new Promise<PackageInstallResult>(resolve => {
           release = resolve;
         }),
-      confirmChange: async password => {
-        confirmations.push(password);
-        return { kind: 'confirmed' };
-      },
     });
     const first = service.install({ harnesses: ['claude'] }, loopback);
     await Bun.sleep(0);
-    const refused = await refusal(service.install({ harnesses: ['codex'], operatorPassword: 'pw' }, governed()));
+    const refused = await refusal(service.install({ harnesses: ['codex'] }, governed));
     should(refused).containEql({
       code: 'tool_install_in_progress',
       message: 'an install is already running on this machine; wait for it to finish',
     });
-    should(confirmations).be.empty();
     release({ kind: 'exited', code: 1, tail: [] });
     await first;
     const again = service.install({ harnesses: ['codex'] }, loopback);
     await Bun.sleep(0);
     release({ kind: 'exited', code: 1, tail: [] });
     should(await again).have.length(1);
-  });
-
-  it('refuses a request whose confirmation finished after another install had started', async () => {
-    let confirm: () => void = () => undefined;
-    let release: (result: PackageInstallResult) => void = () => undefined;
-    const { service, runs } = harness({
-      run: async run => {
-        runs.push(run);
-        return new Promise<PackageInstallResult>(resolve => {
-          release = resolve;
-        });
-      },
-      confirmChange: () =>
-        new Promise<ChangeConfirmation>(resolve => {
-          confirm = () => resolve({ kind: 'confirmed' });
-        }),
-    });
-    const confirming = service.install({ harnesses: ['claude'], operatorPassword: 'pw' }, governed());
-    await Bun.sleep(0);
-    const running = service.install({ harnesses: ['codex'] }, loopback);
-    await Bun.sleep(0);
-    confirm();
-    should((await refusal(confirming)).code).equal('tool_install_in_progress');
-    release({ kind: 'exited', code: 1, tail: [] });
-    await running;
-    should(runs.map(run => run.args.at(-1))).eql(['codex']);
   });
 });

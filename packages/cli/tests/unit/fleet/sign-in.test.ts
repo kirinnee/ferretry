@@ -38,7 +38,7 @@ describe('runSignIn', () => {
 
     // Assert
     should(signedIn).be.true();
-    should(world.gateway.called('submitSignInCode')[0]?.args).eql(['flow-1', 'the-code', {}]);
+    should(world.gateway.called('submitSignInCode')[0]?.args).eql(['flow-1', 'the-code']);
     should(world.prompt.questions).eql(['Paste the code the page shows:']);
     should(world.out.text('report')).equal(`Open this page and sign in:\n  ${URL}`);
     should(world.out.text('success')).equal('Signed in. claude-you is ready to use.');
@@ -157,7 +157,6 @@ describe('runSignIn', () => {
     should(world.gateway.called('submitSignInCode')[0]?.args).eql([
       'flow-1',
       'http://localhost:1455/auth/callback?code=c&state=s',
-      {},
     ]);
     should(world.prompt.questions).eql(['Paste the address of the page that did not load:']);
     should(world.out.text('warn')).match(/does not allow device codes/);
@@ -234,7 +233,7 @@ describe('runSignIn', () => {
       },
     });
     should(await runSignIn(world.deps, 'codex-you')).be.true();
-    should(world.gateway.called('startSignIn').map(call => call.args[2])).eql([undefined, 'link']);
+    should(world.gateway.called('startSignIn').map(call => call.args[1])).eql([undefined, 'link']);
     should(world.out.text('warn')).match(/The device code did not work: the sign-in exited with code 1/);
     should(world.prompt.questions[0]).equal('Sign in with a link instead? [y/N]');
     should(world.out.exitCode).not.equal(1);
@@ -258,11 +257,13 @@ describe('runSignIn', () => {
     should(link.prompt.questions).have.length(1);
   });
 
-  it('should carry the operator password a caller off this machine owes', async () => {
+  it('should refuse a caller that needs a passkey confirmation, before any sign-in starts', async () => {
     const world = fakeWorld({
-      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
+      gateway: {
+        machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'step-up-required' }) }),
+      },
     });
-    await runSignIn(world.deps, 'claude-you');
-    should(world.gateway.called('startSignIn')[0]?.args).eql(['claude-you', { password: 'operator-password-1' }]);
+    await should(runSignIn(world.deps, 'claude-you')).be.rejectedWith(/passkey confirmation/);
+    should(world.gateway.called('startSignIn')).be.empty();
   });
 });

@@ -129,8 +129,6 @@ function socketDispatcher(events: FleetEventStreamService): ApiSocketDispatcher 
       decide: () => ({ allowed: false, refusal: 'undetermined' as const }),
       governance: () => ({
         governed: true,
-        passwordSet: false,
-        confirmChange: true,
         decide: () => ({ allowed: false, refusal: 'undetermined' as const }),
       }),
       explain: () => undefined,

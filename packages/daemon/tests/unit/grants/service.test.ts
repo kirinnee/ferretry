@@ -1,11 +1,5 @@
 import { describe, it } from 'bun:test';
-import {
-  type CapabilityGrants,
-  DAEMON_CAPABILITIES,
-  GRANT_UNLOCK_LOCKOUT_SECONDS,
-  GRANT_UNLOCK_MAX_ATTEMPTS,
-  GRANT_UNLOCK_TTL_SECONDS,
-} from '@ferretry/protocol';
+import { type CapabilityGrants, DAEMON_CAPABILITIES, GrantsViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import type { CapabilityPresentation } from '../../../src/lib/api/capability.ts';
 import {
@@ -21,20 +15,19 @@ interface World {
   readonly service: CapabilityGrantService;
   readonly audit: GrantAuditEntry[];
   written(): CapabilityGrants | undefined;
-  /** How many passwords were actually checked against the store. */
-  verified(): number;
-  advance(milliseconds: number): void;
 }
 
 function world(
-  options: { grants?: CapabilityGrants; password?: string; broken?: boolean; changed?: () => void } = {},
+  options: {
+    grants?: CapabilityGrants;
+    broken?: boolean;
+    auditFails?: boolean;
+    clientName?: string;
+    changed?: () => void;
+  } = {},
 ): World {
   let recorded = options.grants ?? DEFAULT_CAPABILITY_GRANTS;
   let written: CapabilityGrants | undefined;
-  let stored = options.password;
-  let minted = 0;
-  let verified = 0;
-  let now = NOW;
   const audit: GrantAuditEntry[] = [];
   const service = new CapabilityGrantService({
     document: {
@@ -42,95 +35,157 @@ function world(
         if (options.broken === true) throw new Error('the grant document is not readable');
         return recorded;
       },
-      written: async () => (options.grants === undefined ? [] : DAEMON_CAPABILITIES),
+      written: async () => (options.grants === undefined ? [] : ['browser']),
       write: async next => {
         written = next;
         recorded = next;
       },
     },
-    passwords: {
-      isSet: async () => stored !== undefined,
-      set: async password => {
-        stored = password;
-      },
-      verify: async candidate => {
-        verified += 1;
-        return stored !== undefined && candidate === stored;
-      },
-    },
-    tokens: {
-      mint: () => {
-        minted += 1;
-        return `fy_unlock_${String(minted).padStart(22, 'a')}`;
-      },
-    },
-    clock: { nowMs: () => now },
+    clock: { nowMs: () => NOW },
     audit: {
       record: async entry => {
+        if (options.auditFails === true) throw new Error('the audit journal is full');
         audit.push(entry);
       },
-      recent: async limit => ({ entries: [...audit].reverse().slice(0, limit), unreadable: 0, truncated: false }),
+      recent: async limit => ({ entries: [...audit].reverse().slice(0, limit), unreadable: 2, truncated: true }),
     },
-    clientName: 'fy',
+    clientName: options.clientName ?? 'fy',
     ...(options.changed === undefined ? {} : { changed: options.changed }),
   });
-  return {
-    service,
-    audit,
-    written: () => written,
-    verified: () => verified,
-    advance: milliseconds => {
-      now += milliseconds;
-    },
-  };
+  return { service, audit, written: () => written };
 }
 
-const remote: CapabilityPresentation = { loopback: false, adminToken: false, actor: 'device:phone-1' };
-/** The host's COMMAND LINE: on the machine and holding the admin token, so ungoverned unconditionally. */
-const local: CapabilityPresentation = { loopback: true, adminToken: true, actor: 'admin-cli' };
-/**
- * A browser ON the machine — local arrival, a DEVICE credential.
- *
- * The caller the whole gate exists for, and the one a single `loopback` boolean could not tell apart from
- * the command line above.
- */
-const localBrowser: CapabilityPresentation = { loopback: true, adminToken: false, actor: 'device:this-browser' };
+async function ready(options: Parameters<typeof world>[0] = {}): Promise<World> {
+  const built = world(options);
+  await built.service.refresh();
+  return built;
+}
+
+/** A paired phone across the relay that has NOT confirmed with its passkey. */
+const remote: CapabilityPresentation = { loopback: false, adminToken: false, actor: 'device:phone-1', stepUp: false };
+/** The same phone after a passkey step-up. */
+const steppedUp: CapabilityPresentation = { ...remote, stepUp: true };
+/** The host's command line: arrived on the host and holding the admin token. */
+const host: CapabilityPresentation = { loopback: true, adminToken: true, actor: 'admin-cli', stepUp: false };
+/** A browser that carried the host proof — on the machine, with a DEVICE credential. */
+const localBrowser: CapabilityPresentation = {
+  loopback: true,
+  adminToken: false,
+  actor: 'device:this-browser',
+  stepUp: false,
+};
+/** A remote warden: governed, proves no device, so it can never step up. */
+const remoteWarden: CapabilityPresentation = { loopback: false, adminToken: true, actor: 'warden', stepUp: false };
+
+async function failure(promise: Promise<unknown>): Promise<GrantError> {
+  const raised = await promise.then(() => undefined).catch((error: unknown) => error);
+  should(raised).be.instanceof(GrantError);
+  return raised as GrantError;
+}
 
 describe('reading the operator decision', () => {
   it('should refuse every governed capability until the decision has been read', () => {
-    // A service that has never read its document does not know what it may allow, and the safe
-    // reading of "nobody can tell me" is that it is not allowed. This is the state the composition
-    // root must leave behind before it binds an address.
+    // A service that has never read its document does not know what it may allow.
     // Arrange
     const { service } = world();
 
-    // Act
-    const decision = service.decide({ capability: 'terminal', axis: 'use' }, remote);
-
-    // Assert
-    should(decision).deepEqual({ allowed: false, refusal: 'undetermined' });
+    // Act + Assert
+    should(service.enforced()).be.undefined();
+    should(service.decide({ capability: 'terminal', axis: 'use' }, steppedUp)).deepEqual({
+      allowed: false,
+      refusal: 'undetermined',
+    });
   });
 
   it('should raise, and stop enforcing anything, when the document cannot be read', async () => {
-    // Damaged state is not empty state. It must not be left serving from a decision that may no
-    // longer be true, and it must say which document is broken rather than falling silent.
+    // Damaged state is not empty state.
     // Arrange
     const { service } = world({ broken: true });
 
     // Act
-    const raised = await service
-      .refresh()
-      .then(() => undefined)
-      .catch((error: unknown) => error);
+    const raised = await failure(service.refresh());
 
     // Assert
-    should(raised).be.instanceof(GrantError);
-    should((raised as GrantError).failure).equal('unavailable');
+    should(raised.failure).equal('unavailable');
+    should(raised.name).equal('GrantError');
+    should(raised.message).match(/could not read its capability grants.*the grant document is not readable/u);
     should(service.enforced()).be.undefined();
-    should(service.decide({ capability: 'fleet', axis: 'use' }, remote).refusal).equal('undetermined');
-    // The host command line is unaffected: it holds the admin token and is not governed by this layer at
-    // all, whatever the document says or fails to say.
-    should(service.decide({ capability: 'fleet', axis: 'use' }, local).allowed).be.true();
+    should(service.decide({ capability: 'fleet', axis: 'use' }, steppedUp).refusal).equal('undetermined');
+    // The host is unaffected: it is not governed by this layer at all.
+    should(service.decide({ capability: 'fleet', axis: 'use' }, host).allowed).be.true();
+  });
+
+  it('should stringify a thrown non-error rather than losing it', async () => {
+    // Arrange
+    const service = new CapabilityGrantService({
+      document: {
+        read: () => Promise.reject('disk on fire'),
+        written: async () => [],
+        write: async () => undefined,
+      },
+      clock: { nowMs: () => NOW },
+      audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+      clientName: 'fy',
+    });
+
+    // Act
+    const raised = await failure(service.refresh());
+
+    // Assert
+    should(raised.message).match(/disk on fire$/u);
+  });
+
+  it('should enforce what it read once refreshed', async () => {
+    // Arrange
+    const shut = { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: false, configure: false } };
+    const { service } = await ready({ grants: shut });
+
+    // Act + Assert
+    should(service.enforced()).deepEqual(shut);
+    should(service.decide({ capability: 'warden', axis: 'use' }, steppedUp).refusal).equal('not-granted');
+    should(service.decide({ capability: 'fleet', axis: 'use' }, remote).refusal).equal('granted');
+  });
+});
+
+describe('the decision for each kind of caller', () => {
+  it('should ask a governed caller for a step-up on configure and on the dangerous uses only', async () => {
+    // Arrange
+    const { service } = await ready();
+
+    // Act + Assert
+    should(service.decide({ capability: 'fleet', axis: 'use' }, remote).refusal).equal('granted');
+    should(service.decide({ capability: 'terminal', axis: 'use' }, remote).refusal).equal('step-up-required');
+    should(service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('step-up-required');
+    should(service.decide({ capability: 'terminal', axis: 'use' }, steppedUp).refusal).equal('granted');
+    should(service.decide({ capability: 'fleet', axis: 'configure' }, steppedUp).refusal).equal('granted');
+  });
+
+  it('should leave the host command line and a host-proven local browser ungoverned', async () => {
+    // Arrange
+    const shut = Object.fromEntries(
+      DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false }]),
+    ) as CapabilityGrants;
+    const { service } = await ready({ grants: shut });
+
+    // Act + Assert
+    for (const caller of [host, localBrowser]) {
+      for (const capability of DAEMON_CAPABILITIES) {
+        should(service.decide({ capability, axis: 'configure' }, caller)).deepEqual({
+          allowed: true,
+          refusal: 'granted',
+        });
+      }
+    }
+  });
+
+  it('should keep a remote warden governed even holding the admin token, and never stepped up', async () => {
+    // Arrange
+    const { service } = await ready();
+
+    // Act + Assert
+    should(service.decide({ capability: 'warden', axis: 'use' }, remoteWarden).allowed).be.true();
+    should(service.decide({ capability: 'warden', axis: 'configure' }, remoteWarden).refusal).equal('step-up-required');
+    should(service.view(remoteWarden)).containDeep({ governed: true, hostLocal: false, steppedUp: false });
   });
 });
 
@@ -143,7 +198,7 @@ describe('telling open streams the answer moved', () => {
 
     // Act
     await context.service.refresh();
-    await context.service.patch({ fleet: { use: false } }, local);
+    await context.service.patch({ fleet: { use: false } }, host);
     await broken.service.refresh().catch(() => undefined);
 
     // Assert
@@ -152,788 +207,391 @@ describe('telling open streams the answer moved', () => {
 });
 
 describe('the grant view a UI reads', () => {
-  it('should report every capability with both axes and the reason each reads that way', async () => {
-    // The UI must be able to explain a limit BEFORE somebody clicks into it. One read, not a probe
-    // per control — a UI that discovers its limits by watching calls fail can explain nothing.
+  it('should report every capability with both axes, the document underneath, and each reason', async () => {
     // Arrange
-    const { service } = world({ grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } } });
-    await service.refresh();
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } },
+    });
 
     // Act
     const view = service.view(remote);
 
     // Assert
-    should(view.capabilities).have.length(DAEMON_CAPABILITIES.length);
-    const browser = view.capabilities.find(entry => entry.capability === 'browser');
-    should(browser).deepEqual({
+    should(GrantsViewSchema.parse(view)).deepEqual(view);
+    should(Object.keys(view).sort()).deepEqual(['capabilities', 'governed', 'hostLocal', 'steppedUp']);
+    should(view).containDeep({ governed: true, hostLocal: false, steppedUp: false });
+    should(view.capabilities.map(row => row.capability)).deepEqual([...DAEMON_CAPABILITIES]);
+    should(view.capabilities.find(row => row.capability === 'browser')).deepEqual({
       capability: 'browser',
       use: false,
       configure: false,
       granted: { use: false, configure: false },
       useRefusal: 'not-granted',
       configureRefusal: 'not-granted',
-      // No remote caller may widen anything, so this is false for every capability on this view.
       mayGrant: false,
-      // The operator wrote this one down; `--print-config` draws the same distinction for every other
-      // value, and a report that could not tell a choice from a default answers the wrong question.
       origin: 'config file',
     });
-    // No password on this machine, so the configure axis passes and says nothing was standing behind
-    // it — which is the honest disclosure, not a refusal.
-    should(view.capabilities.find(entry => entry.capability === 'fleet')).have.property('configureRefusal', 'ungated');
-    should(view.passwordSet).be.false();
-    should(view.attemptsRemaining).be.undefined();
+    should(view.capabilities.find(row => row.capability === 'fleet')).deepEqual({
+      capability: 'fleet',
+      use: true,
+      configure: false,
+      granted: { use: true, configure: true },
+      useRefusal: 'granted',
+      configureRefusal: 'step-up-required',
+      mayGrant: false,
+      origin: 'default',
+    });
   });
 
-  it('should never disclose the password, its length or its verifier', async () => {
-    // The entire disclosure is one boolean. Anything more would be the first crack in "never
-    // rendered back", and no client needs it.
+  it('should report a stepped-up remote caller as stepped up, and its configure axes as allowed', async () => {
     // Arrange
-    const { service } = world({ password: 'correct horse battery' });
-    await service.refresh();
+    const { service } = await ready();
 
     // Act
-    const encoded = JSON.stringify(service.view(remote));
+    const view = service.view(steppedUp);
 
     // Assert
-    should(encoded).not.match(/correct horse/u);
-    should(encoded).match(/"passwordSet":true/u);
-    should(service.hasPassword()).be.true();
+    should(view).containDeep({ governed: true, hostLocal: false, steppedUp: true });
+    for (const row of view.capabilities) {
+      should(row).containDeep({ use: true, configure: true, useRefusal: 'granted', configureRefusal: 'granted' });
+      should(row.mayGrant).be.false();
+    }
   });
-});
 
-describe('unlocking', () => {
-  it('should mint a bounded unlock for the right password and honour it', async () => {
+  it('should report the host as ungoverned, host-local and able to widen', async () => {
     // Arrange
-    const { service } = world({ password: 'operator-secret' });
-    await service.refresh();
+    const { service } = await ready();
 
     // Act
-    const outcome = await service.unlock('operator-secret');
-    const held = outcome.kind === 'unlocked' ? outcome.token : '';
+    const view = service.view(localBrowser);
 
     // Assert
-    should(outcome.kind).equal('unlocked');
-    should(outcome.kind === 'unlocked' ? outcome.expiresAtMs : 0).equal(NOW + GRANT_UNLOCK_TTL_SECONDS * 1_000);
-    should(service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: held }).allowed).be.true();
+    should(view).containDeep({ governed: false, hostLocal: true, steppedUp: false });
+    for (const row of view.capabilities) should(row.mayGrant).be.true();
   });
 
-  it('should stop honouring an unlock once it has expired', async () => {
-    // An unlock is held while somebody changes a setting, not for a session: one that outlived the
-    // tab it was minted in would be a standing configure grant nobody re-consented to.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-    const outcome = await context.service.unlock('operator-secret');
-    const held = outcome.kind === 'unlocked' ? outcome.token : '';
-
-    // Act
-    context.advance(GRANT_UNLOCK_TTL_SECONDS * 1_000 + 1);
-
-    // Assert
-    should(
-      context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: held }).refusal,
-    ).equal('locked');
-  });
-
-  it('should refuse a blank or unknown unlock rather than matching anything', async () => {
-    // Arrange
-    const { service } = world({ password: 'operator-secret' });
-    await service.refresh();
-
-    // Act + Assert
-    should(service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: '  ' }).refusal).equal(
-      'locked',
-    );
-    should(
-      service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: 'fy_unlock_forged' }).refusal,
-    ).equal('locked');
-  });
-
-  it('should refuse to mint anything on a machine with no operator password', async () => {
-    // Nothing is gated there, so an unlock would prove nothing — and handing one out would let a
-    // client believe it had passed a check that never happened.
+  it('should report an undetermined document as both axes shut', () => {
     // Arrange
     const { service } = world();
-    await service.refresh();
 
     // Act
-    const outcome = await service.unlock('anything');
+    const view = service.view(steppedUp);
 
     // Assert
-    should(outcome.kind).equal('refused');
-    should(outcome.kind === 'refused' ? outcome.refusal.reason : '').equal('no-password');
-  });
-
-  it('should stop checking passwords after too many wrong ones, correct ones included', async () => {
-    // A limiter that let a correct guess through early would leak whether a guess was correct while
-    // claiming to be closed.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-
-    // Act
-    for (let attempt = 0; attempt < GRANT_UNLOCK_MAX_ATTEMPTS; attempt += 1) {
-      await context.service.unlock('wrong');
+    for (const row of view.capabilities) {
+      should(row).containDeep({
+        use: false,
+        configure: false,
+        granted: { use: false, configure: false },
+        useRefusal: 'undetermined',
+        configureRefusal: 'undetermined',
+      });
     }
-    const afterLockout = await context.service.unlock('operator-secret');
-
-    // Assert
-    should(afterLockout.kind).equal('refused');
-    should(afterLockout.kind === 'refused' ? afterLockout.refusal.reason : '').equal('rate-limited');
-    should(context.service.view(remote).lockedUntil).be.a.String();
-
-    // And it resumes once the lockout lapses — a permanent lockout would deny the operator service
-    // rather than defend against a guesser.
-    context.advance(GRANT_UNLOCK_LOCKOUT_SECONDS * 1_000 + 1);
-    should((await context.service.unlock('operator-secret')).kind).equal('unlocked');
   });
 
-  it('should check no more passwords than the budget when the guesses arrive all at once', async () => {
-    // The verify is a slow hash awaited off the request's turn. A ledger written only AFTER it let
-    // every guess in one parallel burst pass the lockout check together, so the five tries bounded
-    // nothing — a guesser just sent them concurrently.
+  it('should say nothing about any password', async () => {
     // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
+    const { service } = await ready();
 
     // Act
-    const burst = await Promise.all(
-      Array.from({ length: GRANT_UNLOCK_MAX_ATTEMPTS * 4 }, () => context.service.unlock('wrong')),
-    );
+    const said = JSON.stringify(service.view(remote));
 
     // Assert
-    should(context.verified()).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
-    should(burst.every(outcome => outcome.kind === 'refused')).be.true();
-    should(context.service.view(remote).lockedUntil).be.a.String();
-    should((await context.service.unlock('operator-secret')).kind).equal('refused');
-  });
-
-  it('should still unlock a correct password that arrives beside wrong ones', async () => {
-    // Charging before the check must not cost the holder anything: a right password clears the ledger.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-
-    // Act
-    const [wrong, right] = await Promise.all([
-      context.service.unlock('wrong'),
-      context.service.unlock('operator-secret'),
-    ]);
-
-    // Assert
-    should(wrong.kind).equal('refused');
-    should(right.kind).equal('unlocked');
-    should(context.service.view(remote).attemptsRemaining).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
+    should(said).not.match(/password|unlock/iu);
   });
 });
 
 describe('changing the grants', () => {
-  it('should let a governed caller narrow without any unlock at all', async () => {
-    // Revoking must never be harder than granting: in an incident you want the fastest possible path
-    // to "the UI can no longer do that", and a password prompt in the way is a liability.
+  it('should refuse to change grants it could not read, before anything else', async () => {
+    // `unavailable` comes first: even a widening remote patch is told the daemon has no answer.
     // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-
-    // Act
-    const view = await context.service.patch({ fleet: { configure: false } }, remote);
-
-    // Assert
-    should(context.written()?.fleet).deepEqual({ use: true, configure: false });
-    should(view.capabilities.find(entry => entry.capability === 'fleet')).have.property('configure', false);
-    should(context.audit).have.length(1);
-    should(context.audit[0]).containDeep({ actor: 'device:phone-1', changes: ['fleet.configure=off'] });
-  });
-
-  it('should refuse a governed caller the grant it was not given permission to change', async () => {
-    // Changing capability X's grant is a configure act ON X, which is what stops the layer being
-    // self-defeating: a UI the operator excluded from warden configuration cannot quietly rewrite
-    // the warden grant — not even to narrow it further.
-    // Arrange
-    const context = world({ grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } } });
-    await context.service.refresh();
-
-    // Act
-    const refused = await context.service
-      .patch({ warden: { use: false } }, remote)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-
-    // Assert
-    should(refused).be.instanceof(GrantError);
-    should((refused as GrantError).message).match(/has not granted the UI permission to change the warden grant/u);
-    should(context.written()).be.undefined();
-  });
-
-  it('should let the host widen without a password when the machine has none', async () => {
-    // This is how a machine is set up at all. Nothing is gated on it, and the person doing it is
-    // standing on the host — the output says plainly what that means.
-    // Arrange
-    const context = world({ grants: { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: false, configure: false } } });
-    await context.service.refresh();
-
-    // Act
-    await context.service.patch({ fleet: { use: true, configure: true } }, local);
-
-    // Assert
-    should(context.written()?.fleet).deepEqual({ use: true, configure: true });
-  });
-
-  it('should refuse to change grants it could not read', async () => {
-    // Arrange
-    const { service } = world({ broken: true });
+    const { service, written } = world({ broken: true });
     await service.refresh().catch(() => undefined);
 
     // Act
-    const refused = await service
-      .patch({ fleet: { use: false } }, local)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
+    const raised = await failure(service.patch({ fleet: { use: true } }, remote));
 
     // Assert
-    should((refused as GrantError).failure).equal('unavailable');
+    should(raised.failure).equal('unavailable');
+    should(raised.message).match(/will not change them/u);
+    should(written()).be.undefined();
   });
 
-  it('should take effect immediately, with no restart', async () => {
-    // The document is written and the in-memory answer moves in the same call, so the very next
-    // request is decided by the new one. Only a document edited by hand needs a restart.
+  it('should refuse a remote widening even with a step-up, naming the host command', async () => {
+    // Widening is a local act. No step-up buys it.
     // Arrange
-    const context = world();
-    await context.service.refresh();
-    should(context.service.decide({ capability: 'terminal', axis: 'use' }, remote).allowed).be.true();
-
-    // Act
-    await context.service.patch({ terminal: { use: false } }, local);
-
-    // Assert
-    should(context.service.decide({ capability: 'terminal', axis: 'use' }, remote).refusal).equal('not-granted');
-  });
-});
-
-describe('the operator password itself', () => {
-  it('should drop every held unlock when the password changes', async () => {
-    // Rotating a password after a device is lost achieves nothing if what the old one bought
-    // survives it.
-    // Arrange
-    const context = world({ password: 'first-secret' });
-    await context.service.refresh();
-    const outcome = await context.service.unlock('first-secret');
-    const held = outcome.kind === 'unlocked' ? outcome.token : '';
-
-    // Act
-    await context.service.setPassword('second-secret', local);
-
-    // Assert
-    should(
-      context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: held }).refusal,
-    ).equal('locked');
-    should(context.service.hasPassword()).be.true();
-  });
-
-  it('should keep the security layer on across every move of the password, because nothing turns it off', async () => {
-    // SETTING ONE IS ONE-WAY, and this is the assertion that says so. Removal used to be spelled as an
-    // absent password; it revokes no paired device, so a machine that had paired one — and pairing
-    // refuses without a password — was left with paired devices and no gate. There is now no argument,
-    // no second call and no port method that reaches that state.
-    // Arrange
-    const context = world({ password: 'first-secret' });
-    await context.service.refresh();
-
-    // Act — every move this service offers, one after another.
-    await context.service.setPassword('second-secret', local);
-    await context.service.setPassword('third-secret', local);
-
-    // Assert — a remote caller is still gated, and the layer never went off in between.
-    should(context.service.hasPassword()).be.true();
-    should(context.service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('locked');
-  });
-
-  it('should let the HOST replace a password nobody knows, which is the escape hatch', async () => {
-    // THE TEST THAT KEEPS THIS FEATURE FROM BEING A LOCKOUT.
-    //
-    // A local browser needs the current password to move it, so a forgotten password would brick the
-    // machine forever if the command line needed one too — no remote path, no local path, nothing. It
-    // does not: the admin token is ungoverned, so `fy daemon password set` replaces an UNKNOWN password
-    // without presenting it or any unlock. Recovery is asserted from exactly that state.
-    // Arrange — a machine whose password this caller cannot produce, and holds no unlock for.
-    const context = world({ password: 'the-one-nobody-remembers' });
-    await context.service.refresh();
-
-    // Act — no password, no unlock, no header of any kind.
-    await context.service.setPassword('a-brand-new-one', local);
-
-    // Assert — and the new one works, so this is recovery rather than merely an accepted call.
-    const outcome = await context.service.unlock('a-brand-new-one');
-    should(outcome.kind).equal('unlocked');
-    should(context.service.hasPassword()).be.true();
-  });
-
-  it('should refuse a LOCAL BROWSER that has not unlocked, so the gate is not one tap wide', async () => {
-    // Local arrival is not the whole answer: a browser is a paired device, and one that could replace
-    // the password it cannot prove would make every sentence about deliberateness false. The refusal
-    // names the way back for the reader who does not have it either — that is the point of it being a
-    // sentence rather than a status.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-
-    // Act
-    const raised = await context.service
-      .setPassword('something-else', localBrowser)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-
-    // Assert
-    should(raised).be.instanceof(GrantError);
-    should((raised as GrantError).failure).equal('forbidden');
-    should((raised as GrantError).message).match(/fy daemon password set/u);
-    should(await context.service.unlock('operator-secret')).have.property('kind', 'unlocked');
-  });
-
-  it('should let a local browser move the password once it holds an unlock', async () => {
-    // One gate at the door, then full authority. The unlock the browser already spent is what proves it,
-    // rather than a second concept with its own lifetime.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-    const outcome = await context.service.unlock('operator-secret');
-    const held = outcome.kind === 'unlocked' ? outcome.token : '';
-
-    // Act
-    await context.service.setPassword('a-newer-secret', { ...localBrowser, unlock: held });
-
-    // Assert
-    should(await context.service.unlock('a-newer-secret')).have.property('kind', 'unlocked');
-  });
-
-  it('should let a local browser set the FIRST password with nothing to prove', async () => {
-    // The state every new user starts in, and the one required at first pairing. There is no password to
-    // unlock with, so demanding one would make the requirement impossible to satisfy from the browser
-    // that is being asked to satisfy it.
-    // Arrange — a fresh machine.
-    const context = world();
-    await context.service.refresh();
-
-    // Act
-    await context.service.setPassword('the-first-one', localBrowser);
-
-    // Assert
-    should(context.service.hasPassword()).be.true();
-  });
-});
-
-describe('a browser standing on the machine', () => {
-  it('should be governed until it unlocks, and ungoverned afterwards', async () => {
-    // The whole change, in one assertion: `configure` on a local browser is refused with `locked` rather
-    // than served, and the unlock — not a second gate — is what opens it.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-
-    // Act
-    const before = context.service.decide({ capability: 'fleet', axis: 'configure' }, localBrowser);
-    const outcome = await context.service.unlock('operator-secret');
-    const held = outcome.kind === 'unlocked' ? outcome.token : '';
-    const after = context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...localBrowser, unlock: held });
-
-    // Assert
-    should(before).deepEqual({ allowed: false, refusal: 'locked' });
-    should(after).deepEqual({ allowed: true, refusal: 'granted' });
-  });
-
-  it('should stay ungoverned on a machine with no password at all', async () => {
-    // A fresh install is useful immediately: there is nothing to unlock with, so there is no gate.
-    // Arrange
-    const context = world();
-    await context.service.refresh();
-
-    // Act
-    const decided = context.service.decide({ capability: 'fleet', axis: 'configure' }, localBrowser);
-
-    // Assert
-    should(decided).deepEqual({ allowed: true, refusal: 'granted' });
-  });
-
-  it('should report itself as ON THIS HOST while still governed, and may widen after unlocking', async () => {
-    // `governed` and `hostLocal` came apart here, and a view that collapsed them would tell somebody
-    // standing at the machine they were remote — and call a switch they can reopen a one-way door.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-
-    // Act
-    const view = context.service.view(localBrowser);
-
-    // Assert
-    should(view.governed).be.true();
-    should(view.hostLocal).be.true();
-    should(view.capabilities.every(entry => entry.mayGrant)).be.true();
-    // And the remote caller is unmoved by any of it.
-    should(context.service.view(remote)).containDeep({ governed: true, hostLocal: false });
-  });
-
-  it('should refuse a widening patch until it unlocks, naming the password rather than the machine', async () => {
-    // The remote sentence ("only from the machine itself") is the wrong one here: this caller IS at the
-    // machine, and sending them to the host to do what they are already doing is the dead end this
-    // surface exists to remove.
-    // Arrange — a capability switched off, on a machine with a password.
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } },
-      password: 'operator-secret',
+    const { service, written, audit } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: true, configure: false } },
     });
-    await context.service.refresh();
 
     // Act
-    const raised = await context.service
-      .patch({ browser: { use: true } }, localBrowser)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
+    const raised = await failure(service.patch({ terminal: { configure: true } }, steppedUp));
 
     // Assert
-    should(raised).be.instanceof(GrantError);
-    should((raised as GrantError).message).match(/operator password/u);
-    should((raised as GrantError).message).not.match(/no remote caller/u);
-    should(context.written()).be.undefined();
+    should(raised.failure).equal('forbidden');
+    should(raised.message).containEql('terminal.configure can only be turned on from the machine itself');
+    should(raised.message).containEql('`fy daemon config set terminal --configure`');
+    should(written()).be.undefined();
+    should(audit).be.empty();
   });
 
-  it('should name the PASSWORD, not the document, when a local browser is refused a restricted grant', async () => {
-    // Two readers, two remedies. Off the host, the document is the answer and the operator is somebody
-    // else. On the host the reader IS the operator: telling them their own document refuses them — when
-    // the password they already have would let it through — sends them to edit a file for a limit that was
-    // never theirs.
-    // Arrange — a capability the operator excluded the UI from configuring, on a machine with a password.
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } },
-      password: 'operator-secret',
+  it('should check widening BEFORE configure permission and the step-up', async () => {
+    // Arrange — the caller holds neither configure on the capability nor a step-up.
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: false, configure: false } },
     });
-    await context.service.refresh();
 
     // Act
-    const locally = await context.service
-      .patch({ warden: { use: false } }, localBrowser)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-    const remotely = await context.service
-      .patch({ warden: { use: false } }, remote)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
+    const raised = await failure(service.patch({ warden: { use: true } }, remote));
 
     // Assert
-    should((locally as GrantError).message).match(/operator password/u);
-    should((locally as GrantError).message).match(/fy daemon password set/u);
-    should((remotely as GrantError).message).match(/has not granted the UI permission/u);
-    should((remotely as GrantError).message).not.match(/operator password/u);
-    should(context.written()).be.undefined();
-  });
-
-  it('should let a local browser NARROW without unlocking, because revoking is never gated', async () => {
-    // A prompt between a person and shutting a door is a liability during the incident that made them
-    // reach for it. The gate is on widening and on the password, never on a revoke.
-    // Arrange
-    const context = world({ password: 'operator-secret' });
-    await context.service.refresh();
-
-    // Act
-    await context.service.patch({ terminal: { use: false } }, localBrowser);
-
-    // Assert
-    should(context.written()).containDeep({ terminal: { use: false } });
-  });
-});
-
-describe('the sentence a refusal carries', () => {
-  it('should compose it here, because only this layer knows the command a person types', () => {
-    // The authorization boundary has no business knowing what this product's client is called, so it
-    // asks the guard — which is what lets a refusal name the next step instead of saying "forbidden".
-    // Arrange
-    const { service } = world();
-
-    // Act
-    const said = service.explain({ capability: 'warden', axis: 'configure' }, 'not-granted');
-    const nothing = service.explain({ capability: 'warden', axis: 'configure' }, 'granted');
-
-    // Assert
-    should(said).match(/fy daemon config set warden --configure/u);
-    should(nothing).be.undefined();
-  });
-});
-
-describe('widening is a local act and there is no remote path to it', () => {
-  it('should refuse a remote widen even with a valid unlock, because no password buys it', async () => {
-    // THE RULE. Locality is the boundary, not the password: the security of the model rests on where
-    // the socket came from, which nothing a caller sends can move, rather than on a secret a person
-    // chose. A stolen phone cannot grant itself anything.
-    // Arrange — the caller holds a genuine, unexpired unlock.
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } },
-      password: 'operator-secret',
-    });
-    await context.service.refresh();
-    const outcome = await context.service.unlock('operator-secret');
-    const unlock = outcome.kind === 'unlocked' ? outcome.token : '';
-
-    // Act
-    const refused = await context.service
-      .patch({ terminal: { use: true } }, { ...remote, unlock })
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-
-    // Assert
-    should(refused).be.instanceof(GrantError);
-    should((refused as GrantError).message).match(/only be turned on from the machine itself/u);
-    should((refused as GrantError).message).match(/with or without the operator password/u);
-    should(context.written()).be.undefined();
+    should(raised.failure).equal('forbidden');
+    should(raised.message).containEql('warden.use can only be turned on from the machine itself');
+    should(raised.message).containEql('`fy daemon config set warden --use`');
   });
 
   it('should refuse the WHOLE patch when it both widens and narrows', async () => {
-    // A half-applied widen is worse than either outcome: the operator is left with a machine in a
-    // state they did not ask for and were not told about, and the refusal they saw is
-    // indistinguishable from a total one.
     // Arrange
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } },
+    const { service, written } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } },
     });
-    await context.service.refresh();
 
-    // Act — one on, one off, in a single patch.
-    const refused = await context.service
-      .patch({ terminal: { use: true }, fleet: { use: false } }, remote)
+    // Act
+    const raised = await failure(service.patch({ browser: { use: true }, fleet: { configure: false } }, steppedUp));
+
+    // Assert
+    should(raised.failure).equal('forbidden');
+    should(written()).be.undefined();
+    should(service.enforced()?.fleet).deepEqual({ use: true, configure: true });
+  });
+
+  it('should refuse a governed narrowing of a capability it holds no configure on', async () => {
+    // A UI the operator excluded from warden configuration cannot quietly rewrite the warden grant.
+    // Arrange
+    const { service, written } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } },
+    });
+
+    // Act
+    const raised = await failure(service.patch({ warden: { use: false } }, steppedUp));
+
+    // Assert
+    should(raised.failure).equal('forbidden');
+    should(raised.message).equal(
+      'the operator of this machine has not granted the UI permission to change the warden grant',
+    );
+    should(written()).be.undefined();
+  });
+
+  it('should refuse a governed narrowing of a capability it holds no use on', async () => {
+    // Arrange
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, filesystem: { use: false, configure: true } },
+    });
+
+    // Act
+    const raised = await failure(service.patch({ filesystem: { configure: false } }, steppedUp));
+
+    // Assert
+    should(raised.failure).equal('forbidden');
+    should(raised.message).containEql('change the filesystem grant');
+  });
+
+  it('should check configure permission BEFORE the step-up', async () => {
+    // Arrange
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } },
+    });
+
+    // Act
+    const raised = await failure(service.patch({ warden: { use: false } }, remote));
+
+    // Assert
+    should(raised.failure).equal('forbidden');
+  });
+
+  it('should ask a governed caller to step up before it narrows', async () => {
+    // Narrowing is itself a configure act.
+    // Arrange
+    const { service, written, audit } = await ready();
+
+    // Act
+    const raised = await failure(service.patch({ terminal: { use: false } }, remote));
+
+    // Assert
+    should(raised.failure).equal('step-up-required');
+    should(raised.message).equal('changing these grants needs a passkey confirmation from this device.');
+    should(raised.message).not.match(/password|unlock/iu);
+    should(written()).be.undefined();
+    should(audit).be.empty();
+  });
+
+  it('should let a stepped-up governed caller narrow, write it, audit it and answer with the new view', async () => {
+    // Arrange
+    const { service, written, audit } = await ready();
+
+    // Act
+    const view = await service.patch({ terminal: { use: false, configure: false } }, steppedUp);
+
+    // Assert
+    should(written()?.terminal).deepEqual({ use: false, configure: false });
+    should(audit).deepEqual([
+      {
+        actor: 'device:phone-1',
+        changes: ['terminal.use=off', 'terminal.configure=off'],
+        at: new Date(NOW).toISOString(),
+      },
+    ]);
+    should(view.capabilities.find(row => row.capability === 'terminal')?.useRefusal).equal('not-granted');
+    should(view.steppedUp).be.true();
+  });
+
+  it('should let the host widen with no step-up at all', async () => {
+    // Arrange
+    const { service, written, audit } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: false, configure: false } },
+    });
+
+    // Act
+    await service.patch({ pairing: { use: true, configure: true } }, host);
+
+    // Assert
+    should(written()?.pairing).deepEqual({ use: true, configure: true });
+    should(audit[0]).containDeep({ actor: 'admin-cli', changes: ['pairing.use=on', 'pairing.configure=on'] });
+  });
+
+  it('should let a host-proven local browser widen too, because locality is the boundary', async () => {
+    // Arrange
+    const { service, written } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } },
+    });
+
+    // Act
+    await service.patch({ browser: { use: true } }, localBrowser);
+
+    // Assert
+    should(written()?.browser).deepEqual({ use: true, configure: false });
+  });
+
+  it('should take effect immediately, with no restart', async () => {
+    // Arrange
+    const { service } = await ready();
+
+    // Act
+    await service.patch({ fleet: { use: false } }, steppedUp);
+
+    // Assert
+    should(service.decide({ capability: 'fleet', axis: 'use' }, steppedUp).refusal).equal('not-granted');
+  });
+
+  it('should audit a patch that changed nothing with no changes', async () => {
+    // Arrange
+    const { service, audit } = await ready();
+
+    // Act
+    await service.patch({ fleet: { use: true } }, steppedUp);
+
+    // Assert
+    should(audit[0]?.changes).be.empty();
+  });
+
+  it('should not swallow an audit that failed after the write', async () => {
+    // Arrange
+    const { service, written } = await ready({ auditFails: true });
+
+    // Act
+    const raised = await service
+      .patch({ fleet: { use: false } }, steppedUp)
       .then(() => undefined)
       .catch((error: unknown) => error);
 
-    // Assert — NEITHER half reached the document, and the enforced answer did not move either.
-    should(refused).be.instanceof(GrantError);
-    should(context.written()).be.undefined();
-    should(context.service.decide({ capability: 'fleet', axis: 'use' }, remote).allowed).be.true();
-    should(context.service.decide({ capability: 'terminal', axis: 'use' }, remote).refusal).equal('not-granted');
-    should(context.audit).be.empty();
+    // Assert
+    should(raised).be.instanceof(Error);
+    should((raised as Error).message).equal('the audit journal is full');
+    should(written()?.fleet.use).be.false();
   });
+});
 
-  it('should still let a remote caller turn something off', async () => {
-    // Revoking stays easier than granting — that was already the principle, and this rule is its
-    // conclusion rather than a departure from it.
+describe('the history of changes', () => {
+  it('should report the recorded changes, newest first, with the reading damage', async () => {
     // Arrange
-    const context = world();
-    await context.service.refresh();
+    const { service } = await ready();
+    await service.patch({ fleet: { use: false } }, steppedUp);
+    await service.patch({ warden: { configure: false } }, host);
 
     // Act
-    await context.service.patch({ warden: { configure: false } }, remote);
+    const history = await service.history(1);
 
     // Assert
-    should(context.written()?.warden).deepEqual({ use: true, configure: false });
-  });
-
-  it('should let the machine itself turn something on with no password at all', async () => {
-    // The other half of the rule: local may do both, unconditionally. This is the only path back
-    // after a remote caller has switched something off.
-    // Arrange
-    const context = world({ grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } } });
-    await context.service.refresh();
-
-    // Act
-    await context.service.patch({ terminal: { use: true, configure: true } }, local);
-
-    // Assert
-    should(context.written()?.terminal).deepEqual({ use: true, configure: true });
-  });
-
-  it('should tell a UI which callers may widen, so it never offers a control that always fails', async () => {
-    // `mayGrant` is on the wire so the browser is TOLD rather than encoding the rule a second time —
-    // and so a remote caller can be warned BEFORE switching something off that this door is one-way.
-    // Arrange
-    const context = world();
-    await context.service.refresh();
-
-    // Act
-    const fromAway = context.service.view(remote);
-    const fromHere = context.service.view(local);
-
-    // Assert
-    should(fromAway.capabilities.every(entry => !entry.mayGrant)).be.true();
-    should(fromHere.capabilities.every(entry => entry.mayGrant)).be.true();
+    should(history).deepEqual({
+      entries: [{ at: new Date(NOW).toISOString(), actor: 'admin-cli', changes: ['warden.configure=off'] }],
+      unreadable: 2,
+      truncated: true,
+    });
   });
 });
 
 describe('where a caller stands, for a route that must add one step', () => {
-  it('should tell an ungoverned caller it owes nothing, whatever the machine has set', async () => {
-    // THE OWNER'S CASE. The host's command line, and a browser on this machine that has unlocked,
-    // are past the gate — `isGovernedCaller` says so — and the fleet's per-change confirmation must
-    // not reintroduce a second one behind it. `#358` established that shape: unlock once, then full
-    // authority, exactly as `sudo` behaves.
+  it('should tell an ungoverned caller it is ungoverned, and answer every axis as granted', async () => {
     // Arrange
-    const context = world({ password: 'the operator knows this' });
-    await context.service.refresh();
+    const { service } = await ready();
 
     // Act
-    const commandLine = context.service.governance(local);
-    const unlocked = await context.service.unlock('the operator knows this');
-    const browser = context.service.governance({
-      ...localBrowser,
-      unlock: unlocked.kind === 'unlocked' ? unlocked.token : '',
+    const governance = service.governance(localBrowser);
+
+    // Assert
+    should(governance.governed).be.false();
+    should(governance.decide({ capability: 'terminal', axis: 'configure' })).deepEqual({
+      allowed: true,
+      refusal: 'granted',
     });
-
-    // Assert
-    should(commandLine).match({ governed: false, passwordSet: true, confirmChange: false });
-    should(browser).match({ governed: false, passwordSet: true, confirmChange: false });
-  });
-
-  it('should ask a governed caller on a machine with a password to confirm each change', async () => {
-    // Arrange
-    const context = world({ password: 'the operator knows this' });
-    await context.service.refresh();
-
-    // Act
-    const actual = context.service.governance(remote);
-
-    // Assert
-    should(actual).match({ governed: true, passwordSet: true, confirmChange: true });
-  });
-
-  it('should ask a governed caller on a machine with NO password for nothing at all', async () => {
-    // A control that cannot refuse is theatre. There is no secret to bind a change to here, so
-    // there is deliberately no prompt — and the capability layer already reports the state as
-    // `ungated` rather than `granted` so a surface can say once, beside the control, that nothing
-    // is standing behind it.
-    // Arrange
-    const context = world();
-    await context.service.refresh();
-
-    // Act
-    const actual = context.service.governance(remote);
-
-    // Assert
-    should(actual).match({ governed: true, passwordSet: false, confirmChange: false });
   });
 
   it('should answer for an axis its own route never demanded, and never disagree with the boundary', async () => {
-    // A read route asking "and would `configure` be allowed?" is how a panel explains a limit BEFORE
-    // somebody clicks into it. It is the same `decide` the boundary just used, over the same
-    // evaluation, so the two can never come to different answers about one request.
     // Arrange
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: true, configure: false } },
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } },
     });
-    await context.service.refresh();
 
     // Act
-    const governance = context.service.governance(remote);
-    const reported = governance.decide({ capability: 'fleet', axis: 'configure' });
-    const enforced = context.service.decide({ capability: 'fleet', axis: 'configure' }, remote);
+    const governance = service.governance(remote);
 
     // Assert
-    should(reported).deepEqual({ allowed: false, refusal: 'not-granted' });
-    should(reported).deepEqual(enforced);
-    should(governance.decide({ capability: 'fleet', axis: 'use' })).deepEqual({ allowed: true, refusal: 'granted' });
+    should(governance.governed).be.true();
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of ['use', 'configure'] as const) {
+        should(governance.decide({ capability, axis })).deepEqual(service.decide({ capability, axis }, remote));
+      }
+    }
   });
 });
 
-describe('confirming one change against the operator password', () => {
-  it('should accept the password and mint nothing, so the proof cannot outlive the request', async () => {
-    // THE DIFFERENCE FROM `unlock`. An unlock is a bearer value good for five minutes and any number
-    // of `configure` demands; this is spent inside the one request that carries it and leaves
-    // nothing behind, which is what binds it to a single change rather than opening a window.
+describe('the sentence a refusal carries', () => {
+  it('should compose it here, with the client name this layer was built with', () => {
     // Arrange
-    const context = world({ password: 'the operator knows this' });
-    await context.service.refresh();
+    const { service } = world({ clientName: 'ferretry' });
 
-    // Act
-    const actual = await context.service.confirmChange('the operator knows this');
-
-    // Assert — no unlock was minted, so a later request presenting nothing is still governed.
-    should(actual).deepEqual({ kind: 'confirmed' });
-    should(context.service.view(remote).unlocked).be.false();
-    should(context.service.governance(remote).governed).be.true();
-  });
-
-  it('should refuse a wrong password and spend one of the SAME five tries an unlock spends', async () => {
-    // A separate budget here would hand an attacker a fresh five for every surface that asked, which
-    // is the exact reasoning the unlock ledger is already keyed per daemon for.
-    // Arrange
-    const context = world({ password: 'the operator knows this' });
-    await context.service.refresh();
-
-    // Act
-    const wrong = await context.service.confirmChange('not it');
-
-    // Assert
-    should(wrong).deepEqual({ kind: 'refused', reason: 'wrong-password' });
-    should(context.service.view(remote).attemptsRemaining).equal(GRANT_UNLOCK_MAX_ATTEMPTS - 1);
-  });
-
-  it('should lock out after the shared budget and refuse even a correct password', async () => {
-    // THE RATE LIMIT IS CHECKED FIRST and applies to a caller that would have got it right: a
-    // limiter that let correct guesses through early would leak whether a guess was correct while
-    // claiming to be closed.
-    // Arrange
-    const context = world({ password: 'the operator knows this' });
-    await context.service.refresh();
-    for (let attempt = 0; attempt < GRANT_UNLOCK_MAX_ATTEMPTS - 1; attempt += 1) {
-      await context.service.confirmChange('not it');
-    }
-
-    // Act
-    const last = await context.service.confirmChange('not it');
-    const correct = await context.service.confirmChange('the operator knows this');
-
-    // Assert
-    should(last).deepEqual({ kind: 'refused', reason: 'rate-limited' });
-    should(correct).deepEqual({ kind: 'refused', reason: 'rate-limited' });
-  });
-
-  it('should spend the shared budget on a parallel burst of confirmations, not one per guess', async () => {
-    // The same race as the unlock's, on the per-change proof: it shares that ledger, so it must share
-    // the synchronous charge too, or a burst of confirmations would be an unbounded guessing oracle.
-    // Arrange
-    const context = world({ password: 'the operator knows this' });
-    await context.service.refresh();
-
-    // Act
-    const burst = await Promise.all(
-      Array.from({ length: GRANT_UNLOCK_MAX_ATTEMPTS * 4 }, () => context.service.confirmChange('not it')),
+    // Act + Assert
+    should(service.explain({ capability: 'fleet', axis: 'use' }, 'granted')).be.undefined();
+    should(service.explain({ capability: 'fleet', axis: 'use' }, 'not-granted')).containEql(
+      '`ferretry daemon config set fleet --use`',
     );
-
-    // Assert
-    should(context.verified()).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
-    should(burst.filter(outcome => outcome.kind === 'refused' && outcome.reason === 'rate-limited').length).be.above(
-      GRANT_UNLOCK_MAX_ATTEMPTS * 3 - 1,
+    should(service.explain({ capability: 'fleet', axis: 'configure' }, 'step-up-required')).equal(
+      'changing the settings for the agent fleet needs a passkey confirmation from this device.',
     );
-    should(await context.service.confirmChange('the operator knows this')).deepEqual({
-      kind: 'refused',
-      reason: 'rate-limited',
+  });
+
+  it('should name the client in a widening refusal', async () => {
+    // Arrange
+    const { service } = await ready({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: false, configure: true } },
+      clientName: 'ferretry',
     });
-  });
-
-  it('should clear the ledger when the password is right, exactly as an unlock does', async () => {
-    // Arrange
-    const context = world({ password: 'the operator knows this' });
-    await context.service.refresh();
-    await context.service.confirmChange('not it');
 
     // Act
-    const confirmed = await context.service.confirmChange('the operator knows this');
-
-    // Assert — the holder proved who they are, so a mistyped attempt does not follow them around.
-    should(confirmed).deepEqual({ kind: 'confirmed' });
-    should(context.service.view(remote).attemptsRemaining).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
-  });
-
-  it('should report a machine with no password as itself rather than as a wrong password', async () => {
-    // A MACHINE WITH NO PASSWORD IS AN ORDINARY STATE, not a race any more. It is the state every
-    // fresh install is in, and this service answers for it whether or not anything upstream would
-    // ever ask — `confirmChange` is a public method on the port, and the caller that reaches it with
-    // no password stored gets the reason rather than a guess. The comment here once cited
-    // `fy daemon password clear` creating a set-then-unset window mid-change; that verb is gone and
-    // the window with it, but the answer is the same and so is the reason for its wording: reporting
-    // it as a wrong password would send somebody hunting for a secret the machine does not have.
-    // Arrange
-    const context = world();
-    await context.service.refresh();
-
-    // Act
-    const actual = await context.service.confirmChange('anything at all');
+    const raised = await failure(service.patch({ fleet: { use: true } }, steppedUp));
 
     // Assert
-    should(actual).deepEqual({ kind: 'refused', reason: 'no-password' });
+    should(raised.message).containEql('`ferretry daemon config set fleet --use`');
   });
 });

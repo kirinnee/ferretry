@@ -1,6 +1,6 @@
 import type { FleetAccountChange, FleetHarnessScan, FleetSetupScan } from '@ferretry/protocol';
 import type { Command } from 'commander';
-import { WriteAuthority } from '../fleet/account-authority.ts';
+import { requireMayApply } from '../fleet/account-authority.ts';
 import { runChange } from '../fleet/account-change.ts';
 import { mergedOptions, parseHarness, writeFlags, writeOptions } from '../fleet/account-commands.ts';
 import {
@@ -58,12 +58,12 @@ async function askNo(deps: AccountCommandDeps, question: string): Promise<boolea
 }
 
 /** The scan, refused in words when this machine takes no import now. */
-async function openScan(deps: AccountCommandDeps): Promise<{ authority: WriteAuthority; scan: FleetSetupScan }> {
-  const authority = await WriteAuthority.open(deps);
-  const scan = await deps.gateway.scan(authority.current);
+async function openScan(deps: AccountCommandDeps): Promise<FleetSetupScan> {
+  await requireMayApply(deps);
+  const scan = await deps.gateway.scan();
   const blocked = unavailable(scan.importing);
   if (blocked !== undefined) throw new AccountCommandError(blocked);
-  return { authority, scan };
+  return scan;
 }
 
 /** After an import: what to run next, including the sign-in a login that is not signed in still needs. */
@@ -95,9 +95,7 @@ export async function runSetup(deps: AccountCommandDeps, flags: Record<string, u
     );
   }
   const options: AccountWriteOptions = writeFlags(flags);
-  const opened = await openScan(deps);
-  const { authority } = opened;
-  let scan = opened.scan;
+  let scan = await openScan(deps);
 
   // Tools come first, and only on a machine that has no setup yet: Import again is about what changed.
   if (scan.format === 'none') {
@@ -105,8 +103,8 @@ export async function runSetup(deps: AccountCommandDeps, flags: Record<string, u
     if (missing.length > 0 && !options.dryRun) {
       const label = missing.map(harness => HARNESS_LABEL[harness]).join(' and ');
       if (await askYes(deps, `${label} ${missing.length === 1 ? 'is' : 'are'} not installed. Install now?`)) {
-        await installTools(deps, missing, { yes: true }, authority);
-        scan = await deps.gateway.scan(authority.current);
+        await installTools(deps, missing, { yes: true });
+        scan = await deps.gateway.scan();
       }
     }
   }
@@ -159,7 +157,7 @@ export async function runSetup(deps: AccountCommandDeps, flags: Record<string, u
     ...(Object.keys(names).length === 0 ? {} : { names }),
     ...(acceptedUpdates.length === 0 ? {} : { acceptedUpdates }),
   };
-  const outcome = await runChange(deps, { change, destructive: false, options, authority });
+  const outcome = await runChange(deps, { change, destructive: false, options });
   if (outcome !== undefined && options.json !== true) reportNext(deps, scan, include);
 }
 
@@ -177,7 +175,7 @@ export async function runImport(deps: AccountCommandDeps, tool: string, flags: I
   const harness = parseHarness(tool);
   const bin = deps.binaryName;
   const options: AccountWriteOptions = writeFlags(flags);
-  const { authority, scan } = await openScan(deps);
+  const scan = await openScan(deps);
   const found = scan.harnesses.find(candidate => candidate.harness === harness);
   if (found === undefined || !found.installed) {
     throw new AccountCommandError(
@@ -195,7 +193,7 @@ export async function runImport(deps: AccountCommandDeps, tool: string, flags: I
     include: [harness],
     ...(flags.name === undefined ? {} : { names: { [harness]: flags.name } }),
   };
-  const outcome = await runChange(deps, { change, destructive: false, options, authority });
+  const outcome = await runChange(deps, { change, destructive: false, options });
   if (outcome !== undefined && options.json !== true) reportNext(deps, scan, [harness]);
 }
 

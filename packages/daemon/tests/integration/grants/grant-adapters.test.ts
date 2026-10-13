@@ -1,35 +1,24 @@
 import { describe, it } from 'bun:test';
 import { DAEMON_CAPABILITIES } from '@ferretry/protocol';
 import should from 'should';
-import {
-  ConfigGrantDocument,
-  FileOperatorPassword,
-  JournalGrantAudit,
-  RandomUnlockTokens,
-  SystemGrantClock,
-} from '../../../src/adapters/grants/index.ts';
+import { ConfigGrantDocument, JournalGrantAudit, SystemGrantClock } from '../../../src/adapters/grants/index.ts';
 import { FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import { DEFAULT_CAPABILITY_GRANTS, type FileSystemPort, type FoundationPaths } from '../../../src/lib/index.ts';
 
 const paths = {
   daemonConfig: '/state/config/daemon.json',
-  operatorPassword: '/state/state/operator-password.json',
   grantAudit: '/state/state/grant-audit.jsonl',
 } as FoundationPaths;
 
 /** One in-memory tree, so what the assertions read is what actually reached a file. */
 function tree(initial: Readonly<Record<string, string>> = {}) {
   const files = new Map(Object.entries(initial));
-  const modes = new Map<string, number>();
   const appended: string[] = [];
   const port = {
     readText: async (path: string) => files.get(path),
     writeTextAtomic: async (path: string, next: string) => {
       files.set(path, next);
-    },
-    setMode: async (path: string, mode: number) => {
-      modes.set(path, mode);
     },
     appendLineDurable: async (path: string, line: string) => {
       appended.push(line);
@@ -37,7 +26,7 @@ function tree(initial: Readonly<Record<string, string>> = {}) {
       return { offset: 0, fingerprint: { device: 0, inode: 0 } };
     },
   } as unknown as FileSystemPort;
-  return { port, files, modes, appended };
+  return { port, files, appended };
 }
 
 /** Each direct adapter world owns the same transaction boundary production supplies at composition. */
@@ -135,126 +124,7 @@ describe('the grants in the operator configuration document', () => {
   });
 });
 
-describe('the operator password verifier', () => {
-  it('should store an argon2id digest, never the password, at mode 0600', async () => {
-    // The threat is somebody with a copy of the state home guessing offline, and against that a fast
-    // digest buys almost nothing — the cost of guessing is what makes a human-chosen password
-    // survivable at all.
-    // Arrange
-    const world = tree();
-    const passwords = new FileOperatorPassword(paths.operatorPassword, world.port);
-
-    // Act
-    await passwords.set('correct horse battery staple');
-    const stored = world.files.get(paths.operatorPassword) ?? '';
-
-    // Assert
-    should(stored).not.match(/correct horse/u);
-    should(stored).match(/\$argon2id\$/u);
-    should(world.modes.get(paths.operatorPassword)).equal(0o600);
-    should(await passwords.isSet()).be.true();
-  });
-
-  it('should verify the right password and refuse a wrong one', async () => {
-    // Arrange
-    const world = tree();
-    const passwords = new FileOperatorPassword(paths.operatorPassword, world.port);
-    await passwords.set('correct horse battery staple');
-
-    // Act + Assert
-    should(await passwords.verify('correct horse battery staple')).be.true();
-    should(await passwords.verify('correct horse battery stapl')).be.false();
-  });
-
-  it('should answer false rather than true on a machine with no verifier', async () => {
-    // "There is nothing to check" must never become "so everything passes". The caller above decides
-    // what an absent password means, in one place.
-    // Arrange
-    const passwords = new FileOperatorPassword(paths.operatorPassword, tree().port);
-
-    // Act + Assert
-    should(await passwords.isSet()).be.false();
-    should(await passwords.verify('anything')).be.false();
-  });
-
-  it('should keep a verifier on disk through every write, offering nothing that removes one', async () => {
-    // THE MISSING METHOD IS THE CONTRACT. Removing a verifier revokes no paired device, so it would
-    // leave a machine with devices paired and nothing gating them — the state pairing exists to make
-    // unreachable. This asserts the shape rather than trusting the absence: every write this adapter
-    // can perform leaves a password set.
-    // Arrange
-    const world = tree();
-    const passwords = new FileOperatorPassword(paths.operatorPassword, world.port);
-
-    // Act
-    await passwords.set('operator-secret');
-    await passwords.set('the-replacement');
-
-    // Assert
-    should(await passwords.isSet()).be.true();
-    should(await passwords.verify('the-replacement')).be.true();
-    should(await passwords.verify('operator-secret')).be.false();
-    should(passwords).not.have.property('clear');
-  });
-
-  it('should read a passwordless file written by an earlier daemon as an ABSENCE, not as damage', async () => {
-    // `{}` is what removing a password used to leave behind. The verb is gone, but the file is not: a
-    // machine that ran an older daemon still has one, and it must come up passwordless rather than
-    // refusing every governed capability as undetermined.
-    // Arrange
-    const world = tree();
-    world.files.set(paths.operatorPassword, '{}\n');
-    const passwords = new FileOperatorPassword(paths.operatorPassword, world.port);
-
-    // Act + Assert
-    should(await passwords.isSet()).be.false();
-    should(await passwords.verify('anything')).be.false();
-  });
-
-  it('should RAISE on a damaged verifier rather than reading it as absent', async () => {
-    // Reading damage as absence would silently disarm the security layer on the one machine whose
-    // state is already known to be damaged — and the operator would never be told.
-    // Arrange
-    const damaged = new FileOperatorPassword(
-      paths.operatorPassword,
-      tree({ [paths.operatorPassword]: '{"argon2id":123}' }).port,
-    );
-
-    // Act + Assert
-    await should(damaged.isSet()).be.rejected();
-  });
-
-  it('should let its hashing be substituted so a test never pays argon2id twice', async () => {
-    // Arrange
-    const world = tree();
-    const passwords = new FileOperatorPassword(
-      paths.operatorPassword,
-      world.port,
-      async password => `fake:${password}`,
-      async (password, digest) => digest === `fake:${password}`,
-    );
-
-    // Act
-    await passwords.set('operator-secret');
-
-    // Assert
-    should(await passwords.verify('operator-secret')).be.true();
-    should(await passwords.verify('other')).be.false();
-  });
-});
-
 describe('the remaining grant ports', () => {
-  it('should mint prefixed, high-entropy unlocks that are not derived from anything', async () => {
-    // An unlock that leaked must say nothing about the password behind it. The prefix is not the
-    // secret — it is what makes one greppable in a support thread.
-    // Act
-    const minted = new Set(Array.from({ length: 64 }, () => new RandomUnlockTokens().mint()));
-
-    // Assert
-    should(minted.size).equal(64);
-    for (const token of minted) should(token).match(/^fy_unlock_[A-Za-z0-9_-]{22,}$/u);
-  });
-
   it('should record a grant change with the actor and the axes, and never a credential', async () => {
     // "When did this machine start letting a phone apply the fleet, and who said so" becomes
     // unanswerable at exactly the moment somebody needs it answered, unless it is written down.
@@ -276,7 +146,7 @@ describe('the remaining grant ports', () => {
       actor: 'device:phone-1',
       changes: ['fleet.configure=off'],
     });
-    should(world.appended[0]).not.match(/Bearer|token|password/iu);
+    should(world.appended[0]).not.match(/Bearer|token/iu);
   });
 
   it('should read wall-clock milliseconds through the clock port', () => {

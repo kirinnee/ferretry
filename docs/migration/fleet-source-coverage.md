@@ -50,8 +50,7 @@ also open to a device, because composing writes nothing at all.
 
 Changing the host is decided by **the capability layer and nothing else**. Every
 fleet route declares its `fleet` axis, and `decideCapability` answers it — the
-same question, the same vocabulary and the same operator password as the other
-five capabilities. See [grants](../grants.md).
+same question and the same vocabulary as the other five capabilities. See [grants](../grants.md).
 
 **This replaced a second authority system, and the replacement is the point.**
 The fleet used to mint its own single-use eight-character code through `POST
@@ -64,12 +63,11 @@ deleted; the decision and its cost are recorded in
 [fleet-authority-unification](../design/fleet-authority-unification.md), §6 in
 particular, which names the one property that died rather than moving.
 
-What survives is a **per-change confirmation**: a caller the operator's grants
-govern, on a machine that has an operator password, presents that password in the
-apply body, bound to that one staged change. It is the same secret the unlock is
-made of and spends the same shared five tries; it mints nothing, so it opens no
-window. An ungoverned caller — the host's command line, or a browser on this
-machine that has already unlocked — is asked for nothing at all.
+What survives is the passkey step-up: a caller the operator's grants govern needs
+a current step-up on its device for `fleet.configure`, and the apply body carries
+nothing. The per-change confirmation that once bound a password to one staged
+change is deleted. An ungoverned caller — the host's command line, or a browser
+that arrived on the host — is asked for nothing at all.
 
 The body-less admin `POST /v1/fleet/apply` is unchanged. The device refusals that
 sat inline on it and on `PUT /v1/fleet/environment` are gone: their route

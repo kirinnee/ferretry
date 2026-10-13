@@ -376,7 +376,7 @@ The rule is one line in the dispatcher: **a route whose capability demand is `*.
 `terminal.use`, `secrets.use`, `browser.use` or `pairing.use`, requires a step-up from a governed
 caller.** Reads (`fleet.use`, `filesystem.use`, `warden.use`) and everything in the daemon's own
 state home (sessions, chat, tasks, attention, pins) do not. A refusal is
-`403 { code: "step_up_required" }`, which the app answers by raising the passkey prompt and retrying
+`403 { code: "grant_step_up_required" }`, which the app answers by raising the passkey prompt and retrying
 once.
 
 ### B2. The ceremony, and who verifies it
@@ -455,14 +455,27 @@ the machine.
 
 ### B3. The operator password is deleted
 
-The step-up replaces it for every purpose it had: the local-browser unlock, the remote `configure`
-lock and the per-change confirmation on fleet apply and sign-in. No compatibility is kept:
-`state/operator-password.json`, `PUT /v1/grants/password`, `POST /v1/grants/unlock`, the
-`x-ferretry-operator-unlock` header, `fy daemon password` and the unlock dialog are removed, and
-`POST /v1/pair/code` no longer requires a password (pairing is now safe without one: a new device
-gets read + chat only). The per-change confirmation's "bound to one diff" property becomes "bound to
-a biometric check in the last 15 minutes", which is weaker against a replayed request and stronger
-against a known password — and replay is no longer possible inside a sealed session anyway.
+**Done.** The step-up replaced the operator password for every purpose it had: the local-browser unlock,
+the remote `configure` lock and the per-change confirmation on fleet apply and sign-in. No compatibility
+was kept.
+
+- **Removed:** `state/operator-password.json`, `PUT /v1/grants/password`, `POST /v1/grants/unlock`, the
+  `x-ferretry-operator-unlock` header, `fy daemon password`, the unlock dialog, and the password prompt at
+  `fy daemon start`. A stale `state/operator-password.json` is deleted at boot with one notice line.
+- **Pairing:** `POST /v1/pair/code` no longer requires a password. It is governed by `pairing.use`, so a
+  governed caller needs a step-up to mint, and a caller on the host mints freely.
+- **The decision:** a caller is governed exactly when its request did not arrive on the host. A governed
+  caller needs a step-up for every `configure` demand and for `use` of `terminal`, `browser` and
+  `pairing`; every other `use` is granted. The refusals are `granted`, `not-granted`,
+  `step-up-required` and `undetermined` — `locked`, `rate-limited` and `ungated` no longer exist.
+- **Widening is host-only.** A governed caller may only narrow, and a narrowing needs a step-up. A remote
+  warden is governed and can never step up, because it has no device.
+- **The cost, stated:** the per-change confirmation's "bound to one diff" property becomes "bound to a
+  biometric check in the last 15 minutes", which is weaker against a replayed request and stronger against
+  a known password — and replay is no longer possible inside a sealed session anyway.
+- **A declared GAP:** `pairing.use` also guards the four `/v1/push/*` enrolment routes, so a governed push
+  subscription now needs a step-up too. Moving push off `pairing.use` is B5 and is not done here
+  ([grants.md](../grants.md) records it).
 
 ### B4. Loopback is ungoverned, and it is the recovery path
 

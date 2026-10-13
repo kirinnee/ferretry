@@ -1,87 +1,19 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { WriteAuthority } from '../../../src/lib/fleet/account-authority.ts';
+import { requireMayApply } from '../../../src/lib/fleet/account-authority.ts';
 import { confirmStep, runChange } from '../../../src/lib/fleet/account-change.ts';
 import { authorityOf, CHANGE_ID, changeView, credential, fakeWorld, machine } from './account-fakes.ts';
 
 const removeRuntime = { kind: 'runtime.remove', name: 'old' } as const;
 
-describe('WriteAuthority', () => {
-  it('should owe nothing on this machine and never ask', async () => {
+describe('requireMayApply', () => {
+  it('should pass a caller that may change the machine, and never ask anything', async () => {
     // Arrange
     const world = fakeWorld();
 
-    // Act
-    const authority = await WriteAuthority.open(world.deps);
-
-    // Assert
-    should(authority.current).eql({});
-    should(await authority.forApply()).eql({});
-    should(world.prompt.secrets).be.empty();
-  });
-
-  it('should unlock a locked caller before staging and send the password once for the apply', async () => {
-    // Arrange
-    const world = fakeWorld({
-      gateway: {
-        machine: () =>
-          machine({
-            authority: authorityOf({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' }),
-          }),
-      },
-    });
-
-    // Act
-    const authority = await WriteAuthority.open(world.deps);
-    const applied = await authority.forApply();
-
-    // Assert
-    should(world.gateway.called('unlock')[0]?.args).eql(['operator-password-1']);
-    should(authority.current).eql({ unlock: 'unlock-token' });
-    should(applied).eql({ unlock: 'unlock-token', password: 'operator-password-1' });
-    should(world.prompt.secrets).have.length(1);
-  });
-
-  it('should ask for the password only at the apply when the caller is not locked', async () => {
-    // Arrange
-    const world = fakeWorld({
-      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
-    });
-    const authority = await WriteAuthority.open(world.deps);
-
-    // Act
-    should(world.prompt.secrets).be.empty();
-    const applied = await authority.forApply();
-
-    // Assert
-    should(applied).eql({ password: 'operator-password-1' });
-  });
-
-  it('should read the password from standard input off a terminal', async () => {
-    // Arrange
-    const world = fakeWorld({
-      interactive: false,
-      stdinPassword: 'piped-password-1',
-      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
-    });
-
-    // Act
-    const applied = await (await WriteAuthority.open(world.deps)).forApply();
-
-    // Assert
-    should(applied).eql({ password: 'piped-password-1' });
-  });
-
-  it('should say how to pipe the password when standard input has none', async () => {
-    // Arrange
-    const world = fakeWorld({
-      interactive: false,
-      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
-    });
-    const authority = await WriteAuthority.open(world.deps);
-
     // Act + Assert
-    await should(authority.forApply()).be.rejectedWith(/standard input/);
+    await should(requireMayApply(world.deps)).be.fulfilled();
+    should(world.prompt.questions).be.empty();
   });
 
   it('should refuse a caller the operator has not granted, in words', async () => {
@@ -91,7 +23,41 @@ describe('WriteAuthority', () => {
     });
 
     // Act + Assert
-    await should(WriteAuthority.open(world.deps)).be.rejectedWith(/has not granted it/);
+    await should(requireMayApply(world.deps)).be.rejectedWith(/has not granted it/);
+  });
+
+  it('should say a command line cannot give the passkey confirmation a caller still owes', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: {
+        machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'step-up-required' }) }),
+      },
+    });
+
+    // Act + Assert
+    await should(requireMayApply(world.deps)).be.rejectedWith(/passkey confirmation from a paired device/);
+  });
+
+  it('should refuse when the grant settings could not be read', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: {
+        machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'undetermined' }) }),
+      },
+    });
+
+    // Act + Assert
+    await should(requireMayApply(world.deps)).be.rejectedWith(/could not be read/);
+  });
+
+  it('should refuse a caller that is refused with no reason, rather than let the apply fail later', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: { machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'granted' }) }) },
+    });
+
+    // Act + Assert
+    await should(requireMayApply(world.deps)).be.rejectedWith(/not allowed to change this machine/);
   });
 });
 
@@ -132,7 +98,7 @@ describe('runChange', () => {
     // Assert
     should(outcome?.outcome).equal('applied');
     should(world.prompt.questions).be.empty();
-    should(world.gateway.called('apply')[0]?.args).eql([CHANGE_ID, {}]);
+    should(world.gateway.called('apply')[0]?.args).eql([CHANGE_ID]);
     should(world.out.text('report'))
       .match(/Add runtime claude-work/)
       .and.match(/config\.yaml/)

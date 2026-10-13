@@ -1,5 +1,6 @@
 import type { CapabilityAxis, DaemonCapability, GrantRefusal } from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
+import type { SessionDevice } from './http.ts';
 
 /**
  * THE SECOND AUTHORIZATION QUESTION, asked after the first one has already been answered.
@@ -11,20 +12,16 @@ import type { ApiActor } from './actor.ts';
  * checks have passed,
  * and it can only ever remove what the scope already allowed.
  *
- * ## THE BOUNDARY IS LOOPBACK, WITH ONE GATE IN FRONT OF A LOCAL BROWSER
+ * ## THE BOUNDARY IS ARRIVAL ON THE HOST
  *
  * Somebody on the machine already HAS the machine: they can edit the configuration document, run the
- * command line, or start anything they like. So the host's own command line is not governed by this
- * layer at all, and a fresh install needs no setup, no questionnaire and no password.
+ * command line, or start anything they like. So a caller that PROVED it arrived on the host — the
+ * command line holding the admin token, or a local browser carrying the host proof — is not governed
+ * by this layer at all, and a fresh install needs no setup and no questionnaire. See
+ * `isGovernedCaller` for the whole rule.
  *
- * A LOCAL BROWSER IS THE ONE EXCEPTION, because a browser is a paired device wherever it runs and an
- * unattended tab is one tap from provisioning the machine. It is governed until it presents an unlock
- * and ungoverned afterwards — one gate, then full authority, exactly as `sudo` behaves. That is
- * FRICTION AND NOT A BOUNDARY: a person at the keyboard can read the admin token and bypass it
- * entirely, so it buys deliberateness against slips and unattended tabs, and nothing here may claim it
- * stops an attacker with local access. See `isGovernedCaller` for the whole rule.
- *
- * Every other restriction here exists for the caller who is NOT standing on the host, which is where a
+ * A governed caller exercising a dangerous demand must also hold a recent passkey step-up for its
+ * proven device and app session (`StepUpWitness`). Every other restriction here exists for the caller who is NOT standing on the host, which is where a
  * boundary is real.
  *
  * ## "LOOPBACK" IS HOW THE REQUEST ARRIVED, NEVER WHAT IT CLAIMS
@@ -67,8 +64,8 @@ export interface CapabilityDemand {
  * why it may never be inferred from an address a caller presents. `actor` is the value
  * `resolveApiActor` already derived, carried only so a change can be journalled against whoever made
  * it; it never decides anything here, because a header can move it and this boundary must not be
- * movable by a header. `unlock` is a value this daemon minted itself and can therefore recognise on
- * its own evidence.
+ * movable by a header. `stepUp` is this daemon's own record, keyed by the session's proven device,
+ * so no header or body can move it either.
  */
 export interface CapabilityPresentation {
   /** Whether the request is PROVED to come from this host (`arrivedOnHost`). Carrier-derived; a
@@ -79,15 +76,19 @@ export interface CapabilityPresentation {
    *
    * SERVER-DERIVED FROM THE TOKEN CLASS, never from `actor` — an actor string can be refined by a
    * self-identification header and is lossy about authority, so deriving a class back out of one would
-   * be guessing at the very question this decides. It is here because arrival stopped being the whole
-   * locality answer: a local BROWSER is a paired device and is gated, while the command line on the
-   * same machine holds the token file and is not.
+   * be guessing at the very question this decides. Attribution and audit only; locality is `loopback`.
    */
   readonly adminToken: boolean;
   /** Who to attribute a change to. Attribution only — never an input to a decision. */
   readonly actor: ApiActor;
-  /** An unlock presented for a `configure` demand. */
-  readonly unlock?: string;
+  /**
+   * Whether the session's PROVEN device holds a live passkey step-up for its app session.
+   *
+   * Computed by the dispatcher from `ApiRequest.device` through a {@link StepUpWitness}; `false` for a
+   * request with no proven device, which is every caller that is not a paired browser session —
+   * including a remote warden, which is governed and can never step up.
+   */
+  readonly stepUp: boolean;
 }
 
 /** What the grant layer decided. The reason is not decoration — it is what names the next step. */
@@ -101,7 +102,7 @@ export interface GrantDecision {
  * to a handler that has to honour or render it.
  *
  * IT EXISTS SO NO HANDLER RE-DERIVES ONE OF THESE. `governed` is `isGovernedCaller`'s answer for this
- * exact request, made from the four facts the guard already gathered — and a handler that recomputed
+ * exact request, made from the facts the guard already gathered — and a handler that recomputed
  * it from `request.loopback` would be reading the ONE value that must never be inferred anywhere but
  * the transport, in the ONE place a mistake hands a remote phone the machine. The fleet mount used to
  * decide its own version of this from `tokenClass`, four separate times; that is the duplication this
@@ -113,16 +114,6 @@ export interface GrantDecision {
 export interface CallerGovernance {
   /** Whether the operator's grants govern this caller at all. */
   readonly governed: boolean;
-  /** Whether this machine has an operator password. Never the password, never any part of it. */
-  readonly passwordSet: boolean;
-  /**
-   * Whether a change this caller makes must be confirmed against that password, PER CHANGE.
-   *
-   * Derived by the grant layer rather than composed from the two fields above, so the policy has one
-   * owner. A route that consumes this must bind the confirmation to the exact artifact it is about to
-   * spend — an unconfirmed one, or one confirmed against something else, is not a confirmation.
-   */
-  readonly confirmChange: boolean;
   /**
    * The operator's answer for ANY axis, for THIS caller — so a surface can report an axis its own
    * route did not demand.
@@ -135,17 +126,6 @@ export interface CallerGovernance {
    */
   decide(demand: CapabilityDemand): GrantDecision;
 }
-
-/**
- * What a per-change confirmation was worth.
- *
- * The refusals are the grant layer's own, not a second vocabulary: a wrong password spends one of the
- * SAME five tries an unlock does, and the same fifteen-minute lockout follows. A second budget would
- * hand an attacker a fresh one for every surface that asked.
- */
-export type ChangeConfirmation =
-  | { readonly kind: 'confirmed' }
-  | { readonly kind: 'refused'; readonly reason: 'wrong-password' | 'rate-limited' | 'no-password' };
 
 /**
  * The grant layer as the authorization boundary sees it.
@@ -186,8 +166,6 @@ export const NO_GOVERNED_ROUTES_GUARD: CapabilityGuard = {
   // gate, and a wiring mistake that grew one must not be told the caller is past it.
   governance: () => ({
     governed: true,
-    passwordSet: false,
-    confirmChange: true,
     decide: () => ({ allowed: false, refusal: 'undetermined' }),
   }),
   explain: () => undefined,
@@ -196,10 +174,23 @@ export const NO_GOVERNED_ROUTES_GUARD: CapabilityGuard = {
 /**
  * The error code one refusal answers with.
  *
- * DISTINCT PER REASON, so a client can tell "the operator said no" from "you need to unlock" from
+ * DISTINCT PER REASON, so a client can tell "the operator said no" from "confirm with your passkey" from
  * "this daemon has lost its own decision" without parsing prose. A single `forbidden` for all three
  * is what makes a UI grey a control out with nothing to say beside it.
  */
 export function grantRefusalCode(refusal: GrantRefusal): string {
   return `grant_${refusal.replaceAll('-', '_')}`;
 }
+
+/**
+ * Whether a session's proven device holds a live step-up. Synchronous, for the reason the guard is.
+ *
+ * DECLARED AT THE BOUNDARY so the dispatcher can compute `CapabilityPresentation.stepUp` without
+ * importing the step-up subsystem; `StepUpService` satisfies it structurally.
+ */
+export interface StepUpWitness {
+  held(subject: SessionDevice): boolean;
+}
+
+/** The witness for a dispatcher with no step-up subsystem wired: nobody holds one. */
+export const NO_STEP_UP_WITNESS: StepUpWitness = { held: () => false };
