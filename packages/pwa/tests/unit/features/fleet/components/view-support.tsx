@@ -5,11 +5,12 @@ import type { AccountCatalog } from '../../../../../src/features/fleet/component
 import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-configuration-surface.tsx';
 import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
 import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
-import { interact, must } from '../../../../support/dom.ts';
+import type { ReactElement } from 'react';
+import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { APPLY_PATH, type Call, OUTCOME, permissions, STAGED, scriptedClient } from '../shell/change-support.ts';
 import { studioCatalog, studioMachine } from './catalog-fixture.ts';
 
-export const STUDIO = daemonConnection({
+const STUDIO = daemonConnection({
   daemonId: 'studio',
   baseUrl: 'https://studio.example.test',
   deviceToken: 't',
@@ -36,7 +37,7 @@ export const scriptedMachine = (overrides: Partial<Machine> = {}): Machine => ({
 });
 
 /** The client factory a tab is handed, answering from `machine`. */
-export const machineFactory =
+const machineFactory =
   (machine: Machine): FleetClientFactory =>
   async () => {
     const catalog = (answer: () => unknown) => () => machine.readFails ?? answer();
@@ -75,47 +76,67 @@ export const tabProps = (machine: Machine, overrides: Partial<MachineTabProps> =
   ...overrides,
 });
 
-export const settle = async (): Promise<void> => {
+const drain = async (): Promise<void> => {
+  for (let turn = 0; turn < 20; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+};
+
+/** Runs an action and lets every read and write it started finish, all inside one `act`. */
+const settled = async (action: () => unknown): Promise<void> => {
   await interact(async () => {
-    for (let turn = 0; turn < 20; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    await action();
+    await drain();
   });
 };
 
+export const settle = async (): Promise<void> => settled(() => undefined);
+
 export const click = async (root: ParentNode, selector: string): Promise<void> => {
   const target = must(root.querySelector<HTMLElement>(selector), selector);
-  await interact(() => target.click());
-  await settle();
+  await settled(() => target.click());
 };
 
 /** Types into an input or a text area the way React hears it. */
 export const type = async (root: ParentNode, selector: string, value: string): Promise<void> => {
   const field = must(root.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector), selector);
-  await interact(() => {
+  await settled(() => {
     const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, value);
     field.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await settle();
 };
 
 export const choose = async (root: ParentNode, selector: string, value: string): Promise<void> => {
   const field = must(root.querySelector<HTMLSelectElement>(selector), selector);
-  await interact(() => {
+  await settled(() => {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(field, value);
     field.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  await settle();
 };
 
 /** Ticks a pick row by its label. */
 export const tick = async (root: ParentNode, selector: string): Promise<void> => {
   const label = must(root.querySelector<HTMLElement>(selector), selector);
   const input = must(label.querySelector<HTMLInputElement>('input'), `${selector} input`);
-  await interact(() => input.click());
-  await settle();
+  await settled(() => input.click());
 };
 
 export const text = (root: ParentNode, selector: string): string =>
   must(root.querySelector(selector), selector).textContent ?? '';
 
 export const submit = async (root: ParentNode): Promise<void> => click(root, '[data-change-submit]');
+
+/** Mounts and lets the first catalogue read land, inside one `act`. */
+export const mountSettled = async (element: ReactElement): Promise<Mounted> => {
+  let mounted: Mounted | undefined;
+  await settled(async () => {
+    mounted = await mount(element);
+  });
+  return must(mounted, 'the mounted tab');
+};
+
+/** Follows a link the way the Settings page does: a new hash and its event. */
+export const followHash = async (hash: string): Promise<void> =>
+  settled(() => {
+    window.history.replaceState(null, '', `/${hash}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });

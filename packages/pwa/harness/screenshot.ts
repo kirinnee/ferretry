@@ -108,8 +108,9 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Sixty-five. MACHINES owes six at each viewport — its section, four tab switches and the Machines list the
- * switcher opens — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
+ * Eighty-nine. MACHINES owes eighteen at each viewport — its section, four tab switches, the Machines list the
+ * switcher opens, and twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps,
+ * a component with every badge, two edit forms) — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
  * and twenty-four at `desktop`. Twenty-four at both viewports —
  * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
  * surface: each step is a different layout, the model step is a card per model beside a custom-value

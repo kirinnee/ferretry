@@ -16,6 +16,8 @@ import {
 } from '../components/catalog-fixture.ts';
 import {
   type Machine,
+  followHash,
+  mountSettled,
   choose,
   click,
   scriptedMachine,
@@ -36,8 +38,7 @@ afterEach(async () => {
 });
 
 const open = async (machine: Machine = scriptedMachine(), overrides: Parameters<typeof tabProps>[1] = {}) => {
-  mounted = await mount(<ProfilesTab {...tabProps(machine, overrides)} />);
-  await settle();
+  mounted = await mountSettled(<ProfilesTab {...tabProps(machine, overrides)} />);
   return mounted.container;
 };
 
@@ -124,13 +125,9 @@ describe('ProfilesTab — list and page', () => {
     window.history.replaceState(null, '', '/#machines/studio-mac/profiles/Review');
     const root = await open();
     expect(text(root, 'h3')).toBe('Review');
-    window.history.replaceState(null, '', '/#machines/studio-mac/profiles/Default');
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-    await settle();
+    await followHash("#machines/studio-mac/profiles/Default");
     expect(text(root, 'h3')).toBe('Default');
-    window.history.replaceState(null, '', '/#machines/studio-mac/profiles/Nope');
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-    await settle();
+    await followHash("#machines/studio-mac/profiles/Nope");
     expect(text(root, 'h3')).toBe('Profiles');
   });
 });

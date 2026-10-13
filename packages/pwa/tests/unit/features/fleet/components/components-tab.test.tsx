@@ -17,10 +17,11 @@ import {
 } from './catalog-fixture.ts';
 import {
   type Machine,
+  followHash,
+  mountSettled,
   choose,
   click,
   scriptedMachine,
-  settle,
   stagedChanges,
   submit,
   tabProps,
@@ -36,8 +37,7 @@ afterEach(async () => {
 });
 
 const open = async (machine: Machine = scriptedMachine(), overrides: Parameters<typeof tabProps>[1] = {}) => {
-  mounted = await mount(<ComponentsTab {...tabProps(machine, overrides)} />);
-  await settle();
+  mounted = await mountSettled(<ComponentsTab {...tabProps(machine, overrides)} />);
   return mounted.container;
 };
 
@@ -192,9 +192,7 @@ describe('ComponentsTab — a component’s page', () => {
     window.history.replaceState(null, '', `/#machines/studio-mac/components/${encodeURIComponent('mcp/github')}`);
     const root = await open();
     expect(text(root, 'h3')).toBe('github');
-    window.history.replaceState(null, '', '/#machines/studio-mac/components/mcp%2Fgone');
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-    await settle();
+    await followHash("#machines/studio-mac/components/mcp%2Fgone");
     expect(root.textContent).toContain('This component is not on studio-mac any more.');
     await click(root, '[data-catalog-back]');
     expect(root.querySelector('[data-components-page="kinds"]')).not.toBeNull();
