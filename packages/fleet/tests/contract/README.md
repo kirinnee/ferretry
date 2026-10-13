@@ -1,0 +1,54 @@
+# Harness contract guard
+
+The account model ([design §8](../../../../docs/design/account-model.md)) shares one login across many
+runtimes through mechanisms Claude Code and Codex never documented. This suite measures each one
+against a real `claude` and `codex`, so a harness release that breaks one fails a build instead of
+forking somebody's login.
+
+```sh
+packages/fleet/tests/contract/run.sh pinned   # the versions this build pins (the flake's own nixpkgs)
+packages/fleet/tests/contract/run.sh latest   # the newest npm releases
+```
+
+CI runs `pinned` on Linux and `macos-15` in every build (`harness-contract` in `ci.yaml`). The
+scheduled `harness-contract-latest.yaml` runs `latest` daily and gates nothing.
+
+## What is pinned
+
+| File                              | Claim                                                                                                                                                                                                                                                                                           |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-credential-store.test.ts` | `CLAUDE_SECURESTORAGE_CONFIG_DIR` is still read; two config dirs share one store; without it a dir is signed out; a refresh lands in the store; the refresh lock is `<store>.lock` and a second runtime never spends the token; a symlinked credential is replaced by a regular file on refresh |
+| `claude-keychain.test.ts`         | macOS only: the store is the keychain item `Claude Code-credentials-<sha256(dir)[0:8]>`, `""` selects the bare item, and a refresh writes the same item (gap G1)                                                                                                                                |
+| `claude-launch.test.ts`           | `hasCompletedOnboarding` + `projects[cwd].hasTrustDialogAccepted` skip onboarding and trust; `--permission-mode auto` / `bypassPermissions` are accepted; `--settings` overlays rather than replaces                                                                                            |
+| `codex-credential-link.test.ts`   | a refresh rewrites `auth.json` through the link; a second home reads the rotated token; `cli_auth_credentials_store = "file"` never touches the keyring (Linux); `codex logout` removes only its link                                                                                           |
+| `codex-launch.test.ts`            | `-c 'projects={"<cwd>"={trust_level="trusted"}}'` skips the trust prompt and merges with `config.toml`; `skills/<item>` (including a symlink) is listed                                                                                                                                         |
+
+Every positive claim sits beside the control that shows what it suppresses.
+
+## Rules
+
+- **Fake credentials only.** Tokens are made up here (`FAKE`, `ROTATED<n>`). Nothing reads the
+  caller's environment: each child gets a throwaway `HOME` and a minimal `PATH`.
+- **No network.** Every proxy variable points at a loopback proxy that records each `CONNECT` and
+  forwards nothing. The one exception is Claude's token host, spliced to a loopback TLS server
+  trusted through `NODE_EXTRA_CA_CERTS`; Codex's token endpoint comes from
+  `CODEX_REFRESH_TOKEN_URL_OVERRIDE`.
+- **No inference.** A refresh is triggered by `claude mcp list` or Codex `app-server`
+  `getAuthStatus`, neither of which calls a model; anything aimed at an inference host dies at the
+  proxy's `CONNECT` line with no request sent.
+- **The keychain is written only on the CI runner** (`FY_CONTRACT_KEYCHAIN=1` and `CI=true`), because
+  the bare item is where a person's own Claude login lives.
+- Outside `run.sh` (`FY_HARNESS_CONTRACT` unset) every file skips, which is what the unit and
+  integration tiers see. Opting in without a binary fails instead of skipping.
+
+## Declared limits
+
+- The keyring check is Linux-only: there a keyring call is a D-Bus connection a fake bus can count.
+  On macOS Codex's keyring is the Security framework, which has no socket to watch.
+- The lock test proves a second runtime waits and adopts the rotated token while the first holds
+  the lock. It does not race two refreshes at the same instant.
+- `latest` comes from npm, not nixpkgs, so it measures what a person who installs from npm runs.
+- On macOS the keychain suite runs with the runner's REAL `HOME`: `security` finds the login keychain
+  through the search list under `~/Library`, so under a throwaway `HOME` no keychain is searched at all
+  (measured on the first `macos-15` run). The launch suite keeps a throwaway `HOME`, so there Claude
+  reports signed out; none of the screens it measures depends on being signed in.
