@@ -33,7 +33,7 @@ describe('fy passkey window', () => {
     should(gateway.opened).eql([PIXEL_ID]);
     should(time.asked).eql([CLOSES_AT]);
     should(out.messages).eql([
-      'The passkey window for Pixel 8 is open until 14:32. On that device, open Settings → Security → Add a passkey within 10 minutes.',
+      'The passkey window for Pixel 8 is open until 14:32. On that device, open Settings → Daemons → Security → Add a passkey within 10 minutes.',
     ]);
     should(out.errors).eql([]);
     should(out.exitCode).equal(undefined);

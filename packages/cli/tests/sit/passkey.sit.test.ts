@@ -114,7 +114,7 @@ describe(`passkey window (SIT, ${useInProcess ? 'in-process' : 'compiled binary'
     // Assert
     should(actual.code).equal(0, actual.err);
     should(actual.out).match(/The passkey window for Pixel 8 is open until \d\d:\d\d\./u);
-    should(actual.out).containEql('Settings → Security → Add a passkey within 10 minutes');
+    should(actual.out).containEql('Settings → Daemons → Security → Add a passkey within 10 minutes');
     should(daemon.opened.at(-1)).equal(PIXEL_ID);
     should(daemon.bearers.at(-1)).equal(ADMIN_TOKEN);
   });

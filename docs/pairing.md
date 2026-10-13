@@ -107,8 +107,8 @@ moment.
   that needs it and protect nothing.
 - **`no-store`**, because the entire value of the answer is that it is current. A cached copy re-serves
   the rendezvous the operator just switched off.
-- **Not `privilegedOnly`, and no capability demand.** A caller on the host already has the machine and
-  needs no list; the remote phone is the reader. And an operator who switches `pairing` off to stop **new**
+- **Not `privilegedOnly`, and no capability demand.** The owner's command line already has the machine
+  and needs no list; a paired device — a phone, or a browser on the host — is the reader. And an operator who switches `pairing` off to stop **new**
   devices being added must not thereby strand the devices already paired on a rendezvous this daemon no
   longer dials.
 - **Read-only.** There is no `POST`, `PUT` or `DELETE` here. A device may learn where this daemon can be
@@ -126,16 +126,19 @@ a phone that can never dial it directly.
 
 ### Who may mint
 
-Read [grants.md](grants.md) first: minting is governed by the `pairing` capability, so a caller **on the
-host** is ungoverned and a caller **off the host** mints while the operator leaves `pairing` on. The two
-facts a UI needs before it offers anything — whether this request arrived on the host, and which grant is
-the caller's own — are on `GET /v1/pair/devices` as `hostLocal` and `thisDeviceId`. Both are
+Read [grants.md](grants.md) first: minting is governed by the `pairing` capability, so only **the owner at
+the machine** — `fy pair` with the host's admin token — is ungoverned, and **every paired device**, a browser
+on the host included, mints while the operator leaves `pairing` on (B4: a tunnel to `127.0.0.1` is
+indistinguishable from a local browser). The two facts a UI needs before it offers anything — whether this
+caller is the owner at the machine, and which grant is the caller's own — are on `GET /v1/pair/devices` as
+`hostLocal` and `thisDeviceId`. `hostLocal` is `arrivedOnHost`, never the bare loopback flag, so a caller behind
+a local proxy is never told it is at the machine. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
 ### Minting needs no password
 
-**`POST /v1/pair/code` asks for no secret.** A caller that arrived on the host mints freely. A **governed**
-caller — a paired phone, a browser across the network — mints only while the operator leaves `pairing`
+**`POST /v1/pair/code` asks for no secret.** The owner's `fy pair` mints freely. A **governed** caller — a
+paired phone, a browser across the network or on the host itself — mints only while the operator leaves `pairing`
 on **and** it holds a current passkey step-up, because `pairing.use` is one of the three `use` demands the
 step-up guards ([grants.md](grants.md)). The refusal is `step-up-required` and the app answers it by raising
 the passkey prompt and retrying once; a remote warden has no device and can never mint.
@@ -335,7 +338,7 @@ row states what its revoke will do before the press.
   the device agreed recently, nothing about the act itself ([grants.md](grants.md)).
 - **A device's first passkey has a ten-minute window.** It can be added only in the ten minutes after
   pairing (B2), so a newly paired device with no passkey for the machine sees one dismissible line
-  pointing at Settings → Security → Add a passkey. A device that misses the window cannot step up
+  pointing at Settings → Daemons → Security → Add a passkey. A device that misses the window cannot step up
   until the owner re-opens it at the machine (below) or it pairs again; until then it keeps only the uses
   that need no step-up ([design/zero-trust.md](design/zero-trust.md) B2).
 
