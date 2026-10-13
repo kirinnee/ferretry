@@ -46,7 +46,13 @@ import {
   renderRuntimeWrapperScript,
   STATE_HOME_ENV,
 } from '../wrappers.ts';
-import { type AdaptedEntry, adaptProfile, CLAUDE_JSON_FILE, type ClaudeStatuslineCommand, componentPartialSupport } from './adapt.ts';
+import {
+  type AdaptedEntry,
+  adaptProfile,
+  CLAUDE_JSON_FILE,
+  type ClaudeStatuslineCommand,
+  componentPartialSupport,
+} from './adapt.ts';
 import {
   CODEX_CREDENTIAL_FILE,
   codexCredentialLink,
@@ -81,10 +87,10 @@ const LAUNCH_FOLDER_PLACEHOLDER = '/ferretry-launch-folder';
  * runtime's own values and another value would make a statusLine or a claim speak for another one.
  */
 const REFUSED_LAUNCH_VARIABLES: Readonly<Record<string, string>> = {
-  HOME: "a runtime keeps your real home, because that is where your own login and keychain are found; its config directory is what keeps it separate",
+  HOME: 'a runtime keeps your real home, because that is where your own login and keychain are found; its config directory is what keeps it separate',
   [RUNTIME_CREDENTIAL_ENV]: "Ferretry sets it to the runtime's own credential",
   [RUNTIME_NAME_ENV]: "Ferretry sets it to the runtime's own name",
-  [STATE_HOME_ENV]: "Ferretry sets it to its own state directory",
+  [STATE_HOME_ENV]: 'Ferretry sets it to its own state directory',
 };
 
 /** Component bodies the caller read from the asset tree, by component name. */
@@ -226,7 +232,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
   // Every Ferretry-kept login gets its directory, used or not: an empty slot (C8) has no login yet,
   // and a sign-in needs somewhere to write one.
-  for (const [id, credential] of Object.entries(model.credentials).toSorted(([left], [right]) => (left < right ? -1 : 1))) {
+  for (const [id, credential] of Object.entries(model.credentials).toSorted(([left], [right]) =>
+    left < right ? -1 : 1,
+  )) {
     const resolution = resolveCredentialStore(id, credential, credentialStorePaths);
     if (!('ownedDirectory' in resolution) || resolution.ownedDirectory === undefined) continue;
     operations.push({ kind: 'directory', path: resolution.ownedDirectory, mode: DIRECTORY_MODE });
@@ -258,7 +266,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const reasons: string[] = [];
 
     const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths);
-    if ('unavailable' in store) reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
+    if ('unavailable' in store)
+      reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
 
     const availableModels = input.availableModels?.[runtime.credential];
     const resolution = resolveProfile({
@@ -270,7 +279,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       partialSupport,
     });
     if (!resolution.ok) {
-      problems.push({ runtime: name, message: `profile "${runtime.profile}" cannot be read: ${resolution.failure.kind}` });
+      problems.push({
+        runtime: name,
+        message: `profile "${runtime.profile}" cannot be read: ${resolution.failure.kind}`,
+      });
       continue;
     }
     const resolved = resolution.resolved;
@@ -296,7 +308,11 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
               cwd: LAUNCH_FOLDER_PLACEHOLDER,
               acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
             })
-          : fixedLayerFor({ harness, agentPermissions: model.machine.agentPermissions, cwd: LAUNCH_FOLDER_PLACEHOLDER });
+          : fixedLayerFor({
+              harness,
+              agentPermissions: model.machine.agentPermissions,
+              cwd: LAUNCH_FOLDER_PLACEHOLDER,
+            });
       if (result.ok) fixed = withoutLaunchFolder(result.layer);
       else reasons.push(result.refusal.message);
     }
@@ -318,7 +334,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // The launch environment: the credential's, the profile's, the MCP servers' forwarded secrets,
     // then Ferretry's own. A refused variable is a configuration to fix, never silently dropped.
-    const profileEnv = Object.fromEntries(Object.entries(resolved.env).map(([variable, { value }]) => [variable, value]));
+    const profileEnv = Object.fromEntries(
+      Object.entries(resolved.env).map(([variable, { value }]) => [variable, value]),
+    );
     const env: Record<string, string> = {
       ...credentialLaunchEnvironment(store),
       ...profileEnv,
@@ -384,7 +402,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       wrapper,
       models,
       defaultModel,
-      secretEnv: sorted(Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0))),
+      secretEnv: sorted(
+        Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
+      ),
       ...(blocked === undefined ? {} : { blocked }),
     });
   }
@@ -434,7 +454,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
   });
 
   const homesOf = (harness: HarnessKind) =>
-    planned.filter(runtime => runtime.harness === harness).map(runtime => ({ account: runtime.id, path: runtime.home }));
+    planned
+      .filter(runtime => runtime.harness === harness)
+      .map(runtime => ({ account: runtime.id, path: runtime.home }));
   return {
     manifest,
     manifestPath: layout.manifestPath,
@@ -490,7 +512,10 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
   operations.push({
     kind: 'prune-directory',
     path: skillsContainer,
-    keep: [...skillEntries.map(entry => entry.dest.slice(skillsDest.length + 1)), ...HARNESS_OWNED_SKILL_ENTRIES[harness]],
+    keep: [
+      ...skillEntries.map(entry => entry.dest.slice(skillsDest.length + 1)),
+      ...HARNESS_OWNED_SKILL_ENTRIES[harness],
+    ],
   });
 
   operations.push({
@@ -526,7 +551,12 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
   if (input.credentialLink !== undefined) {
     // The one link to a credential: the canonical file may not exist yet (an empty slot), and Codex
     // writes the login THROUGH the link when somebody signs in.
-    operations.push({ kind: 'symlink', source: input.credentialLink.target, path: input.credentialLink.path, dangling: true });
+    operations.push({
+      kind: 'symlink',
+      source: input.credentialLink.target,
+      path: input.credentialLink.path,
+      dangling: true,
+    });
   }
 
   const recorded: MaterialisedRecord = {
@@ -565,16 +595,28 @@ function commandOperations(
   const { advanced } = input.model;
   const byName = new Map(planned.map(runtime => [runtime.name, runtime]));
   const owners = new Map<string, string>(planned.map(runtime => [runtime.name, `runtime ${runtime.name}`]));
-  const commands: { readonly wrapper: string; readonly runtime: PlannedRuntime; readonly flags: readonly string[]; readonly alias?: string }[] = [];
+  const commands: {
+    readonly wrapper: string;
+    readonly runtime: PlannedRuntime;
+    readonly flags: readonly string[];
+    readonly alias?: string;
+  }[] = [];
   for (const command of advanced.commands) {
     const runtime = byName.get(command.runtime);
     if (runtime !== undefined) commands.push({ wrapper: command.wrapper, runtime, flags: command.flags });
   }
-  for (const [alias, byHarness] of Object.entries(advanced.aliases).toSorted(([left], [right]) => (left < right ? -1 : 1))) {
+  for (const [alias, byHarness] of Object.entries(advanced.aliases).toSorted(([left], [right]) =>
+    left < right ? -1 : 1,
+  )) {
     for (const runtime of planned) {
       const flags = byHarness[runtime.harness];
       if (flags === undefined) continue;
-      commands.push({ wrapper: `${alias}-${runtime.name}`, runtime, flags: typeof flags === 'string' ? flags.trim().split(/\s+/).filter(Boolean) : flags, alias });
+      commands.push({
+        wrapper: `${alias}-${runtime.name}`,
+        runtime,
+        flags: typeof flags === 'string' ? flags.trim().split(/\s+/).filter(Boolean) : flags,
+        alias,
+      });
     }
   }
   const names: string[] = [];
@@ -582,7 +624,10 @@ function commandOperations(
     const claimant = command.alias === undefined ? `command ${command.wrapper}` : `alias ${command.alias}`;
     const owner = owners.get(command.wrapper);
     if (owner !== undefined) {
-      problems.push({ runtime: command.wrapper, message: `${claimant} and ${owner} would both be the executable "${command.wrapper}"` });
+      problems.push({
+        runtime: command.wrapper,
+        message: `${claimant} and ${owner} would both be the executable "${command.wrapper}"`,
+      });
       continue;
     }
     owners.set(command.wrapper, claimant);

@@ -964,7 +964,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const existing = await this.readExistingSettings(previous, format);
       // A replaced key is the plan's, all of it, so nothing of the old value may survive the merge.
       if (existing !== undefined) {
-        resolved.push(Object.fromEntries(Object.entries(existing).filter(([key]) => !options.replaceKeys.includes(key))));
+        resolved.push(
+          Object.fromEntries(Object.entries(existing).filter(([key]) => !options.replaceKeys.includes(key))),
+        );
       }
     }
     for (const layer of layers) {

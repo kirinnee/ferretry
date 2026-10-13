@@ -456,9 +456,19 @@ const tomlBasicString = (value: string): string => `"${value.replace(/[\\"]/gu, 
  * it behaves like the person's own CLI.
  */
 export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
-  const header = ['#!/bin/sh', MANAGED_MARKER, `# runtime ${input.name} ${input.id} (${input.harness}${input.agent ? ', agent' : ''})`, ''];
+  const header = [
+    '#!/bin/sh',
+    MANAGED_MARKER,
+    `# runtime ${input.name} ${input.id} (${input.harness}${input.agent ? ', agent' : ''})`,
+    '',
+  ];
   if (input.refusal !== undefined) {
-    return [...header, `echo ${shellQuote(`ferretry: ${input.name} cannot start: ${input.refusal}`)} >&2`, 'exit 1', ''].join('\n');
+    return [
+      ...header,
+      `echo ${shellQuote(`ferretry: ${input.name} cannot start: ${input.refusal}`)} >&2`,
+      'exit 1',
+      '',
+    ].join('\n');
   }
   const environment = environmentLines(input.env, input.secretsFile);
   const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args].map(shellQuote).join(' ');
