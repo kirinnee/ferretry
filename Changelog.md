@@ -1,3 +1,5 @@
+## [3.41.0](https://github.com/kirinnee/ferretry/compare/v3.40.0...v3.41.0) (2026-10-13)
+
 ## [3.40.0](https://github.com/kirinnee/ferretry/compare/v3.39.0...v3.40.0) (2026-10-13)
 
 ## [3.39.0](https://github.com/kirinnee/ferretry/compare/v3.38.0...v3.39.0) (2026-10-13)
