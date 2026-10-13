@@ -59,7 +59,7 @@ export function codexAppServerPidFiles(codexHome: string): readonly string[] {
 }
 
 /** The directory every executable of one home's app-server daemon runs from. */
-export function codexAppServerPackageDirectory(codexHome: string): string {
+function codexAppServerPackageDirectory(codexHome: string): string {
   return `${trimSlash(codexHome)}/packages/app-server-daemon/`;
 }
 
@@ -110,7 +110,7 @@ export function codexRuntimeHome(
 const trimSlash = (path: string): string => (path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path);
 
 /** The published accounts. Satisfied by the daemon's manifest inventory. */
-export interface CodexRuntimeInventory {
+interface CodexRuntimeInventory {
   accounts(): Promise<readonly CodexRuntimeAccount[]>;
 }
 

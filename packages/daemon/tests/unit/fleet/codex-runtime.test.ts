@@ -67,7 +67,10 @@ class FakeHost implements CodexAppServerProcesses {
   }
 }
 
-const supervisor = (host: FakeHost, accounts: () => Promise<readonly CodexRuntimeAccount[]> = async () => PUBLISHED) => {
+const supervisor = (
+  host: FakeHost,
+  accounts: () => Promise<readonly CodexRuntimeAccount[]> = async () => PUBLISHED,
+) => {
   const sleeps: number[] = [];
   const subject = new CodexAppServerSupervisor({
     inventory: { accounts },
@@ -151,7 +154,10 @@ describe('CodexAppServerSupervisor', () => {
   it('should wait out the session’s own exiting harness before deciding', async () => {
     // Arrange — the killed pane's codex (pid 300) is still exiting on the first look.
     const host = new FakeHost();
-    host.usersAnswers = [[100, 101, 300], [100, 101]];
+    host.usersAnswers = [
+      [100, 101, 300],
+      [100, 101],
+    ];
     const { subject, sleeps } = supervisor(host);
 
     // Act

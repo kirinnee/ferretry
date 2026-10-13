@@ -23,7 +23,11 @@ beforeAll(async () => {
     await writeFile(join(proc, pid, 'cmdline'), cmdline);
     if (environ !== undefined) await writeFile(join(proc, pid, 'environ'), environ);
   };
-  await entry('100', `${HOME}/packages/app-server-daemon/bin/codex\0app-server\0--managed-daemon\0`, `PATH=/bin\0CODEX_HOME=${HOME}\0`);
+  await entry(
+    '100',
+    `${HOME}/packages/app-server-daemon/bin/codex\0app-server\0--managed-daemon\0`,
+    `PATH=/bin\0CODEX_HOME=${HOME}\0`,
+  );
   await entry('200', '/usr/bin/codex\0', `CODEX_HOME=${HOME}-other\0`);
   await entry('300', '', undefined);
   await mkdir(join(proc, 'self'), { recursive: true });
@@ -57,7 +61,9 @@ describe('HostCodexAppServerProcesses on Linux', () => {
   });
 
   it('should read a command line from the process table', async () => {
-    should(await subject().commandLine(100)).equal(`${HOME}/packages/app-server-daemon/bin/codex app-server --managed-daemon`);
+    should(await subject().commandLine(100)).equal(
+      `${HOME}/packages/app-server-daemon/bin/codex app-server --managed-daemon`,
+    );
     should(await subject().commandLine(300)).be.undefined();
     should(await subject().commandLine(999)).be.undefined();
   });
@@ -104,7 +110,10 @@ describe('HostCodexAppServerProcesses without /proc', () => {
 
   it('should say it cannot tell when ps is missing, relative or fails to run', async () => {
     for (const psExecutable of [undefined, 'ps', join(root, 'no-such-ps')]) {
-      const subject = new HostCodexAppServerProcesses({ platform: 'darwin', ...(psExecutable === undefined ? {} : { psExecutable }) });
+      const subject = new HostCodexAppServerProcesses({
+        platform: 'darwin',
+        ...(psExecutable === undefined ? {} : { psExecutable }),
+      });
       should(await subject.usersOf(HOME)).be.undefined();
       should(await subject.commandLine(100)).be.undefined();
     }

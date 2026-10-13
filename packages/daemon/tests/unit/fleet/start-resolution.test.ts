@@ -152,7 +152,12 @@ describe('resolveStartAccount by a runtime name it had before', () => {
 
   it('should resolve an old wrapper name to the runtime it became', async () => {
     // Act
-    const actual = await resolveStartAccount(withIds(async () => ids), 'claude-auto-review', host, 'fy');
+    const actual = await resolveStartAccount(
+      withIds(async () => ids),
+      'claude-auto-review',
+      host,
+      'fy',
+    );
 
     // Assert
     should(actual.account.agent).equal('reviewer');
@@ -168,7 +173,12 @@ describe('resolveStartAccount by a runtime name it had before', () => {
 
     // Act
     const byName = await resolveStartAccount(counted, 'reviewer', host, 'fy');
-    const byId = await resolveStartAccount(withIds(async () => undefined), RUNTIME_ID, host, 'fy');
+    const byId = await resolveStartAccount(
+      withIds(async () => undefined),
+      RUNTIME_ID,
+      host,
+      'fy',
+    );
 
     // Assert
     should(byName.account.id).equal(RUNTIME_ID);
@@ -178,7 +188,14 @@ describe('resolveStartAccount by a runtime name it had before', () => {
 
   it('should refuse as unknown a name that is neither current nor former', async () => {
     // Act
-    const error = await refusal(resolveStartAccount(withIds(async () => ids), 'nobody', host, 'fy'));
+    const error = await refusal(
+      resolveStartAccount(
+        withIds(async () => ids),
+        'nobody',
+        host,
+        'fy',
+      ),
+    );
 
     // Assert
     should(error.failure).equal('unknown_agent');

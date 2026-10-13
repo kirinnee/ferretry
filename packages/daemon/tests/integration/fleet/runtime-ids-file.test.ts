@@ -21,7 +21,10 @@ describe('RuntimeIdsFile', () => {
 
   it('should parse the runtime names and their former names', async () => {
     // Arrange
-    const text = JSON.stringify({ version: 1, runtimes: { reviewer: { id: ID, formerNames: ['claude-auto-review'] } } });
+    const text = JSON.stringify({
+      version: 1,
+      runtimes: { reviewer: { id: ID, formerNames: ['claude-auto-review'] } },
+    });
 
     // Act
     const actual = await new RuntimeIdsFile(files(text), PATH).ids();

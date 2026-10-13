@@ -4519,7 +4519,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   /** Stops the app-server daemon a Codex runtime started, once nothing uses that runtime (U12). */
   const codexAppServers = new CodexAppServerSupervisor({
     inventory: accounts,
-    processes: new HostCodexAppServerProcesses({ platform: process.platform, psExecutable: Bun.which('ps') ?? undefined }),
+    processes: new HostCodexAppServerProcesses({
+      platform: process.platform,
+      psExecutable: Bun.which('ps') ?? undefined,
+    }),
     homesDirectory: join(paths.fleet, 'homes'),
     sleep: milliseconds => Bun.sleep(milliseconds),
   });
@@ -5190,28 +5193,28 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     browserTransport,
     sessionLauncher: new RuntimeSupervisedLauncher(
       new TmuxSessionLifecycleLauncher(
-      // A private absolute socket inside the state home is what keeps managed panes off any
-      // tmux server the host already runs.
-      launchTmux,
-      new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
-      // The pane is handed its own credential — and its own session id, which is what lets a
-      // teammate attribute a message to itself — through `tmux -e`, never through argv: argv is
-      // world-readable on this host through /proc, and the fleet wrappers read the values from their
-      // environment anyway.
-      sessionEnvironments,
-      new DurableTerminalPaneRegistrar(paths.home, launchTmux, stateFiles, paths),
-      lastSnapshots,
-      // What makes the resource-limit settings a capability rather than a stored preference: the
-      // compiled daemon's own launch path asks, per pane, whether this session runs inside a
-      // scope. Supervision and this daemon are never wrapped — see `lib/cgroups/exemption.ts` and
-      // the planner's header — and a launch with limits off is byte-for-byte what it always was.
-      cgroupLaunchPlanner,
-      // Resolved per launch against the store, so a rotated credential reaches the next pane with no
-      // apply in between, and a missing one refuses the start naming the secret.
-      accountLaunchEnvironment,
-      // Attended renewal's second door: a person started this session, so the account's credential is
-      // given its chance to rotate while somebody is still here to be told it could not.
-      accountLaunchRenewal,
+        // A private absolute socket inside the state home is what keeps managed panes off any
+        // tmux server the host already runs.
+        launchTmux,
+        new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+        // The pane is handed its own credential — and its own session id, which is what lets a
+        // teammate attribute a message to itself — through `tmux -e`, never through argv: argv is
+        // world-readable on this host through /proc, and the fleet wrappers read the values from their
+        // environment anyway.
+        sessionEnvironments,
+        new DurableTerminalPaneRegistrar(paths.home, launchTmux, stateFiles, paths),
+        lastSnapshots,
+        // What makes the resource-limit settings a capability rather than a stored preference: the
+        // compiled daemon's own launch path asks, per pane, whether this session runs inside a
+        // scope. Supervision and this daemon are never wrapped — see `lib/cgroups/exemption.ts` and
+        // the planner's header — and a launch with limits off is byte-for-byte what it always was.
+        cgroupLaunchPlanner,
+        // Resolved per launch against the store, so a rotated credential reaches the next pane with no
+        // apply in between, and a missing one refuses the start naming the secret.
+        accountLaunchEnvironment,
+        // Attended renewal's second door: a person started this session, so the account's credential is
+        // given its chance to rotate while somebody is still here to be told it could not.
+        accountLaunchRenewal,
       ),
       codexAppServers,
       { text: async record => (await launchTmux.state(record.config.tmuxSession)).visible },

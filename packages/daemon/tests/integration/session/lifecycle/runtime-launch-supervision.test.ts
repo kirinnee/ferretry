@@ -18,7 +18,9 @@ import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../
 import type { TerminalReapTarget } from '../../../../src/lib/session/reap.ts';
 
 const WRAPPER = '/state/fleet/bin/codex-default';
-const RECORD = { config: { id: 'session-1', agent: WRAPPER, tmuxSession: 'fy-session-1' } } as unknown as SessionLifecycleRecord;
+const RECORD = {
+  config: { id: 'session-1', agent: WRAPPER, tmuxSession: 'fy-session-1' },
+} as unknown as SessionLifecycleRecord;
 const OFFLINE = 'Error: account/read failed: workspace routing discovery failed (code -32603)';
 
 class RecordingLauncher implements SessionLifecycleLauncher {
@@ -139,7 +141,11 @@ describe('RuntimeSupervisedReaper', () => {
   it('should not follow up a session whose launcher cannot be read', async () => {
     // Arrange
     const calls: string[] = [];
-    const unknown = new RuntimeSupervisedReaper({ reap: async () => undefined }, supervisor(calls), async () => undefined);
+    const unknown = new RuntimeSupervisedReaper(
+      { reap: async () => undefined },
+      supervisor(calls),
+      async () => undefined,
+    );
     const broken = new RuntimeSupervisedReaper({ reap: async () => undefined }, supervisor(calls), async () => {
       throw new Error('record unreadable');
     });

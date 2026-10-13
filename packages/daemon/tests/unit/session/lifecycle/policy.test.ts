@@ -417,7 +417,9 @@ describe('session lifecycle policy', () => {
       should(isAgentAccount(lookalike, SETTINGS)).be.false();
       should(isAgentAccount(account('x', { mode: 'auto', wrapper: '/usr/bin/x' }), SETTINGS)).be.false();
       should(unrunnableAccountRefusal(agent, [agent], SETTINGS, 'fy')).be.undefined();
-      should(unrunnableAccountRefusal(lookalike, [lookalike, agent], SETTINGS, 'fy')).match(/Start it on reviewer instead/u);
+      should(unrunnableAccountRefusal(lookalike, [lookalike, agent], SETTINGS, 'fy')).match(
+        /Start it on reviewer instead/u,
+      );
     });
 
     it('should say how to get a runnable account when the host has none', () => {
