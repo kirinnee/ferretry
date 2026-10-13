@@ -48,3 +48,7 @@ Every positive claim sits beside the control that shows what it suppresses.
 - The lock test proves a second runtime waits and adopts the rotated token while the first holds
   the lock. It does not race two refreshes at the same instant.
 - `latest` comes from npm, not nixpkgs, so it measures what a person who installs from npm runs.
+- On macOS the keychain suite runs with the runner's REAL `HOME`: `security` finds the login keychain
+  through the search list under `~/Library`, so under a throwaway `HOME` no keychain is searched at all
+  (measured on the first `macos-15` run). The launch suite keeps a throwaway `HOME`, so there Claude
+  reports signed out; none of the screens it measures depends on being signed in.
