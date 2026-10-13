@@ -33,9 +33,9 @@
  *   politely. It is refused and never downgraded to anything.
  * - No carrier working is an error naming every carrier tried and why. It is never
  *   an empty answer, a `503` this code made up, or a connection presented as live.
- * - `oversize` (§14) is surfaced as a refusal naming the size, never as a
- *   truncated body: a client that rendered half a session list would show a fleet
- *   that does not exist.
+ * - An answer too large for the session (§14) arrives as the daemon's own `502`,
+ *   never as a truncated body: a client that rendered half a session list would
+ *   show a fleet that does not exist.
  */
 
 import { OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE } from '@ferretry/protocol';
