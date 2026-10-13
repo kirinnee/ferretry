@@ -707,9 +707,10 @@ describe('the operator grant layer', () => {
     should(served.status).equal(200);
   });
 
-  it('should present a device on a loopback peer as remote unless the carrier proved the host', async () => {
-    // A PROXIED phone is a loopback peer. Presenting it as local made it `hostLocal` — free to widen its
-    // own grants — and ungoverned. Only the carrier's proof moves it.
+  it('should present every device as remote, even on a host-proven carrier, and only the owner as local', async () => {
+    // A PROXIED phone is a loopback peer, and a tunnel to a loopback-only bind is indistinguishable from
+    // a browser on the host. So no device is ever the owner: only the host's admin token over loopback is
+    // (owner decision, docs/design/zero-trust.md B4).
     // Arrange
     const seen: boolean[] = [];
     const recording: CapabilityGuard = {
@@ -727,9 +728,12 @@ describe('the operator grant layer', () => {
     await dispatcher.dispatch(
       request({ path: '/v1/fleet/plan', device: DEVICE, loopback: true, privilegedLoopback: true }),
     );
+    await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' }, loopback: true }),
+    );
 
     // Assert
-    should(seen).deepEqual([false, true]);
+    should(seen).deepEqual([false, false, true]);
   });
 });
 
@@ -1364,15 +1368,13 @@ describe('presence on opening', () => {
     should(asked).be.empty();
   });
 
-  it('should never ask a device that arrived on the host, which is the way back in when everything else is lost', async () => {
-    const asked: string[] = [];
-
-    const served = await dispatcherWith(wanting(DEVICE.deviceId, asked)).dispatch(
+  it("should ask a browser even when the carrier proved it local: only the owner's token is at the machine", async () => {
+    // B4: a browser is never the owner, wherever it runs. The way back in is `fy` at the machine.
+    const answered = await dispatcherWith(wanting(DEVICE.deviceId)).dispatch(
       request({ path: '/v1/sessions', device: DEVICE, loopback: true, privilegedLoopback: true }),
     );
 
-    should(served.status).equal(200);
-    should(asked).be.empty();
+    should(answered.status).equal(401);
   });
 
   it('should still ask a device on a loopback peer the carrier did not prove is the host', async () => {

@@ -44,6 +44,8 @@ const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => stri
   'not-verified': () => 'That passkey did not check out. Try again.',
   'rotation-required': () =>
     'This device needs a new key before it can confirm, and it makes one with the next confirmation. Try again.',
+  'not-at-machine': () => 'Only the owner at the machine can re-open a passkey window for a device.',
+  'unknown-device': () => 'That machine has no paired device with that name. Pair it first.',
 };
 
 /** The one plain sentence for a failed registration or read — never a status code or a raw error name. */

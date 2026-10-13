@@ -317,15 +317,15 @@ describe('push routes', () => {
     should([key.status, enrol.status]).deepEqual([401, 401]);
   });
 
-  it('should honour an operator who switched device management off for callers who are not on the host', async () => {
+  it('should honour an operator who switched device management off, for a browser on this host too', async () => {
     const subject = new FakePush();
     const surface = await mount(subject, false);
 
     const remote = await surface.dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', device: browser, body: JSON.stringify(body) }),
     );
-    // A caller whose request ARRIVED on this host is ungoverned, so the `pairing` demand this route carries
-    // never reaches the step-up a remote caller is asked for.
+    // A browser on this host is an ordinary governed device (B4): only the host's admin token is the owner,
+    // and it enrols no device of its own. So the operator's decision binds the local browser as well.
     const local = await surface.dispatch(
       request({
         method: 'POST',
@@ -339,6 +339,7 @@ describe('push routes', () => {
 
     should(remote.status).equal(403);
     should(jsonBody(remote).code).match(/^grant_/u);
-    should(local.status).equal(201);
+    should(local.status).equal(403);
+    should(jsonBody(local).code).match(/^grant_/u);
   });
 });

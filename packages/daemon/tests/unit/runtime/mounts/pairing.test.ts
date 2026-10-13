@@ -88,11 +88,13 @@ const admin = { authorization: 'Bearer admin-secret' };
 /** A paired browser: whoever its session proved. It sends no credential of its own. */
 const browser = { deviceId: deviceOneId, appSession: 'app-one' } as const;
 /**
- * A paired browser ON THE HOST: loopback AND the carrier's host proof. Loopback alone is not enough
- * for a device — a phone behind a locally bound proxy is a loopback peer too — so only
- * `privilegedLoopback` makes it ungoverned.
+ * A paired browser ON THE HOST: loopback AND the carrier's host proof. It is still an ordinary governed
+ * device (B4): a tunnel to a loopback-only bind is indistinguishable from it. Only the host's admin token
+ * over loopback is the owner.
  */
 const localBrowser = { device: browser, loopback: true, privilegedLoopback: true } as const;
+/** A device holding a current passkey step-up, for the cases about what a route does, not who may ask. */
+const confirmedStepUp: StepUpWitness = { held: () => true };
 
 /**
  * The mount over the REAL grant subsystem.
@@ -128,24 +130,26 @@ describe('pairing routes', () => {
     should(host.status).equal(404);
   });
 
-  it('should let a BROWSER on this host mint, which the host scope could never do', async () => {
+  it('should let a BROWSER on this host mint once it has confirmed with a passkey, which the host scope never could', async () => {
     // THE WHOLE POINT OF THE SCOPE MOVE. A browser is always a paired device — that is how it got a
     // credential at all — so under `host` scope the UI could not add a second device from the machine
-    // itself. Loopback is ungoverned, so no grant stands in the way of a browser that IS on the host,
-    // whatever the operator has decided about callers who are not.
+    // itself. It is governed like any device (B4), so it confirms with a passkey first, and then mints.
     // Arrange
     const subject = new FakePairing();
     const surface = await mount(subject);
+    const confirmed = await mount(subject, true, confirmedStepUp);
 
     // Act
     const anonymous = await surface.dispatch(request({ method: 'POST', path: '/v1/pair/code', loopback: true }));
-    const fromBrowser = await surface.dispatch(request({ method: 'POST', path: '/v1/pair/code', ...localBrowser }));
+    const unconfirmed = await surface.dispatch(request({ method: 'POST', path: '/v1/pair/code', ...localBrowser }));
+    const fromBrowser = await confirmed.dispatch(request({ method: 'POST', path: '/v1/pair/code', ...localBrowser }));
     const fromHostCli = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
     );
 
     // Assert
     should(anonymous.status).equal(401);
+    should(jsonBody(unconfirmed).code).equal('grant_step_up_required');
     should(fromBrowser.status).equal(201);
     should(fromHostCli.status).equal(201);
     should(fromBrowser.headers.get('cache-control')).equal('no-store');
@@ -172,9 +176,10 @@ describe('pairing routes', () => {
     should(jsonBody(confirmed)).deepEqual(minted);
   });
 
-  it('should ask a caller on the host for no step-up at all, however the operator set pairing', async () => {
-    // Somebody at the machine already has the machine, so neither the grant nor the step-up stands in
-    // front of them — `fy pair` and a local browser reach the same route and get the same code.
+  it('should ask only the owner at the machine for no step-up at all, however the operator set pairing', async () => {
+    // The owner — the host's admin token over loopback — already has the machine, so neither the grant
+    // nor the step-up stands in front of `fy pair`. A browser on this host is not the owner: the
+    // operator's "pairing off" binds it as it binds a phone (B4).
     // Arrange
     const subject = new FakePairing();
     const surface = await mount(subject, false);
@@ -192,8 +197,8 @@ describe('pairing routes', () => {
     );
 
     // Assert
-    should([fromHostCli.status, fromLocalBrowser.status]).deepEqual([201, 201]);
-    should(fromLocalBrowser.body).equal(fromHostCli.body);
+    should(fromHostCli.status).equal(201);
+    should(fromLocalBrowser.status).equal(403);
     should(fromProxiedPhone.status).equal(403);
   });
 
@@ -257,7 +262,7 @@ describe('pairing routes', () => {
 
   it('should report a minted code’s fate without ever returning the code', async () => {
     const subject = new FakePairing();
-    const surface = await mount(subject);
+    const surface = await mount(subject, true, confirmedStepUp);
     const path = `/v1/pair/code/${pairingId}`;
 
     const local = await surface.dispatch(request({ path, ...localBrowser }));
@@ -275,7 +280,7 @@ describe('pairing routes', () => {
 
   it('should revoke a live code by its pairing id and answer 404 for an id it never minted', async () => {
     const subject = new FakePairing();
-    const surface = await mount(subject);
+    const surface = await mount(subject, true, confirmedStepUp);
     const path = `/v1/pair/code/${pairingId}`;
 
     const revoked = await surface.dispatch(request({ method: 'DELETE', path, ...localBrowser }));
@@ -298,7 +303,7 @@ describe('pairing routes', () => {
     // browser cannot point the "this is you" mark at somebody else's grant.
     // Arrange
     const subject = new FakePairing();
-    const surface = await mount(subject);
+    const surface = await mount(subject, true, confirmedStepUp);
 
     // Act
     const fromBrowser = await surface.dispatch(request({ path: '/v1/pair/devices', ...localBrowser }));
@@ -312,19 +317,36 @@ describe('pairing routes', () => {
     // Assert
     should(jsonBody(fromBrowser)).deepEqual({
       devices: [device(deviceOneId, 'Pixel 8'), device(deviceTwoId, 'iPad')],
-      hostLocal: true,
+      // A browser on this host is not the owner (B4), so it is not told it is at the machine.
+      hostLocal: false,
       thisDeviceId: deviceOneId,
     });
     // The host's admin credential is not a paired device, so there is no grant of its own to mark.
     should(jsonBody(fromHostCli).thisDeviceId).be.undefined();
+    should(jsonBody(fromHostCli).hostLocal).be.true();
     should(jsonBody(fromRemote).hostLocal).be.false();
     // A digest is the only thing between a leaked state file and a forged credential. It is not here.
     should(fromBrowser.body).not.containEql('tokenHash');
   });
 
+  it('should never tell a loopback peer behind a local proxy that it is at this machine', async () => {
+    // A remote caller forwarded by `tailscale serve`, `cloudflared` or `ssh -L` arrives from a loopback
+    // peer on a bind that is not loopback-only. It used to read "you are at this machine".
+    // Arrange
+    const confirmed = await mount(new FakePairing(), true, { held: () => true });
+
+    // Act
+    const proxied = await confirmed.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: true }));
+    const hostCli = await confirmed.dispatch(request({ path: '/v1/pair/devices', headers: admin, loopback: true }));
+
+    // Assert
+    should(jsonBody(proxied).hostLocal).be.false();
+    should(jsonBody(hostCli).hostLocal).be.true();
+  });
+
   it('should revoke one device and answer with the remaining list', async () => {
     const subject = new FakePairing();
-    const surface = await mount(subject);
+    const surface = await mount(subject, true, confirmedStepUp);
 
     const removed = await surface.dispatch(
       request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, ...localBrowser }),
@@ -339,7 +361,7 @@ describe('pairing routes', () => {
     should(removed.status).equal(200);
     should(jsonBody(removed)).deepEqual({
       devices: [device(deviceOneId, 'Pixel 8')],
-      hostLocal: true,
+      hostLocal: false,
       thisDeviceId: deviceOneId,
     });
     should(subject.revokedDevices).deepEqual([deviceTwoId]);

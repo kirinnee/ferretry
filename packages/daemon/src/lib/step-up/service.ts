@@ -9,6 +9,7 @@ import {
   type PasskeyView,
   type PresenceGranted,
   type SecuritySettings,
+  type PasskeyWindowOpened,
   type StepUpAssertion,
   type StepUpGranted,
   type StepUpOptions,
@@ -16,6 +17,7 @@ import {
 } from '@ferretry/protocol';
 import { fromBase64Url, toBase64Url } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
+import type { GrantAuditPort } from '../grants/types.ts';
 import { type PasskeyCrypto, verifyAssertion, verifyRegistration } from '../passkeys/index.ts';
 import type { ChallengeLedger, StepUpRegistry, StepUpSubject } from './registry.ts';
 import type {
@@ -53,6 +55,8 @@ export interface StepUpServiceDeps {
   readonly settings?: () => SecuritySettings;
   /** Replacing a device's key inside a step-up. Absent means no rotation is ever asked for. */
   readonly rotation?: DeviceKeyRotationPort;
+  /** Where the owner re-opening a registration window is written down. */
+  readonly audit: Pick<GrantAuditPort, 'record'>;
 }
 
 const CHALLENGE_BYTES = 32;
@@ -79,8 +83,10 @@ export const relyingPartyIdFor = (origin: string): string => new URL(origin).hos
  * attacker tune a forgery and helps nobody else.
  *
  * WHO MAY ADD A PASSKEY is the rule that keeps a thief holding an unlocked app from adding their own:
- * the host, a copy of the app holding a current step-up, or a device with none yet inside the ten
- * minutes after it was paired — the moment its owner is holding it.
+ * a copy of the app holding a current step-up, a device with none yet inside the ten minutes after it
+ * was paired — the moment its owner is holding it — or a device whose window the OWNER re-opened at the
+ * machine. A browser is never the owner, wherever it runs (B4), so that last path is the recovery: a
+ * device that missed its first window or lost its authenticator is not locked out.
  */
 export class StepUpService {
   /**
@@ -88,6 +94,8 @@ export class StepUpService {
    * copy of the app, so it holds across page loads; in memory, so a restart asks again.
    */
   readonly #present = new Map<string, number>();
+  /** Registration windows the owner re-opened, by device: when each closes. Spent by one passkey. */
+  readonly #reopened = new Map<string, number>();
 
   constructor(private readonly deps: StepUpServiceDeps) {}
 
@@ -109,6 +117,25 @@ export class StepUpService {
     return issuedAt + days * DAY_MS;
   }
 
+  /**
+   * The owner, at the machine, re-opens the registration window for one paired device. Ten minutes,
+   * one passkey, audited. Nobody else may: a browser on this host is an ordinary device.
+   */
+  async reopenRegistration(caller: StepUpCaller, deviceId: string): Promise<StepUpOutcome<PasskeyWindowOpened>> {
+    if (!caller.hostLocal) return refuse('not-at-machine');
+    const record = await this.deps.devices.device(deviceId);
+    if (record === undefined) return refuse('unknown-device');
+    const now = this.deps.clock.nowMs();
+    const closesAtMs = now + PASSKEY_REGISTRATION_WINDOW_SECONDS * 1_000;
+    this.#reopened.set(deviceId, closesAtMs);
+    await this.deps.audit.record({
+      actor: caller.actor ?? 'unknown',
+      changes: [`passkey.registration-window=${deviceId}`],
+      at: instant(now),
+    });
+    return { ok: true, value: { deviceId, deviceName: record.name, closesAt: instant(closesAtMs) } };
+  }
+
   /** Whether this copy of the app holds a current step-up. The authorization boundary's one question. */
   held(subject: StepUpSubject): boolean {
     return this.deps.registry.held(subject, this.deps.clock.nowMs());
@@ -125,7 +152,7 @@ export class StepUpService {
     if (device === undefined) return refuse('not-a-device');
     const now = this.deps.clock.nowMs();
     const passkeys = await this.deps.store.list(device.deviceId);
-    const registration = await this.#registration(caller, device, passkeys, now);
+    const registration = await this.#registration(device, passkeys, now);
     const stepUpUntil = this.deps.registry.expiresAt(device, now);
     return {
       ok: true,
@@ -144,7 +171,7 @@ export class StepUpService {
     if (!this.deps.allowedOrigins().includes(origin)) return refuse('origin-not-allowed');
     const now = this.deps.clock.nowMs();
     const passkeys = await this.deps.store.list(device.deviceId);
-    const registration = await this.#registration(caller, device, passkeys, now);
+    const registration = await this.#registration(device, passkeys, now);
     if (registration.kind === 'closed') return refuse('registration-closed');
     if (passkeys.length >= MAX_PASSKEYS_PER_DEVICE) return refuse('too-many-passkeys');
     const record = await this.deps.devices.device(device.deviceId);
@@ -179,7 +206,7 @@ export class StepUpService {
     const challenge = this.deps.challenges.take(device, 'register', now);
     const passkeys = await this.deps.store.list(device.deviceId);
     // Asked again rather than trusted from the options call: the window can close in between.
-    if ((await this.#registration(caller, device, passkeys, now)).kind === 'closed')
+    if ((await this.#registration(device, passkeys, now)).kind === 'closed')
       return refuse('registration-closed');
     if (passkeys.length >= MAX_PASSKEYS_PER_DEVICE) return refuse('too-many-passkeys');
     if (challenge === undefined) return refuse('not-verified');
@@ -207,6 +234,8 @@ export class StepUpService {
       createdAt: instant(now),
     };
     await this.deps.store.add(stored);
+    // A re-opened window admits ONE passkey: the owner opened it for a recovery, not for a session.
+    this.#reopened.delete(device.deviceId);
     // The authenticator just verified the person against a fresh challenge from this daemon, which is
     // exactly what a step-up is — so asking again for the act they registered for would be theatre.
     this.deps.registry.grant(device, now);
@@ -363,6 +392,7 @@ export class StepUpService {
 
   /** Revoking a device forgets its passkeys, its step-ups, its presence and its outstanding challenges. */
   async forgetDevice(deviceId: string): Promise<void> {
+    this.#reopened.delete(deviceId);
     this.deps.registry.forgetDevice(deviceId);
     this.#present.delete(deviceId);
     this.deps.challenges.forgetDevice(deviceId);
@@ -370,13 +400,14 @@ export class StepUpService {
   }
 
   async #registration(
-    caller: StepUpCaller,
     device: StepUpSubject,
     passkeys: readonly StoredPasskey[],
     nowMs: number,
   ): Promise<{ readonly kind: PasskeysView['registration']; readonly closesAtMs?: number }> {
-    if (caller.hostLocal) return { kind: 'host' };
     if (this.deps.registry.held(device, nowMs)) return { kind: 'stepped-up' };
+    const reopened = this.#reopened.get(device.deviceId);
+    if (reopened !== undefined && reopened > nowMs) return { kind: 'reopened', closesAtMs: reopened };
+    if (reopened !== undefined) this.#reopened.delete(device.deviceId);
     if (passkeys.length > 0) return { kind: 'closed' };
     const record = await this.deps.devices.device(device.deviceId);
     if (record === undefined) return { kind: 'closed' };

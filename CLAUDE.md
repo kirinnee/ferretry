@@ -158,11 +158,12 @@ operator believing they configured something they did not. Boot, `fyd --check` a
 each name the resolved path AND the rule that produced it, and **nothing is ever launched to find
 out**. It is discovery only: a start still launches the absolute wrapper the manifest publishes.
 
-`packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
-(`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`) and per axis (_use_ / _configure_). **A
-loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"
-means how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves,
-so any check reading a peer address, a `Host` header or a URL would hand a remote phone full control.
+`packages/daemon` also decides **what every caller but the owner may do**, per capability
+(`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`) and per axis (_use_ / _configure_). **Only
+the host's admin token over loopback is ungoverned** (`arrivedOnHost`): a browser on the host is an ordinary
+governed device, because a tunnel or proxy to `127.0.0.1` is indistinguishable from it. "Loopback" means
+how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves, so any check
+reading a peer address, a `Host` header or a URL would hand a remote phone full control.
 Defaults are permissive and a **passkey step-up** from the paired device guards configure and the
 terminal/browser/pairing uses; a grant can only ever
 narrow what a credential could already do, and an undetermined document fails closed. The contract,

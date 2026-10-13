@@ -82,6 +82,7 @@ const stepUpSubsystem = (): StepUpService =>
     devices: { device: async () => undefined },
     allowedOrigins: () => [],
     relyingPartyName: 'Ferretry',
+    audit: { record: async () => undefined },
   });
 
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
@@ -481,7 +482,7 @@ describe('the mounted daemon surface', () => {
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
-      5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options
+      6 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options, and the owner's re-opened window
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       2; // the passkey confirmation on opening: its options and the verified confirmation (zero-trust B6)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
@@ -522,9 +523,13 @@ describe('the mounted daemon surface', () => {
       'POST /v1/passkeys',
       'POST /v1/step-up/options',
       'POST /v1/step-up',
-      // A confirmation on opening, then the machine's security settings it is tuned by (zero-trust B6).
+      // A confirmation on opening (zero-trust B6).
       'POST /v1/presence/options',
       'POST /v1/presence',
+      // The owner's recovery path: a browser is never at the machine (B4), so only `fy passkey window`
+      // can re-open a device's passkey window. Without it a device past its first window is locked out.
+      'POST /v1/passkeys/registration-window',
+      // The machine's security settings the step-up and presence are tuned by (zero-trust B6).
       'GET /v1/security',
       'PATCH /v1/security',
       // The grant surface. NOTE WHAT IS ABSENT: there is no password to set and nothing to unlock — a

@@ -363,7 +363,7 @@ forged signal on the direct path therefore cannot stop the app from reaching a w
 
 ### B1. Which acts need a step-up
 
-A **governed** caller (any device not on a host-proven carrier) must hold a current step-up for:
+A **governed** caller (every caller but the host's admin token — a browser on the host included, B4) must hold a current step-up for:
 
 | act                                                        | route demand                      |
 | ---------------------------------------------------------- | --------------------------------- |
@@ -424,14 +424,15 @@ cannot be used by a self-hosted copy (`ferretry.example.com`), a local developme
 
 When the browser has no passkey for this origin — or the origin cannot hold one — the step-up prompt
 says it plainly: "This copy of the app at ‹origin› has no passkey for this machine. Add one from a
-device that already has access, or pair this device again at the machine." Never a raw
+device that already has access, or ask the owner to run `fy passkey window <this device>` at the
+machine." Never a raw
 `NotAllowedError`.
 
 **Who may register a passkey**, because a thief holding an unlocked, open app must not be able to add
 their own: (a) a device with **no passkey yet, within 10 minutes of pairing** — the moment the owner
-is holding it; (b) any device **with a current step-up** (adds a second authenticator); (c) the
-**host** (a browser on a host-proven carrier). Lost every passkey? Revoke the device and pair again at
-the machine.
+is holding it; (b) any device **with a current step-up** (adds a second authenticator); (c) a device
+whose window **the owner re-opened at the machine** with `fy passkey window <device>` — ten minutes, one
+passkey, audited (B4). Lost every passkey? That last path recovers it without pairing again.
 
 **As built** (`feat/zt-passkey-ui`), the app's side of registration:
 
@@ -480,14 +481,33 @@ was kept.
   subscription now needs a step-up too. Moving push off `pairing.use` is B5 and is not done here
   ([grants.md](../grants.md) records it).
 
-### B4. Loopback is ungoverned, and it is the recovery path
+### B4. Only the owner's admin token is ungoverned, and it is the recovery path
 
-A caller that **arrived on the host** — the CLI with the admin token, or a browser on a host-proven
-direct carrier (`privilegedLoopback`) — is ungoverned: no step-up, no per-device narrowing. Somebody
-at the machine already has the machine. This is also the only recovery: lost phone, lost passkey or a
-device narrowed to nothing is repaired at the machine, with `fy` or a local browser. The cost is
-stated: a browser tab left open on the host is not protected by any of this. A remote caller arriving
-through a local proxy (`tailscale serve`, `cloudflared`) is NOT host-proven, exactly as today.
+**Owner decision (2026-10-13): "at the machine" means ONLY a caller presenting the owner-only local
+credential** — the CLI with the admin token, over loopback. That caller is ungoverned: no step-up, no
+per-device narrowing. Reading the token needs this machine's disk, so somebody presenting it already has
+the machine.
+
+**A browser on the host is an ordinary governed device**, even on a loopback-only bind. `ssh -L`, `socat`,
+`cloudflared`, `tailscale serve` or any reverse proxy to `127.0.0.1` is indistinguishable from it, so
+treating it as the owner would hand the machine to anybody who can open a tunnel. It pairs like any device
+and confirms the dangerous acts (B1) with a passkey; it can never widen a grant or a setting.
+
+The recovery is at the machine, with `fy`: a lost phone or a device narrowed to nothing is repaired with
+`fy` commands, and a device that missed its first-passkey window or lost its authenticator gets
+**`fy passkey window <device>`**, which re-opens that one device's registration window for ten minutes
+and one passkey (`POST /v1/passkeys/registration-window`, admin token only, audited in the grant
+journal). Without it a local browser past its first window would be locked out of every dangerous act.
+
+As built:
+
+- `arrivedOnHost(request, adminToken) = adminToken && request.loopback` (`packages/daemon/src/lib/api/http.ts`).
+  Every owner rule reads it: governance, widening a grant or a security setting, and the passkey recovery.
+- `privilegedLoopback` survives only for the PLACE: `privilegedOnly` routes (a local terminal attach) read
+  `arrivedPrivileged` = `privilegedLoopback || arrivedOnHost`, and nothing it admits grants authority.
+- `PasskeysView.registration` lost `host` and gained `reopened`.
+- The device list's `hostLocal` reads `arrivedOnHost` too; it used to read the bare loopback flag, which
+  told a caller behind a local proxy it was at the machine.
 
 ### B5. Least-privilege defaults
 
@@ -504,8 +524,8 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   those routes carry no capability demand at all, so any paired device can run a command through
   them; that is closed. The "before you add capability seven" questions in grants.md are answered in
   the same PR.
-- **Widening a device** is done at the machine (`fy device grant <device> <capability> --use`, or the
-  local browser), or remotely by a device that holds `pairing.configure` **and** the capability being
+- **Widening a device** is done at the machine (`fy device grant <device> <capability> --use`; a browser
+  on the host is a device like any other, B4), or remotely by a device that holds `pairing.configure` **and** the capability being
   granted **and** a current step-up. No device can grant what it does not hold, so nothing escalates.
 - **Narrowing** a device (including oneself) needs a step-up and nothing else — never harder than
   widening.
@@ -557,8 +577,8 @@ action on the `pairing` capability.
 - **Narrowing** (a smaller window or period, `presenceOnOpen` → on) is allowed remotely by a device
   holding `pairing.configure` **with a current step-up**.
 - **Widening** (a larger window or period, `presenceOnOpen` → off) is allowed **only at the machine**
-  — a loopback caller, the CLI, or the local browser. A remote widen is `403` with a sentence naming
-  the command to run at the machine.
+  — the owner's admin token over loopback, i.e. the CLI (B4); a browser on the host is a device like any
+  other. A remote widen is `403` with a sentence naming the command to run at the machine.
 - A request that changes several fields is judged field by field and refused whole if any field
   widens remotely.
 - Where it lives: `<FY_HOME>/state/security.json` (`schemaVersion: 1`, written atomically, mode
@@ -605,7 +625,7 @@ small PR E immediately after it.
   `GET /v1/security`, `POST /v1/presence/options` and `POST /v1/presence`. A confirmation is held in the
   daemon's memory per **device** for `presenceValidityHours`, so it survives page loads and ends on a
   restart or a revoke. Registering a first passkey counts as a confirmation, so a device on a machine
-  with presence on can still get in. It is never a step-up. A device on the host (B4) is not asked. The
+  with presence on can still get in. It is never a step-up. Every browser is asked, on the host too: only the owner's admin token is at the machine (B4). The
   app shows "Confirm it's you" with the same dialog component as the step-up prompt and re-sends once.
 - **Rotation.** `authenticated` and `stream-opened` carry `rotateBy` (key age counted from the last
   `keyRotatedAt` on the device record, or from pairing). Past it, `POST /v1/step-up` without a
@@ -711,8 +731,9 @@ Said plainly, because the useful property is narrower than "zero trust" sounds:
   when asked. Revoke the device first.
 - **The 30-day idle window.** A device used at least once a month never expires; revocation is the
   control for a lost device, and the new-device alert is the control for an added one.
-- **Somebody at the machine.** Loopback is ungoverned by design (B4); an SSH tunnel to the port is
-  loopback.
+- **Somebody at the machine.** The host's admin token is ungoverned by design (B4), so anybody who can
+  read it — anybody at an unlocked keyboard — has the machine. A browser or an SSH tunnel is not: both are
+  governed devices.
 - **Relay metadata.** A relay still sees fingerprint, IPs, timing and frame sizes
   (`relay-protocol.md` §10); this design hides the device id from it, nothing more.
 - **Denial of service.** A relay can drop traffic; a guesser can spend a pairing code's relay budget.

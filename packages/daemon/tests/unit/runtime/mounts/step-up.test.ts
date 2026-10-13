@@ -119,6 +119,7 @@ function mount(world: World = {}) {
   const store = world.store ?? new MemoryStore();
   const verifier = new FakeVerifier();
   const registry = newRegistry();
+  const audited: { readonly actor: string; readonly changes: readonly string[] }[] = [];
   const service = new StepUpService({
     store,
     verifier,
@@ -136,13 +137,18 @@ function mount(world: World = {}) {
     relyingPartyName: 'Ferretry',
     ...(world.settings === undefined ? {} : { settings: () => ({ ...DEFAULT_SECURITY_SETTINGS, ...world.settings }) }),
     ...(world.rotation === undefined ? {} : { rotation: world.rotation }),
+    audit: {
+      record: async entry => {
+        audited.push(entry);
+      },
+    },
   });
   const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
   const surface = (async () => {
     await grants.refresh();
     return new ApiDispatcher(new ApiRouter(stepUpRoutes(service)), credentials, grants, undefined, service);
   })();
-  return { store, verifier, registry, service, surface };
+  return { store, verifier, registry, service, surface, audited };
 }
 
 const json = (value: unknown): string => JSON.stringify(value);
@@ -161,6 +167,12 @@ const originBody = json({ origin: ORIGIN });
 
 const asDevice = { device: browser } as const;
 const asAdminNoDevice = { headers: admin, loopback: true } as const;
+const windowBody = json({ deviceId });
+/** The owner, at the machine, re-opens this device's passkey window: the only recovery path (B4). */
+const reopenAsOwner = (dispatcher: ApiDispatcher) =>
+  dispatcher.dispatch(
+    request({ method: 'POST', path: '/v1/passkeys/registration-window', body: windowBody, ...asAdminNoDevice }),
+  );
 
 /** Every route, with a body valid for it, for the refusals that do not depend on which route spoke. */
 const ROUTES = [
@@ -314,19 +326,14 @@ describe('step-up routes', () => {
   });
 
   it('should refuse a ninth passkey: 409 step_up_too_many_passkeys', async () => {
-    // Arrange — the host may always add, so the cap is the only thing left to refuse
+    // Arrange — a window the owner re-opened admits a passkey, so the cap is the only thing left to refuse
     const full = Array.from({ length: MAX_PASSKEYS_PER_DEVICE }, (_, index) => stored(b64([index, 1])));
     const dispatcher = await mount({ store: new MemoryStore(full) }).surface;
+    await reopenAsOwner(dispatcher);
 
     // Act
     const options = await dispatcher.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/passkeys/options',
-        body: originBody,
-        privilegedLoopback: true,
-        ...asDevice,
-      }),
+      request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, ...asDevice }),
     );
 
     // Assert
@@ -357,14 +364,9 @@ describe('step-up routes', () => {
     const { surface, verifier } = mount({ store: held });
     const dispatcher = await surface;
     const registerAfterOptions = async () => {
+      await reopenAsOwner(dispatcher);
       await dispatcher.dispatch(
-        request({
-          method: 'POST',
-          path: '/v1/passkeys/options',
-          body: originBody,
-          privilegedLoopback: true,
-          ...asDevice,
-        }),
+        request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, ...asDevice }),
       );
     };
     const stepUpAfterOptions = async () => {
@@ -386,7 +388,7 @@ describe('step-up routes', () => {
     await registerAfterOptions();
     verifier.registrationVerdict = 'refuse';
     const badAttestation = await dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/passkeys', body: registrationBody, privilegedLoopback: true, ...asDevice }),
+      request({ method: 'POST', path: '/v1/passkeys', body: registrationBody, ...asDevice }),
     );
 
     // Assert
@@ -415,35 +417,64 @@ describe('step-up routes', () => {
     }
   });
 
-  it('should take host locality from how the request ARRIVED, never from a header or a body', async () => {
-    // Arrange — a device with no step-up, paired long ago: only the host may add a passkey
-    const dispatcher = await mount({ pairedAgoMs: 3_600_000 }).surface;
+  it('should let only the owner at the machine re-open a window: never a browser, wherever it runs', async () => {
+    // Arrange — a device with no step-up, paired long ago, so its first window is long closed
+    const { surface, audited } = mount({ pairedAgoMs: 3_600_000 });
+    const dispatcher = await surface;
     const lookalike = { 'x-forwarded-for': '127.0.0.1', host: 'localhost' };
+    const asBrowser = (arrival: Record<string, unknown>) =>
+      dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/passkeys/registration-window', body: windowBody, ...asDevice, ...arrival }),
+      );
 
-    // Act
-    const proved = await dispatcher.dispatch(request({ path: '/v1/passkeys', privilegedLoopback: true, ...asDevice }));
-    const loopbackOnly = await dispatcher.dispatch(request({ path: '/v1/passkeys', loopback: true, ...asDevice }));
-    const spoofed = await dispatcher.dispatch(request({ path: '/v1/passkeys', headers: lookalike, ...asDevice }));
+    // Act — a browser on a host-proven carrier, on a loopback peer, behind a spoofed header; then the owner
+    const refused = [
+      await asBrowser({ loopback: true, privilegedLoopback: true }),
+      await asBrowser({ loopback: true }),
+      await asBrowser({ headers: lookalike }),
+    ];
+    const before = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
+    const opened = await reopenAsOwner(dispatcher);
+    const after = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
+    const stranger = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/passkeys/registration-window',
+        body: json({ deviceId: `fy_device_id_${'z'.repeat(22)}` }),
+        ...asAdminNoDevice,
+      }),
+    );
 
     // Assert
-    should(jsonBody(proved)).containEql({ registration: 'host' });
-    should(jsonBody(loopbackOnly)).containEql({ registration: 'closed' });
-    should(jsonBody(spoofed)).containEql({ registration: 'closed' });
+    for (const response of refused)
+      should([response.status, jsonBody(response).code]).deepEqual([403, stepUpRefusalCode('not-at-machine')]);
+    should(jsonBody(before)).containEql({ registration: 'closed' });
+    should(opened.status).equal(200);
+    should(jsonBody(opened)).containEql({ deviceId, deviceName: 'Pixel 8' });
+    should(jsonBody(after)).containEql({ registration: 'reopened' });
+    should([stranger.status, jsonBody(stranger).code]).deepEqual([404, stepUpRefusalCode('unknown-device')]);
+    // Audited once: the refusals changed nothing.
+    should(audited.map(entry => entry.changes)).deepEqual([[`passkey.registration-window=${deviceId}`]]);
   });
 
-  it('should let a host-proven request register where the same device off the host could not', async () => {
+  it('should admit exactly one passkey through a re-opened window', async () => {
     // Arrange
     const dispatcher = await mount({ pairedAgoMs: 3_600_000 }).surface;
-    const host = { privilegedLoopback: true, ...asDevice } as const;
+    await reopenAsOwner(dispatcher);
 
     // Act
-    await dispatcher.dispatch(request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, ...host }));
+    await dispatcher.dispatch(request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, ...asDevice }));
     const registered = await dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/passkeys', body: registrationBody, ...host }),
+      request({ method: 'POST', path: '/v1/passkeys', body: registrationBody, ...asDevice }),
+    );
+    // Another copy of the app on the same device holds no step-up: the window, not the step-up, is asked.
+    const otherTab = await dispatcher.dispatch(
+      request({ path: '/v1/passkeys', device: { deviceId, appSession: 'app-two' } }),
     );
 
     // Assert
     should(registered.status).equal(201);
+    should(jsonBody(otherTab)).containEql({ registration: 'closed' });
   });
 
   it('should keep one copy of the app’s step-up from covering another’s', async () => {
@@ -594,7 +625,8 @@ describe('step-up routes: presence on opening (B6)', () => {
     should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
   });
 
-  it('should ask a caller on the host for nothing, and never ask a caller that is not a device', async () => {
+  it('should ask a browser the carrier proved local, and never ask a caller that is not a device', async () => {
+    // B4: a browser is never at the machine, so presence is asked of it wherever it runs.
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
 
@@ -607,7 +639,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     );
 
     // Assert
-    should(onHost.status).equal(200);
+    should([onHost.status, jsonBody(onHost).code]).deepEqual([401, PRESENCE_REQUIRED_CODE]);
     should([noDevice.status, jsonBody(noDevice).code]).deepEqual([400, stepUpRefusalCode('not-a-device')]);
   });
 

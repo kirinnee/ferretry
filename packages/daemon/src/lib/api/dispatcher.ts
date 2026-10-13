@@ -19,6 +19,7 @@ import {
   type ApiRequest,
   type ApiResponse,
   arrivedOnHost,
+  arrivedPrivileged,
   headerValue,
   queryValue,
   type RouteParameters,
@@ -177,13 +178,13 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: methodNotAllowedResponse(request.method, request.path, lookup.allowed),
     };
 
-  // Host arrival is PROVED, never inferred from a loopback peer: a remote caller forwarded through a
-  // locally bound proxy is a loopback peer too. Decided once so the privileged-arrival check and the
-  // grant presentation below cannot disagree about where the same request came from.
+  // The OWNER is the host's admin token over loopback, never a loopback peer on its own: a tunnel or
+  // proxy to 127.0.0.1 is a loopback peer too. A `privilegedOnly` route asks the separate question of
+  // where the request arrived, which a local browser on a loopback-only bind also answers.
   const onHost = arrivedOnHost(request, authentication.tokenClass === 'admin');
   if (
     !meetsMinimum(authentication.tokenClass, lookup.route.minimum) ||
-    (lookup.route.privilegedOnly === true && !onHost)
+    (lookup.route.privilegedOnly === true && !arrivedPrivileged(request, authentication.tokenClass === 'admin'))
   )
     return {
       kind: 'refused',
@@ -196,9 +197,9 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
 
   // A MACHINE THAT WANTS A PERSON ON OPENING serves a device nothing until one has confirmed. The
   // session is sound, so this is 401 rather than a refusal of the device, and the few routes a device
-  // needs to GIVE that confirmation are exempt. Asked only of a proven device off this host: the CLI
-  // and a warden have no passkey to give, and a browser on the host is ungoverned (B4) — it is the
-  // way back in when everything else is lost.
+  // needs to GIVE that confirmation are exempt. Asked only of a proven device: the CLI and a warden
+  // have no passkey to give. `onHost` is the owner's admin token over loopback, which no device holds,
+  // so every browser is asked — the machine itself, through `fy`, is the way back in (B4).
   if (
     device !== undefined &&
     !onHost &&

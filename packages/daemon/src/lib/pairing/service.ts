@@ -374,8 +374,9 @@ export class PairingService {
    * A live code, replacing any code still outstanding.
    *
    * IT ASKS NOTHING ABOUT THIS MACHINE. Who may mint is the `pairing` capability's question, answered
-   * at the boundary before this runs: a caller on the host is ungoverned, and a caller off it needs the
-   * grant AND a live passkey step-up from the device already paired. The code itself is single-use and
+   * at the boundary before this runs: the owner's admin token at the machine is ungoverned, and every
+   * other caller — a browser on the host included — needs the grant AND a live passkey step-up from the
+   * device already paired. The code itself is single-use and
    * short-lived, so there is no machine-level precondition left for this method to check.
    */
   mint(): PairingCodeMintResponse {

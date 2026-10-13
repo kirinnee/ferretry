@@ -23,6 +23,8 @@ import {
   PasskeysViewSchema,
   PasskeyViewSchema,
   PresenceGrantedSchema,
+  PasskeyWindowOpenedSchema,
+  PasskeyWindowRequestSchema,
   StepUpAssertionSchema,
   StepUpGrantedSchema,
   StepUpOptionsSchema,
@@ -59,6 +61,11 @@ const REFUSALS: Readonly<Record<StepUpRefusal, { readonly status: number; readon
     status: 403,
     message: "this device's key is due for replacement, and this machine replaces it with the next passkey confirmation",
   },
+  'not-at-machine': {
+    status: 403,
+    message: 'only the owner at the machine can re-open a passkey window; run `fy passkey window <device>` there',
+  },
+  'unknown-device': { status: 404, message: 'no paired device has that id; `fy pair` lists none, so pair it first' },
 };
 
 const refusal = (reason: StepUpRefusal): ApiResponse => {
@@ -66,10 +73,11 @@ const refusal = (reason: StepUpRefusal): ApiResponse => {
   return errorResponse(status, message, stepUpRefusalCode(reason));
 };
 
-const caller = ({ request, credential }: RouteContext): StepUpCaller => ({
+const caller = ({ request, credential, actor }: RouteContext): StepUpCaller => ({
   ...(request.device === undefined ? {} : { device: request.device }),
   ...(request.transcriptHash === undefined ? {} : { transcriptHash: request.transcriptHash }),
   hostLocal: arrivedOnHost(request, credential?.tokenClass === 'admin'),
+  ...(actor === undefined ? {} : { actor }),
 });
 
 const answer = <T>(outcome: StepUpOutcome<T>, parse: (value: T) => unknown, status = 200): ApiResponse =>
@@ -154,6 +162,21 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       handle: async context => {
         const body = await parseBody(context.request, StepUpAssertionSchema);
         return answer(await service.presence(caller(context), body), value => PresenceGrantedSchema.parse(value));
+      },
+    },
+    {
+      // The owner's recovery path (B4): a browser is never at the machine, so a device that missed its
+      // first window or lost its authenticator would otherwise never step up again. The service refuses
+      // anybody but the owner, whatever the route's minimum lets through.
+      method: 'POST',
+      path: '/v1/passkeys/registration-window',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const body = await parseBody(context.request, PasskeyWindowRequestSchema);
+        return answer(await service.reopenRegistration(caller(context), body.deviceId), value =>
+          PasskeyWindowOpenedSchema.parse(value),
+        );
       },
     },
   ];

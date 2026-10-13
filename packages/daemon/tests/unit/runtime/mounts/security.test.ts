@@ -145,7 +145,8 @@ describe('the read', () => {
     });
   });
 
-  it('should show the host that it may loosen, over the admin token and from a proved local browser', async () => {
+  it("should show the owner's admin token that it may loosen, and a browser even on the host that it may not", async () => {
+    // B4: only the owner's admin token over loopback is at the machine; a browser never is.
     // Arrange
     const { dispatcher } = await mount();
 
@@ -155,7 +156,7 @@ describe('the read', () => {
 
     // Assert
     should(cli.mayWiden).be.true();
-    should(browser.mayWiden).be.true();
+    should(browser.mayWiden).be.false();
   });
 
   it('should not take a merely loopback peer for the host', async () => {
@@ -358,16 +359,16 @@ describe('who may change what, over the route', () => {
     should(audited[0]?.actor).equal('admin-cli');
   });
 
-  it('should let a browser the carrier proved local loosen, with no step-up', async () => {
+  it('should not let a browser loosen even when the carrier proved it local, however stepped up', async () => {
     // Arrange
-    const { dispatcher, service } = await mount();
+    const { dispatcher, service } = await mount({ stepUps: witnessFor(PHONE) });
 
     // Act
     const answered = await dispatcher.dispatch(fromHostBrowser('PATCH', { presenceValidityHours: 24 }));
 
     // Assert
-    should(answered.status).equal(200);
-    should(service.current().presenceValidityHours).equal(24);
+    should([answered.status, jsonBody(answered).code]).deepEqual([403, SECURITY_WIDEN_REFUSED_CODE]);
+    should(service.current().presenceValidityHours).equal(12);
   });
 
   it('should not let a merely loopback peer loosen, however stepped up', async () => {
