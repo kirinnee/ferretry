@@ -3,6 +3,7 @@ import {
   ConversationIdSchema,
   conversationFromArguments,
   conversationLeaseRefusal,
+  HISTORY_CLAIM_HELD_EXIT_CODE,
   type HarnessKind,
 } from '@ferretry/fleet';
 
@@ -36,8 +37,9 @@ export interface HistoryContext {
  * A wrapper whose arguments name a conversation runs this before `exec`. It claims the lease for the
  * pid it is about to become, so a person's own `claude --resume <id>` and a daemon session can never
  * write one conversation at once. Claimed, or nothing to claim, is silent: a wrapper prints nothing
- * on the way to its harness. Held is one sentence naming the holder and a non-zero exit, which the
- * wrapper turns into not launching.
+ * on the way to its harness. Held is one sentence naming the holder and the exit status
+ * `HISTORY_CLAIM_HELD_EXIT_CODE`, the ONLY status the wrapper turns into not launching: every other
+ * failure of `fy` launches anyway.
  */
 export class HistoryController {
   constructor(
@@ -64,7 +66,7 @@ export class HistoryController {
     );
     if (outcome.kind === 'claimed') return;
     this.io.error(conversationLeaseRefusal(outcome.lease));
-    this.io.setExitCode(1);
+    this.io.setExitCode(HISTORY_CLAIM_HELD_EXIT_CODE);
   }
 
   private conversationOf(request: HistoryClaimRequest): string | undefined {

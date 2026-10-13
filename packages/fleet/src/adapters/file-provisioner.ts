@@ -58,6 +58,24 @@ type CodexSqliteMarker = z.output<typeof CodexSqliteMarkerSchema>;
 
 const MODE_BITS = 0o7777;
 
+const MaterialisedRecordSchema = z.strictObject({
+  version: z.literal(1),
+  entries: z.array(z.string()).readonly(),
+});
+
+/** Parsed JSON, or `undefined` for text that is not JSON. */
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** A name that is exactly one entry of its directory: never a path that could reach outside it. */
+const isSingleComponent = (name: string): boolean =>
+  name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes(path.sep);
+
 /**
  * Drop a staged replacement without ever becoming the reported failure.
  *
@@ -486,6 +504,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // instructions. `stat` rather than `lstat`, because the destination has to resolve to something
       // real — a link to a link to nothing is still nothing.
       if (operation.kind === 'copy' || operation.kind === 'symlink') {
+        // A credential link is the one declared exception: an empty slot's file does not exist until
+        // somebody signs in, and the harness writes it through the link.
+        if (operation.kind === 'symlink' && operation.dangling === true) continue;
         if (!pending.has(path.resolve(operation.source))) await stat(operation.source);
         continue;
       }
@@ -632,7 +653,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     if (operation.kind === 'prune-directory') {
-      await this.pruneDirectory(operation.path, new Set(operation.keep), journal);
+      if (operation.only === undefined) await this.pruneDirectory(operation.path, new Set(operation.keep), journal);
+      else await this.retireEntries(operation.path, operation.only, new Set(operation.keep), operation.record, journal);
       // Deliberately no names: the caller collects what it reports as pruned WRAPPERS, and a removed
       // skill item is not one. What was removed is visible where a person decides — the dry run states
       // the directory and the keep set it is bounded to.
@@ -656,6 +678,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // were there when this operation took ownership of the destination.
       const content = await this.resolveSettings(journal.backupOf(operation.path), operation.format, operation.layers, {
         preserveExisting: operation.preserveExisting,
+        replaceKeys: operation.replaceKeys ?? [],
       });
       await mkdir(path.dirname(operation.path), { recursive: true });
       await this.writeFileAtomically(operation.path, content, operation.mode, journal);
@@ -878,6 +901,51 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
   }
 
+  /**
+   * Remove the named direct children of a directory the plan shares with the harness and the person,
+   * each only on evidence it is the plan's own: a symbolic link, or an entry the previous apply's
+   * record names. A regular file or a directory with neither — a person's own `CLAUDE.md` — stays.
+   */
+  private async retireEntries(
+    directory: string,
+    only: readonly string[],
+    keep: ReadonlySet<string>,
+    record: string | undefined,
+    journal: FileMutationJournal,
+  ): Promise<void> {
+    const recorded = record === undefined ? new Set<string>() : await this.recordedEntries(record);
+    for (const entry of only) {
+      if (keep.has(entry) || isMutationReservedName(entry) || !isSingleComponent(entry)) continue;
+      const target = path.join(directory, entry);
+      let information: Stats;
+      try {
+        information = await lstat(target);
+      } catch (error) {
+        if (isMissing(error)) continue;
+        throw error;
+      }
+      if (!information.isSymbolicLink() && !recorded.has(entry)) continue;
+      await journal.capture(target);
+    }
+  }
+
+  /**
+   * What the previous apply recorded putting in a directory. No record, or one that cannot be read
+   * as one, is an empty record: the cost is a leftover the next apply cannot prove is its own, which
+   * is the safe direction to be wrong in.
+   */
+  private async recordedEntries(record: string): Promise<ReadonlySet<string>> {
+    let document: string | undefined;
+    try {
+      document = await this.readRegularText(record, 'materialised record');
+    } catch {
+      return new Set();
+    }
+    if (document === undefined) return new Set();
+    const parsed = MaterialisedRecordSchema.safeParse(safeJson(document));
+    return new Set(parsed.success ? parsed.data.entries : []);
+  }
+
   private async stillCarries(backup: string | undefined, marker: string): Promise<boolean> {
     if (backup === undefined) return false;
     const stats = await lstat(backup);
@@ -889,12 +957,17 @@ export class FileFleetProvisioner implements FleetProvisioner {
     previous: string | undefined,
     format: SettingsFormat,
     layers: readonly SettingsLayerSource[],
-    options: { readonly preserveExisting: boolean },
+    options: { readonly preserveExisting: boolean; readonly replaceKeys: readonly string[] },
   ): Promise<string> {
     const resolved: SettingsObject[] = [];
     if (options.preserveExisting && previous !== undefined) {
       const existing = await this.readExistingSettings(previous, format);
-      if (existing !== undefined) resolved.push(existing);
+      // A replaced key is the plan's, all of it, so nothing of the old value may survive the merge.
+      if (existing !== undefined) {
+        resolved.push(
+          Object.fromEntries(Object.entries(existing).filter(([key]) => !options.replaceKeys.includes(key))),
+        );
+      }
     }
     for (const layer of layers) {
       resolved.push(
