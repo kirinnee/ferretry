@@ -63,6 +63,7 @@ import {
 import {
   ApiError,
   type ApiRoute,
+  arrivedOnHost,
   type CapabilityDemand,
   type CapabilityPresentation,
   DEVICE_ACTOR_PREFIX,
@@ -145,9 +146,11 @@ async function devicesView(
   const thisDeviceId = callerDeviceId(context.actor);
   return PairedDevicesViewSchema.parse({
     devices: await subsystem.devices(),
-    // `arrivedOnHost`'s answer, as the boundary computed it — never `request.loopback`: a relayed hop or a
-    // caller behind a locally bound proxy is a loopback peer and is NOT at the machine.
-    hostLocal: presentationIn(context).loopback,
+    // The SAME answer every other host-locality rule uses, never a loopback peer on its own: a remote
+    // caller forwarded through a locally bound proxy (`tailscale serve`, `cloudflared`, `ssh -L`)
+    // arrives from a loopback peer too, and was told it was at this machine. Nothing derived from an
+    // address, a `Host` header or the URL is consulted either: a relayed hop terminates on this host.
+    hostLocal: arrivedOnHost(context.request, context.credential?.tokenClass === 'admin'),
     ...(thisDeviceId === undefined ? {} : { thisDeviceId }),
     mayWiden: grants.mayWiden(presentationIn(context)),
   });
