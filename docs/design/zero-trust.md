@@ -548,11 +548,11 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   (`grant_device_not_granted`), asked after the daemon-wide half.
 - **The default device holds `fleet.use` only** (`DEFAULT_DEVICE_GRANTS`). **`fy pair --full`** (owner
   decision, 2026-10-13) mints a code whose redemption grants `FULL_DEVICE_GRANTS` instead; the mint request
-  is `{ grants: "full" }`, it is refused unless the request `arrivedOnHost`, and the pairing service keeps
+  is `{ grants: "full" }`, it is refused unless the request `arrivedOnHost` (the owner's admin token, B4 — a browser on the host is refused), and the pairing service keeps
   the choice with the live code — the link carries nothing extra.
 - **Changing one device** is `PATCH /v1/pair/devices/:deviceId/grants` (demand `pairing.use`), judged by
   `judgeDeviceGrantChange` in `src/lib/grants/policy.ts` and applied by `DeviceGrantService`: host —
-  anything; remote — a widen only of an axis the caller holds effectively (daemon-wide ∧ its own) and only
+  anything; any device (a browser on the host included) — a widen only of an axis the caller holds effectively (daemon-wide ∧ its own) and only
   with `pairing.configure`; every remote change needs a step-up; a patch with one illegal widen is refused
   whole before any step-up is asked. `configure ⇒ use` is kept true of the result. A change is written to
   `devices.json` before the live registry, calls `recheckAll` so open streams are re-asked, and is audited

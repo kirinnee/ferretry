@@ -101,16 +101,17 @@ contract is [relay-protocol.md](relay-protocol.md) §13.
 **A newly paired device can read the fleet and chat with sessions — `fleet.use` — and nothing else**
 ([grants.md](grants.md), "Per-device grants"; [design/zero-trust.md](design/zero-trust.md) B5). Terminals,
 files, the browser, secrets, the warden, pairing and every `configure` axis start off for it, and are
-widened one device at a time: `fy device grant <device> <capability> --use` at the machine, the toggles in
-Settings → Add a device on a browser at the machine, or remotely by a device that holds `pairing.configure`
-and the capability it is giving, with a step-up.
+widened one device at a time: by the owner with `fy device grant <device> <capability> --use` (the admin
+token, the only ungoverned caller — B4), or from any browser's Settings → Add a device toggles by a device
+that holds `pairing.configure` and the capability it is giving, with a step-up. A browser on the host is a
+governed device like any other, so its toggles follow the same rule.
 
 **`fy pair --full`** mints a code whose redemption gives the device every capability on both axes, for the
 owner's own browser, which would otherwise need a grant per capability. Its rules:
 
 - **Host-only.** `POST /v1/pair/code` with `{ "grants": "full" }` is refused (`403 grant_forbidden`) unless the
-  request arrived on the host, decided by `arrivedOnHost` like every other "at the machine" rule. A remote
-  device could otherwise mint a code giving a new device more than it holds itself.
+  request `arrivedOnHost` — the owner's admin token over loopback, i.e. `fy pair --full`. A browser on the
+  host is refused too (B4). Any device could otherwise mint a code giving a new device more than it holds.
 - **The code carries the choice, the link does not.** The daemon holds the grant set with the live code and
   applies it at redemption; the QR stays the one-version `v1` fragment, so nothing about what a code grants
   is visible to whoever reads it. A newer mint replaces the code and its choice together.

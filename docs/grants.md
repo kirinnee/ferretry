@@ -370,13 +370,13 @@ list. At the machine — `fy` with the admin token, the only ungoverned caller (
 Add a device shows each device's capabilities as toggles; a browser is a governed device wherever it runs, so
 its toggles follow the remote column below — a toggle it may not turn on says so, with the `fy` command.
 
-| change                        | on the host | a remote device                                                                        |
-| ----------------------------- | ----------- | -------------------------------------------------------------------------------------- |
-| turn an axis **on** (widen)   | allowed     | only an axis it holds itself, effective, **and** it holds `pairing.configure`; step-up |
-| turn an axis **off** (narrow) | allowed     | allowed with a step-up — any device, its own included                                  |
+| change                        | the owner (`fy`) | any device (a browser on the host too)                                                 |
+| ----------------------------- | ---------------- | -------------------------------------------------------------------------------------- |
+| turn an axis **on** (widen)   | allowed          | only an axis it holds itself, effective, **and** it holds `pairing.configure`; step-up |
+| turn an axis **off** (narrow) | allowed          | allowed with a step-up — any device, its own included                                  |
 
 - **No device can grant what it does not hold**, so nothing escalates: the most a device can give another
-  is a copy of what it has. A remote widen of anything else is `403 grant_forbidden`, naming the host command.
+  is a copy of what it has. A widen of anything else by a device is `403 grant_forbidden`, naming the host command.
 - **Narrowing is never harder than widening.** The route demands `pairing.use`, so any device holding that
   — and a step-up — can narrow. A device with no `pairing.use` (the default) cannot reach the route at all;
   its own grants are narrowed at the machine or by a device that may manage devices.
