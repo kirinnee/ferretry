@@ -22,7 +22,11 @@
  * Sign-out and labels are not here: they change the machine's setup, so they are reviewed changes
  * (`POST /v1/fleet/proposals`), and the list carries the consequence sentence a confirm card shows.
  */
-import { FleetCredentialCheckRequestSchema, FleetCredentialListSchema, FleetCredentialViewSchema } from '@ferretry/protocol';
+import {
+  FleetCredentialCheckRequestSchema,
+  FleetCredentialListSchema,
+  FleetCredentialViewSchema,
+} from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter } from '../../api/http.ts';

@@ -333,7 +333,8 @@ export class HarnessLoginService {
 
   /** Start one identity's login, confirmed against the operator password when this caller owes one. */
   async start(request: HarnessLoginStartRequest, governance: CallerGovernance | undefined): Promise<HarnessLoginFlow> {
-    if (request.credentialId !== undefined) return await this.#startCredential(request.credentialId, request, governance);
+    if (request.credentialId !== undefined)
+      return await this.#startCredential(request.credentialId, request, governance);
     // The schema admits exactly one of the two ids, so an account id is present here.
     const accountId = request.accountId ?? '';
     const { identity } = await this.#authorize({ ...request, accountId }, governance, SIGN_IN);
@@ -363,7 +364,8 @@ export class HarnessLoginService {
     try {
       target = await targets.target(credentialId);
     } catch (error) {
-      if (error instanceof FleetCredentialRefusal) throw new HarnessLoginRefusal('fleet_login_unavailable', error.message);
+      if (error instanceof FleetCredentialRefusal)
+        throw new HarnessLoginRefusal('fleet_login_unavailable', error.message);
       throw error;
     }
     if (target.kind === 'refused') throw new HarnessLoginRefusal('fleet_login_unavailable', target.reason);
@@ -704,7 +706,10 @@ export class HarnessLoginService {
     try {
       const binary = this.options.locate?.(target.harness);
       if (binary === undefined) {
-        this.#end(record, `the ${target.harness} command is not installed on this machine, so there is nothing to sign in with`);
+        this.#end(
+          record,
+          `the ${target.harness} command is not installed on this machine, so there is nothing to sign in with`,
+        );
         return;
       }
       await target.prepare();
@@ -721,7 +726,10 @@ export class HarnessLoginService {
       record.child = undefined;
       if (settled(record.stage)) return;
       if (!published(record.stage)) {
-        this.#end(record, `this host's ${record.stage.harness} did not offer a sign-in that can be driven from a browser`);
+        this.#end(
+          record,
+          `this host's ${record.stage.harness} did not offer a sign-in that can be driven from a browser`,
+        );
         return;
       }
       const ending = this.#ending(record.stage, { exit: code });

@@ -1,0 +1,1033 @@
+/**
+ * The account model's credentials, as the daemon serves them (docs/design/account-model.md §3.2, §7,
+ * §9.4).
+ *
+ * The claims: the catalog reads either document version and says where each login lives; a sign-in by
+ * credential launches against that credential's STORE (or goes through the account flow on version 1);
+ * the list carries status and usage and the sentences a surface shows — never material; Check now is
+ * gated exactly as a sign-in is and refuses a version-1 Codex group with several copies in words; the
+ * usage pass observes stored credentials only and never rejects; and passive Codex usage is attributed
+ * through the sessions this daemon launched, never guessed.
+ *
+ * NO CREDENTIAL MATERIAL APPEARS HERE. Every port is a fake answering classifications and paths, and
+ * every path is a string no test ever opens.
+ */
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  type Credential,
+  type CredentialStatus,
+  type CredentialStatusView,
+  type CredentialSubject,
+  type CredentialUsage,
+  type FleetDocument,
+  type FleetManifest,
+  type HarnessKind,
+  type LocalCredentialReading,
+  type PassiveUsageRecord,
+  resolveCredentialStore,
+  type StoredCredentialResolution,
+} from '@ferretry/fleet';
+import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
+import {
+  attributedTranscripts,
+  type CredentialEmailSource,
+  type CredentialHarnessRun,
+  type CredentialSessionRecord,
+  type CredentialStatusReader,
+  createFleetCredentialsSubsystem,
+  credentialLaunch,
+  credentialPassiveUsage,
+  FleetCredentialCatalog,
+  FleetCredentialRefusal,
+  type FleetCredentialsService,
+  signOutSentence,
+} from '../../../src/lib/fleet/credentials-service.ts';
+
+const PATHS = { fleetRoot: '/fy/fleet', userHome: '/home/person', hostCodexHome: '/home/person/.codex' } as const;
+const NO_CODEX_HOME = { fleetRoot: '/fy/fleet', userHome: '/home/person' } as const;
+
+const claudeFerretry: Credential = { harness: 'claude', store: 'ferretry' };
+const claudeHost: Credential = { harness: 'claude', store: 'host' };
+const codexFerretry: Credential = { harness: 'codex', store: 'ferretry' };
+const codexHost: Credential = { harness: 'codex', store: 'host' };
+const claudeEnvironment: Credential = {
+  harness: 'claude',
+  store: 'environment',
+  env: { ANTHROPIC_BASE_URL: 'https://example.invalid' },
+};
+
+/** A version-2 document, reduced to the two tables the catalog reads. */
+const v2 = (
+  credentials: Readonly<Record<string, Credential>>,
+  runtimes: Readonly<Record<string, string>> = {},
+): FleetDocument =>
+  ({
+    version: 2,
+    model: {
+      credentials,
+      runtimes: Object.fromEntries(Object.entries(runtimes).map(([name, credential]) => [name, { credential }])),
+    },
+  }) as unknown as FleetDocument;
+
+/** A version-1 document's conversion: each credential is a group of routes, each runtime one route. */
+const v1 = (
+  credentials: Readonly<Record<string, Credential>>,
+  groups: Readonly<Record<string, readonly string[]>>,
+  runtimes: Readonly<Record<string, string>>,
+): FleetDocument =>
+  ({
+    version: 1,
+    config: {},
+    conversion: {
+      model: { credentials, runtimes: {} },
+      credentials: Object.fromEntries(
+        Object.entries(groups).map(([id, routeIds]) => [
+          id,
+          { key: `x:${id}`, harness: credentials[id]?.harness, routeIds },
+        ]),
+      ),
+      runtimes: Object.fromEntries(Object.entries(runtimes).map(([name, routeId]) => [name, { routeId }])),
+    },
+  }) as unknown as FleetDocument;
+
+type Manifest = Pick<FleetManifest, 'accounts'>;
+const manifest = (...accounts: readonly { id: string; home: string; available: boolean }[]): Manifest =>
+  ({ accounts }) as unknown as Manifest;
+
+/** The store path a classification is keyed by: the file a harness keeps the login in. */
+const storeFile = (resolution: StoredCredentialResolution): string =>
+  resolution.harness === 'claude' ? resolution.credentialFile : resolution.canonicalFile;
+
+interface CatalogOptions {
+  readonly document?: () => Promise<FleetDocument | undefined>;
+  readonly manifest?: () => Promise<Manifest>;
+  readonly readings?: Readonly<Record<string, LocalCredentialReading | 'throw'>>;
+  readonly paths?: typeof PATHS | typeof NO_CODEX_HOME;
+  readonly created?: string[];
+}
+
+const catalogOf = (document: FleetDocument | undefined, options: CatalogOptions = {}): FleetCredentialCatalog =>
+  new FleetCredentialCatalog({
+    document: options.document ?? (async () => document),
+    manifest: options.manifest ?? (async () => manifest()),
+    paths: options.paths ?? PATHS,
+    classify: async resolution => {
+      const reading = options.readings?.[storeFile(resolution)];
+      if (reading === 'throw') throw new Error('locked keychain');
+      return reading ?? { state: 'missing' };
+    },
+    ensureDirectory: async path => {
+      options.created?.push(path);
+    },
+  });
+
+const status = (overrides: Partial<CredentialStatus> = {}): CredentialStatus => ({
+  word: 'ready',
+  reason: 'not_checked_yet',
+  lastCheckInconclusive: false,
+  ...overrides,
+});
+
+/** A status reader that answers a configured word per credential and records every call. */
+class FakeStatus implements CredentialStatusReader {
+  readonly calls: string[] = [];
+  readonly words = new Map<string, Partial<CredentialStatus>>();
+  usage: CredentialUsage = { fiveHour: {}, weekly: {} };
+  failObserve = false;
+
+  #view(subject: CredentialSubject): CredentialStatusView {
+    return {
+      id: subject.id,
+      harness: subject.resolution.harness,
+      status: status(this.words.get(subject.id)),
+      usage: this.usage,
+    };
+  }
+
+  async view(subject: CredentialSubject): Promise<CredentialStatusView> {
+    this.calls.push(`view:${subject.id}`);
+    return this.#view(subject);
+  }
+
+  async observe(subject: CredentialSubject): Promise<CredentialStatusView> {
+    this.calls.push(`observe:${subject.id}`);
+    if (this.failObserve) throw new Error('probe failed');
+    return this.#view(subject);
+  }
+
+  async checkNow(subject: CredentialSubject): Promise<CredentialStatusView> {
+    this.calls.push(`check:${subject.id}`);
+    return this.#view(subject);
+  }
+}
+
+interface ServiceOptions {
+  readonly emails?: Readonly<Record<string, string>>;
+  readonly confirmation?: ChangeConfirmation;
+  readonly binary?: string;
+  readonly exitCode?: number;
+  readonly runs?: CredentialHarnessRun[];
+  readonly afterRun?: () => void;
+  readonly passwords?: string[];
+}
+
+const emailKey = (source: CredentialEmailSource): string =>
+  source.harness === 'claude' ? source.accountFile : storeFile(source.resolution);
+
+const serviceOf = (
+  catalog: FleetCredentialCatalog,
+  fake: FakeStatus,
+  options: ServiceOptions = {},
+): FleetCredentialsService =>
+  createFleetCredentialsSubsystem({
+    catalog,
+    status: fake,
+    email: async source => {
+      const email = options.emails?.[emailKey(source)];
+      if (email === 'throw') throw new Error('unreadable');
+      return email;
+    },
+    confirmChange: async password => {
+      options.passwords?.push(password);
+      return options.confirmation ?? { kind: 'confirmed' };
+    },
+    machineName: () => 'studio',
+    clientName: 'fy',
+    locate: harness => (options.binary === undefined ? undefined : `${options.binary}/${harness}`),
+    run: async spec => {
+      options.runs?.push(spec);
+      options.afterRun?.();
+      return options.exitCode ?? 0;
+    },
+    baseEnvironment: () => ({ PATH: '/usr/bin' }),
+  });
+
+const governed = (confirmChange: boolean): CallerGovernance =>
+  ({ governed: true, passwordSet: true, confirmChange }) as CallerGovernance;
+
+const refusalOf = async (work: () => Promise<unknown>): Promise<FleetCredentialRefusal> => {
+  try {
+    await work();
+  } catch (error) {
+    should(error).be.instanceOf(FleetCredentialRefusal);
+    return error as FleetCredentialRefusal;
+  }
+  throw new Error('expected a refusal');
+};
+
+const resolved = (id: string, credential: Credential, paths: typeof PATHS | typeof NO_CODEX_HOME = PATHS) =>
+  resolveCredentialStore(id, credential, paths);
+
+const claudeOwned = resolved('work', claudeFerretry) as Extract<StoredCredentialResolution, { harness: 'claude' }>;
+
+describe('the credential catalog', () => {
+  it('should list a version-2 document’s credentials with the runtimes that use each, sorted', async () => {
+    // Arrange
+    const catalog = catalogOf(
+      v2({ work: claudeFerretry, keyed: claudeEnvironment }, { zeta: 'work', alpha: 'work', other: 'keyed' }),
+    );
+
+    // Act
+    const actual = await catalog.entries();
+
+    // Assert
+    should(actual.format).equal(2);
+    should(actual.entries.map(entry => [entry.id, entry.usedBy, entry.copies])).deepEqual([
+      ['work', ['alpha', 'zeta'], []],
+      ['keyed', ['other'], []],
+    ]);
+    should(actual.entries[0]?.resolution).deepEqual(resolved('work', claudeFerretry));
+    should(actual.entries[1]?.resolution.store).equal('environment');
+  });
+
+  it('should answer no credentials, as version 2, when there is no fleet document yet', async () => {
+    // Act
+    const actual = await catalogOf(undefined).entries();
+
+    // Assert
+    should(actual).deepEqual({ format: 2, entries: [] });
+  });
+
+  it('should refuse in words when the document cannot be read', async () => {
+    // Arrange
+    const failing = catalogOf(undefined, {
+      document: async () => {
+        throw new Error('bad indentation on line 3');
+      },
+    });
+    const silent = catalogOf(undefined, {
+      document: async () => {
+        throw 'nothing useful';
+      },
+    });
+
+    // Act
+    const loud = await refusalOf(async () => await failing.entries());
+    const quiet = await refusalOf(async () => await silent.entries());
+
+    // Assert
+    should(loud.code).equal('fleet_credentials_unreadable');
+    should(loud.message).containEql('bad indentation on line 3');
+    should(quiet.message).endWith(': unreadable');
+  });
+
+  it('should refuse an unknown id by name', async () => {
+    // Act
+    const actual = await refusalOf(async () => await catalogOf(v2({})).entry('ghost'));
+
+    // Assert
+    should(actual.code).equal('fleet_credential_unknown');
+    should(actual.message).containEql('"ghost"');
+  });
+
+  it('should read a version-1 group from its freshest usable copy, tolerating a copy that cannot be read', async () => {
+    // Arrange
+    const catalog = catalogOf(v1({ group: claudeFerretry }, { group: ['a', 'b', 'c', 'd'] }, { one: 'a', two: 'c' }), {
+      manifest: async () =>
+        manifest(
+          { id: 'a', home: '/homes/a', available: false },
+          { id: 'b', home: '/homes/b', available: true },
+          { id: 'c', home: '/homes/c', available: true },
+          { id: 'd', home: '/homes/d', available: true },
+        ),
+      readings: {
+        '/homes/a/.credentials.json': { state: 'valid', expiresAt: 100 },
+        '/homes/b/.credentials.json': { state: 'refreshable', expiresAt: 300 },
+        '/homes/c/.credentials.json': 'throw',
+        '/homes/d/.credentials.json': { state: 'valid' },
+      },
+    });
+
+    // Act
+    const actual = await catalog.entry('group');
+
+    // Assert
+    should(actual.format).equal(1);
+    should(actual.usedBy).deepEqual(['one', 'two']);
+    should(actual.copies).deepEqual(['/homes/a', '/homes/b', '/homes/c', '/homes/d']);
+    should(actual.resolution).deepEqual({
+      harness: 'claude',
+      store: 'ferretry',
+      secureStorage: '/homes/b',
+      storageDirectory: '/homes/b',
+      credentialFile: '/homes/b/.credentials.json',
+    });
+    // The first AVAILABLE member signs the group in, not merely the first member.
+    should(actual.signInAccount).equal('b');
+  });
+
+  it('should fall back to the first copy, and the first member, when no copy is usable', async () => {
+    // Arrange
+    const catalog = catalogOf(v1({ group: codexFerretry }, { group: ['a', 'b', 'missing'] }, {}), {
+      manifest: async () =>
+        manifest({ id: 'a', home: '/homes/a', available: false }, { id: 'b', home: '/homes/b', available: false }),
+    });
+
+    // Act
+    const actual = await catalog.entry('group');
+
+    // Assert
+    should(actual.copies).deepEqual(['/homes/a', '/homes/b']);
+    should(actual.resolution).deepEqual({ harness: 'codex', store: 'ferretry', canonicalFile: '/homes/a/auth.json' });
+    should(actual.signInAccount).equal('a');
+  });
+
+  it('should read a version-1 group with no published copy as its own store, with nobody to sign in through', async () => {
+    // Arrange — the manifest cannot be read at all, and one group has no origin.
+    const catalog = catalogOf(v1({ group: claudeFerretry, keyed: claudeEnvironment }, {}, { one: 'a' }), {
+      manifest: async () => {
+        throw new Error('no manifest yet');
+      },
+    });
+
+    // Act
+    const actual = await catalog.entries();
+
+    // Assert
+    should(actual.format).equal(1);
+    should(actual.entries.map(entry => [entry.id, entry.usedBy, entry.copies, entry.signInAccount])).deepEqual([
+      ['group', [], [], undefined],
+      ['keyed', [], [], undefined],
+    ]);
+    should(actual.entries[0]?.resolution).deepEqual(resolved('group', claudeFerretry));
+    should(actual.entries[1]?.resolution.store).equal('environment');
+  });
+
+  it('should say where each kind of login records its email', async () => {
+    // Arrange
+    const modern = catalogOf(
+      v2({ mine: claudeHost, work: claudeFerretry, codex: codexFerretry, keyed: claudeEnvironment }),
+    );
+    const legacy = catalogOf(v1({ group: claudeFerretry }, { group: ['a'] }, {}), {
+      manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }),
+    });
+
+    // Act
+    const sources = (await modern.entries()).entries.map(entry => modern.emailSource(entry));
+    const old = legacy.emailSource(await legacy.entry('group'));
+
+    // Assert
+    should(sources).deepEqual([
+      { harness: 'claude', accountFile: '/home/person/.claude.json' },
+      { harness: 'claude', accountFile: `${claudeOwned.ownedDirectory}/sign-in/.claude.json` },
+      { harness: 'codex', resolution: resolved('codex', codexFerretry) },
+      undefined,
+    ]);
+    should(old).deepEqual({ harness: 'claude', accountFile: '/homes/a/.claude.json' });
+  });
+});
+
+describe('signing a credential in', () => {
+  it('should go through the account flow on version 1, and refuse in words when it cannot', async () => {
+    // Arrange
+    const catalog = catalogOf(
+      v1({ group: claudeFerretry, orphan: codexFerretry, keyed: claudeEnvironment }, { group: ['a'] }, {}),
+      { manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }) },
+    );
+
+    // Act
+    const [group, orphan, keyed] = (await catalog.entries()).entries.map(entry => catalog.signInTarget(entry));
+
+    // Assert
+    should(group).deepEqual({ kind: 'account', credentialId: 'group', accountId: 'a' });
+    should(orphan).deepEqual({
+      kind: 'refused',
+      credentialId: 'orphan',
+      reason: 'no runtime that uses this login is published on this machine, so there is nothing to sign in through',
+    });
+    should(keyed).deepEqual({
+      kind: 'refused',
+      credentialId: 'keyed',
+      reason: '"keyed" is authenticated by its environment variables, so there is nothing to sign in to',
+    });
+  });
+
+  it('should launch a Ferretry Claude sign-in against its own store, in a config directory inside it', async () => {
+    // Arrange
+    const created: string[] = [];
+    const catalog = catalogOf(v2({ work: claudeFerretry }), {
+      created,
+      readings: { [claudeOwned.credentialFile]: { state: 'valid' } },
+    });
+
+    // Act
+    const target = catalog.signInTarget(await catalog.entry('work'));
+    if (target.kind !== 'store') throw new Error('expected a store sign-in');
+    await target.prepare();
+
+    // Assert
+    const owned = claudeOwned.ownedDirectory ?? '';
+    should(target.harness).equal('claude');
+    should(target.environment).deepEqual({
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: claudeOwned.secureStorage,
+      CLAUDE_CONFIG_DIR: `${owned}/sign-in`,
+    });
+    should(target.arguments).deepEqual([]);
+    should(created).deepEqual([owned, `${owned}/sign-in`]);
+    should(await target.signedIn()).be.true();
+  });
+
+  it('should sign the person’s own Claude in with the empty secure-storage value and no config directory', async () => {
+    // Arrange
+    const created: string[] = [];
+    const catalog = catalogOf(v2({ mine: claudeHost }), {
+      created,
+      readings: { '/home/person/.claude/.credentials.json': 'throw' },
+    });
+
+    // Act
+    const target = catalog.signInTarget(await catalog.entry('mine'));
+    if (target.kind !== 'store') throw new Error('expected a store sign-in');
+    await target.prepare();
+
+    // Assert — and a store that cannot be read is not signed in.
+    should(target.environment).deepEqual({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' });
+    should(created).deepEqual([]);
+    should(await target.signedIn()).be.false();
+  });
+
+  it('should sign Codex in at the canonical file’s directory with file storage forced', async () => {
+    // Arrange
+    const created: string[] = [];
+    const catalog = catalogOf(v2({ codex: codexFerretry, mine: codexHost }), { created });
+    const owned = resolved('codex', codexFerretry);
+
+    // Act
+    const [own, host] = await Promise.all(
+      ['codex', 'mine'].map(async id => catalog.signInTarget(await catalog.entry(id))),
+    );
+    if (own?.kind !== 'store' || host?.kind !== 'store') throw new Error('expected store sign-ins');
+    await own.prepare();
+    await host.prepare();
+
+    // Assert
+    should(own.environment).deepEqual({ CODEX_HOME: owned.store === 'ferretry' ? owned.ownedDirectory : '' });
+    should(own.arguments).deepEqual(['-c', 'cli_auth_credentials_store="file"']);
+    should(host.environment).deepEqual({ CODEX_HOME: '/home/person/.codex' });
+    should(created).deepEqual([owned.store === 'ferretry' ? owned.ownedDirectory : '']);
+    should(await own.signedIn()).be.false();
+  });
+
+  it('should refuse a version-2 environment credential and a store this machine cannot name', async () => {
+    // Arrange
+    const catalog = catalogOf(v2({ keyed: claudeEnvironment, mine: codexHost }), { paths: NO_CODEX_HOME });
+
+    // Act
+    const [keyed, mine] = (await catalog.entries()).entries.map(entry => catalog.signInTarget(entry));
+
+    // Assert
+    should(keyed?.kind).equal('refused');
+    should(mine).deepEqual({
+      kind: 'refused',
+      credentialId: 'mine',
+      reason: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
+    });
+  });
+
+  it('should spell a launch against each kind of store', () => {
+    // Act / Assert
+    should(credentialLaunch(resolved('mine', claudeHost) as StoredCredentialResolution)).deepEqual({
+      environment: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '' },
+      arguments: [],
+      directories: [],
+    });
+    should(credentialLaunch(resolved('mine', codexHost) as StoredCredentialResolution)).deepEqual({
+      environment: { CODEX_HOME: '/home/person/.codex' },
+      arguments: ['-c', 'cli_auth_credentials_store="file"'],
+      directories: [],
+    });
+  });
+});
+
+describe('the sign-out sentence', () => {
+  const entryOf = async (credential: Credential, runtimes: Readonly<Record<string, string>>) =>
+    await catalogOf(v2({ work: { ...credential } }, runtimes)).entry('work');
+
+  it('should say that a host sign-out also signs out the terminal, and how many runtimes need sign-in', async () => {
+    // Arrange
+    const entry = await entryOf({ ...claudeHost, label: 'personal' }, { a: 'work', b: 'work', c: 'work' });
+
+    // Act
+    const actual = signOutSentence(entry, 'kirin@example.com', 'studio');
+
+    // Assert
+    should(actual).deepEqual({
+      available: true,
+      sentence:
+        'Sign out of kirin@example.com (personal)? This also signs out claude in your terminal on studio. 3 runtimes will need sign-in.',
+      runtimesAffected: 3,
+      signsOutTerminal: true,
+    });
+  });
+
+  it('should name the login by email, label or id, and count one runtime or none', async () => {
+    // Act
+    const one = signOutSentence(await entryOf(codexFerretry, { a: 'work' }), 'kirin@example.com', 'studio');
+    const labelled = signOutSentence(await entryOf({ ...codexFerretry, label: 'team' }, {}), undefined, 'studio');
+    const bare = signOutSentence(await entryOf(codexFerretry, {}), undefined, 'studio');
+
+    // Assert
+    should(one.sentence).equal('Sign out of kirin@example.com? 1 runtime will need sign-in.');
+    should(one.signsOutTerminal).be.false();
+    should(labelled.sentence).equal('Sign out of team? No runtime uses it.');
+    should(bare.sentence).equal('Sign out of work? No runtime uses it.');
+  });
+
+  it('should not offer sign-out where it cannot run', async () => {
+    // Arrange
+    const keyed = await entryOf(claudeEnvironment, {});
+    const unnamed = await catalogOf(v2({ work: codexHost }), { paths: NO_CODEX_HOME }).entry('work');
+    const legacy = await catalogOf(v1({ work: claudeFerretry }, { work: ['a'] }, {}), {
+      manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }),
+    }).entry('work');
+
+    // Act / Assert
+    should([keyed, unnamed, legacy].map(entry => signOutSentence(entry, undefined, 'studio').available)).deepEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+});
+
+describe('the credential list', () => {
+  it('should answer each login’s status, usage and acts, parsed through the wire shape', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    fake.words.set('work', {
+      word: 'refresh_due',
+      reason: 'access_expired_refreshable',
+      since: 1_000,
+      lastCheckedAt: 2_000,
+      lastCheckInconclusive: true,
+      planType: 'pro',
+    });
+    fake.usage = {
+      fiveHour: { usedPercent: 42, resetAt: 3_000 },
+      weekly: {},
+      source: 'anthropic-usage',
+      at: 4_000,
+    };
+    const service = serviceOf(
+      catalogOf(v2({ work: { ...claudeFerretry, clonedFrom: 'laptop' } }, { a: 'work' })),
+      fake,
+    );
+
+    // Act
+    const actual = await service.list();
+
+    // Assert
+    should(actual.format).equal(2);
+    should(actual.machine).equal('studio');
+    should(actual.credentials).deepEqual([
+      {
+        id: 'work',
+        harness: 'claude',
+        store: 'ferretry',
+        needsLabel: false,
+        clonedFrom: 'laptop',
+        sharedWithTerminal: false,
+        status: {
+          word: 'refresh_due',
+          label: 'Refresh due',
+          reason: 'access_expired_refreshable',
+          explanation: 'The access token has expired. It renews itself the next time it is used.',
+          since: '1970-01-01T00:00:01.000Z',
+          lastCheckedAt: '1970-01-01T00:00:02.000Z',
+          lastCheckInconclusive: true,
+          planType: 'pro',
+        },
+        usage: {
+          fiveHour: { usedPercent: 42, resetsAt: '1970-01-01T00:00:03.000Z' },
+          weekly: {},
+          source: 'anthropic-usage',
+          at: '1970-01-01T00:00:04.000Z',
+        },
+        usedBy: ['a'],
+        signIn: { available: true },
+        checkNow: { available: true },
+        signOut: {
+          available: true,
+          sentence: 'Sign out of work? 1 runtime will need sign-in.',
+          runtimesAffected: 1,
+          signsOutTerminal: false,
+        },
+      },
+    ]);
+  });
+
+  it('should ask for labels only where two logins of one harness share an email and are not told apart (E26)', async () => {
+    // Arrange
+    const owned = (id: string, harness: HarnessKind): string => {
+      const resolution = resolved(id, { harness, store: 'ferretry' }) as StoredCredentialResolution;
+      return resolution.harness === 'claude'
+        ? `${resolution.ownedDirectory}/sign-in/.claude.json`
+        : storeFile(resolution);
+    };
+    const same = 'same@example.com';
+    const service = serviceOf(
+      catalogOf(
+        v2({
+          bare1: claudeFerretry,
+          bare2: claudeFerretry,
+          tagged: { ...claudeFerretry, label: 'work' },
+          other: { ...codexFerretry },
+          alone: { ...codexFerretry, label: 'x' },
+          twin1: { harness: 'codex', store: 'ferretry', label: 'twin' },
+          twin2: { harness: 'codex', store: 'ferretry', label: 'twin' },
+          quiet: claudeFerretry,
+        }),
+      ),
+      new FakeStatus(),
+      {
+        emails: {
+          [owned('bare1', 'claude')]: same,
+          [owned('bare2', 'claude')]: same,
+          [owned('tagged', 'claude')]: same,
+          [owned('other', 'codex')]: same,
+          [owned('alone', 'codex')]: 'alone@example.com',
+          [owned('twin1', 'codex')]: 'twin@example.com',
+          [owned('twin2', 'codex')]: 'twin@example.com',
+          [owned('quiet', 'claude')]: 'throw',
+        },
+      },
+    );
+
+    // Act
+    const actual = await service.list();
+
+    // Assert
+    should(Object.fromEntries(actual.credentials.map(row => [row.id, [row.email, row.needsLabel]]))).deepEqual({
+      bare1: [same, true],
+      bare2: [same, true],
+      // Labelled while the others are not: the UNLABELLED ones still need one, this one does not.
+      tagged: [same, false],
+      // Another harness with the same email is another rate-limit pool, so it is no collision.
+      other: [same, false],
+      alone: ['alone@example.com', false],
+      twin1: ['twin@example.com', true],
+      twin2: ['twin@example.com', true],
+      quiet: [undefined, false],
+    });
+  });
+
+  it('should list a version-1 machine as format 1, refusing Check now on a Codex group with several copies', async () => {
+    // Arrange
+    const service = serviceOf(
+      catalogOf(v1({ group: codexFerretry, solo: codexFerretry }, { group: ['a', 'b'], solo: ['c'] }, {}), {
+        manifest: async () =>
+          manifest(
+            { id: 'a', home: '/homes/a', available: true },
+            { id: 'b', home: '/homes/b', available: true },
+            { id: 'c', home: '/homes/c', available: true },
+          ),
+      }),
+      new FakeStatus(),
+    );
+
+    // Act
+    const actual = await service.list();
+
+    // Assert
+    should(actual.format).equal(1);
+    should(actual.credentials.map(row => [row.id, row.checkNow.available, row.signOut.available])).deepEqual([
+      ['group', false, false],
+      ['solo', true, false],
+    ]);
+    const group = actual.credentials[0]?.checkNow;
+    should(group?.available === false && group.reason).equal(
+      'This machine still uses the old account format, where 2 runtimes each keep a copy of this login. Checking it renews one copy and signs the others out, so migrate this machine first.',
+    );
+  });
+
+  it('should say why sign-in and Check now are not offered on an environment login or an unnamed store', async () => {
+    // Arrange
+    const service = serviceOf(
+      catalogOf(v2({ keyed: claudeEnvironment, mine: codexHost }), { paths: NO_CODEX_HOME }),
+      new FakeStatus(),
+    );
+
+    // Act
+    const [keyed, mine] = (await service.list()).credentials;
+
+    // Assert
+    should(keyed?.sharedWithTerminal).be.false();
+    should(keyed?.signIn).deepEqual({
+      available: false,
+      reason: '"keyed" is authenticated by its environment variables, so there is nothing to sign in to.',
+    });
+    should(keyed?.checkNow).deepEqual({
+      available: false,
+      reason: 'This login comes from environment variables, so there is nothing to check.',
+    });
+    should(mine?.sharedWithTerminal).be.true();
+    should(mine?.signIn).deepEqual({
+      available: false,
+      reason: 'Your own Codex home could not be named, because CODEX_HOME is set to a relative path.',
+    });
+    should(mine?.checkNow).deepEqual({
+      available: false,
+      reason: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
+    });
+  });
+});
+
+describe('the usage pass', () => {
+  it('should observe every stored credential and nothing that has no store', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    fake.failObserve = true;
+    const service = serviceOf(
+      catalogOf(v2({ work: claudeFerretry, keyed: claudeEnvironment, mine: codexHost, codex: codexFerretry }), {
+        paths: NO_CODEX_HOME,
+      }),
+      fake,
+    );
+
+    // Act — an observation that fails is settled, never a rejection out of the pass.
+    await service.observeAll();
+
+    // Assert
+    should(fake.calls).deepEqual(['observe:work', 'observe:codex']);
+  });
+
+  it('should leave every word as it was when the document cannot be read', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    const service = serviceOf(
+      catalogOf(undefined, {
+        document: async () => {
+          throw new Error('unreadable');
+        },
+      }),
+      fake,
+    );
+
+    // Act
+    await service.observeAll();
+
+    // Assert
+    should(fake.calls).deepEqual([]);
+  });
+});
+
+describe('Check now', () => {
+  const work = (): FleetCredentialCatalog => catalogOf(v2({ work: codexFerretry, keyed: claudeEnvironment }));
+
+  it('should refuse when nobody can say whether this caller may check', async () => {
+    // Act
+    const actual = await refusalOf(async () => await serviceOf(work(), new FakeStatus()).check('work', {}, undefined));
+
+    // Assert
+    should(actual.code).equal('fleet_credential_unauthorized');
+  });
+
+  it('should refuse an unknown login and one that cannot be checked, before any password is spent', async () => {
+    // Arrange
+    const passwords: string[] = [];
+    const fake = new FakeStatus();
+    const service = serviceOf(work(), fake, { passwords });
+
+    // Act
+    const unknown = await refusalOf(
+      async () => await service.check('ghost', { operatorPassword: 'pw' }, governed(true)),
+    );
+    const keyed = await refusalOf(async () => await service.check('keyed', { operatorPassword: 'pw' }, governed(true)));
+
+    // Assert
+    should(unknown.code).equal('fleet_credential_unknown');
+    should(keyed.code).equal('fleet_credential_unavailable');
+    should(keyed.message).equal('This login comes from environment variables, so there is nothing to check.');
+    should(passwords).deepEqual([]);
+    should(fake.calls).deepEqual([]);
+  });
+
+  it('should refuse a version-1 Codex group with more than one copy in words', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    const service = serviceOf(
+      catalogOf(v1({ group: codexFerretry }, { group: ['a', 'b', 'c'] }, {}), {
+        manifest: async () =>
+          manifest(
+            { id: 'a', home: '/homes/a', available: true },
+            { id: 'b', home: '/homes/b', available: true },
+            { id: 'c', home: '/homes/c', available: true },
+          ),
+      }),
+      fake,
+    );
+
+    // Act
+    const actual = await refusalOf(async () => await service.check('group', {}, governed(false)));
+
+    // Assert
+    should(actual.code).equal('fleet_credential_unavailable');
+    should(actual.message).containEql('3 runtimes each keep a copy of this login');
+    should(actual.message).containEql('migrate this machine first');
+    should(fake.calls).deepEqual([]);
+  });
+
+  it('should check with no password for a caller that owes none', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    const passwords: string[] = [];
+
+    // Act
+    const actual = await serviceOf(work(), fake, { passwords }).check('work', {}, governed(false));
+
+    // Assert
+    should(actual.id).equal('work');
+    should(fake.calls).deepEqual(['check:work']);
+    should(passwords).deepEqual([]);
+  });
+
+  it('should prove the operator password for a caller that owes one', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    const passwords: string[] = [];
+
+    // Act
+    await serviceOf(work(), fake, { passwords }).check('work', { operatorPassword: 'correct' }, governed(true));
+
+    // Assert
+    should(passwords).deepEqual(['correct']);
+    should(fake.calls).deepEqual(['check:work']);
+  });
+
+  it('should refuse each failed confirmation in words, and check nothing', async () => {
+    // Arrange
+    const cases: readonly [ChangeConfirmation | undefined, string | undefined, string][] = [
+      [undefined, undefined, 'checking "work" from off this machine needs its operator password'],
+      [{ kind: 'refused', reason: 'rate-limited' }, 'pw', '`fy daemon password set`'],
+      [{ kind: 'refused', reason: 'no-password' }, 'pw', 'this machine has no operator password'],
+      [{ kind: 'refused', reason: 'wrong-password' }, 'pw', "that is not this machine's operator password"],
+    ];
+
+    for (const [confirmation, password, expected] of cases) {
+      const fake = new FakeStatus();
+      const service = serviceOf(work(), fake, confirmation === undefined ? {} : { confirmation });
+
+      // Act
+      const actual = await refusalOf(
+        async () =>
+          await service.check('work', password === undefined ? {} : { operatorPassword: password }, governed(true)),
+      );
+
+      // Assert
+      should(actual.code).equal('fleet_credential_unauthorized');
+      should(actual.message).containEql(expected);
+      should(fake.calls).deepEqual([]);
+    }
+  });
+});
+
+describe('signing a credential out', () => {
+  it('should refuse an unknown login, a version-1 copy, an environment login and an unnamed store', async () => {
+    // Arrange
+    const legacy = serviceOf(
+      catalogOf(v1({ group: claudeFerretry }, { group: ['a'] }, {}), {
+        manifest: async () => manifest({ id: 'a', home: '/homes/a', available: true }),
+      }),
+      new FakeStatus(),
+    );
+    const modern = serviceOf(
+      catalogOf(v2({ keyed: claudeEnvironment, mine: codexHost }), { paths: NO_CODEX_HOME }),
+      new FakeStatus(),
+    );
+
+    // Act
+    const unknown = await refusalOf(async () => await legacy.signOut('ghost'));
+    const copy = await refusalOf(async () => await legacy.signOut('group'));
+    const keyed = await refusalOf(async () => await modern.signOut('keyed'));
+    const mine = await refusalOf(async () => await modern.signOut('mine'));
+
+    // Assert
+    should(unknown.code).equal('fleet_credential_unknown');
+    should(copy.code).equal('fleet_credential_unavailable');
+    should(copy.message).endWith('migrate this machine first.');
+    should(keyed.message).equal(
+      '"keyed" is authenticated by its environment variables, so there is nothing to sign out of.',
+    );
+    should(mine.message).equal('This login cannot be reached on this machine.');
+  });
+
+  it('should fail in words when the harness is not installed, launching nothing', async () => {
+    // Arrange
+    const runs: CredentialHarnessRun[] = [];
+    const service = serviceOf(catalogOf(v2({ work: claudeFerretry })), new FakeStatus(), { runs });
+
+    // Act
+    const actual = await service.signOut('work');
+
+    // Assert
+    should(actual.outcome).equal('failed');
+    should(actual.outcome === 'failed' && actual.reason).equal(
+      'the claude command is not installed on this machine, so its login could not be signed out',
+    );
+    should(runs).deepEqual([]);
+  });
+
+  it('should run the harness’s own logout against the one store, and answer signed-out once nothing is left', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    const runs: CredentialHarnessRun[] = [];
+    const service = serviceOf(catalogOf(v2({ work: claudeFerretry }, { a: 'work' })), fake, {
+      binary: '/opt/bin',
+      runs,
+      afterRun: () => fake.words.set('work', { word: 'needs_sign_in', reason: 'not_signed_in' }),
+    });
+
+    // Act
+    const actual = await service.signOut('work');
+
+    // Assert
+    should(actual.outcome).equal('signed-out');
+    should(actual.credential.status.word).equal('needs_sign_in');
+    should(runs).deepEqual([
+      {
+        command: ['/opt/bin/claude', 'auth', 'logout'],
+        environment: {
+          PATH: '/usr/bin',
+          CLAUDE_SECURESTORAGE_CONFIG_DIR: claudeOwned.secureStorage,
+          CLAUDE_CONFIG_DIR: `${claudeOwned.ownedDirectory}/sign-in`,
+        },
+      },
+    ]);
+  });
+
+  it('should say a login is still there, whether the harness claimed success or not', async () => {
+    // Arrange
+    const runs: CredentialHarnessRun[] = [];
+    const claimed = serviceOf(catalogOf(v2({ codex: codexFerretry })), new FakeStatus(), { binary: '/opt/bin', runs });
+    const failed = serviceOf(catalogOf(v2({ codex: codexFerretry })), new FakeStatus(), {
+      binary: '/opt/bin',
+      exitCode: 3,
+    });
+
+    // Act
+    const zero = await claimed.signOut('codex');
+    const three = await failed.signOut('codex');
+
+    // Assert
+    should(zero.outcome === 'failed' && zero.reason).equal(
+      'the harness said it signed out, but a login is still there',
+    );
+    should(three.outcome === 'failed' && three.reason).equal('the harness could not sign out (it exited with code 3)');
+    should(runs[0]?.command).deepEqual(['/opt/bin/codex', '-c', 'cli_auth_credentials_store="file"', 'logout']);
+  });
+});
+
+describe('passive usage', () => {
+  const sessions: readonly CredentialSessionRecord[] = [
+    { agent: 'alpha', transcript: { home: '/homes/x', file: '/pool/b.jsonl' } },
+    { agent: 'alpha', transcript: { home: '/homes/x', file: '/pool/a.jsonl' } },
+    { agent: 'alpha', transcript: { home: '/homes/x', file: '/pool/a.jsonl' } },
+    { agent: 'alpha', transcript: { home: '/homes/x' } },
+    { agent: 'alpha' },
+    { agent: 'stranger', transcript: { home: '/homes/copy', file: '/homes/copy/sessions/c.jsonl' } },
+    { agent: 'stranger', transcript: { home: '/homes/other', file: '/homes/other/sessions/d.jsonl' } },
+  ];
+
+  it('should attribute a transcript by the runtime that ran it or the copy it was written in, once each', () => {
+    // Act
+    const actual = attributedTranscripts({ usedBy: ['alpha'], copies: ['/homes/copy'] }, sessions);
+
+    // Assert
+    should(actual).deepEqual(['/homes/copy/sessions/c.jsonl', '/pool/a.jsonl', '/pool/b.jsonl']);
+  });
+
+  it('should read Claude from its statusLine file and Codex from its attributed rollouts', async () => {
+    // Arrange
+    const record: PassiveUsageRecord = { version: 1, source: 'codex-rollout', at: 5, fiveHour: { usedPercent: 10 } };
+    const asked: (readonly string[])[] = [];
+    const claudeIds: string[] = [];
+    const catalog = catalogOf(
+      v2({ work: claudeFerretry, codex: codexFerretry, idle: codexFerretry }, { alpha: 'codex' }),
+    );
+    const passive = credentialPassiveUsage({
+      catalog,
+      claude: async id => {
+        claudeIds.push(id);
+        return undefined;
+      },
+      sessions: async () => sessions,
+      newestRollout: async files => {
+        asked.push(files);
+        return record;
+      },
+    });
+
+    // Act
+    const claude = await passive({ id: 'work', resolution: resolved('work', claudeFerretry) });
+    const codex = await passive({ id: 'codex', resolution: resolved('codex', codexFerretry) });
+    const idle = await passive({ id: 'idle', resolution: resolved('idle', codexFerretry) });
+
+    // Assert — a credential no recorded session ran on reads nothing at all.
+    should(claude).be.undefined();
+    should(claudeIds).deepEqual(['work']);
+    should(codex).deepEqual(record);
+    should(idle).be.undefined();
+    should(asked).deepEqual([['/pool/a.jsonl', '/pool/b.jsonl']]);
+  });
+});

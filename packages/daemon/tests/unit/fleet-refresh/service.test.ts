@@ -33,6 +33,34 @@ describe('the fleet refresh loop', () => {
     should(calls).deepEqual(['usage']);
   });
 
+  it('should observe the account model’s credentials on the same pass, and survive their failure', async () => {
+    // Arrange
+    const calls: string[] = [];
+    const service = new FleetRefreshService({
+      usage: {
+        accounts: async () => {
+          calls.push('usage');
+          return [];
+        },
+        snapshotAt: () => undefined,
+        hasSnapshot: () => false,
+      },
+      credentials: {
+        observeAll: async () => {
+          calls.push('credentials');
+          throw new Error('a probe failed');
+        },
+      },
+    });
+
+    // Act — the pass resolves although the credentials observation rejected.
+    await service.run();
+    await service.run();
+
+    // Assert — free reads only: the usage feed and the credentials' observation, nothing else.
+    should(calls).deepEqual(['usage', 'credentials', 'usage', 'credentials']);
+  });
+
   it('should retain the next scheduled pass after the established feed fails', async () => {
     // Arrange
     let attempts = 0;

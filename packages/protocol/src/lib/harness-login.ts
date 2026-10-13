@@ -442,21 +442,21 @@ export type HarnessLoginFlow = z.infer<typeof HarnessLoginFlowSchema>;
 /** Start one login. The caller names an ACCOUNT or a CREDENTIAL — never a command, never a path. */
 export const HarnessLoginStartRequestSchema = z
   .strictObject({
-  /** The account to sign in. Exactly one of this and `credentialId`. */
-  accountId: AccountIdSchema.optional(),
-  /**
-   * The account-model credential to sign in (design §4.6, §7): every runtime on it, or none yet — an
-   * empty slot is signed in before anything uses it. Exactly one of this and `accountId`.
-   */
-  credentialId: CredentialIdSchema.optional(),
-  /**
-   * The per-change confirmation, for a governed caller that owes one.
-   *
-   * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE, held to the same rule by the same schema the fleet's
-   * proposal apply uses, and spent against this one start. It is not a second gate: `fleet.configure`
-   * decides whether this caller may reach the route at all, and this proves the change.
-   */
-  operatorPassword: OperatorPasswordSchema.optional(),
+    /** The account to sign in. Exactly one of this and `credentialId`. */
+    accountId: AccountIdSchema.optional(),
+    /**
+     * The account-model credential to sign in (design §4.6, §7): every runtime on it, or none yet — an
+     * empty slot is signed in before anything uses it. Exactly one of this and `accountId`.
+     */
+    credentialId: CredentialIdSchema.optional(),
+    /**
+     * The per-change confirmation, for a governed caller that owes one.
+     *
+     * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE, held to the same rule by the same schema the fleet's
+     * proposal apply uses, and spent against this one start. It is not a second gate: `fleet.configure`
+     * decides whether this caller may reach the route at all, and this proves the change.
+     */
+    operatorPassword: OperatorPasswordSchema.optional(),
   })
   .check(ctx => {
     if ((ctx.value.accountId === undefined) !== (ctx.value.credentialId === undefined)) return;

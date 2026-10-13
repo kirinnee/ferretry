@@ -62,7 +62,9 @@ async function claudeEmail(accountFile: string): Promise<string | undefined> {
 
 export interface CredentialEmailReaderDeps {
   /** The Codex store's raw material (`PlatformFleetCredentialStore.storedMaterial`). Read and dropped. */
-  storedMaterial(resolution: Extract<CredentialEmailSource, { harness: "codex" }>["resolution"]): Promise<CredentialMaterial>;
+  storedMaterial(
+    resolution: Extract<CredentialEmailSource, { harness: 'codex' }>['resolution'],
+  ): Promise<CredentialMaterial>;
 }
 
 /** Reads the display email of one login. `undefined` when the harness recorded none. */
@@ -71,7 +73,9 @@ export class CredentialEmailReader {
 
   async email(source: CredentialEmailSource): Promise<string | undefined> {
     if (source.harness === 'claude') return await claudeEmail(source.accountFile);
-    return codexEmail(await this.deps.storedMaterial(source.resolution).catch((): CredentialMaterial => ({ outcome: 'absent' })));
+    return codexEmail(
+      await this.deps.storedMaterial(source.resolution).catch((): CredentialMaterial => ({ outcome: 'absent' })),
+    );
   }
 }
 
@@ -95,9 +99,8 @@ export async function rolloutFiles(paths: readonly string[]): Promise<readonly R
   return files;
 }
 
-
 /** How long a sign-out child may run. The harness's own logout is one local write and one revoke. */
-export const CREDENTIAL_HARNESS_TIMEOUT_MS = 60_000;
+const CREDENTIAL_HARNESS_TIMEOUT_MS = 60_000;
 
 /**
  * Runs one harness child to completion with no stdio, and its exit code. A child that outlives the

@@ -164,7 +164,8 @@ export const submitHarnessLoginCode = async (
   flowId: string,
   code: string,
   unlock?: string,
-): Promise<LoginSubmission<AccountLoginFlow>> => submission(await submitFlow(client, flowId, code, unlock), accountFlow);
+): Promise<LoginSubmission<AccountLoginFlow>> =>
+  submission(await submitFlow(client, flowId, code, unlock), accountFlow);
 
 /** Forwards the one value a person brings back to a CREDENTIAL sign-in, write-only as above. */
 export const submitCredentialSignInCode = async (
@@ -183,7 +184,8 @@ export type LoginSubmission<Flow extends HarnessLoginFlow> =
 const submission = <Flow extends HarnessLoginFlow>(
   answer: HarnessLoginSubmission,
   typed: (flow: HarnessLoginFlow) => Flow,
-): LoginSubmission<Flow> => (answer.outcome === 'accepted' ? { outcome: 'accepted', flow: typed(answer.flow) } : answer);
+): LoginSubmission<Flow> =>
+  answer.outcome === 'accepted' ? { outcome: 'accepted', flow: typed(answer.flow) } : answer;
 
 const submitFlow = async (
   client: FleetClient,

@@ -143,7 +143,7 @@ export interface CredentialEntry {
 }
 
 /** The isolated config directory a Claude `store: ferretry` sign-in runs with, inside its store. */
-export const CREDENTIAL_SIGN_IN_DIRECTORY = 'sign-in';
+const CREDENTIAL_SIGN_IN_DIRECTORY = 'sign-in';
 
 /** The file Claude records the signed-in account in, inside a config directory. */
 const CLAUDE_ACCOUNT_FILE = '.claude.json';
@@ -265,9 +265,9 @@ export class FleetCredentialCatalog {
   async #freshest(harness: HarnessKind, copies: readonly string[]): Promise<string | undefined> {
     let best: { readonly home: string; readonly expiresAt: number } | undefined;
     for (const home of copies) {
-      const reading = await this.deps.classify(legacyResolution(harness, home)).catch(
-        (): LocalCredentialReading => ({ state: 'unreadable' }),
-      );
+      const reading = await this.deps
+        .classify(legacyResolution(harness, home))
+        .catch((): LocalCredentialReading => ({ state: 'unreadable' }));
       if (!usable(reading)) continue;
       const expiresAt = reading.expiresAt ?? 0;
       if (best === undefined || expiresAt > best.expiresAt) best = { home, expiresAt };
@@ -280,7 +280,8 @@ export class FleetCredentialCatalog {
     const resolution = stored(entry.resolution);
     if (resolution === undefined) return undefined;
     if (resolution.harness === 'codex') return { harness: 'codex', resolution };
-    if (entry.format === 1) return { harness: 'claude', accountFile: join(resolution.storageDirectory, CLAUDE_ACCOUNT_FILE) };
+    if (entry.format === 1)
+      return { harness: 'claude', accountFile: join(resolution.storageDirectory, CLAUDE_ACCOUNT_FILE) };
     return {
       harness: 'claude',
       accountFile:
@@ -310,7 +311,10 @@ export class FleetCredentialCatalog {
     if (entry.format === 1) {
       if (entry.credential.store === 'environment') return refusedSignIn(entry, environmentReason(entry));
       return entry.signInAccount === undefined
-        ? refusedSignIn(entry, 'no runtime that uses this login is published on this machine, so there is nothing to sign in through')
+        ? refusedSignIn(
+            entry,
+            'no runtime that uses this login is published on this machine, so there is nothing to sign in through',
+          )
         : { kind: 'account', credentialId: entry.id, accountId: entry.signInAccount };
     }
     const resolution = entry.resolution;
@@ -466,9 +470,7 @@ export function signOutSentence(
   const runtimes = entry.usedBy.length;
   const terminal = host ? ` This also signs out ${entry.credential.harness} in your terminal on ${machine}.` : '';
   const consequence =
-    runtimes === 0
-      ? ' No runtime uses it.'
-      : ` ${plural(runtimes, 'runtime', 'runtimes')} will need sign-in.`;
+    runtimes === 0 ? ' No runtime uses it.' : ` ${plural(runtimes, 'runtime', 'runtimes')} will need sign-in.`;
   return {
     available: signOutRefusal(entry) === undefined,
     sentence: `Sign out of ${whoOf(entry, email)}?${terminal}${consequence}`,
@@ -569,7 +571,9 @@ export class FleetCredentialsService {
       return;
     }
     await Promise.allSettled(
-      entries.filter(entry => stored(entry.resolution) !== undefined).map(entry => this.deps.status.observe(subjectOf(entry))),
+      entries
+        .filter(entry => stored(entry.resolution) !== undefined)
+        .map(entry => this.deps.status.observe(subjectOf(entry))),
     );
   }
 
@@ -620,7 +624,10 @@ export class FleetCredentialsService {
     const refusal = signOutRefusal(entry);
     const resolution = stored(entry.resolution);
     if (refusal !== undefined || resolution === undefined) {
-      throw new FleetCredentialRefusal('fleet_credential_unavailable', sentence(refusal ?? 'this login cannot be reached'));
+      throw new FleetCredentialRefusal(
+        'fleet_credential_unavailable',
+        sentence(refusal ?? 'this login cannot be reached'),
+      );
     }
     const answer = async (): Promise<FleetCredentialView> =>
       this.#row(entry, await this.deps.status.view(subjectOf(entry)), await this.#emails(entries), entries);

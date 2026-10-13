@@ -38,6 +38,7 @@ import {
   HarnessLoginService,
 } from '../../../src/lib/fleet-login/service.ts';
 import type { HarnessLoginChild, HarnessLoginChildSpec } from '../../../src/lib/fleet-login/ports.ts';
+import { type CredentialSignInTarget, FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
 import { harnessLoginRoutes } from '../../../src/lib/runtime/mounts/fleet-login.ts';
 import { jsonBody, request } from '../api/support.ts';
 import { CREDENTIALS, GOVERNED, GRANTED, human, NARROWED } from '../runtime/mounts/support.ts';
@@ -317,6 +318,9 @@ interface FixtureOptions {
    * than 500-ing, and the default has to be the shape that proves it.
    */
   readonly renewal?: RecordingRenewal;
+  /** Signing in by credential id. Absent by default, matching the option. */
+  readonly credentialTargets?: { target(credentialId: string): Promise<CredentialSignInTarget> };
+  readonly locate?: (harness: HarnessKind) => string | undefined;
 }
 
 /**
@@ -381,6 +385,8 @@ function fixture(options: FixtureOptions = {}): Fixture {
     confirmChange: options.confirmChange ?? (async () => ({ kind: 'confirmed' })),
     clientName: 'fy',
     ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
+    ...(options.credentialTargets === undefined ? {} : { credentialTargets: options.credentialTargets }),
+    ...(options.locate === undefined ? {} : { locate: options.locate }),
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
     ...(options.declarations === undefined ? {} : { declarations: options.declarations }),
   });
@@ -2307,5 +2313,419 @@ describe('a code the harness does not take', () => {
 
     // Assert
     should(actual).match({ state: 'failed', lastCode: 'expired' });
+  });
+});
+
+// ─── signing in by credential id ──────────────────────────────────────────────────────────────────
+
+/** A credential's store sign-in, recording what it was asked to do. */
+function storeTarget(
+  overrides: Partial<Omit<Extract<CredentialSignInTarget, { kind: 'store' }>, 'kind'>> & {
+    readonly signedInAnswer?: boolean;
+    readonly prepared?: string[];
+  } = {},
+): Extract<CredentialSignInTarget, { kind: 'store' }> {
+  const prepared = overrides.prepared ?? [];
+  return {
+    kind: 'store',
+    credentialId: overrides.credentialId ?? 'work',
+    harness: overrides.harness ?? 'claude',
+    environment: overrides.environment ?? {
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/fleet/credentials/work',
+      CLAUDE_CONFIG_DIR: '/fy/fleet/credentials/work/sign-in',
+    },
+    arguments: overrides.arguments ?? [],
+    prepare:
+      overrides.prepare ??
+      (async () => {
+        prepared.push('prepared');
+      }),
+    signedIn: overrides.signedIn ?? (async () => overrides.signedInAnswer ?? true),
+  };
+}
+
+const targets = (answer: (id: string) => Promise<CredentialSignInTarget>) => ({ target: answer });
+const LOCATED = (harness: HarnessKind): string => `/usr/local/bin/${harness}`;
+
+describe('harness login by credential id', () => {
+  it('should refuse a caller whose standing cannot be decided', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
+
+    // Act
+    const actual = await refusalOf(() => subject.service.start({ credentialId: 'work' }, undefined));
+
+    // Assert
+    should(actual.code).equal('fleet_login_unauthorized');
+    should(subject.children).have.length(0);
+  });
+
+  it('should refuse in words when this daemon was not composed to sign logins in by id', async () => {
+    // Act
+    const actual = await refusalOf(() => fixture().service.start({ credentialId: 'work' }, HOST));
+
+    // Assert
+    should(actual.code).equal('fleet_login_unavailable');
+    should(actual.message).equal('this daemon is not configured to sign logins in by id');
+  });
+
+  it('should carry a credential refusal through as the sign-in refusal', async () => {
+    // Arrange
+    const subject = fixture({
+      credentialTargets: targets(async id => {
+        throw new FleetCredentialRefusal('fleet_credential_unknown', `no login "${id}" exists on this machine`);
+      }),
+    });
+
+    // Act
+    const actual = await refusalOf(() => subject.service.start({ credentialId: 'ghost' }, HOST));
+
+    // Assert
+    should(actual.code).equal('fleet_login_unavailable');
+    should(actual.message).equal('no login "ghost" exists on this machine');
+  });
+
+  it('should let any other resolution failure through untouched', async () => {
+    // Arrange
+    const subject = fixture({
+      credentialTargets: targets(async () => {
+        throw new Error('the configuration could not be read');
+      }),
+    });
+
+    // Act / Assert
+    await should(subject.service.start({ credentialId: 'work' }, HOST)).be.rejectedWith(
+      'the configuration could not be read',
+    );
+  });
+
+  it('should refuse a credential that has nothing to sign in to, with its reason', async () => {
+    // Arrange
+    const subject = fixture({
+      credentialTargets: targets(async id => ({
+        kind: 'refused',
+        credentialId: id,
+        reason: '"work" is authenticated by its environment variables, so there is nothing to sign in to',
+      })),
+    });
+
+    // Act
+    const actual = await refusalOf(() => subject.service.start({ credentialId: 'work' }, HOST));
+
+    // Assert
+    should(actual.code).equal('fleet_login_unavailable');
+    should(actual.message).equal(
+      '"work" is authenticated by its environment variables, so there is nothing to sign in to',
+    );
+  });
+
+  it('should sign a version-1 credential in through its account, naming both ids on the flow', async () => {
+    // Arrange
+    const subject = fixture({
+      credentialTargets: targets(async id => ({ kind: 'account', credentialId: id, accountId: INTERACTIVE_ID })),
+    });
+
+    // Act
+    const actual = await subject.service.start({ credentialId: 'claude-kirin' }, HOST);
+    const child = await subject.child();
+
+    // Assert
+    should(actual).match({ accountId: INTERACTIVE_ID, credentialId: 'claude-kirin', identity: 'claude:kirin' });
+    should(child.spec.command[0]).equal('/fleet/bin/claude-kirin');
+  });
+
+  it('should launch the located harness with the store environment and the store arguments first', async () => {
+    // Arrange
+    const prepared: string[] = [];
+    const subject = fixture({
+      credentialTargets: targets(async () =>
+        storeTarget({
+          harness: 'codex',
+          credentialId: 'team',
+          environment: { CODEX_HOME: '/fy/fleet/credentials/team' },
+          arguments: ['-c', 'cli_auth_credentials_store="file"'],
+          prepared,
+        }),
+      ),
+      locate: LOCATED,
+    });
+
+    // Act
+    const started = await subject.service.start({ credentialId: 'team' }, HOST);
+    const child = await subject.child();
+
+    // Assert
+    should(prepared).deepEqual(['prepared']);
+    should(child.spec.command).deepEqual([
+      '/usr/local/bin/codex',
+      '-c',
+      'cli_auth_credentials_store="file"',
+      'login',
+      '--device-auth',
+    ]);
+    // Sanitized of the caller's provider credentials, then given the store's.
+    should(child.spec.environment).deepEqual({
+      PATH: '/usr/bin',
+      PROXY_KEY: 'proxy-key',
+      CODEX_HOME: '/fy/fleet/credentials/team',
+    });
+    should(started).match({ harness: 'codex', credentialId: 'team', identity: 'credential:team' });
+    should(started).not.have.property('accountId');
+  });
+
+  it('should complete a Claude credential sign-in once the store holds a usable login', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    const child = await subject.child();
+
+    // Act
+    child.emit(CLAUDE_URL_LINE);
+    child.exit(0);
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(child.spec.command).deepEqual(['/usr/local/bin/claude', 'auth', 'login', '--claudeai']);
+    should(actual).match({ harness: 'claude', state: 'complete', accounts: [], credentialId: 'work' });
+    should(actual).not.have.property('accountId');
+  });
+
+  it('should fail a sign-in that exited cleanly but wrote no usable login', async () => {
+    // Arrange
+    const subject = fixture({
+      credentialTargets: targets(async () => storeTarget({ signedInAnswer: false })),
+      locate: LOCATED,
+    });
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    const child = await subject.child();
+
+    // Act
+    child.emit(CLAUDE_URL_LINE);
+    child.exit(0);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the sign-in finished, but no usable login was written for this credential',
+    });
+  });
+
+  it('should fail with the exit code when the child exits badly after publishing', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    const child = await subject.child();
+
+    // Act
+    child.emit(CLAUDE_URL_LINE);
+    child.exit(2);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the sign-in exited with code 2',
+    });
+  });
+
+  it('should end as the harness reads it when a submitted code was refused', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    await subject.service.submit(started.flowId, PASTED_CODE);
+
+    // Act
+    child.exit(1);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'Claude could not sign in with that code',
+      lastCode: 'rejected',
+    });
+  });
+
+  it('should say so when the harness offered nothing a browser can drive', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    const child = await subject.child();
+
+    // Act
+    child.exit(0);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: "this host's claude did not offer a sign-in that can be driven from a browser",
+    });
+  });
+
+  it('should fail in words when the harness is not installed, launching nothing', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: () => undefined });
+
+    // Act
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.children).have.length(0);
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the claude command is not installed on this machine, so there is nothing to sign in with',
+    });
+  });
+
+  it('should fail in words when no locator was composed at all', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()) });
+
+    // Act
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({ state: 'failed' });
+  });
+
+  it('should record a preparation failure on the flow rather than reject', async () => {
+    // Arrange
+    const subject = fixture({
+      credentialTargets: targets(async () =>
+        storeTarget({
+          prepare: async () => {
+            throw new Error('the store directory could not be created');
+          },
+        }),
+      ),
+      locate: LOCATED,
+    });
+
+    // Act
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.children).have.length(0);
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'the store directory could not be created',
+    });
+  });
+
+  it('should fall back to a plain sentence for a failure with no message', async () => {
+    // Arrange
+    const subject = fixture({
+      credentialTargets: targets(async () =>
+        storeTarget({
+          prepare: async () => {
+            throw new Error('');
+          },
+        }),
+      ),
+      locate: LOCATED,
+    });
+
+    // Act
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).match({ state: 'failed', reason: 'the sign-in failed' });
+  });
+
+  it('should spawn nothing when the flow was cancelled while its store was being prepared', async () => {
+    // Arrange
+    let release: () => void = () => undefined;
+    const subject = fixture({
+      credentialTargets: targets(async () =>
+        storeTarget({
+          prepare: async () => {
+            await new Promise<void>(resolve => {
+              release = resolve;
+            });
+          },
+        }),
+      ),
+      locate: LOCATED,
+    });
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    await subject.settle();
+
+    // Act
+    await subject.service.cancel(started.flowId);
+    release();
+    await subject.settle();
+
+    // Assert
+    should(subject.children).have.length(0);
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'this sign-in was cancelled',
+    });
+  });
+
+  it('should keep a cancelled ending when the killed child exits afterwards', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
+    const started = await subject.service.start({ credentialId: 'work' }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+
+    // Act
+    await subject.service.cancel(started.flowId);
+    await subject.settle();
+
+    // Assert
+    should(child.killed).be.true();
+    should(await subject.service.status(started.flowId)).match({
+      state: 'failed',
+      reason: 'this sign-in was cancelled',
+    });
+  });
+
+  it('should refuse a second sign-in of one credential while the first runs', async () => {
+    // Arrange
+    const subject = fixture({ credentialTargets: targets(async () => storeTarget()), locate: LOCATED });
+    const first = await subject.service.start({ credentialId: 'work' }, HOST);
+
+    // Act
+    const actual = await refusalOf(() => subject.service.start({ credentialId: 'work' }, HOST));
+
+    // Assert
+    should(actual.code).equal('fleet_login_in_progress');
+    should(actual.message).equal(
+      `a sign-in for "credential:work" is already running as flow "${first.flowId}"; finish or cancel it first`,
+    );
+  });
+
+  it('should ask a governed caller for the operator password before launching', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const subject = fixture({
+      credentialTargets: targets(async () => storeTarget()),
+      locate: LOCATED,
+      confirmChange: async password => {
+        asked.push(password);
+        return { kind: 'confirmed' };
+      },
+    });
+
+    // Act
+    const refused = await refusalOf(() => subject.service.start({ credentialId: 'work' }, BROWSER));
+    const started = await subject.service.start({ credentialId: 'work', operatorPassword: 'correct horse' }, BROWSER);
+    await subject.child();
+
+    // Assert
+    should(refused.code).equal('fleet_login_unauthorized');
+    should(asked).deepEqual(['correct horse']);
+    should(started).match({ credentialId: 'work' });
   });
 });
