@@ -8,7 +8,7 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { ChevronLeft, Palette, Server, SlidersHorizontal } from 'lucide-react';
+import { ChevronLeft, MonitorCog, Palette, Server, SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
@@ -18,12 +18,16 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
+import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
+import type { FleetClientFactory } from '../fleet/fleet-configuration-surface.tsx';
+import { DEFAULT_MACHINE_TAB, type MachineRoute, machineHash, parseMachineHash } from '../fleet/shell/machine-route.ts';
+import { MachinesSurface, type MachineTabSurfaces } from '../fleet/shell/machines-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
@@ -64,6 +68,7 @@ const sectionFromHash = (): SettingsSectionId | null => {
   if (typeof window === 'undefined') return null;
   const value = window.location.hash.replace(/^#/, '');
   if (isSettingsSectionId(value)) return value;
+  if (parseMachineHash(window.location.hash) !== null) return 'machines';
   return isSettingId(value) ? settingsSectionForSetting(value) : null;
 };
 
@@ -81,6 +86,8 @@ const SETTINGS_SECTION_ICONS: Readonly<Record<SettingsSectionId, ReactNode>> = {
   behaviour: <SlidersHorizontal size={16} aria-hidden="true" />,
   // The machines, not the pairing: this section is where a reader picks WHICH host they are configuring.
   daemons: <Server size={16} aria-hidden="true" />,
+  // What runs on a machine, so the machine with a gear rather than a second server.
+  machines: <MonitorCog size={16} aria-hidden="true" />,
 };
 
 /**
@@ -265,6 +272,13 @@ export interface SettingsPageProps {
   readonly createPairingClient?: PairingClientFactory;
   /** Future daemon-owned tabs, appended after Warden in the shared frame. */
   readonly daemonSettingsTabs?: readonly DaemonSettingsTabDefinition[];
+  /**
+   * The Machines section's client, through the app's pool so every read rides the measured carrier.
+   * Without one the section says it cannot read a machine rather than dialling an address itself.
+   */
+  readonly createMachineClient?: FleetClientFactory;
+  /** The Machines tabs' surfaces; a tab nobody supplies is the shell's honest empty frame. */
+  readonly machineTabs?: MachineTabSurfaces;
   readonly onSelectDaemon: (daemonId: DaemonId) => void;
   readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
   readonly onRemoveDaemon: (daemonId: DaemonId) => void;
@@ -303,6 +317,8 @@ export function SettingsPage({
   createGrantClient,
   createPairingClient,
   daemonSettingsTabs,
+  createMachineClient,
+  machineTabs,
   onSelectDaemon,
   onRenameDaemon,
   onRemoveDaemon,
@@ -323,6 +339,9 @@ export function SettingsPage({
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => sectionFromHash() ?? 'appearance');
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
+  const [machineRoute, setMachineRoute] = useState<MachineRoute>(
+    () => parseMachineHash(window.location.hash) ?? { tab: DEFAULT_MACHINE_TAB },
+  );
   const followedHash = useRef<string | null>(null);
   const focusFrame = useRef<number | undefined>(undefined);
 
@@ -331,6 +350,8 @@ export function SettingsPage({
     followedHash.current = window.location.hash;
     const nextSection = sectionFromHash();
     const target = settingFromHash();
+    const nextMachineRoute = parseMachineHash(window.location.hash);
+    if (nextMachineRoute !== null) setMachineRoute(nextMachineRoute);
     if (nextSection === null) return;
     setActiveSection(nextSection);
     if (target === null) return;
@@ -448,6 +469,32 @@ export function SettingsPage({
     [controls, density, densityState.explicit, densityState.setDensity, device, dictation, notifications, theme],
   );
   const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
+
+  /**
+   * A Machines link names a machine by the name this browser shows for it. The PATH decides which
+   * daemon answers, so a link naming another paired machine is a request to go there — never a way
+   * to show this daemon's setup under that name. Two pairings can share a name, so a name this daemon
+   * carries is always "here" and cannot bounce between them.
+   */
+  const named =
+    machineRoute.machine === undefined ? [] : connections.filter(c => daemonDisplayName(c) === machineRoute.machine);
+  const switchTo = named.some(candidate => candidate.daemonId === daemonId) ? undefined : named[0];
+  const unknownMachine = machineRoute.machine !== undefined && named.length === 0 ? machineRoute.machine : undefined;
+  const go = useCallback(
+    (to: string): void => (onNavigate ? onNavigate(to) : window.location.assign(to)),
+    [onNavigate],
+  );
+  const openMachine = useCallback(
+    (target: DaemonId, tab: MachineRoute['tab']): void => {
+      const record = connections.find(candidate => candidate.daemonId === target);
+      if (record) go(`${daemonSettingsPath(target)}${machineHash(daemonDisplayName(record), tab)}`);
+    },
+    [connections, go],
+  );
+  const switchToId = activeSection === 'machines' ? switchTo?.daemonId : undefined;
+  useEffect(() => {
+    if (switchToId !== undefined) openMachine(switchToId, machineRoute.tab);
+  }, [machineRoute.tab, openMachine, switchToId]);
 
   return (
     <main
@@ -581,6 +628,26 @@ export function SettingsPage({
                       />
                     )}
                   </>
+                ) : null}
+
+                {section.id === 'machines' ? (
+                  createMachineClient === undefined ? (
+                    <p className="m-0 text-ui leading-base text-warn" role="alert">
+                      Machines cannot be shown because this page was opened without a way to reach them.
+                    </p>
+                  ) : (
+                    <MachinesSurface
+                      key={String(daemonId)}
+                      daemonId={daemonId}
+                      connections={connections}
+                      tab={machineRoute.tab}
+                      {...(unknownMachine === undefined ? {} : { unknownMachine })}
+                      onOpen={openMachine}
+                      onAddMachine={onAddDaemon}
+                      createClient={createMachineClient}
+                      {...(machineTabs ? { tabs: machineTabs } : {})}
+                    />
+                  )
                 ) : null}
               </div>
             </section>
