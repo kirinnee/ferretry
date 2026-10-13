@@ -31,8 +31,15 @@ const b64 = (bytes: ArrayLike<number>): string => Buffer.from(Uint8Array.from(by
 const CREDENTIAL_ID = b64([1, 2, 3, 4]);
 const SPKI = b64([9, 9, 9, 9]);
 
-/** The ONE place the registry is built, so the shape of its constructor is edited once. */
-const newRegistry = (): StepUpRegistry => new StepUpRegistry();
+/**
+ * The ONE place the registry is built. The browser's copy of the app holds a live session throughout,
+ * as it does whenever it can reach these routes, so its step-up span is open.
+ */
+const newRegistry = (): StepUpRegistry => {
+  const registry = new StepUpRegistry({ nowMs: () => NOW });
+  registry.open(browser);
+  return registry;
+};
 
 class MemoryStore implements PasskeyStore {
   constructor(public held: StoredPasskey[] = []) {}
