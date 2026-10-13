@@ -16,7 +16,7 @@ import { render, run } from '../support/react.ts';
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 class MemoryStorage implements DraftStorage {

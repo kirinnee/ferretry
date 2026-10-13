@@ -50,7 +50,7 @@ afterEach(() => {
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 describe('ComposerMarkdownPreview', () => {

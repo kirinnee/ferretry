@@ -13,6 +13,7 @@ import { Loader2 } from 'lucide-react';
 import type { AnalyticsResponse } from '@ferretry/protocol';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { fetchSessionAnalytics } from './analytics-api.ts';
@@ -63,8 +64,14 @@ export interface SessionAnalyticsSurfaceProps {
 export function SessionAnalyticsSurface({
   connection,
   scope,
-  requestAnalytics = fetchSessionAnalytics,
+  requestAnalytics: injected,
 }: SessionAnalyticsSurfaceProps) {
+  // Through the carrier router by default: a paired device has no bearer value of its own to read with.
+  const fetcher = useDaemonFetch();
+  const requestAnalytics = useMemo<SessionAnalyticsRequest>(
+    () => injected ?? ((daemon, target, query) => fetchSessionAnalytics(daemon, target, query, fetcher)),
+    [fetcher, injected],
+  );
   const queryId = useId();
   // Destructure once: every hook below depends on these stable primitives, not
   // on `scope` itself, so an equivalent recreated scope leaves the hooks stable.

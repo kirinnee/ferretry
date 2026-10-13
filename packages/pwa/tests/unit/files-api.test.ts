@@ -24,8 +24,8 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { browserFetch } from '../../src/lib/runtime-models.ts';
 import { render, runAsync } from '../support/react.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a-token' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b-token' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b-token' });
 const scopeA = daemonSessionScope(daemonA, 'same/session');
 const scopeB = daemonSessionScope(daemonB, 'same/session');
 

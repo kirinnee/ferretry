@@ -93,6 +93,7 @@ class FakePairing implements PairingSubsystem {
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
+  devices: { has: (deviceId: string) => deviceId !== 'unpaired-device' },
 };
 
 const admin = { authorization: 'Bearer admin-secret' };

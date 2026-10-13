@@ -11,7 +11,7 @@ import { sessionView } from '../../support/sessions.ts';
 const daemon = daemonConnection({
   daemonId: 'workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 
 /**

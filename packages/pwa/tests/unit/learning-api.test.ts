@@ -9,7 +9,7 @@ import {
   runLearningScan,
 } from '../../src/lib/learning-api.ts';
 
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
+const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const status = {
   enabled: true,
   intervalMinutes: 10,

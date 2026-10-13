@@ -15,6 +15,7 @@ import {
 import {
   isPromptKnownBusy,
   type RuntimeControlApi,
+  type RuntimeModelCatalogSource,
   RuntimeEffortControls,
   RuntimeModelControls,
 } from '../../components/runtime-controls.tsx';
@@ -421,6 +422,11 @@ export function SessionChatPage({
   // until a catalog has actually been read — unread, never "no skills".
   // The carrier router: the `@file` proof and the skills read both reach a relay-only daemon.
   const referenceFetch = useDaemonFetch();
+  // The model catalog is read through the same routed fetch: a paired device has no bearer value.
+  const routedRuntimeCatalogs = useMemo<RuntimeModelCatalogSource>(
+    () => ({ load: async (daemon, scope) => await runtimeModelCatalogs.load(daemon, scope, referenceFetch) }),
+    [referenceFetch],
+  );
   const skills = useSessionSkills(connection, scope, referenceFetch);
   const attentionId = useId();
   const [attentionOpen, setAttentionOpen] = useState(false);
@@ -836,7 +842,7 @@ export function SessionChatPage({
                         <RuntimeEffortControls
                           api={runtimeApi}
                           canControl={canControl}
-                          catalogs={runtimeModelCatalogs}
+                          catalogs={routedRuntimeCatalogs}
                           daemon={connection}
                           onOpenTerminal={openTerminalPane}
                           view={session}
@@ -847,7 +853,7 @@ export function SessionChatPage({
                         <RuntimeModelControls
                           api={runtimeApi}
                           canControl={canControl}
-                          catalogs={runtimeModelCatalogs}
+                          catalogs={routedRuntimeCatalogs}
                           daemon={connection}
                           onOpenTerminal={openTerminalPane}
                           view={session}

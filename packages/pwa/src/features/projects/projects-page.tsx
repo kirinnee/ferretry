@@ -25,6 +25,7 @@
 import type { RegisterProjectRequest } from '@ferretry/protocol';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { projectPickerOptions } from '../../components/daemon-picker-model.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonProjectPath } from '../../lib/pages/routes.ts';
@@ -46,13 +47,15 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
  * with it or a write settling late would hand the store the stale connection.
  */
 const sameConnection = (left: DaemonConnection, right: DaemonConnection): boolean =>
-  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
+  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceId === right.deviceId;
 
 /** The same identity as one comparable value, for the render that has to notice it changed. */
 const credentialKey = (connection: DaemonConnection): string =>
-  JSON.stringify([connection.daemonId, connection.baseUrl, connection.deviceToken]);
+  JSON.stringify([connection.daemonId, connection.baseUrl, connection.deviceId]);
 
 export function ProjectsPage({ connection }: { readonly connection: DaemonConnection }) {
+  // Registering a project rides the carrier router: a paired device has no bearer value of its own.
+  const fetcher = useDaemonFetch();
   const { projects, fleet } = useAppStore();
   const { navigate } = useRouter();
   const slice = useProjectsSlice(projects, connection);
@@ -119,7 +122,7 @@ export function ProjectsPage({ connection }: { readonly connection: DaemonConnec
     const issued = connection;
     setStatus({ phase: 'submitting', request });
     try {
-      const project = await registerProject(issued, request);
+      const project = await registerProject(issued, request, fetcher);
       if (!sameConnection(onScreen.current, issued)) return false;
       // Compared against the rows read BEFORE the write, which is the only
       // moment "this folder was already registered" is answerable.

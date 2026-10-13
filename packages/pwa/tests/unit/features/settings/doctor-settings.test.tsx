@@ -6,7 +6,7 @@ import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { render, runAsync } from '../../../support/react.ts';
 
 const connection = (id: string) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` });
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
 
 const report: DoctorReport = {
   ready: false,

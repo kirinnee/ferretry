@@ -63,7 +63,7 @@ const seedFor = (daemonId: string): PairingSeed => ({
 });
 
 const PAIRED_RESPONSE = {
-  deviceToken: `fy_device_${'b'.repeat(43)}`,
+  deviceId: `fy_device_${'b'.repeat(43)}`,
   daemonId: FINGERPRINT,
   daemonName: 'Studio',
   capabilities: [],
@@ -98,7 +98,7 @@ const keyed = async (mode: RelaySessionMode, onData?: (frame: RelayStreamFrame) 
 const pairMode: RelaySessionMode = { kind: 'pair', code: CODE, deviceName: 'Ferretry PWA' };
 const streamMode: RelaySessionMode = {
   kind: 'stream',
-  deviceToken: 'fy_device_x',
+  deviceId: 'fy_device_x',
   path: '/v1/events',
   query: [['after', '0']],
 };
@@ -388,7 +388,7 @@ describe('a stream session', () => {
     await streaming.session.receiveBinary(await streaming.daemon.record({ t: 'res', id: 1, status: 200 }));
     should(streaming.session.streaming()).be.false();
 
-    const serving = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const serving = await keyed({ kind: 'auth', deviceId: 'fy_device_x' });
     const authenticated = serving.session.ready();
     await serving.session.receiveBinary(
       await serving.daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }),
@@ -411,7 +411,7 @@ describe('the carrier a redemption and a stream actually travel', () => {
   it('should redeem over a dialled rendezvous and hand back the response verbatim', async () => {
     const id = await identity();
     const response = {
-      deviceToken: `fy_device_${'m'.repeat(43)}`,
+      deviceId: `fy_device_${'m'.repeat(43)}`,
       daemonId: id.daemonId,
       daemonName: 'Studio',
       capabilities: [],
@@ -470,7 +470,7 @@ describe('a stream opened through the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: id.daemonId,
       baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      deviceId: `fy_device_${'x'.repeat(43)}`,
       carriers: [{ kind: 'direct', daemonUrl: 'https://studio.example' }, RELAY],
     });
     // One ordinary request first: `openStream` reads a MEASURED carrier and never probes for one.
@@ -484,7 +484,7 @@ describe('a stream opened through the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: id.daemonId,
       baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      deviceId: `fy_device_${'x'.repeat(43)}`,
     });
     should(await router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.null();
   });
@@ -569,7 +569,7 @@ describe('a stream opened through the carrier router', () => {
     const refreshed = daemonConnection({
       daemonId: daemon.daemonId,
       baseUrl: daemon.baseUrl,
-      deviceToken: daemon.deviceToken,
+      deviceId: daemon.deviceId,
       carriers: [RELAY],
     });
     await router.send(refreshed, 'https://studio.example/v1/health');
@@ -606,7 +606,7 @@ describe('a terminal and an event feed on a relayed carrier', () => {
   const daemon = daemonConnection({
     daemonId: 'fy_daemon_x',
     baseUrl: 'https://studio.example',
-    deviceToken: `fy_device_${'x'.repeat(43)}`,
+    deviceId: `fy_device_${'x'.repeat(43)}`,
   });
 
   /** A stream session the suite drives directly, standing in for one the router opened. */
@@ -756,7 +756,7 @@ describe('the two sequence counters one channel holds', () => {
    * carrying one sequence is the defect, stated in the only terms an attacker would also see.
    */
   it('should never reuse a record sequence when a seal and an open overlap', async () => {
-    const { session, socket, daemon } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const { session, socket, daemon } = await keyed({ kind: 'auth', deviceId: 'fy_device_x' });
     const ready = session.ready();
     await session.receiveBinary(await daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
     await ready;
@@ -802,7 +802,7 @@ describe('the pieces the composition root supplies by default', () => {
     const daemon = daemonConnection({
       daemonId: id.daemonId,
       baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      deviceId: `fy_device_${'x'.repeat(43)}`,
       carriers: [
         { kind: 'direct', daemonUrl: 'https://studio.example' },
         { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
@@ -822,7 +822,7 @@ describe('the pieces the composition root supplies by default', () => {
   it('should arm a real interval for a redemption that injects none, and cancel it', async () => {
     const id = await newDaemonIdentity();
     const response = {
-      deviceToken: `fy_device_${'m'.repeat(43)}`,
+      deviceId: `fy_device_${'m'.repeat(43)}`,
       daemonId: id.daemonId,
       daemonName: 'Studio',
       capabilities: [],
@@ -839,7 +839,7 @@ describe('the pieces the composition root supplies by default', () => {
       dial: auto.dial,
     });
 
-    should(paired.deviceToken).equal(response.deviceToken);
+    should(paired.deviceId).equal(response.deviceId);
     // A timer still armed here would keep this process alive past the suite; that it exits proves it.
     should(auto.sockets[0]?.closed?.code).equal(1000);
   });
@@ -849,7 +849,7 @@ describe('leaving a stream, on either carrier', () => {
   const daemon = daemonConnection({
     daemonId: 'fy_daemon_x',
     baseUrl: 'https://studio.example',
-    deviceToken: `fy_device_${'x'.repeat(43)}`,
+    deviceId: `fy_device_${'x'.repeat(43)}`,
   });
   const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
 
@@ -987,7 +987,7 @@ describe('the failure shapes the adversarial review named', () => {
   const daemon = daemonConnection({
     daemonId: 'fy_daemon_x',
     baseUrl: 'https://studio.example',
-    deviceToken: `fy_device_${'x'.repeat(43)}`,
+    deviceId: `fy_device_${'x'.repeat(43)}`,
   });
   const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
 
@@ -1029,7 +1029,7 @@ describe('the failure shapes the adversarial review named', () => {
    * pairing walk can be refused 4429 by a slot the failed attempt is still holding.
    */
   it('should close the socket when it refuses a record, not only mark itself ended', async () => {
-    const { session, socket, daemon: scripted } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const { session, socket, daemon: scripted } = await keyed({ kind: 'auth', deviceId: 'fy_device_x' });
     const ready = session.ready();
     await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
 
@@ -1042,7 +1042,7 @@ describe('the failure shapes the adversarial review named', () => {
    * would race its own close frame.
    */
   it('should stay quiet when the rendezvous is the one closing', async () => {
-    const { session, socket } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const { session, socket } = await keyed({ kind: 'auth', deviceId: 'fy_device_x' });
     const ready = session.ready();
     session.carrierClosed(RELAY_CLOSE_CODES.daemonAbsent, 'no daemon holds this rendezvous');
     await failure(ready);
@@ -1098,7 +1098,7 @@ describe('the failure shapes the adversarial review named', () => {
     const paired = daemonConnection({
       daemonId: id.daemonId,
       baseUrl: 'https://studio.example',
-      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      deviceId: `fy_device_${'x'.repeat(43)}`,
       carriers: [
         { kind: 'direct', daemonUrl: 'https://studio.example' },
         { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },

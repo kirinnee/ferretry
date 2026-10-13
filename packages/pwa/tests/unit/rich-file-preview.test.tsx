@@ -14,7 +14,7 @@ import { interact, mount, must } from '../support/dom.ts';
 const daemon = daemonConnection({
   daemonId: 'preview-daemon',
   baseUrl: 'https://preview.example.test',
-  deviceToken: 'preview-token',
+  deviceId: 'preview-token',
 });
 const scope = daemonSessionScope(daemon, 'session');
 const originalFetch = globalThis.fetch;
@@ -133,7 +133,7 @@ describe('rich preview containment', () => {
       const frame = must(view.container.querySelector('iframe'), 'sandboxed HTML frame');
       expect(frame.getAttribute('sandbox')).toBe('');
       expect(frame.getAttribute('src')).toBe('blob:preview/1');
-      expect(frame.getAttribute('src')).not.toContain(daemon.deviceToken);
+      expect(frame.getAttribute('src')).not.toContain(daemon.deviceId);
       await view.unmount();
       expect(revoked).toEqual(['blob:preview/1']);
     } finally {
@@ -227,7 +227,7 @@ describe('rich preview containment', () => {
         const frame = must(view.container.querySelector('iframe'), 'PDF frame');
         expect(frame.getAttribute('sandbox')).toBe('');
         expect(frame.getAttribute('src')).toBe('blob:preview/pdf');
-        expect(frame.getAttribute('src')).not.toContain(daemon.deviceToken);
+        expect(frame.getAttribute('src')).not.toContain(daemon.deviceId);
         expect(frame.getAttribute('title')).toBe('PDF preview of report.pdf');
         expect(
           must(view.container.querySelector('a[target="_blank"]'), 'safe PDF open link').getAttribute('href'),

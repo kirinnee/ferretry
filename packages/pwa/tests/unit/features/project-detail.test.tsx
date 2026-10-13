@@ -18,7 +18,7 @@ const PROJECT_ID = '11111111-1111-4111-8111-111111111111';
 const daemon = daemonConnection({
   daemonId: 'workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 
 const project: FleetProject = {
@@ -444,7 +444,7 @@ describe('ProjectDetailPage', () => {
     const laptop = daemonConnection({
       daemonId: 'laptop',
       baseUrl: 'https://laptop.example.test',
-      deviceToken: 'laptop-token',
+      deviceId: 'laptop-token',
     });
     const asked: string[] = [];
     const store = {

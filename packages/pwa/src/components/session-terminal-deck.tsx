@@ -77,8 +77,7 @@ import {
   type TerminalStreamOpener,
   TerminalStreamRefused,
 } from '../lib/web-terminals.ts';
-import type { ConnectionMethod } from '@ferretry/relay';
-import { browserFetch, type DaemonFetch } from '../lib/runtime-models.ts';
+import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { Button } from '../shell/primitives.tsx';
 
 type XtermModules = {
@@ -123,23 +122,20 @@ export interface TerminalDeckDependencies {
 /**
  * The browser's real dependencies, bound to the carrier this daemon's traffic is on.
  *
- * THE FETCHER IS THREADED THROUGH EVERY HTTP CALL, and it did not used to be. `list`, `create`,
- * `rename`, `close` and the ticket purchase all defaulted to `browserFetch` — the raw network — so on
- * a relay-only network the deck did not show the honest refusal it was written to give; it showed a
- * raw `TypeError: Failed to fetch` from a ticket purchase at an address nothing can reach. The
- * control plane and the stream now travel the same carrier as every other daemon call.
+ * THE FETCHER IS THREADED THROUGH EVERY HTTP CALL. `list`, `create`, `rename` and `close` used to
+ * default to `browserFetch` — the raw network — which a paired device cannot use at all now: it holds
+ * no bearer value, so every daemon call rides a session the device key opened. The control plane and
+ * the stream travel the same carrier as every other daemon call.
  */
 export const browserTerminalDeckDependencies = (
-  fetcher: DaemonFetch = browserFetch,
-  openStream: TerminalStreamOpener = async () => null,
-  /** Which carrier a request has MEASURED. `undefined` means no walk has decided yet. */
-  carrier: () => ConnectionMethod | undefined = () => undefined,
+  fetcher: DaemonFetch,
+  openStream: TerminalStreamOpener,
 ): TerminalDeckDependencies => ({
   list: (daemon, scope) => listSessionTerminals(daemon, scope, fetcher),
   create: (daemon, scope) => createSessionTerminal(daemon, scope, {}, fetcher),
   rename: (daemon, scope, id, title) => renameSessionTerminal(daemon, scope, id, title, fetcher),
   close: (daemon, scope, id) => closeSessionTerminal(daemon, scope, id, fetcher),
-  attach: browserTerminalStreamAttach(openStream, fetcher, carrier),
+  attach: browserTerminalStreamAttach(openStream),
   loadXterm: async () => {
     const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
     return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };
@@ -162,7 +158,8 @@ export interface SessionTerminalDeckProps {
   readonly scope: DaemonSessionScope;
   /** Display only — the daemon derives and enforces the shell's cwd itself. */
   readonly cwd?: string;
-  readonly dependencies?: TerminalDeckDependencies;
+  /** Required: a deck has no network of its own — every call rides the router's sessions. */
+  readonly dependencies: TerminalDeckDependencies;
   /**
    * The terminal this mount was opened FOR — a `terminal:<id>` side-pane tab
    * (#35) or a proved `%terminal:<key>` reference.
@@ -469,7 +466,7 @@ export function SessionTerminalDeck({
   connection,
   scope,
   cwd,
-  dependencies = browserTerminalDeckDependencies(),
+  dependencies,
   focusTerminalId,
 }: SessionTerminalDeckProps) {
   const [list, setList] = useState<TerminalListView | null>(null);

@@ -14,7 +14,7 @@ import { render, run } from '../../support/react.ts';
 const connection = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const item = {
   id: 'A3',

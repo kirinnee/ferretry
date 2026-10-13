@@ -14,14 +14,14 @@ import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 const daemon = daemonConnection({
   daemonId: 'pane-daemon',
   baseUrl: 'https://pane.example.test',
-  deviceToken: 'pane-token',
+  deviceId: 'pane-token',
 });
 const scope = daemonSessionScope(daemon, 'pane/session');
 
 const other = daemonConnection({
   daemonId: 'other-daemon',
   baseUrl: 'https://other.example.test',
-  deviceToken: 'other-token',
+  deviceId: 'other-token',
 });
 
 describe('terminal snapshot url', () => {

@@ -22,7 +22,7 @@ import { taskSummary } from '../support/tasks.ts';
 const daemon = daemonConnection({
   daemonId: 'relayed',
   baseUrl: 'https://relayed.example.test',
-  deviceToken: 'relayed-token',
+  deviceId: 'relayed-token',
 });
 const scope = daemonSessionScope(daemon, 'session-a');
 

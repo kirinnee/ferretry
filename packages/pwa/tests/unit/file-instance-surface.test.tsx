@@ -10,14 +10,14 @@ import { interact, mount, must, type Mounted } from '../support/dom.ts';
 const daemon = daemonConnection({
   daemonId: 'view-daemon',
   baseUrl: 'https://view.example.test',
-  deviceToken: 'view-token',
+  deviceId: 'view-token',
 });
 const scope = daemonSessionScope(daemon, 'work');
 
 const other = daemonConnection({
   daemonId: 'other-daemon',
   baseUrl: 'https://other.example.test',
-  deviceToken: 'other-token',
+  deviceId: 'other-token',
 });
 const otherScope = daemonSessionScope(other, 'work');
 
@@ -581,7 +581,7 @@ describe('a file instance tab body showing a rich preview', () => {
         const frame = must(view.container.querySelector('iframe'), 'the sandboxed preview frame');
         expect(frame.getAttribute('sandbox')).toBe('');
         expect(frame.getAttribute('src')).toBe('blob:instance/1');
-        expect(frame.getAttribute('src')).not.toContain(daemon.deviceToken);
+        expect(frame.getAttribute('src')).not.toContain(daemon.deviceId);
         expect(view.container.textContent).not.toContain('This file is empty');
         expect(view.container.textContent).not.toContain('This file is binary');
       } finally {

@@ -11,12 +11,12 @@ import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../support/te
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'beta-token',
 });
 const scopeAlpha = daemonSessionScope(alpha, 'shared');
 const scopeBeta = daemonSessionScope(beta, 'shared');

@@ -6,7 +6,7 @@ import { daemonEventUrl, daemonRequest, daemonUrl } from '../../src/lib/daemon-t
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 
 describe('daemon transport', () => {
@@ -55,7 +55,7 @@ describe('daemon transport', () => {
     const loopback = daemonConnection({
       daemonId: 'loopback',
       baseUrl: 'http://127.0.0.1:7431',
-      deviceToken: 'loopback-token',
+      deviceId: 'loopback-token',
     });
 
     // Act

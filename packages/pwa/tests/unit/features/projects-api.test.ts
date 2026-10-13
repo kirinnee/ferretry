@@ -11,7 +11,7 @@ import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 const connection = daemonConnection({
   daemonId: 'daemon/a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 const json = (body: unknown, status = 200): Response =>

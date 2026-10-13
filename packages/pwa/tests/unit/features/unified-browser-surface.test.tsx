@@ -25,8 +25,8 @@ import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { interact, mount, must, pressKey } from '../../support/dom.ts';
 import { render, run } from '../../support/react.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b' });
 /** The adversarial pair: one session id, two daemons, two different Chromes. */
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
@@ -37,12 +37,12 @@ const scopeB = daemonSessionScope(daemonB, 'same-session');
 const daemonARotatedToken = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'a2',
+  deviceId: 'a2',
 });
 const daemonAMovedUrl = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a2.example.test',
-  deviceToken: 'a',
+  deviceId: 'a',
 });
 const scopeARotatedToken = daemonSessionScope(daemonARotatedToken, 'same-session');
 const scopeAMovedUrl = daemonSessionScope(daemonAMovedUrl, 'same-session');
@@ -239,7 +239,7 @@ const delayedRemoteEngine = (): DelayedRemoteEngine => {
 
   const Pane = ({ daemon, onStateChange }: RemoteBrowserPaneProps) => {
     // The grant is recorded in test memory only; nothing renders it.
-    const grant = daemon.deviceToken;
+    const grant = daemon.deviceId;
     const runAction = useCallback(
       (action: BrowserAction) => {
         ran.push({ action, grant });
@@ -929,7 +929,7 @@ describe('the unified browser surface', () => {
     await click(labelled(view.container, 'Reload real browser'));
     expect(delayed.ran).toEqual([]);
     await delayed.publish();
-    expect(delayed.ran).toEqual([{ action: { action: 'reload' }, grant: daemonAMovedUrl.deviceToken }]);
+    expect(delayed.ran).toEqual([{ action: { action: 'reload' }, grant: daemonAMovedUrl.deviceId }]);
     await view.unmount();
   });
 

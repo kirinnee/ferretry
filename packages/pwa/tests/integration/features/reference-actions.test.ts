@@ -33,12 +33,12 @@ import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
 });
 const workstation = daemonConnection({
   daemonId: 'daemon/workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'token-workstation',
+  deviceId: 'token-workstation',
 });
 
 /** Same session id on two daemons, and two sessions on one daemon. */

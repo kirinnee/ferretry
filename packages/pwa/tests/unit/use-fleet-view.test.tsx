@@ -12,7 +12,7 @@ const alpha = daemonId('alpha');
 const beta = daemonId('beta');
 
 const connection = (id: DaemonId): DaemonConnection =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` });
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
 
 /** A port that answers each daemon with its own fixed fleet. */
 const port = (fleets: Readonly<Record<string, readonly SessionView[]>>): DaemonFleetPort => ({

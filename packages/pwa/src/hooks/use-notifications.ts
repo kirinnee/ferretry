@@ -179,7 +179,7 @@ export const useNotificationControls = (
       preferences: host.preferences,
       enrolment: host.enrolment,
     }),
-    [connection.daemonId, connection.baseUrl, connection.deviceToken, host],
+    [connection.daemonId, connection.baseUrl, connection.deviceId, host],
   );
 
   // ONLY THE NEWEST CONNECTION CONTEXT MAY PUBLISH A READOUT.

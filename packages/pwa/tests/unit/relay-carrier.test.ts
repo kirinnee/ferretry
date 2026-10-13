@@ -25,7 +25,7 @@ import { autoDial, newDaemonIdentity, relayCrypto, ScriptedSocket, settle } from
 
 const DAEMON_URL = 'https://studio.example';
 const RELAY: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay.example', operator: 'hosted' };
-const DEVICE_TOKEN = 'fy_device_secret';
+const DEVICE_ID = 'fy_device_secret';
 
 /** A heartbeat schedule that fires nothing, and records what was asked for. */
 const idleHeartbeat = (): { schedule: (tick: () => void, interval: number) => () => void; intervals: number[] } => {
@@ -259,7 +259,7 @@ describe('the browser WebSocket adapter', () => {
 
 describe('opening one relayed session', () => {
   it('should refuse a fingerprint no rendezvous can address', async () => {
-    const daemon = daemonConnection({ daemonId: 'not-a-fingerprint', baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: 'not-a-fingerprint', baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     await should(
       openRelaySession({ crypto: relayCrypto, dial: () => new ScriptedSocket(), daemon, method: RELAY }),
     ).be.rejectedWith(/cannot address a rendezvous/u);
@@ -267,7 +267,7 @@ describe('opening one relayed session', () => {
 
   it('should authenticate, then arm a heartbeat and disarm the opening deadline', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const heartbeat = idleHeartbeat();
     const auto = autoDial(identity);
     const session = await openRelaySession({
@@ -284,7 +284,7 @@ describe('opening one relayed session', () => {
 
   it('should refuse a rendezvous that neither opens a session nor closes the socket', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     let fire: (() => void) | undefined;
     const socket = new ScriptedSocket();
     const opening = openRelaySession({
@@ -309,7 +309,7 @@ describe('opening one relayed session', () => {
 
   it('should surface the heartbeat and text the carrier sends through the live session', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     let beat: (() => void) | undefined;
     const auto = autoDial(identity);
     await openRelaySession({
@@ -332,7 +332,7 @@ describe('opening one relayed session', () => {
 
   it('should arm real timers when no schedule is injected, and cancel them on close', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const auto = autoDial(identity);
     const session = await openRelaySession({ crypto: relayCrypto, dial: auto.dial, daemon, method: RELAY });
     should(session.live()).be.true();
@@ -344,7 +344,7 @@ describe('opening one relayed session', () => {
 
   it('should refuse when the daemon rejects the device grant inside the channel', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const auto = autoDial(identity, { rejectDevice: true });
     const refusal = await openRelaySession({
       crypto: relayCrypto,
@@ -368,7 +368,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       ...(options.relay === undefined
         ? {}
         : {
@@ -425,7 +425,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: 'https://other-direct.example' }],
     });
     const router = new DaemonCarrierRouter({
@@ -467,7 +467,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
     const bodies: string[] = [];
@@ -503,7 +503,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, first, second],
     });
     const live = autoDial(identity);
@@ -579,7 +579,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
     let releaseFirstDirect = (): void => {};
@@ -649,7 +649,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
     });
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,
@@ -708,7 +708,7 @@ describe('the carrier router', () => {
     should(auto.sockets).have.length(1);
 
     // A re-pair: same daemon, new grant. Nothing live may survive it.
-    const repaired = { ...daemon, deviceToken: 'fy_device_rotated' };
+    const repaired = { ...daemon, deviceId: 'fy_device_rotated' };
     await router.send(repaired, `${DAEMON_URL}/v1/projects`);
     should(auto.sockets).have.length(2);
 
@@ -736,7 +736,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
     const live = autoDial(identity);
@@ -845,7 +845,7 @@ describe('the carrier router', () => {
    */
   it('should dial the current hosted address for a daemon that published no rendezvous', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const auto = autoDial(identity);
     let asked = 0;
     const router = new DaemonCarrierRouter({
@@ -877,7 +877,7 @@ describe('the carrier router', () => {
 
   it('should dial nothing for that daemon once the directory has no address to give', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const auto = autoDial(identity);
     let asked = 0;
     const router = new DaemonCarrierRouter({
@@ -908,7 +908,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
     const auto = autoDial(identity);
@@ -949,7 +949,7 @@ describe('the carrier router', () => {
    */
   it('should keep carrying over a direct winner the daemon can no longer name, and hand back to its set when that stops', async () => {
     const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const auto = autoDial(identity);
     let directWorks = true;
     let directCalls = 0;
@@ -1001,7 +1001,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
     const auto = autoDial(identity);
@@ -1052,7 +1052,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY, second],
     });
     const auto = autoDial(identity);
@@ -1092,7 +1092,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
     const republished = daemonConnection({
@@ -1185,7 +1185,7 @@ describe('the carrier router', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
     });
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,

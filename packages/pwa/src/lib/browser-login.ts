@@ -306,7 +306,7 @@ export class DaemonBrowserLoginStore {
       this.#logins.set(daemon.daemonId, created);
       return created;
     }
-    if (existing.connection.baseUrl === daemon.baseUrl && existing.connection.deviceToken === daemon.deviceToken) {
+    if (existing.connection.baseUrl === daemon.baseUrl && existing.connection.deviceId === daemon.deviceId) {
       return existing;
     }
     // The same daemon, reached a different way: re-paired, rotated token, new

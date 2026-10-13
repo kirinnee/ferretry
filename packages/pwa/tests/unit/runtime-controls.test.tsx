@@ -21,8 +21,8 @@ import type { RuntimeModelCatalog } from '../../src/lib/runtime-models.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
-const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceToken: 'token-a' });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'token-b' });
+const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
+const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'token-b' });
 
 const view = (overrides: Parameters<typeof sessionView>[1] = {}): SessionView =>
   sessionView('s-1', {

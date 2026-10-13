@@ -12,7 +12,7 @@ import { render, run } from '../../support/react.ts';
 const connection = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'device-token-a',
+  deviceId: 'device-token-a',
 });
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const verdict: WardenVerdictView = {

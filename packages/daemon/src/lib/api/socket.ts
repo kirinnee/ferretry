@@ -122,11 +122,6 @@ export type SocketUpgradeDecision =
   | {
       readonly outcome: 'accepted';
       readonly attach: SocketAttachment;
-      /**
-       * The paired device the upgrade was authorized for, absent for a host credential. The
-       * transport tracks the socket under it, so unpairing the device closes the socket too.
-       */
-      readonly deviceId?: string;
     }
   /** No socket route claims this path; it is an ordinary request/response one. */
   | { readonly outcome: 'unclaimed' }
@@ -189,13 +184,9 @@ export class ApiSocketDispatcher {
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
     if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
     try {
-      const attach = await authorized.route.accept(authorized.context);
-      const credential = authorized.context.credential;
-      return {
-        outcome: 'accepted',
-        attach,
-        ...(credential?.tokenClass === 'device' ? { deviceId: credential.deviceId } : {}),
-      };
+      // A paired device's stream is tracked by the SESSION that opened it, which ends it on revocation;
+      // no plain-HTTP upgrade can carry a device at all any more.
+      return { outcome: 'accepted', attach: await authorized.route.accept(authorized.context) };
     } catch (error) {
       // Same taxonomy as a route handler's: a refusal the subsystem named keeps its own status, and
       // anything else is the daemon's fault rather than the caller's.

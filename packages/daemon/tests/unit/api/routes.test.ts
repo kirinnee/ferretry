@@ -58,7 +58,12 @@ describe('health routes', () => {
 
     // Assert
     should(response.status).equal(200);
-    should(jsonBody(response)).deepEqual({ status: 'ok', version: daemonVersion, uptimeSeconds: 90 });
+    should(jsonBody(response)).deepEqual({
+      status: 'ok',
+      version: daemonVersion,
+      sessionProtocol: 'ferretry-relay/2',
+      uptimeSeconds: 90,
+    });
   });
 
   it('should leave /v1/health to the mount that can answer it', async () => {

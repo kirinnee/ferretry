@@ -26,7 +26,7 @@ describe('PageHost', () => {
     const connection = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'device-secret',
+      deviceId: 'device-secret',
     });
     const received: DaemonConnection[] = [];
     const daemonPage = (name: string): ComponentType<DaemonPageProps> =>
@@ -103,7 +103,7 @@ describe('PageHost', () => {
     const connection = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'device-secret',
+      deviceId: 'device-secret',
     });
     const unusedDaemonPage = (): never => {
       throw new Error('a daemon page must not render');
@@ -170,7 +170,7 @@ describe('PageHost', () => {
     const connection = daemonConnection({
       daemonId: 'daemon-b',
       baseUrl: 'https://b.example.test',
-      deviceToken: 'device-b',
+      deviceId: 'device-b',
     });
     const daemonPage = () => <p>must not render</p>;
     const slots: PageHostSlots = {

@@ -8,12 +8,12 @@ import { type DaemonUsagePort, DaemonUsageStore, daemonUsagePort, USAGE_POLL_MS 
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
 });
 const workstation = daemonConnection({
   daemonId: 'daemon/workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'token-workstation',
+  deviceId: 'token-workstation',
 });
 
 const feed = (percent: number, agent = 'claude'): UsageFeedView => ({
@@ -179,7 +179,7 @@ describe('DaemonUsageStore', () => {
     );
 
     const stale = store.refresh(laptop);
-    const repaired = { ...laptop, deviceToken: 'token-rotated' };
+    const repaired = { ...laptop, deviceId: 'token-rotated' };
     expect(await store.refresh(repaired)).toBe(true);
     expect(store.usage(laptop.daemonId).feed?.accounts[0]?.fiveHourPercent).toBe(77);
 
@@ -327,7 +327,7 @@ describe('DaemonUsageStore.watch', () => {
     const store = new DaemonUsageStore(
       {
         usage: async daemon => {
-          tokens.push(daemon.deviceToken);
+          tokens.push(daemon.deviceId);
           return feed(3);
         },
       },
@@ -335,7 +335,7 @@ describe('DaemonUsageStore.watch', () => {
     );
 
     const first = store.watch(laptop);
-    const second = store.watch({ ...laptop, deviceToken: 'token-rotated' });
+    const second = store.watch({ ...laptop, deviceId: 'token-rotated' });
     await new Promise(resolve => setTimeout(resolve, 16));
     first();
     second();

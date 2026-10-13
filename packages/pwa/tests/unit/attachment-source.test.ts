@@ -7,14 +7,14 @@ import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 const daemon = daemonConnection({
   daemonId: 'files-daemon',
   baseUrl: 'https://files.example.test',
-  deviceToken: 'files-token',
+  deviceId: 'files-token',
 });
 const scope = daemonSessionScope(daemon, 'files/session');
 
 const other = daemonConnection({
   daemonId: 'other-daemon',
   baseUrl: 'https://other.example.test',
-  deviceToken: 'other-token',
+  deviceId: 'other-token',
 });
 
 describe('loading an attachment blob', () => {

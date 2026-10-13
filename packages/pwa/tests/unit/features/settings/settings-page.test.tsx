@@ -25,8 +25,8 @@ const pendingProbe: DaemonReachabilityProbe = () => new Promise(() => undefined)
 const unavailableWardenClient: WardenClientFactory = async () =>
   Promise.reject(new Error('Warden unavailable in this test.'));
 
-const daemon = (id: string, baseUrl: string, deviceToken: string, label?: string): DaemonConnectionRecord => ({
-  ...daemonConnection({ daemonId: id, baseUrl, deviceToken }),
+const daemon = (id: string, baseUrl: string, deviceId: string, label?: string): DaemonConnectionRecord => ({
+  ...daemonConnection({ daemonId: id, baseUrl, deviceId }),
   ...(label === undefined ? {} : { label }),
   pairedAt: 1,
   lastSelectedAt: 2,
@@ -559,7 +559,7 @@ describe('daemon settings', () => {
     const alphaHealth = deferred<unknown>();
     const probed: string[] = [];
     const probe: DaemonReachabilityProbe = connection => {
-      probed.push(`${connection.daemonId}:${connection.deviceToken}`);
+      probed.push(`${connection.daemonId}:${connection.deviceId}`);
       return alphaHealth.promise;
     };
     const view = await mount(page({ connections: [alpha, beta], probe }));
@@ -669,7 +669,7 @@ describe('daemon settings', () => {
     const newHealth = deferred<unknown>();
     const rotated = daemon('daemon-alpha', 'https://alpha.example.test', 'alpha-rotated', 'Alpha workstation');
     const probe: DaemonReachabilityProbe = connection =>
-      connection.deviceToken === 'alpha-secret' ? oldHealth.promise : newHealth.promise;
+      connection.deviceId === 'alpha-secret' ? oldHealth.promise : newHealth.promise;
     const controls = new DaemonControlsStore(memoryStorage());
     const view = await mount(page({ current: alpha, connections: [alpha], controls, probe }));
     await interact(() =>
@@ -691,7 +691,7 @@ describe('daemon settings', () => {
     const stale = deferred<unknown>();
     const fresh = deferred<unknown>();
     const lateProbe: DaemonReachabilityProbe = connection =>
-      connection.deviceToken === 'alpha-secret' ? stale.promise : fresh.promise;
+      connection.deviceId === 'alpha-secret' ? stale.promise : fresh.promise;
     await view.render(page({ current: alpha, connections: [alpha], controls, probe: lateProbe }));
     await view.render(page({ current: rotated, connections: [rotated], controls, probe: lateProbe }));
     stale.resolve({});

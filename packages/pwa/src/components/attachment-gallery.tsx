@@ -32,6 +32,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -57,6 +58,7 @@ import {
 import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 
 /** The browser's own object-URL pair, isolated so tests never touch it. */
 const browserBlobUrls: AttachmentBlobUrlPort = {
@@ -67,17 +69,21 @@ const browserBlobUrls: AttachmentBlobUrlPort = {
 /** The daemon read, injected so a test or the visual harness stays offline. */
 export type AttachmentBlobLoader = (daemon: DaemonConnection, scope: DaemonAttachmentScope) => Promise<Blob>;
 
-const defaultLoader: AttachmentBlobLoader = (daemon, scope) => loadAttachmentBlob(daemon, scope, scope.attachmentId);
 
 interface GalleryEnvironment {
   readonly cache: DaemonAttachmentBlobCache | null;
-  readonly load: AttachmentBlobLoader;
+  /**
+   * The daemon read, or nothing for "read through the carrier router" — which is every production
+   * mount. A loader that called the network by itself could only be refused: a paired device has no
+   * bearer value, and every daemon read rides a session the device key opened.
+   */
+  readonly load: AttachmentBlobLoader | undefined;
   readonly urls: AttachmentBlobUrlPort;
 }
 
 const AttachmentGalleryContext = createContext<GalleryEnvironment>({
   cache: null,
-  load: defaultLoader,
+  load: undefined,
   urls: browserBlobUrls,
 });
 
@@ -96,7 +102,7 @@ export interface AttachmentGalleryProviderProps {
  */
 export const AttachmentGalleryProvider = ({
   children,
-  load = defaultLoader,
+  load,
   urls = browserBlobUrls,
 }: AttachmentGalleryProviderProps) => {
   const cache = useRef<DaemonAttachmentBlobCache | null>(null);
@@ -116,10 +122,15 @@ export const AttachmentGalleryProvider = ({
  */
 const useAttachmentCache = (): { cache: DaemonAttachmentBlobCache; load: AttachmentBlobLoader } => {
   const environment = useContext(AttachmentGalleryContext);
+  const fetcher = useDaemonFetch();
+  const routed = useMemo<AttachmentBlobLoader>(
+    () => (daemon, scope) => loadAttachmentBlob(daemon, scope, scope.attachmentId, undefined, fetcher),
+    [fetcher],
+  );
   const local = useRef<DaemonAttachmentBlobCache | null>(null);
   local.current ??= new DaemonAttachmentBlobCache(environment.urls, 1);
   useEffect(() => () => local.current?.dispose(), []);
-  return { cache: environment.cache ?? local.current, load: environment.load };
+  return { cache: environment.cache ?? local.current, load: environment.load ?? routed };
 };
 
 /**

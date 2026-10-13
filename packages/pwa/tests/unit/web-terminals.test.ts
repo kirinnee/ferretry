@@ -15,12 +15,12 @@ import {
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const daemonB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'https://b.example.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 const scopeA = daemonSessionScope(daemonA, 'shared/session');
 const scopeB = daemonSessionScope(daemonB, 'shared/session');
@@ -154,7 +154,7 @@ describe('web terminal transport', () => {
     expect(terminalStreamUrl(daemonA, scopeA, TERMINAL_ID, 'one-time')).toBe(
       `wss://a.example.test/v1/sessions/shared%2Fsession/terminals/${TERMINAL_ID}/stream?ticket=one-time`,
     );
-    const insecure = daemonConnection({ daemonId: 'daemon-c', baseUrl: 'http://localhost:8787', deviceToken: 'c' });
+    const insecure = daemonConnection({ daemonId: 'daemon-c', baseUrl: 'http://localhost:8787', deviceId: 'c' });
     expect(terminalStreamUrl(insecure, daemonSessionScope(insecure, 's'), TERMINAL_ID, 't')).toBe(
       `ws://localhost:8787/v1/sessions/s/terminals/${TERMINAL_ID}/stream?ticket=t`,
     );

@@ -13,7 +13,7 @@ import { wardenFailover, wardenStatus } from '../../support/warden.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 const connection = (id: string) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` });
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
 const view = (agent = 'claude-auto-loge'): WardenConfigView => ({
   config: { ...wardenStatus().config, accounts: [{ agent }] },
   accounts: [{ agent }],

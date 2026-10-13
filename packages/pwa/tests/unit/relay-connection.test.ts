@@ -42,7 +42,7 @@ const connection = (daemonId: string, relays: readonly RelayCarrier[] = []) =>
   daemonConnection({
     daemonId,
     baseUrl: DAEMON_URL,
-    deviceToken: 'fy_device_x',
+    deviceId: 'fy_device_x',
     carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, ...relays],
   });
 
@@ -51,7 +51,7 @@ const stored = (relay: unknown) =>
     v: CONNECTIONS_VERSION,
     selectedDaemonId: FINGERPRINT,
     connections: [
-      { daemonId: FINGERPRINT, baseUrl: DAEMON_URL, deviceToken: 'fy_device_x', pairedAt: 1, lastSelectedAt: 2, relay },
+      { daemonId: FINGERPRINT, baseUrl: DAEMON_URL, deviceId: 'fy_device_x', pairedAt: 1, lastSelectedAt: 2, relay },
     ],
   });
 
@@ -63,7 +63,7 @@ const storedCarriers = (carriers: unknown) =>
       {
         daemonId: FINGERPRINT,
         baseUrl: DAEMON_URL,
-        deviceToken: 'fy_device_x',
+        deviceId: 'fy_device_x',
         pairedAt: 1,
         lastSelectedAt: 2,
         carriers,

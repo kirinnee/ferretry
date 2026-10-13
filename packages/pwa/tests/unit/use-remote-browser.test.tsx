@@ -15,12 +15,12 @@ import { render, run, runAsync } from '../support/react.ts';
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const daemonB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'https://b.example.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 
 /**
@@ -30,18 +30,18 @@ const daemonB = daemonConnection({
 const daemonARotatedToken = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a2',
+  deviceId: 'token-a2',
 });
 const daemonAMovedUrl = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a2.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 /** Not a re-pair: a host that rebuilt an equivalent object on a render. */
 const daemonARebuilt = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 const statusFor = (sessionId: string, state: 'stopped' | 'running' = 'stopped'): BrowserStatus =>

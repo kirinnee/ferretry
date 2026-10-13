@@ -42,7 +42,7 @@ import {
   testSessionId,
 } from '../support/relay.ts';
 
-const DEVICE_TOKEN = 'fy_device_secret';
+const DEVICE_ID = 'fy_device_secret';
 const sessionId = testSessionId();
 
 interface Harness {
@@ -58,7 +58,7 @@ const opened = async (overrides: Partial<RelayClientSessionDependencies> = {}): 
   const session = new RelayClientSession({
     crypto: relayCrypto,
     daemonId: identity.daemonId,
-    mode: { kind: 'auth', deviceToken: DEVICE_TOKEN },
+    mode: { kind: 'auth', deviceId: DEVICE_ID },
     socket,
     ...overrides,
   });
@@ -79,7 +79,7 @@ const serving = async (overrides: Partial<RelayClientSessionDependencies> = {}):
 /** A keyed stream the daemon has accepted: ready to carry frames and conclude. */
 const streaming = async (overrides: Partial<RelayClientSessionDependencies> = {}): Promise<Harness> => {
   const harness = await opened({
-    mode: { kind: 'stream', deviceToken: DEVICE_TOKEN, path: '/v1/events' },
+    mode: { kind: 'stream', deviceId: DEVICE_ID, path: '/v1/events' },
     ...overrides,
   });
   const hello = harness.socket.sent[0];
@@ -114,8 +114,8 @@ describe('the relay tunnel codec', () => {
   });
 
   it('should encode a client message as one JSON object', () => {
-    const encoded = encodeTunnelClientMessage({ t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: 'token' });
-    should(JSON.parse(new TextDecoder().decode(encoded))).match({ t: 'auth', deviceToken: 'token' });
+    const encoded = encodeTunnelClientMessage({ t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceId: 'token' });
+    should(JSON.parse(new TextDecoder().decode(encoded))).match({ t: 'auth', deviceId: 'token' });
   });
 });
 
@@ -179,7 +179,7 @@ describe('a relay session reading frames from its carrier', () => {
     const session = new RelayClientSession({
       crypto: relayCrypto,
       daemonId: identity.daemonId,
-      mode: { kind: 'auth', deviceToken: DEVICE_TOKEN },
+      mode: { kind: 'auth', deviceId: DEVICE_ID },
       socket,
     });
     await session.receiveBinary(creditFrame(sessionId, encodeCreditPayload(4)));

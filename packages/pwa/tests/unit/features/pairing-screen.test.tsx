@@ -10,9 +10,9 @@ import { interact, mount, must } from '../../support/dom.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-secret',
+  deviceId: 'alpha-secret',
 });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-secret' });
+const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'beta-secret' });
 const records = [
   { ...alpha, label: 'Studio daemon', pairedAt: 1, lastSelectedAt: 2 },
   { ...beta, pairedAt: 1, lastSelectedAt: 1 },

@@ -12,7 +12,7 @@ test('Composer forwards textarea selection changes to its autocomplete controlle
   const view = render(
     <Composer
       api={{ send: async () => undefined } as unknown as ComposerProps['api']}
-      daemon={daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token' })}
+      daemon={daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token' })}
       sessionId="session-a"
     />,
   );

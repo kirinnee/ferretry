@@ -13,6 +13,20 @@
 export interface ApiCredentials {
   readonly admin: string;
   readonly warden?: string;
+  /**
+   * Which devices are paired THIS INSTANT — consulted for a session's device, never to resolve one.
+   *
+   * A session's device was proved when the session opened, and revoking the device ends its sessions;
+   * this is the second half of that, at the request boundary, so a request already in flight on a
+   * session being torn down is refused rather than served for a device that no longer exists. Absent
+   * is "nobody can say", which refuses every device: fail closed.
+   */
+  readonly devices?: PairedDeviceDirectory;
+}
+
+/** Whether a device grant exists right now. Answers about an id; it resolves no credential. */
+export interface PairedDeviceDirectory {
+  has(deviceId: string): boolean;
 }
 
 /** What a request presented. Assembled by the dispatcher from headers and, for loopback WebSocket

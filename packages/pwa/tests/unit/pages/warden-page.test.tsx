@@ -17,7 +17,7 @@ describe('WardenPage', () => {
     const connection = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'device-secret',
+      deviceId: 'device-secret',
     });
     const received: DaemonConnection[] = [];
     const surface = (name: string): ComponentType<WardenSurfaceProps> =>

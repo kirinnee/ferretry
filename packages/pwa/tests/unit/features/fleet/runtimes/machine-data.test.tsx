@@ -15,7 +15,7 @@ import { interact, mount, must } from '../../../../support/dom.ts';
 import { CREDENTIALS, DATA, READS, STUDIO, scripted } from '../account-support.ts';
 
 const NO_ANSWER = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
-const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceToken: 'u' });
+const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });
 
 const settle = async (): Promise<void> => {
   await interact(async () => {

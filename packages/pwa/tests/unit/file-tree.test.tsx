@@ -8,7 +8,7 @@ import { render, run, runAsync } from '../support/react.ts';
 const daemon = daemonConnection({
   daemonId: 'tree-daemon',
   baseUrl: 'https://tree.example.test',
-  deviceToken: 'tree-token',
+  deviceId: 'tree-token',
 });
 const scope = daemonSessionScope(daemon, 'tree/session');
 

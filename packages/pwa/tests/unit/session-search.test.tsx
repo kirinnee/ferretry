@@ -35,7 +35,7 @@ import { type TaskSummaryOverrides, taskSummary } from '../support/tasks.ts';
 const daemon = daemonConnection({
   daemonId: 'search-daemon',
   baseUrl: 'https://search.example.test',
-  deviceToken: 'search-token',
+  deviceId: 'search-token',
 });
 const scope = daemonSessionScope(daemon, 'session-a');
 const originalFetch = globalThis.fetch;
@@ -1065,8 +1065,8 @@ describe('the query reader is fenced by scope and by query', () => {
   });
 
   test('publishes a query that settles after a scope change under the scope that started it', async () => {
-    const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.test', deviceToken: 'a' });
-    const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.test', deviceToken: 'b' });
+    const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.test', deviceId: 'a' });
+    const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.test', deviceId: 'b' });
     const alphaScope = daemonSessionScope(alpha, 'shared');
     const betaScope = daemonSessionScope(beta, 'shared');
     const alphaRow = boardTask({ id: 'F1', title: 'Alpha only' }, { ask: 'needle' }, 'shared');
@@ -1439,7 +1439,7 @@ describe('Add to chat from the current-session task board', () => {
     // happen, because a task id is session-local and would name other work.
     const stranger = composerAt(
       daemonSessionScope(
-        daemonConnection({ daemonId: 'other-daemon', baseUrl: 'https://other.example.test', deviceToken: 'other' }),
+        daemonConnection({ daemonId: 'other-daemon', baseUrl: 'https://other.example.test', deviceId: 'other' }),
         'session-a',
       ),
       '',
@@ -1592,12 +1592,12 @@ describe('the published scope and the published evidence never disagree', () => 
     const alpha = daemonConnection({
       daemonId: 'alpha',
       baseUrl: 'https://alpha.example.test',
-      deviceToken: 'alpha-token',
+      deviceId: 'alpha-token',
     });
     const beta = daemonConnection({
       daemonId: 'beta',
       baseUrl: 'https://beta.example.test',
-      deviceToken: 'beta-token',
+      deviceId: 'beta-token',
     });
     // The same session id on both daemons — the arrangement in which a stale
     // pairing is invisible to any check that compares session ids alone.

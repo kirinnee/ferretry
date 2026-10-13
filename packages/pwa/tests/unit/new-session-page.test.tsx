@@ -18,7 +18,7 @@ import { pickerHealth } from './picker-support.ts';
 const connection = daemonConnection({
   daemonId: 'daemon/a',
   baseUrl: 'https://daemon.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 
 const page = (overrides: Partial<NewSessionPageProps> = {}) => {
@@ -178,7 +178,7 @@ describe('NewSessionPage', () => {
 const workstation = daemonConnection({
   daemonId: 'daemon/b',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'token-workstation',
+  deviceId: 'token-workstation',
 });
 
 const studio: PickerAccount = {
@@ -924,7 +924,7 @@ describe('NewSessionPage with the daemon pickers', () => {
         connection={daemonConnection({
           daemonId: connection.daemonId,
           baseUrl: connection.baseUrl,
-          deviceToken: 'device-token-2',
+          deviceId: 'device-token-2',
         })}
       />,
     );

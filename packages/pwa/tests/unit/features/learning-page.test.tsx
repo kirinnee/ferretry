@@ -34,12 +34,12 @@ const withModality = <T,>(desktop: boolean, body: () => T): T => {
 const connection = daemonConnection({
   daemonId: 'daemon/a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const connectionB = daemonConnection({
   daemonId: 'daemon/b',
   baseUrl: 'https://b.example.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 const makeProposal = (state: ProposalView['state'], occurrences: number, id: string): ProposalView => ({
   ...proposal,

@@ -38,7 +38,9 @@
  *   that does not exist.
  */
 
+import { OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE } from '@ferretry/protocol';
 import {
+  APP_SESSION_BYTES,
   type ConnectionChoice,
   type ConnectionMethod,
   type ConnectionProbe,
@@ -47,7 +49,10 @@ import {
   connectionSocketUrl,
   HEARTBEAT_GRACE_SECONDS,
   HEARTBEAT_SECONDS,
+  type PrivateKeyHandle,
   RELAY_CLOSE_CODES,
+  SESSION_PROTOCOL_ID,
+  toBase64Url,
 } from '@ferretry/relay';
 import {
   type DaemonConnection,
@@ -57,6 +62,7 @@ import {
   sameDaemonCarrier,
   sameDaemonConnection,
 } from './daemon-connection.ts';
+import { DeviceKeyMissingError } from './device-keys.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -64,6 +70,8 @@ import {
   RelaySessionError,
   type RelaySessionMode,
   type RelayStreamFrame,
+  RelayStreamRefusedError,
+  type SessionDeviceClaim,
   type RelayTunnelAnswer,
   type RelayTunnelClientMessage,
 } from './relay-session.ts';
@@ -278,24 +286,15 @@ const BODYLESS_STATUSES: readonly number[] = [204, 205, 304];
  * this and inventing one would be inventing a result. Paging or a chunked reply is
  * unbuilt work on both ends; this is what says so to a caller.
  */
-export class RelayOversizeError extends Error {
-  constructor(
-    readonly status: number,
-    readonly byteLength: number,
-  ) {
-    super(`the daemon’s answer is ${byteLength} bytes and does not fit one relay record`);
-    this.name = 'RelayOversizeError';
-  }
-}
 
 /**
  * The answer, as the `Response` every caller in this package already handles.
  *
- * `oversize` throws rather than returning anything: a client that turned it into a
- * `200` with an empty body would render a fleet that does not exist.
+ * A body that did not fit one record has already been reassembled from its parts by the session, so
+ * there is no "too large" shape left to refuse here — the daemon answers an answer past the tunnel's
+ * limit with its own `502`, and that is an ordinary response.
  */
 export const relayResponse = (answer: RelayTunnelAnswer): Response => {
-  if (answer.kind === 'oversize') throw new RelayOversizeError(answer.status, answer.byteLength);
   const bodyless = BODYLESS_STATUSES.includes(answer.status);
   return new Response(bodyless ? null : answer.body, { status: answer.status, headers: answer.headers });
 };
@@ -306,16 +305,17 @@ export interface OpenRelaySessionOptions {
   readonly crypto: RelayClientSessionDependencies['crypto'];
   readonly dial: RelayDial;
   readonly daemon: DaemonConnection;
-  readonly method: Extract<ConnectionMethod, { kind: 'relay' }>;
+  /** Either carrier: a rendezvous, or the daemon's own address, which speaks the same session. */
+  readonly method: ConnectionMethod;
   readonly heartbeat?: RelayHeartbeatSchedule;
   /**
-   * What this session is for. A request session by default, because that is every existing caller.
+   * What this session is for, including the device claim that proves it.
    *
    * A PAIRING session never comes through here: it has no `DaemonConnection` to be opened against —
-   * there is no device token yet and no daemon in the registry — so it is dialled by
-   * `relay-pairing.ts` instead. What does come through here is a stream session, which has both.
+   * there is no grant yet and no daemon in the registry — so it is dialled by `relay-pairing.ts`
+   * instead. What does come through here is a request or a stream session, which have both.
    */
-  readonly mode?: RelaySessionMode;
+  readonly mode: RelaySessionMode;
   readonly onData?: RelayClientSessionDependencies['onData'];
 }
 
@@ -348,12 +348,15 @@ export const driveRelaySession = async <T>({
   heartbeat,
   settled,
   keepAlive,
+  deadlineMs = HEARTBEAT_GRACE_SECONDS * 1_000,
 }: {
   readonly socket: RelayCarrierSocket;
   readonly session: RelayClientSession;
   readonly heartbeat: RelayHeartbeatSchedule;
   readonly settled: Promise<T>;
   readonly keepAlive: boolean;
+  /** How long the session may take to settle. The heartbeat grace by default; shorter for a probe. */
+  readonly deadlineMs?: number;
 }): Promise<T> => {
   const timers = new Set<() => void>();
   const stop = (): void => {
@@ -363,7 +366,7 @@ export const driveRelaySession = async <T>({
   const deadline = heartbeat(() => {
     session.carrierClosed(RELAY_CLOSE_CODES.heartbeatTimeout, 'the rendezvous did not open a session in time');
     socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, 'no session');
-  }, HEARTBEAT_GRACE_SECONDS * 1_000);
+  }, deadlineMs);
   timers.add(deadline);
   socket.onOpen = () => {
     timers.add(heartbeat(() => session.heartbeat(), HEARTBEAT_SECONDS * 1_000));
@@ -402,15 +405,15 @@ export const openRelaySession = async ({
 }: OpenRelaySessionOptions): Promise<RelayClientSession> => {
   const url = connectionSocketUrl(method, daemon.daemonId, 'client');
   if (url === null) {
-    // `connectionSocketUrl` refuses a fingerprint a rendezvous cannot address. That
+    // `connectionSocketUrl` refuses a fingerprint a session cannot be checked against. That
     // is a refusal, not an address to improvise around.
-    throw new RelaySessionError('this daemon fingerprint cannot address a rendezvous', RELAY_CLOSE_CODES.protocolError);
+    throw new RelaySessionError('this daemon fingerprint cannot address a session', RELAY_CLOSE_CODES.protocolError);
   }
   const socket = dial(url);
   const session = new RelayClientSession({
     crypto,
     daemonId: daemon.daemonId,
-    mode: mode ?? { kind: 'auth', deviceToken: daemon.deviceToken },
+    mode,
     socket,
     ...(onData === undefined ? {} : { onData }),
   });
@@ -419,9 +422,40 @@ export const openRelaySession = async ({
 
 /* ---------- the router every daemon-bound request goes through ------------- */
 
+/**
+ * The key this browser proves one daemon's grant with, or nothing when it is gone.
+ *
+ * A port rather than the IndexedDB store itself, so the router never knows where keys live and a suite
+ * can hand it one. `undefined` is answered with {@link DeviceKeyMissingError}: there is nothing a
+ * second carrier could do about a key that is not here.
+ */
+export type DeviceKeyResolver = (daemonId: DaemonId) => Promise<PrivateKeyHandle | undefined>;
+
+/**
+ * Said when a daemon answers its public liveness route but not the session this app speaks.
+ *
+ * Final, like a sealed refusal: every other carrier reaches the same old machine.
+ */
+export class DaemonOutdatedError extends Error {
+  constructor() {
+    super(OLDER_DAEMON_SENTENCE);
+    this.name = 'DaemonOutdatedError';
+  }
+}
+
 export interface DaemonCarrierRouterOptions {
-  /** The real network, for the direct carrier and for anything not bound to a daemon. */
+  /**
+   * The real network — for the one liveness read that tells an old daemon from an absent one, and
+   * for anything not bound to a daemon. NO daemon request goes over it: every one rides a session.
+   */
   readonly network?: DaemonFetch;
+  /** The device key for a daemon, read when a session opens. See {@link DeviceKeyResolver}. */
+  readonly deviceKey: DeviceKeyResolver;
+  /**
+   * This running copy of the app, signed into every session's proof. Random per page load by default;
+   * a step-up the daemon grants belongs to one of these and ends when the page does.
+   */
+  readonly appSession?: string;
   readonly crypto: RelayClientSessionDependencies['crypto'];
   readonly dial?: RelayDial;
   readonly heartbeat?: RelayHeartbeatSchedule;
@@ -449,9 +483,14 @@ export interface DaemonCarrierRouterOptions {
  * ask about the address.
  */
 interface CarrierSession {
-  readonly relayUrl: string;
+  /** The carrier this session is on: a rendezvous URL, or the daemon's own direct address. */
+  readonly address: string;
   readonly session: Promise<RelayClientSession>;
 }
+
+/** Where one carrier lives, as the key its sessions are held under. */
+const carrierAddress = (method: ConnectionMethod): string =>
+  method.kind === 'direct' ? `direct ${method.daemonUrl}` : method.relayUrl;
 
 interface CarrierEntry {
   readonly connection: DaemonConnection;
@@ -487,7 +526,7 @@ export interface RelayStreamRequest {
 }
 
 /** The request session's key. One per rendezvous, because §14 gives a request session no identity. */
-const requestSessionKey = (relayUrl: string): string => `request ${relayUrl}`;
+const requestSessionKey = (address: string): string => `request ${address}`;
 
 /**
  * A stream session's key: one per CALL, because §14 gives each stream its own session.
@@ -497,11 +536,11 @@ const requestSessionKey = (relayUrl: string): string => `request ${relayUrl}`;
  * reader of this map can still see what a session is for.
  */
 const streamSessionKey = (
-  relayUrl: string,
+  address: string,
   path: string,
   query: readonly (readonly [string, string])[],
   ordinal: number,
-): string => `stream ${String(ordinal)} ${relayUrl} ${path} ${query.map(pair => pair.join('=')).join('&')}`;
+): string => `stream ${String(ordinal)} ${address} ${path} ${query.map(pair => pair.join('=')).join('&')}`;
 
 /**
  * Same daemon, same address, same grant — only the published carrier set moved.
@@ -512,7 +551,7 @@ const streamSessionKey = (
  * survive from every difference it may not.
  */
 const carrierRefreshOnly = (left: DaemonConnection, right: DaemonConnection): boolean =>
-  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
+  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceId === right.deviceId;
 
 /**
  * Said to a session that finished opening after the entry it was dialled for was replaced.
@@ -539,7 +578,7 @@ const STALE_WALK_REASON =
  *
  * A transport failure is a fact about a carrier and is the reason to try the next one. This is a fact
  * about the WALK: the pairing it was issued against has been cleared or replaced, so the connection it
- * is holding — a device token that may already be revoked, a base URL that may have moved, a carrier
+ * is holding — a device grant that may already be revoked, a base URL that may have moved, a carrier
  * set the daemon has since corrected — is not one this browser may dial anything with.
  *
  * It is a distinct class rather than a plain `Error` precisely so it cannot be mistaken for one: as a
@@ -595,6 +634,8 @@ export class DaemonCarrierRouter {
   readonly #crypto: RelayClientSessionDependencies['crypto'];
   readonly #heartbeat: RelayHeartbeatSchedule | undefined;
   readonly #hostedRelay: () => Promise<string | undefined>;
+  readonly #deviceKey: DeviceKeyResolver;
+  readonly #appSession: string;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
@@ -626,6 +667,8 @@ export class DaemonCarrierRouter {
     this.#heartbeat = options.heartbeat;
     // No provider is direct-only, which is what a build with no relay directory honestly is.
     this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
+    this.#deviceKey = options.deviceKey;
+    this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
   }
 
   /**
@@ -669,7 +712,7 @@ export class DaemonCarrierRouter {
   }
 
   /**
-   * ONE LIVE STREAM, OVER THE RENDEZVOUS THIS DAEMON'S TRAFFIC IS ALREADY ON.
+   * ONE LIVE STREAM, ON WHICHEVER CARRIER REACHES THIS DAEMON.
    *
    * §14 gives a stream its own session — "the socket IS the session, so the session layer already
    * owns the stream's ordering, its flow control, its teardown and its cancellation" — and the
@@ -677,68 +720,49 @@ export class DaemonCarrierRouter {
    * onto the request session, thirty-two outstanding terminal frames would starve and then KILL the
    * fleet requests underneath them.
    *
-   * IT DOES NOT WALK. A stream is opened on the carrier a request has already been measured on, and
-   * `undefined` — nothing measured yet — is not a reason to probe: the caller has a direct socket for
-   * that case and is better at opening one than this class is. A DIRECT winner therefore answers
-   * `null` rather than an error, which is not a failure but the ordinary answer "you can open this
-   * yourself".
+   * IT IS THE ONLY WAY A DEVICE OPENS A STREAM NOW, on either carrier. A direct carrier used to be a
+   * plain WebSocket bought with a ticket; a paired device has no ticket to buy any more, so a direct
+   * stream is a stream session on the daemon's own address. When a request has already measured a
+   * carrier this opens on it; when none has, it walks the set exactly as a request does — direct
+   * first, then each rendezvous — because opening a stream changes nothing on the daemon until it is
+   * accepted, so trying the next carrier after a transport failure is safe.
    *
-   * A REFUSAL FROM THE RENDEZVOUS IS NOT A CARRIER TO REPLACE. §14 requires the session-ceiling
-   * refusal in particular to be "rendered with its reason … rather than surfacing as a stream that
-   * never opens, because a person with three tabs open did nothing wrong and can act on the
-   * sentence", so it is thrown with its close code intact for the caller to say out loud.
+   * A REFUSAL IS NOT A CARRIER TO REPLACE. The daemon's own `stream-refused` is an answer, and §14
+   * requires the rendezvous's session-ceiling refusal to be "rendered with its reason … rather than
+   * surfacing as a stream that never opens", so both are thrown intact for the caller to say out loud.
    *
    * A STREAM SESSION IS NEVER SHARED BETWEEN TWO CALLERS, and that is the protocol's rule rather than
-   * a convenience. §14: "A stream session carries exactly ONE of them: the socket is the session."
-   * Handing one session to two subscribers breaks it on its own terms, and the failure is silent in
-   * both directions a client would care about. `RelayClientSession` takes ONE `onData` at
-   * construction, so a second caller receives no frames at all. And either caller's `closeStream`
-   * concludes the session for BOTH, so one consumer finishing ends the other's stream under it.
-   *
-   * `onStreamClosed` IS NOT ONE OF THOSE REASONS ANY MORE. It used to ASSIGN, so a second subscriber
-   * overwrote the first and the first was never told the stream ended; it now keeps every listener,
-   * which is what lets the eviction below coexist with the consumer's own watcher. The two reasons
-   * above are enough on their own, and they are the ones this per-call key exists for.
-   *
+   * a convenience. `RelayClientSession` takes ONE `onData` at construction, so a second caller would
+   * receive no frames at all, and either caller's `closeStream` would conclude the session for BOTH.
    * So every call opens its own session and the key carries a per-call ordinal to say so. The REQUEST
    * session is still shared, because it genuinely has no per-caller state: its answers are routed by
    * the `id` the caller minted, so two callers on one request session cannot receive each other's.
    */
-  async openStream(daemon: DaemonConnection, request: RelayStreamRequest): Promise<RelayClientSession | null> {
+  async openStream(daemon: DaemonConnection, request: RelayStreamRequest): Promise<RelayClientSession> {
     const entry = this.#entry(daemon);
     const chosen = entry.choice;
-    if (chosen?.ok !== true || chosen.method.kind !== 'relay') return null;
-    const method = chosen.method;
-    const query = request.query ?? [];
-    this.#streams += 1;
-    const key = streamSessionKey(method.relayUrl, request.path, query, this.#streams);
-    const session = await this.#hold(entry, key, method.relayUrl, () =>
-      openRelaySession({
-        crypto: this.#crypto,
-        dial: this.#dial,
-        daemon: entry.connection,
-        method,
-        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-        mode: {
-          kind: 'stream',
-          deviceToken: entry.connection.deviceToken,
-          path: request.path,
-          ...(query.length === 0 ? {} : { query }),
-        },
-        onData: request.onData,
-      }),
-    );
-    // EVICTED WHEN IT CONCLUDES, not when something happens to ask for the same key again — and with
-    // a per-call key nothing ever does, so without this the map would gain one dead entry for every
-    // terminal ever attached over the life of a pairing. A carrier-only refresh replaces `entry`
-    // while carrying this exact held value into the new map, so eviction resolves the authoritative
-    // entry at close time. Identity is the fence: an old close can never delete a newer occupant.
-    const held = entry.sessions.get(key);
-    session.onStreamClosed(() => {
-      const sessions = this.#entries.get(entry.connection.daemonId)?.sessions;
-      if (held !== undefined && sessions?.get(key) === held) sessions.delete(key);
-    });
-    return session;
+    if (chosen?.ok === true) return await this.#streamOn(entry, chosen.method, request);
+    const probes: ConnectionProbe[] = [];
+    for await (const method of this.#candidates(daemon)) {
+      this.#assertCurrent(entry);
+      try {
+        const session = await this.#streamOn(entry, method, request);
+        this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: 101 })]);
+        return session;
+      } catch (reason) {
+        if (
+          reason instanceof RelayStaleEntryError ||
+          reason instanceof DeviceKeyMissingError ||
+          reason instanceof RelayStreamRefusedError ||
+          (reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.rendezvousBusy)
+        )
+          throw reason;
+        probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
+        if (method.kind === 'direct') await this.#refuseIfOutdated(method);
+      }
+    }
+    this.#decide(entry, probes);
+    throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
   }
 
   /** Unpair and re-pair invalidation: a carrier is live state, never durable. */
@@ -829,7 +853,7 @@ export class DaemonCarrierRouter {
     for await (const method of this.#candidates(daemon)) {
       // ASKED BEFORE EVERY ATTEMPT, not once at the top: a walk takes as long as its failures do, and
       // an unpair, a re-pair or a republish can land between any two of them. Every address below
-      // would be dialled with THIS walk's `DaemonConnection` — the old base URL, the old device token,
+      // would be dialled with THIS walk's `DaemonConnection` — the old base URL, the old device grant,
       // the withdrawn rendezvous — which is the one thing a cleared pairing must never do again.
       this.#assertCurrent(entry);
       try {
@@ -847,7 +871,9 @@ export class DaemonCarrierRouter {
         // whether this address works; it says this walk no longer describes a pairing that exists, so
         // every remaining candidate would be dialled with a credential and a set that were replaced.
         if (reason instanceof RelayStaleEntryError) throw reason;
+        if (reason instanceof DeviceKeyMissingError || reason instanceof DaemonOutdatedError) throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
+        if (method.kind === 'direct') await this.#refuseIfOutdated(method);
         // A direct fetch rejection can follow receipt of a POST/PUT/etc. Record its
         // failed probe for the same disclosure a completed walk produces, but do not
         // send that possibly-applied request to the next carrier.
@@ -884,7 +910,7 @@ export class DaemonCarrierRouter {
    * The entry is the walk's whole identity: its connection, its remembered choice and its live
    * sessions. `clearDaemon` replaces it with nothing and `#entry` replaces it on a re-pair or a
    * republish, and in every one of those cases the object a walk captured is an orphan — carrying a
-   * device token that may have been revoked and a carrier set the daemon has already corrected.
+   * device grant that may have been revoked and a carrier set the daemon has already corrected.
    */
   #assertCurrent(entry: CarrierEntry): void {
     if (this.#entries.get(entry.connection.daemonId) === entry) return;
@@ -939,10 +965,12 @@ export class DaemonCarrierRouter {
    */
   #refreshed(current: CarrierEntry, daemon: DaemonConnection): CarrierEntry {
     const carriers = daemonCarriers(daemon);
-    const published = new Set(carriers.flatMap(method => (method.kind === 'relay' ? [method.relayUrl] : [])));
+    const published = new Set(carriers.map(carrierAddress));
+    const winner = current.choice?.ok === true ? carrierAddress(current.choice.method) : undefined;
     const sessions = new Map<string, CarrierSession>();
     for (const [key, held] of current.sessions) {
-      if (published.has(held.relayUrl)) {
+      // A direct winner's own sessions stay for the reason the winner itself stays (below).
+      if (published.has(held.address) || (held.address === winner && held.address.startsWith('direct '))) {
         sessions.set(key, held);
         continue;
       }
@@ -984,16 +1012,26 @@ export class DaemonCarrierRouter {
   }
 
   async #over(entry: CarrierEntry, method: ConnectionMethod, url: string, init: RequestInit): Promise<Response> {
-    if (method.kind === 'direct') return await this.#network(directCarrierUrl(method, url), init);
     const session = await this.#session(entry, method);
     try {
       return relayResponse(await session.request(relayTunnelRequest(url, init)));
     } catch (reason) {
+      // A LEASE THAT RAN OUT IS NOT A CARRIER THAT FAILED. The device slept through its renewal — a
+      // frozen tab, a laptop lid — and the daemon ended the session; a read is simply asked again on a
+      // fresh one, silently. A write is not, for the reason every write is not replayed.
+      if (
+        reason instanceof RelaySessionError &&
+        reason.code === RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE &&
+        replaySafe(init)
+      ) {
+        const fresh = await this.#session(entry, method);
+        return relayResponse(await fresh.request(relayTunnelRequest(url, init)));
+      }
       // The carrier failed under this request, so another carrier may be tried — and
       // the request itself is LOST rather than retried on this one: §9 says frames in
       // flight are gone and known to be gone, so re-requesting is the caller's call.
       if (!session.live()) throw reason;
-      // The daemon ANSWERED. A `409`, an `oversize` refusal — that is a result, and
+      // The daemon ANSWERED. A `409`, a refused body — that is a result, and
       // trying another carrier after it would silently re-send a mutation.
       throw new RelayAnswerError(reason);
     }
@@ -1016,19 +1054,90 @@ export class DaemonCarrierRouter {
    * ever close. A refresh that carried this exact opening promise across is the one case
    * where the entry moved and the session did not, and that session is tracked and fine.
    */
-  async #session(
-    entry: CarrierEntry,
-    method: Extract<ConnectionMethod, { kind: 'relay' }>,
-  ): Promise<RelayClientSession> {
-    return await this.#hold(entry, requestSessionKey(method.relayUrl), method.relayUrl, () =>
+  async #session(entry: CarrierEntry, method: ConnectionMethod): Promise<RelayClientSession> {
+    const address = carrierAddress(method);
+    return await this.#hold(entry, requestSessionKey(address), address, async () =>
       openRelaySession({
         crypto: this.#crypto,
         dial: this.#dial,
         daemon: entry.connection,
         method,
         ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
+        mode: { kind: 'auth', device: await this.#claim(entry) },
       }),
     );
+  }
+
+  /** One stream session on one carrier, held where unpairing can reach it, evicted when it ends. */
+  async #streamOn(entry: CarrierEntry, method: ConnectionMethod, request: RelayStreamRequest): Promise<RelayClientSession> {
+    const address = carrierAddress(method);
+    const query = request.query ?? [];
+    this.#streams += 1;
+    const key = streamSessionKey(address, request.path, query, this.#streams);
+    const session = await this.#hold(entry, key, address, async () =>
+      openRelaySession({
+        crypto: this.#crypto,
+        dial: this.#dial,
+        daemon: entry.connection,
+        method,
+        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
+        mode: {
+          kind: 'stream',
+          device: await this.#claim(entry),
+          path: request.path,
+          ...(query.length === 0 ? {} : { query }),
+        },
+        onData: request.onData,
+      }),
+    );
+    // EVICTED WHEN IT CONCLUDES, not when something happens to ask for the same key again — and with
+    // a per-call key nothing ever does, so without this the map would gain one dead entry for every
+    // terminal ever attached over the life of a pairing. A carrier-only refresh replaces `entry`
+    // while carrying this exact held value into the new map, so eviction resolves the authoritative
+    // entry at close time. Identity is the fence: an old close can never delete a newer occupant.
+    const held = entry.sessions.get(key);
+    session.onStreamClosed(() => {
+      const sessions = this.#entries.get(entry.connection.daemonId)?.sessions;
+      if (held !== undefined && sessions?.get(key) === held) sessions.delete(key);
+    });
+    return session;
+  }
+
+  /**
+   * Which grant this browser holds on this daemon, the key that proves it, and this page's session.
+   *
+   * Read per session rather than cached: a key removed by an unpair, or by the person clearing site
+   * data, must stop opening sessions the moment it is gone.
+   */
+  async #claim(entry: CarrierEntry): Promise<SessionDeviceClaim> {
+    const key = await this.#deviceKey(entry.connection.daemonId);
+    if (key === undefined) throw new DeviceKeyMissingError();
+    return { deviceId: entry.connection.deviceId, key, appSession: this.#appSession };
+  }
+
+  /**
+   * After a direct socket failed: is that an OLD daemon rather than an absent one?
+   *
+   * A browser cannot read why a WebSocket was refused, and an old daemon refuses the session path the
+   * way any unknown route is refused. Its public liveness route still answers, though, and a daemon
+   * that answers it without naming the dialect this app speaks is one that needs updating — which is a
+   * sentence a person can act on, where "could not connect" is not. Anything else — no answer, a body
+   * that does not parse — leaves the walk to carry on, because that daemon is not provably old.
+   */
+  async #refuseIfOutdated(method: Extract<ConnectionMethod, { kind: 'direct' }>): Promise<void> {
+    let body: unknown;
+    try {
+      const response = await this.#network(new URL('/healthz', `${method.daemonUrl}/`).toString(), {
+        cache: 'no-store',
+        credentials: 'omit',
+      });
+      if (!response.ok) return;
+      body = await response.json();
+    } catch {
+      return;
+    }
+    const answer = body as { readonly status?: unknown; readonly sessionProtocol?: unknown } | null;
+    if (answer?.status === 'ok' && answer.sessionProtocol !== SESSION_PROTOCOL_ID) throw new DaemonOutdatedError();
   }
 
   /**
@@ -1042,7 +1151,7 @@ export class DaemonCarrierRouter {
   async #hold(
     entry: CarrierEntry,
     key: string,
-    relayUrl: string,
+    address: string,
     open: () => Promise<RelayClientSession>,
   ): Promise<RelayClientSession> {
     const existing = entry.sessions.get(key);
@@ -1052,7 +1161,7 @@ export class DaemonCarrierRouter {
       entry.sessions.delete(key);
     }
     const opening = open();
-    entry.sessions.set(key, { relayUrl, session: opening });
+    entry.sessions.set(key, { address, session: opening });
     let session: RelayClientSession;
     try {
       session = await opening;
@@ -1077,12 +1186,6 @@ export class DaemonCarrierRouter {
     for (const listener of this.#listeners) listener();
   }
 }
-
-/** Re-targets one daemon-shaped request to a published direct carrier without changing the request path. */
-export const directCarrierUrl = (method: Extract<ConnectionMethod, { kind: 'direct' }>, requestUrl: string): string => {
-  const request = new URL(requestUrl);
-  return new URL(`${request.pathname}${request.search}`, `${method.daemonUrl}/`).toString();
-};
 
 /** Marks a refusal that came from the DAEMON, so no other carrier is tried after it. */
 class RelayAnswerError extends Error {

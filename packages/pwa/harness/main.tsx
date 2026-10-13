@@ -245,17 +245,17 @@ import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
   baseUrl: 'https://daemon.invalid/',
-  deviceToken: 'harness-token',
+  deviceId: 'harness-token',
 });
 const unreachableDaemon = daemonConnection({
   daemonId: 'unreachable-daemon',
   baseUrl: 'https://offline.example.test',
-  deviceToken: 'offline-harness-token',
+  deviceId: 'offline-harness-token',
 });
 const checkingDaemon = daemonConnection({
   daemonId: 'checking-daemon',
   baseUrl: 'https://checking.example.test',
-  deviceToken: 'checking-harness-token',
+  deviceId: 'checking-harness-token',
 });
 const HARNESS_SETTINGS_CONNECTIONS = [
   { ...daemon, label: 'Studio workstation', pairedAt: 1, lastSelectedAt: 3 },
@@ -4194,7 +4194,7 @@ function Shell() {
               {
                 daemonId: 'archive-daemon' as typeof daemon.daemonId,
                 baseUrl: 'https://archive.invalid',
-                deviceToken: 'harness-archive-token',
+                deviceId: 'harness-archive-token',
                 carriers: [{ kind: 'direct', daemonUrl: 'https://archive.invalid' }],
                 label: 'Archive daemon',
                 pairedAt: HARNESS_NOW - 7_200_000,

@@ -21,7 +21,7 @@ import {
 } from '../../../src/lib/terminal/stream-policy.ts';
 import { jsonBody, request } from './support.ts';
 
-const CREDENTIALS = { admin: 'admin-secret', warden: 'warden-secret' } as const;
+const CREDENTIALS = { admin: 'admin-secret', warden: 'warden-secret', devices: { has: () => true } } as const;
 /** These cases authenticate with a real bearer; the ticket surface has its own suite. */
 const NO_TICKETS = { redeem: () => undefined } as const;
 
@@ -126,9 +126,9 @@ describe('ApiSocketDispatcher', () => {
     should(sent).deepEqual(['s1']);
   });
 
-  it('should name the paired device an upgrade was authorized for, and no device for a host token', async () => {
-    // The transport tracks a device's socket under this id, so unpairing the device closes it. The
-    // device is whoever its SESSION proved — the only way a device is ever a caller now.
+  it('should accept a stream for the device its session proved, and for the host token', async () => {
+    // The device is whoever its SESSION proved — the only way a device is ever a caller now — and that
+    // session, not the transport, is what ends the stream when the device is unpaired.
     // Arrange
     const dispatcher = new ApiSocketDispatcher(
       new ApiRouter([streamRoute()]),
@@ -144,9 +144,8 @@ describe('ApiSocketDispatcher', () => {
     const host = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', headers: human }));
 
     // Assert
-    should(device).containDeep({ outcome: 'accepted', deviceId: 'fy_device_id_phone' });
+    should(device.outcome).equal('accepted');
     should(host.outcome).equal('accepted');
-    should(host).not.have.property('deviceId');
   });
 
   it('should refuse an unauthenticated upgrade before the route is ever accepted', async () => {

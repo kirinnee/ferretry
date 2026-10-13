@@ -3,6 +3,7 @@ import { Check, Copy, FileDown, GraduationCap, Pencil, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { displayCallsign } from '../../lib/callsign.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
@@ -63,6 +64,8 @@ export interface LearningPageProps {
 
 /** First-class learning route; all work is scoped to the supplied paired daemon. */
 export function LearningPage({ connection, now = Date.now() }: LearningPageProps) {
+  // Every read and write here goes through the carrier router: a paired device has no bearer value.
+  const fetcher = useDaemonFetch();
   const [status, setStatus] = useState<LearningStatus | null>(null);
   const [proposals, setProposals] = useState<readonly ProposalView[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -117,8 +120,8 @@ export function LearningPage({ connection, now = Date.now() }: LearningPageProps
       scopeRef.current === scope && loadSerial !== undefined && loadSerialRef.current === loadSerial;
     try {
       const [nextStatus, nextProposals] = await Promise.all([
-        fetchLearningStatus(connection),
-        fetchLearningProposals(connection),
+        fetchLearningStatus(connection, fetcher),
+        fetchLearningProposals(connection, undefined, fetcher),
       ]);
       if (!canPublish()) return;
       setStatus(nextStatus);
@@ -128,7 +131,7 @@ export function LearningPage({ connection, now = Date.now() }: LearningPageProps
       if (!canPublish()) return;
       setError(learningErrorMessage(reason));
     }
-  }, [connection, scope]);
+  }, [connection, fetcher, scope]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -136,7 +139,7 @@ export function LearningPage({ connection, now = Date.now() }: LearningPageProps
     async (id: string, action: LearningActionRequest) => {
       setBusy(count => count + 1);
       try {
-        await actOnLearningProposal(connection, id, action);
+        await actOnLearningProposal(connection, id, action, fetcher);
         await load();
       } catch (reason) {
         if (scopeRef.current === scope) setError(learningErrorMessage(reason));
@@ -144,19 +147,19 @@ export function LearningPage({ connection, now = Date.now() }: LearningPageProps
         if (scopeRef.current === scope) setBusy(count => Math.max(0, count - 1));
       }
     },
-    [connection, load, scope],
+    [connection, fetcher, load, scope],
   );
   const run = useCallback(async () => {
     setBusy(count => count + 1);
     try {
-      await runLearningScan(connection, true);
+      await runLearningScan(connection, true, fetcher);
       await load();
     } catch (reason) {
       if (scopeRef.current === scope) setError(learningErrorMessage(reason));
     } finally {
       if (scopeRef.current === scope) setBusy(count => Math.max(0, count - 1));
     }
-  }, [connection, load, scope]);
+  }, [connection, fetcher, load, scope]);
   return (
     <LearningReview
       connection={connection}
@@ -224,7 +227,7 @@ export function LearningReview({
           // because the bundle was served by the daemon it talked to and might
           // have been handed no token at all. Here a page cannot render without
           // a `DaemonConnection`, and `daemonConnection` refuses an empty
-          // `deviceToken` — so a rendered learning page is an authenticated one
+          // `deviceId` — so a rendered learning page is a paired one
           // by construction, and there is no reachable read-only mode to model.
           // A per-device capability grant would change that; nothing issues one
           // today, and inventing a permanently-`true` flag to carry would be a
@@ -357,6 +360,7 @@ export function ProposalCard({
 }) {
   const touchAffected = useTouchAffected();
   const [editing, setEditing] = useState(false);
+  const fetcher = useDaemonFetch();
   const [draft, setDraft] = useState(proposal.ruleText);
   const [copied, setCopied] = useState<'rule' | 'patch' | null>(null);
   const [patchError, setPatchError] = useState<string | null>(null);
@@ -396,7 +400,7 @@ export function ProposalCard({
   };
   const savePatch = async () => {
     try {
-      const patch = await fetchLearningPatch(connection, proposal.id);
+      const patch = await fetchLearningPatch(connection, proposal.id, fetcher);
       const url = URL.createObjectURL(new Blob([patch.contents], { type: 'text/markdown' }));
       const link = document.createElement('a');
       link.href = url;

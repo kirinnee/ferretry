@@ -16,8 +16,8 @@ import {
 } from '../../src/lib/browser-login.ts';
 import { daemonConnection, type DaemonConnection } from '../../src/lib/daemon-connection.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 
 const closed = { state: 'closed', profilePrimed: false } as const;
 
@@ -270,7 +270,7 @@ describe('DaemonBrowserLoginStore', () => {
     const rotated = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a-new.example.test',
-      deviceToken: 'token-a-rotated',
+      deviceId: 'token-a-rotated',
     });
     should(await store.refresh(rotated)).deepEqual(closed);
 
@@ -281,7 +281,7 @@ describe('DaemonBrowserLoginStore', () => {
     // obsolete connection and published its dead VNC password.
     should(store.getSnapshot(daemonA.daemonId)).deepEqual(closed);
     should(stalePort.kinds).deepEqual(['act']);
-    should(seen.map(connection => connection.deviceToken)).deepEqual(['token-a', 'token-a-rotated']);
+    should(seen.map(connection => connection.deviceId)).deepEqual(['token-a', 'token-a-rotated']);
   });
 
   it('never lets an older action publish over a newer one or satisfy its read', async () => {
@@ -333,7 +333,7 @@ describe('DaemonBrowserLoginStore', () => {
     const rotated = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'token-a-rotated',
+      deviceId: 'token-a-rotated',
     });
     store.subscribe(rotated, () => undefined);
     // The rebind dropped the old credential and cancelled its poll. Counting
@@ -471,11 +471,11 @@ describe('DaemonBrowserLoginStore', () => {
     const rotated = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'token-a-rotated',
+      deviceId: 'token-a-rotated',
     });
     should(await store.refresh(rotated)).deepEqual(closed);
     should(seen).have.length(2);
-    should(seen[1]?.deviceToken).equal('token-a-rotated');
+    should(seen[1]?.deviceId).equal('token-a-rotated');
     // The replacement itself told the banner the old credential is gone.
     should(notified).be.aboveOrEqual(2);
 

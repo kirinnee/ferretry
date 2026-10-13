@@ -14,14 +14,14 @@ import { sessionView } from '../../support/sessions.ts';
 const daemon = daemonConnection({
   daemonId: 'workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 
 /** A second machine, so a write can settle onto the wrong screen if unfenced. */
 const laptop = daemonConnection({
   daemonId: 'laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'laptop-token',
+  deviceId: 'laptop-token',
 });
 
 const pathField = (mounted: Mounted): HTMLInputElement => {
@@ -389,7 +389,7 @@ describe('ProjectsPage', () => {
     // Same daemon id, replaced device token: a re-pair, not a different machine.
     // The status must still be dropped, because the refusal belongs to a
     // credential that no longer exists.
-    await mounted.render(element(daemonConnection({ ...daemon, deviceToken: 'rotated-token' })));
+    await mounted.render(element(daemonConnection({ ...daemon, deviceId: 'rotated-token' })));
     await settle();
     release();
     await settle();

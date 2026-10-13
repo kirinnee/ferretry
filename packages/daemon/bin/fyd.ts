@@ -5340,7 +5340,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       sources: transcriptSources,
       search: (events, query, options) => searchTranscript(events, query, options),
     },
-    api: new BunApiServer(undefined, undefined, deviceConnections),
+    api: new BunApiServer(),
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
@@ -6502,7 +6502,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     seen: deviceId => pairing.subsystem.seen(deviceId),
   };
   const base = {
-    credentials: await world.credentials.load(),
+    credentials: {
+      ...(await world.credentials.load()),
+      devices: { has: (deviceId: string) => pairing.credentials.get(deviceId) !== undefined },
+    },
     usage,
     clock: world.clock,
     startedAtMs,

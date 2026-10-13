@@ -19,7 +19,7 @@ class MemoryRepository implements DaemonConnectionRepository {
 const alpha = daemonConnection({
   daemonId: `fy_daemon_${'a'.repeat(43)}`,
   baseUrl: 'https://alpha.example.test',
-  deviceToken: `fy_device_${'t'.repeat(43)}`,
+  deviceId: `fy_device_${'t'.repeat(43)}`,
   carriers: [{ kind: 'direct', daemonUrl: 'https://alpha.example.test' }],
 });
 

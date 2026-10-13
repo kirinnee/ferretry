@@ -13,7 +13,12 @@ export interface SessionTerminalSurfaceProps {
   readonly readSnapshot?: PaneSnapshotReader;
   /** Test seam for the addressing list; production asks the paired daemon. */
   readonly listTerminals?: SurfaceTerminalLister;
-  /** Test seam for the live deck; production opens real sockets. */
+  /**
+   * The live deck's dependencies, bound to the router's sessions by the composition root.
+   *
+   * Absent renders no deck rather than one with a network of its own: a paired device has no bearer
+   * value, so a deck that dialled the daemon by itself could only ever be refused.
+   */
   readonly deck?: TerminalDeckDependencies;
   /** The terminal a `terminal:<id>` side-pane tab was opened for (#35). */
   readonly focusTerminalId?: string;
@@ -47,14 +52,16 @@ export function SessionTerminalSurface({
 
   return (
     <section aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-      <div className="flex min-h-[18rem] flex-1 flex-col overflow-hidden rounded-md border border-border">
-        <SessionTerminalDeck
-          connection={connection}
-          scope={scope}
-          {...(deck === undefined ? {} : { dependencies: deck })}
-          {...(focusTerminalId === undefined ? {} : { focusTerminalId })}
-        />
-      </div>
+      {deck === undefined ? null : (
+        <div className="flex min-h-[18rem] flex-1 flex-col overflow-hidden rounded-md border border-border">
+          <SessionTerminalDeck
+            connection={connection}
+            scope={scope}
+            dependencies={deck}
+            {...(focusTerminalId === undefined ? {} : { focusTerminalId })}
+          />
+        </div>
+      )}
       <div className="shrink-0">
         <SessionSurfaceReferences
           connection={connection}

@@ -4,8 +4,8 @@ import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonUsageIndex, hasReadout, type ResolvedQuota } from '../../src/lib/usage.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 
 /** A session carrying only the identity and state the quota join reads. */
 const session = (agent: string, state: Record<string, unknown> = {}): SessionView =>

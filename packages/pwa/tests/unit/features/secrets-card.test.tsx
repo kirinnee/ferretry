@@ -19,7 +19,7 @@ const AT = '2026-08-05T10:00:00.000Z';
 const LATER = '2026-08-06T10:00:00.000Z';
 
 const connection = (id: string) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` });
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
 
 const list = (overrides: Partial<SecretList> = {}): SecretList => ({
   v: SECRET_SCHEMA_VERSION,

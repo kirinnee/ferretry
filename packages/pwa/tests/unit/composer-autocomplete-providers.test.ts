@@ -30,12 +30,12 @@ import { sessionView } from '../support/sessions.ts';
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const daemonB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'https://b.example.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 const scopeA = daemonSessionScope(daemonA, 'same/session');
 const scopeB = daemonSessionScope(daemonB, 'same/session');

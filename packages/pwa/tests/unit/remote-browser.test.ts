@@ -25,7 +25,7 @@ import {
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon.example.test',
-  deviceToken: 'secret-token',
+  deviceId: 'secret-token',
 });
 const scope = daemonSessionScope(daemon, 'same/session');
 const status = {
@@ -54,7 +54,7 @@ describe('remote browser transport', () => {
     expect(new Headers(calls[1]?.init?.headers).get('content-type')).toBe('application/json');
     expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ action: 'start' });
     const other = daemonSessionScope(
-      daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b' }),
+      daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b' }),
       'same/session',
     );
     await expect(fetchRemoteBrowserStatus(daemon, other, fetcher)).rejects.toThrow('browser scope must belong');
@@ -105,7 +105,7 @@ describe('remote browser transport', () => {
     );
     expect(
       remoteBrowserStreamUrl(
-        daemonConnection({ daemonId: 'loop', baseUrl: 'http://127.0.0.1:7431', deviceToken: 'x' }),
+        daemonConnection({ daemonId: 'loop', baseUrl: 'http://127.0.0.1:7431', deviceId: 'x' }),
         daemonSessionScope({ daemonId: 'loop' as never }, 'x'),
         't',
       ),
@@ -299,7 +299,7 @@ describe('remote browser input translation', () => {
     ).rejects.toMatchObject({ status: 502 });
     // And it is bound to the daemon the scope names, exactly like the status and action calls.
     const other = daemonSessionScope(
-      daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b' }),
+      daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b' }),
       'same/session',
     );
     await expect(fetchRemoteBrowserStreamTicket(daemon, other, fetcher)).rejects.toThrow('browser scope must belong');

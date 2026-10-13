@@ -22,12 +22,12 @@ import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 const daemon = daemonConnection({
   daemonId: 'browser-daemon',
   baseUrl: 'https://browser.example.test',
-  deviceToken: 'browser-token',
+  deviceId: 'browser-token',
 });
 const other = daemonConnection({
   daemonId: 'other-daemon',
   baseUrl: 'https://other.example.test',
-  deviceToken: 'other-token',
+  deviceId: 'other-token',
 });
 const scope = daemonSessionScope(daemon, 'shared-session-id');
 const otherScope = daemonSessionScope(other, 'shared-session-id');

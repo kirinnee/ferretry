@@ -95,7 +95,7 @@ describe('LineageSurfaceContent', () => {
     const connection = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'token-a',
+      deviceId: 'token-a',
     });
     const current = sessionView('current', { state: { status: 'running' } });
     const fleet = new DaemonFleetStore({ list: async () => [current], get: async () => current });

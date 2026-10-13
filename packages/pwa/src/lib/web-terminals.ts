@@ -5,7 +5,6 @@ import {
   CreateTerminalRequestSchema,
   FY_REQUEST_ID_HEADER,
   RenameTerminalRequestSchema,
-  SocketTicketResponseSchema,
   TerminalIdSchema,
   type TerminalListView,
   TerminalListViewSchema,
@@ -15,7 +14,6 @@ import {
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import type { ConnectionMethod } from '@ferretry/relay';
 import type { RelayStreamRequest } from './relay-carrier.ts';
 import { type RelayClientSession, type RelayStreamFrame, RelayStreamRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
@@ -136,64 +134,15 @@ export const closeSessionTerminal = async (
 };
 
 /**
- * Buys the short-lived credential a browser WebSocket can actually carry.
- *
- * The device token remains in this header-carrying request; it is never copied into the resulting
- * stream URL. The daemon binds the ticket to this exact `(daemon, session, terminal)` stream, and
- * the local scope assertion prevents a same-named session on another pairing from being substituted.
- */
-export const daemonTerminalTicket = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  terminalId: string,
-  fetcher: DaemonFetch = browserFetch,
-): Promise<string> => {
-  assertScopeDaemon(daemon, scope);
-  const request = daemonRequest(daemon, `${terminalPath(scope, terminalId)}/stream/ticket`, { method: 'POST' });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw await responseError(response);
-  return SocketTicketResponseSchema.parse(await response.json()).ticket;
-};
-
-/**
  * The daemon route one terminal's stream lives at, credential-free.
  *
- * ONE VALUE, TWO CARRIERS, AND THE TICKET IS NOT PART OF IT. A direct viewer appends a ticket to
- * build a `wss://` URL; a relayed viewer puts this path in its §14 `stream` credential record and
- * appends NOTHING — `docs/relay-protocol.md` §14 refuses `ticket` or `token` in a stream's query with
- * `4400`. Deriving the two separately is exactly how a ticket ends up in a relayed stream's query, so
- * the credential-free path is the shared value and each carrier adds its own.
+ * ONE VALUE, BOTH CARRIERS, AND NO CREDENTIAL IN IT. A viewer puts this path in its §14 `stream`
+ * credential record on whichever carrier reaches the daemon; the record carries the device's proof,
+ * and §14 refuses `ticket` or `token` in a stream's query with `4400`.
  */
 export const terminalStreamPath = (daemon: DaemonConnection, scope: DaemonSessionScope, terminalId: string): string => {
   assertScopeDaemon(daemon, scope);
   return `${terminalPath(scope, terminalId)}/stream`;
-};
-
-/**
- * Builds a viewer URL from a per-connection ticket on the paired daemon.  The
- * device token is deliberately absent: it would outlive the socket in any log
- * or history that retains the URL, and the page origin is never the daemon.
- */
-export const terminalStreamUrl = (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  terminalId: string,
-  ticket: string,
-): string => {
-  assertScopeDaemon(daemon, scope);
-  if (ticket.trim() === '') throw new Error('terminal stream ticket must not be empty');
-  // COMPOSED HERE RATHER THAN CALLED FROM `terminalStreamPath`, AND THE REASON IS A GATE.
-  // `scripts/validate/route-agreement.sh` recognises a dial by the path it composes at the call
-  // site; behind a helper it sees nothing and reports this route as reached by no client at all —
-  // which would be a false statement about a route the deck opens on every attach. The two
-  // spellings are kept honest by a test that asserts this URL ends with that path, so the
-  // duplication cannot drift silently.
-  const url = new URL(`${terminalPath(scope, terminalId)}/stream`, `${daemon.baseUrl}/`);
-  if (url.origin !== new URL(daemon.baseUrl).origin)
-    throw new Error('terminal stream must remain on the paired daemon');
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.searchParams.set('ticket', ticket);
-  return url.toString();
 };
 
 /* ---------- one terminal stream, whichever carrier reaches the daemon ------- */
@@ -201,13 +150,13 @@ export const terminalStreamUrl = (
 /**
  * The live half of a terminal, as the four things a viewer does with one.
  *
- * A PORT RATHER THAN A `WebSocket`, and the reason is not testability. A relayed terminal is a §14
- * stream SESSION over a rendezvous — there is no socket at the daemon's address to hand back, because
- * that address is precisely the one the relay exists because the browser cannot reach. The deck asks
- * for these four operations and gets whichever carrier is live; nothing above this line knows which.
+ * A PORT RATHER THAN A `WebSocket`, and the reason is not testability. A terminal is a §14 stream
+ * SESSION on whichever carrier reaches the daemon — its own address or a rendezvous — so there is no
+ * bare socket to hand back. The deck asks for these four operations and nothing above this line knows
+ * which carrier carries them.
  */
 export interface TerminalStream {
-  /** Raw keystrokes and pastes. Split at the record budget on a relay; one write on a socket. */
+  /** Raw keystrokes and pastes, split at the record budget. */
   write(bytes: Uint8Array): void;
   /** One complete control frame — a resize. Never split, because half a message is corruption. */
   control(text: string): void;
@@ -239,45 +188,14 @@ export type TerminalStreamAttach = (
   handlers: TerminalStreamHandlers,
 ) => Promise<TerminalStream>;
 
-/** Opens one §14 stream session, or answers `null` when this daemon's traffic is not on a rendezvous. */
-export type TerminalStreamOpener = (
-  daemon: DaemonConnection,
-  request: RelayStreamRequest,
-) => Promise<RelayClientSession | null>;
+/** Opens one §14 stream session on whichever carrier reaches the daemon. */
+export type TerminalStreamOpener = (daemon: DaemonConnection, request: RelayStreamRequest) => Promise<RelayClientSession>;
 
 /**
- * The direct carrier: a ticket bought over HTTP, then a `wss://` socket at the daemon's own address.
+ * One terminal as one §14 stream session: no ticket, and the client's own splitting.
  *
- * Unchanged in every respect that matters — the device token stays in the header-carrying request and
- * never enters the URL — and wrapped in the port so the deck stops knowing which carrier it is on.
- */
-const directTerminalStream = (socket: WebSocket, handlers: TerminalStreamHandlers): TerminalStream => {
-  socket.binaryType = 'arraybuffer';
-  socket.addEventListener('open', () => handlers.onOpen());
-  socket.addEventListener('message', event => {
-    if (event.data instanceof ArrayBuffer) handlers.onBytes(new Uint8Array(event.data));
-  });
-  socket.addEventListener('close', event => handlers.onClosed(event.code, event.reason));
-  // `error` is always followed by `close`, which owns the taxonomy and the retry decision.
-  socket.addEventListener('error', () => undefined);
-  return {
-    write: bytes => {
-      // Copied onto its own buffer: `send` will not take a view whose buffer might be shared.
-      if (socket.readyState === WebSocket.OPEN) socket.send(new Uint8Array(bytes).buffer);
-    },
-    control: text => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(text);
-    },
-    close: (code, reason) => socket.close(code, reason),
-  };
-};
-
-/**
- * The relayed carrier: one §14 stream session, no ticket, and the client's own splitting.
- *
- * NO TICKET IS BOUGHT, and the refusal precedes the purchase rather than following it — §14 refuses
- * `ticket` in a stream's query with `4400`, so one minted here would be a live single-use credential
- * the daemon burned for a surface that will not take it.
+ * NO TICKET EXISTS any more. A paired device opens its streams inside its own session, where the
+ * credential is the device's signed proof, and the daemon sells no device a ticket.
  *
  * WRITES ARE SPLIT AND NOTHING IS REASSEMBLED. §14: "a `bytes` record carries a run of an ordered
  * byte stream, delivered to the stream the moment it arrives … a terminal neither knows nor cares
@@ -296,43 +214,21 @@ const relayTerminalStream = (session: RelayClientSession, handlers: TerminalStre
 };
 
 /**
- * Attach to one terminal over whichever carrier this daemon's traffic is measured on.
+ * Attach to one terminal over whichever carrier reaches this daemon.
  *
- * The relay is tried FIRST here, and that is not a reversal of §1's direct-first rule: the carrier
- * has already been decided by a walk that tried direct first, and `openStream` answers `null` for
- * anything that is not a live rendezvous. This is reading a decision, not making one.
+ * The router opens the stream on the carrier a request has already measured, or walks the set itself
+ * — direct first, then each rendezvous — when none has. Either way the attach is a stream session the
+ * device key opened, so there is no second, ticketed path for a direct viewer any more.
  */
 export const browserTerminalStreamAttach =
-  (
-    openStream: TerminalStreamOpener,
-    fetcher: DaemonFetch = browserFetch,
-    carrier: () => ConnectionMethod | undefined = () => undefined,
-  ): TerminalStreamAttach =>
+  (openStream: TerminalStreamOpener): TerminalStreamAttach =>
   async (daemon, scope, terminalId, handlers) => {
     const path = terminalStreamPath(daemon, scope, terminalId);
     const session = await openStream(daemon, { path, onData: frame => onStreamFrame(frame, handlers) }).catch(
       relayAttachFailure(handlers),
     );
-    if (session !== null && session !== undefined) return relayTerminalStream(session, handlers);
-    // NOT UNTIL A CARRIER HAS BEEN MEASURED, the same gate the live event feed already has. A carrier
-    // is decided by the first request that walks, and `openStream` answers `null` both for "the
-    // winner is direct" and for "no walk has finished". Treating the second as direct buys a
-    // single-use ticket and opens a `wss://` at the daemon's own address — the one a relayed browser
-    // cannot reach — burning a credential on a socket that can only fail, and recovering through the
-    // deck's backoff rather than through anything this function knew.
-    if (carrier() === undefined) throw new Error(TERMINAL_STREAM_NO_CARRIER);
-    const ticket = await daemonTerminalTicket(daemon, scope, terminalId, fetcher);
-    return directTerminalStream(new WebSocket(terminalStreamUrl(daemon, scope, terminalId, ticket)), handlers);
+    return relayTerminalStream(session, handlers);
   };
-
-/**
- * Said when a terminal is asked for before any request has measured a carrier.
- *
- * It is a RETRYABLE failure rather than a refusal: the deck's ordinary backoff is exactly right here,
- * because the next request to walk decides the carrier and the attach after it will succeed.
- */
-export const TERMINAL_STREAM_NO_CARRIER =
-  'no carrier has been measured for this daemon yet, so there is nothing to attach a terminal over';
 
 /**
  * A terminal's frames, as the two shapes §14 gives them.
@@ -347,7 +243,7 @@ const onStreamFrame = (frame: RelayStreamFrame, handlers: TerminalStreamHandlers
 };
 
 /**
- * A relayed attach that did not open, told apart into the two answers a viewer acts on differently.
+ * An attach that did not open, told apart into the two answers a viewer acts on differently.
  *
  * A `stream-refused` is the DAEMON's verdict and is final for this attempt, so the viewer is told
  * through `onRefused` and then this throws `TerminalStreamRefused` — which the deck recognises and

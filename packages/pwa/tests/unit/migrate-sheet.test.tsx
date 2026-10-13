@@ -25,12 +25,12 @@ import { pickerHealth } from './picker-support.ts';
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.invalid',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const daemonB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'https://daemon-b.invalid',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
@@ -937,7 +937,7 @@ describe('MigrateSheet account picker', () => {
     const rotated = daemonConnection({
       daemonId: daemonA.daemonId,
       baseUrl: daemonA.baseUrl,
-      deviceToken: 'token-a-rotated',
+      deviceId: 'token-a-rotated',
     });
     await must(live, 'a mounted migrate sheet').render(
       <MigrateSheet {...props({ accountPicker: store, connection: rotated, usage, view })} />,

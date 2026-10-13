@@ -20,12 +20,12 @@ import {
 const alpha = daemonConnection({
   daemonId: 'daemon-alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'token-alpha',
+  deviceId: 'token-alpha',
 });
 const beta = daemonConnection({
   daemonId: 'daemon-beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'token-beta',
+  deviceId: 'token-beta',
 });
 
 interface Call {

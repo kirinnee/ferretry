@@ -43,6 +43,9 @@ import {
   toBase64Url,
   utf8Bytes,
   utf8Text,
+  deviceAuthMessage,
+  SESSION_PROTOCOL_ID,
+  signDeviceProof,
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
@@ -59,13 +62,27 @@ import { FleetEventStreamService } from '../../../src/lib/session/events/index.t
 import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
 
 const relayCrypto = new WebCryptoRelayCrypto();
-const DEVICE_TOKEN = 'fy_device_known';
 const DEVICE_ID = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
 const SESSION = 'wire-1';
 
 let identity: DaemonIdentity;
+let deviceKey: Awaited<ReturnType<WebCryptoRelayCrypto['generateDeviceKey']>>;
+let deviceKeyText = '';
+const APP_SESSION = toBase64Url(new Uint8Array(16).fill(2));
+
+/** The device's claim to one stream session, signed over that session's transcript. */
+async function streamClaim(transcript: Uint8Array): Promise<Record<string, string>> {
+  const proof = await signDeviceProof(
+    relayCrypto,
+    relayCrypto.deviceKeyHandle(deviceKey.privateKey),
+    deviceAuthMessage(transcript, 'stream', DEVICE_ID, APP_SESSION),
+  );
+  return { t: 'stream', protocol: SESSION_PROTOCOL_ID, deviceId: DEVICE_ID, appSession: APP_SESSION, proof };
+}
 
 beforeAll(async () => {
+  deviceKey = await relayCrypto.generateDeviceKey();
+  deviceKeyText = toBase64Url(deviceKey.publicKeySpki);
   identity = await new WebCryptoRelayIdentityKeys().load(new NodePairingCryptography().newIdentity().privateKeyPem);
 });
 
@@ -106,7 +123,7 @@ function socketDispatcher(events: FleetEventStreamService): ApiSocketDispatcher 
   );
   return new ApiSocketDispatcher(
     new ApiRouter(routes),
-    { admin: 'fy_admin_host_only', devices: { identify: token => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) } },
+    { admin: 'fy_admin_host_only', devices: { has: deviceId => deviceId === DEVICE_ID } },
     new SocketTicketRegistry({ now: () => Date.now() }, { ticket: () => 'unused' }),
     // `/v1/events` names no capability, so the boundary never asks — and a guard that refuses
     // everything proves that, because a route that DID demand one would fail this test loudly.
@@ -186,9 +203,10 @@ describe('a live event stream carried by a rendezvous', () => {
       socket: sent.socket,
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
       sockets: async request => await socketDispatcher(events).upgrade(request),
-      devices: { identifyDevice: token => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) },
+      devices: { deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined), seen: () => undefined },
       connections: new LiveDeviceConnections(),
-      pairing: { redeemOverRelay: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
+      pairing: { redeemInSession: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
+      clock: { now: () => Date.now() },
       scheduler: {
         after: (milliseconds, action) => {
           const timer = setTimeout(action, milliseconds);
@@ -240,9 +258,7 @@ describe('a live event stream carried by a rendezvous', () => {
       clientToDaemon,
       utf8Bytes(
         JSON.stringify({
-          t: 'stream',
-          protocol: RELAY_PROTOCOL_ID,
-          deviceToken: DEVICE_TOKEN,
+          ...(await streamClaim(completed.keys.transcriptHash)),
           path: '/v1/events',
           query: [
             ['sessionId', SESSION],
@@ -258,7 +274,8 @@ describe('a live event stream carried by a rendezvous', () => {
     // status, which is the answer that tells a viewer why rather than leaving it watching nothing.
     const accepted = await readRecords(sent, daemonToClient);
     should(accepted).have.length(1);
-    should(accepted[0]).deepEqual({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID });
+    should(accepted[0]).containDeep({ t: 'stream-opened', protocol: SESSION_PROTOCOL_ID });
+    should((accepted[0] as { accessExpiresAt?: string }).accessExpiresAt).be.a.String();
 
     // Act — the journal appends, exactly as a `waiting` then `working` signal pair makes it.
     feed.append(storedEvent(1));
@@ -304,9 +321,10 @@ describe('a live event stream carried by a rendezvous', () => {
       socket: sent.socket,
       dispatch: async (): Promise<ApiResponse> => ({ status: 404, headers: new Map(), body: '' }),
       sockets: async request => await socketDispatcher(events).upgrade(request),
-      devices: { identifyDevice: token => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) },
+      devices: { deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined), seen: () => undefined },
       connections: new LiveDeviceConnections(),
-      pairing: { redeemOverRelay: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
+      pairing: { redeemInSession: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) },
+      clock: { now: () => Date.now() },
       scheduler: {
         after: (milliseconds, action) => {
           const timer = setTimeout(action, milliseconds);
@@ -356,9 +374,7 @@ describe('a live event stream carried by a rendezvous', () => {
       openChannel(sessionId, completed.keys, 'client'),
       utf8Bytes(
         JSON.stringify({
-          t: 'stream',
-          protocol: RELAY_PROTOCOL_ID,
-          deviceToken: DEVICE_TOKEN,
+          ...(await streamClaim(completed.keys.transcriptHash)),
           path: '/v1/events',
           query: [['after', '42']],
         }),

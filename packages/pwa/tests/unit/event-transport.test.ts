@@ -28,7 +28,7 @@ class FakeSocket implements DaemonEventSocket {
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon.example.test',
-  deviceToken: 'durable-device-token',
+  deviceId: 'durable-device-token',
 });
 
 const streamInput = (onMessage: (value: unknown) => void) => ({

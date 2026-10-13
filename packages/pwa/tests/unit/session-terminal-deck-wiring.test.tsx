@@ -22,7 +22,7 @@ import '../support/dom.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const scope = daemonSessionScope(alpha, 'shared');
 const TERMINAL = 'a1b2c3d4e5f6';

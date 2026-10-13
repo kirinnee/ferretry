@@ -9,7 +9,7 @@ import { interact, mount } from '../../support/dom.ts';
 const connection = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'device-token-a',
+  deviceId: 'device-token-a',
 });
 
 const request: WardenReportDialogRequest = {

@@ -124,13 +124,17 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   }
 
   const bearer = bearerToken(headerValue(request, 'authorization'));
-  // A DEVICE IS WHOEVER ITS SESSION PROVED, and only a session can say so: `device` is set by the
+  // A DEVICE IS WHOEVER ITS SESSION PROVED, while its grant still exists, and only a session can say
+  // so — the grant is re-read here so a request in flight on a revoked device's session is refused. `device` is set by the
   // tunnel that verified the key's signature over the session transcript, and by nothing else. A
   // session's request carries no `authorization` of its own (the tunnel's schema refuses one), so
   // there is no second credential here to disagree with it.
+  const device = request.device;
   const presented: Authentication =
-    request.device !== undefined
-      ? { kind: 'authenticated', tokenClass: 'device', deviceId: request.device.deviceId }
+    device !== undefined
+      ? credentials.devices?.has(device.deviceId) === true
+        ? { kind: 'authenticated', tokenClass: 'device', deviceId: device.deviceId }
+        : { kind: 'anonymous' }
       : authenticate(credentials, {
           bearer,
           // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer

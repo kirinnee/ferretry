@@ -43,12 +43,12 @@ const withRelayDirectory = async <T,>(value: string, body: () => Promise<T>): Pr
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'beta-token',
 });
 
 class MemoryRepository implements DaemonConnectionRepository {
@@ -109,7 +109,7 @@ describe('DaemonApiPool', () => {
 describe('exchangePairing', () => {
   it('posts the single-use code only to the reader-supplied daemon and validates its identity', async () => {
     const daemonId = `fy_daemon_${'d'.repeat(43)}`;
-    const deviceToken = `fy_device_${'t'.repeat(43)}`;
+    const deviceId = `fy_device_${'t'.repeat(43)}`;
     const requests: { readonly url: string; readonly init?: RequestInit }[] = [];
     const connection = await exchangePairing(
       { daemonUrl: 'https://daemon.example.test', daemonId, code: 'one-time-code' },
@@ -117,7 +117,7 @@ describe('exchangePairing', () => {
         requests.push({ url: String(input), init });
         return Response.json({
           daemonId,
-          deviceToken,
+          deviceId,
           daemonName: 'workstation',
           capabilities: [],
           carriers: [
@@ -130,7 +130,7 @@ describe('exchangePairing', () => {
 
     expect(String(connection.daemonId)).toBe(daemonId);
     expect(connection.baseUrl).toBe('https://daemon.example.test');
-    expect(connection.deviceToken).toBe(deviceToken);
+    expect(connection.deviceId).toBe(deviceId);
     expect(connection.carriers).toEqual([
       { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
       { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'self' },
@@ -159,7 +159,7 @@ describe('exchangePairing', () => {
       exchangePairing(seed, async () =>
         Response.json({
           daemonId: `fy_daemon_${'o'.repeat(43)}`,
-          deviceToken: `fy_device_${'t'.repeat(43)}`,
+          deviceId: `fy_device_${'t'.repeat(43)}`,
           daemonName: 'other',
           capabilities: [],
           carriers: [],
@@ -188,7 +188,7 @@ describe('exchangePairing', () => {
           requests.push(String(input));
           return Response.json({
             daemonId,
-            deviceToken: `fy_device_${'t'.repeat(43)}`,
+            deviceId: `fy_device_${'t'.repeat(43)}`,
             daemonName: 'workstation',
             capabilities: [],
             carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
@@ -222,7 +222,7 @@ describe('exchangePairing', () => {
     const identity = await newDaemonIdentity();
     const RELAY = 'wss://relay.mine.test';
     const response = {
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      deviceId: `fy_device_${'t'.repeat(43)}`,
       daemonId: identity.daemonId,
       daemonName: 'Studio',
       capabilities: [],
@@ -290,7 +290,7 @@ describe('exchangePairing', () => {
     const daemonId = `fy_daemon_${'d'.repeat(43)}`;
     const success = Response.json({
       daemonId,
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      deviceId: `fy_device_${'t'.repeat(43)}`,
       daemonName: 'workstation',
       capabilities: [],
       carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
@@ -427,7 +427,7 @@ describe('exchangePairing', () => {
     const RELAY = 'wss://relay.mine.test';
     const auto = autoDial(identity, {
       paired: {
-        deviceToken: `fy_device_${'t'.repeat(43)}`,
+        deviceId: `fy_device_${'t'.repeat(43)}`,
         daemonId: identity.daemonId,
         daemonName: 'Studio',
         capabilities: [],
@@ -728,7 +728,7 @@ describe('StoreProvider', () => {
     const daemon = daemonConnection({
       daemonId: `fy_daemon_${'d'.repeat(43)}`,
       baseUrl: 'https://daemon.example.test',
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      deviceId: `fy_device_${'t'.repeat(43)}`,
       carriers: [
         { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
         { kind: 'relay', relayUrl: 'https://stale.example.test' },
@@ -763,7 +763,7 @@ describe('StoreProvider', () => {
       'https://daemon.example.test/v1/projects',
       'https://daemon.example.test/v1/carriers',
     ]);
-    expect(requests[1]?.authorization).toBe(`Bearer ${daemon.deviceToken}`);
+    expect(requests[1]?.authorization).toBe(`Bearer ${daemon.deviceId}`);
     expect(store.connections.get(daemon.daemonId)?.carriers).toEqual([
       { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
       { kind: 'relay', relayUrl: 'https://relay-one.example.test', operator: 'self' },
@@ -775,7 +775,7 @@ describe('StoreProvider', () => {
     const daemon = daemonConnection({
       daemonId: `fy_daemon_${'d'.repeat(43)}`,
       baseUrl: 'https://daemon.example.test',
-      deviceToken: `fy_device_${'o'.repeat(43)}`,
+      deviceId: `fy_device_${'o'.repeat(43)}`,
       carriers: [
         { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
         { kind: 'relay', relayUrl: 'https://old-relay.example.test' },
@@ -783,7 +783,7 @@ describe('StoreProvider', () => {
     });
     const repaired = daemonConnection({
       ...daemon,
-      deviceToken: `fy_device_${'n'.repeat(43)}`,
+      deviceId: `fy_device_${'n'.repeat(43)}`,
       carriers: [
         { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
         { kind: 'relay', relayUrl: 'https://new-relay.example.test' },
@@ -845,7 +845,7 @@ describe('StoreProvider', () => {
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: 'https://old.example.test',
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      deviceId: `fy_device_${'t'.repeat(43)}`,
     });
     const repository = new MemoryRepository();
     const dialled: string[] = [];
@@ -906,7 +906,7 @@ describe('StoreProvider', () => {
     const daemon = daemonConnection({
       daemonId,
       baseUrl: 'https://box.example.test',
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      deviceId: `fy_device_${'t'.repeat(43)}`,
     });
     const repository = new MemoryRepository();
     const paths: string[] = [];

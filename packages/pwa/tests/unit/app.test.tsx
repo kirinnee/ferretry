@@ -69,12 +69,12 @@ import { settleUntil } from '../support/settle.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'beta-token',
 });
 const GAMMA_ID = `fy_daemon_${'g'.repeat(43)}`;
 const GAMMA_TOKEN = `fy_device_${'t'.repeat(43)}`;
@@ -93,13 +93,13 @@ const HOSTED_RELAY = { kind: 'relay', relayUrl: 'https://relay.example.test', op
 const alphaRelayed = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
   carriers: [{ kind: 'direct', daemonUrl: 'https://alpha.example.test' }, HOSTED_RELAY],
 });
 const gammaRelayed = daemonConnection({
   daemonId: GAMMA_ID,
   baseUrl: 'https://gamma.example.test',
-  deviceToken: GAMMA_TOKEN,
+  deviceId: GAMMA_TOKEN,
   carriers: [{ kind: 'direct', daemonUrl: 'https://gamma.example.test' }, HOSTED_RELAY],
 });
 
@@ -534,7 +534,7 @@ const appStore = async (
       if (url.endsWith('/v1/pair'))
         return Response.json({
           daemonId: GAMMA_ID,
-          deviceToken: GAMMA_TOKEN,
+          deviceId: GAMMA_TOKEN,
           daemonName: 'gamma',
           capabilities: [],
           carriers: [{ kind: 'direct', url: 'https://gamma.example.test' }],

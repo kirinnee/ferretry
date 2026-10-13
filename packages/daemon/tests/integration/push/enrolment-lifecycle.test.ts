@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import {
   DAEMON_CAPABILITIES,
   type BrowserPushSubscription,
-  PairingResponseSchema,
   PushDeviceListResponseSchema,
   PushDeviceViewSchema,
   VapidPublicKeyResponseSchema,
@@ -47,6 +46,10 @@ afterAll(async () => {
 
 const ADMIN = 'admin-secret';
 const admin = { authorization: `Bearer ${ADMIN}` };
+/** An Ed25519 SPKI: the fixed DER prefix and 32 key bytes. The session that proved it is not this test's subject. */
+const DEVICE_KEY = Buffer.from([
+  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(5),
+]).toString('base64url');
 
 /** The push service's own record of what reached it, and what it chooses to answer. */
 class FakePushService {
@@ -63,6 +66,7 @@ function request(overrides: {
   readonly method: string;
   readonly path: string;
   readonly headers?: Readonly<Record<string, string>>;
+  readonly device?: { readonly deviceId: string; readonly appSession: string };
   readonly body?: string;
   readonly loopback?: boolean;
 }): ApiRequest {
@@ -73,6 +77,7 @@ function request(overrides: {
     headers: headersFrom(overrides.headers ?? {}),
     clientAddress: overrides.loopback === true ? '127.0.0.1' : '198.51.100.7',
     loopback: overrides.loopback ?? false,
+    ...(overrides.device === undefined ? {} : { device: overrides.device }),
     text: async () => overrides.body ?? '',
   };
 }
@@ -114,7 +119,7 @@ async function daemon(label: string) {
   const cryptography = new NodePairingCryptography();
   const pairingRepository = new StatePairingRepository(paths, files, cryptography);
   const state = await pairingRepository.open('workstation');
-  const credentials = new PairingDeviceRegistry(state.daemonId, cryptography, state.devices);
+  const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
 
   const pushService = new FakePushService();
   const vapidKeys = new StateVapidKeys(paths, files);
@@ -156,31 +161,37 @@ async function daemon(label: string) {
 
   const surface = new ApiDispatcher(
     new ApiRouter([...pairingRoutes(pairing), ...pushRoutes(push)]),
-    { admin: ADMIN, warden: 'warden-secret', devices: credentials },
+    { admin: ADMIN, warden: 'warden-secret', devices: { has: deviceId => credentials.get(deviceId) !== undefined } },
     grants,
   );
-  return { paths, files, surface, pushService, document: join(paths.state, 'push.json') };
+  return { paths, files, surface, pairing, pushService, document: join(paths.state, 'push.json') };
 }
 
-/** Pairs one browser through the real exchange and answers with the credential it was handed. */
+/**
+ * Pairs one browser through the real exchange and answers with the device it became.
+ *
+ * Redemption happens inside a session, so it is driven through the pairing state machine's one
+ * session entry rather than a route; what the device then presents is the identity its session
+ * proved — set on the request the way the tunnel sets it.
+ */
 async function pair(world: Awaited<ReturnType<typeof daemon>>, deviceName: string) {
   const minted = await world.surface.dispatch(
     request({ method: 'POST', path: '/v1/pair/code', headers: admin, loopback: true }),
   );
   should(minted.status).equal(201);
   const code = (JSON.parse(minted.body) as { code: string }).code;
-  const redeemed = await world.surface.dispatch(
-    request({ method: 'POST', path: '/v1/pair', body: JSON.stringify({ code, deviceName }) }),
+  const redeemed = await world.pairing.redeemInSession(
+    { code, deviceName, deviceKey: DEVICE_KEY, proven: true },
+    { kind: 'direct', rateLimitKey: '198.51.100.7' },
   );
-  should(redeemed.status).equal(200);
-  const token = PairingResponseSchema.parse(JSON.parse(redeemed.body)).deviceToken;
+  should(redeemed.kind).equal('paired');
   const devices = await world.surface.dispatch(
     request({ method: 'GET', path: '/v1/pair/devices', headers: admin, loopback: true }),
   );
   const listed = JSON.parse(devices.body) as { devices: readonly { id: string; name: string }[] };
   const deviceId = listed.devices.find(device => device.name === deviceName)?.id;
   should(deviceId).be.a.String();
-  return { headers: { authorization: `Bearer ${token}` }, deviceId: deviceId ?? '' };
+  return { device: { deviceId: deviceId ?? '', appSession: 'app-one' }, deviceId: deviceId ?? '' };
 }
 
 describe('push enrolment over the real route surface', () => {
@@ -190,7 +201,7 @@ describe('push enrolment over the real route surface', () => {
 
     // ── the key the browser subscribes with ─────────────────────────────────────────────────────
     const key = await world.surface.dispatch(
-      request({ method: 'GET', path: '/v1/push/vapid', headers: browser.headers }),
+      request({ method: 'GET', path: '/v1/push/vapid', device: browser.device }),
     );
     should(key.status).equal(200);
     const publicKey = VapidPublicKeyResponseSchema.parse(JSON.parse(key.body)).publicKey;
@@ -204,7 +215,7 @@ describe('push enrolment over the real route surface', () => {
       request({
         method: 'POST',
         path: '/v1/push/subscriptions',
-        headers: browser.headers,
+        device: browser.device,
         body: JSON.stringify({
           deviceName: 'Pixel 8',
           subscription,
@@ -220,7 +231,7 @@ describe('push enrolment over the real route surface', () => {
     should(world.pushService.received[0]?.body.byteLength).be.above(85);
 
     const listed = await world.surface.dispatch(
-      request({ method: 'GET', path: '/v1/push/subscriptions', headers: browser.headers }),
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
     should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices.map(device => device.id)).deepEqual([
       view.id,
@@ -238,7 +249,7 @@ describe('push enrolment over the real route surface', () => {
     // The credential is gone, so the browser cannot even ask any more — which is why the check below is
     // made with the host's own token rather than the device's.
     const afterRevoke = await world.surface.dispatch(
-      request({ method: 'GET', path: '/v1/push/subscriptions', headers: browser.headers }),
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
     should(afterRevoke.status).equal(401);
 
@@ -256,12 +267,16 @@ describe('push enrolment over the real route surface', () => {
     const phone = await pair(world, 'Pixel 8');
     const tablet = await pair(world, 'iPad');
 
-    const enrol = async (browser: { headers: Record<string, string> }, deviceName: string, endpoint: string) => {
+    const enrol = async (
+      browser: { device: { readonly deviceId: string; readonly appSession: string } },
+      deviceName: string,
+      endpoint: string,
+    ) => {
       const response = await world.surface.dispatch(
         request({
           method: 'POST',
           path: '/v1/push/subscriptions',
-          headers: browser.headers,
+          device: browser.device,
           body: JSON.stringify({
             deviceName,
             subscription: await subscribed(endpoint),
@@ -283,7 +298,7 @@ describe('push enrolment over the real route surface', () => {
     );
 
     const remaining = await world.surface.dispatch(
-      request({ method: 'GET', path: '/v1/push/subscriptions', headers: tablet.headers }),
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: tablet.device }),
     );
     should(PushDeviceListResponseSchema.parse(JSON.parse(remaining.body)).devices.map(device => device.id)).deepEqual([
       tabletEnrolment.id,
@@ -300,7 +315,7 @@ describe('push enrolment over the real route surface', () => {
       request({
         method: 'POST',
         path: '/v1/push/subscriptions',
-        headers: browser.headers,
+        device: browser.device,
         body: JSON.stringify({
           deviceName: 'Pixel 8',
           subscription: await subscribed('https://push.example.test/send/dead'),
@@ -312,7 +327,7 @@ describe('push enrolment over the real route surface', () => {
     should(response.status).equal(400);
     should(JSON.parse(response.body).code).equal('push_invalid');
     const listed = await world.surface.dispatch(
-      request({ method: 'GET', path: '/v1/push/subscriptions', headers: browser.headers }),
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
     should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).be.empty();
   });

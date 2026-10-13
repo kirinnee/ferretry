@@ -39,7 +39,7 @@ beforeEach(installMatchMedia);
 const connection = daemonConnection({
   daemonId: 'daemon/a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const scope = daemonSessionScope(connection, 'sess-1');
 

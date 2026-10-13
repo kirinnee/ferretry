@@ -43,6 +43,7 @@ const UNGOVERNED: CallerGovernance = {
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
+  devices: { has: (deviceId: string) => deviceId !== 'unpaired-device' },
 };
 
 /** A paired device, as a session proved it — the only way a device is ever a caller. */
@@ -196,6 +197,22 @@ describe('ApiDispatcher authorization', () => {
     should(jsonBody(outdated)).containDeep({ code: 'app_outdated' });
     should(String(jsonBody(outdated).error)).match(/Reload the page/u);
     should(stranger.status).equal(401);
+  });
+
+  it('should refuse a session device whose grant is gone, and every device when nobody can say', async () => {
+    // A session proved its device when it opened; revoking the device ends the session. This is the
+    // request-boundary half: a request already in flight for a device that no longer exists is refused.
+    const gone = await dispatcherFor(echo('/v1/sessions', 'operator')).dispatch(
+      request({ path: '/v1/sessions', device: { deviceId: 'unpaired-device', appSession: 'app-one' } }),
+    );
+    const unwired = await new ApiDispatcher(
+      new ApiRouter([echo('/v1/sessions', 'operator')]),
+      { admin: 'admin-secret' },
+      NO_GOVERNED_ROUTES_GUARD,
+    ).dispatch(request({ path: '/v1/sessions', device: DEVICE }));
+
+    should(gone.status).equal(401);
+    should(unwired.status).equal(401);
   });
 
   it('should let a paired device use operator routes but never an admin-token route', async () => {

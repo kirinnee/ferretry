@@ -661,7 +661,7 @@ describe('the agent setup prompt', () => {
       'FY_TOKEN',
       'api-token',
       'daemonId',
-      'deviceToken',
+      'deviceId',
       'ferretry.pages.dev',
       '$HOME',
       '~/.ferretry',

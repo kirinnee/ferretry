@@ -7,14 +7,14 @@ import { interact, mount, must } from '../support/dom.ts';
 const daemon = daemonConnection({
   daemonId: 'pane-daemon',
   baseUrl: 'https://pane.example.test',
-  deviceToken: 'pane-token',
+  deviceId: 'pane-token',
 });
 const scope = daemonSessionScope(daemon, 'pane-session');
 
 const second = daemonConnection({
   daemonId: 'second-daemon',
   baseUrl: 'https://second.example.test',
-  deviceToken: 'second-token',
+  deviceId: 'second-token',
 });
 const secondScope = daemonSessionScope(second, 'pane-session');
 

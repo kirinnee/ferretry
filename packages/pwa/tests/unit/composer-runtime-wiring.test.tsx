@@ -22,7 +22,7 @@ import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-co
 import { interact, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
-const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceToken: 'token-a' });
+const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
 
 const view: SessionView = sessionView('s-1', {
   config: { harness: 'claude', model: 'claude-opus-5' },

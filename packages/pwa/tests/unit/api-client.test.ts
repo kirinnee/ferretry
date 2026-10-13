@@ -73,8 +73,8 @@ class RecordingTransport implements IFyHttpTransport {
   }
 }
 
-const paired = (daemonId: string, baseUrl: string, deviceToken: string) =>
-  daemonConnection({ daemonId, baseUrl, deviceToken });
+const paired = (daemonId: string, baseUrl: string, deviceId: string) =>
+  daemonConnection({ daemonId, baseUrl, deviceId });
 
 describe('daemon API client', () => {
   it('should bind typed protocol calls to the paired daemon instead of the public page origin', async () => {

@@ -37,6 +37,7 @@ import {
   sessionSurfaces,
   type SurfaceOwnership,
 } from '../lib/surface-references.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
 import { Badge, Button } from '../shell/primitives.tsx';
 
@@ -93,6 +94,8 @@ export function SessionSurfaceReferences({
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState('');
+  // Through the carrier router: a paired device has no bearer value, so a read of its own would fail.
+  const fetcher = useDaemonFetch();
 
   // `attempt` is in the dependency list although the body never reads it: it is
   // the retry trigger, and the whole point of Try again is to ask the daemon the
@@ -104,7 +107,7 @@ export function SessionSurfaceReferences({
     // The listing is asked for once per mount and once per explicit retry. It is
     // not polled: a stale row is a stale OFFER, and the reference it carries is
     // proved again by whoever renders or redeems it.
-    listTerminals(connection, scope)
+    listTerminals(connection, scope, fetcher)
       .then(listing => {
         if (controller.signal.aborted) return;
         // A listing about another session is damaged evidence, not an empty
@@ -124,7 +127,7 @@ export function SessionSurfaceReferences({
         setLoad({ status: 'error', reason: failure(reason) });
       });
     return () => controller.abort();
-  }, [attempt, connection, listTerminals, scope]);
+  }, [attempt, connection, fetcher, listTerminals, scope]);
 
   const add = useCallback(
     (surface: SessionSurface): void => {

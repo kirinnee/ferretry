@@ -34,8 +34,8 @@ const mount = (element: ReactElement): ReactTestRenderer => {
   return renderer;
 };
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 // Same id across daemons, and same daemon across sessions, so staleness is about the (daemon, session) pair, not the id alone.
 const scopeASession = daemonSessionScope(daemonA, 'session-a');
 const scopeBSession = daemonSessionScope(daemonA, 'session-b');

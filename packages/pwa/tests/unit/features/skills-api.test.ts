@@ -8,12 +8,12 @@ import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 const connection = daemonConnection({
   daemonId: 'daemon/a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const other = daemonConnection({
   daemonId: 'daemon/b',
   baseUrl: 'https://b.example.test',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 
 const scope = daemonSessionScope(connection, 'sess-1');
