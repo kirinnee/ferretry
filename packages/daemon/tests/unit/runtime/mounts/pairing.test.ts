@@ -322,6 +322,21 @@ describe('pairing routes', () => {
     should(fromBrowser.body).not.containEql('tokenHash');
   });
 
+  it('should never tell a loopback peer behind a local proxy that it is at this machine', async () => {
+    // A remote caller forwarded by `tailscale serve`, `cloudflared` or `ssh -L` arrives from a loopback
+    // peer on a bind that is not loopback-only. It used to read "you are at this machine".
+    // Arrange
+    const confirmed = await mount(new FakePairing(), true, { held: () => true });
+
+    // Act
+    const proxied = await confirmed.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: true }));
+    const hostCli = await confirmed.dispatch(request({ path: '/v1/pair/devices', headers: admin, loopback: true }));
+
+    // Assert
+    should(jsonBody(proxied).hostLocal).be.false();
+    should(jsonBody(hostCli).hostLocal).be.true();
+  });
+
   it('should revoke one device and answer with the remaining list', async () => {
     const subject = new FakePairing();
     const surface = await mount(subject);

@@ -57,14 +57,15 @@ import {
   PairingIdSchema,
 } from '@ferretry/protocol';
 import {
-  type ApiRequest,
   type ApiRoute,
+  arrivedOnHost,
   type CapabilityDemand,
   DEVICE_ACTOR_PREFIX,
   decodeParameter,
   errorResponse,
   jsonResponse,
   parseOptionalBody,
+  type RouteContext,
 } from '../../api/index.ts';
 
 export interface PairingSubsystem {
@@ -109,15 +110,16 @@ function callerDeviceId(actor: string | undefined): string | undefined {
 
 async function devicesView(
   subsystem: PairingSubsystem,
-  request: ApiRequest,
-  actor: string | undefined,
+  { request, actor, credential }: RouteContext,
 ): Promise<PairedDevicesView> {
   const thisDeviceId = callerDeviceId(actor);
   return PairedDevicesViewSchema.parse({
     devices: await subsystem.devices(),
-    // The TRANSPORT's answer and nothing else. A relayed hop terminates on this very host, so anything
-    // derived from an address, a `Host` header or the URL would tell a remote phone it is local.
-    hostLocal: request.loopback,
+    // The SAME answer every other host-locality rule uses, never a loopback peer on its own: a remote
+    // caller forwarded through a locally bound proxy (`tailscale serve`, `cloudflared`, `ssh -L`)
+    // arrives from a loopback peer too, and was told it was at this machine. Nothing derived from an
+    // address, a `Host` header or the URL is consulted either: a relayed hop terminates on this host.
+    hostLocal: arrivedOnHost(request, credential?.tokenClass === 'admin'),
     ...(thisDeviceId === undefined ? {} : { thisDeviceId }),
   });
 }
@@ -177,7 +179,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
-      handle: async ({ request, actor }) => jsonResponse(await devicesView(subsystem, request, actor)),
+      handle: async context => jsonResponse(await devicesView(subsystem, context)),
     },
     {
       /**
@@ -193,12 +195,12 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
-      handle: async ({ request, params, actor }) => {
-        const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(params.get('deviceId') ?? ''));
+      handle: async context => {
+        const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
         if (!deviceId.success) return errorResponse(404, 'device not found', 'pairing_device_not_found');
         const removed = await subsystem.revokeDevice(deviceId.data);
         return removed
-          ? jsonResponse(await devicesView(subsystem, request, actor))
+          ? jsonResponse(await devicesView(subsystem, context))
           : errorResponse(404, 'device not found', 'pairing_device_not_found');
       },
     },
