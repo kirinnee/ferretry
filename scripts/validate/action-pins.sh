@@ -31,9 +31,11 @@ while IFS=: read -r file line body; do
   classification="$(jq -r --arg action "${action}" '.actions[$action] // empty' "${map_file}")"
   [ -z "${classification}" ] && echo "❌ ${file}:${line}: action '${action}' has no authored trust classification" >&2 && exit 1
   [ "${classification}" != "${mode}" ] && continue
-  if [ "${mode}" = "trusted" ]; then
+  # A trusted action may ALSO be pinned to an exact SHA (with its tag as a trailing comment): a job
+  # that holds a long-lived secret pins everything it runs (docs/standards/ci-cd/index.md).
+  if [ "${mode}" = "trusted" ] && ! [[ ${ref} =~ ^[0-9a-fA-F]{40}$ ]]; then
     [[ ${ref} =~ ^v[1-9][0-9]*$ ]] || {
-      echo "❌ ${file}:${line}: trusted action '${action}' must use a major pin, got '${ref}'" >&2
+      echo "❌ ${file}:${line}: trusted action '${action}' must use a major pin or an exact SHA, got '${ref}'" >&2
       exit 1
     }
   else

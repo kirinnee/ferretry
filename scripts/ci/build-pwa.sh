@@ -26,6 +26,21 @@ for asset in fy-render-sandbox.html fy-render-mermaid.js fy-render-lottie.js; do
     exit 1
   }
 done
+# The signed-release files (docs/pwa-release-signing.md). The build always writes the UNSIGNED
+# marker; only scripts/ci/sign-pwa-release.sh, holding the key, replaces it.
+for asset in sw.verified.js release-manifest.json release-manifest.sig; do
+  test -s "packages/pwa/dist/${asset}" || {
+    echo "❌ packages/pwa/dist/${asset} is missing or empty; the release step did not run" >&2
+    exit 1
+  }
+done
+listed="$(jq -r '.files | keys[]' packages/pwa/dist/release-manifest.json | sort)"
+present="$(cd packages/pwa/dist && find . -type f ! -name _headers ! -name _redirects ! -name 'release-manifest.*' | sed 's|^\./||' | sort)"
+[[ ${listed} == "${present}" ]] || {
+  echo "❌ packages/pwa/dist/release-manifest.json does not list exactly the files in dist" >&2
+  diff <(printf '%s\n' "${listed}") <(printf '%s\n' "${present}") >&2 || true
+  exit 1
+}
 cmp packages/pwa/public/_headers packages/pwa/dist/_headers
 cmp packages/pwa/public/_redirects packages/pwa/dist/_redirects
 

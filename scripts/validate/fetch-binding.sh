@@ -81,6 +81,7 @@ fi
 declare -A call_allowlist=(
   ['packages/pwa/src/lib/runtime-models.ts']='defines browserFetch, the one wrapper around the builtin'
   ['packages/pwa/src/components/fy-render-sandbox.tsx']='fetches a pinned rendering library from this page'"'"'s own origin, never a daemon'
+  ['packages/pwa/src/worker/service-worker.ts']='the service worker fetches this site'"'"'s own release files and passes unanswered requests through unchanged; it never builds a daemon request'
 )
 
 call_hits=""

@@ -67,6 +67,12 @@ export interface ServiceWorkerUpdate {
    * subtly different piece of chip state.
    */
   readonly raiseRecovery: () => void;
+  /**
+   * Raises the update chip from outside the hook: the release checker
+   * (`use-release-integrity.ts`) installs a verified release WITHOUT a new worker, so no
+   * `installed` state change exists for this hook to hear.
+   */
+  readonly raiseUpdate: () => void;
 }
 
 /**
@@ -379,6 +385,7 @@ export const useServiceWorkerUpdate = (environment: ServiceWorkerUpdateEnvironme
   // ONE recovery entry point for both halves of the failure surface: the preload
   // watch below and the chunk error boundary's render-time catch.
   const raiseRecovery = useCallback(() => raise('recovery'), [raise]);
+  const raiseUpdate = useCallback(() => raise('update'), [raise]);
 
   useEffect(() => {
     if (container === null) return;
@@ -401,5 +408,5 @@ export const useServiceWorkerUpdate = (environment: ServiceWorkerUpdateEnvironme
     );
   }, [basePath, container, reload]);
 
-  return { updateReady, applyUpdate, raiseRecovery };
+  return { updateReady, applyUpdate, raiseRecovery, raiseUpdate };
 };
