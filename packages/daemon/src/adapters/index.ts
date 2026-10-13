@@ -15,6 +15,7 @@ export * from './migrate/file-migration-report.ts';
 export * from './names/index.ts';
 export * from './notifications/index.ts';
 export * from './pairing/index.ts';
+export * from './passkeys/webcrypto-passkey-crypto.ts';
 export * from './pins/index.ts';
 export * from './push/index.ts';
 export * from './step-up/index.ts';
