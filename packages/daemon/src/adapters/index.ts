@@ -17,6 +17,7 @@ export * from './notifications/index.ts';
 export * from './pairing/index.ts';
 export * from './pins/index.ts';
 export * from './push/index.ts';
+export * from './step-up/index.ts';
 export * from './quota-failover/index.ts';
 export * from './relay/index.ts';
 export * from './runtime/index.ts';

@@ -76,6 +76,7 @@ export * from './session/send/index.ts';
 export * from './session/signal/index.ts';
 export * from './session/snapshot/index.ts';
 export * from './session/transcript/index.ts';
+export * from './step-up/index.ts';
 export * from './session-id.ts';
 export * from './state-home.ts';
 export * from './storage-types.ts';

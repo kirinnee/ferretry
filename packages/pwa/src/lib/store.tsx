@@ -41,6 +41,7 @@ import { DaemonEventTransport } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
+import type { CredentialsPort } from './passkeys.ts';
 import { DaemonPinClient } from './pin-client.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
@@ -54,6 +55,8 @@ import {
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { browserCredentials, describeStepUpFailure, stepUpCeremony } from './step-up-ceremony.ts';
+import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 
@@ -329,6 +332,11 @@ export interface AppStore {
    * the disclosure; call nothing else on it from a surface.
    */
   readonly carrier: DaemonCarrierRouter;
+  /**
+   * The passkey prompt every daemon request shares: a refusal for want of a step-up raises it once,
+   * and the request is sent again when the person has confirmed. Rendered by `StepUpDialog`.
+   */
+  readonly stepUp: StepUpGate;
   readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
   /**
    * Whether Ferretry's default relay is advertising itself right now.
@@ -352,6 +360,10 @@ export interface CreateAppStoreOptions {
   readonly deviceKeys?: DeviceKeyStore;
   /** The browser WebSocket by default. Injected so no suite opens one. */
   readonly relayDial?: RelayDial;
+  /** `navigator.credentials` by default: where a passkey step-up is asked of the person. */
+  readonly passkeyCredentials?: CredentialsPort;
+  /** `location.origin` by default: this copy of the app, which a passkey belongs to. */
+  readonly appOrigin?: string;
 }
 
 /**
@@ -400,8 +412,19 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // the same WebCrypto either way, and one value is one thing a suite has to replace.
   const relayCrypto = options.relayCrypto ?? new WebCryptoRelayCrypto();
   const deviceKeys = options.deviceKeys ?? new IndexedDbDeviceKeyStore();
+  const appOrigin = options.appOrigin ?? globalThis.location?.origin ?? '';
+  const stepUp = new StepUpGate({
+    // The pool is built below and read only when a person presses the prompt's button.
+    ceremony: stepUpCeremony({
+      client: async daemon => await clients.client(daemon),
+      credentials: options.passkeyCredentials ?? browserCredentials(),
+      origin: appOrigin,
+    }),
+    describe: describeStepUpFailure(appOrigin),
+  });
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
+    stepUp: async daemon => await stepUp.require(daemon),
     crypto: relayCrypto,
     // Read per session, never cached: a key the person removed by clearing site data must stop
     // opening sessions the moment it is gone.
@@ -533,6 +556,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
 
   return {
     carrier,
+    stepUp,
     connections,
     clients,
     fleet,

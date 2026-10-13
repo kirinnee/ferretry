@@ -893,6 +893,8 @@ export interface DaemonWorld {
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
     readonly push: PushService;
+    /** Passkeys and the step-up they prove, opened with pairing because revoking a device forgets them. */
+    readonly stepUp: StepUpService;
     /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
     readonly droppedBearerGrants: number;
   }>;
@@ -1053,6 +1055,8 @@ export interface DaemonWorld {
     pairing: PairingService,
     /** Opened WITH pairing, because an enrolment's lifetime is a device grant's — see `createPairing`. */
     push: PushService,
+    /** Opened with pairing for the same reason: a device's passkeys die with its grant. */
+    stepUp: StepUpService,
     /** The exact published set pairing redemption receives and authenticated refresh serves. */
     carriers: readonly DaemonCarrier[],
     /**
@@ -5292,9 +5296,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A push enrolment id is a protocol UUID under a fixed prefix, minted the way a pin id is.
         ids: { next: () => crypto.randomUUID() },
       });
+      // Passkeys, verified here and never by the browser (`docs/design/zero-trust.md` B2). The device
+      // directory is the grant store itself, so a passkey can only ever be asked about a device that is
+      // still paired, and its window is measured from the grant's own `createdAt`.
+      const stepUp = new StepUpService({
+        store: new StatePasskeyStore(paths, stateFiles),
+        verifier: passkeyVerifier,
+        registry: new StepUpRegistry(),
+        challenges: new ChallengeLedger(),
+        random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
+        clock,
+        devices: {
+          device: async deviceId => {
+            const record = (await repository.list()).find(candidate => candidate.id === deviceId);
+            return record === undefined ? undefined : { name: record.name, createdAt: record.createdAt };
+          },
+        },
+        allowedOrigins: () => browserOrigins(config),
+        relyingPartyName: 'Ferretry',
+      });
       return {
         credentials,
         push,
+        stepUp,
         droppedBearerGrants: state.droppedBearerGrants,
         subsystem: new PairingService({
           daemonId: state.daemonId,
@@ -5314,7 +5338,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           credentials,
           // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
           // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
-          deviceState: [push],
+          deviceState: [push, stepUp],
           // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
           connections: deviceConnections,
           // WHY PAIRING HOLDS THE VERIFIER. A machine with no operator password will not hand out a
@@ -5413,6 +5437,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       analyticsStore,
       pairing,
       push,
+      stepUp,
       carriers,
       harnessDiscovery,
     ) => {
@@ -6000,6 +6025,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         pairing,
         push,
+        stepUp,
         carriers,
         harnessLogin,
         fleetCredentials,
@@ -6557,6 +6583,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     analyticsStore,
     pairing.subsystem,
     pairing.push,
+    pairing.stepUp,
     carriers,
     harnessDiscovery,
   );

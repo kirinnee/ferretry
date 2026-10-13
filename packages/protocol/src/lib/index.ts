@@ -35,6 +35,7 @@ export * from './session-search.ts';
 export * from './session-transcript.ts';
 export * from './session-transfer.ts';
 export * from './state-home-layout.ts';
+export * from './step-up.ts';
 export * from './stt.ts';
 export * from './surface.ts';
 export * from './task-boards.ts';

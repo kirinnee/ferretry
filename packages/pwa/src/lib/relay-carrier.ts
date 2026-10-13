@@ -33,12 +33,12 @@
  *   politely. It is refused and never downgraded to anything.
  * - No carrier working is an error naming every carrier tried and why. It is never
  *   an empty answer, a `503` this code made up, or a connection presented as live.
- * - `oversize` (§14) is surfaced as a refusal naming the size, never as a
- *   truncated body: a client that rendered half a session list would show a fleet
- *   that does not exist.
+ * - An answer too large for the session (§14) arrives as the daemon's own `502`,
+ *   never as a truncated body: a client that rendered half a session list would
+ *   show a fleet that does not exist.
  */
 
-import { OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE } from '@ferretry/protocol';
+import { OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
 import {
   APP_SESSION_BYTES,
   type ConnectionChoice,
@@ -524,6 +524,12 @@ export interface DaemonCarrierRouterOptions {
    * the directory at all. What comes back is dialled, never stored: see `hostedRelayFallbackCarrier`.
    */
   readonly hostedRelay?: () => Promise<string | undefined>;
+  /**
+   * Asked when the daemon refuses a request for want of a passkey step-up (`grant_step_up_required`):
+   * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
+   * nothing can ask, and the refusal is returned as it came.
+   */
+  readonly stepUp?: (daemon: DaemonConnection) => Promise<boolean>;
 }
 
 /**
@@ -689,6 +695,7 @@ export class DaemonCarrierRouter {
   readonly #hostedRelay: () => Promise<string | undefined>;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
+  readonly #stepUp: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
@@ -722,6 +729,7 @@ export class DaemonCarrierRouter {
     this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
+    this.#stepUp = options.stepUp;
   }
 
   /**
@@ -889,6 +897,17 @@ export class DaemonCarrierRouter {
    * behaviour that can ever recover.
    */
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
+    const response = await this.#sendOnce(daemon, url, init);
+    // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to
+    // confirm; once they have, the same request is sent again exactly once — its body is text, so it
+    // can be — and a dismissed prompt returns the refusal unchanged for the caller to say.
+    const ask = this.#stepUp;
+    if (ask === undefined || response.status !== 403 || !(await asksForStepUp(response))) return response;
+    if (!(await ask(daemon))) return response;
+    return await this.#sendOnce(daemon, url, init);
+  }
+
+  async #sendOnce(daemon: DaemonConnection, url: string, init: RequestInit): Promise<Response> {
     const entry = this.#entry(daemon);
     const chosen = entry.choice;
     if (chosen?.ok === true) {
@@ -1241,6 +1260,16 @@ export class DaemonCarrierRouter {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/** Whether a refusal is the daemon asking for a passkey step-up. Read from a copy; the body stays. */
+const asksForStepUp = async (response: Response): Promise<boolean> => {
+  try {
+    const body = (await response.clone().json()) as { readonly code?: unknown } | null;
+    return body?.code === STEP_UP_REQUIRED_CODE;
+  } catch {
+    return false;
+  }
+};
 
 /** Marks a failure to OPEN a session: nothing of the request left this browser, whatever it was. */
 class RelayUnsentError extends Error {

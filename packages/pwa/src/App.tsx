@@ -53,6 +53,7 @@ import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { daemonDisplayName } from './features/settings/daemon-settings.tsx';
+import { StepUpDialog } from './features/step-up/step-up-dialog.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
@@ -1549,6 +1550,15 @@ export function AppShell() {
         {routeAnnouncement(effectiveRoute)}
       </p>
       {content}
+      {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
+          it, and it names which machine is asking. */}
+      <StepUpDialog
+        gate={store.stepUp}
+        machineName={daemonId => {
+          const record = connectionSnapshot.connections.find(candidate => candidate.daemonId === daemonId);
+          return record === undefined ? 'This machine' : daemonDisplayName(record);
+        }}
+      />
     </NotificationControlsContext.Provider>
   );
 }
