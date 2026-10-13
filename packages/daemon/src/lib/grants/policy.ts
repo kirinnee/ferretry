@@ -16,7 +16,7 @@ import type { EnforcedGrants } from './types.ts';
  * PERMISSIVE, and chosen rather than shrugged at. The governing principle is *control as much as
  * possible from the UI, with a security layer for the cautious* — so a person should be able to do
  * everything from a browser until they decide otherwise, and the restriction is something they turn
- * on rather than a wall they start behind. Both axes are therefore enabled for all six capabilities,
+ * on rather than a wall they start behind. Both axes are therefore enabled for all seven capabilities,
  * `pairing` included — see `docs/grants.md` for why the one that hands out credentials needs no
  * exception: a caller who is not on this host can switch it off and can never switch it back on.
  *
@@ -42,6 +42,7 @@ export const DEFAULT_CAPABILITY_GRANTS: CapabilityGrants = {
   filesystem: { use: true, configure: true },
   warden: { use: true, configure: true },
   pairing: { use: true, configure: true },
+  secrets: { use: true, configure: true },
 };
 
 /**
@@ -137,6 +138,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   filesystem: 'the project filesystem',
   warden: 'fleet supervision',
   pairing: 'device pairing',
+  secrets: 'the secret store',
 };
 
 /** The capability as an operator reads it, for a report row or a refusal. */
