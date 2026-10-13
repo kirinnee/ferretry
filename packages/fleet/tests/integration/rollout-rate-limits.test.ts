@@ -29,7 +29,11 @@ afterEach(async () => {
 });
 
 const tokenCount = (timestamp: string, rateLimits: unknown): string =>
-  JSON.stringify({ timestamp, type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: rateLimits } });
+  JSON.stringify({
+    timestamp,
+    type: 'event_msg',
+    payload: { type: 'token_count', info: null, rate_limits: rateLimits },
+  });
 
 const limits = (primary: number, secondary: number) => ({
   primary: { used_percent: primary, window_minutes: 300, resets_at: 1_800_003_600 },
@@ -109,7 +113,10 @@ describe('listRollouts and newestRolloutRateLimits', () => {
     const plain = join(day, `rollout-2026-10-13T07-00-00-${CONVERSATION}.jsonl`);
     const packed = join(older, `rollout-2026-09-01T07-00-00-${OTHER}.jsonl.zst`);
     await writeFile(plain, `${tokenCount('2026-10-13T07:05:00.000Z', limits(30, 3))}\n`);
-    await writeFile(packed, Bun.zstdCompressSync(Buffer.from(`${tokenCount('2026-09-01T07:05:00.000Z', limits(70, 7))}\n`)));
+    await writeFile(
+      packed,
+      Bun.zstdCompressSync(Buffer.from(`${tokenCount('2026-09-01T07:05:00.000Z', limits(70, 7))}\n`)),
+    );
     await writeFile(join(day, 'not-a-rollout.txt'), 'token_count');
     await utimes(plain, new Date('2026-10-13T07:05:00Z'), new Date('2026-10-13T07:05:00Z'));
     await utimes(packed, new Date('2026-09-01T07:05:00Z'), new Date('2026-09-01T07:05:00Z'));

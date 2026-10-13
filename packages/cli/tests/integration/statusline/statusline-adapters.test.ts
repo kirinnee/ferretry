@@ -104,7 +104,7 @@ describe('statusline adapters', () => {
       should(await readdir(directory)).not.containEql('home');
     });
 
-    it('should default the state home under the person\'s home when FY_HOME is unset', async () => {
+    it("should default the state home under the person's home when FY_HOME is unset", async () => {
       // Arrange
       const home = join(directory, 'home');
       const controller = createStatuslineController({

@@ -477,7 +477,10 @@ export function scanCodexRefreshEvidence(text: string): CodexRefreshEvidence {
 }
 
 /** Merge two scans, so evidence split across streams or chunks is one answer. */
-export function mergeCodexRefreshEvidence(left: CodexRefreshEvidence, right: CodexRefreshEvidence): CodexRefreshEvidence {
+export function mergeCodexRefreshEvidence(
+  left: CodexRefreshEvidence,
+  right: CodexRefreshEvidence,
+): CodexRefreshEvidence {
   return {
     codes: CODEX_REFRESH_FAILURE_CODES.filter(code => left.codes.includes(code) || right.codes.includes(code)),
     unauthorized: left.unauthorized || right.unauthorized,

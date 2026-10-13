@@ -139,7 +139,7 @@ describe('StatuslineController', () => {
     should(h.writes).be.empty();
   });
 
-  it('should chain the person\'s own command with the same stdin and take its exit code', async () => {
+  it("should chain the person's own command with the same stdin and take its exit code", async () => {
     // Arrange
     const h = harness({ chainCode: 3 });
 

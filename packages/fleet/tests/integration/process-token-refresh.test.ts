@@ -486,7 +486,11 @@ describe('spawnFleetTokenRefreshProcess scanning output', () => {
 
     // Act
     const child = spawnFleetTokenRefreshProcess(
-      [shell, '-c', 'echo "token refresh failed: refresh_token_expired" >&2; echo "status 401 on refresh"; cat >/dev/null'],
+      [
+        shell,
+        '-c',
+        'echo "token refresh failed: refresh_token_expired" >&2; echo "status 401 on refresh"; cat >/dev/null',
+      ],
       { PATH: '/usr/bin:/bin' },
       { scanOutput: true },
     );

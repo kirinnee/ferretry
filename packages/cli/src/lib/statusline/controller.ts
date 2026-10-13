@@ -19,17 +19,17 @@ import {
  */
 
 /** Reading the whole of stdin, bounded. */
-export interface StatuslineInput {
+interface StatuslineInput {
   read(): Promise<string>;
 }
 
 /** Where a credential's passive reading is kept. */
-export interface StatuslineUsageSink {
+interface StatuslineUsageSink {
   write(credentialId: string, record: PassiveUsageRecord): Promise<void>;
 }
 
 /** Running the person's own statusLine command with this stdin; its output goes straight to ours. */
-export interface StatuslineChain {
+interface StatuslineChain {
   run(command: string, stdin: string): Promise<number>;
 }
 

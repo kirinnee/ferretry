@@ -110,10 +110,18 @@ describe('CodexUsageProbe', () => {
 
   const failures: readonly [string, Reply, string][] = [
     ['a non-2xx status', { status: 401, text: '{}' }, 'the Codex usage endpoint answered HTTP 401'],
-    ['a truncated body', { text: usageBody, truncated: true }, 'the Codex usage endpoint answered more than this read keeps'],
+    [
+      'a truncated body',
+      { text: usageBody, truncated: true },
+      'the Codex usage endpoint answered more than this read keeps',
+    ],
     ['unreadable JSON', { text: '<html>' }, 'the Codex usage read failed'],
     ['a body with no usage', { text: '{"rate_limit":{}}' }, 'the Codex usage endpoint carried no readable usage'],
-    ['a timeout', { throws: Object.assign(new Error('aborted'), { name: 'AbortError' }) }, 'the Codex usage read timed out'],
+    [
+      'a timeout',
+      { throws: Object.assign(new Error('aborted'), { name: 'AbortError' }) },
+      'the Codex usage read timed out',
+    ],
     ['a transport failure', { throws: new Error(`connect refused ${TOKEN}`) }, 'the Codex usage read failed'],
   ];
   for (const [what, reply, error] of failures) {

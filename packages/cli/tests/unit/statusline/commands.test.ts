@@ -15,7 +15,7 @@ function recording(): { readonly controller: StatuslineController; readonly call
 }
 
 describe('registerStatuslineCommands', () => {
-  it('should hand the person\'s own command to the controller when --then names one', async () => {
+  it("should hand the person's own command to the controller when --then names one", async () => {
     // Arrange
     const program = new Command().exitOverride();
     const { controller, calls } = recording();

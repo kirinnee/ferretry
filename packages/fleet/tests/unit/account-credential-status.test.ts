@@ -275,8 +275,9 @@ describe('decideCodexStatus', () => {
 
   it('should be Refresh due within five minutes of exp, and when there is no exp and last_refresh is old', () => {
     should(decide(tokens({ accessExpiresAt: NOW + 4 * MINUTE })).reason).equal('access_expiring');
-    should(decide(tokens({ accessExpiresAt: undefined, lastRefreshAt: NOW - CODEX_LAST_REFRESH_MAX_AGE_MS - 1 })).reason)
-      .equal('last_refresh_old');
+    should(
+      decide(tokens({ accessExpiresAt: undefined, lastRefreshAt: NOW - CODEX_LAST_REFRESH_MAX_AGE_MS - 1 })).reason,
+    ).equal('last_refresh_old');
     should(decide(tokens({ accessExpiresAt: undefined, lastRefreshAt: undefined })).reason).equal('last_refresh_old');
     should(decide(tokens({ accessExpiresAt: undefined, lastRefreshAt: NOW - MINUTE })).word).equal('ready');
     // An old last_refresh does not matter while exp says the token is current: Codex itself would not refresh.
@@ -284,7 +285,9 @@ describe('decideCodexStatus', () => {
   });
 
   it('should tell a token with no way back from one that can still renew', () => {
-    should(decide(tokens({ hasRefresh: false, accessExpiresAt: NOW - MINUTE })).reason).equal('access_expired_no_refresh');
+    should(decide(tokens({ hasRefresh: false, accessExpiresAt: NOW - MINUTE })).reason).equal(
+      'access_expired_no_refresh',
+    );
     should(decide(tokens({ hasRefresh: false, hasAccess: false })).reason).equal('not_signed_in');
     should(decide(tokens({ hasAccess: false })).reason).equal('access_expired_refreshable');
     should(decide(tokens({ hasRefresh: false })).word).equal('ready');
@@ -297,7 +300,11 @@ describe('decideCodexStatus', () => {
     };
 
     // Act / Assert
-    should(decide(tokens(), head, 'f1')).match({ word: 'needs_sign_in', reason: 'refresh_revoked', since: NOW - MINUTE });
+    should(decide(tokens(), head, 'f1')).match({
+      word: 'needs_sign_in',
+      reason: 'refresh_revoked',
+      since: NOW - MINUTE,
+    });
     should(decide(tokens({ lastRefreshAt: NOW }), head, 'f1').word).equal('ready');
     should(decide(tokens(), head, 'f2').word).equal('ready');
     should(decide(tokens({ lastRefreshAt: undefined }), head).reason).equal('refresh_revoked');
@@ -306,15 +313,17 @@ describe('decideCodexStatus', () => {
   });
 
   it('should show a refresh it saw succeed', () => {
-    should(
-      decide(tokens(), { conclusion: { word: 'ready', reason: 'refresh_accepted', at: NOW - 2 * MINUTE } }),
-    ).match({ reason: 'refresh_accepted', since: NOW - 2 * MINUTE });
+    should(decide(tokens(), { conclusion: { word: 'ready', reason: 'refresh_accepted', at: NOW - 2 * MINUTE } })).match(
+      { reason: 'refresh_accepted', since: NOW - 2 * MINUTE },
+    );
   });
 });
 
 describe('decideStorelessStatus', () => {
   it('should treat the environment as Ready and an unreachable store as Needs sign-in', () => {
-    should(decideStorelessStatus({ harness: 'claude', store: 'environment', env: {} }).reason).equal('from_environment');
+    should(decideStorelessStatus({ harness: 'claude', store: 'environment', env: {} }).reason).equal(
+      'from_environment',
+    );
     should(decideStorelessStatus({ harness: 'codex', store: 'host', unavailable: 'relative CODEX_HOME' }).reason).equal(
       'store_unreachable',
     );
@@ -335,7 +344,10 @@ describe('folding', () => {
     should(foldClaudeSignal({}, 'rejected', NOW, 'f1').conclusion?.word).equal('needs_sign_in');
     const kept = { conclusion: { word: 'ready' as const, reason: 'provider_accepted' as const, at: 1 } };
     for (const signal of ['rejection_unconfirmed', 'timeout', 'inconclusive', 'absent', undefined] as const) {
-      should(foldClaudeSignal(kept, signal, NOW, 'f1')).deepEqual({ ...kept, lastCheck: { at: NOW, conclusive: false } });
+      should(foldClaudeSignal(kept, signal, NOW, 'f1')).deepEqual({
+        ...kept,
+        lastCheck: { at: NOW, conclusive: false },
+      });
     }
   });
 
@@ -394,8 +406,11 @@ describe('usage', () => {
       source: 'codex-rollout',
       at: NOW,
     });
-    should(chooseCredentialUsage([passiveUsageReading({ version: 1, source: 'claude-statusline', at: 1, fiveHour: { usedPercent: 3 } })]))
-      .match({ weekly: {} });
+    should(
+      chooseCredentialUsage([
+        passiveUsageReading({ version: 1, source: 'claude-statusline', at: 1, fiveHour: { usedPercent: 3 } }),
+      ]),
+    ).match({ weekly: {} });
     should(chooseCredentialUsage([])).deepEqual({ fiveHour: {}, weekly: {} });
   });
 
@@ -408,7 +423,11 @@ describe('usage', () => {
 
   it('should turn a free read into a reading only when it measured something', () => {
     should(
-      activeUsageReading('anthropic-usage', { usageBased: true, ok: true, shortWindow: { usedPercent: 1 }, longWindow: { usedPercent: 2 } }, NOW),
+      activeUsageReading(
+        'anthropic-usage',
+        { usageBased: true, ok: true, shortWindow: { usedPercent: 1 }, longWindow: { usedPercent: 2 } },
+        NOW,
+      ),
     ).deepEqual({ source: 'anthropic-usage', at: NOW, fiveHour: { usedPercent: 1 }, weekly: { usedPercent: 2 } });
     should(activeUsageReading('codex-usage', { usageBased: true, ok: false }, NOW)).be.undefined();
   });

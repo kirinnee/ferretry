@@ -421,10 +421,19 @@ export function foldClaudeSignal(
   at: number,
   fingerprint: string | undefined,
 ): CredentialStatusHead {
-  const word = signal === 'accepted' || signal === 'scope_unavailable' ? 'ready' : signal === 'rejected' ? 'needs_sign_in' : undefined;
+  const word =
+    signal === 'accepted' || signal === 'scope_unavailable'
+      ? 'ready'
+      : signal === 'rejected'
+        ? 'needs_sign_in'
+        : undefined;
   if (word === undefined) return { ...head, lastCheck: { at, conclusive: false } };
   const reason: CredentialStatusReason =
-    signal === 'accepted' ? 'provider_accepted' : signal === 'scope_unavailable' ? 'usage_scope_unavailable' : 'provider_rejected';
+    signal === 'accepted'
+      ? 'provider_accepted'
+      : signal === 'scope_unavailable'
+        ? 'usage_scope_unavailable'
+        : 'provider_rejected';
   return {
     ...head,
     conclusion: { word, reason, at, ...(fingerprint === undefined ? {} : { fingerprint }) },
@@ -447,7 +456,11 @@ export function foldCodexRefresh(
 ): CredentialStatusHead {
   if (observation.kind === 'advanced') {
     const { codexFailure: _cleared, ...rest } = head;
-    return { ...rest, conclusion: { word: 'ready', reason: 'refresh_accepted', at }, lastCheck: { at, conclusive: true } };
+    return {
+      ...rest,
+      conclusion: { word: 'ready', reason: 'refresh_accepted', at },
+      lastCheck: { at, conclusive: true },
+    };
   }
   if (observation.kind === 'failed' && observation.failure !== 'transient') {
     const lastRefreshAt = after.facts.state === 'tokens' ? after.facts.lastRefreshAt : undefined;
@@ -514,13 +527,14 @@ export function needsActiveUsageRead(
   now: number,
   intervalMs: number,
 ): boolean {
-  return !hasSignal(passive === undefined ? undefined : passiveUsageReading(passive)) || now - (passive?.at ?? 0) >= intervalMs;
+  return (
+    !hasSignal(passive === undefined ? undefined : passiveUsageReading(passive)) ||
+    now - (passive?.at ?? 0) >= intervalMs
+  );
 }
 
 /** The newest reading that measured something, or two unknown windows. */
-export function chooseCredentialUsage(
-  readings: readonly (CredentialUsageReading | undefined)[],
-): CredentialUsage {
+export function chooseCredentialUsage(readings: readonly (CredentialUsageReading | undefined)[]): CredentialUsage {
   const newest = readings.filter(hasSignal).sort((left, right) => right.at - left.at)[0];
   if (newest === undefined) return { fiveHour: {}, weekly: {} };
   return { fiveHour: newest.fiveHour ?? {}, weekly: newest.weekly ?? {}, source: newest.source, at: newest.at };
@@ -686,7 +700,10 @@ export class CredentialStatusService {
     const observation: CodexRefreshObservation = codexFileAdvanced(before, after)
       ? { kind: 'advanced' }
       : attempt.outcome === 'ran'
-        ? { kind: 'failed', failure: classifyCodexRefreshFailure(attempt.evidence ?? { codes: [], unauthorized: false }) }
+        ? {
+            kind: 'failed',
+            failure: classifyCodexRefreshFailure(attempt.evidence ?? { codes: [], unauthorized: false }),
+          }
         : { kind: 'not_run' };
     const head = (await this.ports.heads.read(id)) ?? {};
     await this.ports.heads.write(id, foldCodexRefresh(head, observation, this.ports.now(), after));
@@ -696,7 +713,12 @@ export class CredentialStatusService {
     const harness = subject.resolution.harness;
     const resolution = stored(subject.resolution);
     if (resolution === undefined) {
-      return { id: subject.id, harness, status: decideStorelessStatus(subject.resolution), usage: chooseCredentialUsage([]) };
+      return {
+        id: subject.id,
+        harness,
+        status: decideStorelessStatus(subject.resolution),
+        usage: chooseCredentialUsage([]),
+      };
     }
     const head = (await this.ports.heads.read(subject.id)) ?? {};
     const passive = await this.#passive(subject);
@@ -715,7 +737,10 @@ export class CredentialStatusService {
       id: subject.id,
       harness,
       status: decided,
-      usage: chooseCredentialUsage([passive === undefined ? undefined : passiveUsageReading(passive), head.activeUsage]),
+      usage: chooseCredentialUsage([
+        passive === undefined ? undefined : passiveUsageReading(passive),
+        head.activeUsage,
+      ]),
     };
   }
 
@@ -739,7 +764,9 @@ export class CredentialStatusService {
     resolution: StoredCredentialResolution,
   ): Promise<{ readonly facts: CodexAuthFacts; readonly fingerprint?: string }> {
     const [material, reading] = await Promise.all([
-      this.ports.material(resolution).catch((): CredentialMaterial => ({ outcome: 'unreadable', reason: 'read failed' })),
+      this.ports
+        .material(resolution)
+        .catch((): CredentialMaterial => ({ outcome: 'unreadable', reason: 'read failed' })),
       this.#classify(resolution),
     ]);
     return {

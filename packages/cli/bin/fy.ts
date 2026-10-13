@@ -665,7 +665,12 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world }) =>
     registerStatuslineCommands(
       program,
-      createStatuslineController({ environment: world.environment, homeDirectory: resolveUserHome(world.environment), product: PRODUCT_NAME, io: world.io }),
+      createStatuslineController({
+        environment: world.environment,
+        homeDirectory: resolveUserHome(world.environment),
+        product: PRODUCT_NAME,
+        io: world.io,
+      }),
     ),
   // `fy history claim`, which a wrapper runs before `exec` so a conversation has one live writer (§9.3).
   ({ program, world }) =>

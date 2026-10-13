@@ -560,7 +560,9 @@ describe('Codex refresh evidence', () => {
     // Assert
     should(evidence).deepEqual({ codes: ['refresh_token_reused'], unauthorized: true });
     should(JSON.stringify(evidence)).not.match(/sk-fake/);
-    should(scanCodexRefreshEvidence('request 401 for models\nrefresh took 1401ms')).deepEqual(NO_CODEX_REFRESH_EVIDENCE);
+    should(scanCodexRefreshEvidence('request 401 for models\nrefresh took 1401ms')).deepEqual(
+      NO_CODEX_REFRESH_EVIDENCE,
+    );
     should(scanCodexRefreshEvidence('refresh: 401')).deepEqual({ codes: [], unauthorized: true });
   });
 
