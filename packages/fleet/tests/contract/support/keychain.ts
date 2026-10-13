@@ -69,3 +69,14 @@ export function refreshTokenIn(secret: string | undefined): string | undefined {
     return undefined;
   }
 }
+
+/**
+ * Whether `security` finds `service` when run with `home` as HOME — a diagnostic, never a secret:
+ * without `-w` it prints the item's attributes, not its password.
+ */
+export async function keychainVisibleFrom(home: string, service: string): Promise<string> {
+  const found = await run(['/usr/bin/security', 'find-generic-password', '-a', account, '-s', service], {
+    env: { PATH: '/usr/bin:/bin', HOME: home, USER: account },
+  });
+  return found.code === 0 ? 'found' : `not found (exit ${found.code}: ${found.stderr.trim().split('\n')[0] ?? ''})`;
+}

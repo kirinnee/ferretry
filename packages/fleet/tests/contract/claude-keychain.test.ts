@@ -21,6 +21,7 @@ import { claudeCredential, claudeTokenAnswer } from './support/fixtures.ts';
 import { contract, harnessEnv, requireHarness, run, type Sandbox, sandbox, until } from './support/harness.ts';
 import {
   BARE_SERVICE,
+  keychainVisibleFrom,
   keychainWritable,
   plantKeychainItem,
   readKeychainItem,
@@ -39,6 +40,13 @@ import {
 
 const STORE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
 const TOKEN_HOST = 'platform.claude.com';
+/**
+ * The runner's REAL home, not a throwaway one. `security` finds the login keychain through the search
+ * list kept under `~/Library`, so under a throwaway HOME no keychain is searched at all and every read
+ * comes back empty — measured on the first macos-15 run, where even the bare item was invisible. This
+ * suite runs only on the CI runner, and `CLAUDE_CONFIG_DIR` still keeps Claude's own files in the sandbox.
+ */
+const KEYCHAIN_HOME = process.env.HOME ?? '';
 
 describe.skipIf(!(contract.enabled && keychainWritable))(
   'claude contract (macOS): the shared store is a keychain item named from the store dir',
@@ -55,6 +63,14 @@ describe.skipIf(!(contract.enabled && keychainWritable))(
       caFile = tls.caFile;
       endpoint = startTokenEndpoint({ tls, issue: claudeTokenAnswer });
       proxy = startProxy({ [TOKEN_HOST]: endpoint.port });
+      // Record what `security` can see from each HOME, so a red run says which one failed.
+      const probe = 'fy-contract-visibility-probe';
+      await mkdir(box.home, { recursive: true });
+      await plantKeychainItem(probe, 'not-a-secret');
+      const fromReal = await keychainVisibleFrom(KEYCHAIN_HOME, probe);
+      const fromThrowaway = await keychainVisibleFrom(box.home, probe);
+      console.log(`keychain probe: real HOME ${fromReal}; throwaway HOME ${fromThrowaway}`);
+      await removeKeychainItem(probe);
     });
     afterAll(async () => {
       await removePlantedKeychainItems();
@@ -68,7 +84,7 @@ describe.skipIf(!(contract.enabled && keychainWritable))(
       const store = path.join(root, 'store');
       for (const directory of ['store', 'config', 'home']) await mkdir(path.join(root, directory), { recursive: true });
       const env = (storeValue: string) =>
-        harnessEnv(path.join(root, 'home'), proxy.port, {
+        harnessEnv(KEYCHAIN_HOME, proxy.port, {
           CLAUDE_CONFIG_DIR: path.join(root, 'config'),
           [STORE_VARIABLE]: storeValue,
           NODE_EXTRA_CA_CERTS: caFile,
@@ -77,7 +93,11 @@ describe.skipIf(!(contract.enabled && keychainWritable))(
     };
     const loggedIn = async (env: Record<string, string>): Promise<boolean | undefined> => {
       const ran = await run([claude().bin, 'auth', 'status', '--json'], { env });
-      return (JSON.parse(ran.stdout) as { loggedIn?: boolean }).loggedIn;
+      try {
+        return (JSON.parse(ran.stdout) as { loggedIn?: boolean }).loggedIn;
+      } catch {
+        throw new Error(`claude auth status said: ${ran.stdout}${ran.stderr}`.slice(0, 600));
+      }
     };
     const filesUnder = async (root: string): Promise<string[]> =>
       (await readdir(root, { recursive: true }))
