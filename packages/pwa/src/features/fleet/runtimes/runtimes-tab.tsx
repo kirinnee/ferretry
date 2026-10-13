@@ -199,7 +199,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
                           <Badge
                             key={note}
                             tone={note.startsWith('Partly') || note.includes('not found') ? 'warn' : 'pend'}
-                            className="max-w-full whitespace-normal"
+                            className="max-w-full !whitespace-normal"
                           >
                             {note}
                           </Badge>

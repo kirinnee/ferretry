@@ -404,7 +404,7 @@ export function AddRuntime({
                       fit.notes.length === 0 ? null : (
                         <span className="flex flex-wrap gap-1">
                           {fit.notes.map(note => (
-                            <Badge key={note} tone="warn" className="max-w-full whitespace-normal">
+                            <Badge key={note} tone="warn" className="max-w-full !whitespace-normal">
                               {note}
                             </Badge>
                           ))}

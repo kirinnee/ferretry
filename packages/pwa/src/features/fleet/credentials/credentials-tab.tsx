@@ -84,8 +84,8 @@ export function CredentialBadges({ credential }: { readonly credential: FleetCre
   return (
     <span className="flex min-w-0 flex-wrap gap-1" data-credential-badges="">
       {credential.label === undefined ? null : <Badge tone="accent">{credential.label}</Badge>}
-      {slot === null ? null : <Badge className="max-w-full whitespace-normal">{slot}</Badge>}
-      {terminal === null ? null : <Badge className="max-w-full whitespace-normal">{terminal}</Badge>}
+      {slot === null ? null : <Badge className="max-w-full !whitespace-normal">{slot}</Badge>}
+      {terminal === null ? null : <Badge className="max-w-full !whitespace-normal">{terminal}</Badge>}
     </span>
   );
 }
