@@ -100,7 +100,8 @@ export const withSteps = (state: StepperState, steps: readonly StepperStep[]): S
   const first = steps[0];
   if (first === undefined) throw new Error(`stepper ${flow.kind} has no steps`);
   const at = steps.some(step => step.id === flow.at) ? flow.at : first.id;
-  return replaceTop(state, { ...flow, steps, at });
+  // A flow that recomputes its steps on every render must not lose an open leave confirmation.
+  return { ...replaceTop(state, { ...flow, steps, at }), confirming: state.confirming };
 };
 
 /** Next. The last step stays put: finishing a flow is the consumer's act, not a step. */

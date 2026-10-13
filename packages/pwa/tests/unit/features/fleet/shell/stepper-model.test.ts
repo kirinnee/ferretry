@@ -78,6 +78,12 @@ describe('stepper model', () => {
     expect(() => withSteps(state, [])).toThrow('has no steps');
   });
 
+  it('keeps an open leave confirmation when the steps are recomputed', () => {
+    const confirming = cancelStepper(stepForward(startStepper(addRuntime)));
+    expect(withSteps(confirming, addRuntime.steps).confirming).toBe(true);
+    expect(withSteps(keepGoing(confirming), addRuntime.steps).confirming).toBe(false);
+  });
+
   it('Back goes one step back, and from step 1 of a top-level flow asks to confirm leaving', () => {
     const second = stepForward(startStepper(addRuntime));
     const first = moved(second);

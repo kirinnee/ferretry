@@ -18,5 +18,6 @@ export const HARNESS_MACHINE_TABS: MachineTabSurfaces = {
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsTab,
+  // main.tsx mounts the Settings tab itself, because it needs the harness's other pairings for Clone.
   settings: emptyMachineTab('settings'),
 };

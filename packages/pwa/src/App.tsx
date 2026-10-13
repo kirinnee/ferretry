@@ -19,6 +19,7 @@ import {
   type SessionEventStreamStatus,
   startSessionEventStream,
 } from './components/session-event-stream-model.ts';
+import { browserTerminalDeckDependencies } from './components/session-terminal-deck.tsx';
 import {
   type SessionWorkspaceRefreshControl,
   type SessionWorkspaceRefreshEnvironment,
@@ -33,9 +34,10 @@ import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.t
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.tsx';
 import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
+import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
-import { emptyMachineTab, type MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
+import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
@@ -64,8 +66,8 @@ import { WardenStrip } from './features/warden/warden-strip.tsx';
 import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
 import { useActiveCarrier } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
-import { useInputModality } from './hooks/use-input-modality.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useInputModality } from './hooks/use-input-modality.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
   type NotificationControlsHost,
@@ -100,7 +102,6 @@ import {
   routePageKey,
   setupPath,
 } from './lib/pages/routes.ts';
-import { browserTerminalDeckDependencies } from './components/session-terminal-deck.tsx';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
@@ -958,7 +959,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsTab,
-  settings: emptyMachineTab('settings'),
+  settings: MachineSettingsSurface,
 };
 
 function SettingsRoute({ connection }: DaemonPageProps) {

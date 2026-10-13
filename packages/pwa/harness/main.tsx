@@ -119,9 +119,12 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
+import { accountsRoster } from '../src/features/fleet/accounts-model.ts';
+import { accountsSettingsTab } from '../src/features/fleet/accounts-page.tsx';
+import { type AccountsReadState, AccountsSurface } from '../src/features/fleet/accounts-surface.tsx';
+import { ClaudeLoginPanel } from '../src/features/fleet/claude-login-panel.tsx';
+import { CodexLoginPanel } from '../src/features/fleet/codex-login-panel.tsx';
 import { FleetAccountStepper } from '../src/features/fleet/fleet-account-stepper.tsx';
-import { harnessCatalogAnswer } from './account-model-catalog.ts';
-import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import type {
   FleetApplyOutcome,
   FleetConfigView,
@@ -142,12 +145,9 @@ import {
   FleetFirstRunPlan,
   FleetLiveRoster,
 } from '../src/features/fleet/fleet-change-review.tsx';
-import { accountsRoster } from '../src/features/fleet/accounts-model.ts';
-import { accountsSettingsTab } from '../src/features/fleet/accounts-page.tsx';
-import { type AccountsReadState, AccountsSurface } from '../src/features/fleet/accounts-surface.tsx';
 import {
-  FleetConfigurationSurface,
   type FleetClientFactory,
+  FleetConfigurationSurface,
   fleetSettingsTab,
 } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import {
@@ -155,8 +155,8 @@ import {
   type FleetInstructionsControl,
   type FleetSkillsStoreItem,
 } from '../src/features/fleet/fleet-stepper-model.ts';
-import { ClaudeLoginPanel } from '../src/features/fleet/claude-login-panel.tsx';
-import { CodexLoginPanel } from '../src/features/fleet/codex-login-panel.tsx';
+import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
+import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
@@ -278,6 +278,8 @@ import {
 import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
+import { harnessCatalogAnswer } from './account-model-catalog.ts';
+import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -1535,6 +1537,23 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   // Measured for the daemon on screen, never carried over from the last one.
   const activeCarrier = harnessSettingsCarrier(activeDaemonId);
 
+  // The Settings tab reads the OTHER paired machines from the app store; the harness has none, so it
+  // hands them over itself. The other tabs are the harness map's.
+  const machineTabs = useMemo<MachineTabSurfaces>(
+    () => ({
+      ...HARNESS_MACHINE_TABS,
+      settings: function HarnessMachineSettings(props: MachineTabProps) {
+        return (
+          <MachineSettingsTab
+            {...props}
+            sources={connections.filter(candidate => candidate.daemonId !== props.connection.daemonId)}
+          />
+        );
+      },
+    }),
+    [connections],
+  );
+
   const page = (
     <SettingsPage
       daemonId={activeDaemonId}
@@ -1573,7 +1592,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       createPairingClient={HARNESS_PAIRING_CLIENT}
       daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       createMachineClient={HARNESS_MACHINE_CLIENT}
-      machineTabs={HARNESS_MACHINE_TABS}
+      machineTabs={machineTabs}
       // A stand-in router: the path picks the daemon, the hash is kept on THIS page's address, so a
       // Machines tab or switch stays inside the preview instead of loading a route the harness lacks.
       onNavigate={to => {
@@ -2126,29 +2145,76 @@ const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
  * never render as five allowed rows, and that is exactly the state a screenshot has to prove.
  */
 /**
- * The Machines section's one read, `GET /v1/fleet/machine`, answered locally: the unreachable pairing is
- * offline, the first is set up with a long name the switcher must truncate, the rest are not set up.
+ * The Machines section's reads, answered locally: `GET /v1/fleet/machine` for the switcher (the
+ * unreachable pairing is offline, the first is set up, the rest are not), plus what the Settings tab's
+ * flows read — the setup scan, with one tool missing, on top of the shared catalogue — so Import again,
+ * Clone and Install are walkable without a daemon.
  */
 const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   const setUp = connection.daemonId === daemon.daemonId;
+  const answer = (path: string, init?: RequestInit): unknown => {
+    if (path === '/v1/fleet/setup/scan') return HARNESS_SETUP_SCAN;
+    if (path !== '/v1/fleet/machine') return harnessCatalogAnswer(path, init);
+    return {
+      name: 'studio-mac',
+      format: setUp ? 'version-2' : 'none',
+      setUp,
+      agentPermissions: 'auto',
+      tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
+      runtimeCount: setUp ? 5 : 0,
+      runningSessions: 0,
+      changes: { available: true },
+    };
+  };
   return {
     request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
-      schema.parse(
-        path !== '/v1/fleet/machine'
-          ? harnessCatalogAnswer(path, init)
-          : {
-              name: 'studio-mac',
-              format: setUp ? 'version-2' : 'none',
-              setUp,
-              agentPermissions: 'auto',
-              tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
-              runtimeCount: setUp ? 5 : 0,
-              runningSessions: 0,
-              changes: { available: true },
-            },
-      )) as Awaited<ReturnType<FleetClientFactory>>['request'],
+      schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
+};
+
+/** What Import again finds on the harness machine: a full Claude Code setup, and Codex not installed. */
+const HARNESS_SETUP_SCAN = {
+  machine: 'studio-mac',
+  format: 'version-2',
+  tools: [
+    { harness: 'claude', label: 'Claude Code', installed: true },
+    {
+      harness: 'codex',
+      label: 'Codex',
+      installed: false,
+      install: { kind: 'runnable', command: 'npm install -g @openai/codex' },
+    },
+  ],
+  harnesses: [
+    {
+      harness: 'claude',
+      installed: true,
+      account: { state: 'refresh-due', email: 'someone.with.a.long.address@example.com' },
+      instructions: { name: 'CLAUDE.md', source: 'CLAUDE.md', bytes: 2150 },
+      settings: { source: 'settings.json', count: 6, hooks: 1 },
+      mcpServers: ['github', 'linear', 'notes'],
+      skills: ['release-notes', 'pr-review', 'changelog', 'db-migrate', 'incident-summary'],
+      secretKeys: ['env.GITHUB_TOKEN', 'env.LINEAR_API_KEY'],
+      missingCommands: ['uvx'],
+      problems: [],
+    },
+    {
+      harness: 'codex',
+      installed: false,
+      account: { state: 'not-signed-in' },
+      mcpServers: [],
+      skills: [],
+      secretKeys: [],
+      missingCommands: [],
+      problems: [],
+    },
+  ],
+  runtimes: [],
+  updates: [{ reference: 'settings/claude', sources: ['settings.json'] }],
+  duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
+  notes: [],
+  importing: { available: true },
 };
 
 const HARNESS_GRANT_CLIENT: GrantClientFactory = async connection => {
