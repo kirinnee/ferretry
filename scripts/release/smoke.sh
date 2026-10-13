@@ -4,9 +4,9 @@ set -euo pipefail
 # Smoke-test one target's standalone binaries: run --version/--help and assert the help banner
 # names the CLI, then drive the real first-session journey with the COMPILED CLI and daemon —
 # `daemon start` through the supervisor (so the daemon gets the same minimal environment a user's
-# does), the first run importing this host's Claude Code into an agent runtime whose wrapper runs a
-# fake harness, a session that must reach running, and a stop that must clean its pane up. No model
-# is ever called: the harness is a shell script.
+# does) and importing nothing by itself, then `daemon import claude` importing this host's Claude Code
+# into an agent runtime whose wrapper runs a fake harness, a session that must reach running, and a
+# stop that must clean its pane up. No model is ever called: the harness is a shell script.
 #
 # Usage: smoke.sh <cli-binary> [daemon-binary]
 # The daemon binary defaults to the CLI binary's sibling with the daemon's name swapped in.
@@ -96,24 +96,27 @@ fail() {
   exit 1
 }
 
-# The first run ON — it is the journey a new user gets — and no hosted relay dial. It imports the
-# fake `claude` on PATH from this isolated HOME; there is no Codex, so only a Claude runtime appears.
+# No hosted relay dial. Starting the daemon imports nothing — a fresh machine is "not set up" until
+# somebody chooses — so the smoke chooses explicitly, the way a script does: `daemon import claude`
+# imports the fake `claude` on PATH from this isolated HOME. There is no Codex, so only Claude is asked.
 cat >"${fy_home}/config/daemon.json" <<'CONFIG'
-{ "fleet": { "prepareDefaults": true }, "relay": { "url": "ws://127.0.0.1:1", "enabled": false } }
+{ "relay": { "url": "ws://127.0.0.1:1", "enabled": false } }
 CONFIG
 "${name}" daemon adopt </dev/null >/dev/null
 
 "${name}" daemon start </dev/null
 
-# The agent runtime the first run made (its runtimes are agents), by the wrapper name `start` takes.
-account=""
-for _ in $(seq 1 30); do
-  account="$("${name}" runtimes --json | jq -r '[.runtimes[] | select(.agent and .harness == "claude")][0].wrapper // empty')"
-  [ -n "${account}" ] && break
-  sleep 1
-done
-[ -n "${account}" ] || fail "the first run made no Claude agent runtime: $("${name}" runtimes 2>&1)"
-echo "✅ the first run made ${account}"
+# Nothing was imported by the start itself.
+[ "$("${name}" runtimes --json | jq '.runtimes | length')" = "0" ] ||
+  fail "starting the daemon set the machine up by itself: $("${name}" runtimes 2>&1)"
+echo "✅ the start imported nothing"
+
+"${name}" daemon import claude --name claude-auto-smoke </dev/null || fail "daemon import claude refused"
+
+# The agent runtime the import made (imported runtimes are agents), by the wrapper name `start` takes.
+account="$("${name}" runtimes --json | jq -r '[.runtimes[] | select(.agent and .harness == "claude")][0].wrapper // empty')"
+[ -n "${account}" ] || fail "the import made no Claude agent runtime: $("${name}" runtimes 2>&1)"
+echo "✅ the import made ${account}"
 
 cd "${root}/work"
 started="$("${name}" start --agent "${account}" --name "Smoke Session" --json "say hello")" || fail "start refused: ${started:-no output}"

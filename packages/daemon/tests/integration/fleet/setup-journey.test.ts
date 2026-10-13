@@ -102,6 +102,12 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
   return { fleet, userHome, setup, catalog, secrets };
 }
 
+/** The import a person chooses, staged and applied through the catalogue the way the app and `fy daemon import` do it. */
+async function importHost(on: Awaited<ReturnType<typeof machine>>): Promise<unknown> {
+  const staged = await on.catalog.propose({ kind: 'setup.import' });
+  return await on.catalog.apply(staged.id, {}, { governed: false, passwordSet: false, confirmChange: false } as never);
+}
+
 /** Every file under a directory, relative to it. */
 async function filesUnder(root: string, relative = ''): Promise<string[]> {
   const found: string[] = [];
@@ -114,15 +120,19 @@ async function filesUnder(root: string, relative = ''): Promise<string[]> {
 }
 
 describe('the first run and Clone over real files', () => {
-  it('should import the host setup at boot, sharing the login in place and copying no credential', async () => {
+  it('should import the host setup when asked, sharing the login in place and copying no credential', async () => {
     // Arrange
     const studio = await machine('studio', { claude: true });
 
     // Act
-    const result = await studio.setup.firstRunAtBoot();
+    const result = await importHost(studio);
 
     // Assert: a version-2 configuration whose login is the host's own, and a runtime that launches as an agent.
-    should(result).deepEqual({ kind: 'imported', summary: 'studio is ready · 1 runtime created: claude-default.' });
+    should(result).deepEqual({
+      outcome: 'executed',
+      executor: 'setup',
+      summary: 'studio is ready · 1 runtime created: claude-default.',
+    });
     const model = parseAccountModel(Bun.YAML.parse(await readFile(path.join(studio.fleet, 'config.yaml'), 'utf8')));
     should(model.credentials['claude-you']).deepEqual({ harness: 'claude', store: 'host' });
     should(model.runtimes['claude-default']).deepEqual({ credential: 'claude-you', profile: 'default', agent: true });
@@ -139,15 +149,12 @@ describe('the first run and Clone over real files', () => {
     // The catalogue reads back exactly what the import wrote.
     const runtimes = await studio.catalog.runtimes();
     should(runtimes.runtimes.map(runtime => runtime.name)).deepEqual(['claude-default']);
-
-    // A second boot leaves it alone.
-    should((await studio.setup.firstRunAtBoot()).kind).equal('skipped');
   });
 
   it('should copy one machine onto another as a reviewed change, each login an empty slot', async () => {
     // Arrange: a set-up source and a bare target.
     const studio = await machine('studio', { claude: true });
-    await studio.setup.firstRunAtBoot();
+    await importHost(studio);
     const bundle = FleetCloneBundleSchema.parse(await studio.setup.exportBundle());
     const target = await machine('work-linux', { claude: false });
 

@@ -1,11 +1,11 @@
 /**
  * The browser's half of a credential's sign-in (docs/design/account-model.md §4.6).
  *
- * NOTHING HERE HOLDS A CREDENTIAL. Two values come out — a verification URL, and for Codex a device
- * code — and exactly one goes in: a short-lived authorization code, in a request body, forwarded to the
- * harness child's stdin on the host and retained nowhere. There is no shape in this module that could
- * carry a provider token in either direction, because there is no field for one in the shared contract
- * these calls parse through.
+ * NOTHING HERE HOLDS A CREDENTIAL. Two values come out — a verification URL, and for a Codex device
+ * grant its user code — and exactly one goes in: a short-lived authorization code (Claude's, or the
+ * address a Codex link sign-in ended on), in a request body, forwarded to the harness child on the host
+ * and retained nowhere. There is no shape in this module that could carry a provider token in either
+ * direction, because there is no field for one in the shared contract these calls parse through.
  *
  * EVERY WIRE SHAPE IS THE SHARED ONE, from `@ferretry/protocol`, which the daemon parses its own answers
  * through on the way out. So this browser and that daemon cannot hold two different ideas of what a
@@ -99,4 +99,19 @@ export const submitCredentialSignInCode = async (
     method: 'POST',
     headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
     body: JSON.stringify(HarnessLoginSubmitRequestSchema.parse({ code })),
+  });
+
+/**
+ * Moves a Codex device-code sign-in that did not work to Codex's link sign-in, in the same flow — so the
+ * operator password its start proved is not asked for again.
+ */
+export const switchCredentialSignInToLink = async (
+  client: FleetClient,
+  flowId: string,
+  unlock?: string,
+): Promise<HarnessLoginSubmission> =>
+  await client.request(flowPath(flowId), HarnessLoginSubmissionSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    body: JSON.stringify(HarnessLoginSubmitRequestSchema.parse({ method: 'link' })),
   });

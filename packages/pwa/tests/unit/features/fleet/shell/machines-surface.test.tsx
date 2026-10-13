@@ -48,6 +48,7 @@ interface SurfaceOptions {
   readonly opened?: string[];
   readonly added?: string[];
   readonly tabs?: Parameters<typeof MachinesSurface>[0]['tabs'];
+  readonly setUp?: string[];
 }
 
 const surface = (options: SurfaceOptions = {}) => (
@@ -58,6 +59,7 @@ const surface = (options: SurfaceOptions = {}) => (
     {...(options.unknownMachine === undefined ? {} : { unknownMachine: options.unknownMachine })}
     onOpen={(id, tab) => options.opened?.push(`${id}:${tab}`)}
     onAddMachine={() => options.added?.push('add')}
+    {...(options.setUp === undefined ? {} : { onSetUp: (id: DaemonId) => options.setUp?.push(String(id)) })}
     createClient={options.createClient ?? factory({ studio: machineView() })}
     {...(options.tabs === undefined ? {} : { tabs: options.tabs })}
   />
@@ -243,6 +245,49 @@ describe('MachinesSurface', () => {
     expect(view.container.querySelector('[role="alert"]')?.textContent).toBe(
       'This machine is not paired with this browser, so its setup cannot be shown.',
     );
+    await view.unmount();
+  });
+});
+
+describe('MachinesSurface: a machine that is not set up', () => {
+  it('opens its first run by itself, once per visit', async () => {
+    // Arrange
+    const setUp: string[] = [];
+    const notSetUp = factory({ studio: machineView({ setUp: false, runtimeCount: 0 }) });
+    const view = await mount(surface({ setUp, createClient: notSetUp }));
+    await settle();
+
+    // Assert — asked for straight away, so nobody has to find a button.
+    expect(setUp).toEqual(['studio']);
+
+    // Coming back to the tabs in the same visit (Leave setup, or Done with nothing) does not go round again.
+    await click(view.container, '[data-machine-tab="settings"]');
+    await view.render(surface({ setUp, createClient: notSetUp, tab: 'settings' }));
+    await settle();
+    expect(setUp).toEqual(['studio']);
+    await view.unmount();
+
+    // A new visit offers it again.
+    const again = await mount(surface({ setUp, createClient: notSetUp }));
+    await settle();
+    expect(setUp).toEqual(['studio', 'studio']);
+    await again.unmount();
+  });
+
+  it('leaves a machine that is set up, offline or unreadable alone', async () => {
+    const setUp: string[] = [];
+    for (const answer of [machineView(), new Error('unreachable'), new FyHttpError('no', 404, 'not_found')]) {
+      const view = await mount(surface({ setUp, createClient: factory({ studio: answer }) }));
+      await settle();
+      await view.unmount();
+    }
+    expect(setUp).toEqual([]);
+  });
+
+  it('does nothing when the page offers no first run', async () => {
+    const view = await mount(surface({ createClient: factory({ studio: machineView({ setUp: false }) }) }));
+    await settle();
+    expect(view.container.querySelector('[data-machine-tabs]')).not.toBeNull();
     await view.unmount();
   });
 });

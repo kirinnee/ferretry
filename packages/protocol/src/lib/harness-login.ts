@@ -8,7 +8,7 @@
  * | a verification URL            | out          | anybody may open it; completing it binds THEIR account       |
  * | a Codex user code             | out          | same — it authorises nothing on its own                      |
  * | a credential CLASSIFICATION   | out          | `valid` / `refreshable` / `missing` / `unreadable`, no bytes  |
- * | one authorization code        | **in only**  | written straight to the harness child's stdin and dropped     |
+ * | one authorization code        | **in only**  | to the harness child (stdin, or Codex's listener); dropped   |
  * | an access or refresh token    | **never**    | the harness writes its own store; the daemon never holds one  |
  *
  * There is no field here that could carry a token in either direction. `docs/secrets.md:38-42` states
@@ -25,7 +25,10 @@
  * - **Claude** prints an authorization URL and reads a pasted code from stdin, so it has an
  *   `awaiting-code` state and a submission.
  * - **Codex** completes a device grant at the provider, so it has an `awaiting-approval` state, a user
- *   code to type there, and **no return trip at all**.
+ *   code to type there, and **no return trip at all**. When an account or workspace has device codes
+ *   turned off, Codex's ordinary browser login is the other way in: it has an `awaiting-callback`
+ *   state, and its return trip is the ADDRESS of the page the browser could not load, which the daemon
+ *   delivers to Codex's own listener on the host.
  *
  * A single parameterised flow would have needed an optional `userCode` and an optional submission on
  * both, which is a shape that can express a Codex flow waiting for a paste and a Claude flow with a
@@ -191,11 +194,16 @@ export const ClaudeLoginFlowSchema = z.discriminatedUnion('state', [
 export type ClaudeLoginFlow = z.infer<typeof ClaudeLoginFlowSchema>;
 
 /**
- * Codex's own login, as a state machine.
+ * Codex's own login, as a state machine — either of its two sign-ins.
  *
  * `awaiting-approval` carries BOTH values the provider prints, because a device grant needs both: the
  * URL to open and the code to type there. There is no submission — the child polls the provider and
  * exits on its own, so this flow has nothing for a person to bring back.
+ *
+ * `awaiting-callback` is the LINK sign-in: `verificationUrl` is the provider's authorize page, and
+ * the person brings back the address their browser was sent to afterwards. `finishing` is the moment
+ * after that address reached Codex, while Codex redeems it with the provider. The address itself is
+ * never on the wire, in either state.
  */
 export const CodexLoginFlowSchema = z.discriminatedUnion('state', [
   z.strictObject({ harness: z.literal('codex'), ...flowShape, state: z.literal('starting') }),
@@ -206,6 +214,18 @@ export const CodexLoginFlowSchema = z.discriminatedUnion('state', [
     verificationUrl: HarnessLoginVerificationUrlSchema,
     userCode: HarnessLoginUserCodeSchema,
   }),
+  z.strictObject({
+    harness: z.literal('codex'),
+    ...flowShape,
+    state: z.literal('awaiting-callback'),
+    verificationUrl: HarnessLoginVerificationUrlSchema,
+    /**
+     * Codex said device-code sign-in is not available for this account, so the daemon moved this flow to
+     * the link sign-in by itself. Set only then, so a surface can say why the screen changed.
+     */
+    deviceCode: z.literal('unavailable').optional(),
+  }),
+  z.strictObject({ harness: z.literal('codex'), ...flowShape, state: z.literal('finishing') }),
   z.strictObject({ harness: z.literal('codex'), ...flowShape, state: z.literal('complete') }),
   z.strictObject({ harness: z.literal('codex'), ...flowShape, state: z.literal('failed'), ...failureShape }),
 ]);
@@ -222,6 +242,17 @@ export type CodexLoginFlow = z.infer<typeof CodexLoginFlowSchema>;
 export const HarnessLoginFlowSchema = z.union([ClaudeLoginFlowSchema, CodexLoginFlowSchema]);
 export type HarnessLoginFlow = z.infer<typeof HarnessLoginFlowSchema>;
 
+/**
+ * How a Codex sign-in is done. Claude has one way, so this applies to Codex alone.
+ *
+ * - `device-code` — the default. A link and a one-time code typed AT the provider; nothing comes back.
+ * - `link` — Codex's own browser login. The provider sends the browser to a `localhost` address on
+ *   the host, which a phone cannot load, and the person pastes that address back. It exists because an
+ *   account or workspace can turn device codes off, and then this is the only way in from a browser.
+ */
+export const HarnessLoginCodexMethodSchema = z.enum(['device-code', 'link']);
+export type HarnessLoginCodexMethod = z.infer<typeof HarnessLoginCodexMethodSchema>;
+
 /** Start one login. The caller names a CREDENTIAL — never a command, never a path. */
 export const HarnessLoginStartRequestSchema = z.strictObject({
   /**
@@ -237,11 +268,13 @@ export const HarnessLoginStartRequestSchema = z.strictObject({
    * decides whether this caller may reach the route at all, and this proves the change.
    */
   operatorPassword: OperatorPasswordSchema.optional(),
+  /** Codex only: which of its two sign-ins to run. Absent means a device code. */
+  method: HarnessLoginCodexMethodSchema.optional(),
 });
 export type HarnessLoginStartRequest = z.infer<typeof HarnessLoginStartRequestSchema>;
 
 /**
- * The one value a person brings back, for the one harness that needs one.
+ * The one value a person brings back: Claude's code, or the address a Codex link sign-in ended on.
  *
  * WRITE-ONLY AND SINGLE-USE. It is written to the harness child's stdin and retained nowhere: not in a
  * status, not in an error message, not in a log line, not in the grant audit journal. Non-retention is
@@ -252,9 +285,19 @@ export type HarnessLoginStartRequest = z.infer<typeof HarnessLoginStartRequestSc
  * provider's business and has already changed once. A bound stops an unbounded body; a pattern would
  * refuse a legitimate code the day the format moves.
  */
-export const HarnessLoginSubmitRequestSchema = z.strictObject({
+const HarnessLoginCodeSubmitSchema = z.strictObject({
   code: z.string().min(1).max(4_096),
 });
+
+/**
+ * What a person can send to a running sign-in: the value they brought back, or — for a Codex device
+ * code that did not work — "use a link instead". The switch rides the same request because it is the
+ * same consent: the password this sign-in proved at its start covers the credential, not the method.
+ */
+export const HarnessLoginSubmitRequestSchema = z.union([
+  HarnessLoginCodeSubmitSchema,
+  z.strictObject({ method: z.literal('link') }),
+]);
 export type HarnessLoginSubmitRequest = z.infer<typeof HarnessLoginSubmitRequestSchema>;
 
 /**

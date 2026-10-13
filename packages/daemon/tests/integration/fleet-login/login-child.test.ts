@@ -288,3 +288,26 @@ describe('harnessLoginTimer', () => {
     disarm();
   });
 });
+
+describe('spawnHarnessLoginChild exit', () => {
+  it('should not report the exit until every line the child wrote has been delivered', async () => {
+    // A Codex device login that says device codes are unavailable exits at once. If the exit were
+    // reported before that last line, the service would read the child as having printed nothing.
+    // Arrange
+    const path = await script('seq 1 20000\nseq 1 20000 >&2\necho last-word >&2\nexit 3\n');
+    const lines: string[] = [];
+
+    // Act
+    const child = spawnHarnessLoginChild({
+      command: [path],
+      environment: { PATH: '/usr/bin:/bin' },
+      onLine: line => lines.push(line),
+    });
+    const code = await child.exited;
+
+    // Assert — read at the moment of exit, with no wait for the pumps.
+    should(code).equal(3);
+    should(lines).have.length(40001);
+    should(lines).containEql('last-word');
+  });
+});

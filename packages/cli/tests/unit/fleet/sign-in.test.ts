@@ -7,6 +7,13 @@ const URL = 'https://claude.ai/oauth/authorize?code=true';
 const awaitingCode = (extra: Record<string, unknown> = {}) =>
   flow({ state: 'awaiting-code', verificationUrl: URL, ...extra });
 const complete = () => flow({ state: 'complete', accounts: [] });
+const codex = (extra: Record<string, unknown>) => flow({ harness: 'codex', credentialId: 'codex-you', ...extra });
+const linkAwaiting = (extra: Record<string, unknown> = {}) =>
+  codex({
+    state: 'awaiting-callback',
+    verificationUrl: 'https://auth.openai.com/oauth/authorize?state=s',
+    ...extra,
+  });
 
 /** Answers each status read from a queue, repeating the last. */
 const queue =
@@ -135,6 +142,120 @@ describe('runSignIn', () => {
     should(await runSignIn(world.deps, 'claude-you')).be.false();
     should(world.out.text('error')).match(/took too long/);
     should(world.gateway.called('cancelSignIn')).have.length(1);
+  });
+
+  it('should ask for the address a Codex link sign-in ends on, and finish when Codex does', async () => {
+    const world = fakeWorld({
+      answers: ['  http://localhost:1455/auth/callback?code=c&state=s  '],
+      gateway: {
+        startSignIn: () => linkAwaiting({ deviceCode: 'unavailable' }),
+        submitSignInCode: () => ({ outcome: 'accepted', flow: codex({ state: 'finishing' }) }),
+        signInStatus: queue([codex({ state: 'finishing' }), codex({ state: 'complete' })]),
+      },
+    });
+    should(await runSignIn(world.deps, 'codex-you')).be.true();
+    should(world.gateway.called('submitSignInCode')[0]?.args).eql([
+      'flow-1',
+      'http://localhost:1455/auth/callback?code=c&state=s',
+      {},
+    ]);
+    should(world.prompt.questions).eql(['Paste the address of the page that did not load:']);
+    should(world.out.text('warn')).match(/does not allow device codes/);
+    should(world.out.text('report')).match(
+      /Open this page on any device and sign in:\n {2}https:\/\/auth\.openai\.com/,
+    );
+    should(world.out.text('report')).match(/http:\/\/localhost/);
+    should(world.out.lines.filter(line => line.text.includes('finishing'))).have.length(1);
+  });
+
+  it('should ask again, with the reason, when the address is refused', async () => {
+    const world = fakeWorld({
+      answers: ['http://localhost:1455/partial', 'http://localhost:1455/auth/callback?code=c&state=s'],
+      gateway: {
+        startSignIn: () => linkAwaiting(),
+        submitSignInCode: queue([
+          { outcome: 'refused', reason: 'That address has no sign-in code in it.' },
+          { outcome: 'accepted', flow: codex({ state: 'complete' }) },
+        ]),
+      },
+    });
+    should(await runSignIn(world.deps, 'codex-you')).be.true();
+    should(world.prompt.questions).have.length(2);
+    should(world.out.text('warn')).equal('That address has no sign-in code in it.');
+    should(world.out.lines.filter(line => line.text.includes('auth.openai.com'))).have.length(1);
+  });
+
+  it('should read the sign-in back when the address arrives too late or nobody can say', async () => {
+    const late = fakeWorld({
+      answers: ['http://localhost:1455/auth/callback?code=c&state=s'],
+      gateway: {
+        startSignIn: () => linkAwaiting(),
+        submitSignInCode: () => ({ outcome: 'conflict', reason: 'this login has already finished' }),
+        signInStatus: () => codex({ state: 'complete' }),
+      },
+    });
+    should(await runSignIn(late.deps, 'codex-you')).be.true();
+
+    const unknown = fakeWorld({
+      answers: ['http://localhost:1455/auth/callback?code=c&state=s'],
+      gateway: {
+        startSignIn: () => linkAwaiting(),
+        submitSignInCode: () => ({ outcome: 'unconfirmed', reason: 'Codex was no longer listening.' }),
+        signInStatus: () => codex({ state: 'complete' }),
+      },
+    });
+    should(await runSignIn(unknown.deps, 'codex-you')).be.true();
+    should(unknown.out.text('warn')).equal('Codex was no longer listening.');
+  });
+
+  it('should stop when no address is given, and refuse a link sign-in off a terminal', async () => {
+    const empty = fakeWorld({ answers: [''], gateway: { startSignIn: () => linkAwaiting() } });
+    should(await runSignIn(empty.deps, 'codex-you')).be.false();
+    should(empty.out.text('error')).match(/No address was given/);
+    should(empty.gateway.called('cancelSignIn')).have.length(1);
+
+    const headless = fakeWorld({ interactive: false, gateway: { startSignIn: () => linkAwaiting() } });
+    await should(runSignIn(headless.deps, 'codex-you')).be.rejectedWith(/needs a person to paste an address/);
+  });
+
+  it('should offer a link when a device code fails, and sign in with one when asked', async () => {
+    const world = fakeWorld({
+      answers: ['Y', 'http://localhost:1455/auth/callback?code=c&state=s'],
+      gateway: {
+        startSignIn: queue([
+          codex({
+            state: 'failed',
+            reason: 'the sign-in exited with code 1',
+            remedy: 'fy credential signin codex-you',
+          }),
+          linkAwaiting(),
+        ]),
+        submitSignInCode: () => ({ outcome: 'accepted', flow: codex({ state: 'complete' }) }),
+      },
+    });
+    should(await runSignIn(world.deps, 'codex-you')).be.true();
+    should(world.gateway.called('startSignIn').map(call => call.args[2])).eql([undefined, 'link']);
+    should(world.out.text('warn')).match(/The device code did not work: the sign-in exited with code 1/);
+    should(world.prompt.questions[0]).equal('Sign in with a link instead? [y/N]');
+    should(world.out.exitCode).not.equal(1);
+  });
+
+  it('should report the device failure when the link is declined, and never offer one for a failed link', async () => {
+    const failed = codex({ state: 'failed', reason: 'no', remedy: 'retry' });
+    const declined = fakeWorld({ answers: [''], gateway: { startSignIn: () => failed } });
+    should(await runSignIn(declined.deps, 'codex-you')).be.false();
+    should(declined.out.text('error')).equal('Sign-in did not finish: no');
+    should(declined.out.exitCode).equal(1);
+
+    const link = fakeWorld({
+      answers: ['http://localhost:1455/auth/callback?code=c&state=s'],
+      gateway: {
+        startSignIn: () => linkAwaiting(),
+        submitSignInCode: () => ({ outcome: 'accepted', flow: failed }),
+      },
+    });
+    should(await runSignIn(link.deps, 'codex-you')).be.false();
+    should(link.prompt.questions).have.length(1);
   });
 
   it('should carry the operator password a caller off this machine owes', async () => {

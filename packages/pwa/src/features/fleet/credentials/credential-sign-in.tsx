@@ -2,9 +2,10 @@
  * Signing one login in, in place (docs/design/account-model.md §4.6, E13, E31).
  *
  * The harness's own sign-in, driven from here: Claude shows a link and takes back the code its page
- * shows; Codex shows a link and a device code and finishes on its own. The daemon holds no token while
- * it happens — the harness writes its own login into the one store every runtime on it reads, so one
- * sign-in fixes all of them.
+ * shows; Codex shows a link and a device code and finishes on its own — or, when device codes do not
+ * work for the account, shows a link and takes back the address the browser ends on. The daemon holds
+ * no token while it happens — the harness writes its own login into the one store every runtime on it
+ * reads, so one sign-in fixes all of them.
  *
  * Before a sign-in starts, this is the ordinary change panel ("Sign in to Claude Code", with the
  * operator password when this browser owes it). Once one is running, it is the harness's panel. The
@@ -12,9 +13,10 @@
  * somewhere this browser cannot see; it stops the moment the flow ends.
  */
 
-import type { FleetCredentialView, HarnessLoginFlow } from '@ferretry/protocol';
+import type { FleetCredentialView, HarnessLoginCodexMethod, HarnessLoginFlow } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
+import { Button } from '../../../shell/primitives.tsx';
 import { ClaudeLoginPanel } from '../claude-login-panel.tsx';
 import { CodexLoginPanel } from '../codex-login-panel.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
@@ -25,6 +27,7 @@ import {
   readCredentialSignIn,
   startCredentialSignIn,
   submitCredentialSignInCode,
+  switchCredentialSignInToLink,
 } from '../harness-login-api.ts';
 import type { LoginPanelWording } from '../harness-login-model.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
@@ -50,8 +53,19 @@ export interface CredentialSignInProps {
   readonly pollMs?: number;
 }
 
-const waiting = (flow: HarnessLoginFlow | null): boolean =>
-  flow !== null && (flow.state === 'starting' || flow.state === 'awaiting-code' || flow.state === 'awaiting-approval');
+const WAITING: ReadonlySet<HarnessLoginFlow['state']> = new Set([
+  'starting',
+  'awaiting-code',
+  'awaiting-approval',
+  'awaiting-callback',
+  'finishing',
+]);
+
+const waiting = (flow: HarnessLoginFlow | null): boolean => flow !== null && WAITING.has(flow.state);
+
+/** A Codex flow that is on its link sign-in, which its endings and its next start follow. */
+const onLink = (flow: HarnessLoginFlow | null): boolean =>
+  flow?.harness === 'codex' && (flow.state === 'awaiting-callback' || flow.state === 'finishing');
 
 export function CredentialSignIn({
   credential,
@@ -67,12 +81,15 @@ export function CredentialSignIn({
   const [flow, setFlow] = useState<CredentialLoginFlow | null>(initialFlow ?? null);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /** Codex's sign-in method for the next start. Follows a flow that moved to a link by itself. */
+  const [method, setMethod] = useState<HarnessLoginCodexMethod>('device-code');
   const unlock = useRef<string | undefined>(initialUnlock);
   const reported = useRef<string | null>(null);
 
   const finished = useCallback(
     (next: CredentialLoginFlow): void => {
       setFlow(next);
+      if (onLink(next)) setMethod('link');
       if (next.state === 'complete' && reported.current !== next.flowId) {
         reported.current = next.flowId;
         onSignedIn();
@@ -105,6 +122,7 @@ export function CredentialSignIn({
           client,
           {
             credentialId: credential.id,
+            ...(credential.harness === 'codex' && method === 'link' ? { method } : {}),
             ...(authorization.operatorPassword === undefined
               ? {}
               : { operatorPassword: authorization.operatorPassword }),
@@ -135,6 +153,24 @@ export function CredentialSignIn({
     }
   };
 
+  const switchToLink = async (): Promise<void> => {
+    if (flow === null) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      const client = await createClient(connection);
+      const answer = await switchCredentialSignInToLink(client, flow.flowId, unlock.current);
+      if (answer.outcome === 'accepted') {
+        setMethod('link');
+        finished(answer.flow);
+      } else setRefusal(answer.reason);
+    } catch (error) {
+      setRefusal(changeRefusalSentence(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const cancel = async (): Promise<void> => {
     if (flow === null) return;
     setBusy(true);
@@ -157,6 +193,7 @@ export function CredentialSignIn({
     );
 
   const name = HARNESS_NAMES[credential.harness];
+  const linkStart = method === 'link';
   if (flow === null)
     return (
       <section className="kt-panel flex flex-col gap-3 p-panel" data-credential-sign-in="start">
@@ -170,9 +207,25 @@ export function CredentialSignIn({
           busy={busy || changes.busy}
           busyLabel="Starting sign-in…"
           refusal={refusal ?? changes.refusal}
-          submitLabel={`Sign in to ${name}`}
+          submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
           onSubmit={password => void start(password)}
         />
+        {credential.harness === 'codex' ? (
+          <div data-credential-sign-in-method={method}>
+            <p className="m-0 text-meta leading-base text-muted">
+              {linkStart ? 'You’ll paste back the address the browser ends on.' : 'Device code didn’t work?'}
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              className="mt-1"
+              disabled={busy}
+              onClick={() => setMethod(linkStart ? 'device-code' : 'link')}
+            >
+              {linkStart ? 'Use a device code instead' : 'Sign in with a link instead'}
+            </Button>
+          </div>
+        ) : null}
       </section>
     );
 
@@ -195,7 +248,17 @@ export function CredentialSignIn({
       {flow.harness === 'claude' ? (
         <ClaudeLoginPanel {...common} flow={flow} onSubmitCode={code => void submit(code)} />
       ) : (
-        <CodexLoginPanel {...common} flow={flow} />
+        <CodexLoginPanel
+          {...common}
+          flow={flow}
+          linked={linkStart}
+          onUseLink={() => void switchToLink()}
+          onStartLink={() => {
+            setMethod('link');
+            setFlow(null);
+          }}
+          onSubmitAddress={address => void submit(address)}
+        />
       )}
     </div>
   );

@@ -30,10 +30,11 @@
  * The FLOWS are per harness and stay that way — two stage unions, two recognisers, two sets of state
  * names. The TRANSPORT is not: a flow id names one flow, and the projection it answers with is
  * discriminated on `harness`, so a reader narrows once and then holds exactly one harness's own states.
- * The one place this shows is the submit route, which a Codex flow always REFUSES — because Codex
- * completes at the provider and has nothing to bring back. That refusal is information rather than an
- * error, and it is worth a route that can say it: the alternative is a surface that silently offers a
- * paste box for a harness that cannot read one.
+ * The one place this shows is the submit route. A Codex DEVICE flow refuses a value — Codex completes
+ * at the provider and has nothing to bring back — and accepts only "use a link instead". A Codex LINK
+ * flow accepts the address its sign-in ended on, which the daemon checks and delivers to Codex's own
+ * listener on this machine. Every one of those is the same consent the start proved, so they share the
+ * start's `fleet`/`configure` gate rather than growing a second route.
  */
 import {
   HarnessLoginFlowSchema,
@@ -111,12 +112,13 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
     },
     {
       /**
-       * Forward the one value a person brings back.
+       * Forward the one value a person brings back, or move a Codex device code to a link.
        *
        * A POST carrying an explicit human intent, like the browser login window's actions, and the value
-       * travels in a BODY: a query parameter reaches every proxy's access log, and this one is an
-       * authorization code. It is written to the harness child's stdin and retained nowhere — not here,
-       * not on the flow, not in the answer, and not in the grant audit journal.
+       * travels in a BODY: a query parameter reaches every proxy's access log, and this one carries an
+       * authorization code. It goes to the harness child — Claude's stdin, or Codex's own listener — and
+       * is retained nowhere: not here, not on the flow, not in the answer, and not in the grant audit
+       * journal.
        */
       method: 'POST',
       path: '/v1/fleet/login/:flowId',
@@ -125,7 +127,7 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       noStore: true,
       handle: async context =>
         await respondWith(HarnessLoginSubmissionSchema, async () =>
-          subsystem.submit(flowId(context), (await parseBody(context.request, HarnessLoginSubmitRequestSchema)).code),
+          subsystem.submit(flowId(context), await parseBody(context.request, HarnessLoginSubmitRequestSchema)),
         ),
     },
     {

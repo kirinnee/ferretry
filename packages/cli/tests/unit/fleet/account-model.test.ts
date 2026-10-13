@@ -23,8 +23,9 @@ describe('registerAccountModelCommands', () => {
       'profiles',
       'runtime',
       'runtimes',
-      'setup',
     ]);
+    // Setting up is a daemon verb now; there is no top-level `setup` to alias it.
+    should(program.commands.map(command => command.name())).not.containEql('setup');
   });
 
   it('should answer a mounted verb through the shared gateway', async () => {

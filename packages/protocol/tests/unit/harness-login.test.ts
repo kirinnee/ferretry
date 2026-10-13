@@ -64,11 +64,55 @@ const schemaCases: SchemaCase[] = [
   { name: 'submit request', schema: harnessLogin.HarnessLoginSubmitRequestSchema, value: { code: 'pasted-code' } },
   { name: 'submission', schema: harnessLogin.HarnessLoginSubmissionSchema, value: accepted },
   { name: 'renewal status', schema: harnessLogin.FleetRenewalStatusSchema, value: 'renewed' },
+  { name: 'codex method', schema: harnessLogin.HarnessLoginCodexMethodSchema, value: 'link' },
 ];
+
+const CODEX_AUTHORIZE_URL =
+  'https://auth.openai.com/oauth/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=abc';
 
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
 
 describe('harness-login schemas', () => {
+  it('should carry Codex’s link sign-in, and say when a device code was unavailable', () => {
+    const awaitingCallback = {
+      harness: 'codex',
+      ...flowShape,
+      state: 'awaiting-callback',
+      verificationUrl: CODEX_AUTHORIZE_URL,
+    } satisfies CodexLoginFlow;
+    assertRoundTrips([
+      { name: 'awaiting callback', schema: harnessLogin.CodexLoginFlowSchema, value: awaitingCallback },
+      {
+        name: 'switched automatically',
+        schema: harnessLogin.CodexLoginFlowSchema,
+        value: { ...awaitingCallback, deviceCode: 'unavailable' },
+      },
+      {
+        name: 'finishing',
+        schema: harnessLogin.CodexLoginFlowSchema,
+        value: { harness: 'codex', ...flowShape, state: 'finishing' },
+      },
+      {
+        name: 'start as a link',
+        schema: harnessLogin.HarnessLoginStartRequestSchema,
+        value: { credentialId: 'codex-kirin', method: 'link' },
+      },
+      { name: 'switch to a link', schema: harnessLogin.HarnessLoginSubmitRequestSchema, value: { method: 'link' } },
+    ]);
+    assertRejects([
+      rejects('the pasted address on the wire', harnessLogin.CodexLoginFlowSchema, {
+        ...awaitingCallback,
+        callbackUrl: 'http://localhost:1455/auth/callback?code=x',
+      }),
+      rejects('a callback on a Claude flow', harnessLogin.ClaudeLoginFlowSchema, {
+        ...awaitingCallback,
+        harness: 'claude',
+      }),
+      rejects('a switch to a device code', harnessLogin.HarnessLoginSubmitRequestSchema, { method: 'device-code' }),
+      rejects('a switch with a code', harnessLogin.HarnessLoginSubmitRequestSchema, { method: 'link', code: 'x' }),
+    ]);
+  });
+
   it('should carry a refused or expired code as a recognised value, and nothing else', () => {
     // The fix for §6: a refused code needs a state of its own, and never the child's text.
     assertRoundTrips([
@@ -254,7 +298,9 @@ describe('harness-login schemas', () => {
   });
 
   it('should bound the submitted value without pinning a provider’s format', () => {
-    should(harnessLogin.HarnessLoginSubmitRequestSchema.parse({ code: 'code#state' }).code).equal('code#state');
+    should(harnessLogin.HarnessLoginSubmitRequestSchema.parse({ code: 'code#state' })).deepEqual({
+      code: 'code#state',
+    });
     assertRejects([
       rejects('empty code', harnessLogin.HarnessLoginSubmitRequestSchema, { code: '' }),
       rejects('unbounded code', harnessLogin.HarnessLoginSubmitRequestSchema, { code: 'x'.repeat(4_097) }),

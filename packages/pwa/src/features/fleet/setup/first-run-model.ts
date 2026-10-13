@@ -232,10 +232,15 @@ export const harnessProblems = (scan: FleetSetupScan, harness: SetupHarness): re
 /** The button that imports a harness: "Import, sign in later" when it is not signed in (E4). */
 export const importLabel = (scan: FleetSetupScan, harness: SetupHarness): string => {
   const state = scanOf(scan, harness)?.account.state;
-  return state === 'signed-in' || state === 'refresh-due'
-    ? `Import from ${SETUP_HARNESS_NAMES[harness]}`
-    : 'Import, sign in later';
+  return state === 'signed-in' || state === 'refresh-due' ? 'Import' : 'Import, sign in later';
 };
+
+/**
+ * Whether the step offers "Sign in now": the person's own login is there to share but is not signed in.
+ * A login that could not be read, or cannot be shared, is imported as an empty slot and signed in after.
+ */
+export const offersSignIn = (scan: FleetSetupScan, harness: SetupHarness): boolean =>
+  scanOf(scan, harness)?.account.state === 'not-signed-in';
 
 // ── Name runtimes ────────────────────────────────────────────────────────────────────────────────
 
