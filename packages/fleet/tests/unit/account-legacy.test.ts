@@ -360,6 +360,55 @@ describe('convertLegacyConfig — a hand-built fleet', () => {
     ]);
   });
 
+  it('should read a skills list written as references under skills/ as bare item names', () => {
+    // Arrange — exactly how docs/fleet-sharing.md writes a selection.
+    const input = {
+      profiles: { base: { skills: ['./skills/review', 'skills/deploy', 'review'] } },
+      variants: { default: { profiles: ['base'] } },
+      agents: [{ name: 'one', kind: 'claude', routes: { default: route(1, 'claude-one') } }],
+    };
+
+    // Act
+    const actual = readFleetDocument(input);
+
+    // Assert — it reads, and the three spellings of two items become two items.
+    should(actual.version).equal(1);
+    should(convert(input).model.components.skills).deepEqual({ 'claude-one-skills': { items: ['review', 'deploy'] } });
+  });
+
+  it('should note a skills reference outside skills/ instead of refusing the document', () => {
+    // Arrange
+    const input = {
+      profiles: { base: { skills: ['./skills/review', './elsewhere/tools', '/abs/skills/x', 'skills/a/b'] } },
+      variants: { default: { profiles: ['base'] } },
+      agents: [{ name: 'one', kind: 'claude', routes: { default: route(1, 'claude-one') } }],
+    };
+
+    // Act
+    const actual = convert(input);
+
+    // Assert — only the item that has a spelling is carried; each of the others is named in a note.
+    should(actual.model.components.skills).deepEqual({ 'claude-one-skills': { items: ['review'] } });
+    should(messages(actual).filter(message => message.startsWith('skill "'))).have.length(3);
+    should(messages(actual).join('\n')).containEql('./elsewhere/tools');
+  });
+
+  it('should carry no skills layer when no reference has a spelling', () => {
+    // Arrange
+    const input = {
+      profiles: { base: { skills: ['./elsewhere/tools'] } },
+      variants: { default: { profiles: ['base'] } },
+      agents: [{ name: 'one', kind: 'claude', routes: { default: route(1, 'claude-one') } }],
+    };
+
+    // Act
+    const actual = convert(input);
+
+    // Assert
+    should(actual.model.components.skills).deepEqual({});
+    should(messages(actual).some(message => message.includes('./elsewhere/tools'))).equal(true);
+  });
+
   it('should collapse identical skill selections and keep one instructions document both harnesses read', () => {
     // Act
     const actual = convert(ownerLike());
