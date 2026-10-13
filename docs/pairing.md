@@ -348,7 +348,10 @@ row states what its revoke will do before the press.
   held only token digests, which no session can prove against, so the daemon drops those grants at boot
   and says so once. Each such device must pair again.
 - **There is no passkey step-up yet.** A paired device's session can do whatever its capabilities
-  allow without a second factor; [design/zero-trust.md](design/zero-trust.md) B adds one.
+  allow without a second factor; [design/zero-trust.md](design/zero-trust.md) B adds one. A newly
+  paired device with no passkey for the machine sees one dismissible line pointing at Settings →
+  Security → Add a passkey, because its first passkey can be added only in the ten minutes after
+  pairing (B2).
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first

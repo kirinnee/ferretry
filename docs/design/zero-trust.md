@@ -430,6 +430,29 @@ is holding it; (b) any device **with a current step-up** (adds a second authenti
 **host** (a browser on a host-proven carrier). Lost every passkey? Revoke the device and pair again at
 the machine.
 
+**As built** (`feat/zt-passkey-ui`), the app's side of registration:
+
+- **Settings → Daemons → Security** is one panel per machine (`#security` deep-links to it, and the
+  palette lists it). It shows the passkeys this device holds for that machine as "Passkey for
+  ‹origin›, added ‹date›", says what a step-up is for in one sentence, and offers **Add a passkey**,
+  which runs the registration ceremony above against the app's own origin and re-reads the list.
+- **The button is offered only when it would work**: the machine reports `registration` other than
+  `closed`, and the browser can run WebAuthn at all (the API exists and the page is a secure context).
+  Otherwise one sentence says why — the ten-minute first-passkey rule, "confirm a change first" for a
+  second one, or that this address cannot hold passkeys. Every refusal and ceremony failure is one
+  plain sentence; no status or error name reaches the screen.
+- **After pairing**, a device with no passkey for a machine sees one dismissible line pointing at that
+  panel. It is read once per machine, never polled, hidden on Settings itself, and not shown when
+  registration is `closed`, because a line pointing at a dead end is worse than none. Dismissal is
+  remembered per machine in `localStorage`; storage that throws means the line may return next load.
+- **Not built, because the daemon has no route or field for it**: a passkey's name, its last use, and
+  removing one passkey. `PasskeyView` is id, origin and created-at. Revoking the device still forgets
+  all of its passkeys.
+- **Not exercised end to end**: the prompt answers `403 grant_step_up_required`, and no governed route
+  on this branch issues that refusal yet (B3's grant work does). The app's reaction is unit-tested; a
+  real authenticator ceremony is not — the tests use a software authenticator on the daemon side and a
+  fake credential container in the app.
+
 ### B3. The operator password is deleted
 
 The step-up replaces it for every purpose it had: the local-browser unlock, the remote `configure`
