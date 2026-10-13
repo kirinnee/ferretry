@@ -14,6 +14,14 @@ describe('sanitizeHarnessEnv', () => {
     should(actual).deepEqual({ PATH: '/usr/bin', HOME: '/home/somebody' });
   });
 
+  it('should remove an inherited Claude secure-storage pointer, the empty string included', () => {
+    // Act — "" is a value (the person's own login), so it is stripped like any other.
+    const actual = sanitizeHarnessEnv({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '', PATH: '/usr/bin' });
+
+    // Assert
+    should(actual).deepEqual({ PATH: '/usr/bin' });
+  });
+
   it('should remove per-model default overrides by shape rather than by name', () => {
     // Arrange
     const environment = {

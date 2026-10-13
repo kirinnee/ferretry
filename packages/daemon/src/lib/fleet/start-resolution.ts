@@ -1,3 +1,4 @@
+import { resolveRuntimeReference, type RuntimeIds } from '@ferretry/fleet';
 import { accountLaunchability, type ExecutableResolverPort } from '../core/harness-readiness.ts';
 import {
   type AccountInventoryPort,
@@ -10,7 +11,24 @@ import { unrunnableAccountRefusal } from '../session/lifecycle/policy.ts';
 import { defaultSessionLifecycleSettings } from '../session/lifecycle/settings.ts';
 
 /**
+ * The runtime names the fleet recorded in `ids.json` (docs/design/account-model.md R6, §10.4), read
+ * for the one thing a start needs from them: an OLD wrapper name, which keeps working forever.
+ *
+ * Answers `undefined` when there is no `ids.json` — a version-1 fleet, or a machine with no fleet —
+ * and THROWS for one that is there and unreadable, so a start that needed it can say so.
+ */
+export interface RuntimeNamesPort {
+  ids(): Promise<RuntimeIds | undefined>;
+}
+
+/**
  * The account this start names, or a refusal that says which half of the resolution failed.
+ *
+ * A start names a runtime by its NAME, then by a NAME IT HAD BEFORE (recorded in `ids.json` by a
+ * migration or a rename), then by its opaque ID (§8.4) — in that order, so a runtime's own name is
+ * never shadowed by another's former one. The old names come from the inventory's optional
+ * {@link RuntimeNamesPort} half, so the ONE inventory every start already shares carries them and no
+ * call site has a second thing to pass; an inventory without it resolves names and ids as before.
  *
  * THE LAUNCHABILITY RULE IS THE DOMAIN'S, not a second copy written here. `fyd --check` and the boot
  * preflight report on whether a harness could serve, and they answer that question by asking this
@@ -21,7 +39,7 @@ import { defaultSessionLifecycleSettings } from '../session/lifecycle/settings.t
  * it; every refusal below names the command to run next.
  */
 export async function resolveStartAccount(
-  accounts: AccountInventoryPort,
+  accounts: AccountInventoryPort & Partial<RuntimeNamesPort>,
   requested: string,
   executables: ExecutableResolverPort,
   clientName: string,
@@ -34,9 +52,7 @@ export async function resolveStartAccount(
       throw new SessionControlError('unavailable', fleetManifestRefusal(error, clientName));
     throw error;
   });
-  // The wrapper NAME first, then the opaque id: `fy start claude-auto-loge` names the wrapper a human
-  // types, and the recommender answers with account ids, so both must resolve.
-  const account = published.find(row => row.agent === requested) ?? published.find(row => row.id === requested);
+  const account = await findRequested(published, requested, accounts.ids?.bind(accounts));
   if (account === undefined)
     throw new SessionControlError(
       'unknown_agent',
@@ -52,4 +68,32 @@ export async function resolveStartAccount(
   // the operator's business, and it is the reason the rule reports the two separately.
   if (launchability.kind !== 'launchable') throw new SessionControlError('unavailable', launchability.reason);
   return { account, executable: launchability.executable };
+}
+
+/** Name, then former name, then id. `ids.json` is read only when the name alone did not match. */
+async function findRequested(
+  published: readonly CoreAccount[],
+  requested: string,
+  readIds: RuntimeNamesPort['ids'] | undefined,
+): Promise<CoreAccount | undefined> {
+  const byName = published.find(row => row.agent === requested);
+  if (byName !== undefined) return byName;
+  const byId = published.find(row => row.id === requested);
+  if (readIds === undefined) return byId;
+  const ids = await readIds().catch((error: unknown) => {
+    // An id needs no `ids.json`, so an unreadable one costs only the old-name lookup.
+    if (byId !== undefined) return undefined;
+    // Fail closed: an unreadable `ids.json` could be hiding the runtime this old name now is, and
+    // answering "no such account" would send somebody looking for a runtime that exists.
+    throw new SessionControlError(
+      'unavailable',
+      `${JSON.stringify(requested)} is not a runtime name, and the fleet's runtime ids (ids.json) could not be read to check whether it is an old one: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+  const reference = ids === undefined ? undefined : resolveRuntimeReference(ids, requested);
+  if (reference?.matched === 'former-name') {
+    const renamed = published.find(row => row.agent === reference.name);
+    if (renamed !== undefined) return renamed;
+  }
+  return byId;
 }
