@@ -140,7 +140,10 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     userHome: layout.userHome,
     ...(options.claudeConfigDir === undefined ? {} : { claudeConfigDir: options.claudeConfigDir }),
     ...(options.codexHome === undefined ? {} : { codexHome: options.codexHome }),
-    commands: { resolve: name => (name === 'claude' || name === 'codex' ? catalog.locate(name) : undefined) ?? Bun.which(name) ?? undefined },
+    // A harness through the daemon's one rule, never a second detector; an MCP command on `PATH`.
+    commands: {
+      resolve: name => (name === 'claude' || name === 'codex' ? catalog.locate(name) : (Bun.which(name) ?? undefined)),
+    },
     credentials: options.credentials,
     now: () => catalog.now(),
     maxDocumentBytes: MAX_HOST_DOCUMENT_BYTES,

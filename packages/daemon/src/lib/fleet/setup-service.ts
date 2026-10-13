@@ -99,7 +99,7 @@ export class FleetSetupRefusal extends Error {
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
 
 /** One file of a folder, relative to that folder, as text. */
-export interface FolderFile {
+interface FolderFile {
   readonly path: string;
   readonly content: string;
 }
@@ -175,7 +175,10 @@ export interface FleetSetupServiceDeps {
   /** The tool installer (`tool-install.ts`): its plans, and an install a person asked for. */
   readonly tools: {
     plans(harnesses: readonly HarnessKind[]): readonly ToolInstallPreview[];
-    install(request: FleetToolInstallRequest, governance: CallerGovernance | undefined): Promise<readonly ToolInstallOutcome[]>;
+    install(
+      request: FleetToolInstallRequest,
+      governance: CallerGovernance | undefined,
+    ): Promise<readonly ToolInstallOutcome[]>;
   };
   /** The secret store's management side: names in, values in, never a value out. */
   readonly secrets: {
@@ -215,8 +218,7 @@ const errorMessage = (error: unknown): string =>
 
 const bytesOf = (text: string): number => new TextEncoder().encode(text).length;
 
-const plural = (count: number, one: string, many = `${one}s`): string =>
-  `${String(count)} ${count === 1 ? one : many}`;
+const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -234,7 +236,10 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
   const components: Record<string, { sources: string[]; digest: string }> = {};
   for (const [reference, entry] of Object.entries(raw.components)) {
     if (!isRecord(entry) || typeof entry.digest !== 'string' || !Array.isArray(entry.sources)) continue;
-    components[reference] = { sources: entry.sources.filter(source => typeof source === 'string'), digest: entry.digest };
+    components[reference] = {
+      sources: entry.sources.filter(source => typeof source === 'string'),
+      digest: entry.digest,
+    };
   }
   return {
     version: 1,
@@ -417,7 +422,8 @@ export class FleetSetupService {
       budget -= size;
       files.push({ path, content });
     };
-    const asset = (path: string): string => expandAssetPath(path, catalog.layout.userHome, catalog.layout.assetsDirectory);
+    const asset = (path: string): string =>
+      expandAssetPath(path, catalog.layout.userHome, catalog.layout.assetsDirectory);
     for (const path of sources.documents) {
       const content = await catalog.readAsset(asset(path));
       if (content === undefined) notCopied.push({ path, reason: 'it could not be read' });
@@ -426,7 +432,8 @@ export class FleetSetupService {
     for (const directory of sources.directories) {
       const folder = await this.deps.readFolder(asset(directory));
       for (const file of folder.files) carry(`${directory}/${file.path}`, file.content);
-      for (const skipped of folder.skipped) notCopied.push({ path: `${directory}/${skipped.path}`, reason: skipped.reason });
+      for (const skipped of folder.skipped)
+        notCopied.push({ path: `${directory}/${skipped.path}`, reason: skipped.reason });
     }
     return buildCloneBundle({
       model: reading.model,
@@ -649,7 +656,11 @@ export class FleetSetupService {
     }
     let model: AccountModel;
     try {
-      model = mergeImport(existing, plan, updates.map(update => update.reference));
+      model = mergeImport(
+        existing,
+        plan,
+        updates.map(update => update.reference),
+      );
     } catch (error) {
       throw new FleetCatalogRefusal(
         'fleet_change_refused',
@@ -665,7 +676,10 @@ export class FleetSetupService {
       const folder = await this.deps.readFolder(file.from);
       for (const entry of folder.files) assets.push({ path: `${file.path}/${entry.path}`, content: entry.content });
     }
-    const record = mergeImportRecord(plan, updates.map(update => update.reference));
+    const record = mergeImportRecord(
+      plan,
+      updates.map(update => update.reference),
+    );
     const documents = await this.#documents(reading.revision, model, assets, [
       { path: this.#recordPath(), content: `${JSON.stringify(record, null, 2)}\n` },
     ]);
@@ -695,7 +709,10 @@ export class FleetSetupService {
         runtimes.length > 0
           ? `${catalog.machineName()} is ready · ${plural(runtimes.length, 'runtime')} created: ${runtimes.join(', ')}.`
           : `Imported into ${catalog.machineName()}.`,
-      fingerprint: this.#fingerprint(documents, secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`))),
+      fingerprint: this.#fingerprint(
+        documents,
+        secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
+      ),
     };
   }
 
@@ -733,7 +750,8 @@ export class FleetSetupService {
   /** The runtimes an import would create, by harness, for the naming step. */
   #runtimesOf(plan: ImportPlan, existing: AccountModel): { harness: HarnessKind; name: string; profile: string }[] {
     return Object.entries(plan.runtimes).flatMap(([name, runtime]) => {
-      const harness = plan.credentials[runtime.credential]?.harness ?? existing.credentials[runtime.credential]?.harness;
+      const harness =
+        plan.credentials[runtime.credential]?.harness ?? existing.credentials[runtime.credential]?.harness;
       return harness === undefined ? [] : [{ harness, name, profile: runtime.profile }];
     });
   }
@@ -773,7 +791,9 @@ export class FleetSetupService {
         `Copied ${plural(plan.copied.runtimes, 'runtime')} from ${bundle.machine}.`,
         ...(busiest === undefined || busiest.runtimes.length === 0
           ? []
-          : [`Sign in once for ${plural(busiest.runtimes.length, 'runtime')}: ${busiest.email ?? busiest.label ?? busiest.id}.`]),
+          : [
+              `Sign in once for ${plural(busiest.runtimes.length, 'runtime')}: ${busiest.email ?? busiest.label ?? busiest.id}.`,
+            ]),
       ].join(' '),
       fingerprint: this.#fingerprint(documents, []),
     };

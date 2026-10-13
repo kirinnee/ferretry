@@ -497,6 +497,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
     documents: readonly FleetDocumentWrite[],
   ): Promise<void> {
     const pending = new Map(documents.map(document => [path.resolve(document.path), document.content]));
+    // A folder a document of this apply lands in is there by the time the operation runs too: a skill
+    // the apply itself writes into the store is linked into a runtime in the same apply.
+    const pendingFolders = new Set<string>();
+    for (const written of pending.keys()) {
+      for (let folder = path.dirname(written); !pendingFolders.has(folder); folder = path.dirname(folder)) {
+        pendingFolders.add(folder);
+      }
+    }
     for (const operation of operations) {
       // A LINK IS CHECKED EXACTLY LIKE A COPY, and it has to be checked HERE rather than left to the
       // write. `cp` fails on a missing source and `symlink` does not: it creates a dangling link
@@ -507,7 +515,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // A credential link is the one declared exception: an empty slot's file does not exist until
         // somebody signs in, and the harness writes it through the link.
         if (operation.kind === 'symlink' && operation.dangling === true) continue;
-        if (!pending.has(path.resolve(operation.source))) await stat(operation.source);
+        const source = path.resolve(operation.source);
+        if (!pending.has(source) && !pendingFolders.has(source)) await stat(operation.source);
         continue;
       }
       if (operation.kind !== 'settings') continue;

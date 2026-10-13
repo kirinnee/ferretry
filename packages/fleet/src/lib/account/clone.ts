@@ -320,8 +320,10 @@ export function planClone(target: AccountModel, bundle: FleetCloneBundle, option
   // Profiles, then runtimes: every reference follows the rename.
   const profileNames = new Map<string, string>();
   const profiles: Record<string, LayeredProfile> = { ...base.profiles };
+  const chosenProfiles = new Set<string>();
   for (const name of Object.keys(source.profiles)) {
-    const free = freeName(name, candidate => profiles[candidate] !== undefined || profileNames.has(candidate));
+    const free = freeName(name, candidate => profiles[candidate] !== undefined || chosenProfiles.has(candidate));
+    chosenProfiles.add(free);
     if (free !== name) renamed.push({ what: 'profile', from: name, to: free });
     profileNames.set(name, free);
   }
@@ -416,8 +418,7 @@ export function planClone(target: AccountModel, bundle: FleetCloneBundle, option
   };
 }
 
-const plural = (count: number, one: string, many = `${one}s`): string =>
-  `${String(count)} ${count === 1 ? one : many}`;
+const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;
 
 /** What applying the copy would do, as the confirm card says it (§4.7 Preview and Done). */
 export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine: string): readonly string[] {
@@ -447,14 +448,17 @@ export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine
   }
   for (const check of plan.checkPaths) lines.push(`Check after copying: ${check.reference} names ${check.path}.`);
   for (const harness of plan.missingHarnesses) {
-    lines.push(`${HARNESS_DISPLAY_NAMES[harness]} isn't installed on ${machine}: its runtimes are copied and wait for it.`);
+    lines.push(
+      `${HARNESS_DISPLAY_NAMES[harness]} isn't installed on ${machine}: its runtimes are copied and wait for it.`,
+    );
   }
   if (plan.missingSecrets.length > 0) {
     lines.push(
       `${machine}'s secret store has no ${plan.missingSecrets.join(', ')}: add ${plan.missingSecrets.length === 1 ? 'it' : 'them'} before those runtimes launch.`,
     );
   }
-  for (const item of plan.keptSkillItems) lines.push(`Skill ${item} is already on ${machine}, so its copy there was kept.`);
+  for (const item of plan.keptSkillItems)
+    lines.push(`Skill ${item} is already on ${machine}, so its copy there was kept.`);
   for (const entry of plan.notCopied) lines.push(`Not copied: ${entry.path} (${entry.reason}).`);
   return lines;
 }

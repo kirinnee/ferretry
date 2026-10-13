@@ -102,6 +102,31 @@ describe('FileFleetProvisioner', () => {
     should((await stat(manifestPath)).mode & 0o777).equal(0o600);
   });
 
+  it("should link a folder that only this apply's own documents create, in the same apply", async () => {
+    // Arrange: a skill the apply writes into the store, linked into a home by the same apply.
+    const root = await temporaryDirectory();
+    const skill = path.join(root, 'fleet', 'assets', 'skills', 'review');
+    const linked = path.join(root, 'fleet', 'homes', 'one', 'skills', 'review');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [
+        { kind: 'directory', path: path.dirname(linked), mode: 0o700 },
+        { kind: 'symlink', source: skill, path: linked },
+      ],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply(plan, [
+      { path: path.join(skill, 'SKILL.md'), content: '---\nname: review\n---\n', mode: 0o600 },
+    ]);
+
+    // Assert
+    should((await lstat(linked)).isSymbolicLink()).be.true();
+    should(await readFile(path.join(linked, 'SKILL.md'), 'utf8')).containEql('name: review');
+  });
+
   it('should preserve the previous manifest when an operation fails', async () => {
     // Arrange
     const root = await temporaryDirectory();
