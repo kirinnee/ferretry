@@ -162,3 +162,124 @@ describe('StateFileSystem fleet history links', () => {
     should(String(error)).match(/symbolic links are not allowed inside the state home/u);
   });
 });
+
+describe('StateFileSystem Codex credential links', () => {
+  /** A Codex runtime home and the one canonical `auth.json` of a credential Ferretry keeps. */
+  async function codexWorld(options: { readonly hostCodexAuth?: string } = {}) {
+    const subject = await fixture();
+    const files = new StateFileSystem(subject.paths, undefined, options);
+    const canonical = join(subject.paths.fleet, 'credentials', 'codex-work', 'auth.json');
+    const home = join(subject.paths.fleet, 'homes', 'codex-default');
+    await mkdir(join(subject.paths.fleet, 'credentials', 'codex-work'), { recursive: true });
+    await mkdir(home, { recursive: true });
+    await writeFile(canonical, '{"placeholder":true}\n');
+    return { ...subject, files, canonical, home };
+  }
+
+  it("should read through a runtime's auth.json into its credential's one canonical file", async () => {
+    // Arrange — exactly the link design §8.2.1 has every Codex runtime hold.
+    const world = await codexWorld();
+    await symlink(world.canonical, join(world.home, 'auth.json'));
+
+    // Act
+    const actual = await world.files.readText(join(world.home, 'auth.json'));
+
+    // Assert
+    should(actual).equal('{"placeholder":true}\n');
+  });
+
+  it('should refuse a credential link at any name other than auth.json', async () => {
+    const world = await codexWorld();
+    await symlink(world.canonical, join(world.home, 'other.json'));
+
+    const error = await world.files.readText(join(world.home, 'other.json')).catch(value => value);
+
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+
+  it('should refuse an auth.json link deeper than a runtime home', async () => {
+    const world = await codexWorld();
+    await mkdir(join(world.home, 'nested'), { recursive: true });
+    await symlink(world.canonical, join(world.home, 'nested', 'auth.json'));
+
+    const error = await world.files.readText(join(world.home, 'nested', 'auth.json')).catch(value => value);
+
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+
+  it('should refuse an auth.json link to anything in the credentials tree but a credential file', async () => {
+    // Arrange — another file of the credential directory, and the directory itself.
+    const world = await codexWorld();
+    const other = join(world.paths.fleet, 'credentials', 'codex-work', 'usage.json');
+    await writeFile(other, '{}\n');
+    await symlink(other, join(world.home, 'auth.json'));
+
+    // Act
+    const error = await world.files.readText(join(world.home, 'auth.json')).catch(value => value);
+
+    // Assert
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+
+  it('should refuse an auth.json link into a nested credentials path', async () => {
+    const world = await codexWorld();
+    const nested = join(world.paths.fleet, 'credentials', 'codex-work', 'deeper', 'auth.json');
+    await mkdir(join(world.paths.fleet, 'credentials', 'codex-work', 'deeper'), { recursive: true });
+    await writeFile(nested, '{}\n');
+    await symlink(nested, join(world.home, 'auth.json'));
+
+    const error = await world.files.readText(join(world.home, 'auth.json')).catch(value => value);
+
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+
+  it("should read through a link to the person's own Codex auth.json when the composition root named it", async () => {
+    // Arrange — `store: host`: the link resolves OUTSIDE the state home, to exactly one named file.
+    const probe = await fixture();
+    const host = join(probe.root, 'user', '.codex', 'auth.json');
+    await mkdir(join(probe.root, 'user', '.codex'), { recursive: true });
+    await writeFile(host, '{"host":true}\n');
+    const files = new StateFileSystem(probe.paths, undefined, { hostCodexAuth: host });
+    const home = join(probe.paths.fleet, 'homes', 'codex-default');
+    await mkdir(home, { recursive: true });
+    await symlink(host, join(home, 'auth.json'));
+
+    // Act
+    const actual = await files.readText(join(home, 'auth.json'));
+
+    // Assert
+    should(actual).equal('{"host":true}\n');
+  });
+
+  it("should refuse a link to the person's own auth.json when no host file was named (fail closed)", async () => {
+    const probe = await fixture();
+    const host = join(probe.root, 'user', '.codex', 'auth.json');
+    await mkdir(join(probe.root, 'user', '.codex'), { recursive: true });
+    await writeFile(host, '{"host":true}\n');
+    const home = join(probe.paths.fleet, 'homes', 'codex-default');
+    await mkdir(home, { recursive: true });
+    await symlink(host, join(home, 'auth.json'));
+
+    const error = await probe.files.readText(join(home, 'auth.json')).catch(value => value);
+
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+
+  it('should refuse a link to a different file outside the state home even with a host file named', async () => {
+    const probe = await fixture();
+    const host = join(probe.root, 'user', '.codex', 'auth.json');
+    const other = join(probe.root, 'user', 'auth.json');
+    await mkdir(join(probe.root, 'user', '.codex'), { recursive: true });
+    await writeFile(other, '{"other":true}\n');
+    const files = new StateFileSystem(probe.paths, undefined, { hostCodexAuth: host });
+    const home = join(probe.paths.fleet, 'homes', 'codex-default');
+    await mkdir(home, { recursive: true });
+    await symlink(other, join(home, 'auth.json'));
+
+    // Act — the named host file does not even exist, and the link points elsewhere.
+    const error = await files.readText(join(home, 'auth.json')).catch(value => value);
+
+    // Assert
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+});

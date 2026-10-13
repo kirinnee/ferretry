@@ -30,6 +30,7 @@
 import type { FleetCredentialClassifier, LocalCredentialReading } from '../lib/health.ts';
 import { classifyCredential, type CredentialMaterial } from '../lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
+import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 
 /** Reading one home's raw credential. Satisfied structurally by the platform credential store. */
 export interface CredentialMaterialReader {
@@ -59,13 +60,42 @@ export class StoreCredentialClassifier implements FleetCredentialClassifier {
   constructor(private readonly deps: StoreCredentialClassifierDeps) {}
 
   async classify(account: FleetManifestAccount): Promise<LocalCredentialReading> {
-    const material = await this.deps.credentials.material(account.kind, account.home);
-    const reading = classifyCredential(account.kind, material, this.deps.now());
-    return {
-      state: reading.state,
-      ...(reading.expiresAt === undefined ? {} : { expiresAt: reading.expiresAt }),
-      // Only material that was actually found has a digest. See the note above.
-      ...(material.outcome === 'found' ? { fingerprint: credentialFingerprint(material.blob) } : {}),
-    };
+    return localReading(
+      account.kind,
+      await this.deps.credentials.material(account.kind, account.home),
+      this.deps.now(),
+    );
+  }
+}
+
+function localReading(kind: HarnessKind, material: CredentialMaterial, now: number): LocalCredentialReading {
+  const reading = classifyCredential(kind, material, now);
+  return {
+    state: reading.state,
+    ...(reading.expiresAt === undefined ? {} : { expiresAt: reading.expiresAt }),
+    // Only material that was actually found has a digest. See the note above.
+    ...(material.outcome === 'found' ? { fingerprint: credentialFingerprint(material.blob) } : {}),
+  };
+}
+
+/** Reading one account-model credential's raw material from its one store. Satisfied by the platform store. */
+export interface StoredCredentialMaterialReader {
+  storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
+}
+
+export interface StoredCredentialClassifierDeps {
+  readonly credentials: StoredCredentialMaterialReader;
+  readonly now: () => number;
+}
+
+/**
+ * The same classification and digest, for a CREDENTIAL rather than an account home (design §3.2 C5):
+ * one credential is one store and one rate-limit pool, so it is read once however many runtimes use it.
+ */
+export class StoredCredentialClassifier {
+  constructor(private readonly deps: StoredCredentialClassifierDeps) {}
+
+  async classify(resolution: StoredCredentialResolution): Promise<LocalCredentialReading> {
+    return localReading(resolution.harness, await this.deps.credentials.storedMaterial(resolution), this.deps.now());
   }
 }

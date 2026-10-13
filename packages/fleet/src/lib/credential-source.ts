@@ -45,6 +45,7 @@
  * generated wrapper will actually export, which is the thing that decides what the harness does.
  */
 import { secretReferencesIn, type SecretName } from '@ferretry/protocol';
+import type { Credential } from './account/schema.ts';
 import type { HarnessKind } from './manifest.ts';
 import type { ResolvedAccount } from './profiles.ts';
 import { envReferenceName } from './wrappers.ts';
@@ -104,8 +105,8 @@ export type FleetCredentialSource =
  * nobody should write, and a reading that depended on object key order would report it differently
  * on two hosts that declared the same thing.
  */
-function declaredCredentialVariable(account: ResolvedAccount): string | undefined {
-  return HARNESS_CREDENTIAL_ENV[account.kind].find(name => account.env[name] !== undefined);
+function declaredCredentialVariable(kind: HarnessKind, env: Readonly<Record<string, string>>): string | undefined {
+  return HARNESS_CREDENTIAL_ENV[kind].find(name => env[name] !== undefined);
 }
 
 /**
@@ -115,13 +116,36 @@ function declaredCredentialVariable(account: ResolvedAccount): string | undefine
  * generated wrapper sources nothing.
  */
 export function credentialSourceOf(account: ResolvedAccount, secretsFile?: string): FleetCredentialSource {
-  const variable = declaredCredentialVariable(account);
+  const variable = declaredCredentialVariable(account.kind, account.env);
   if (variable === undefined) {
     return account.auth === 'api-key' ? { source: 'undeclared' } : { source: 'interactive-login' };
   }
+  return sourceOfVariable(variable, account.env, secretsFile);
+}
+
+/**
+ * Where an account-model CREDENTIAL comes from (design §3.2 C3).
+ *
+ * `host` and `ferretry` are both logins the harness signs in to — the person's own, or one Ferretry
+ * keeps. `environment` is no login at all, and the same reading as above names where its value comes
+ * from; one whose `env` names no credential variable this harness reads is `undeclared`, because a
+ * login would not help it either.
+ */
+export function credentialSourceOfCredential(credential: Credential, secretsFile?: string): FleetCredentialSource {
+  if (credential.store !== 'environment') return { source: 'interactive-login' };
+  const env = credential.env ?? {};
+  const variable = declaredCredentialVariable(credential.harness, env);
+  return variable === undefined ? { source: 'undeclared' } : sourceOfVariable(variable, env, secretsFile);
+}
+
+function sourceOfVariable(
+  variable: string,
+  env: Readonly<Record<string, string>>,
+  secretsFile: string | undefined,
+): FleetCredentialSource {
   // Present because `declaredCredentialVariable` found it; read again rather than threaded through so
   // this function has one source of truth for the value it classifies.
-  const value = account.env[variable] ?? '';
+  const value = env[variable] ?? '';
   // Asked FIRST, because a secret reference is a value the wrapper never carries and never resolves
   // for itself. Reading it as a `configured-value` would report the credential as living in the fleet
   // configuration — which is exactly the sentence a profile exists to stop being true.
