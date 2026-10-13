@@ -122,7 +122,11 @@ function MachineNewDevices({
           // First look on this browser: remember now, announce nothing.
           if (!seeded.current) {
             seeded.current = true;
-            markDevicesLooked(storage, daemonId, lookedInstant(answer, now()));
+            const seed = lookedInstant(answer, now());
+            // Held here as well as announced: this machine's own notice must not depend on the page-wide
+            // event reaching it, or a device paired later in this visit would never be announced.
+            setLooked(seed);
+            markDevicesLooked(storage, daemonId, seed);
           }
         })
         .catch(() => {

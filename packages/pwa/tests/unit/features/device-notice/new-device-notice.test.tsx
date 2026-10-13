@@ -2,7 +2,6 @@ import '../../../support/dom.ts';
 import { describe, expect, it } from 'bun:test';
 import type { PairedDevice, PairedDevicesView } from '@ferretry/protocol';
 import {
-  DEVICES_LOOKED_EVENT,
   type DevicesLookedStorage,
   devicesLookedKey,
   markDevicesLooked,
@@ -308,24 +307,29 @@ describe('the new-device notice', () => {
   it('works without storage, says nothing for an unreachable machine, and reads again on a timer', async () => {
     const alphaMachine = machine([]);
     const timer = manualSchedule();
-    // Counting READS is not enough on a loaded runner: the read is counted before its answer is applied,
-    // and a device swapped in before the first look is seeded is, correctly, "already there".
-    let seeded = false;
-    const onLooked = (): void => {
-      seeded = true;
+    // Storage that refuses every read and write: the instant lives only in the notice itself. The
+    // refused write is also the signal that the first answer was applied — never a page-wide event,
+    // which an earlier file in the same process may have left a replaced `window` behind for.
+    let seedAttempts = 0;
+    const refusing: DevicesLookedStorage = {
+      getItem: () => {
+        throw new Error('storage is off');
+      },
+      setItem: () => {
+        seedAttempts += 1;
+        throw new Error('storage is off');
+      },
     };
-    window.addEventListener(DEVICES_LOOKED_EVENT, onLooked);
     const shown = await mount(
       <NewDeviceNotices
         connections={[alpha, beta]}
         clients={pool({ alpha: alphaMachine, beta: 'unreachable' })}
-        storage={undefined}
+        storage={refusing}
         now={now}
         schedule={timer.schedule}
       />,
     );
-    await until(() => seeded, 'the first look to be seeded');
-    window.removeEventListener(DEVICES_LOOKED_EVENT, onLooked);
+    await until(() => seedAttempts === 1, 'the first look to be seeded');
     expect(shown.container.querySelector('[data-new-device]')).toBeNull();
     // A device paired after this page first looked is news even with no storage at all.
     alphaMachine.view = { ...alphaMachine.view, devices: [device('phone', new Date(NOW + MINUTE).toISOString())] };
