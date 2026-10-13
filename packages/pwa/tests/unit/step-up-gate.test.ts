@@ -1,0 +1,270 @@
+/**
+ * The step-up gate: one prompt per machine however many requests wait, a ceremony that starts only on
+ * the button, and a settled prompt that hands the screen to the next machine.
+ */
+
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { StepUpGate } from '../../src/lib/step-up-gate.ts';
+
+const machine = (name: string): DaemonConnection =>
+  daemonConnection({ daemonId: `daemon-${name}`, baseUrl: `https://${name}.example`, deviceId: 'device-one' });
+
+const first = machine('first');
+const second = machine('second');
+
+/** A ceremony the test settles by hand, so "busy" is an observable state rather than a race. */
+function manualCeremony() {
+  const calls: DaemonConnection[] = [];
+  const pending: { resolve: () => void; reject: (reason: unknown) => void }[] = [];
+  const ceremony = (daemon: DaemonConnection): Promise<void> => {
+    calls.push(daemon);
+    return new Promise<void>((resolve, reject) => pending.push({ resolve, reject }));
+  };
+  return { calls, pending, ceremony };
+}
+
+const gateWith = (ceremony: (daemon: DaemonConnection) => Promise<void>) =>
+  new StepUpGate({ ceremony, describe: reason => `described: ${String(reason)}` });
+
+const flush = async (): Promise<void> => {
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+};
+
+describe('asking for a step-up', () => {
+  it('should open nothing until a request asks', () => {
+    // Arrange, Act
+    const gate = gateWith(async () => undefined);
+
+    // Assert
+    should(gate.snapshot()).be.null();
+  });
+
+  it('should open ONE prompt for a machine however many requests wait on it', async () => {
+    // Arrange
+    const { ceremony, calls, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    const answers: boolean[] = [];
+    let changes = 0;
+    gate.subscribe(() => {
+      changes += 1;
+    });
+
+    // Act
+    const waiting = [gate.require(first), gate.require(first), gate.require(first)].map(async wait => {
+      answers.push(await wait);
+    });
+    await flush();
+
+    // Assert — one prompt, nobody resolved, no ceremony started by itself.
+    should(changes).equal(1);
+    should(gate.snapshot()).eql({ daemon: first, busy: false });
+    should(answers).eql([]);
+    should(calls).eql([]);
+
+    // Act — the button runs one ceremony and settles all three.
+    const confirming = gate.confirm();
+    pending[0]?.resolve();
+    await confirming;
+    await Promise.all(waiting);
+
+    // Assert
+    should(calls).eql([first]);
+    should(answers).eql([true, true, true]);
+    should(gate.snapshot()).be.null();
+  });
+});
+
+describe('confirming', () => {
+  it('should be busy while the ceremony runs, then resolve every waiter true and close', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    const one = gate.require(first);
+    const two = gate.require(first);
+
+    // Act
+    const confirming = gate.confirm();
+
+    // Assert — the prompt says so while the passkey sheet is up.
+    should(gate.snapshot()).eql({ daemon: first, busy: true });
+    pending[0]?.resolve();
+    await confirming;
+    should(await one).be.true();
+    should(await two).be.true();
+    should(gate.snapshot()).be.null();
+  });
+
+  it('should keep the prompt, say why and stop being busy when the ceremony fails', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    let settled: boolean | undefined;
+    const waiting = gate.require(first).then(answer => {
+      settled = answer;
+    });
+
+    // Act
+    const confirming = gate.confirm();
+    pending[0]?.reject(new Error('sheet closed'));
+    await confirming;
+    await flush();
+
+    // Assert — the request still waits; the person can try again.
+    should(gate.snapshot()).eql({ daemon: first, busy: false, failure: 'described: Error: sheet closed' });
+    should(settled).be.undefined();
+
+    // Act — a second try that works clears the failure and resolves the waiter.
+    const retrying = gate.confirm();
+    should(gate.snapshot()).eql({ daemon: first, busy: true });
+    pending[1]?.resolve();
+    await retrying;
+    await waiting;
+    should(settled).be.true();
+    should(gate.snapshot()).be.null();
+  });
+
+  it('should do nothing with no prompt, and nothing while a ceremony is already running', async () => {
+    // Arrange
+    const { ceremony, calls, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+
+    // Act, Assert — no prompt.
+    await gate.confirm();
+    should(calls).eql([]);
+
+    // Act — a second tap while busy.
+    const waiting = gate.require(first);
+    const confirming = gate.confirm();
+    await gate.confirm();
+
+    // Assert
+    should(calls).have.length(1);
+    pending[0]?.resolve();
+    await confirming;
+    await waiting;
+  });
+});
+
+describe('dismissing', () => {
+  it('should resolve every waiter on the machine false and close', async () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    const one = gate.require(first);
+    const two = gate.require(first);
+
+    // Act
+    gate.dismiss();
+
+    // Assert
+    should(await one).be.false();
+    should(await two).be.false();
+    should(gate.snapshot()).be.null();
+  });
+
+  it('should do nothing with no prompt', () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    let changes = 0;
+    gate.subscribe(() => {
+      changes += 1;
+    });
+
+    // Act
+    gate.dismiss();
+
+    // Assert
+    should(changes).equal(0);
+  });
+
+  it('should do nothing while a ceremony is running', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    let answer: boolean | undefined;
+    const waiting = gate.require(first).then(value => {
+      answer = value;
+    });
+    const confirming = gate.confirm();
+
+    // Act
+    gate.dismiss();
+    await flush();
+
+    // Assert — still busy, nobody resolved.
+    should(gate.snapshot()).eql({ daemon: first, busy: true });
+    should(answer).be.undefined();
+    pending[0]?.resolve();
+    await confirming;
+    await waiting;
+    should(answer).be.true();
+  });
+});
+
+describe('two machines asking', () => {
+  it('should queue the second and show it once the first settles', async () => {
+    // Arrange
+    const { ceremony, calls, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    const answers: Record<string, boolean> = {};
+    const waitingFirst = gate.require(first).then(value => {
+      answers.first = value;
+    });
+    const waitingSecond = gate.require(second).then(value => {
+      answers.second = value;
+    });
+
+    // Assert — only the first is on screen.
+    should(gate.snapshot()).eql({ daemon: first, busy: false });
+
+    // Act — the first is confirmed.
+    const confirming = gate.confirm();
+    pending[0]?.resolve();
+    await confirming;
+    await waitingFirst;
+
+    // Assert — the second takes the screen, unsettled and not busy.
+    should(answers).eql({ first: true });
+    should(gate.snapshot()).eql({ daemon: second, busy: false });
+
+    // Act — the second is dismissed.
+    gate.dismiss();
+    await waitingSecond;
+
+    // Assert
+    should(answers).eql({ first: true, second: false });
+    should(calls).eql([first]);
+    should(gate.snapshot()).be.null();
+  });
+});
+
+describe('watching the gate', () => {
+  it('should tell a subscriber about each change until it unsubscribes', () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    let changes = 0;
+    const stop = gate.subscribe(() => {
+      changes += 1;
+    });
+
+    // Act
+    void gate.require(first);
+    should(changes).equal(1);
+    stop();
+    gate.dismiss();
+
+    // Assert — the dismissal changed the prompt, and nobody was told.
+    should(changes).equal(1);
+    should(gate.snapshot()).be.null();
+  });
+
+  it('should hand back the same snapshot object until something changes', () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    void gate.require(first);
+
+    // Act, Assert — `useSyncExternalStore` needs stability between changes.
+    should(gate.snapshot()).equal(gate.snapshot());
+  });
+});
