@@ -422,17 +422,19 @@ describe('CredentialSignIn with a Codex link', () => {
   });
 
   it('moves a device code to a link in the same flow, then hands the address over and finishes', async () => {
-    let reads = 0;
+    // The daemon's answer to a re-read follows what was sent, so the poll can never run ahead of the person.
+    let stage: HarnessLoginFlow = codexFlow('awaiting-approval');
+    let delivered = 0;
     const { view, calls, signedIn } = await open(
       {
         [LOGIN]: codexFlow('awaiting-approval'),
-        [`POST ${FLOW}`]: (call: Call) =>
-          'method' in (call.body as object)
-            ? { outcome: 'accepted', flow: codexLink('awaiting-callback') }
-            : { outcome: 'accepted', flow: codexLink('finishing') },
+        [`POST ${FLOW}`]: (call: Call) => {
+          stage = 'method' in (call.body as object) ? codexLink('awaiting-callback') : codexLink('finishing');
+          return { outcome: 'accepted', flow: stage };
+        },
         [`GET ${FLOW}`]: () => {
-          reads += 1;
-          return reads === 1 ? codexLink('finishing') : codexFlow('complete');
+          if (stage.state === 'finishing') delivered += 1;
+          return delivered > 1 ? codexFlow('complete') : stage;
         },
       },
       { credential: CODEX, pollMs: 5 },
@@ -448,7 +450,8 @@ describe('CredentialSignIn with a Codex link', () => {
     expect(view.container.textContent).toContain('Codex is finishing the sign-in…');
     expect(view.container.innerHTML).not.toContain('code-TESTONLY');
 
-    await wait(60);
+    // Waits for the outcome rather than for a fixed time, so a slow machine cannot outrun it.
+    for (let slice = 0; slice < 300 && state(view.container) !== 'complete'; slice += 1) await wait(10);
     expect(state(view.container)).toBe('complete');
     expect(signedIn).toEqual(['signed-in']);
     await view.unmount();
