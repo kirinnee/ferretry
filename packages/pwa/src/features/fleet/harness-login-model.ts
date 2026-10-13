@@ -211,3 +211,17 @@ export function usageSummary(readout: AccountUsageReadout): string {
   const windows = readout.windows.map(usageWindowLabel).join(' · ');
   return readout.atLimit ? `${windows} · at limit` : windows;
 }
+
+/**
+ * The words a sign-in panel uses when it signs in an account-model LOGIN rather than an account
+ * (docs/design/account-model.md §4.6). That surface never shows an identity, a wrapper or a sibling
+ * copy (§4.1 rule 8), so the panel takes its two sentences from here instead.
+ */
+export interface LoginPanelWording {
+  /** Under the header: what one sign-in covers ("Every runtime that uses it can launch once it is done."). */
+  readonly coverage: string;
+  /** Once the harness accepted the sign-in ("Signed in. 3 runtimes can launch now."). */
+  readonly signedIn: string;
+  /** The finish button ("Finish sign-in for 3 runtimes"); Claude only, Codex has no button. */
+  readonly finishLabel?: string;
+}

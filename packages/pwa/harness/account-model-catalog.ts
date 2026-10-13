@@ -9,6 +9,7 @@
  */
 
 import { FyHttpError } from '@ferretry/protocol/client';
+import { harnessCredentialAnswer } from './credential-catalog.ts';
 
 /** A `${secret:NAME}` reference, spelled so it is never mistaken for a template. */
 const secretRef = (name: string): string => ['$', `{secret:${name}}`].join('');
@@ -284,6 +285,8 @@ const draftView = (init: RequestInit | undefined) => {
  * with the account model's own switched-off sentence.
  */
 export function harnessCatalogAnswer(path: string, init?: RequestInit): unknown {
+  const login = harnessCredentialAnswer(path, init);
+  if (login !== undefined) return login;
   switch (path) {
     case '/v1/fleet/components':
       return COMPONENTS;

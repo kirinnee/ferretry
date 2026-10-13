@@ -853,6 +853,12 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
    */
   readonly preselect?: boolean;
   /**
+   * A wrapper to fill in instead of the first usable one — Launch on a runtime's page names it. A HINT
+   * ONLY: it is used when this field offers it AND it is available, and is otherwise ignored silently, so
+   * a link can never put a refused or unoffered account in the box. Nothing is started from it.
+   */
+  readonly preferred?: string;
+  /**
    * Drawn INSTEAD of the field when the roster was read and nothing is offered,
    * so a host with no account that can run a session says so in one sentence
    * with a way forward rather than showing an empty list. An unread or failed
@@ -921,6 +927,7 @@ export function DaemonAccountPicker({
   offerHealthCheck = false,
   sessionCapableOnly = false,
   preselect = false,
+  preferred,
   noAccounts,
   now = Date.now(),
   ...field
@@ -935,7 +942,8 @@ export function DaemonAccountPicker({
   const projected = accountPickerOptions(published, usage, slice.health);
   const capable = sessionCapableOnly ? sessionCapableAccountOptions(projected) : projected;
   const scoped = harness === undefined ? capable : sameHarnessAccountOptions(capable, harness);
-  const suggested = preselect ? firstUsableAccountOption(scoped) : null;
+  const hinted = scoped?.find(option => option.wrapper === preferred && option.available) ?? null;
+  const suggested = hinted ?? (preselect ? firstUsableAccountOption(scoped) : null);
   // Set by the first keystroke or the one pre-fill, whichever comes first, so the
   // pre-fill can never overwrite a reader's own answer — including an empty one.
   const answered = useRef(false);

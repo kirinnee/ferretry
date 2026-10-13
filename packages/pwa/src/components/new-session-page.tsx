@@ -37,6 +37,11 @@ export interface NewSessionPageProps {
   /** Receives canonical daemon-scoped paths for both cancel and successful creation. */
   readonly onNavigate: (path: string) => void;
   /**
+   * The runtime a Launch button named (`?agent=` on this page's address). A HINT ONLY: the Account box
+   * fills it in when it offers that runtime as usable and ignores it otherwise. Nothing starts from it.
+   */
+  readonly initialAgent?: string;
+  /**
    * THE FOUR DAEMON-SCOPED READS THIS FORM OFFERS, AND WHY EVERY ONE IS OPTIONAL.
    *
    * A store handed in turns the matching free-text box into the picker beside it;
@@ -216,6 +221,7 @@ export function NewSessionPage({
   usage,
   projects,
   fleet,
+  initialAgent,
 }: NewSessionPageProps) {
   const [draft, setDraft] = useState<NewSessionDraft>(emptyNewSessionDraft);
   const [submitting, setSubmitting] = useState(false);
@@ -283,6 +289,7 @@ export function NewSessionPage({
                 onAccountChosen={account => setChosenAccount({ account, connection })}
                 noAccounts={noAccounts}
                 onValueChange={value => update('agent', value)}
+                {...(initialAgent === undefined ? {} : { preferred: initialAgent })}
                 store={accounts}
                 usage={NO_USAGE_ROWS}
                 usageError={null}
@@ -294,6 +301,7 @@ export function NewSessionPage({
                 noAccounts={noAccounts}
                 onAccountChosen={account => setChosenAccount({ account, connection })}
                 onValueChange={value => update('agent', value)}
+                {...(initialAgent === undefined ? {} : { preferred: initialAgent })}
                 store={accounts}
                 usage={usage}
                 value={draft.agent}
@@ -464,6 +472,8 @@ interface AccountRosterFieldProps extends ConnectedFieldProps {
   readonly onAccountChosen: (account: AccountPickerOption) => void;
   /** What the form says instead of an empty list. */
   readonly noAccounts: ReactNode;
+  /** A Launch button's runtime, filled in only when offered and usable. */
+  readonly preferred?: string;
 }
 
 /**
@@ -498,6 +508,7 @@ function AccountRosterField({ store, usage, usageError, ...field }: AccountRoste
       onValueChange={field.onValueChange}
       placeholder="e.g. claude-auto-default"
       preselect={true}
+      {...(field.preferred === undefined ? {} : { preferred: field.preferred })}
       sessionCapableOnly={true}
       store={store}
       usage={usage}

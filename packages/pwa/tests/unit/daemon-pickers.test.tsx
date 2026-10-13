@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-
+import { accountPickerOptions, projectPickerOptions } from '../../src/components/daemon-picker-model.ts';
 import {
   AccountHealthCheck,
   AccountName,
@@ -8,16 +8,15 @@ import {
   accountEmptyCopy,
   accountFieldOptions,
   accountFieldSource,
+  checkedAmongOffered,
   DaemonAccountName,
   DaemonAccountPicker,
-  checkedAmongOffered,
   DaemonProjectPicker,
   namedAccount,
   ProjectPickerField,
   projectFieldOptions,
   projectFieldSource,
 } from '../../src/components/daemon-pickers.tsx';
-import { accountPickerOptions, projectPickerOptions } from '../../src/components/daemon-picker-model.ts';
 import type {
   AccountPickerHealthCatalog,
   PickerAccount,
@@ -29,8 +28,8 @@ import {
   DaemonAccountPickerStore,
 } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { DaemonFleetSlice } from '../../src/lib/fleet-store.ts';
 import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
+import type { DaemonFleetSlice } from '../../src/lib/fleet-store.ts';
 import type { DaemonProjectsSlice } from '../../src/lib/projects-store.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -995,6 +994,78 @@ describe('AccountPickerField', () => {
     await accountField([account()]);
 
     expect(find('button')).toBeNull();
+  });
+
+  describe('preferred', () => {
+    const preferredStore = () =>
+      new DaemonAccountPickerStore({
+        catalog: async () => ({ accounts: [account(), codex, archived] }),
+        health: async () => ({ health: new Map(), error: null }),
+        checkHealth: async () => ({ health: new Map(), error: null }),
+      });
+
+    const showPreferred = async (preferred: string | undefined, preselect: boolean): Promise<string[]> => {
+      const chosen: string[] = [];
+      const store = preferredStore();
+      function Host() {
+        const [value, setValue] = useState('');
+        return (
+          <DaemonAccountPicker
+            connection={laptop}
+            id="fy-test-agent"
+            label="Account"
+            onAccountChosen={picked => chosen.push(picked.wrapper)}
+            onValueChange={setValue}
+            {...(preferred === undefined ? {} : { preferred })}
+            preselect={preselect}
+            store={store}
+            usage={usage}
+            value={value}
+          />
+        );
+      }
+      await show(<Host />);
+      await interact(async () => {
+        for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      });
+      return chosen;
+    };
+
+    it('wins over the first usable account when it is offered and available', async () => {
+      const chosen = await showPreferred('codex-auto-atelier', true);
+
+      expect(input().value).toBe('codex-auto-atelier');
+      expect(chosen).toEqual(['codex-auto-atelier']);
+    });
+
+    it('fills the box with no preselect at all when it is offered and available', async () => {
+      const chosen = await showPreferred('codex-auto-atelier', false);
+
+      expect(input().value).toBe('codex-auto-atelier');
+      expect(chosen).toEqual(['codex-auto-atelier']);
+    });
+
+    it('is ignored silently when the roster does not offer it', async () => {
+      const chosen = await showPreferred('claude-auto-nobody', true);
+
+      expect(input().value).toBe('claude-auto-studio');
+      expect(chosen).toEqual(['claude-auto-studio']);
+      expect(find('[role="alert"]')).toBeNull();
+    });
+
+    it('is ignored when the account is offered but unavailable, so a link cannot pick a refused one', async () => {
+      const chosen = await showPreferred('claude-auto-archive', true);
+
+      expect(input().value).toBe('claude-auto-studio');
+      expect(chosen).toEqual(['claude-auto-studio']);
+    });
+
+    it('with nothing offered to prefer and no preselect, leaves the box empty', async () => {
+      const chosen = await showPreferred('claude-auto-archive', false);
+
+      expect(input().value).toBe('');
+      expect(chosen).toEqual([]);
+    });
   });
 });
 

@@ -40,6 +40,7 @@ import type { ClaudeLoginFlow, FleetLoginAccountOutcome, HarnessLoginLastCode } 
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
+import type { LoginPanelWording } from './harness-login-model.ts';
 
 export interface ClaudeLoginPanelProps {
   /** The account a person recognises before granting provider access. */
@@ -57,6 +58,8 @@ export interface ClaudeLoginPanelProps {
   readonly onSubmitCode: (code: string) => void;
   readonly onCancel: () => void;
   readonly copy?: ClipboardWriter;
+  /** A login of the account model: no identity line, and these sentences in place of the wrapper ones. */
+  readonly wording?: LoginPanelWording;
   className?: string;
 }
 
@@ -105,6 +108,7 @@ export function ClaudeLoginPanel({
   onSubmitCode,
   onCancel,
   copy = browserClipboardWriter(),
+  wording,
   className,
 }: ClaudeLoginPanelProps) {
   const [code, setCode] = useState('');
@@ -137,9 +141,11 @@ export function ClaudeLoginPanel({
             <h3 id={`claude-login-${identity}`} className="m-0 mt-0.5 text-title font-semibold text-fg">
               {accountLabel}
             </h3>
-            <p className="m-0 mt-1 text-ui leading-base text-muted">
-              Identity <code className="font-mono text-meta text-fg">{identity}</code>
-            </p>
+            {wording === undefined ? (
+              <p className="m-0 mt-1 text-ui leading-base text-muted">
+                Identity <code className="font-mono text-meta text-fg">{identity}</code>
+              </p>
+            ) : null}
           </div>
         </div>
       </header>
@@ -147,10 +153,14 @@ export function ClaudeLoginPanel({
       <div className="space-y-4 p-panel">
         <div className="flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-muted">
           <ShieldCheck size={17} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
-          <p className="m-0">
-            One sign-in covers <strong className="font-semibold text-fg">{coverage(memberCount)}</strong>. The harness
-            writes its own credential; this daemon never holds one.
-          </p>
+          {wording === undefined ? (
+            <p className="m-0">
+              One sign-in covers <strong className="font-semibold text-fg">{coverage(memberCount)}</strong>. The harness
+              writes its own credential; this daemon never holds one.
+            </p>
+          ) : (
+            <p className="m-0">{wording.coverage}</p>
+          )}
         </div>
 
         {refusal === null ? null : (
@@ -220,7 +230,7 @@ export function ClaudeLoginPanel({
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
                   <ShieldCheck size={16} aria-hidden="true" />
-                  {busy ? 'Sending…' : 'Finish sign-in'}
+                  {busy ? 'Sending…' : (wording?.finishLabel ?? 'Finish sign-in')}
                 </Button>
                 <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
                   Cancel
@@ -241,7 +251,9 @@ export function ClaudeLoginPanel({
           >
             <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
             <div className="min-w-0">
-              {failed(flow.accounts).length === 0 ? (
+              {wording !== undefined ? (
+                <p className="m-0 font-semibold">{wording.signedIn}</p>
+              ) : failed(flow.accounts).length === 0 ? (
                 <>
                   <p className="m-0 font-semibold">Signed in to {accountLabel}</p>
                   <p className="m-0 mt-1 text-muted">
