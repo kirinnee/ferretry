@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
-import { createFleetSetupSubsystem } from '../../../../src/lib/fleet/setup-service.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import {
@@ -205,9 +204,38 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
-  // The setup table, through the factory the daemon itself calls. It serves no route yet
-  // (docs/design/account-model.md §13.2).
-  fleetSetup: createFleetSetupSubsystem(),
+  fleetSetup: {
+    scan: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    installTools: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    exportBundle: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    migration: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    migrate: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    firstRunAtBoot: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    executors: {
+      setup: { describe: async () => {
+      throw new Error('not exercised by the surface inventory');
+    }, execute: async () => {
+      throw new Error('not exercised by the surface inventory');
+    } },
+      clone: { describe: async () => {
+      throw new Error('not exercised by the surface inventory');
+    }, execute: async () => {
+      throw new Error('not exercised by the surface inventory');
+    } },
+    },
+  },
   cgroups: {
     config: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -494,7 +522,8 @@ describe('the mounted daemon surface', () => {
       1 + // the profile catalog the account stepper reads
       1 + // POST /v1/fleet/renew
       2 + // the account model's credential list and its Check now
-      7; // the account model's four catalogue reads and its three change routes
+      7 + // the account model's four catalogue reads and its three change routes
+      5; // the setup scan, tool install, the clone export and the migration's dry run and apply
     should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
@@ -553,6 +582,14 @@ describe('the mounted daemon surface', () => {
       'POST /v1/fleet/changes',
       'GET /v1/fleet/changes/:changeId',
       'POST /v1/fleet/changes/:changeId/apply',
+      // A machine's setup. The import and the clone are reviewed changes above; these are the scan they
+      // start from, the export a clone carries, the tool install, and the migration — whose apply
+      // names the digest of the dry run it shows, so nothing migrates that a person did not see.
+      'GET /v1/fleet/setup/scan',
+      'POST /v1/fleet/machine/tools/install',
+      'GET /v1/fleet/export',
+      'GET /v1/fleet/migration',
+      'POST /v1/fleet/migration/apply',
       'GET /v1/fleet/accounts',
       'GET /v1/fleet/harnesses',
       'GET /v1/fleet/config',

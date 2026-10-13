@@ -18,6 +18,7 @@ export * from './fleet-changes.ts';
 export * from './fleet-credentials.ts';
 export * from './fleet-environment.ts';
 export * from './fleet-profiles.ts';
+export * from './fleet-setup.ts';
 export * from './foreign-history.ts';
 export * from './grants.ts';
 export * from './handover.ts';

@@ -309,7 +309,12 @@ import {
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
-import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
+import {
+  bootFirstRunChoice,
+  bootFirstRunSentence,
+  createFleetSetupSubsystem,
+} from '../src/lib/fleet/setup-service.ts';
+import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -619,11 +624,7 @@ import {
   WorkspaceFacetContributor,
 } from '../src/lib/transfer/index.ts';
 import { daemonVersion } from '../src/lib/version.ts';
-// Account-model seeds (docs/design/account-model.md §13.2) that nothing here constructs yet. Each is
-// loaded so it is reachable from the first commit; the unit that fills one replaces its line with the
-// construction it needs: U11 the tool installer and its package adapter.
-import '../src/adapters/process/package-install.ts';
-import '../src/lib/fleet/tool-install.ts';
+import { runPackageInstall } from '../src/adapters/process/package-install.ts';
 import {
   ConversationLeases,
   LeaseClaimingLaunchWrapper,
@@ -631,6 +632,7 @@ import {
 } from '../src/lib/session/conversation-lease.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
 import { fileFleetCatalogDeps } from '../src/adapters/fleet/account-model-files.ts';
+import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import {
@@ -5966,6 +5968,56 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         run: async spec => await runCredentialHarness(spec),
         baseEnvironment: () => sanitizeHarnessEnv(process.env),
       });
+      // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
+      // write one machine the same way (docs/design/account-model.md §7).
+      const fleetCatalogDeps = fileFleetCatalogDeps({
+        paths,
+        userHome,
+        ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
+        daemonConfig: daemonConfigStore,
+        sessionStates: async () =>
+          await Promise.all(
+            storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
+          ),
+        credentials: fleetCredentials,
+        confirmChange: async password => await grants.confirmChange(password),
+        locate: locateHarness,
+        machineName: () => hostname(),
+        clientName: CLIENT_NAME,
+      });
+      /**
+       * First-run import, Import again, tool install, the Clone export and import, and migration
+       * (docs/design/account-model.md §4.3, §4.7, §10.3). A package manager runs only inside an install
+       * a person asked for; nothing here runs on a timer.
+       */
+      const fleetSetup = createFleetSetupSubsystem(
+        fileFleetSetupDeps({
+          catalog: fleetCatalogDeps,
+          platform: process.platform,
+          ...(process.env.CLAUDE_CONFIG_DIR === undefined ? {} : { claudeConfigDir: process.env.CLAUDE_CONFIG_DIR }),
+          ...(process.env.CODEX_HOME === undefined ? {} : { codexHome: process.env.CODEX_HOME }),
+          credentials: harnessCredentials,
+          command: new SpawnCredentialCommand(),
+          keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
+          tools: new ToolInstallService({
+            platform: process.platform,
+            executables,
+            locate: kind => locateHarnessCommand(kind, harnessDiscovery, executables),
+            run: runPackageInstall,
+            environment: process.env,
+            confirmChange: async password => await grants.confirmChange(password),
+            clientName: CLIENT_NAME,
+          }),
+          secrets: secrets.directory,
+          sessions: async () =>
+            await Promise.all(
+              storage.listSessions().map(async session => ({
+                config: await storage.readConfig(session.id).catch(() => undefined),
+                state: await storage.readState(session.id).catch(() => undefined),
+              })),
+            ),
+        }),
+      );
       return {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -5992,24 +6044,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         fleet,
         harnessLogin,
         fleetCredentials,
-        fleetCatalog: createFleetCatalogSubsystem(
-          fileFleetCatalogDeps({
-            paths,
-            userHome,
-            ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
-            daemonConfig: daemonConfigStore,
-            sessionStates: async () =>
-              await Promise.all(
-                storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
-              ),
-            credentials: fleetCredentials,
-            confirmChange: async password => await grants.confirmChange(password),
-            locate: locateHarness,
-            machineName: () => hostname(),
-            clientName: CLIENT_NAME,
-          }),
-        ),
-        fleetSetup: createFleetSetupSubsystem(),
+        // The catalogue runs the setup service's import and clone as two of its reviewed changes.
+        fleetCatalog: createFleetCatalogSubsystem({ ...fleetCatalogDeps, executors: fleetSetup.executors }),
+        fleetSetup,
         /**
          * How much of this machine the managed fleet may take.
          *
@@ -6484,7 +6521,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * withheld when preparation is going to run; the trail then reports the true FINAL state from a
    * re-read preflight, further down, rather than the state this line saw.
    */
-  const fleetPreparation = decideFleetBootPreparation({ enabled: config.fleet.prepareDefaults, preflight: harnesses });
+  // Which first run: today's version-1 scaffold while the account model is switched off, and the
+  // version-2 import once it is on — never both (docs/design/account-model.md §10.4).
+  const firstRun = bootFirstRunChoice({
+    prepareDefaults: config.fleet.prepareDefaults,
+    accountModelEnabled: config.accountModel.enabled,
+  });
+  const fleetPreparation = decideFleetBootPreparation({ enabled: firstRun === 'version-1', preflight: harnesses });
   const fleetLocations = {
     fleetDirectory: opened.paths.fleet,
     binDirectory: join(opened.paths.fleet, 'bin'),
@@ -6499,8 +6542,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
     // WHY nothing was created, beside the warning that says nothing can be launched. The two are one
     // question for the reader — "there is a harness here, why can I not use it" — and the skip reason
-    // is the half that names the key or the file standing in the way.
-    world.notices.state(fleetPreparation.reason);
+    // is the half that names the key or the file standing in the way. The version-2 first run says
+    // its own below, after the mounts it runs through.
+    if (firstRun !== 'version-2') world.notices.state(fleetPreparation.reason);
   }
 
   const usage = await world.createUsageFeed(config);
@@ -6597,6 +6641,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * A FAILURE NEVER REFUSES THE BOOT. `prepareDefaults` answers with a value for exactly that reason,
    * and the failure is said as a `state` so no log level can hide a host that was left part-prepared.
    */
+  if (firstRun === 'version-2') {
+    // The version-2 first run: this host's own Claude Code and Codex setup, imported, with each login
+    // shared in place rather than copied. A failure is a sentence, never a refused boot.
+    world.notices.state(bootFirstRunSentence(await subsystems.fleetSetup.firstRunAtBoot()));
+  }
   if (fleetPreparation.kind === 'prepare') {
     const prepared = await subsystems.fleet.prepareDefaults(fleetPreparation.harnesses);
     if (prepared.kind === 'prepared') {
