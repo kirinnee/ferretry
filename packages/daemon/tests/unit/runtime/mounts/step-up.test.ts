@@ -1,11 +1,19 @@
 import { describe, it } from 'bun:test';
-import { MAX_PASSKEYS_PER_DEVICE, STEP_UP_TTL_SECONDS, stepUpRefusalCode } from '@ferretry/protocol';
+import {
+  DEFAULT_SECURITY_SETTINGS,
+  MAX_PASSKEYS_PER_DEVICE,
+  PRESENCE_REQUIRED_CODE,
+  type SecuritySettings,
+  STEP_UP_TTL_SECONDS,
+  stepUpRefusalCode,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { stepUpRoutes } from '../../../../src/lib/runtime/mounts/step-up.ts';
 import {
   ChallengeLedger,
+  type DeviceKeyRotationPort,
   type PasskeyStore,
   type PasskeyVerifierPort,
   StepUpRegistry,
@@ -102,6 +110,9 @@ interface World {
   /** Milliseconds between the device being paired and now. */
   readonly pairedAgoMs?: number;
   readonly known?: boolean;
+  /** The machine's security settings, over the defaults. Absent builds the service without settings. */
+  readonly settings?: Partial<SecuritySettings>;
+  readonly rotation?: DeviceKeyRotationPort;
 }
 
 function mount(world: World = {}) {
@@ -123,11 +134,13 @@ function mount(world: World = {}) {
     },
     allowedOrigins: () => [ORIGIN],
     relyingPartyName: 'Ferretry',
+    ...(world.settings === undefined ? {} : { settings: () => ({ ...DEFAULT_SECURITY_SETTINGS, ...world.settings }) }),
+    ...(world.rotation === undefined ? {} : { rotation: world.rotation }),
   });
   const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
   const surface = (async () => {
     await grants.refresh();
-    return new ApiDispatcher(new ApiRouter(stepUpRoutes(service)), credentials, grants);
+    return new ApiDispatcher(new ApiRouter(stepUpRoutes(service)), credentials, grants, undefined, service);
   })();
   return { store, verifier, registry, service, surface };
 }
@@ -156,6 +169,8 @@ const ROUTES = [
   { method: 'POST', path: '/v1/passkeys', body: registrationBody },
   { method: 'POST', path: '/v1/step-up/options', body: originBody },
   { method: 'POST', path: '/v1/step-up', body: assertionBody },
+  { method: 'POST', path: '/v1/presence/options', body: originBody },
+  { method: 'POST', path: '/v1/presence', body: assertionBody },
 ] as const;
 
 describe('step-up routes', () => {
@@ -448,5 +463,289 @@ describe('step-up routes', () => {
     should(jsonBody(same)).containEql({ registration: 'stepped-up' });
     should(jsonBody(otherTab)).containEql({ registration: 'closed' });
     should(store.held).have.length(1);
+  });
+});
+
+describe('step-up routes: presence on opening (B6)', () => {
+  const ask = { settings: { presenceOnOpen: true } } as const;
+  const post = (path: string, body: string) => request({ method: 'POST', path, body, ...asDevice });
+
+  it('should exempt exactly the passkey panel and the two presence routes from the presence demand', () => {
+    // Arrange
+    const routes = stepUpRoutes(mount().service);
+
+    // Act
+    const exempt = routes.filter(route => route.presenceExempt === true).map(route => `${route.method} ${route.path}`);
+
+    // Assert
+    should(exempt).deepEqual(['GET /v1/passkeys', 'POST /v1/presence/options', 'POST /v1/presence']);
+  });
+
+  it('should serve the presence routes with no capability demand, never cached, to operators only', () => {
+    // Arrange
+    const routes = stepUpRoutes(mount().service);
+
+    // Act
+    const presence = routes.filter(route => route.path.startsWith('/v1/presence'));
+
+    // Assert
+    should(presence).have.length(2);
+    for (const route of presence) {
+      should([route.path, route.minimum, route.noStore, route.capability]).deepEqual([
+        route.path,
+        'operator',
+        true,
+        undefined,
+      ]);
+    }
+  });
+
+  it('should answer 401 presence_required to every other route until the device confirms', async () => {
+    // Arrange
+    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+    const refused = ROUTES.filter(
+      route => route.path !== '/v1/passkeys' || route.method !== 'GET',
+    ).filter(route => !route.path.startsWith('/v1/presence'));
+
+    for (const route of refused) {
+      // Act
+      const response = await dispatcher.dispatch(
+        request({ method: route.method, path: route.path, body: route.body, ...asDevice }),
+      );
+
+      // Assert
+      should([route.path, response.status, jsonBody(response).code]).deepEqual([
+        route.path,
+        401,
+        PRESENCE_REQUIRED_CODE,
+      ]);
+    }
+  });
+
+  it('should still serve the passkey panel and both presence routes while presence is required', async () => {
+    // Arrange
+    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+
+    // Act
+    const panel = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
+    const options = await dispatcher.dispatch(post('/v1/presence/options', originBody));
+    const confirmed = await dispatcher.dispatch(post('/v1/presence', assertionBody));
+
+    // Assert
+    should(panel.status).equal(200);
+    should(options.status).equal(200);
+    should(jsonBody(options)).containEql({ rpId: 'app.example.test' });
+    should(confirmed.status).equal(200);
+  });
+
+  it('should answer a confirmation with when presence lapses, and then serve every route', async () => {
+    // Arrange
+    const dispatcher = await mount({
+      settings: { presenceOnOpen: true, presenceValidityHours: 2 },
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+    }).surface;
+    const blocked = await dispatcher.dispatch(post('/v1/step-up/options', originBody));
+    await dispatcher.dispatch(post('/v1/presence/options', originBody));
+
+    // Act
+    const confirmed = await dispatcher.dispatch(post('/v1/presence', assertionBody));
+    const served = await dispatcher.dispatch(post('/v1/step-up/options', originBody));
+
+    // Assert
+    should(blocked.status).equal(401);
+    should(jsonBody(confirmed)).deepEqual({ presentUntil: new Date(NOW + 2 * 3_600_000).toISOString() });
+    should(served.status).equal(200);
+  });
+
+  it('should not count a confirmation on opening as a step-up', async () => {
+    // Arrange
+    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+    await dispatcher.dispatch(post('/v1/presence/options', originBody));
+    await dispatcher.dispatch(post('/v1/presence', assertionBody));
+
+    // Act
+    const view = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
+
+    // Assert
+    should(jsonBody(view).stepUpUntil).be.undefined();
+  });
+
+  it('should refuse a confirmation with no challenge: 401 step_up_not_verified', async () => {
+    // Arrange
+    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+
+    // Act
+    const response = await dispatcher.dispatch(post('/v1/presence', assertionBody));
+
+    // Assert
+    should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
+  });
+
+  it('should refuse a confirmation that carries a rotation: 401 step_up_not_verified', async () => {
+    // Arrange
+    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+    await dispatcher.dispatch(post('/v1/presence/options', originBody));
+    const body = json({ ...JSON.parse(assertionBody), rotation: { deviceKey: 'bmV3', proof: 'cHJvb2Y' } });
+
+    // Act
+    const response = await dispatcher.dispatch(post('/v1/presence', body));
+
+    // Assert
+    should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
+  });
+
+  it('should ask a caller on the host for nothing, and never ask a caller that is not a device', async () => {
+    // Arrange
+    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+
+    // Act
+    const onHost = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up/options', body: originBody, privilegedLoopback: true, ...asDevice }),
+    );
+    const noDevice = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asAdminNoDevice }),
+    );
+
+    // Assert
+    should(onHost.status).equal(200);
+    should([noDevice.status, jsonBody(noDevice).code]).deepEqual([400, stepUpRefusalCode('not-a-device')]);
+  });
+
+  it('should refuse the presence routes to a caller that is not a device: 400 step_up_not_a_device', async () => {
+    // Arrange
+    const dispatcher = await mount(ask).surface;
+
+    for (const route of ROUTES.filter(entry => entry.path.startsWith('/v1/presence'))) {
+      // Act
+      const response = await dispatcher.dispatch(
+        request({ method: route.method, path: route.path, body: route.body, ...asAdminNoDevice }),
+      );
+
+      // Assert
+      should([route.path, response.status, jsonBody(response).code]).deepEqual([
+        route.path,
+        400,
+        stepUpRefusalCode('not-a-device'),
+      ]);
+    }
+  });
+
+  it('should refuse presence options for an origin the machine does not serve: 403', async () => {
+    // Arrange
+    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+
+    // Act
+    const response = await dispatcher.dispatch(
+      post('/v1/presence/options', json({ origin: 'https://elsewhere.example.test' })),
+    );
+
+    // Assert
+    should([response.status, jsonBody(response).code]).deepEqual([403, stepUpRefusalCode('origin-not-allowed')]);
+  });
+});
+
+describe('step-up routes: key rotation (B6)', () => {
+  const TRANSCRIPT = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const rotationBody = json({ ...JSON.parse(assertionBody), rotation: { deviceKey: 'bmV3LWtleQ', proof: 'cHJvb2Y' } });
+
+  /** A rotation port for a key issued `ageDays` ago, answering what the case says. */
+  const rotationPort = (ageDays: number, swapped = true) => {
+    const rotated: Parameters<DeviceKeyRotationPort['rotate']>[0][] = [];
+    const port: DeviceKeyRotationPort = {
+      keyIssuedAt: () => NOW - ageDays * 86_400_000,
+      verify: async () => true,
+      rotate: async input => {
+        rotated.push(input);
+        return swapped;
+      },
+    };
+    return { port, rotated };
+  };
+
+  /** A session-carried request: what the tunnel produces, with the transcript the proof is bound to. */
+  const inSession = (body: string, path = '/v1/step-up') => ({
+    ...request({ method: 'POST', path, body, ...asDevice }),
+    transcriptHash: TRANSCRIPT,
+  });
+
+  it('should answer 403 step_up_rotation_required, naming what happens next, once the key is due', async () => {
+    // Arrange
+    const { port } = rotationPort(30);
+    const world = mount({
+      settings: { deviceKeyRotationDays: 30 },
+      rotation: port,
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+    });
+    const dispatcher = await world.surface;
+    await dispatcher.dispatch(inSession(originBody, '/v1/step-up/options'));
+
+    // Act
+    const response = await dispatcher.dispatch(inSession(assertionBody));
+
+    // Assert
+    should([response.status, jsonBody(response).code]).deepEqual([403, stepUpRefusalCode('rotation-required')]);
+    should(jsonBody(response).error).equal(
+      "this device's key is due for replacement, and this machine replaces it with the next passkey confirmation",
+    );
+    should(world.service.held(browser)).be.false();
+  });
+
+  it('should rotate the key in the same step-up that was refused, answering keyRotated', async () => {
+    // Arrange
+    const { port, rotated } = rotationPort(31);
+    const dispatcher = await mount({
+      settings: { deviceKeyRotationDays: 30 },
+      rotation: port,
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+    }).surface;
+    await dispatcher.dispatch(inSession(originBody, '/v1/step-up/options'));
+    const refused = await dispatcher.dispatch(inSession(assertionBody));
+
+    // Act
+    const granted = await dispatcher.dispatch(inSession(rotationBody));
+
+    // Assert
+    should(refused.status).equal(403);
+    should(granted.status).equal(200);
+    should(jsonBody(granted)).deepEqual({
+      expiresAt: new Date(NOW + STEP_UP_TTL_SECONDS * 1_000).toISOString(),
+      keyRotated: true,
+    });
+    should(rotated).deepEqual([{ deviceId, deviceKey: 'bmV3LWtleQ', transcriptHash: TRANSCRIPT }]);
+  });
+
+  it('should answer 400 step_up_not_a_device when the device was revoked between the assertion and the swap', async () => {
+    // Arrange
+    const { port } = rotationPort(31, false);
+    const dispatcher = await mount({
+      settings: { deviceKeyRotationDays: 30 },
+      rotation: port,
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+    }).surface;
+    await dispatcher.dispatch(inSession(originBody, '/v1/step-up/options'));
+
+    // Act
+    const response = await dispatcher.dispatch(inSession(rotationBody));
+
+    // Assert
+    should([response.status, jsonBody(response).code]).deepEqual([400, stepUpRefusalCode('not-a-device')]);
+  });
+
+  it('should refuse a rotation the request did not carry a session transcript for: 401 step_up_not_verified', async () => {
+    // Arrange
+    const { port, rotated } = rotationPort(31);
+    const dispatcher = await mount({
+      settings: { deviceKeyRotationDays: 30 },
+      rotation: port,
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+    }).surface;
+    await dispatcher.dispatch(inSession(originBody, '/v1/step-up/options'));
+
+    // Act
+    const response = await dispatcher.dispatch(request({ method: 'POST', path: '/v1/step-up', body: rotationBody, ...asDevice }));
+
+    // Assert
+    should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
+    should(rotated).deepEqual([]);
   });
 });

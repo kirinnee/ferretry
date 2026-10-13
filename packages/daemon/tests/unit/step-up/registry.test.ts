@@ -63,6 +63,80 @@ describe('StepUpRegistry', () => {
   });
 });
 
+describe('StepUpRegistry window (B6)', () => {
+  /** A registry whose window is a value the case can change, as the saved setting is. */
+  const windowed = (minutes: number) => {
+    const window = { minutes };
+    const registry = new StepUpRegistry({ nowMs: () => NOW }, () => window.minutes);
+    registry.open(phone);
+    return { window, registry };
+  };
+
+  it('should hold a step-up for the window the setting names, not the default', () => {
+    // Arrange
+    const { registry } = windowed(5);
+
+    // Act
+    const expiresAtMs = registry.grant(phone, NOW);
+
+    // Assert
+    should(expiresAtMs).equal(NOW + 5 * 60_000);
+    should(registry.held(phone, NOW + 5 * 60_000 - 1)).be.true();
+    should(registry.held(phone, NOW + 5 * 60_000)).be.false();
+  });
+
+  it('should apply a shortened window to a step-up that is already held', () => {
+    // Arrange
+    const { window, registry } = windowed(15);
+    registry.grant(phone, NOW);
+    const later = NOW + 6 * 60_000;
+    should(registry.held(phone, later)).be.true();
+
+    // Act
+    window.minutes = 5;
+
+    // Assert
+    should(registry.expiresAt(phone, later)).be.undefined();
+    should(registry.held(phone, NOW)).be.false();
+  });
+
+  it('should hold a step-up for a challenge’s life only when the window is 0, and spend it on one act', () => {
+    // Arrange
+    const { registry } = windowed(0);
+
+    // Act
+    const expiresAtMs = registry.grant(phone, NOW);
+
+    // Assert
+    should(expiresAtMs).equal(NOW + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000);
+    should(registry.held(phone, expiresAtMs - 1)).be.true();
+    registry.spend(phone);
+    should(registry.held(phone, NOW)).be.false();
+  });
+
+  it('should let a window of 0 lapse on its own when no act spends it', () => {
+    // Arrange
+    const { registry } = windowed(0);
+    const expiresAtMs = registry.grant(phone, NOW);
+
+    // Act / Assert
+    should(registry.held(phone, expiresAtMs)).be.false();
+  });
+
+  it('should leave a step-up alone when an act is admitted under a window above 0', () => {
+    // Arrange
+    const { registry } = windowed(15);
+    registry.grant(phone, NOW);
+
+    // Act
+    registry.spend(phone);
+    registry.spend(phone);
+
+    // Assert
+    should(registry.held(phone, NOW)).be.true();
+  });
+});
+
 describe('ChallengeLedger', () => {
   it('should answer a challenge exactly once', () => {
     // Arrange
