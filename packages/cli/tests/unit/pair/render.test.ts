@@ -1,5 +1,5 @@
-import { localOnlyNotice, refusalNotice } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import { localOnlyNotice, refusalNotice } from '@ferretry/protocol';
 import should from 'should';
 import {
   type PairingInvitation,
@@ -23,6 +23,7 @@ const invitation = (overrides: Partial<PairingInvitation> = {}): string =>
   renderInvitation({
     mint: MINT,
     offer: { kind: 'qr', link: LINK, qr: QR },
+    requestedGrants: 'default',
     columns: 100,
     remainingMs: 120_000,
     binaryName: 'fy',
@@ -227,5 +228,47 @@ describe('pairing screen', () => {
     should(unconfirmed).containEql('whether anything used it is unknown: fetch failed');
     should(unconfirmed).containEql('Treating it as unpaired');
     should(unconfirmed).not.containEql('expired unused');
+  });
+});
+
+describe('pairing screen, what the new device will hold', () => {
+  const before = (actual: string, marker: string): boolean => actual.indexOf('FULL ACCESS') < actual.indexOf(marker);
+
+  it('should say a plain code gives read-and-chat only, and name the verbs that widen it', () => {
+    // Act
+    const actual = invitation({ binaryName: 'foo' });
+
+    // Assert
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('can only read the fleet and chat with sessions');
+    should(flattened).containEql('`foo device grant`');
+    should(flattened).containEql('`foo pair --full`');
+    should(actual).not.containEql('FULL ACCESS');
+    should(actual).not.containEql('fy ');
+  });
+
+  it('should say a full code gives every capability, before the QR, and that the passkey still applies', () => {
+    // Act
+    const actual = invitation({ mint: { ...MINT, grants: 'full' }, requestedGrants: 'full' });
+
+    // Assert
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('FULL ACCESS: the device that scans this gets every capability on this machine');
+    should(flattened).containEql('still asks for its passkey');
+    should(flattened).not.containEql('can only read the fleet');
+    should(before(actual, 'Or scan this compact QR:')).be.true();
+    should(before(actual, LINK)).be.true();
+  });
+
+  it('should not claim full access when an older daemon echoes the default to a --full request', () => {
+    // Act
+    const actual = invitation({ mint: MINT, requestedGrants: 'full', binaryName: 'foo' });
+
+    // Assert
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('--full was NOT applied: this daemon is older');
+    should(flattened).containEql('can only read the fleet and chat with sessions');
+    should(flattened).containEql('`foo device grant`');
+    should(actual).not.containEql('FULL ACCESS');
   });
 });

@@ -1,10 +1,11 @@
 import {
-  pairingLinkUrl,
   type PairingCodeMintResponse,
   PairingCodeMintResponseSchema,
-  type PairingInvitationLink,
   type PairingCodeStatusResponse,
+  type PairingGrantSet,
   type PairingId,
+  type PairingInvitationLink,
+  pairingLinkUrl,
 } from '@ferretry/protocol';
 import type {
   IBrowserOpener,
@@ -197,6 +198,7 @@ export class FixedTerminalSize implements ITerminalSize {
  */
 export class ScriptedPairGateway implements IPairGateway {
   minted = 0;
+  readonly mintedWith: string[] = [];
   readonly polled: string[] = [];
 
   constructor(
@@ -206,8 +208,9 @@ export class ScriptedPairGateway implements IPairGateway {
     private readonly mint_: PairingCodeMintResponse | Error = MINT,
   ) {}
 
-  async mint(): Promise<PairingCodeMintResponse> {
+  async mint(grants: PairingGrantSet): Promise<PairingCodeMintResponse> {
     this.minted += 1;
+    this.mintedWith.push(grants);
     if (this.mint_ instanceof Error) throw this.mint_;
     return await Promise.resolve(this.mint_);
   }
@@ -258,3 +261,6 @@ export class RecordingBrowserOpener implements IBrowserOpener {
     return await Promise.resolve(this.succeeds);
   }
 }
+
+/** A mint whose daemon echoes that the device will hold every capability. */
+export const FULL_MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({ ...MINT, grants: 'full' });

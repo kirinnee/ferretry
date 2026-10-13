@@ -61,6 +61,8 @@ export interface PairOptions {
    * operator to photograph their own screen.
    */
   readonly open?: boolean;
+  /** Mint a code whose device holds every capability — `fy pair --full`. */
+  readonly full?: boolean;
 }
 
 export interface PairDeps {
@@ -97,7 +99,8 @@ export class PairController {
   constructor(private readonly deps: PairDeps) {}
 
   async pair(options: PairOptions): Promise<void> {
-    const mint = await this.deps.gateway.mint();
+    const requestedGrants = options.full === true ? 'full' : 'default';
+    const mint = await this.deps.gateway.mint(requestedGrants);
     const remainingMs = this.#lifespan(mint);
     const outcome = pairingMintOutcome(mint);
     const offer = await this.#offer(outcome, options);
@@ -105,6 +108,7 @@ export class PairController {
       renderInvitation({
         mint,
         offer,
+        requestedGrants,
         columns: this.deps.terminal.columns(),
         remainingMs,
         binaryName: this.deps.binaryName,
