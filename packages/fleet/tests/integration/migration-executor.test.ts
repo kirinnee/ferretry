@@ -74,7 +74,11 @@ class FakeKeychain implements CredentialCommand {
   readonly calls: string[][] = [];
   failWith: Partial<Record<'find' | 'write' | 'delete' | 'list', number>> = {};
 
-  async run(command: readonly [string, ...string[]], _timeoutMs: number, stdin?: string): Promise<CredentialCommandResult> {
+  async run(
+    command: readonly [string, ...string[]],
+    _timeoutMs: number,
+    stdin?: string,
+  ): Promise<CredentialCommandResult> {
     this.calls.push([...command]);
     const [, verb, ...rest] = command;
     if (verb === '-i') {
@@ -148,7 +152,9 @@ async function firstRunMachine(
 
   const platform = options.platform ?? 'linux';
   const keychain = new FakeKeychain();
-  const homes = Object.fromEntries(WRAPPERS.map(wrapper => [wrapper, path.join(homesDirectory, wrapper)])) as Machine['homes'];
+  const homes = Object.fromEntries(
+    WRAPPERS.map(wrapper => [wrapper, path.join(homesDirectory, wrapper)]),
+  ) as Machine['homes'];
   const records: FleetSeedProvenanceRecord[] = [];
   for (const [index, wrapper] of WRAPPERS.entries()) {
     const home = homes[wrapper];
@@ -197,7 +203,12 @@ async function firstRunMachine(
         layout,
         configPath,
         platform,
-        credentials: new PlatformFleetCredentialStore({ platform, command: keychain, now: () => NOW, keychainAccount: 'someone' }),
+        credentials: new PlatformFleetCredentialStore({
+          platform,
+          command: keychain,
+          now: () => NOW,
+          keychainAccount: 'someone',
+        }),
         command: keychain,
         keychainAccount: 'someone',
         hostCodexHome: path.join(userHome, '.codex'),
@@ -215,7 +226,10 @@ async function firstRunMachine(
 /** Give the four homes different copies, so the store cannot be the host's (no provenance proves it). */
 async function divergeCopies(machine: Machine): Promise<void> {
   await writeFile(path.join(machine.homes['claude-default'], '.credentials.json'), claudeBlob('old', NOW + HOUR));
-  await writeFile(path.join(machine.homes['claude-auto-default'], '.credentials.json'), claudeBlob('new', NOW + 9 * HOUR));
+  await writeFile(
+    path.join(machine.homes['claude-auto-default'], '.credentials.json'),
+    claudeBlob('new', NOW + 9 * HOUR),
+  );
   await writeFile(path.join(machine.homes['codex-default'], 'auth.json'), codexBlob('alive', NOW - 60_000));
   await writeFile(path.join(machine.homes['codex-auto-default'], 'auth.json'), codexBlob('spent', NOW - 9 * HOUR));
 }
@@ -246,7 +260,9 @@ describe('FleetMigration — the default first run, shared with the terminal', (
       should(await exists(path.join(machine.homes[wrapper], '.credentials.json'))).be.false();
     }
     for (const wrapper of ['codex-default', 'codex-auto-default'] as const) {
-      should(await readlink(path.join(machine.homes[wrapper], 'auth.json'))).equal(path.join(machine.userHome, '.codex', 'auth.json'));
+      should(await readlink(path.join(machine.homes[wrapper], 'auth.json'))).equal(
+        path.join(machine.userHome, '.codex', 'auth.json'),
+      );
     }
     should(machine.applied.map(model => Object.keys(model.runtimes).toSorted())).deepEqual([
       ['claude-auto-default', 'claude-default', 'codex-auto-default', 'codex-default'],
@@ -263,7 +279,9 @@ describe('FleetMigration — the default first run, shared with the terminal', (
     should(outcome.report.credentials.find(credential => credential.id === 'codex-default')?.kept).equal(
       `your own login in ${path.join(machine.userHome, '.codex')}`,
     );
-    const report = JSON.parse(await readFile(path.join(machine.layout.fleetDirectory, 'migration', 'report.json'), 'utf8'));
+    const report = JSON.parse(
+      await readFile(path.join(machine.layout.fleetDirectory, 'migration', 'report.json'), 'utf8'),
+    );
     should(report.digest).equal(dryRun.plan.digest);
     should(await exists(path.join(machine.layout.fleetDirectory, 'migration', 'state.json'))).be.false();
   });
@@ -383,7 +401,9 @@ describe('FleetMigration — never silently', () => {
 
     // Act / Assert
     should(await machine.migration().status()).deepEqual({ kind: 'no-fleet' });
-    await should(machine.migration().dryRun()).be.rejectedWith('this machine has no fleet to migrate; set it up instead');
+    await should(machine.migration().dryRun()).be.rejectedWith(
+      'this machine has no fleet to migrate; set it up instead',
+    );
   });
 });
 
@@ -403,7 +423,9 @@ describe('FleetMigration — a failure puts everything back', () => {
     should(await readFile(machine.configPath, 'utf8')).equal(machine.configText);
     should(await readFile(path.join(machine.homes['codex-auto-default'], 'auth.json'), 'utf8')).equal(before);
     should((await lstat(path.join(machine.homes['codex-auto-default'], 'auth.json'))).isFile()).be.true();
-    should(await exists(path.join(machine.layout.fleetDirectory, 'credentials', 'codex-default', 'auth.json'))).be.false();
+    should(
+      await exists(path.join(machine.layout.fleetDirectory, 'credentials', 'codex-default', 'auth.json')),
+    ).be.false();
     should(await exists(path.join(machine.layout.fleetDirectory, 'ids.json'))).be.false();
     should(await exists(path.join(machine.layout.fleetDirectory, 'migration', 'state.json'))).be.false();
     should(await machine.migration().status()).deepEqual({ kind: 'version-1' });
@@ -430,8 +452,14 @@ describe('FleetMigration — a failure puts everything back', () => {
     // Assert
     if (outcome.kind !== 'rolled-back') throw new Error(`expected a rollback, got ${outcome.kind}`);
     should(outcome.unrestored).containEql(`${storeFile} changed after the migration wrote it, so it was kept`);
-    should(outcome.unrestored.some(line => line.startsWith(`${path.join(machine.homes['claude-default'], '.credentials.json')} was not put back`))).be.true();
-    const record = (await readdir(path.join(machine.layout.fleetDirectory, 'migration'))).find(name => name.startsWith('rollback-'));
+    should(
+      outcome.unrestored.some(line =>
+        line.startsWith(`${path.join(machine.homes['claude-default'], '.credentials.json')} was not put back`),
+      ),
+    ).be.true();
+    const record = (await readdir(path.join(machine.layout.fleetDirectory, 'migration'))).find(name =>
+      name.startsWith('rollback-'),
+    );
     should(record).not.be.undefined();
   });
 
@@ -454,7 +482,10 @@ describe('FleetMigration — a failure puts everything back', () => {
     const machine = await firstRunMachine({ provenance: false });
     await divergeCopies(machine);
     await mkdir(path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default'), { recursive: true });
-    await writeFile(path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default', '.credentials.json'), claudeBlob('stranger', NOW));
+    await writeFile(
+      path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default', '.credentials.json'),
+      claudeBlob('stranger', NOW),
+    );
 
     // Act
     const { outcome } = await dryRunAndMigrate(machine);
@@ -462,7 +493,8 @@ describe('FleetMigration — a failure puts everything back', () => {
     // Assert
     should(outcome).match({
       kind: 'rolled-back',
-      reason: "Ferretry's store for login claude-default already holds a different login, so nothing was written over it",
+      reason:
+        "Ferretry's store for login claude-default already holds a different login, so nothing was written over it",
     });
   });
 
@@ -472,7 +504,12 @@ describe('FleetMigration — a failure puts everything back', () => {
     await divergeCopies(machine);
     const migration = machine.migration();
     const { plan } = await migration.dryRun();
-    const credentials = new PlatformFleetCredentialStore({ platform: 'linux', command: machine.keychain, now: () => NOW, keychainAccount: 'x' });
+    const credentials = new PlatformFleetCredentialStore({
+      platform: 'linux',
+      command: machine.keychain,
+      now: () => NOW,
+      keychainAccount: 'x',
+    });
     let reads = 0;
     const changing = machine.migration({
       credentials: {
@@ -480,7 +517,9 @@ describe('FleetMigration — a failure puts everything back', () => {
         material: async (kind, home) => {
           // The survey reads each home once; the store step re-reads the kept copy, which has changed.
           reads++;
-          return reads > 4 ? { outcome: 'found', blob: claudeBlob('changed', NOW + HOUR) } : credentials.material(kind, home);
+          return reads > 4
+            ? { outcome: 'found', blob: claudeBlob('changed', NOW + HOUR) }
+            : credentials.material(kind, home);
         },
       },
     });
@@ -499,15 +538,21 @@ describe('FleetMigration — a failure puts everything back', () => {
     // Arrange
     const machine = await firstRunMachine({ provenance: false });
     await divergeCopies(machine);
-    const credentials = new PlatformFleetCredentialStore({ platform: 'linux', command: machine.keychain, now: () => NOW, keychainAccount: 'x' });
+    const credentials = new PlatformFleetCredentialStore({
+      platform: 'linux',
+      command: machine.keychain,
+      now: () => NOW,
+      keychainAccount: 'x',
+    });
     let stored = 0;
     const migration = machine.migration({
       credentials: {
         material: (kind, home) => credentials.material(kind, home),
         storedMaterial: async resolution => {
-          stored++;
-          // Survey reads two host logins; the store step reads once; the verify read fails.
-          if (stored === 4) throw new Error('disk gone');
+          // The store step reads Ferretry's Claude store once (empty); the verify read is the second.
+          if (resolution.store === 'ferretry' && resolution.harness === 'claude' && ++stored === 2) {
+            throw new Error('disk gone');
+          }
           return credentials.storedMaterial(resolution);
         },
       },
@@ -528,14 +573,20 @@ describe('FleetMigration — a failure puts everything back', () => {
     // Arrange
     const machine = await firstRunMachine({ provenance: false });
     await divergeCopies(machine);
-    const credentials = new PlatformFleetCredentialStore({ platform: 'linux', command: machine.keychain, now: () => NOW, keychainAccount: 'x' });
+    const credentials = new PlatformFleetCredentialStore({
+      platform: 'linux',
+      command: machine.keychain,
+      now: () => NOW,
+      keychainAccount: 'x',
+    });
     let stored = 0;
     const migration = machine.migration({
       credentials: {
         material: (kind, home) => credentials.material(kind, home),
         storedMaterial: async resolution => {
-          stored++;
-          if (stored === 4) return { outcome: 'found', blob: claudeBlob('other', NOW + HOUR) };
+          if (resolution.store === 'ferretry' && resolution.harness === 'claude' && ++stored === 2) {
+            return { outcome: 'found', blob: claudeBlob('other', NOW + HOUR) };
+          }
           return credentials.storedMaterial(resolution);
         },
       },
@@ -547,14 +598,17 @@ describe('FleetMigration — a failure puts everything back', () => {
     // Assert
     should(outcome).match({
       kind: 'rolled-back',
-      reason: 'login claude-default read back from its new store is not the copy that was moved, so no copy was retired',
+      reason:
+        'login claude-default read back from its new store is not the copy that was moved, so no copy was retired',
     });
   });
 
   it('should refuse a generated settings file that would replace one of yours', async () => {
     // Arrange — a version-1 inline settings object becomes a file the migration writes
     const machine = await firstRunMachine();
-    const config = Bun.YAML.parse(machine.configText) as { agents: { routes: Record<string, Record<string, unknown>> }[] };
+    const config = Bun.YAML.parse(machine.configText) as {
+      agents: { routes: Record<string, Record<string, unknown>> }[];
+    };
     const first = config.agents[0]?.routes.default as Record<string, unknown>;
     first.layer = { settings: [{ theme: 'dark' }] };
     await writeFile(machine.configPath, Bun.YAML.stringify(config));
@@ -570,14 +624,19 @@ describe('FleetMigration — a failure puts everything back', () => {
     const outcome = await migration.migrate(plan.digest);
 
     // Assert
-    should(outcome).match({ kind: 'rolled-back', reason: `${file} already exists with other content, so it was left as it is` });
+    should(outcome).match({
+      kind: 'rolled-back',
+      reason: `${file} already exists with other content, so it was left as it is`,
+    });
     should(await readFile(file, 'utf8')).equal('{"mine": true}\n');
   });
 
   it('should write a generated settings file, and leave one that already says the same', async () => {
     // Arrange
     const machine = await firstRunMachine();
-    const config = Bun.YAML.parse(machine.configText) as { agents: { routes: Record<string, Record<string, unknown>> }[] };
+    const config = Bun.YAML.parse(machine.configText) as {
+      agents: { routes: Record<string, Record<string, unknown>> }[];
+    };
     (config.agents[0]?.routes.default as Record<string, unknown>).layer = { settings: [{ theme: 'dark' }] };
     (config.agents[0]?.routes.auto as Record<string, unknown>).layer = { settings: [{ theme: 'light' }] };
     await writeFile(machine.configPath, Bun.YAML.stringify(config));
@@ -594,7 +653,9 @@ describe('FleetMigration — a failure puts everything back', () => {
 
     // Assert
     should(outcome.kind).equal('migrated');
-    should(JSON.parse(await readFile(path.join(machine.layout.assetsDirectory, written.file), 'utf8'))).deepEqual(written.content);
+    should(JSON.parse(await readFile(path.join(machine.layout.assetsDirectory, written.file), 'utf8'))).deepEqual(
+      written.content,
+    );
   });
 });
 
@@ -616,16 +677,24 @@ describe('FleetMigration — resumable', () => {
     // Act
     const status = await machine.migration().status();
     const refused = await machine.migration().migrate('another');
-    const dryRun = machine.migration().dryRun();
+    const dryRun = await machine
+      .migration()
+      .dryRun()
+      .then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
     const resumed = await machine.migration().migrate(plan.digest);
 
     // Assert
     should(status).match({ kind: 'in-progress', digest: plan.digest, startedAt: NOW });
     should(refused).deepEqual({
       kind: 'refused',
-      reasons: [`a migration approved as ${plan.digest} is half done; approve that one to finish it before anything else`],
+      reasons: [
+        `a migration approved as ${plan.digest} is half done; approve that one to finish it before anything else`,
+      ],
     });
-    await should(dryRun).be.rejectedWith(`a migration approved as ${plan.digest} is half done; approve it again to finish it`);
+    should(dryRun).equal(`a migration approved as ${plan.digest} is half done; approve it again to finish it`);
     if (resumed.kind !== 'migrated') throw new Error(`expected a migration, got ${resumed.kind}`);
     should(resumed.resumed).be.true();
     should(machine.applied).length(1);
@@ -640,7 +709,11 @@ describe('FleetMigration — resumable', () => {
     const { plan } = await first.dryRun();
     void first.migrate(plan.digest);
     const statePath = path.join(machine.layout.fleetDirectory, 'migration', 'state.json');
-    for (let attempt = 0; attempt < 200 && !(await readFile(statePath, 'utf8').catch(() => '')).includes('"config"'); attempt++) {
+    for (
+      let attempt = 0;
+      attempt < 200 && !(await readFile(statePath, 'utf8').catch(() => '')).includes('"config"');
+      attempt++
+    ) {
       await Bun.sleep(10);
     }
     machine.live = [{ session: 'chat', accountId: id(3) }];
@@ -665,10 +738,12 @@ describe('FleetMigration — resumable', () => {
     await writeFile(statePath, '{"version":9}');
 
     // Act / Assert
-    await should(machine.migration().status()).be.rejectedWith(`${statePath} holds a migration this version cannot read; it was left as it is`);
+    await should(machine.migration().status()).be.rejectedWith(
+      `${statePath} holds a migration this version cannot read; it was left as it is`,
+    );
   });
 
-  it('should keep an earlier attempt\'s backup that differs, under this attempt\'s folder', async () => {
+  it("should keep an earlier attempt's backup that differs, under this attempt's folder", async () => {
     // Arrange
     const machine = await firstRunMachine();
     await writeFile(`${machine.configPath}.v1`, 'agents: []\n');
@@ -678,7 +753,9 @@ describe('FleetMigration — resumable', () => {
 
     // Assert
     if (outcome.kind !== 'migrated') throw new Error('unreachable');
-    should(await readFile(path.join(outcome.report.retired, 'documents', 'config.yaml.v1.previous'), 'utf8')).equal('agents: []\n');
+    should(await readFile(path.join(outcome.report.retired, 'documents', 'config.yaml.v1.previous'), 'utf8')).equal(
+      'agents: []\n',
+    );
     should(await readFile(`${machine.configPath}.v1`, 'utf8')).equal(machine.configText);
   });
 });
@@ -687,7 +764,10 @@ describe('FleetMigration — macOS keychain', () => {
   it('should write the kept login into the item named for its store, and list the old items for a purge', async () => {
     // Arrange
     const machine = await firstRunMachine({ platform: 'darwin', provenance: false });
-    machine.keychain.items.set(keychainService(machine.homes['claude-auto-default']), claudeBlob('new', NOW + 9 * HOUR));
+    machine.keychain.items.set(
+      keychainService(machine.homes['claude-auto-default']),
+      claudeBlob('new', NOW + 9 * HOUR),
+    );
     const store = path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default');
 
     // Act
@@ -699,9 +779,14 @@ describe('FleetMigration — macOS keychain', () => {
     should(machine.keychain.items.has(keychainService(machine.homes['claude-default']))).be.true();
     const listed = JSON.parse(await readFile(path.join(outcome.report.retired, 'keychain.json'), 'utf8'));
     should(listed).deepEqual(
-      [keychainService(machine.homes['claude-default']), keychainService(machine.homes['claude-auto-default'])].toSorted(),
+      [
+        keychainService(machine.homes['claude-default']),
+        keychainService(machine.homes['claude-auto-default']),
+      ].toSorted(),
     );
-    should(outcome.report.credentials[0]?.retired).containEql(`keychain item "${keychainService(machine.homes['claude-default'])}" (until purged)`);
+    should(outcome.report.credentials[0]?.retired).containEql(
+      `keychain item "${keychainService(machine.homes['claude-default'])}" (until purged)`,
+    );
 
     // Act — the purge deletes what was listed, never your own item or a current login's
     const purge = await machine.migration().purgeRetired();
@@ -721,13 +806,18 @@ describe('FleetMigration — macOS keychain', () => {
     const root = path.join(machine.layout.fleetDirectory, 'retired');
     const [folder] = await readdir(root);
     const listed = path.join(root, folder as string, 'keychain.json');
-    await writeFile(listed, JSON.stringify([DEFAULT_KEYCHAIN_SERVICE, 7, 'Claude Code-credentials-gone', 'Claude Code-credentials-stuck']));
+    await writeFile(
+      listed,
+      JSON.stringify([DEFAULT_KEYCHAIN_SERVICE, 7, 'Claude Code-credentials-gone', 'Claude Code-credentials-stuck']),
+    );
     machine.keychain.items.set('Claude Code-credentials-stuck', 'x');
     machine.keychain.failWith = {};
     const failing = machine.migration({
       command: {
         run: async (command, timeout, stdin) =>
-          command.includes('Claude Code-credentials-stuck') ? { code: 51, stdout: '' } : machine.keychain.run(command, timeout, stdin),
+          command.includes('Claude Code-credentials-stuck')
+            ? { code: 51, stdout: '' }
+            : machine.keychain.run(command, timeout, stdin),
       },
     });
 
@@ -746,9 +836,14 @@ describe('FleetMigration — macOS keychain', () => {
   it('should roll back a keychain item it wrote, and keep one a harness changed since', async () => {
     // Arrange
     const machine = await firstRunMachine({ platform: 'darwin', provenance: false });
-    machine.keychain.items.set(keychainService(machine.homes['claude-auto-default']), claudeBlob('new', NOW + 9 * HOUR));
+    machine.keychain.items.set(
+      keychainService(machine.homes['claude-auto-default']),
+      claudeBlob('new', NOW + 9 * HOUR),
+    );
     machine.applyFails = 'no';
-    const store = secureStorageKeychainService(path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default'));
+    const store = secureStorageKeychainService(
+      path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default'),
+    );
 
     // Act
     const { outcome } = await dryRunAndMigrate(machine);
@@ -780,8 +875,13 @@ describe('FleetMigration — macOS keychain', () => {
   it('should leave nothing to undo for a keychain item already gone', async () => {
     // Arrange
     const machine = await firstRunMachine({ platform: 'darwin', provenance: false });
-    machine.keychain.items.set(keychainService(machine.homes['claude-auto-default']), claudeBlob('new', NOW + 9 * HOUR));
-    const store = secureStorageKeychainService(path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default'));
+    machine.keychain.items.set(
+      keychainService(machine.homes['claude-auto-default']),
+      claudeBlob('new', NOW + 9 * HOUR),
+    );
+    const store = secureStorageKeychainService(
+      path.join(machine.layout.fleetDirectory, 'credentials', 'claude-default'),
+    );
     const migration = machine.migration({
       apply: {
         apply: async () => {
@@ -801,7 +901,10 @@ describe('FleetMigration — macOS keychain', () => {
   it('should roll back when the keychain refuses the write', async () => {
     // Arrange
     const machine = await firstRunMachine({ platform: 'darwin', provenance: false });
-    machine.keychain.items.set(keychainService(machine.homes['claude-auto-default']), claudeBlob('new', NOW + 9 * HOUR));
+    machine.keychain.items.set(
+      keychainService(machine.homes['claude-auto-default']),
+      claudeBlob('new', NOW + 9 * HOUR),
+    );
     const migration = machine.migration();
     const { plan } = await migration.dryRun();
     machine.keychain.failWith = { write: 9 };
@@ -816,7 +919,10 @@ describe('FleetMigration — macOS keychain', () => {
   it('should refuse a keychain write it could not make without exposing the login', async () => {
     // Arrange
     const machine = await firstRunMachine({ platform: 'darwin', provenance: false });
-    machine.keychain.items.set(keychainService(machine.homes['claude-auto-default']), claudeBlob('new', NOW + 9 * HOUR));
+    machine.keychain.items.set(
+      keychainService(machine.homes['claude-auto-default']),
+      claudeBlob('new', NOW + 9 * HOUR),
+    );
 
     // Act
     const { outcome } = await dryRunAndMigrate(machine, machine.migration({ keychainAccount: 'has"quote' }));
@@ -833,7 +939,12 @@ describe('FleetMigration — the edges of a machine', () => {
   it('should read an unreadable copy as a reason to wait, naming it', async () => {
     // Arrange
     const machine = await firstRunMachine();
-    const credentials = new PlatformFleetCredentialStore({ platform: 'linux', command: machine.keychain, now: () => NOW, keychainAccount: 'x' });
+    const credentials = new PlatformFleetCredentialStore({
+      platform: 'linux',
+      command: machine.keychain,
+      now: () => NOW,
+      keychainAccount: 'x',
+    });
     const migration = machine.migration({
       credentials: {
         storedMaterial: resolution => credentials.storedMaterial(resolution),
@@ -858,7 +969,10 @@ describe('FleetMigration — the edges of a machine', () => {
     // Arrange
     const machine = await firstRunMachine({ provenance: false });
     await rm(path.join(machine.homes['codex-auto-default'], 'auth.json'));
-    await symlink(path.join(machine.userHome, '.codex', 'auth.json'), path.join(machine.homes['codex-auto-default'], 'auth.json'));
+    await symlink(
+      path.join(machine.userHome, '.codex', 'auth.json'),
+      path.join(machine.homes['codex-auto-default'], 'auth.json'),
+    );
     const migration = machine.migration({ hostCodexHome: undefined });
 
     // Act
@@ -892,12 +1006,30 @@ describe('FleetMigration — the edges of a machine', () => {
     const machine = await firstRunMachine();
     const config = Bun.YAML.parse(machine.configText) as { agents: Record<string, unknown>[] };
     (config.agents[0] as Record<string, unknown>).mcp = './mcp.json';
-    config.agents.push({ name: 'x', kind: 'claude', mcp: './missing.json', routes: {} });
-    config.agents.push({ name: 'y', kind: 'claude', mcp: './flat.json', routes: {} });
-    config.agents.push({ name: 'z', kind: 'claude', mcp: './mcp.json', routes: {} });
+    config.agents.push({
+      name: 'x',
+      kind: 'claude',
+      mcp: './missing.json',
+      routes: { default: { id: id(10), wrapper: 'claude-x', home: 'claude-x', defaultModel: 'm', models: ['m'] } },
+    });
+    config.agents.push({
+      name: 'y',
+      kind: 'claude',
+      mcp: './flat.json',
+      routes: { default: { id: id(11), wrapper: 'claude-y', home: 'claude-y', defaultModel: 'm', models: ['m'] } },
+    });
+    config.agents.push({
+      name: 'z',
+      kind: 'claude',
+      mcp: './mcp.json',
+      routes: { default: { id: id(12), wrapper: 'claude-z', home: 'claude-z', defaultModel: 'm', models: ['m'] } },
+    });
     await writeFile(machine.configPath, Bun.YAML.stringify(config));
     await mkdir(machine.layout.assetsDirectory, { recursive: true });
-    await writeFile(path.join(machine.layout.assetsDirectory, 'mcp.json'), JSON.stringify({ mcpServers: { github: { command: 'npx' } } }));
+    await writeFile(
+      path.join(machine.layout.assetsDirectory, 'mcp.json'),
+      JSON.stringify({ mcpServers: { github: { command: 'npx' } } }),
+    );
     await writeFile(path.join(machine.layout.assetsDirectory, 'flat.json'), JSON.stringify([1]));
 
     // Act
@@ -921,7 +1053,9 @@ describe('FleetMigration — the edges of a machine', () => {
           kind: 'claude',
           auth: 'api-key',
           env: { ANTHROPIC_API_KEY: '${secret:K}' },
-          routes: { default: { id: id(9), wrapper: 'claude-api', home: 'claude-api', defaultModel: 'm', models: ['m'] } },
+          routes: {
+            default: { id: id(9), wrapper: 'claude-api', home: 'claude-api', defaultModel: 'm', models: ['m'] },
+          },
         },
       ],
     };
@@ -941,7 +1075,10 @@ describe('FleetMigration — the edges of a machine', () => {
     // Arrange
     const machine = await firstRunMachine({ provenance: false, hostLogins: false });
     for (const wrapper of WRAPPERS) {
-      await writeFile(path.join(machine.homes[wrapper], wrapper.startsWith('claude') ? '.credentials.json' : 'auth.json'), '{}');
+      await writeFile(
+        path.join(machine.homes[wrapper], wrapper.startsWith('claude') ? '.credentials.json' : 'auth.json'),
+        '{}',
+      );
     }
 
     // Act
@@ -965,7 +1102,12 @@ describe('FleetMigration — the edges of a machine', () => {
           ? {
               ...credential,
               retire: [
-                { accountId: id(0), wrapper: 'x', home: path.join(machine.userHome, '.claude'), copy: { kind: 'file', path: own } },
+                {
+                  accountId: id(0),
+                  wrapper: 'x',
+                  home: path.join(machine.userHome, '.claude'),
+                  copy: { kind: 'file', path: own },
+                },
               ],
             }
           : credential,
