@@ -304,10 +304,28 @@ describe('exchangePairing', () => {
    * walk reports for an ordinary failure. Both ways an old machine can show itself are covered: its
    * liveness route after the direct leg failed, and its words on a rendezvous session.
    */
-  it('names the machine as old when its liveness route speaks an older session, and dials no relay', async () => {
+  it('pairs over a working relay even when the direct liveness read looks old, because that read proves nothing', async () => {
+    const identity = await newDaemonIdentity();
+    const relay = autoDial(identity, { paired: pairedAs(identity.daemonId, [{ kind: 'relay', url: RELAY }]) });
+    const route = byHost({ 'relay.mine.test': relay.dial });
+    const connection = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        network: async () => Response.json({ status: 'ok' }),
+      },
+    );
+    expect(String(connection.daemonId)).toBe(identity.daemonId);
+    expect((relay.requests[0] as { t: string }).t).toBe('pair');
+  });
+
+  it('names the machine as old when nothing reached it and its liveness route speaks an older session', async () => {
     const identity = await newDaemonIdentity();
     const relay = autoDial(identity, { paired: pairedAs(identity.daemonId) });
-    const route = byHost({ 'relay.mine.test': relay.dial });
+    const route = byHost({});
     const asked: string[] = [];
     const deviceKeys = new MemoryDeviceKeyStore();
 

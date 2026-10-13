@@ -539,8 +539,9 @@ const pairingThatRegisters = (
     undefined,
 ): RelayPairingRedeemer => ({
   redeemInSession: async attempt => {
-    observe({ ...attempt });
-    if (!attempt.proven) return { kind: 'refused' };
+    const proven = await attempt.prove();
+    observe({ code: attempt.code, deviceName: attempt.deviceName, deviceKey: attempt.deviceKey, proven });
+    if (!proven) return { kind: 'refused' };
     bridge.deviceKeys.set(MINTED_DEVICE_ID, attempt.deviceKey);
     return {
       kind: 'paired',

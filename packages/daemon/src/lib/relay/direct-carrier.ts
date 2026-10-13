@@ -59,6 +59,19 @@ import type { SessionArrival } from './tunnel.ts';
  */
 export const MAX_DIRECT_SESSIONS = 64;
 
+/**
+ * How many of those may be sockets that have not proved a device yet.
+ *
+ * Counted apart so a stranger who can reach the listener cannot starve the devices that can prove
+ * themselves: unproven sockets are the cheap ones to open, and each holds a slot for up to ten seconds.
+ * Eight admits a household's burst of tabs reconnecting at once.
+ */
+export const MAX_DIRECT_UNPROVEN_SESSIONS = 8;
+
+/** How many upgrades one peer may make in one window, before any crypto runs for it. */
+export const DIRECT_UPGRADES_PER_PEER = 30;
+export const DIRECT_UPGRADE_WINDOW_MS = 60_000;
+
 export interface DirectCarrierDependencies {
   readonly crypto: RelayCrypto;
   readonly identity: DaemonIdentity;
@@ -90,6 +103,8 @@ export class DirectSession implements SocketHandler {
     arrival: SessionArrival | undefined,
     private readonly downstream: SocketDownstream,
     private readonly release: () => void,
+    /** Called once, when this socket's session first proves a device. */
+    onProved: () => void = () => undefined,
   ) {
     const sessionId = sessionIdFromBytes(deps.crypto.randomBytes(SESSION_ID_BYTES));
     if (sessionId === null) throw new Error('the session identifier generator produced an unusable identifier');
@@ -113,7 +128,14 @@ export class DirectSession implements SocketHandler {
       pairing: deps.pairing,
       scheduler: deps.scheduler,
       clock: deps.clock,
-      connections: deps.connections,
+      // Seen on the way through: a device's proof is registered here first, which is the moment this
+      // socket stops being an unproven one.
+      connections: {
+        track: (deviceId, end) => {
+          onProved();
+          return deps.connections.track(deviceId, end);
+        },
+      },
       ...(arrival === undefined ? {} : { arrival }),
     });
   }

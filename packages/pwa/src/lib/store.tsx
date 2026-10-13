@@ -42,6 +42,7 @@ import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import { DaemonPinClient } from './pin-client.ts';
+import { browserPresenceEnvironment, PresenceTracker } from './presence.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import {
@@ -254,6 +255,7 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
   const key = crypto.deviceKeyHandle(minted.privateKey);
   let first: Error | undefined;
   let spentUnheard = false;
+  let outdated = false;
   for (const method of pairingCandidates(seed, options.hostedRelayUrl)) {
     let response: PairingResponse;
     try {
@@ -271,15 +273,14 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
       // A sealed refusal is the DAEMON's answer and ends the walk; anything else is this carrier not
       // working, which is the next one's turn.
       if (reason instanceof RelayPairingRefusedError) throw spentUnheard ? new AmbiguousPairingError(reason) : reason;
-      // AN OLD MACHINE IS ONE SENTENCE, NOT A CARRIER THAT FAILED. Every other carrier reaches the same
-      // daemon, so the walk stops and names the side to update rather than reporting a network fault.
-      if (isOutdatedDaemonRefusal(reason)) throw new DaemonOutdatedError();
-      if (
-        method.kind === 'direct' &&
-        options.network !== undefined &&
-        (await daemonIsOutdated(options.network, method.daemonUrl))
-      )
-        throw new DaemonOutdatedError();
+      // AN OLD MACHINE IS A SIGNAL, NOT A VERDICT. Both signs of one are unauthenticated — a plaintext
+      // liveness read, a refusal sent before any key was checked — so they never stop the walk short of
+      // a carrier that works. They only decide the sentence when every carrier has failed.
+      outdated ||=
+        isOutdatedDaemonRefusal(reason) ||
+        (method.kind === 'direct' &&
+          options.network !== undefined &&
+          (await daemonIsOutdated(options.network, method.daemonUrl)));
       if (reason instanceof PairingOutcomeUnknownError) spentUnheard = true;
       first ??= reason instanceof Error ? reason : new Error(String(reason));
       continue;
@@ -296,6 +297,7 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
     await options.deviceKeys.save(connection.daemonId, minted.privateKey);
     return connection;
   }
+  if (outdated) throw new DaemonOutdatedError();
   throw first ?? new Error('no carrier could reach this daemon to pair with it');
 }
 
@@ -352,6 +354,8 @@ export interface CreateAppStoreOptions {
   readonly deviceKeys?: DeviceKeyStore;
   /** The browser WebSocket by default. Injected so no suite opens one. */
   readonly relayDial?: RelayDial;
+  /** The page's own attention signals by default. Injected so a suite decides who is present. */
+  readonly presence?: Pick<PresenceTracker, 'present'>;
 }
 
 /**
@@ -400,8 +404,12 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // the same WebCrypto either way, and one value is one thing a suite has to replace.
   const relayCrypto = options.relayCrypto ?? new WebCryptoRelayCrypto();
   const deviceKeys = options.deviceKeys ?? new IndexedDbDeviceKeyStore();
+  // One tracker per document: whether a person is at this device, so only their requests keep it
+  // from idling out on the daemon.
+  const presence = options.presence ?? new PresenceTracker(browserPresenceEnvironment());
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
+    presence: () => presence.present(),
     crypto: relayCrypto,
     // Read per session, never cached: a key the person removed by clearing site data must stop
     // opening sessions the moment it is gone.

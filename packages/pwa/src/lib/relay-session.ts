@@ -254,6 +254,8 @@ export type RelayTunnelClientMessage =
       readonly headers?: Readonly<Record<string, string>>;
       readonly body?: string;
       readonly more?: true;
+      /** A person is at this device; only such a request moves its idle clock (`presence.ts`). */
+      readonly presence?: true;
     }
   | { readonly t: 'req-more'; readonly id: number; readonly body: string; readonly more?: true }
   | { readonly t: 'renewed'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly proof: string }

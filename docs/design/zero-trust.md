@@ -169,6 +169,14 @@ GET ws(s)://<daemon address>/v1/rendezvous/<daemonId>/client      (WebSocket upg
   protocol schema and PWA client: a stream is its own session, so nothing is left for a ticket to do.
   (GAP: the remote-browser viewer is unmounted and still written against tickets; it moves onto a
   stream session before it is mounted again.)
+- **Admission is a cheap check in front of the expensive one.** A socket's hello costs the daemon a
+  key agreement and a signature before anything is known about the caller, so the upgrade is admitted
+  first: at most **30 upgrades a minute from one peer address**, at most **8 sockets that have not yet
+  proved a device**, and at most **64 direct sessions** in all. The slot is taken when the upgrade is
+  admitted, not when the socket attaches, so a burst of concurrent upgrades cannot all pass the check
+  before any is counted; a reserved slot whose socket never attaches is handed back after ten seconds.
+  An upgrade from an origin the daemon does not serve is refused with the same `403` an HTTP request
+  from it gets, before any socket route runs.
 - The HTTP listener keeps serving the **host's** credentials (admin token, warden token) exactly as
   before. It no longer resolves a device credential of any kind: the device bearer path is deleted,
   so a device identity can only come from a session. `ApiCredentials.devices` survives only as a
@@ -197,13 +205,22 @@ proof = Ed25519-Sign(device key,
 ```
 
 - The daemon looks the device up by id, checks it is not idle-expired (A6), and verifies the proof
-  against the stored SPKI. Unknown device, expired device and bad proof are **one** refusal: `4403`
-  inside the channel, uniform in wording, so the answer is not an oracle for which ids exist.
+  against the stored SPKI. An unknown id is verified against a fixed dummy key, so a known id and an
+  unknown one cost the same Ed25519 verify. Unknown device, expired device and bad proof are **one**
+  refusal, `4403`, uniform in wording, so the answer is not an oracle for which ids exist.
+- **The close code is not secret.** A close travels in the clear, so a relay operator sees `4403` and
+  `4441` and learns WHEN a session was refused, or when a device stopped renewing (asleep, locked,
+  revoked) — never which device, and never why. Only the sealed records are private.
+- Declared limit: an id that has just idle-expired also costs a revocation write on that request, so
+  its timing differs. Ids carry 132 random bits, so this can only confirm an id that already leaked.
 - `TH` covers both ephemeral keys, both nonces, the daemon's identity and the session id, so a proof
   is valid for exactly one session: a captured record replays into nothing.
 - `appSession` is 16 random bytes the page generates once per page load and holds only in memory. It
   names "this running copy of the app" so a step-up (B) belongs to one tab's life and ends when the
   page closes. It is signed, so a relay cannot move it.
+- Declared limit, closed in B: `appSession` is any 16 bytes the client picks. Code running in the page
+  (an XSS, a malicious deploy) can read it and present it again from a later session of the same
+  device, so before a step-up is bound to it, B makes it a value the DAEMON issues.
 - The admin token is still not resolvable through a session, deliberately — it is a host-local secret.
 
 ### A5. The access lease and silent renewal
@@ -226,13 +243,31 @@ proof = Ed25519-Sign(device key, "ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖ 
 - A lease that runs out ends the session with **`4441` — the access lease ended**, which a client
   treats as "open a new session", silently, never as a revocation. `4403` stays the only code that
   means "this device is no longer accepted".
-- What it buys: authority on any one channel is bounded to 15 minutes past the last time the device
-  key was exercised, and every renewal re-reads revocation and expiry from the daemon's own state.
+- **A session also has an absolute cap: 12 hours** (`MAX_SESSION_SECONDS`) from its first proof. The
+  lease is never extended past it; the session ends `4441` and the client opens a new one, which is
+  a fresh proof over a fresh transcript.
+- **The clock is checked on every record, not only by the timer.** A record that arrives after the
+  lease ended is not served, even when the event loop was too busy to fire the lease timer in time.
+- **`renew` jumps the queue.** It goes ahead of any payload waiting for credit, behind only the record
+  being sealed, so a busy terminal stream cannot hold the renewal back until the lease lapses.
+- What it buys: authority on any one channel needs a device signature at least every 15 minutes and
+  can never outlive 12 hours, and every renewal re-reads revocation and expiry from the daemon's own
+  state.
+- Declared limit: a write still running when a session ends (lease, cap, revocation) completes on the
+  daemon, but its answer is lost with the session. The client correctly never replays a write, so the
+  person can be told a change failed that in fact happened. A correctness gap, not a security one.
+- Declared limit, closed in B: renewal re-checks pairing and idle expiry, not capability grants. A
+  terminal or browser stream opened under a grant survives a later narrowing until it closes.
 
 ### A6. Idle expiry and revocation
 
-- `lastSeenAt` is now real: advanced on every successful auth and renewal, persisted at most once an
-  hour per device (so a busy phone is not a disk write per request).
+- `lastSeenAt` is now real, and it means **a person used this device**. Only a request the page marks
+  `presence: true` advances it: the page is visible and somebody touched, clicked or typed in it in the
+  last five minutes, or it was opened in the last minute (`packages/pwa/src/lib/presence.ts`).
+  Authentication and silent renewal never advance it, so a tab left open on a forgotten laptop still
+  expires. It is persisted at most once an hour per device (so a busy phone is not a disk write per
+  request). The mark is the device's own word, and that is enough: it answers a forgotten device, not
+  a hostile one — somebody using a stolen phone IS present, and revocation is the control for that.
 - A device whose `lastSeenAt` is **30 days** old is expired: refused at its next auth, removed from
   `devices.json`, and absent from the device list — it must pair again. The check runs at boot, at
   every auth or renewal, and at every device-list read; there is no timer.
@@ -243,11 +278,11 @@ proof = Ed25519-Sign(device key, "ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖ 
 
 ```json
 {
-  "version": 2,
+  "schemaVersion": 2,
+  "daemonId": "fy_daemon_…",
   "devices": [
     {
       "id": "fy_device_id_…",
-      "daemonId": "fy_daemon_…",
       "name": "…",
       "platform": "browser",
       "publicKey": "<44-byte Ed25519 SPKI b64url>",
@@ -303,6 +338,12 @@ a bearer that looks like a pre-key device token is answered `426 Upgrade Require
 as the error message (which the old app already renders as text), and an `hs1` naming `/1` is closed
 with `4426` and the same sentence as the close reason. The upgrade commands are written once, in
 `@ferretry/protocol`, so the CLI, the daemon and the app cannot name different ones.
+
+**An "older daemon" signal is evidence, never a verdict that stops the walk.** A plain `/healthz`
+answer and a `closed 4400 'unparseable client hello'` are both unauthenticated: anybody on the direct
+path can forge them. So the app notes the signal and keeps walking the carriers, and the first row's
+sentence is shown only when NO carrier reached the daemon and at least one of them looked old. A
+forged signal on the direct path therefore cannot stop the app from reaching a working relay.
 
 ## B. Passkey step-up and least privilege
 

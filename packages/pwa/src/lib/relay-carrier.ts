@@ -524,6 +524,12 @@ export interface DaemonCarrierRouterOptions {
    * the directory at all. What comes back is dialled, never stored: see `hostedRelayFallbackCarrier`.
    */
   readonly hostedRelay?: () => Promise<string | undefined>;
+  /**
+   * Whether a person is at this device right now (`presence.ts`). A request sent while they are is
+   * marked, and only marked requests keep the device from idling out on the daemon. Absent means
+   * nobody can tell, and nothing is marked.
+   */
+  readonly presence?: () => boolean;
 }
 
 /**
@@ -689,6 +695,7 @@ export class DaemonCarrierRouter {
   readonly #hostedRelay: () => Promise<string | undefined>;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
+  readonly #presence: () => boolean;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
@@ -722,6 +729,7 @@ export class DaemonCarrierRouter {
     this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
+    this.#presence = options.presence ?? (() => false);
   }
 
   /**
@@ -796,6 +804,7 @@ export class DaemonCarrierRouter {
     const chosen = entry.choice;
     if (chosen?.ok === true) return await this.#streamOn(entry, chosen.method, request);
     const probes: ConnectionProbe[] = [];
+    let outdated = false;
     for await (const method of this.#candidates(daemon)) {
       this.#assertCurrent(entry);
       try {
@@ -807,17 +816,16 @@ export class DaemonCarrierRouter {
           reason instanceof RelayStaleEntryError ||
           reason instanceof DeviceKeyMissingError ||
           reason instanceof DeviceKeyUnreadableError ||
-          reason instanceof DaemonOutdatedError ||
           reason instanceof RelayStreamRefusedError ||
           (reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.rendezvousBusy)
         )
           throw reason;
-        if (isOutdatedDaemonRefusal(reason)) throw new DaemonOutdatedError();
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
-        if (method.kind === 'direct') await this.#refuseIfOutdated(method);
+        outdated ||= await this.#looksOutdated(method, reason);
       }
     }
     this.#decide(entry, probes);
+    if (outdated) throw new DaemonOutdatedError();
     throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
   }
 
@@ -907,6 +915,7 @@ export class DaemonCarrierRouter {
     }
 
     const probes: ConnectionProbe[] = [];
+    let outdated = false;
     for await (const method of this.#candidates(daemon)) {
       // ASKED BEFORE EVERY ATTEMPT, not once at the top: a walk takes as long as its failures do, and
       // an unpair, a re-pair or a republish can land between any two of them. Every address below
@@ -931,15 +940,9 @@ export class DaemonCarrierRouter {
         // whether this address works; it says this walk no longer describes a pairing that exists, so
         // every remaining candidate would be dialled with a credential and a set that were replaced.
         if (reason instanceof RelayStaleEntryError) throw reason;
-        if (
-          reason instanceof DeviceKeyMissingError ||
-          reason instanceof DeviceKeyUnreadableError ||
-          reason instanceof DaemonOutdatedError
-        )
-          throw reason;
-        if (isOutdatedDaemonRefusal(reason)) throw new DaemonOutdatedError();
+        if (reason instanceof DeviceKeyMissingError || reason instanceof DeviceKeyUnreadableError) throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
-        if (method.kind === 'direct') await this.#refuseIfOutdated(method);
+        outdated ||= await this.#looksOutdated(method, reason);
         // A session that died AFTER the request left can follow receipt of a POST/PUT/etc. Record
         // its failed probe for the same disclosure a completed walk produces, but do not send that
         // possibly-applied request to the next carrier. One whose session never opened was never
@@ -951,6 +954,7 @@ export class DaemonCarrierRouter {
       }
     }
     this.#decide(entry, probes);
+    if (outdated) throw new DaemonOutdatedError();
     throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
   }
 
@@ -1082,8 +1086,9 @@ export class DaemonCarrierRouter {
     const session = await this.#session(entry, method).catch((reason: unknown) => {
       throw new RelayUnsentError(reason);
     });
+    const record = { ...relayTunnelRequest(url, init), ...(this.#presence() ? { presence: true as const } : {}) };
     try {
-      return relayResponse(await session.request(relayTunnelRequest(url, init)));
+      return relayResponse(await session.request(record));
     } catch (reason) {
       // A LEASE THAT RAN OUT IS NOT A CARRIER THAT FAILED. The device slept through its renewal — a
       // frozen tab, a laptop lid — and the daemon ended the session; a read is simply asked again on a
@@ -1094,7 +1099,7 @@ export class DaemonCarrierRouter {
         replaySafe(init)
       ) {
         const fresh = await this.#session(entry, method);
-        return relayResponse(await fresh.request(relayTunnelRequest(url, init)));
+        return relayResponse(await fresh.request(record));
       }
       // The carrier failed under this request, so another carrier may be tried — and
       // the request itself is LOST rather than retried on this one: §9 says frames in
@@ -1190,9 +1195,19 @@ export class DaemonCarrierRouter {
     return { deviceId: entry.connection.deviceId, key, appSession: this.#appSession };
   }
 
-  /** After a direct socket failed: refuse the walk, in words, when that is an OLD daemon. */
-  async #refuseIfOutdated(method: Extract<ConnectionMethod, { kind: 'direct' }>): Promise<void> {
-    if (await daemonIsOutdated(this.#network, method.daemonUrl)) throw new DaemonOutdatedError();
+  /**
+   * Whether a failed carrier LOOKS like an older daemon — a SIGNAL for the end of the walk, never a
+   * verdict that stops it.
+   *
+   * Both signals are unauthenticated: the liveness route is read over plaintext, and the refusal an
+   * old daemon gives a new hello arrives before any key is checked. So anybody on the direct path —
+   * or simply an older daemon at the same private address on another network — could produce one.
+   * Read as final, that let them stop the walk short of a rendezvous that works and tell the owner to
+   * re-pair. Read as a signal, it only chooses the sentence when NOTHING worked.
+   */
+  async #looksOutdated(method: ConnectionMethod, reason: unknown): Promise<boolean> {
+    if (isOutdatedDaemonRefusal(reason)) return true;
+    return method.kind === 'direct' && (await daemonIsOutdated(this.#network, method.daemonUrl));
   }
 
   /**

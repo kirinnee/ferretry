@@ -82,6 +82,16 @@ export const ACCESS_LEASE_SECONDS = 900 as const;
 export const ACCESS_RENEW_LEAD_SECONDS = 120 as const;
 
 /**
+ * The most one session may live, renewals included.
+ *
+ * Renewal is silent, so without a cap a forgotten tab kept one session alive forever. At the cap the
+ * daemon stops asking and the lease runs out with `4441`; the browser opens a new session with a fresh
+ * proof, which costs it nothing a person notices — and a session that nobody's device can open again
+ * (revoked, expired) ends for good.
+ */
+export const MAX_SESSION_SECONDS = 43_200 as const;
+
+/**
  * The largest request or response body the tunnel will assemble from its parts.
  *
  * A body larger than one record travels as ordered parts (`req-more`, `res-more`). This bounds what

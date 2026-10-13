@@ -280,6 +280,7 @@ export * from './pairing-invite.ts';
 export * from './peer-message.ts';
 export * from './pin-bridge.ts';
 export * from './pin-client.ts';
+export * from './presence.ts';
 export * from './pin-links.ts';
 export * from './pin-reference-context.ts';
 export * from './pin-selection.ts';

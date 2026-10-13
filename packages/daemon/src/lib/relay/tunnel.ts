@@ -41,7 +41,14 @@ import {
   utf8Text,
 } from '@ferretry/relay';
 import { z } from 'zod';
-import { type ApiRequest, type ApiResponse, headersFrom, queryFrom, type SessionDevice } from '../api/http.ts';
+import {
+  type ApiRequest,
+  type ApiResponse,
+  BodyTooLargeError,
+  headersFrom,
+  queryFrom,
+  type SessionDevice,
+} from '../api/http.ts';
 
 /** The widest request identifier a client may name an answer with. */
 export const MAX_TUNNEL_REQUEST_ID = 0xffff_ffff;
@@ -228,6 +235,12 @@ export const RelayTunnelClientMessageSchema = z.union([
       body: BodyPartSchema.optional(),
       /** More of this body follows in `req-more` records. */
       more: z.literal(true).optional(),
+      /**
+       * A person is at this device: the page is visible and was used recently. Only such a request
+       * advances the device's idle clock, so an open background tab that renews by itself does not
+       * keep a forgotten device paired forever (`docs/design/zero-trust.md` A6).
+       */
+      presence: z.literal(true).optional(),
     }),
     z.strictObject({
       t: z.literal('req-more'),
@@ -413,7 +426,12 @@ export function tunnelApiRequest(
     loopback: arrival?.loopback ?? false,
     privilegedLoopback: arrival?.privilegedLoopback ?? false,
     device,
-    text: async () => body,
+    // The route's own bound applies to a session's body exactly as it does to an HTTP one: a body the
+    // tunnel reassembled up to 32 MiB is still refused by a route that reads at most 512 KiB.
+    text: async limitBytes => {
+      if (limitBytes !== undefined && utf8Bytes(body).byteLength > limitBytes) throw new BodyTooLargeError(limitBytes);
+      return body;
+    },
   };
 }
 
