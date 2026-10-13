@@ -982,3 +982,90 @@ describe('SessionLifecycleService', () => {
     should(launcher.calls).deepEqual([]);
   });
 });
+
+/** Records every claim and release. */
+class RecordingLeases {
+  readonly calls: string[] = [];
+  claimError?: unknown;
+  releaseError?: unknown;
+
+  async claim(sessionId: string, command: readonly string[]): Promise<void> {
+    this.calls.push(`claim:${sessionId}:${command.join(' ')}`);
+    if (this.claimError !== undefined) throw this.claimError;
+  }
+
+  async release(sessionId: string): Promise<void> {
+    this.calls.push(`release:${sessionId}`);
+    if (this.releaseError !== undefined) throw this.releaseError;
+  }
+}
+
+describe('SessionLifecycleService conversation leases', () => {
+  function leased(): Harness & { readonly leases: RecordingLeases } {
+    const leases = new RecordingLeases();
+    return { ...harness({ leases }), leases };
+  }
+
+  it('should claim the conversation the launch argv names before the pane exists, and release it on stop', async () => {
+    // Arrange
+    const built = leased();
+    const command = [AGENT, '--session-id', '0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21'];
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.create(input({ command }));
+
+    // Act
+    await built.subject.start(ID);
+    await built.subject.stop(ID);
+
+    // Assert
+    should(built.leases.calls).deepEqual([`claim:${ID}:${command.join(' ')}`, `release:${ID}`]);
+    should(built.launcher.launches()).equal(1);
+  });
+
+  it('should fail the start naming the holder, launch nothing, and release what it held', async () => {
+    // Arrange
+    const built = leased();
+    built.leases.claimError = new Error('conversation c is being written by session s-2 on claude-review');
+    await built.subject.create(input());
+
+    // Act
+    const starting = built.subject.start(ID);
+
+    // Assert
+    await should(starting).be.rejectedWith(/being written by session s-2/u);
+    should(built.launcher.launches()).equal(0);
+    should(built.repository.current().state).containDeep({
+      status: 'failed',
+      reason: 'conversation c is being written by session s-2 on claude-review',
+    });
+    should(built.leases.calls.at(-1)).equal(`release:${ID}`);
+  });
+
+  it('should release the conversation when the launch fails for good', async () => {
+    // Arrange
+    const built = leased();
+    built.launcher.launchErrors = [new Error('a'), new Error('b'), new Error('c'), new Error('d')];
+    await built.subject.create(input());
+
+    // Act
+    const starting = built.subject.start(ID);
+
+    // Assert
+    await should(starting).be.rejected();
+    should(built.leases.calls.at(-1)).equal(`release:${ID}`);
+  });
+
+  it('should still report a stop when the release fails, because the daemon reads that lease as stale', async () => {
+    // Arrange
+    const built = leased();
+    built.leases.releaseError = new Error('disk full');
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.createAndStart(input());
+
+    // Act
+    const stopped = await built.subject.stop(ID);
+
+    // Assert
+    should(stopped.state.status).equal('stopped');
+  });
+});

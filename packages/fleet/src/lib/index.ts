@@ -37,6 +37,21 @@ export * from './seed-provenance.ts';
 export * from './settings.ts';
 export * from './sharing.ts';
 export {
+  type ConversationHolderStanding,
+  ConversationIdSchema,
+  type ConversationLeaseClaim,
+  type ConversationLeaseDecision,
+  type ConversationLeaseFacts,
+  ConversationLeaseHeldError,
+  type ConversationLeaseHolder,
+  ConversationLeaseHolderSchema,
+  type ConversationLeaseRecord,
+  ConversationLeaseRecordSchema,
+  type ConversationLeaseStore,
+  conversationFromArguments,
+  conversationLeaseDirectory,
+  conversationLeaseRefusal,
+  decideConversationLease,
   planSharedHistory,
   type SharedHistoryAction,
   type SharedHistoryChange,
@@ -57,6 +72,9 @@ export {
   type SharedHistoryRequest,
   type SharedHistorySymbolicLinkNode,
   sharedHistoryEntries,
+  sharedHistoryPoolDirectory,
+  sharedHistoryPoolRequests,
+  sharedHistoryPoolRoot,
 } from './shared-history.ts';
 export * from './token-refresh.ts';
 export * from './unimplemented.ts';
