@@ -184,6 +184,13 @@ reader, never persisted, and never screenshotted for real (committed captures us
 Minting is governed by the `pairing` capability rather than by an admin-token minimum, because a browser is
 always a paired device and could otherwise never add a second one.
 
+The hosted PWA is a **signed release**: CI signs a list of every file's SHA-256 with an Ed25519 key that
+lives only in the protected `pwa-release` environment, and the service worker serves only bytes that
+list names, refusing any update it cannot verify against the key it pinned at first install. It is
+**trust on first use**, and a deploy that ships a new service worker is **detected, not prevented**.
+The runbook — key custody, rotation, compromise, and exactly what this does not protect — is
+[docs/pwa-release-signing.md](docs/pwa-release-signing.md).
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

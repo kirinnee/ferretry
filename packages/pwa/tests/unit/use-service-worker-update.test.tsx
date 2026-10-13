@@ -555,6 +555,25 @@ describe('useServiceWorkerUpdate', () => {
     await probe.unmount();
   });
 
+  it('raises the update chip for a release the checker installed, and never over recovery', async () => {
+    const probe = mount({
+      release: 'r1',
+      container: null,
+      doc: visibilityTarget().doc,
+      win: listenerTarget().target,
+      reload: () => undefined,
+      onError: () => undefined,
+    });
+    await settle();
+
+    run(() => probe.hook().raiseUpdate());
+    expect(probe.hook().updateReady).toBe('update');
+    run(() => probe.hook().raiseRecovery());
+    run(() => probe.hook().raiseUpdate());
+    expect(probe.hook().updateReady).toBe('recovery');
+    await probe.unmount();
+  });
+
   it('reloads once per chip press, no matter how many times it is pressed', async () => {
     const harness = container({ waiting: { waiting: null } });
     let reloads = 0;

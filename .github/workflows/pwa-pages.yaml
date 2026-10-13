@@ -12,6 +12,13 @@ concurrency:
 jobs:
   deploy:
     name: Build and Deploy PWA
+    # Production is main-only: `push` is already filtered to main, and this guard stops a
+    # workflow_dispatch on any other ref from deploying it.
+    if: github.ref == 'refs/heads/main'
+    # The release signing key lives ONLY in this protected environment (docs/pwa-release-signing.md).
+    # Restrict its deployment branches to `main` in the repository settings, so no other job or ref
+    # can read the secret.
+    environment: pwa-release
     permissions:
       contents: read
       deployments: write
@@ -23,6 +30,12 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: Build static PWA bundle
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
+      # An installed copy of the app refuses any release it cannot verify, so an unsigned deploy
+      # would strand every reader on their current version. A missing secret fails here instead.
+      - name: Sign the release
+        env:
+          PWA_RELEASE_SIGNING_KEY: ${{ secrets.PWA_RELEASE_SIGNING_KEY }}
+        run: nix develop .#ci -c ./scripts/ci/sign-pwa-release.sh
       # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action
       # installs wrangler with whichever package manager it detects, picks bun from this repository's
       # lockfile, and then cannot find bun — it runs outside the nix shell that provides it. Calling

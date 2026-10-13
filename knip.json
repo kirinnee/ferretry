@@ -31,6 +31,7 @@
         "vite.config.ts",
         "tests/**/*.test.{ts,tsx}",
         "harness/screenshot.ts",
+        "harness/release-notice-screenshot.tsx",
         "harness/app-screenshot.ts",
         "harness/main.tsx",
         "harness/tasks-pane-benchmark.tsx",
@@ -42,7 +43,8 @@
         "tests/integration/fixtures/fy-render-visual-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
-        "scripts/fy-render-shell/lottie-entry.ts"
+        "scripts/fy-render-shell/lottie-entry.ts",
+        "scripts/sign-release.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
