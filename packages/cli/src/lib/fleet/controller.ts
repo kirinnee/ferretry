@@ -216,6 +216,15 @@ export class FleetController {
     }
   }
 
+  /**
+   * Say which account-model command replaces an old verb (docs/design/account-model.md §6.2). The old
+   * verb still runs for this release, so a script keeps working while it moves. Never in JSON, which
+   * a script parses.
+   */
+  replaced(replacement: string, options: FleetCommandOptions): void {
+    if (options.json !== true) this.deps.out.warn(`Note: ${replacement}`);
+  }
+
   async list(options: FleetCommandOptions): Promise<void> {
     const manifest = await this.#manifest();
     this.#report(manifest, options, () => renderManifest(this.deps.binaryName, manifest));
