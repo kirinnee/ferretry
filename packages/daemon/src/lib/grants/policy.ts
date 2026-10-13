@@ -60,10 +60,10 @@ export interface CallerArrival {
 /**
  * Whether the operator's grants govern THIS caller.
  *
- * EXACTLY THE CALLERS THAT DID NOT ARRIVE ON THE HOST. A caller that proved it is at the machine — the
- * command line holding the admin token, or a local browser carrying the host proof — already has the
+ * EVERY CALLER BUT THE OWNER AT THE MACHINE. The owner — the command line holding the admin token, over loopback — already has the
  * machine, so a grant or a step-up asked of it would be friction with no safety. Every other caller is
- * governed: a paired phone, a browser across the network, a session carried over the rendezvous. That
+ * governed: a paired phone, a browser across the network, a session carried over the rendezvous, and a
+ * browser on the host itself, which a tunnel to 127.0.0.1 is indistinguishable from (B4). That
  * is where a boundary is real, because possession of the machine is exactly what such a caller lacks.
  *
  * Deciding this from a peer address, a `Host` header or a URL containing `127.0.0.1` would hand a

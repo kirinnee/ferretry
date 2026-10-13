@@ -22,7 +22,6 @@ import {
   PasskeyRegistrationSchema,
   PasskeysViewSchema,
   PasskeyViewSchema,
-  PASSKEY_WINDOW_PATH,
   PasskeyWindowOpenedSchema,
   PasskeyWindowRequestSchema,
   StepUpAssertionSchema,
@@ -136,7 +135,7 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       // first window or lost its authenticator would otherwise never step up again. The service refuses
       // anybody but the owner, whatever the route's minimum lets through.
       method: 'POST',
-      path: PASSKEY_WINDOW_PATH,
+      path: '/v1/passkeys/registration-window',
       minimum: 'operator',
       noStore: true,
       handle: async context => {

@@ -1,15 +1,15 @@
 /**
  * CAPABILITY GRANTS — what the operator has decided the UI may do on THIS machine.
  *
- * ## A CALLER ON THE HOST IS UNGOVERNED; EVERY OTHER CALLER IS GOVERNED
+ * ## THE OWNER AT THE MACHINE IS UNGOVERNED; EVERY OTHER CALLER IS GOVERNED
  *
- * A caller that PROVED it arrived on the host — the command line holding the admin token, or a local
- * browser whose request carries the host proof — is subject to none of this. Reading the admin token
+ * The owner — the command line holding the admin token, over loopback — is subject to none of this. Reading the admin token
  * already requires being on the host, so gating it would be friction with no safety, and it is the
  * door a confused remote configuration is repaired through.
  *
- * Every caller that did NOT prove it arrived on the host is governed: a paired phone, a browser across
- * the network, a session carried over the rendezvous. That is where a boundary is real.
+ * Every other caller is governed: a paired phone, a browser across the network, a session carried over
+ * the rendezvous, and a browser on the host itself — a tunnel or proxy to 127.0.0.1 is indistinguishable
+ * from one (docs/design/zero-trust.md B4). That is where a boundary is real.
  *
  * "Loopback" means how the request ARRIVED, decided from the carrier — never a peer address, a `Host`
  * header, or a URL that happens to say `127.0.0.1`. The relay terminates on the host it serves, so a
@@ -196,8 +196,8 @@ export const GrantsViewSchema = z.strictObject({
   /**
    * Whether the operator's grants GOVERN this caller at all.
    *
-   * The inverse of `hostLocal` today: a caller that proved it arrived on the host is ungoverned and
-   * every other caller is governed. Both fields stay on the wire because they answer different
+   * The inverse of `hostLocal` today: the owner at the machine (the admin token over loopback) is
+   * ungoverned and every other caller, a browser on the host included, is governed. Both fields stay on the wire because they answer different
    * questions — "do the grants apply to me" and "am I at the machine" — and a screen should read the
    * one it means rather than a rule it would have to restate.
    *
