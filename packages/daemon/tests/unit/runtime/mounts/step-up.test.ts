@@ -133,7 +133,11 @@ function mount(world: World = {}) {
 }
 
 const json = (value: unknown): string => JSON.stringify(value);
-const registrationBody = json({ credentialId: CREDENTIAL_ID, clientDataJSON: 'Y2xpZW50', attestationObject: 'YXR0ZXN0' });
+const registrationBody = json({
+  credentialId: CREDENTIAL_ID,
+  clientDataJSON: 'Y2xpZW50',
+  attestationObject: 'YXR0ZXN0',
+});
 const assertionBody = json({
   credentialId: CREDENTIAL_ID,
   clientDataJSON: 'Y2xpZW50',
@@ -301,7 +305,13 @@ describe('step-up routes', () => {
 
     // Act
     const options = await dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, privilegedLoopback: true, ...asDevice }),
+      request({
+        method: 'POST',
+        path: '/v1/passkeys/options',
+        body: originBody,
+        privilegedLoopback: true,
+        ...asDevice,
+      }),
     );
 
     // Assert
@@ -314,9 +324,9 @@ describe('step-up routes', () => {
     const dispatcher = await mount({ store: new MemoryStore([elsewhere]) }).surface;
 
     // Act
-    const none = await (await mount().surface).dispatch(
-      request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asDevice }),
-    );
+    const none = await (
+      await mount().surface
+    ).dispatch(request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asDevice }));
     const otherOrigin = await dispatcher.dispatch(
       request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asDevice }),
     );
@@ -333,7 +343,13 @@ describe('step-up routes', () => {
     const dispatcher = await surface;
     const registerAfterOptions = async () => {
       await dispatcher.dispatch(
-        request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, privilegedLoopback: true, ...asDevice }),
+        request({
+          method: 'POST',
+          path: '/v1/passkeys/options',
+          body: originBody,
+          privilegedLoopback: true,
+          ...asDevice,
+        }),
       );
     };
     const stepUpAfterOptions = async () => {

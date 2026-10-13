@@ -124,4 +124,3 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
     },
   ];
 }
-

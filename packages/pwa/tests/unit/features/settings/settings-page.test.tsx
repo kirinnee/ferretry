@@ -914,7 +914,15 @@ describe('daemon settings', () => {
     expect(must(choices[0], 'the Warden choice').textContent).toBe(
       'WardenSupervision, account failover, and policy for this daemon.',
     );
-    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual(['page', null, null, null, null, null, null]);
+    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual([
+      'page',
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
 
     await interact(() =>
       must(

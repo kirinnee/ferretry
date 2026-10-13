@@ -173,7 +173,11 @@ describe('StatePasskeyStore', () => {
     }));
 
     // Act
-    await Promise.all([store.add(passkey('cred-one')), store.add(passkey('cred-two')), store.add(passkey('cred-three'))]);
+    await Promise.all([
+      store.add(passkey('cred-one')),
+      store.add(passkey('cred-two')),
+      store.add(passkey('cred-three')),
+    ]);
 
     // Assert
     should((await store.list(deviceOne)).map(entry => entry.credentialId).sort()).deepEqual([
@@ -220,7 +224,11 @@ describe('StatePasskeyStore', () => {
     const cases: readonly (readonly [string, string, RegExp])[] = [
       ['is not JSON', '{ not json', /not valid JSON/u],
       ['has the wrong schema version', JSON.stringify({ schemaVersion: 2, passkeys: [] }), /does not describe/u],
-      ['holds a row with an unknown field', JSON.stringify({ schemaVersion: 1, passkeys: [{ extra: 1 }] }), /does not describe/u],
+      [
+        'holds a row with an unknown field',
+        JSON.stringify({ schemaVersion: 1, passkeys: [{ extra: 1 }] }),
+        /does not describe/u,
+      ],
       ['holds one credential twice', JSON.stringify(duplicated), /one credential twice/u],
     ];
 

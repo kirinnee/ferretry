@@ -34,7 +34,12 @@ import {
 } from '../../lib/passkey-panel.ts';
 import { type CredentialsPort, createPasskey } from '../../lib/passkeys.ts';
 import { browserCredentials } from '../../lib/step-up-ceremony.ts';
-import { fetchPasskeys, passkeyRegistrationOptions, registerPasskey, type StepUpClient } from '../../lib/step-up-client.ts';
+import {
+  fetchPasskeys,
+  passkeyRegistrationOptions,
+  registerPasskey,
+  type StepUpClient,
+} from '../../lib/step-up-client.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 
 export type PasskeyClientFactory = (connection: DaemonConnection) => Promise<StepUpClient>;

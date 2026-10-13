@@ -355,7 +355,18 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     description:
       'The passkeys this device holds for this machine, and adding another. Daemon-wide — opens this daemon’s settings.',
     href: daemon => `${daemonSettingsPath(daemon)}#security`,
-    keywords: ['passkey', 'passkeys', 'confirm', 'confirmation', 'biometric', 'fingerprint', 'face id', 'webauthn', 'step-up', 'security'],
+    keywords: [
+      'passkey',
+      'passkeys',
+      'confirm',
+      'confirmation',
+      'biometric',
+      'fingerprint',
+      'face id',
+      'webauthn',
+      'step-up',
+      'security',
+    ],
   },
   {
     /**

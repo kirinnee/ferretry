@@ -145,6 +145,8 @@ describe('the passkey routes', () => {
     const client = clientAnswering({ expiresAt: 'not a time' });
 
     // Act, Assert
-    await should(submitStepUp(client, { credentialId: 'a', clientDataJSON: 'b', authenticatorData: 'c', signature: 'd' })).rejected();
+    await should(
+      submitStepUp(client, { credentialId: 'a', clientDataJSON: 'b', authenticatorData: 'c', signature: 'd' }),
+    ).rejected();
   });
 });

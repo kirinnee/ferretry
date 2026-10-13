@@ -27,7 +27,9 @@ import type {
 } from './types.ts';
 
 /** A ceremony's answer: the value, or the one refusal that names the person's next step. */
-export type StepUpOutcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly refusal: StepUpRefusal };
+export type StepUpOutcome<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly refusal: StepUpRefusal };
 
 export interface StepUpServiceDeps {
   readonly store: PasskeyStore;

@@ -102,8 +102,7 @@ const mountSurface = async (
 const marked = (surface: ReactTestRenderer, marker: string) =>
   surface.root.findAll(node => typeof node.type === 'string' && node.props[marker] !== undefined);
 
-const text = (surface: ReactTestRenderer): string =>
-  JSON.stringify(surface.toJSON()).replace(/\\"/g, '"');
+const text = (surface: ReactTestRenderer): string => JSON.stringify(surface.toJSON()).replace(/\\"/g, '"');
 
 const press = async (surface: ReactTestRenderer, marker: string): Promise<void> => {
   const button = must(marked(surface, marker)[0], marker);
@@ -153,7 +152,9 @@ describe('SecuritySurface', () => {
   it('adds a passkey: options for this origin, the ceremony, the registration, then a refreshed list', async () => {
     // Arrange
     const ledger: Ledger = { paths: [], bodies: [] };
-    const surface = await mountSurface(machine([view(), view({ passkeys: [PASSKEY], registration: 'stepped-up' })], ledger));
+    const surface = await mountSurface(
+      machine([view(), view({ passkeys: [PASSKEY], registration: 'stepped-up' })], ledger),
+    );
 
     // Act
     await press(surface, 'data-security-add');

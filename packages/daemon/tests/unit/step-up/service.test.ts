@@ -225,7 +225,10 @@ describe('StepUpService', () => {
       await service.registrationOptions(remote(), ORIGIN);
       const added = await service.register(
         remote(),
-        await registrationBody(second, Uint8Array.from({ length: 16 }, () => 0x11)),
+        await registrationBody(
+          second,
+          Uint8Array.from({ length: 16 }, () => 0x11),
+        ),
       );
 
       // Assert
@@ -334,7 +337,11 @@ describe('StepUpService', () => {
       // Assert
       should(added).eql({
         ok: true,
-        value: { id: toBase64Url(CREDENTIAL_ID), origin: ORIGIN, createdAt: new Date(PAIRED_AT_MS + 60_000).toISOString() },
+        value: {
+          id: toBase64Url(CREDENTIAL_ID),
+          origin: ORIGIN,
+          createdAt: new Date(PAIRED_AT_MS + 60_000).toISOString(),
+        },
       });
       should(store.rows).eql([
         {

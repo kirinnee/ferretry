@@ -897,7 +897,10 @@ describe('AppShell', () => {
     const first = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { fleet: PASSKEYS });
     await settle();
     await interact(() =>
-      must(first.view.container.querySelector<HTMLButtonElement>('[data-passkey-nudge-dismiss]'), 'the dismiss').click(),
+      must(
+        first.view.container.querySelector<HTMLButtonElement>('[data-passkey-nudge-dismiss]'),
+        'the dismiss',
+      ).click(),
     );
     expect(first.view.container.querySelector('[data-passkey-nudge]')).toBeNull();
     await first.view.unmount();

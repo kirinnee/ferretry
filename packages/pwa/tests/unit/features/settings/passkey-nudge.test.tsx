@@ -98,7 +98,9 @@ describe('PasskeyNudge', () => {
   it('stays quiet when a passkey already exists', async () => {
     // Arrange / Act
     const nudge = await mountNudge(
-      answering(view({ passkeys: [{ id: 'QUJD', origin: 'https://a.example.test', createdAt: '2025-12-20T18:22:00.000Z' }] })),
+      answering(
+        view({ passkeys: [{ id: 'QUJD', origin: 'https://a.example.test', createdAt: '2025-12-20T18:22:00.000Z' }] }),
+      ),
       memory(),
     );
 
