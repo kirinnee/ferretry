@@ -38,20 +38,34 @@
  *
  * ## Nothing here can read a token
  *
- * `stdout` and `stderr` are discarded unread, so even output that volunteered a credential could not
- * be seen; the Codex request asks for `includeToken: false` as well, so it should not be offered one.
+ * Claude's `stdout` and `stderr` are discarded unread. Codex's are SCANNED and never kept: the only
+ * thing taken from them is which of the closed-set refresh-failure words they named
+ * (`refresh_token_expired`, `_reused`, `_invalidated`, `invalid_grant`, a refresh `401`), because
+ * that word is the one way to tell an expired login from a revoked one (account-model §8.2.2). Each
+ * chunk is decoded, searched and dropped; at most a short tail survives between chunks so a word
+ * split across two reads is still found, and no text is ever returned, logged or stored. The Codex
+ * request asks for `includeToken: false` as well, so it should not be offered a token to begin with.
+ * WHERE the harness reports the reason (its JSON-RPC answer or its log on stderr) is INFERRED, which is
+ * why both streams are scanned and why success is still read from the credential, never from here.
  * The environment handed to the child is sanitized first — every command in this product runs inside
  * somebody's agent session, and that session exports provider credentials of its own, which is how a
  * renewal for one account ends up authenticating as another. What the child gets is the caller's
  * environment with the provider and session variables stripped, plus one variable: its own home.
  */
-import { failureMessage } from '../lib/identity.ts';
+
 import { sanitizeHarnessEnv } from '../lib/harness-env.ts';
+import { failureMessage } from '../lib/identity.ts';
 import type {
   FleetTokenRefreshAttempt,
   FleetTokenRefreshPort,
   FleetTokenRefreshSettled,
   FleetTokenRefreshTarget,
+} from '../lib/token-refresh.ts';
+import {
+  type CodexRefreshEvidence,
+  mergeCodexRefreshEvidence,
+  NO_CODEX_REFRESH_EVIDENCE,
+  scanCodexRefreshEvidence,
 } from '../lib/token-refresh.ts';
 import { HARNESS_BINARIES, HARNESS_HOME_ENV } from '../lib/wrappers.ts';
 import type { FleetBinaryLookup } from './process-login.ts';
@@ -59,6 +73,11 @@ import type { FleetBinaryLookup } from './process-login.ts';
 /** A started renewal. Deliberately offers no way to read what the child printed. */
 export interface FleetTokenRefreshProcess {
   readonly exited: Promise<number>;
+  /**
+   * The closed-set failure words the child's output has named so far — never the output. Absent on a
+   * process whose output is discarded unread.
+   */
+  evidence?(): CodexRefreshEvidence;
   write(text: string): Promise<void>;
   close(): Promise<void>;
   /** SIGKILL. Both paths are stopped rather than asked, so neither can wedge a fleet command. */
@@ -68,6 +87,8 @@ export interface FleetTokenRefreshProcess {
 export type FleetTokenRefreshSpawn = (
   command: readonly string[],
   environment: Readonly<Record<string, string | undefined>>,
+  /** Scan the child's output for refresh-failure words. Off means its output is discarded unread. */
+  options?: { readonly scanOutput?: boolean },
 ) => FleetTokenRefreshProcess;
 
 /** Hard ceiling on one renewal, including the OAuth round trip the harness makes. */
@@ -173,7 +194,7 @@ export class ProcessFleetTokenRefreshPort implements FleetTokenRefreshPort {
     environment: Readonly<Record<string, string | undefined>>,
     settled: FleetTokenRefreshSettled,
   ): Promise<FleetTokenRefreshAttempt> {
-    const child = this.deps.spawn([executable, 'app-server'], environment);
+    const child = this.deps.spawn([executable, 'app-server'], environment, { scanOutput: true });
     const killer = setTimeout(() => child.kill(), this.#timeoutMs());
     try {
       await child.write(`${REFRESH_REQUESTS.map(request => JSON.stringify(request)).join('\n')}\n`);
@@ -181,6 +202,8 @@ export class ProcessFleetTokenRefreshPort implements FleetTokenRefreshPort {
       const polls = Math.max(1, Math.ceil(this.#timeoutMs() / pollMs));
       for (let poll = 0; poll < polls; poll += 1) {
         if (await settled()) break;
+        // A refresh that already named its failure will not settle: stop waiting for it.
+        if ((child.evidence?.().codes.length ?? 0) > 0) break;
         await (this.deps.sleep ?? delay)(pollMs);
       }
       await child.close();
@@ -189,7 +212,7 @@ export class ProcessFleetTokenRefreshPort implements FleetTokenRefreshPort {
     } finally {
       clearTimeout(killer);
     }
-    return { outcome: 'ran' };
+    return { outcome: 'ran', evidence: child.evidence?.() ?? NO_CODEX_REFRESH_EVIDENCE };
   }
 
   #timeoutMs(): number {
@@ -197,20 +220,54 @@ export class ProcessFleetTokenRefreshPort implements FleetTokenRefreshPort {
   }
 }
 
+/** How much of the previous chunk is kept, so a failure word split across two reads is still seen. */
+const EVIDENCE_TAIL = 64;
+
 /**
- * The production process boundary: piped stdin so the Codex path can speak, and **discarded** stdout
- * and stderr so nothing this product runs can read what a harness printed about a credential.
+ * Scan a stream for the closed-set refresh-failure words and keep nothing else.
+ *
+ * Exported so a test can feed a stream directly. Resolves when the stream ends; a stream that errors
+ * ends the scan with what was found, because evidence is a bonus and never a reason to fail a renewal.
  */
-export const spawnFleetTokenRefreshProcess: FleetTokenRefreshSpawn = (command, environment) => {
+export async function scanRefreshStream(
+  stream: ReadableStream<Uint8Array>,
+  found: (evidence: CodexRefreshEvidence) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let tail = '';
+  try {
+    for await (const chunk of stream) {
+      const text = tail + decoder.decode(chunk, { stream: true });
+      found(scanCodexRefreshEvidence(text));
+      tail = text.slice(-EVIDENCE_TAIL);
+    }
+  } catch {
+    /* the stream died with the child — what was found stands */
+  }
+}
+
+/**
+ * The production process boundary: piped stdin so the Codex path can speak. Claude's output is
+ * **discarded**; Codex's is piped only into {@link scanRefreshStream}, which keeps closed-set words.
+ */
+export const spawnFleetTokenRefreshProcess: FleetTokenRefreshSpawn = (command, environment, options = {}) => {
+  const scanned = options.scanOutput === true;
   const child = Bun.spawn({
     cmd: [...command],
     env: environment,
     stdin: 'pipe',
-    stdout: 'ignore',
-    stderr: 'ignore',
+    stdout: scanned ? 'pipe' : 'ignore',
+    stderr: scanned ? 'pipe' : 'ignore',
   });
+  let evidence = NO_CODEX_REFRESH_EVIDENCE;
+  const record = (found: CodexRefreshEvidence): void => {
+    evidence = mergeCodexRefreshEvidence(evidence, found);
+  };
+  if (child.stdout instanceof ReadableStream) void scanRefreshStream(child.stdout, record);
+  if (child.stderr instanceof ReadableStream) void scanRefreshStream(child.stderr, record);
   return {
     exited: child.exited,
+    evidence: () => evidence,
     async write(text) {
       child.stdin.write(text);
       await child.stdin.flush();

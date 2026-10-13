@@ -250,3 +250,93 @@ export function usageEndpointCredentialSignal(
   if (status === FORBIDDEN) return evidence.scopeUnavailableConfirmed === true ? 'scope_unavailable' : 'inconclusive';
   return status >= 200 && status < 300 ? 'accepted' : 'inconclusive';
 }
+
+/**
+ * The `rate_limits` block Claude Code hands its statusLine command on stdin, each turn.
+ *
+ * `five_hour` / `seven_day` carry `used_percentage` — already a percentage, like the usage JSON — and
+ * `resets_at`, epoch seconds. Named by the harness, so the windows are not inferred from horizons.
+ * Takes the WHOLE statusLine payload, because the block is one field of it and a payload without one
+ * (a harness older than the field, or a turn that made no request) is a reading with no signal.
+ */
+export function parseClaudeStatuslineRateLimits(payload: unknown): QuotaReading {
+  const limits = asRecord(asRecord(payload).rate_limits);
+  const short = asRecord(limits.five_hour);
+  const long = asRecord(limits.seven_day);
+  const shortPercent = percentFromStoredUtilization(short.used_percentage);
+  const longPercent = percentFromStoredUtilization(long.used_percentage);
+  const shortWindow = window(shortPercent, normalizeResetAt(short.resets_at));
+  const longWindow = window(longPercent, normalizeResetAt(long.resets_at));
+  return {
+    ...(shortWindow === undefined ? {} : { shortWindow }),
+    ...(longWindow === undefined ? {} : { longWindow }),
+    hasQuotaSignal: shortPercent !== undefined || longPercent !== undefined,
+    providerAtLimit: false,
+  };
+}
+
+/** A reset given as seconds-from-an-instant, when that is all a Codex source said. */
+function resetFromRelative(seconds: unknown, from: number | undefined): number | undefined {
+  if (from === undefined || typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return undefined;
+  return Math.trunc(from + seconds * 1000);
+}
+
+function codexWindow(
+  value: unknown,
+  relativeKey: 'resets_in_seconds' | 'reset_after_seconds',
+  absoluteKey: 'resets_at' | 'reset_at',
+  from: number | undefined,
+): { readonly percent?: number; readonly window?: FleetUsageWindow } {
+  const record = asRecord(value);
+  const percent = percentFromStoredUtilization(record.used_percent);
+  const resetAt = normalizeResetAt(record[absoluteKey]) ?? resetFromRelative(record[relativeKey], from);
+  const built = window(percent, resetAt);
+  return { ...(percent === undefined ? {} : { percent }), ...(built === undefined ? {} : { window: built }) };
+}
+
+function codexReading(
+  short: ReturnType<typeof codexWindow>,
+  long: ReturnType<typeof codexWindow>,
+  providerAtLimit: boolean,
+): QuotaReading {
+  return {
+    ...(short.window === undefined ? {} : { shortWindow: short.window }),
+    ...(long.window === undefined ? {} : { longWindow: long.window }),
+    hasQuotaSignal: short.percent !== undefined || long.percent !== undefined,
+    providerAtLimit,
+  };
+}
+
+/**
+ * The `rate_limits` of a Codex rollout's `token_count` event: `primary` is the 5-hour window and
+ * `secondary` the weekly one, each `{used_percent, resets_at}` with `resets_at` in epoch seconds.
+ *
+ * An older rollout carries `resets_in_seconds` instead, relative to the event, so the event's own
+ * instant is taken as `observedAt` and a relative reset without one is absent rather than guessed.
+ * `used_percent` is a percentage, `0..100`, exactly like Claude's usage JSON.
+ */
+export function parseCodexRateLimits(rateLimits: unknown, observedAt?: number): QuotaReading {
+  const root = asRecord(rateLimits);
+  return codexReading(
+    codexWindow(root.primary, 'resets_in_seconds', 'resets_at', observedAt),
+    codexWindow(root.secondary, 'resets_in_seconds', 'resets_at', observedAt),
+    false,
+  );
+}
+
+/**
+ * The body of Codex's free usage read, `GET chatgpt.com/backend-api/wham/usage`.
+ *
+ * `rate_limit.primary_window` / `secondary_window` carry `used_percent` and either `reset_at` (epoch
+ * seconds) or `reset_after_seconds`, which is measured from `now`; `rate_limit.limit_reached` is the
+ * provider's own at-limit flag. NOT login proof: this endpoint answers for a stale token, so nothing
+ * here says anything about the credential.
+ */
+export function parseCodexUsageBody(body: unknown, now: number): QuotaReading {
+  const limit = asRecord(asRecord(body).rate_limit);
+  return codexReading(
+    codexWindow(limit.primary_window, 'reset_after_seconds', 'reset_at', now),
+    codexWindow(limit.secondary_window, 'reset_after_seconds', 'reset_at', now),
+    limit.limit_reached === true,
+  );
+}

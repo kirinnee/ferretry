@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { FleetConfig } from './config.ts';
 import { accountIdentityKeys } from './identity.ts';
 import type { FleetManifest, FleetManifestAccount } from './manifest.ts';
+import { shellQuote } from './wrappers.ts';
 
 const finiteNumber = z.number().refine(Number.isFinite, 'expected a finite number');
 const percentage = finiteNumber.min(0).max(100);
@@ -632,3 +633,55 @@ export function buildFleetUsageCollector(
     identityOf: accountIdentityKeys(config),
   });
 }
+
+// ── The account model: usage per credential (docs/design/account-model.md §8.1.3, §8.2.3) ───────
+
+/**
+ * The file, inside `<fleet>/credentials/<id>/`, that a passive reading of one credential's usage is
+ * written to. The SAME directory for every store: a `host` Claude credential's own store is the
+ * person's `~/.claude`, and nothing Ferretry measures is ever written there.
+ */
+export const CREDENTIAL_USAGE_FILE = 'usage.json';
+
+/** The variable every runtime's wrapper exports naming its credential, inherited by the statusLine child. */
+export const CREDENTIAL_ENV = 'FY_CREDENTIAL';
+
+/** The subcommand Claude's `statusLine.command` runs, and the option naming the person's own command. */
+export const STATUSLINE_SUBCOMMAND = 'statusline';
+export const STATUSLINE_THEN_OPTION = '--then';
+
+/**
+ * The `statusLine.command` every Claude runtime is materialised with (a plumbing key, §8.3).
+ *
+ * THE ONE SPELLING. Materialisation calls this and never writes the string itself, because the
+ * command line is a contract with `fy statusline`'s parser and two spellings would drift. When the
+ * person's own settings named a statusLine command, it is CHAINED, never replaced: `fy statusline`
+ * records the reading and then runs theirs with the same stdin, and what they see is what it prints.
+ *
+ * `binary` is the derived binary name (the `bin` key of the CLI package), never a literal here.
+ */
+export function claudeStatuslineCommand(binary: string, ownCommand?: string): string {
+  const own = ownCommand?.trim() ?? '';
+  const base = `${shellQuote(binary)} ${STATUSLINE_SUBCOMMAND}`;
+  return own.length === 0 ? base : `${base} ${STATUSLINE_THEN_OPTION} ${shellQuote(own)}`;
+}
+
+/** Where a passive reading came from. Each is free: nothing was requested to produce it. */
+export const PassiveUsageSourceSchema = z.enum(['claude-statusline', 'codex-rollout']);
+export type PassiveUsageSource = z.infer<typeof PassiveUsageSourceSchema>;
+
+/**
+ * One passive reading of one credential's two windows, exactly as `usage.json` holds it.
+ *
+ * A window is ABSENT when the source did not say, and an absent window is "unknown" on every surface,
+ * never 0%: zero is a claim that nothing was spent.
+ */
+export const PassiveUsageRecordSchema = z.strictObject({
+  version: z.literal(1),
+  source: PassiveUsageSourceSchema,
+  /** When the reading was taken. */
+  at: epochMilliseconds,
+  fiveHour: FleetUsageWindowSchema.optional(),
+  weekly: FleetUsageWindowSchema.optional(),
+});
+export type PassiveUsageRecord = z.infer<typeof PassiveUsageRecordSchema>;
