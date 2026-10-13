@@ -382,10 +382,7 @@ describe('attention routes', () => {
     const peerNotifications = new FakeNotifications();
     const deviceNotifications = new FakeNotifications();
     const peer = fixture(undefined, peerNotifications);
-    const device = fixture(undefined, deviceNotifications, {
-      ...CREDENTIALS,
-      devices: { identify: (token: string) => (token === 'device-secret' ? 'browser-1' : undefined) },
-    });
+    const device = fixture(undefined, deviceNotifications);
     const body = JSON.stringify({ body: 'done' });
 
     // Act
@@ -398,7 +395,8 @@ describe('attention routes', () => {
     const deviceResponse = await device({
       method: 'POST',
       path: '/v1/sessions/s1/notify',
-      headers: { authorization: 'Bearer device-secret', [FY_REQUEST_ID_HEADER]: 'device-request' },
+      headers: { [FY_REQUEST_ID_HEADER]: 'device-request' },
+      device: { deviceId: 'browser-1', appSession: 'app-one' },
       body,
     });
 

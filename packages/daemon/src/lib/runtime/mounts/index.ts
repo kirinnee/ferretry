@@ -473,9 +473,15 @@ export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly Soc
 export function createMountedSocketDispatcher(
   base: DaemonApiDependencies,
   subsystems: MountedSubsystems,
+  /**
+   * Socket routes whose dependencies include THIS dispatcher — today only the direct carrier, which
+   * dispatches a session's streams back through the same table. They cannot be a mounted subsystem
+   * without a construction cycle, so the composition root hands them in.
+   */
+  carriers: readonly SocketRoute[] = [],
 ): ApiSocketDispatcher {
   return new ApiSocketDispatcher(
-    new ApiRouter(mountedSocketRoutes(subsystems)),
+    new ApiRouter([...mountedSocketRoutes(subsystems), ...carriers]),
     base.credentials,
     subsystems.socketTickets,
     // The SAME guard the request/response table uses. A terminal socket that skipped it would let a

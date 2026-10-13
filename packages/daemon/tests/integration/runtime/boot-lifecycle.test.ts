@@ -18,7 +18,6 @@ import {
   NameSuggestionsSchema,
   PairingCodeMintResponseSchema,
   PairingCodeStatusResponseSchema,
-  PairingResponseSchema,
   ProposalViewSchema,
   pairingMintOutcome,
   RunManifestSchema,
@@ -83,6 +82,7 @@ import {
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { healthViewFixture } from '../../fixtures/health-view.ts';
+import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -904,7 +904,7 @@ describe('daemon boot lifecycle', () => {
     should(verdict).equal('accepted');
   });
 
-  it('should mint, redeem, persist and authenticate a pairing through the production composition root', async () => {
+  it('should mint, redeem over a direct session, persist and authenticate a device key through the production composition root', async () => {
     const home = await tempDirectory('fyd-pairing');
     const port = await freeLoopbackPort();
     const relayPort = await freeLoopbackPort();
@@ -978,34 +978,48 @@ describe('daemon boot lifecycle', () => {
      */
     const invitation = pairingMintOutcome(minted);
     if (invitation.kind !== 'invitation') throw new Error('a loopback-bound daemon still hands out its own address');
-    const pairedResponse = await fetch(`${base}/v1/pair`, {
+    /*
+     * REDEMPTION IS A SESSION NOW, over this daemon's own direct socket: the daemon is proved against
+     * the fingerprint the link names before the code leaves the client, and what it registers is a KEY.
+     * The plain-HTTP route is gone, which this journey also proves.
+     */
+    const device = await newTestDevice();
+    const httpRedemption = await fetch(`${base}/v1/pair`, {
       method: 'POST',
       headers: { origin, 'content-type': 'application/json' },
-      body: JSON.stringify({ code: minted.code, deviceName: '  Browser phone  ' }),
-    });
-    const paired = PairingResponseSchema.parse(await pairedResponse.json());
-    const replay = await fetch(`${base}/v1/pair`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ code: minted.code, deviceName: 'Browser phone' }),
     });
+    const pairing = await pairOverSession(base, minted.daemonId, minted.code, '  Browser phone  ', device);
+    if (pairing.kind !== 'paired') throw new Error('the direct session refused a fresh code');
+    const paired = pairing.response;
+    const replay = await pairOverSession(base, minted.daemonId, minted.code, 'Browser phone', await newTestDevice());
     const statusResponse = await fetch(`${base}/v1/pair/code/${minted.pairingId}`, { headers: admin });
     const status = PairingCodeStatusResponseSchema.parse(await statusResponse.json());
-    const devicePreflight = await fetch(`${base}/v1/usage`, {
-      method: 'OPTIONS',
+    // THE DEVICE KEY IS THE CREDENTIAL: a session it signs is served; the same id signed by another
+    // key is refused; and an app still sending the old bearer token is told to update.
+    const asDevice = await deviceSession(base, minted.daemonId, paired.deviceId, device, { origin });
+    const usage = await asDevice.request('GET', '/v1/usage');
+    const refreshed = DaemonCarriersViewSchema.parse(JSON.parse((await asDevice.request('GET', '/v1/carriers')).body));
+    asDevice.close();
+    const impostor = await TestSession.open(base, minted.daemonId, {
+      kind: 'auth',
+      deviceId: paired.deviceId,
+      device: await newTestDevice(),
+    });
+    const impostorClosed = await impostor.closed();
+    const outdatedApp = await fetch(`${base}/v1/usage`, {
+      headers: { origin, authorization: `Bearer fy_device_${'a'.repeat(43)}` },
+    });
+    // A browser on an origin this daemon was not told to serve cannot even open the socket.
+    const foreignOrigin = await fetch(`${base}/v1/rendezvous/${minted.daemonId}/client`, {
       headers: {
-        origin,
-        'access-control-request-method': 'GET',
-        'access-control-request-headers': 'authorization, x-fy-request-id, x-fy-version',
+        origin: 'https://not-ferretry.example',
+        upgrade: 'websocket',
+        connection: 'upgrade',
+        'sec-websocket-version': '13',
+        'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
       },
     });
-    const asDevice = await fetch(`${base}/v1/usage`, {
-      headers: { origin, authorization: `Bearer ${paired.deviceToken}` },
-    });
-    const refreshedResponse = await fetch(`${base}/v1/carriers`, {
-      headers: { origin, authorization: `Bearer ${paired.deviceToken}` },
-    });
-    const refreshed = DaemonCarriersViewSchema.parse(await refreshedResponse.json());
     const deviceDocument = await readFile(join(home, 'state', 'devices.json'), 'utf8');
     release();
     const code = await exit;
@@ -1026,26 +1040,27 @@ describe('daemon boot lifecycle', () => {
     should(new URL(invitation.pairUrl).search).not.containEql(minted.code);
     should(invitation.reach).equal('local-only');
     should(invitation.daemonUrl).equal(`${base}/`);
-    should(pairedResponse.status).equal(200);
-    should(pairedResponse.headers.get('access-control-allow-origin')).equal(origin);
+    // No route, and nothing public: a stranger is refused for having no credential at all.
+    should(httpRedemption.status).equal(401);
     should(paired.daemonId).equal(minted.daemonId);
-    should(replay.status).equal(403);
+    should(paired.idleExpiryDays).equal(30);
+    should(replay.kind).equal('refused');
     should(status.status).equal('redeemed');
     if (status.status !== 'redeemed') throw new Error('expected a redeemed pairing status');
     should(status.deviceName).equal('Browser phone');
-    should(devicePreflight.status).equal(204);
-    should(devicePreflight.headers.get('access-control-allow-credentials')).equal('true');
-    should(asDevice.status).equal(200);
-    should(asDevice.headers.get('access-control-allow-origin')).equal(origin);
-    should(asDevice.headers.get('access-control-allow-credentials')).equal('true');
-    should(refreshedResponse.status).equal(200);
+    should(usage.status).equal(200);
     should(refreshed.carriers).deepEqual(paired.carriers);
+    should(impostorClosed.code).equal(4403);
+    should(outdatedApp.status).equal(426);
+    should(foreignOrigin.status).equal(403);
     should(paired.carriers).deepEqual([
       { kind: 'direct', url: base },
       { kind: 'relay', url: relayUrl },
     ]);
     should(deviceDocument).containEql('Browser phone');
-    should(deviceDocument).not.containEql(paired.deviceToken);
+    // The daemon keeps the PUBLIC half and nothing a copy of this file could replay.
+    should(deviceDocument).containEql(device.publicKey);
+    should(deviceDocument).not.containEql('tokenHash');
   });
 
   /**
@@ -3379,29 +3394,9 @@ describe('daemon boot lifecycle', () => {
     const adminB = (await readFile(join(homeB, 'api-token'), 'utf8')).trim();
     const headersA = { authorization: `Bearer ${adminA}`, 'x-ferretry-client': 'cli' };
     const headersB = { authorization: `Bearer ${adminB}`, 'x-ferretry-client': 'cli' };
-    // A DEVICE TOKEN IS WHAT THIS TEST NEEDS, and a device cannot exist on a machine with no operator
-    // password — the mint refuses, which is proved where that rule lives. So this journey sets one first,
-    // through the host's own always-permitted path, exactly as a person would before adding a phone.
-    await fetch(`${baseA}/v1/grants/password`, {
-      method: 'PUT',
-      headers: { ...headersA, 'content-type': 'application/json' },
-      body: JSON.stringify({ password: 'correct horse battery' }),
-    });
-    const pairingCode = (await (
-      await fetch(`${baseA}/v1/pair/code`, { method: 'POST', headers: headersA })
-    ).json()) as {
-      readonly code: string;
-    };
-    const paired = PairingResponseSchema.parse(
-      await (
-        await fetch(`${baseA}/v1/pair`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ code: pairingCode.code, deviceName: 'ticket phone' }),
-        })
-      ).json(),
-    );
-    const deviceA = { authorization: `Bearer ${paired.deviceToken}` };
+    // The HOST's token buys these tickets: a paired device opens its streams inside its session and has
+    // no ticket to buy, so the ticket rules are proved with the one caller that still uses them.
+    const deviceA = headersA;
     const terminalsA = `${baseA}/v1/sessions/${SESSION_ID}/terminals`;
     const terminalsB = `${baseB}/v1/sessions/${SESSION_ID}/terminals`;
     const first = TerminalViewSchema.parse(

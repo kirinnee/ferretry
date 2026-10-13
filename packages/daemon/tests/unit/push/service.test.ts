@@ -90,7 +90,7 @@ describe('PairedPushDevices', () => {
           platform: 'browser' as const,
           createdAt: AT,
           lastSeenAt: AT,
-          tokenHash: 'h',
+          publicKey: 'MCowBQYDK2VwAyEA0000000000000000000000000000000000000000000',
         },
       ],
     });

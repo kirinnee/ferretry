@@ -4,6 +4,7 @@ import {
   headersFrom,
   queryFrom,
   readBoundedBody,
+  type SessionDevice,
 } from '../../../src/lib/api/index.ts';
 
 /**
@@ -34,6 +35,8 @@ export interface RequestOverrides {
   readonly loopback?: boolean;
   /** An unforgeable carrier proof for an anonymous public privileged-only route. */
   readonly privilegedLoopback?: boolean;
+  /** The device a session proved — what the tunnel attaches, and the only way a device is a caller. */
+  readonly device?: SessionDevice;
   readonly body?: string;
   /** Bytes per piece for a bounded read, so a case can drive a body that arrives in installments. */
   readonly bodyPieceBytes?: number;
@@ -64,6 +67,7 @@ export function request(overrides: RequestOverrides = {}): ApiRequest {
     clientAddress: overrides.clientAddress,
     loopback: overrides.loopback ?? false,
     privilegedLoopback: overrides.privilegedLoopback,
+    ...(overrides.device === undefined ? {} : { device: overrides.device }),
     ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
     text: async (limitBytes?: number) => {
       reads?.limits.push(limitBytes);

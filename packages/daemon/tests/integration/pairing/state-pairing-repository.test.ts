@@ -20,6 +20,11 @@ async function fixture(label: string) {
   return { home, paths, files, repository: new StatePairingRepository(paths, files) };
 }
 
+/** An Ed25519 SPKI: the fixed DER prefix and 32 key bytes. */
+const DEVICE_KEY = Buffer.from([
+  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(5),
+]).toString('base64url');
+
 function record(daemonId: DaemonId, id: string): PairingDeviceRecord {
   return {
     id,
@@ -28,12 +33,12 @@ function record(daemonId: DaemonId, id: string): PairingDeviceRecord {
     platform: 'browser',
     createdAt: '2026-08-03T12:00:00.000Z',
     lastSeenAt: '2026-08-03T12:00:00.000Z',
-    tokenHash: 'h'.repeat(43),
+    publicKey: DEVICE_KEY,
   };
 }
 
 describe('NodePairingCryptography', () => {
-  it('should mint correctly sized, visibly typed secrets from the injected random source', () => {
+  it('should mint correctly sized, visibly typed handles from the injected random source', () => {
     let integer = 0;
     const cryptography = new NodePairingCryptography(
       size => Buffer.alloc(size, 7),
@@ -47,9 +52,6 @@ describe('NodePairingCryptography', () => {
     should(cryptography.pairingCode()).equal('2345-6789');
     should(cryptography.pairingId()).equal(`fy_pair_${Buffer.alloc(16, 7).toString('base64url')}`);
     should(cryptography.deviceId()).equal(`fy_device_id_${Buffer.alloc(16, 7).toString('base64url')}`);
-    const token = cryptography.deviceToken();
-    should(token).equal(`fy_device_${Buffer.alloc(32, 7).toString('base64url')}`);
-    should(Buffer.from(token.slice('fy_device_'.length), 'base64url').byteLength).equal(32);
   });
 
   it('should generate only unambiguous codes accepted by the public schema', () => {
@@ -79,18 +81,6 @@ describe('NodePairingCryptography', () => {
     should(identity.daemonId).match(/^fy_daemon_[A-Za-z0-9_-]{43}$/u);
     should(restored).deepEqual(identity);
     should(() => cryptography.identityFromPrivateKey('not a private key')).throw();
-  });
-
-  it('should domain-separate a token hash by daemon', () => {
-    const cryptography = new NodePairingCryptography();
-    const token = `fy_device_${'a'.repeat(43)}`;
-
-    const first = cryptography.hashDeviceToken(`fy_daemon_${'b'.repeat(43)}`, token);
-    const second = cryptography.hashDeviceToken(`fy_daemon_${'c'.repeat(43)}`, token);
-
-    should(first).match(/^[A-Za-z0-9_-]{43}$/u);
-    should(second).not.equal(first);
-    should(first).not.containEql(token);
   });
 });
 
@@ -178,7 +168,7 @@ describe('StatePairingRepository', () => {
     const duplicate = record(initial.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa');
     await foreign.files.writeTextAtomic(
       join(foreign.paths.state, 'devices.json'),
-      `${JSON.stringify({ schemaVersion: 1, daemonId: initial.daemonId, devices: [duplicate, duplicate] })}\n`,
+      `${JSON.stringify({ schemaVersion: 2, daemonId: initial.daemonId, devices: [duplicate, duplicate] })}\n`,
     );
     await should(new StatePairingRepository(foreign.paths, foreign.files).open('workstation')).be.rejectedWith(
       'device grants contain duplicate identities',
@@ -245,5 +235,56 @@ describe('StatePairingRepository', () => {
 
     await should(repository.list()).be.rejectedWith('pairing state is not open');
     await should(repository.remove('fy_device_id_aaaaaaaaaaaaaaaaaaaaaa')).be.rejectedWith('pairing state is not open');
+  });
+});
+
+describe('StatePairingRepository device keys', () => {
+  it('should persist only public keys, and drop every bearer grant a document from before device keys held', async () => {
+    // Arrange — a v1 document whose grants each held the digest of a bearer token.
+    const { paths, files, repository } = await fixture('pairing-state-bearer');
+    const first = await repository.open('workstation');
+    await files.writeTextAtomic(
+      join(paths.state, 'devices.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        daemonId: first.daemonId,
+        devices: [{ id: 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa', tokenHash: 'h'.repeat(43) }, { id: 'second' }],
+      })}\n`,
+    );
+
+    // Act
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+    const rewritten = JSON.parse((await files.readText(join(paths.state, 'devices.json'))) ?? '{}') as unknown;
+    const again = await new StatePairingRepository(paths, files).open('workstation');
+
+    // Assert — nothing in it can authenticate any more, so it lists nothing, and says how much it dropped once.
+    should(reopened.devices).be.empty();
+    should(reopened.droppedBearerGrants).equal(2);
+    should(rewritten).deepEqual({ schemaVersion: 2, daemonId: first.daemonId, devices: [] });
+    should(again.droppedBearerGrants).equal(0);
+  });
+
+  it('should refuse a grant whose key is not an Ed25519 public key, rather than store a device that can never get in', async () => {
+    const { repository } = await fixture('pairing-state-bad-key');
+    const state = await repository.open('workstation');
+    await should(
+      repository.add({ ...record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'), publicKey: 'not-a-key' }),
+    ).be.rejected();
+    should(await repository.list()).be.empty();
+  });
+
+  it('should record when a device was last seen, durably, and write nothing for one it does not hold', async () => {
+    const { paths, files, repository } = await fixture('pairing-state-touch');
+    const state = await repository.open('workstation');
+    await repository.add(record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'));
+    const before = await files.readText(join(paths.state, 'devices.json'));
+
+    await repository.touch('fy_device_id_cccccccccccccccccccccc', '2026-08-04T12:00:00.000Z');
+    should(await files.readText(join(paths.state, 'devices.json'))).equal(before);
+
+    await repository.touch('fy_device_id_aaaaaaaaaaaaaaaaaaaaaa', '2026-08-04T12:00:00.000Z');
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+    should(reopened.devices[0]?.lastSeenAt).equal('2026-08-04T12:00:00.000Z');
+    should(reopened.devices[0]?.publicKey).equal(DEVICE_KEY);
   });
 });

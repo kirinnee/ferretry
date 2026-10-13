@@ -474,6 +474,7 @@ import {
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
+  directCarrierSocketRoute,
   readHarnessPreflight,
   reconcileAnswerEvidence,
   refuseExhaustedCandidates,
@@ -546,6 +547,7 @@ import {
   SessionTranscriptResolver,
   type SessionTranscriptTail,
   SignalRefused,
+  type SocketRoute,
   type SocketTicketBroker,
   SocketTicketRegistry,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
@@ -892,7 +894,23 @@ export interface DaemonWorld {
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
     readonly push: PushService;
+    /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
+    readonly droppedBearerGrants: number;
   }>;
+  /**
+   * The DIRECT carrier: the socket route a browser that can reach this address opens its sessions on.
+   *
+   * Signed with the key PAIRING minted, read through the path the relay carriers already share — a
+   * second key would carry a fingerprint no QR names. A refusal is answered rather than thrown, and
+   * printed: without it no device can reach this daemon directly, which must not look like a network
+   * fault.
+   */
+  readonly createDirectCarrier: (
+    dispatch: RelayApiDispatch,
+    sockets: RelayStreamDispatch,
+    devices: RelayDeviceDirectory,
+    pairing: RelayPairingRedeemer,
+  ) => Promise<{ readonly route: SocketRoute } | { readonly refusal: string }>;
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
@@ -5263,7 +5281,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
-      const credentials = new PairingDeviceRegistry(state.daemonId, cryptography, state.devices);
+      const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
       // The application-server key pair, minted into the state home on first use and never returned by
       // anything: the transport below is the only holder of the signing half, and the domain above sees
       // the public point alone. See `src/adapters/push/webcrypto-vapid-keys.ts`.
@@ -5282,6 +5300,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       return {
         credentials,
         push,
+        droppedBearerGrants: state.droppedBearerGrants,
         subsystem: new PairingService({
           daemonId: state.daemonId,
           daemonName: state.daemonName,
@@ -5327,6 +5346,32 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
+    createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
+      const identity = await readDaemonRelayIdentity(
+        stateFiles,
+        paths.daemonIdentity,
+        new WebCryptoRelayIdentityKeys(),
+      );
+      if (!identity.ok) return { refusal: identity.reason };
+      return {
+        route: directCarrierSocketRoute({
+          crypto: new WebCryptoRelayCrypto(),
+          identity: identity.identity,
+          dispatch,
+          sockets,
+          devices,
+          pairing,
+          scheduler: {
+            after: (milliseconds, action) => {
+              const handle = setTimeout(action, milliseconds);
+              return { cancel: () => clearTimeout(handle) };
+            },
+          },
+          clock: { now: () => Date.now() },
+          connections: deviceConnections,
+        }),
+      };
+    },
     createRelayCarriers: async (sources, dispatch, sockets, devices, pairing) => {
       const dialledSources = sources.filter(
         (source): source is Exclude<RelayCarrierSource, { readonly kind: 'direct-only' }> =>
@@ -6441,8 +6486,23 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const startedAtMs = world.clock.now();
   const pairing = await world.createPairing(config, world.clock, carriers, discoverableRelayUrl(relaySources));
   world.notices.step('pairing identity opened');
+  // NO COMPATIBILITY, SAID ONCE. A `devices.json` from before device keys held bearer-token grants
+  // nothing can accept any more; the repository dropped them, and the operator is told how many
+  // devices have to pair again rather than discovering it one phone at a time.
+  if (pairing.droppedBearerGrants > 0)
+    world.notices.state(
+      `${pairing.droppedBearerGrants} paired device${pairing.droppedBearerGrants === 1 ? '' : 's'} from before device keys ${pairing.droppedBearerGrants === 1 ? 'was' : 'were'} removed; pair ${pairing.droppedBearerGrants === 1 ? 'it' : 'them'} again with \`${CLIENT_NAME} pair\``,
+    );
+  const idleExpired = await pairing.subsystem.expireIdleDevices();
+  if (idleExpired > 0)
+    world.notices.state(`${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for 30 days ${idleExpired === 1 ? 'was' : 'were'} removed`);
+  /** Which key a session must prove, answered by the pairing state machine that owns the grants. */
+  const sessionDevices: RelayDeviceDirectory = {
+    deviceKey: async deviceId => await pairing.subsystem.deviceKey(deviceId),
+    seen: deviceId => pairing.subsystem.seen(deviceId),
+  };
   const base = {
-    credentials: { ...(await world.credentials.load()), devices: pairing.credentials },
+    credentials: await world.credentials.load(),
     usage,
     clock: world.clock,
     startedAtMs,
@@ -6569,7 +6629,19 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // table rather than a second one. A stream a browser opens over a rendezvous passes the
   // authorization boundary, the ticket-free credential rule and the per-capability guard that the
   // bound address already enforces — one privilege model, not two that drift.
-  const socketDispatcher = createMountedSocketDispatcher(base, subsystems);
+  //
+  // The DIRECT carrier is one more socket route on that table: a browser that can reach this address
+  // opens its sessions here, and each one runs the same link a rendezvous socket runs. Without the
+  // identity there is nothing to sign a handshake with, so no device can reach this daemon directly —
+  // which is said out loud rather than left to look like a network fault.
+  const direct = await world.createDirectCarrier(
+    async request => await dispatcher.dispatch(request),
+    async request => await socketDispatcher.upgrade(request),
+    sessionDevices,
+    pairing.subsystem,
+  );
+  if ('refusal' in direct) world.notices.state(`direct sessions unavailable — ${direct.refusal}`);
+  const socketDispatcher = createMountedSocketDispatcher(base, subsystems, 'route' in direct ? [direct.route] : []);
   let server: ApiServerHandle;
   try {
     server = await world.boot.binder.bind(
@@ -6624,7 +6696,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     relaySources,
     request => dispatcher.dispatch(request),
     async request => await socketDispatcher.upgrade(request),
-    { identifyDevice: token => pairing.credentials.identify(token) },
+    sessionDevices,
     // The pairing state machine itself, NOT the route table. A pre-credential session redeems
     // through this port and constructs no request at all, which is what keeps `POST /v1/pair` —
     // public on the route table — unreachable over a relay.

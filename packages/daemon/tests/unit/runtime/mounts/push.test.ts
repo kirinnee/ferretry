@@ -78,14 +78,11 @@ class FakePush implements PushSubscriptionSubsystem {
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: {
-    identify: (token: string) =>
-      token === 'device-secret' ? deviceId : token === 'nameless-secret' ? 'not-a-device-id' : undefined,
-  },
 };
 
 const admin = { authorization: 'Bearer admin-secret' };
-const browser = { authorization: 'Bearer device-secret' };
+/** A paired browser: whoever its session proved. It sends no credential of its own. */
+const browser = { deviceId, appSession: 'app-one' } as const;
 const warden = { authorization: 'Bearer warden-secret' };
 
 /**
@@ -109,7 +106,7 @@ describe('push routes', () => {
 
     const response = await (
       await mount(subject)
-    ).dispatch(request({ method: 'GET', path: '/v1/push/vapid', headers: browser }));
+    ).dispatch(request({ method: 'GET', path: '/v1/push/vapid', device: browser }));
 
     should(response.status).equal(200);
     // One stable public point per daemon. A browser re-reads it on every enrolment attempt, so a
@@ -123,7 +120,7 @@ describe('push routes', () => {
 
     const response = await (
       await mount(subject)
-    ).dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', headers: browser }));
+    ).dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }));
 
     should(response.status).equal(200);
     should(response.headers.get('cache-control')).equal('no-store');
@@ -136,7 +133,7 @@ describe('push routes', () => {
     const surface = await mount(subject);
 
     const enrolled = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/push/subscriptions', headers: browser, body: JSON.stringify(body) }),
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser, body: JSON.stringify(body) }),
     );
     // The request shape is strict, so a body that tries to name a different owner is not merely
     // ignored — it is refused. There is nowhere on this wire to claim a device.
@@ -144,7 +141,7 @@ describe('push routes', () => {
       request({
         method: 'POST',
         path: '/v1/push/subscriptions',
-        headers: browser,
+        device: browser,
         body: JSON.stringify({ ...body, deviceId: otherDeviceId }),
       }),
     );
@@ -164,13 +161,13 @@ describe('push routes', () => {
     const fromCli = await surface.dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', headers: admin, body: JSON.stringify(body) }),
     );
-    // A device the registry names with something the protocol refuses is treated the same way rather
+    // A device a session names with something the protocol refuses is treated the same way rather
     // than being persisted as an unrevocable row.
     const fromNameless = await surface.dispatch(
       request({
         method: 'POST',
         path: '/v1/push/subscriptions',
-        headers: { authorization: 'Bearer nameless-secret' },
+        device: { deviceId: 'not-a-device-id', appSession: 'app-one' },
         body: JSON.stringify(body),
       }),
     );
@@ -192,7 +189,7 @@ describe('push routes', () => {
       request({
         method: 'POST',
         path: '/v1/push/subscriptions',
-        headers: browser,
+        device: browser,
         body: JSON.stringify({ ...body, subscription: { ...body.subscription, endpoint: 'http://insecure.test/x' } }),
       }),
     );
@@ -206,7 +203,7 @@ describe('push routes', () => {
 
     const response = await (
       await mount(subject)
-    ).dispatch(request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, headers: browser }));
+    ).dispatch(request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, device: browser }));
 
     should(response.status).equal(200);
     should(jsonBody(response)).deepEqual(view(enrolmentId, 'Pixel 8'));
@@ -221,13 +218,13 @@ describe('push routes', () => {
       request({
         method: 'DELETE',
         path: '/v1/push/subscriptions/push-99999999-9999-4999-8999-999999999999',
-        headers: browser,
+        device: browser,
       }),
     );
     // An id that is not even shaped like one is refused without the subsystem being asked, so a path
     // segment can never reach a store as a lookup key.
     const malformed = await surface.dispatch(
-      request({ method: 'DELETE', path: '/v1/push/subscriptions/nonsense', headers: browser }),
+      request({ method: 'DELETE', path: '/v1/push/subscriptions/nonsense', device: browser }),
     );
 
     should([unknown.status, malformed.status]).deepEqual([404, 404]);
@@ -244,7 +241,7 @@ describe('push routes', () => {
       request({
         method: 'DELETE',
         path: `/v1/push/subscriptions/${encodeURIComponent(enrolmentId)}`,
-        headers: browser,
+        device: browser,
       }),
     );
 
@@ -255,12 +252,12 @@ describe('push routes', () => {
     const damaged = await mount(new FakePush([], new PushError('corrupt_store', 'the push document is damaged')));
     const rejected = await mount(new FakePush([], new PushError('invalid', 'the push service discarded it')));
 
-    const list = await damaged.dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', headers: browser }));
+    const list = await damaged.dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }));
     const enrol = await rejected.dispatch(
-      request({ method: 'POST', path: '/v1/push/subscriptions', headers: browser, body: JSON.stringify(body) }),
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser, body: JSON.stringify(body) }),
     );
     const revoke = await damaged.dispatch(
-      request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, headers: browser }),
+      request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, device: browser }),
     );
 
     // Damaged is recoverable once somebody repairs the document, so it is a 503 and says so; a
@@ -281,7 +278,7 @@ describe('push routes', () => {
 
     const response = await (
       await mount(new Broken())
-    ).dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', headers: browser }));
+    ).dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }));
 
     should(response.status).equal(500);
   });
@@ -311,7 +308,7 @@ describe('push routes', () => {
     const surface = await mount(subject, false);
 
     const remote = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/push/subscriptions', headers: browser, body: JSON.stringify(body) }),
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser, body: JSON.stringify(body) }),
     );
     // A LOCAL caller on a machine with NO OPERATOR PASSWORD is ungoverned, which is what this fixture is:
     // there is nothing to unlock with, so there is no gate to pass. It is not "loopback is ungoverned"
@@ -321,7 +318,7 @@ describe('push routes', () => {
       request({
         method: 'POST',
         path: '/v1/push/subscriptions',
-        headers: browser,
+        device: browser,
         loopback: true,
         privilegedLoopback: true,
         body: JSON.stringify(body),

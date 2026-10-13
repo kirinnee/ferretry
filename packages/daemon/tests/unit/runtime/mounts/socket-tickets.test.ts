@@ -14,11 +14,7 @@ import { CREDENTIALS, human } from './support.ts';
  * because a URL-borne credential is a credential in an access log.
  */
 
-const deviceToken = { authorization: 'Bearer device-secret' } as const;
-const credentials = {
-  ...CREDENTIALS,
-  devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-};
+const credentials = CREDENTIALS;
 
 function fixture() {
   const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
@@ -46,19 +42,16 @@ describe('the mounted socket ticket counter', () => {
     should(tickets.redeem(body.ticket, '/v1/events')).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
 
-  it('should sell a paired device a ticket that redeems as THAT device', async () => {
-    // Arrange / Act
-    const { tickets, response } = await sell(deviceToken);
-    const body = JSON.parse(response.body) as { readonly ticket: string };
+  it('should sell a paired device no ticket at all, because its streams open inside its session', async () => {
+    // Arrange / Act — a device, as its session proved it.
+    const { http } = fixture();
+    const response = await http.dispatch(
+      request({ method: 'POST', path: '/v1/events/ticket', device: { deviceId: 'device-1', appSession: 'app-one' } }),
+    );
 
-    // Assert — the whole point: a ticket carries its buyer's own class and identity, so a transport
-    // workaround can never be a way to reach the host's surface, and the journal still names the phone.
-    should(response.status).equal(201);
-    should(tickets.redeem(body.ticket, '/v1/events')).deepEqual({
-      kind: 'authenticated',
-      tokenClass: 'device',
-      deviceId: 'device-1',
-    });
+    // Assert — a ticket bought here would be a bearer value it could spend on a plain-HTTP upgrade.
+    should(response.status).equal(403);
+    should(JSON.parse(response.body)).containDeep({ code: 'ticket_not_for_devices' });
   });
 
   it('should never let a ticket be spent on an ordinary route', async () => {

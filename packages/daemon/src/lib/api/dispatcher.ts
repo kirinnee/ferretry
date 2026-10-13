@@ -1,5 +1,12 @@
+import { OLDER_APP_SENTENCE } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
-import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
+import {
+  type ApiCredentials,
+  type Authentication,
+  authenticate,
+  bearerToken,
+  isPreKeyDeviceToken,
+} from './authentication.ts';
 import { type CallerGovernance, type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
 import {
@@ -116,12 +123,20 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     return { kind: 'authorized', route: lookup.route, context: { request, params: lookup.params } };
   }
 
-  const presented = authenticate(credentials, {
-    bearer: bearerToken(headerValue(request, 'authorization')),
-    // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer
-    // that could already read the token file it came from.
-    query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
-  });
+  const bearer = bearerToken(headerValue(request, 'authorization'));
+  // A DEVICE IS WHOEVER ITS SESSION PROVED, and only a session can say so: `device` is set by the
+  // tunnel that verified the key's signature over the session transcript, and by nothing else. A
+  // session's request carries no `authorization` of its own (the tunnel's schema refuses one), so
+  // there is no second credential here to disagree with it.
+  const presented: Authentication =
+    request.device !== undefined
+      ? { kind: 'authenticated', tokenClass: 'device', deviceId: request.device.deviceId }
+      : authenticate(credentials, {
+          bearer,
+          // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer
+          // that could already read the token file it came from.
+          query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
+        });
   // A ticket is the credential a browser CAN present on an upgrade, and only the upgrade boundary
   // passes a redeemer — an ordinary route is given none, so a ticket read out of an access log
   // authenticates nothing there. It is tried only when the request could not authenticate on its own,
@@ -131,7 +146,15 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       ? (tickets.redeem(queryValue(request, SOCKET_TICKET_QUERY_PARAMETER) ?? '', request.path) ?? presented)
       : presented;
   if (authentication.kind === 'anonymous')
-    return { kind: 'refused', response: errorResponse(401, 'unauthorized', 'unauthorized') };
+    return {
+      kind: 'refused',
+      // An app from before device keys still sends the bearer token it was given. Nothing can accept
+      // that any more, and a bare 401 would read as "you were unpaired" when the truth is "update the
+      // app" — so it is told which side is old, in the one sentence every surface shares.
+      response: isPreKeyDeviceToken(bearer)
+        ? errorResponse(426, OLDER_APP_SENTENCE, 'app_outdated')
+        : errorResponse(401, 'unauthorized', 'unauthorized'),
+    };
 
   if (lookup.kind === 'not-found') return { kind: 'unrouted' };
   if (lookup.kind === 'method-not-allowed')

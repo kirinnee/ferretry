@@ -206,10 +206,8 @@ describe('the operator password route', () => {
     // requirement and keeps a remote bearer from rewriting the password.
     // Arrange
     const { subsystem } = await mount();
-    const credentials = {
-      ...CREDENTIALS,
-      devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-    };
+    const credentials = CREDENTIALS;
+    const DEVICE = { deviceId: 'device-1', appSession: 'app-one' } as const;
     const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
@@ -229,7 +227,7 @@ describe('the operator password route', () => {
       request({
         method: 'PUT',
         path: '/v1/grants/password',
-        headers: { authorization: 'Bearer device-secret' },
+        device: DEVICE,
         loopback: true,
         body: JSON.stringify({ password: 'forwarded' }),
       }),
@@ -239,7 +237,7 @@ describe('the operator password route', () => {
       request({
         method: 'PUT',
         path: '/v1/grants/password',
-        headers: { authorization: 'Bearer device-secret' },
+        device: DEVICE,
         loopback: true,
         privilegedLoopback: true,
         body: JSON.stringify({ password: 'operator-secret' }),
@@ -249,7 +247,7 @@ describe('the operator password route', () => {
       request({
         method: 'PUT',
         path: '/v1/grants/password',
-        headers: { authorization: 'Bearer device-secret' },
+        device: DEVICE,
         loopback: false,
         body: JSON.stringify({ password: 'stolen' }),
       }),
@@ -273,19 +271,18 @@ describe('the operator password route', () => {
     // The browser is refused so the gate is not one tap wide. The admin token is served from the same
     // state — a password nobody presented and no unlock — because that is the door a FORGOTTEN password
     // is repaired through, and a design where both were closed would brick the machine forever.
-    // Arrange — a machine with a password, and a device credential this dispatcher can identify.
+    // Arrange — a machine with a password, and a device as its session proved it.
     const { subsystem } = await mount({ password: 'the-one-nobody-remembers' });
-    const credentials = {
-      ...CREDENTIALS,
-      devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-    };
+    const credentials = CREDENTIALS;
+    const DEVICE = { deviceId: 'device-1', appSession: 'app-one' } as const;
     const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials, NO_GOVERNED_ROUTES_GUARD);
-    const put = (headers: Record<string, string>, password: string, privilegedLoopback?: true) =>
+    const put = (headers: Record<string, string>, password: string, privilegedLoopback?: true, device?: typeof DEVICE) =>
       withDevices.dispatch(
         request({
           method: 'PUT',
           path: '/v1/grants/password',
           headers,
+          ...(device === undefined ? {} : { device }),
           loopback: true,
           privilegedLoopback,
           body: JSON.stringify({ password }),
@@ -295,7 +292,7 @@ describe('the operator password route', () => {
     // Act — the browser is PROVED local, so the refusal is the gate's and not the arrival's. The host
     // token carries no such proof, as on a daemon bound beyond loopback, and is served anyway: the
     // escape hatch must not depend on how the daemon was bound.
-    const browser = await put({ authorization: 'Bearer device-secret' }, 'a-browser-tried-this', true);
+    const browser = await put({}, 'a-browser-tried-this', true, DEVICE);
     const hostToken = await put(human, 'the-host-repaired-it');
 
     // Assert

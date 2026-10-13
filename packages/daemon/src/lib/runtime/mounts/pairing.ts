@@ -41,11 +41,14 @@
  * sentence a person can be told — see `docs/grants.md` and `docs/pairing.md`. Nothing else in the
  * daemon consults it: local use of a passwordless machine is untouched.
  *
- * ## REDEMPTION STAYS PUBLIC, AND STAYS THE ONLY PUBLIC ROUTE HERE
+ * ## REDEMPTION IS NOT A ROUTE ANY MORE
  *
- * A device redeeming a code has no credential yet — that is the whole point of the exchange — so
- * `POST /v1/pair` is `public` and the CODE is the credential for that one request. Everything else on
- * this surface either mints a credential or lists and revokes them, and none of it is public.
+ * A device redeeming a code has no credential yet, and the plain-HTTP `POST /v1/pair` that served it
+ * handed the live code to whatever answered at an address nothing had authenticated. Redemption now
+ * happens only inside a session — direct or relayed — whose daemon was proved against the QR's
+ * fingerprint before the code left the device, and it registers the device's KEY rather than issuing a
+ * token (`docs/pairing.md`). So nothing on this surface is public: every route here either mints a
+ * code or lists and revokes devices.
  */
 
 import {
@@ -59,7 +62,6 @@ import {
   PairingCodeStatusResponseSchema,
   type PairingId,
   PairingIdSchema,
-  PairingResponseSchema,
 } from '@ferretry/protocol';
 import {
   type ApiRequest,
@@ -71,7 +73,7 @@ import {
   jsonResponse,
   parseOptionalBody,
 } from '../../api/index.ts';
-import type { PairingMint, PairingRedemption } from '../../pairing/index.ts';
+import type { PairingMint } from '../../pairing/index.ts';
 
 export interface PairingSubsystem {
   /**
@@ -85,14 +87,11 @@ export interface PairingSubsystem {
   status(pairingId: PairingId): PairingCodeStatusResponse | undefined;
   /** Ends a minted code early. `undefined` when this daemon never minted that id. */
   revoke(pairingId: PairingId): PairingCodeStatusResponse | undefined;
-  /** Who may reach this daemon. Never carries a token digest — see `PairedDeviceSchema`. */
+  /** Who may reach this daemon. Never carries key material — see `PairedDeviceSchema`. */
   devices(): Promise<readonly PairedDevice[]>;
   /** Takes one device's access away. False when there was no such grant. */
   revokeDevice(id: string): Promise<boolean>;
-  redeem(value: unknown, rateLimitKey: string): Promise<PairingRedemption>;
 }
-
-const refused = () => errorResponse(403, 'pairing refused', 'pairing_refused');
 
 /**
  * What every governed pairing route demands.
@@ -108,21 +107,6 @@ const refused = () => errorResponse(403, 'pairing refused', 'pairing_refused');
  * `docs/grants.md`.
  */
 const PAIRING_DEMAND: CapabilityDemand = { capability: 'pairing', axis: 'use' };
-
-async function pairingBody(request: ApiRequest): Promise<unknown> {
-  try {
-    return JSON.parse(await request.text());
-  } catch {
-    // Syntax, shape and body-read failures deliberately collapse into the same public refusal as a
-    // wrong code. The service still performs its constant-time comparison without letting broken
-    // uploads spend the daemon-wide code-guess budget.
-    return undefined;
-  }
-}
-
-function rateLimitKey(request: ApiRequest): string {
-  return request.clientAddress ?? (request.loopback ? 'loopback-unknown' : 'remote-unknown');
-}
 
 /**
  * The caller's OWN device grant, when the caller is a paired device.
@@ -154,16 +138,6 @@ async function devicesView(
 
 export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] {
   return [
-    {
-      method: 'POST',
-      path: '/v1/pair',
-      minimum: 'none',
-      noStore: true,
-      handle: async ({ request }) => {
-        const result = await subsystem.redeem(await pairingBody(request), rateLimitKey(request));
-        return result.kind === 'paired' ? jsonResponse(PairingResponseSchema.parse(result.response)) : refused();
-      },
-    },
     {
       method: 'POST',
       path: '/v1/pair/code',

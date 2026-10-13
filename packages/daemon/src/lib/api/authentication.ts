@@ -1,19 +1,18 @@
 /**
- * The tokens the daemon accepts.
+ * The tokens the daemon accepts — the HOST's tokens, and only those.
  *
  * `admin` is the full-authority token. `warden` is a capability-scoped token the warden pane runs
  * under: it may read, and it may perform the safe-recovery actions, but it may not start, remove or
  * reconfigure anything. A daemon with no warden token simply has no warden-scoped surface.
+ *
+ * THERE IS NO DEVICE CREDENTIAL HERE, AND THAT IS THE POINT. A paired device used to present a bearer
+ * token in this header; it now proves a key inside a session, and the tunnel attaches the proven
+ * identity as `ApiRequest.device`. Nothing a request can send resolves to a device, so a stolen or
+ * replayed value has no door left to fit.
  */
 export interface ApiCredentials {
   readonly admin: string;
   readonly warden?: string;
-  /** Per-device credentials are hashed and resolved by the daemon-local registry. */
-  readonly devices?: DeviceCredentialVerifier;
-}
-
-export interface DeviceCredentialVerifier {
-  identify(token: string): string | undefined;
 }
 
 /** What a request presented. Assembled by the dispatcher from headers and, for loopback WebSocket
@@ -72,20 +71,17 @@ export function authenticate(credentials: ApiCredentials, presented: PresentedTo
     return { kind: 'authenticated', tokenClass: 'admin' };
   if (warden !== undefined && warden !== '' && candidates.some(candidate => secretsMatch(candidate, warden)))
     return { kind: 'authenticated', tokenClass: 'warden' };
-  if (credentials.devices !== undefined) {
-    for (const candidate of candidates) {
-      // A blank secret authenticates nothing HERE too, not only against the host tokens above. A
-      // loopback upgrade carrying `?token=` arrives as '', and a verifier is an injected port whose
-      // implementation is free to be sloppier than this one; the seam must not depend on it.
-      if (candidate.trim() === '') continue;
-      const identity = credentials.devices.identify(candidate)?.trim();
-      // A verifier that answers with a blank identity has said "I do not know who this is". Reading
-      // that as a match would authorize an unattributable device on every operator route and
-      // journal it as the bare actor `device` — damaged evidence taken for the benign case. An
-      // identity or nothing.
-      if (identity !== undefined && identity !== '')
-        return { kind: 'authenticated', tokenClass: 'device', deviceId: identity };
-    }
-  }
   return { kind: 'anonymous' };
+}
+
+/**
+ * Whether a presented bearer is a device token from before device keys.
+ *
+ * Read ONLY to answer an old app in words: such a token authenticates nothing — there is no code
+ * left that could compare one — but an app still sending it is an app nobody has updated, and a bare
+ * `401` would read as "this device was unpaired" rather than "reload to update". The shape is the old
+ * `fy_device_` + 43 base64url characters; a pairing id and a device id have different prefixes.
+ */
+export function isPreKeyDeviceToken(bearer: string | undefined): boolean {
+  return bearer !== undefined && /^fy_device_[A-Za-z0-9_-]{43}$/u.test(bearer);
 }

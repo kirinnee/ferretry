@@ -8,6 +8,7 @@ import {
   encodeHandshakeMessage,
   handshakeTranscriptHash,
   sessionIdFromBytes,
+  speaksPreviousSessionProtocol,
   startClientHandshake,
   toBase64Url,
   utf8Bytes,
@@ -125,6 +126,14 @@ describe('end-to-end handshake', () => {
     should(decodeDaemonHello(utf8Bytes('{"t":"hs2"}'))).be.null();
     should(decodeClientHello(utf8Bytes('not json'))).be.null();
     should(decodeClientHello(new Uint8Array([0xff, 0xfe]))).be.null();
+  });
+
+  it('should recognise a peer from before the device key, and only that', async () => {
+    const { pending } = await handshake();
+    should(speaksPreviousSessionProtocol(encodeHandshakeMessage(pending.hello))).be.false();
+    should(speaksPreviousSessionProtocol(utf8Bytes(JSON.stringify({ ...pending.hello, protocol: 'ferretry-relay/1' })))).be.true();
+    should(speaksPreviousSessionProtocol(utf8Bytes('null'))).be.false();
+    should(speaksPreviousSessionProtocol(utf8Bytes('not json'))).be.false();
   });
 
   it('should produce a different transcript for every field it covers', async () => {

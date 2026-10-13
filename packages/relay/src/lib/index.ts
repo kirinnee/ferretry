@@ -5,6 +5,7 @@ export * from './connection.ts';
 export * from './constants.ts';
 export * from './control.ts';
 export * from './crypto.ts';
+export * from './device-proof.ts';
 export * from './flow.ts';
 export * from './frames.ts';
 export * from './handshake.ts';

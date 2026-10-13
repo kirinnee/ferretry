@@ -285,32 +285,26 @@ describe('the mounted fleet event feed', () => {
     should(events.scopes).be.empty();
   });
 
-  it('should let a remote paired device hold the feed on a ticket', async () => {
-    // Arrange — this is the case the feed existed for and could not serve: a phone is not loopback and
-    // its `WebSocket` cannot carry a header, so before the ticket it had no way to authenticate here
-    // at all.
-    const { events, dispatcher, tickets } = fixture();
-    const { ticket } = tickets.issue(
-      { kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' },
-      '/v1/events',
-    );
+  it('should let a remote paired device hold the feed through its session', async () => {
+    // Arrange — this is the case the feed exists for: a phone is not loopback, and it opens the feed as
+    // a stream session whose device the tunnel proved, so it needs no ticket and no header at all.
+    const { events, dispatcher } = fixture();
 
     // Act
-    const decision = await dispatcher.upgrade(request({ path: '/v1/events', query: [['ticket', ticket]] }));
+    const decision = await dispatcher.upgrade(
+      request({ path: '/v1/events', device: { deviceId: 'device-1', appSession: 'app-one' } }),
+    );
     await attach(decision);
 
-    // Assert — accepted, and the ticket parameter did not disturb the scope the caller asked for.
-    should(decision.outcome).equal('accepted');
+    // Assert — accepted, attributed to that device, and in the scope the caller asked for.
+    should(decision).containDeep({ outcome: 'accepted', deviceId: 'device-1' });
     should(events.scopes).deepEqual([{ kind: 'fleet' }]);
   });
 
   it('should let a ticket carry the cursor the caller asked for', async () => {
     // Arrange
     const { events, dispatcher, tickets } = fixture();
-    const { ticket } = tickets.issue(
-      { kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' },
-      '/v1/events',
-    );
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'admin' }, '/v1/events');
 
     // Act
     const decision = await dispatcher.upgrade(

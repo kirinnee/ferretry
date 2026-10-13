@@ -13,15 +13,16 @@
  * redeemable ONLY on an upgrade: the request/response boundary is never handed a redeemer, so a
  * ticket recovered from a log cannot be replayed against an ordinary route even inside its window.
  *
- * What it is NOT is a way to hold authority longer or more widely than the credential behind it. A
- * device's ticket authorizes what a device may do. Revoking the grant does not spend the device's
- * outstanding tickets, so one can still be redeemed for the seconds it has left — which is why that
- * window is seconds — but the socket it opens is closed the moment it is opened, and every socket the
- * device already held is closed by the revocation itself. See `LiveDeviceConnections`.
+ * What it is NOT is a way to hold authority longer or more widely than the credential behind it.
+ *
+ * IT IS FOR THE HOST'S TOKENS ONLY NOW. A paired device used to buy one with its bearer token; it
+ * now has no bearer token, and opens every stream inside its sealed session instead, so {@link
+ * SocketTicketRegistry.issue} refuses a device credential outright.
  */
 
 import { SOCKET_TICKET_TTL_SECONDS } from '@ferretry/protocol';
 import { type Authentication, secretsMatch } from './authentication.ts';
+import { ApiError } from './error.ts';
 
 /** Query parameter carrying a ticket on an upgrade. Distinct from `token`, which stays loopback-only,
  *  so the two can never be confused for one another by a client or by a reader of this code. */
@@ -91,6 +92,16 @@ export class SocketTicketRegistry implements SocketTicketBroker {
   ) {}
 
   issue(credential: AuthenticatedCredential, audience: SocketTicketAudience): SocketTicketGrant {
+    // A PAIRED DEVICE IS NEVER SOLD ONE. Its streams open inside its own sealed session, where the
+    // credential is the session; a ticket bought from inside that session would be a bearer value the
+    // device could spend on a plain-HTTP upgrade — the exact path the device key exists to close. The
+    // host's own tokens still buy tickets, because the host's command line has no session to open.
+    if (credential.tokenClass === 'device')
+      throw new ApiError(
+        403,
+        'a paired device opens its live streams inside its own session, so there is no ticket for it to buy',
+        'ticket_not_for_devices',
+      );
     const now = this.clock.now();
     this.forget(now);
     const ticket = this.secrets.ticket();

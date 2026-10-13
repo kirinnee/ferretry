@@ -64,7 +64,6 @@ const pairingSubsystem = (): PairingSubsystem => ({
   revoke: () => undefined,
   devices: async () => [],
   revokeDevice: async () => false,
-  redeem: async () => ({ kind: 'refused' }),
 });
 
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
@@ -461,7 +460,8 @@ describe('the mounted daemon surface', () => {
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
       3; // the setup scan, tool install and the clone export
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
+    // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
+    should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -477,7 +477,6 @@ describe('the mounted daemon surface', () => {
       'GET /usage',
       'GET /v1/usage',
       'GET /metrics',
-      'POST /v1/pair',
       'POST /v1/pair/code',
       'GET /v1/pair/code/:pairingId',
       'DELETE /v1/pair/code/:pairingId',

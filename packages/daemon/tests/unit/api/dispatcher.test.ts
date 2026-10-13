@@ -43,8 +43,10 @@ const UNGOVERNED: CallerGovernance = {
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
 };
+
+/** A paired device, as a session proved it — the only way a device is ever a caller. */
+const DEVICE = { deviceId: 'device-1', appSession: 'app-one' } as const;
 
 /** Echoes back what the dispatcher decided, so a test asserts the decision rather than a mock call. */
 const echo = (path: string, minimum: CredentialMinimum, method = 'GET', privilegedOnly?: true): ApiRoute => ({
@@ -181,17 +183,32 @@ describe('ApiDispatcher authorization', () => {
     should(asAdmin.status).equal(200);
   });
 
+  it('should tell an app from before device keys to update, rather than that it was unpaired', async () => {
+    // A bearer shaped like the old device token authenticates nothing — there is nothing left that could
+    // compare one — and the answer says which side is old, in the sentence every surface shares.
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
+    const outdated = await dispatcher.dispatch(
+      request({ path: '/v1/sessions', headers: { authorization: `Bearer fy_device_${'b'.repeat(43)}` } }),
+    );
+    const stranger = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: { authorization: 'Bearer nope' } }));
+
+    should(outdated.status).equal(426);
+    should(jsonBody(outdated)).containDeep({ code: 'app_outdated' });
+    should(String(jsonBody(outdated).error)).match(/Reload the page/u);
+    should(stranger.status).equal(401);
+  });
+
   it('should let a paired device use operator routes but never an admin-token route', async () => {
     const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'), echo('/v1/pair/code', 'admin-token', 'POST'));
 
     const operator = await dispatcher.dispatch(
-      request({ path: '/v1/sessions', headers: { authorization: 'Bearer device-secret' } }),
+      request({ path: '/v1/sessions', device: DEVICE }),
     );
     const hostOnly = await dispatcher.dispatch(
       request({
         method: 'POST',
         path: '/v1/pair/code',
-        headers: { authorization: 'Bearer device-secret' },
+        device: DEVICE,
       }),
     );
     const hostAdmin = await dispatcher.dispatch(
@@ -214,7 +231,7 @@ describe('ApiDispatcher authorization', () => {
       request({
         method: 'POST',
         path: '/v1/local',
-        headers: { authorization: 'Bearer device-secret' },
+        device: DEVICE,
         loopback: true,
         privilegedLoopback: true,
       }),
@@ -231,7 +248,7 @@ describe('ApiDispatcher authorization', () => {
       request({
         method: 'POST',
         path: '/v1/local',
-        headers: { authorization: 'Bearer device-secret' },
+        device: DEVICE,
         loopback: false,
       }),
     );
@@ -253,7 +270,9 @@ describe('ApiDispatcher authorization', () => {
       request({ method: 'POST', path: '/v1/local', headers: { authorization: `Bearer ${token}` }, loopback: true });
 
     // Act
-    const proxiedDevice = await dispatcher.dispatch(proxied('device-secret'));
+    const proxiedDevice = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/local', device: DEVICE, loopback: true }),
+    );
     const hostAdmin = await dispatcher.dispatch(proxied('admin-secret'));
 
     // Assert
@@ -349,8 +368,8 @@ describe('ApiDispatcher attribution', () => {
     const response = await dispatcher.dispatch(
       request({
         path: '/v1/sessions',
+        device: DEVICE,
         headers: {
-          authorization: 'Bearer device-secret',
           [SESSION_ID_HEADER]: 'spoofed-peer',
           [CLIENT_HEADER]: 'cli',
         },
@@ -590,12 +609,11 @@ describe('the operator grant layer', () => {
       explain: () => undefined,
     };
     const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording);
-    const asDevice = { authorization: 'Bearer device-secret' };
 
     // Act
-    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: asDevice, loopback: true }));
+    await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE, loopback: true }));
     await dispatcher.dispatch(
-      request({ path: '/v1/fleet/plan', headers: asDevice, loopback: true, privilegedLoopback: true }),
+      request({ path: '/v1/fleet/plan', device: DEVICE, loopback: true, privilegedLoopback: true }),
     );
 
     // Assert
@@ -933,7 +951,8 @@ describe('the warden remedy axis', () => {
       request({
         method: 'POST',
         path: '/v1/sessions/s-3/stop',
-        headers: { authorization: 'Bearer device-secret', [WARDEN_CAPABILITY_HEADER]: 'cap-7' },
+        headers: { [WARDEN_CAPABILITY_HEADER]: 'cap-7' },
+        device: DEVICE,
       }),
     );
 

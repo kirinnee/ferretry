@@ -153,6 +153,24 @@ export class WebCryptoRelayCrypto implements RelayCrypto {
   }
 
   /**
+   * A fresh DEVICE key: Ed25519, generated NON-EXTRACTABLE.
+   *
+   * The private half is a `CryptoKey` the browser will sign with and never export — `exportKey` on it
+   * throws, and the object a caller persists to IndexedDB carries a reference the browser honours, not
+   * the key's bytes. The public half is always exportable, and its SPKI is the only thing the daemon
+   * ever stores about this device.
+   */
+  async generateDeviceKey(): Promise<{ readonly publicKeySpki: Uint8Array; readonly privateKey: CryptoKey }> {
+    const pair = (await this.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+    return { publicKeySpki: bytesOf(await this.subtle.exportKey('spki', pair.publicKey)), privateKey: pair.privateKey };
+  }
+
+  /** Wraps a stored device key so the protocol code can sign with it without knowing it is WebCrypto. */
+  deviceKeyHandle(privateKey: CryptoKey): PrivateKeyHandle {
+    return handleOf('Ed25519', privateKey);
+  }
+
+  /**
    * Load a daemon's stored Ed25519 identity from its PKCS#8 PEM.
    *
    * WebCrypto cannot derive a public key from a private one, so the key is imported extractable

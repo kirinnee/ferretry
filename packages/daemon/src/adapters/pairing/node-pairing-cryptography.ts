@@ -12,9 +12,7 @@ import type { PairingCryptography } from '../../lib/pairing/index.ts';
 // Keep this byte-for-byte aligned with `PairingCodeSchema`: U is excluded alongside 0, 1, I, L
 // and O because it is commonly confused with V in terminal fonts.
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
-const DEVICE_TOKEN_BYTES = 32;
 const OPAQUE_ID_BYTES = 16;
-const DEVICE_HASH_DOMAIN = 'ferretry-device-token-v1';
 
 export interface PairingIdentityMaterial {
   readonly privateKeyPem: string;
@@ -42,22 +40,8 @@ export class NodePairingCryptography implements PairingCryptography {
     return `fy_pair_${this.random(OPAQUE_ID_BYTES).toString('base64url')}`;
   }
 
-  deviceToken(): string {
-    return `fy_device_${this.random(DEVICE_TOKEN_BYTES).toString('base64url')}`;
-  }
-
   deviceId(): string {
     return `fy_device_id_${this.random(OPAQUE_ID_BYTES).toString('base64url')}`;
-  }
-
-  hashDeviceToken(daemonId: string, token: string): string {
-    return createHash('sha256')
-      .update(DEVICE_HASH_DOMAIN, 'utf8')
-      .update('\0', 'utf8')
-      .update(daemonId, 'utf8')
-      .update('\0', 'utf8')
-      .update(token, 'utf8')
-      .digest('base64url');
   }
 
   newIdentity(): PairingIdentityMaterial {

@@ -127,21 +127,19 @@ describe('ApiSocketDispatcher', () => {
   });
 
   it('should name the paired device an upgrade was authorized for, and no device for a host token', async () => {
-    // The transport tracks a device's socket under this id, so unpairing the device closes it.
+    // The transport tracks a device's socket under this id, so unpairing the device closes it. The
+    // device is whoever its SESSION proved — the only way a device is ever a caller now.
     // Arrange
     const dispatcher = new ApiSocketDispatcher(
       new ApiRouter([streamRoute()]),
-      {
-        ...CREDENTIALS,
-        devices: { identify: token => (token === 'fy_device_phone' ? 'fy_device_id_phone' : undefined) },
-      },
+      CREDENTIALS,
       NO_TICKETS,
       NO_GOVERNED_ROUTES_GUARD,
     );
 
     // Act
     const device = await dispatcher.upgrade(
-      request({ path: '/v1/sessions/s1/stream', headers: { authorization: 'Bearer fy_device_phone' } }),
+      request({ path: '/v1/sessions/s1/stream', device: { deviceId: 'fy_device_id_phone', appSession: 'app-one' } }),
     );
     const host = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', headers: human }));
 

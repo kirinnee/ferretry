@@ -1,0 +1,243 @@
+/**
+ * THE DIRECT CARRIER: the same session, over one WebSocket to this daemon's own listener.
+ *
+ * `docs/relay-protocol.md` §1 and §3 always said a direct conversation and a relayed one are
+ * byte-for-byte the same above the socket. Until device keys, "direct" was really plain HTTP with a
+ * bearer header — on a LAN, usually over `http://`, in the clear. This module makes the document true:
+ * a browser that can reach this daemon opens `/v1/rendezvous/<daemonId>/client` here, and the socket
+ * runs the very {@link RelayLink} a rendezvous socket runs — same handshake against the pinned
+ * fingerprint, same device proof, same lease, same records. So the LAN is encrypted end to end and a
+ * device never presents anything a sniffer could replay (`docs/design/zero-trust.md` A3).
+ *
+ * ONE SOCKET IS ONE SESSION. There is no rendezvous to multiplex, so this module plays the
+ * rendezvous's two session-level parts and nothing more: it mints the session identifier and tells the
+ * client `ready`, exactly as a rendezvous would, and it turns the link's `closed` for that session into
+ * the socket's close. It never sends a `challenge` and never accepts a `claim`, and a client that sends
+ * ANY control frame is refused — on a direct socket nobody speaks for a rendezvous.
+ *
+ * LOCALITY IS THE LISTENER'S ANSWER. The upgrade request was classified by the transport exactly as an
+ * HTTP request on the same listener is, and that classification becomes the link's
+ * {@link SessionArrival}. A browser on the host is host-local here precisely when it would have been
+ * over plain HTTP — never because of anything it sent inside the session.
+ */
+
+import {
+  decodeControlMessage,
+  decodeFrame,
+  encodeControlMessage,
+  encodeFrame,
+  FRAME_KINDS,
+  RELAY_CLOSE_CODES,
+  RELAY_LIMITS,
+  RELAY_PROTOCOL_ID,
+  type RelayCrypto,
+  type DaemonIdentity,
+  SESSION_ID_BYTES,
+  type SessionId,
+  sessionIdFromBytes,
+} from '@ferretry/relay';
+import { ApiError } from '../api/error.ts';
+import type { SocketDownstream, SocketFrame, SocketHandler, SocketRoute } from '../api/socket.ts';
+import type { DeviceConnectionTracker } from '../pairing/index.ts';
+import {
+  type RelayApiDispatch,
+  type RelayDeviceDirectory,
+  RelayLink,
+  type RelayLinkClock,
+  type RelayLinkScheduler,
+  type RelayPairingRedeemer,
+  type RelayStreamDispatch,
+} from './link.ts';
+
+/**
+ * How many direct sessions this daemon carries at once.
+ *
+ * Each one is a socket somebody who can reach the listener opened, and each holds a pre-credential
+ * slot for up to ten seconds before it must prove a device. A browser tab holds three (requests, the
+ * event feed, one terminal), so this is room for a household of tabs while still bounding what a
+ * stranger on the network can make this daemon hold.
+ */
+export const MAX_DIRECT_SESSIONS = 64;
+
+export interface DirectCarrierDependencies {
+  readonly crypto: RelayCrypto;
+  readonly identity: DaemonIdentity;
+  readonly dispatch: RelayApiDispatch;
+  readonly sockets: RelayStreamDispatch;
+  readonly devices: RelayDeviceDirectory;
+  readonly pairing: RelayPairingRedeemer;
+  readonly scheduler: RelayLinkScheduler;
+  readonly clock: RelayLinkClock;
+  readonly connections: DeviceConnectionTracker;
+}
+
+/** A frame as bytes, or `null` for one that is not binary — which only a heartbeat may be. */
+function frameBytes(frame: SocketFrame): Uint8Array | null {
+  if (typeof frame === 'string') return null;
+  if (frame instanceof ArrayBuffer) return new Uint8Array(frame);
+  return new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
+}
+
+/** The socket route a browser dials for a direct session. */
+export function directCarrierSocketRoute(deps: DirectCarrierDependencies): SocketRoute {
+  let live = 0;
+  return {
+    method: 'GET',
+    path: '/v1/rendezvous/:daemonId/client',
+    // PUBLIC, because the credential is not on the upgrade: it is the device's proof inside the
+    // session that this socket carries. An upgrade with no credential is exactly what a rendezvous
+    // accepts too, and for the same reason.
+    minimum: 'none',
+    accept: async ({ request, params }) => {
+      // A session cannot open a session. The tunnel dispatches a stream's path through this same
+      // socket table, and a nested direct session would be a carrier inside a carrier with nobody's
+      // locality to stamp on it.
+      if (request.device !== undefined) throw new ApiError(404, 'no stream is served at this path', 'not_found');
+      if (params.get('daemonId') !== deps.identity.daemonId)
+        throw new ApiError(404, 'this daemon does not answer for that fingerprint', 'not_found');
+      if (live >= MAX_DIRECT_SESSIONS)
+        throw new ApiError(429, 'this daemon is carrying as many direct sessions as it allows', 'rendezvous_busy');
+      const arrival = {
+        loopback: request.loopback,
+        privilegedLoopback: request.privilegedLoopback === true,
+        ...(request.clientAddress === undefined ? {} : { clientAddress: request.clientAddress }),
+      };
+      return async downstream => {
+        live += 1;
+        let released = false;
+        const release = (): void => {
+          if (released) return;
+          released = true;
+          live -= 1;
+        };
+        return new DirectSession(deps, arrival, downstream, release);
+      };
+    },
+  };
+}
+
+/** One direct socket: one link carrying exactly one session. */
+class DirectSession implements SocketHandler {
+  readonly #sessionId: SessionId;
+  readonly #link: RelayLink;
+  #inbox: Promise<void> = Promise.resolve();
+  #ended = false;
+
+  constructor(
+    deps: DirectCarrierDependencies,
+    arrival: ConstructorParameters<typeof RelayLink>[0]['arrival'],
+    private readonly downstream: SocketDownstream,
+    private readonly release: () => void,
+  ) {
+    const sessionId = sessionIdFromBytes(deps.crypto.randomBytes(SESSION_ID_BYTES));
+    if (sessionId === null) throw new Error('the session identifier generator produced an unusable identifier');
+    this.#sessionId = sessionId;
+    this.#link = new RelayLink({
+      crypto: deps.crypto,
+      identity: deps.identity,
+      // No rendezvous host exists on a direct socket, and nothing here ever asks the link to sign a
+      // claim: a client's control frame is refused before it reaches the link.
+      relayHost: '',
+      socket: {
+        send: bytes => this.#fromLink(bytes),
+        sendText: text => {
+          if (!this.#ended) this.downstream.send(text);
+        },
+        close: (code, reason) => this.#end(code, reason),
+      },
+      dispatch: deps.dispatch,
+      sockets: deps.sockets,
+      devices: deps.devices,
+      pairing: deps.pairing,
+      scheduler: deps.scheduler,
+      clock: deps.clock,
+      connections: deps.connections,
+      ...(arrival === undefined ? {} : { arrival }),
+    });
+  }
+
+  /** Announce the session to the client, then open it on the link — the order a rendezvous uses. */
+  async open(): Promise<void> {
+    this.downstream.send(
+      encodeFrame({
+        kind: FRAME_KINDS.control,
+        sessionId: this.#sessionId,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'ready', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS }),
+      }),
+    );
+    await this.#link.receiveBinary(
+      encodeFrame({
+        kind: FRAME_KINDS.control,
+        sessionId: this.#sessionId,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'open' }),
+      }),
+    );
+  }
+
+  fromClient(frame: SocketFrame): void {
+    if (this.#ended) return;
+    if (typeof frame === 'string') {
+      this.#link.receiveText(frame);
+      return;
+    }
+    const bytes = frameBytes(frame);
+    const decoded = bytes === null ? undefined : decodeFrame(bytes);
+    if (bytes === null || decoded === undefined || !decoded.ok) {
+      this.#end(RELAY_CLOSE_CODES.protocolError, 'unparseable frame');
+      return;
+    }
+    if (decoded.frame.kind === FRAME_KINDS.control) {
+      this.#end(RELAY_CLOSE_CODES.protocolError, 'a client may not speak for the rendezvous on a direct socket');
+      return;
+    }
+    // In order, one at a time, for the reason the relay carrier serialises its inbox: a record's
+    // receive sequence advances inside the handler, so two decrypting at once would race it.
+    this.#inbox = this.#inbox.then(async () => {
+      if (!this.#ended) await this.#link.receiveBinary(bytes);
+    });
+  }
+
+  close(): void {
+    if (this.#ended) return;
+    this.#ended = true;
+    this.#link.close();
+    this.release();
+  }
+
+  /**
+   * One frame the link wants on the wire.
+   *
+   * Everything passes through unchanged except the link's `closed` for this session: on a rendezvous
+   * that ends one session among many; here the session IS the socket, so the client is sent the
+   * same `closed` it would get from a relay and then the socket closes with that code.
+   */
+  #fromLink(bytes: Uint8Array): void {
+    if (this.#ended) return;
+    this.downstream.send(bytes);
+    const decoded = decodeFrame(bytes);
+    if (!decoded.ok || decoded.frame.kind !== FRAME_KINDS.control) return;
+    const message = decodeControlMessage(decoded.frame.payload);
+    if (message?.t === 'closed') this.#end(message.code, message.reason);
+  }
+
+  #end(code: number, reason: string): void {
+    if (this.#ended) return;
+    this.close();
+    // A close frame's reason is capped at 123 bytes; the full sentence already crossed in `closed`.
+    this.downstream.close(code, truncateUtf8(reason, 123));
+  }
+}
+
+/** The longest prefix of `text` whose UTF-8 encoding fits `limit` bytes, never splitting a character. */
+function truncateUtf8(text: string, limit: number): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(text).byteLength <= limit) return text;
+  let out = '';
+  for (const character of text) {
+    if (encoder.encode(out + character).byteLength > limit) break;
+    out += character;
+  }
+  return out;
+}

@@ -21,9 +21,13 @@
  * - **It will not answer a hello addressed to another daemon.** On a correct carrier that cannot
  *   happen, which is exactly why it is checked: on an incorrect one it is a misrouted session, and
  *   answering would key a channel to a peer that thinks it reached somebody else.
- * - **It will not accept a host token.** A relayed client authenticates with the device grant pairing
- *   gave it. The admin token is a host-local secret, and a daemon that honoured it over the internet
- *   would turn a leaked file into remote authority.
+ * - **It will not accept a host token, or any token.** A client authenticates by signing this
+ *   session's transcript with the device key pairing registered — there is no bearer value to present
+ *   (`docs/design/zero-trust.md` A4). The admin token is a host-local secret, and a daemon that
+ *   honoured it over the internet would turn a leaked file into remote authority.
+ * - **It will not let a session's authority outlive its lease.** Fifteen minutes after the device last
+ *   proved its key the session ends with `4441`, unless the device signed the renewal challenge sent
+ *   ahead of that moment — and every renewal re-reads revocation and idle expiry.
  * - **It will not repair a stream.** A bad tag, a sequence that is not the next one, a record for
  *   another session: the session ends. There is no resume in this protocol, and a carrier that
  *   silently lost frames would otherwise produce a conversation that is missing data and says so
@@ -31,9 +35,23 @@
  *
  * The link holds no keys of its own beyond the session it is running: the durable identity is
  * supplied, and every session's record keys are derived per session and die with it.
+ *
+ * THE SAME LINK SERVES THE DIRECT CARRIER. A browser that can reach this daemon's own address opens
+ * one WebSocket to it per session, and `direct-carrier.ts` runs this exact state machine over that
+ * socket — so the LAN gets the same encryption, the same device proof and the same lease as a relayed
+ * phone, and nothing a device does is plain HTTP any more. The one difference is WHERE a session
+ * arrived (`SessionArrival`), which only a direct socket can say and a relayed one never has.
  */
 
-import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/protocol';
+import {
+  ACCESS_LEASE_SECONDS,
+  ACCESS_RENEW_LEAD_SECONDS,
+  MAX_TUNNEL_BODY_BYTES,
+  OLDER_APP_SENTENCE,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+  RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+  RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+} from '@ferretry/protocol';
 import {
   answerClientHandshake,
   type ChannelState,
@@ -77,26 +95,43 @@ import {
   recordSent,
   type SendWindow,
   type SessionId,
+  SESSION_PROTOCOL_ID,
   sealRecord,
   signRendezvousClaim,
+  speaksPreviousSessionProtocol,
+  toBase64Url,
+  utf8Bytes,
+  verifyDeviceProof,
+  type DeviceAuthKind,
+  deviceAuthMessage,
+  devicePairMessage,
+  deviceRenewMessage,
 } from '@ferretry/relay';
-import type { ApiRequest, ApiResponse } from '../api/http.ts';
+import type { ApiRequest, ApiResponse, SessionDevice } from '../api/http.ts';
 import { SOCKET_CLOSES, type SocketDownstream, type SocketHandler, type SocketUpgradeDecision } from '../api/socket.ts';
-import type { DeviceConnectionTracker, PairingRedemption, RelayPairingAttempt } from '../pairing/index.ts';
+import type {
+  DeviceConnectionTracker,
+  PairingCarrier,
+  PairingRedemption,
+  SessionPairingAttempt,
+} from '../pairing/index.ts';
 import {
   decodeTunnelClientMessage,
   encodeTunnelMessage,
   type RelaySessionCloseCode,
+  type RelayTunnelAuth,
   type RelayTunnelClientMessage,
   type RelayTunnelDaemonMessage,
   type RelayTunnelData,
   type RelayTunnelPair,
   type RelayTunnelRequest,
+  type RelayTunnelRequestPart,
   type RelayTunnelStream,
+  type SessionArrival,
   tunnelApiRequest,
   tunnelDataFrame,
   tunnelDataMessage,
-  tunnelResponseMessage,
+  tunnelResponseMessages,
   tunnelStreamRequest,
 } from './tunnel.ts';
 
@@ -111,13 +146,16 @@ export interface RelayLinkSocket {
 export type RelayApiDispatch = (request: ApiRequest) => Promise<ApiResponse>;
 
 /**
- * Who a device token belongs to.
+ * Which key a device must prove, and the news that it did.
  *
- * A device, or nobody. The host's own tokens are deliberately not resolvable through this port: a
- * relayed peer presenting one is refused like any stranger.
+ * A device, or nobody. The host's own tokens are deliberately not resolvable through this port: there
+ * is no token in a session at all, only a signature over its transcript by a key this answers for.
  */
 export interface RelayDeviceDirectory {
-  identifyDevice(token: string): string | undefined;
+  /** The device's public key, or nothing for a device that is unknown, revoked or idle-expired. */
+  deviceKey(deviceId: string): Promise<string | undefined>;
+  /** The device just proved its key: at a session's open, or at a lease renewal. */
+  seen(deviceId: string): void;
 }
 
 /**
@@ -134,12 +172,17 @@ export type RelayStreamDispatch = (request: ApiRequest) => Promise<SocketUpgrade
  * Redeeming a pairing code, and nothing else.
  *
  * Deliberately NOT the API dispatch. A pre-credential session must reach the pairing state machine
- * without constructing a request, because a relayed session that could build one would be an
- * anonymous caller at a route table — and `POST /v1/pair` is public on that table. This port is how
- * the exchange happens with no route involved at all.
+ * without constructing a request, because a session that could build one would be an anonymous
+ * caller at a route table. This port is how the exchange happens with no route involved at all —
+ * and it is the ONLY redemption there is: the plain-HTTP `POST /v1/pair` is gone.
  */
 export interface RelayPairingRedeemer {
-  redeemOverRelay(attempt: RelayPairingAttempt): Promise<PairingRedemption>;
+  redeemInSession(attempt: SessionPairingAttempt, carrier: PairingCarrier): Promise<PairingRedemption>;
+}
+
+/** The clock a lease is measured against, injected so no suite depends on wall-clock behaviour. */
+export interface RelayLinkClock {
+  now(): number;
 }
 
 /** A cancellable one-shot timer, so the link never holds a runtime timer handle of its own. */
@@ -268,6 +311,15 @@ export interface RelayLinkDependencies {
   readonly devices: RelayDeviceDirectory;
   readonly pairing: RelayPairingRedeemer;
   readonly scheduler: RelayLinkScheduler;
+  readonly clock: RelayLinkClock;
+  /**
+   * Where this link's sessions ARRIVED, for a direct link; absent for a relayed one.
+   *
+   * A link over a rendezvous socket carries sessions from anywhere, so none of them is local and none
+   * has a peer address worth keying a limiter by. A direct link is one socket on this daemon's own
+   * listener, and the listener already classified it exactly as it classifies an HTTP request.
+   */
+  readonly arrival?: SessionArrival;
   /**
    * Where every session that presented a device credential is registered, so unpairing that device
    * ends the session — and whatever stream it carries — instead of leaving it running on an
@@ -296,7 +348,26 @@ export interface RelayLinkReport {
  * exists so a record arriving in that window is refused rather than racing a session that is already
  * over.
  */
-type SessionPhase = 'awaiting-hello' | 'awaiting-credential' | 'serving' | 'streaming' | 'concluding';
+type SessionPhase = 'awaiting-hello' | 'awaiting-credential' | 'proving' | 'serving' | 'streaming' | 'concluding';
+
+/**
+ * The close a lease that ran out ends a session with, and its one public reason.
+ *
+ * The reason crosses the carrier unsealed, so it is a constant that says nothing about the device.
+ */
+export const ACCESS_LEASE_ENDED_REASON = 'the access lease ended';
+
+/** How many request bodies one session may be assembling at once. Each is bounded on its own. */
+export const MAX_INCOMING_BODIES = 4;
+
+/** A request whose body is still arriving in parts. */
+interface IncomingBody {
+  readonly request: RelayTunnelRequest;
+  readonly parts: string[];
+  bytes: number;
+  /** Over the body limit: the parts are dropped and the request is answered `413` when it ends. */
+  refused: boolean;
+}
 
 /**
  * One record waiting for credit, and whether it is a stream's PAYLOAD.
@@ -317,7 +388,18 @@ interface LinkSession {
   readonly sessionId: SessionId;
   phase: SessionPhase;
   channel: ChannelState | undefined;
-  deviceToken: string | undefined;
+  /** The handshake transcript hash every device proof on this session must sign. */
+  transcript: Uint8Array | undefined;
+  /** The device this session proved, once it proved one. */
+  device: SessionDevice | undefined;
+  /** When this session's authority ends unless the device renews it, and the timers that enforce it. */
+  leaseExpiresAtMs: number;
+  lease: RelayLinkTimer | undefined;
+  renewal: RelayLinkTimer | undefined;
+  /** The single-use nonce of the renewal this session is waiting on, if one is outstanding. */
+  renewNonce: string | undefined;
+  /** Request bodies still arriving in parts, by request id. */
+  readonly incoming: Map<number, IncomingBody>;
   send: SendWindow;
   receive: ReceiveWindow;
   /** Request identifiers already answered or in flight. A repeat ends the session. */
@@ -536,7 +618,13 @@ export class RelayLink {
       sessionId,
       phase: 'awaiting-hello',
       channel: undefined,
-      deviceToken: undefined,
+      transcript: undefined,
+      device: undefined,
+      leaseExpiresAtMs: 0,
+      lease: undefined,
+      renewal: undefined,
+      renewNonce: undefined,
+      incoming: new Map(),
       send: newSendWindow(),
       receive: newReceiveWindow(),
       answered: new Set(),
@@ -571,7 +659,8 @@ export class RelayLink {
   #preCredentialSessions(): number {
     let pending = 0;
     for (const session of this.#sessions.values())
-      if (session.phase === 'awaiting-hello' || session.phase === 'awaiting-credential') pending += 1;
+      if (session.phase === 'awaiting-hello' || session.phase === 'awaiting-credential' || session.phase === 'proving')
+        pending += 1;
     return pending;
   }
 
@@ -602,7 +691,12 @@ export class RelayLink {
     }
     const hello = decodeClientHello(frame.payload);
     if (hello === null) {
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'unparseable client hello');
+      // An app from before device keys is not an attacker and not a bug: it is an app nobody updated,
+      // and the person holding it can only fix that if they are told which side is old. The sentence
+      // is public on purpose — it crosses the carrier unsealed and says nothing about anybody.
+      if (speaksPreviousSessionProtocol(frame.payload))
+        this.#endSession(session.sessionId, RELAY_CLOSE_CODES.versionUnsupported, OLDER_APP_SENTENCE);
+      else this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'unparseable client hello');
       return;
     }
     const answered = await answerClientHandshake(this.deps.crypto, this.deps.identity, session.sessionId, hello);
@@ -622,6 +716,7 @@ export class RelayLink {
     }
     this.#consume(session);
     session.channel = openChannel(session.sessionId, answered.keys, 'daemon');
+    session.transcript = answered.keys.transcriptHash;
     session.phase = 'awaiting-credential';
     // NOTHING IS RE-ARMED HERE. The deadline this session is running against was armed by its `open`
     // and covers the handshake as well as the credential, so answering a hello buys no second window.
@@ -671,14 +766,23 @@ export class RelayLink {
       return;
     }
     if (session.phase === 'streaming') {
-      this.#onStreamRecord(session, message);
+      await this.#onStreamRecord(session, message);
       return;
     }
-    if (session.phase !== 'serving' || message.t !== 'req') {
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session does not carry that message');
+    if (session.phase === 'serving' && message.t === 'req') {
+      await this.#serve(session, message);
       return;
     }
-    await this.#serve(session, message);
+    if (session.phase === 'serving' && message.t === 'req-more') {
+      await this.#continueBody(session, message);
+      return;
+    }
+    if (session.phase === 'serving' && message.t === 'renewed') {
+      await this.#renewed(session, message.proof);
+      return;
+    }
+    // `proving` lands here too: nothing may follow the credential record until it is accepted.
+    this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session does not carry that message');
   }
 
   /**
@@ -692,7 +796,7 @@ export class RelayLink {
     session.credentialDeadline = undefined;
     switch (message.t) {
       case 'auth':
-        this.#authenticate(session, message.deviceToken);
+        await this.#authenticate(session, message);
         return;
       case 'stream':
         await this.#openStream(session, message);
@@ -706,49 +810,133 @@ export class RelayLink {
   }
 
   /**
-   * The client's credential, inside the encrypted channel and nowhere else.
+   * The client's proof, inside the encrypted channel and nowhere else.
    *
-   * A device grant, or the session ends. The refusal is `4403` and it is deliberately not
-   * distinguishable on the wire from any other close a relay can see: an operator watching the
-   * carrier learns that a session ended, not that a token was wrong.
+   * A device whose key signed this session's transcript, or the session ends. The refusal is `4403`
+   * and it is deliberately the same for an unknown device, a revoked one, an idle-expired one and a
+   * proof that does not verify — and not distinguishable on the wire from any other close a relay can
+   * see: an operator watching the carrier learns that a session ended, not why.
    */
-  #authenticate(session: LinkSession, deviceToken: string): void {
-    if (!this.#identify(session, deviceToken)) return;
-    session.deviceToken = deviceToken;
+  async #authenticate(session: LinkSession, claim: RelayTunnelAuth): Promise<void> {
+    if (!(await this.#prove(session, 'auth', claim))) return;
     session.phase = 'serving';
-    this.#sendRecord(session, { t: 'authenticated', protocol: RELAY_PROTOCOL_ID });
+    this.#sendRecord(session, {
+      t: 'authenticated',
+      protocol: SESSION_PROTOCOL_ID,
+      accessExpiresAt: instant(session.leaseExpiresAtMs),
+    });
   }
 
   /**
-   * Resolve a device grant, or end the session having said nothing about which one it was.
+   * Verify a device's claim to this session, or end the session having said nothing about why.
    *
-   * Shared by the request and stream modes so a stream cannot acquire a softer answer than a request:
-   * an unknown token is `4403` in both, and a host admin token resolves in neither, because the
-   * directory this asks holds device grants only.
+   * Shared by the request and stream modes so a stream cannot acquire a softer answer than a request.
+   * The session is `proving` while the key is looked up and the signature checked, so a record that
+   * arrives behind the credential is refused rather than read as a second credential.
    */
-  #identify(session: LinkSession, deviceToken: string): boolean {
-    const device = this.deps.devices.identifyDevice(deviceToken)?.trim();
-    if (device !== undefined && device !== '') {
-      session.release = this.deps.connections.track(device, () => {
-        if (!this.#live(session)) return;
-        // Said exactly as an unknown credential is, so the carrier cannot tell a revocation apart.
-        this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
-      });
-      // A device unpaired a moment ago is ended by the registry before `track` returns.
-      return this.#live(session);
+  async #prove(
+    session: LinkSession,
+    kind: DeviceAuthKind,
+    claim: { readonly deviceId: string; readonly appSession: string; readonly proof: string },
+  ): Promise<boolean> {
+    session.phase = 'proving';
+    const transcript = session.transcript;
+    const key = await this.deps.devices.deviceKey(claim.deviceId);
+    const verified =
+      key !== undefined &&
+      transcript !== undefined &&
+      (await verifyDeviceProof(
+        this.deps.crypto,
+        key,
+        claim.proof,
+        deviceAuthMessage(transcript, kind, claim.deviceId, claim.appSession),
+      ));
+    if (!this.#live(session)) return false;
+    if (!verified) {
+      this.#lastRefusal = 'a client presented a device this daemon does not accept';
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+      return false;
     }
-    // An unattributable answer from the directory is a refusal, not a nameless success: a device
-    // nobody can name would be journalled as `device` and authorized as an operator.
-    this.#lastRefusal = 'a relayed client presented a credential this daemon does not know';
-    this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
-    return false;
+    session.release = this.deps.connections.track(claim.deviceId, () => {
+      if (!this.#live(session)) return;
+      // Said exactly as an unknown device is, so the carrier cannot tell a revocation apart.
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+    });
+    // A device unpaired a moment ago is ended by the registry before `track` returns.
+    if (!this.#live(session)) return false;
+    session.device = { deviceId: claim.deviceId, appSession: claim.appSession };
+    this.deps.devices.seen(claim.deviceId);
+    this.#armLease(session);
+    return true;
+  }
+
+  /**
+   * Fifteen minutes of authority from now, and the challenge that can extend it.
+   *
+   * The renewal is asked for {@link ACCESS_RENEW_LEAD_SECONDS} ahead, from THIS side: an incoming
+   * record wakes even a background tab, where a client timer would be throttled into missing it. The
+   * lease timer is what actually ends the session, so a client that never answers — or cannot, because
+   * the key is gone — loses this session at the deadline and keeps nothing.
+   */
+  #armLease(session: LinkSession): void {
+    session.lease?.cancel();
+    session.renewal?.cancel();
+    session.renewNonce = undefined;
+    session.leaseExpiresAtMs = this.deps.clock.now() + ACCESS_LEASE_SECONDS * 1_000;
+    session.renewal = this.deps.scheduler.after((ACCESS_LEASE_SECONDS - ACCESS_RENEW_LEAD_SECONDS) * 1_000, () =>
+      this.#askRenewal(session),
+    );
+    session.lease = this.deps.scheduler.after(ACCESS_LEASE_SECONDS * 1_000, () => {
+      if (!this.#live(session)) return;
+      this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
+    });
+  }
+
+  #askRenewal(session: LinkSession): void {
+    if (!this.#live(session) || (session.phase !== 'serving' && session.phase !== 'streaming')) return;
+    const nonce = toBase64Url(this.deps.crypto.randomBytes(NONCE_BYTES));
+    session.renewNonce = nonce;
+    this.#queue(session, {
+      t: 'renew',
+      protocol: SESSION_PROTOCOL_ID,
+      nonce,
+      expiresAt: instant(session.leaseExpiresAtMs),
+    });
+  }
+
+  /**
+   * The device answered a renewal: the same key, over this transcript and the nonce it was sent.
+   *
+   * The key is looked up AGAIN, so a device revoked or expired since the session opened cannot renew.
+   * The nonce is spent before anything is awaited: a second answer, or one nobody asked for, is a
+   * protocol error rather than a second chance.
+   */
+  async #renewed(session: LinkSession, proof: string): Promise<void> {
+    const nonce = session.renewNonce;
+    session.renewNonce = undefined;
+    const device = session.device;
+    const transcript = session.transcript;
+    if (nonce === undefined || device === undefined || transcript === undefined) {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a renewal arrived that nothing asked for');
+      return;
+    }
+    const key = await this.deps.devices.deviceKey(device.deviceId);
+    const verified =
+      key !== undefined &&
+      (await verifyDeviceProof(this.deps.crypto, key, proof, deviceRenewMessage(transcript, nonce)));
+    if (!this.#live(session)) return;
+    if (!verified) {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+      return;
+    }
+    this.deps.devices.seen(device.deviceId);
+    this.#armLease(session);
   }
 
   async #serve(session: LinkSession, request: RelayTunnelRequest): Promise<void> {
-    const deviceToken = session.deviceToken;
-    if (deviceToken === undefined) {
-      // Unreachable while `serving` implies a token, and checked anyway: the alternative to this
-      // branch is a request dispatched with no credential at all.
+    if (session.device === undefined) {
+      // Unreachable while `serving` implies a proven device, and checked anyway: the alternative to
+      // this branch is a request dispatched with no identity at all.
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session holds no credential');
       return;
     }
@@ -757,8 +945,71 @@ export class RelayLink {
       return;
     }
     session.answered.add(request.id);
-    const response = await this.deps.dispatch(tunnelApiRequest(request, deviceToken, session.sessionId.text));
-    this.#sendRecord(session, tunnelResponseMessage(request.id, response));
+    const first = request.body ?? '';
+    if (request.more !== true) {
+      await this.#dispatch(session, request, first);
+      return;
+    }
+    if (session.incoming.size >= MAX_INCOMING_BODIES) {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'too many request bodies are arriving at once');
+      return;
+    }
+    const bytes = utf8Bytes(first).byteLength;
+    session.incoming.set(request.id, { request, parts: [first], bytes, refused: bytes > MAX_TUNNEL_BODY_BYTES });
+  }
+
+  /**
+   * The next part of a request body. The request is dispatched when its last part arrives.
+   *
+   * A body over {@link MAX_TUNNEL_BODY_BYTES} stops being held the moment it crosses the limit — the
+   * parts are dropped, not buffered to the end — and the request is answered `413` once its last part
+   * arrives, so the peer still learns which request it was and the session survives.
+   */
+  async #continueBody(session: LinkSession, part: RelayTunnelRequestPart): Promise<void> {
+    const pending = session.incoming.get(part.id);
+    if (pending === undefined) {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a body part named no request in progress');
+      return;
+    }
+    pending.bytes += utf8Bytes(part.body).byteLength;
+    if (pending.bytes > MAX_TUNNEL_BODY_BYTES) pending.refused = true;
+    if (pending.refused) pending.parts.length = 0;
+    else pending.parts.push(part.body);
+    if (part.more === true) return;
+    session.incoming.delete(part.id);
+    if (!pending.refused) {
+      await this.#dispatch(session, pending.request, pending.parts.join(''));
+      return;
+    }
+    this.#answer(session, pending.request.id, {
+      status: 413,
+      headers: new Map([['content-type', 'application/json']]),
+      body: JSON.stringify({
+        error: {
+          code: 'request_too_large',
+          message: `the request body is over the ${MAX_TUNNEL_BODY_BYTES}-byte limit one session carries`,
+        },
+      }),
+    });
+  }
+
+  async #dispatch(session: LinkSession, request: RelayTunnelRequest, body: string): Promise<void> {
+    const device = session.device;
+    if (device === undefined) return;
+    const response = await this.deps.dispatch(
+      tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival),
+    );
+    this.#answer(session, request.id, response);
+  }
+
+  /** One answer, as one record or as its ordered parts. */
+  #answer(session: LinkSession, id: number, response: ApiResponse): void {
+    const messages = tunnelResponseMessages(id, response);
+    if (messages.length === 1 && messages[0] !== undefined) {
+      this.#sendRecord(session, messages[0]);
+      return;
+    }
+    for (const message of messages) this.#queue(session, message);
   }
 
   // ─── one pairing exchange ───────────────────────────────────────────────────────────────────
@@ -769,19 +1020,40 @@ export class RelayLink {
    * ONE ATTEMPT, ONE SEALED OUTCOME, THEN THE SESSION CLOSES — success and failure alike, and with
    * the same number of records, so a relay operator counting frames learns nothing the exchange did
    * not intend to tell them. There is no edge from here to `serving`: a device that paired reconnects
-   * as an ordinary request session with the token it was just issued.
+   * as an ordinary request session, proving the key it just registered.
+   *
+   * THE PROOF IS CHECKED HERE because only the session holds the transcript; its verdict travels to the
+   * pairing service as one more way for the attempt to be wrong, so a bad key is refused exactly like a
+   * bad code.
    *
    * The session is marked `concluding` BEFORE the redemption is awaited, so a second record arriving
    * during it is refused rather than racing an exchange that is already spent.
    */
   async #redeemPairing(session: LinkSession, request: RelayTunnelPair): Promise<void> {
     session.phase = 'concluding';
-    const result = await this.deps.pairing.redeemOverRelay({ code: request.code, deviceName: request.deviceName });
+    const transcript = session.transcript;
+    const proven =
+      transcript !== undefined &&
+      (await verifyDeviceProof(
+        this.deps.crypto,
+        request.deviceKey,
+        request.proof,
+        devicePairMessage(transcript, request.deviceKey),
+      ));
+    const arrival = this.deps.arrival;
+    const carrier: PairingCarrier =
+      arrival === undefined
+        ? { kind: 'relay' }
+        : { kind: 'direct', rateLimitKey: arrival.clientAddress ?? `direct-session:${session.sessionId.text}` };
+    const result = await this.deps.pairing.redeemInSession(
+      { code: request.code, deviceName: request.deviceName, deviceKey: request.deviceKey, proven },
+      carrier,
+    );
     this.#queue(
       session,
       result.kind === 'paired'
-        ? { t: 'paired', protocol: RELAY_PROTOCOL_ID, response: result.response }
-        : { t: 'pair-refused', protocol: RELAY_PROTOCOL_ID, reason: 'pairing_refused' },
+        ? { t: 'paired', protocol: SESSION_PROTOCOL_ID, response: result.response }
+        : { t: 'pair-refused', protocol: SESSION_PROTOCOL_ID, reason: 'pairing_refused' },
     );
     this.#conclude(session);
   }
@@ -797,10 +1069,10 @@ export class RelayLink {
    * a stream that opened and instantly died could not tell "it is gone" from "the daemon broke".
    */
   async #openStream(session: LinkSession, request: RelayTunnelStream): Promise<void> {
-    if (!this.#identify(session, request.deviceToken)) return;
+    if (!(await this.#prove(session, 'stream', request))) return;
     session.phase = 'concluding';
     const decision = await this.deps
-      .sockets(tunnelStreamRequest(request, session.sessionId.text))
+      .sockets(tunnelStreamRequest(request, session.sessionId.text, this.deps.arrival))
       .catch((): SocketUpgradeDecision => ({ outcome: 'unclaimed' }));
     // Ended while the route table was deciding — the device unpaired, the rendezvous closed it, the
     // deadline fired. Nothing has been attached yet, so there is nothing to release.
@@ -812,7 +1084,7 @@ export class RelayLink {
         decision.outcome === 'refused'
           ? { status: decision.response.status, body: decision.response.body }
           : { status: 404, body: 'no stream is served at this path' };
-      this.#queue(session, { t: 'stream-refused', protocol: RELAY_PROTOCOL_ID, ...refusal });
+      this.#queue(session, { t: 'stream-refused', protocol: SESSION_PROTOCOL_ID, ...refusal });
       this.#conclude(session);
       return;
     }
@@ -824,7 +1096,7 @@ export class RelayLink {
       // send. Saying 500 is better than the close code the direct path is reduced to.
       this.#queue(session, {
         t: 'stream-refused',
-        protocol: RELAY_PROTOCOL_ID,
+        protocol: SESSION_PROTOCOL_ID,
         status: 500,
         body: 'the daemon failed to attach this stream',
       });
@@ -838,9 +1110,12 @@ export class RelayLink {
       return;
     }
     session.stream = handler;
-    session.deviceToken = request.deviceToken;
     session.phase = 'streaming';
-    this.#queue(session, { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID });
+    this.#queue(session, {
+      t: 'stream-opened',
+      protocol: SESSION_PROTOCOL_ID,
+      accessExpiresAt: instant(session.leaseExpiresAtMs),
+    });
     // Queued before `open` runs, so the acceptance is ahead of the first frame the handler produces
     // however eagerly it produces one.
     await handler.open().catch(() => {
@@ -848,10 +1123,14 @@ export class RelayLink {
     });
   }
 
-  /** Records a stream session accepts once it is open: payload, or the client's own close. */
-  #onStreamRecord(session: LinkSession, message: RelayTunnelClientMessage): void {
+  /** Records a stream session accepts once it is open: payload, a lease renewal, or the client's own close. */
+  async #onStreamRecord(session: LinkSession, message: RelayTunnelClientMessage): Promise<void> {
     if (message.t === 'data') {
       this.#onStreamData(session, message);
+      return;
+    }
+    if (message.t === 'renewed') {
+      await this.#renewed(session, message.proof);
       return;
     }
     if (message.t !== 'stream-close') {
@@ -951,7 +1230,7 @@ export class RelayLink {
     // The close is what makes this loss explicit, so the frames it supersedes go before it is queued
     // — otherwise the record that says "you missed some" would itself wait behind the ones missed.
     this.#discardStreamPayload(session);
-    this.#queue(session, { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code, reason });
+    this.#queue(session, { t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code, reason });
     this.#conclude(session);
   }
 
@@ -977,6 +1256,12 @@ export class RelayLink {
     session.phase = 'concluding';
     session.credentialDeadline?.cancel();
     session.credentialDeadline = undefined;
+    session.lease?.cancel();
+    session.lease = undefined;
+    session.renewal?.cancel();
+    session.renewal = undefined;
+    session.renewNonce = undefined;
+    session.incoming.clear();
     session.owesConclusion = false;
     // Nothing queued can be delivered now. Emptying it is not what makes a late send impossible —
     // `#flush` may already hold a record under a suspended seal, and the liveness gate there is what
@@ -1270,4 +1555,8 @@ export class RelayLink {
     for (const timer of this.#ended.values()) timer.cancel();
     this.#ended.clear();
   }
+}
+
+function instant(milliseconds: number): string {
+  return new Date(milliseconds).toISOString();
 }

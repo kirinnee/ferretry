@@ -17,6 +17,7 @@ import {
  */
 
 const ADMIN: AuthenticatedCredential = { kind: 'authenticated', tokenClass: 'admin' };
+const WARDEN: AuthenticatedCredential = { kind: 'authenticated', tokenClass: 'warden' };
 const DEVICE: AuthenticatedCredential = { kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' };
 const EVENT_STREAM = '/v1/events';
 
@@ -43,16 +44,25 @@ function fixture(options: { readonly limit?: number; readonly ttlMs?: number } =
 }
 
 describe('SocketTicketRegistry', () => {
+  it('should never sell a paired device a ticket, and hold nothing for the attempt', () => {
+    // A device opens its streams inside its sealed session. A ticket bought there would be a bearer
+    // value it could spend on a plain-HTTP upgrade — the very path the device key exists to close.
+    const { registry, secrets } = fixture();
+
+    should(() => registry.issue(DEVICE, EVENT_STREAM)).throw(/no ticket for it to buy/u);
+    should(secrets.issued).equal(0);
+  });
+
   it('should replay exactly the credential that bought the ticket', () => {
     // Arrange
     const { registry } = fixture();
 
     // Act
-    const grant = registry.issue(DEVICE, EVENT_STREAM);
+    const grant = registry.issue(WARDEN, EVENT_STREAM);
 
-    // Assert — a device's ticket is a DEVICE's ticket. A ticket that resolved to admin would let a
+    // Assert — a device's ticket is a WARDEN's ticket. A ticket that resolved to admin would let a
     // phone reach the host's own surface by way of a transport workaround.
-    should(registry.redeem(grant.ticket, EVENT_STREAM)).deepEqual(DEVICE);
+    should(registry.redeem(grant.ticket, EVENT_STREAM)).deepEqual(WARDEN);
   });
 
   it('should expire the ticket at its stated deadline', () => {
@@ -89,7 +99,7 @@ describe('SocketTicketRegistry', () => {
     const { registry } = fixture();
     const owner = '/v1/sessions/s1/terminals/0123456789ab/stream';
     const neighbour = '/v1/sessions/s1/terminals/fedcba987654/stream';
-    const grant = registry.issue(DEVICE, owner);
+    const grant = registry.issue(WARDEN, owner);
 
     // Act / Assert — the failed replay is still a spend, so an access-log reader gets no retry on
     // the correct target after probing one nearby.
@@ -148,7 +158,7 @@ describe('SocketTicketRegistry', () => {
       return left === right;
     });
     const first = registry.issue(ADMIN, EVENT_STREAM);
-    registry.issue(DEVICE, EVENT_STREAM);
+    registry.issue(WARDEN, EVENT_STREAM);
     const third = registry.issue(ADMIN, EVENT_STREAM);
 
     // Act
@@ -171,11 +181,11 @@ describe('SocketTicketRegistry', () => {
 
     // Act — an issue after the deadline is what sweeps the dead ones.
     clock.nowMs = stale.expiresAtMs + 1;
-    const fresh = registry.issue(DEVICE, EVENT_STREAM);
+    const fresh = registry.issue(WARDEN, EVENT_STREAM);
 
     // Assert
     should(registry.redeem(stale.ticket, EVENT_STREAM)).be.undefined();
-    should(registry.redeem(fresh.ticket, EVENT_STREAM)).deepEqual(DEVICE);
+    should(registry.redeem(fresh.ticket, EVENT_STREAM)).deepEqual(WARDEN);
   });
 
   it('should bound what it holds, dropping the oldest unredeemed ticket first', () => {
@@ -187,7 +197,7 @@ describe('SocketTicketRegistry', () => {
 
     // Act
     const third = registry.issue(ADMIN, EVENT_STREAM);
-    const fourth = registry.issue(DEVICE, EVENT_STREAM);
+    const fourth = registry.issue(WARDEN, EVENT_STREAM);
 
     // Assert — exactly the oldest went, to make room for the newest. Everything still within the
     // ceiling is untouched: making room must not be a reason to drop a ticket a client is about to
@@ -195,7 +205,7 @@ describe('SocketTicketRegistry', () => {
     should(registry.redeem(first.ticket, EVENT_STREAM)).be.undefined();
     should(registry.redeem(second.ticket, EVENT_STREAM)).deepEqual(ADMIN);
     should(registry.redeem(third.ticket, EVENT_STREAM)).deepEqual(ADMIN);
-    should(registry.redeem(fourth.ticket, EVENT_STREAM)).deepEqual(DEVICE);
+    should(registry.redeem(fourth.ticket, EVENT_STREAM)).deepEqual(WARDEN);
   });
 
   it('should keep a ceiling that a real client cannot trip by reconnecting once', () => {

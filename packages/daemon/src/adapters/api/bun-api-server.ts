@@ -351,7 +351,7 @@ class HostSocketRegistry {
         this.close(socket, DEVICE_UNPAIRED_CLOSE);
       });
     void state
-      .attach(downstreamFor(socket))
+      .attach(this.downstreamFor(socket))
       .then(async handler => {
         if (state.closed) {
           handler.close();
@@ -408,15 +408,21 @@ class HostSocketRegistry {
     this.closedHere = true;
     socket.close(close.code, close.reason);
   }
-}
 
-/** One live socket, as the domain sees it. */
-function downstreamFor(socket: HostSocket): SocketDownstream {
-  return {
-    send: bytes => socket.send(bytes),
-    close: (code, reason) => socket.close(code, reason),
-    bufferedBytes: () => socket.getBufferedAmount(),
-  };
+  /**
+   * One live socket, as the domain sees it.
+   *
+   * A HANDLER'S CLOSE IS THIS HOST'S CLOSE TOO, so it goes through {@link close} and is counted. The
+   * direct carrier ends its socket whenever its one session ends, and a close the registry did not
+   * count left `stop` awaiting the promise Bun never settles after a server-side close.
+   */
+  private downstreamFor(socket: HostSocket): SocketDownstream {
+    return {
+      send: bytes => socket.send(bytes),
+      close: (code, reason) => this.close(socket, { code, reason }),
+      bufferedBytes: () => socket.getBufferedAmount(),
+    };
+  }
 }
 
 /** Ends the handler behind one socket. Idempotent, because `close` arrives once from the peer and

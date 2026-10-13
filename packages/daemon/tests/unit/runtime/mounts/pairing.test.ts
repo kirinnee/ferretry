@@ -4,7 +4,6 @@ import type {
   PairingCodeMintResponse,
   PairingCodeStatusResponse,
   PairingId,
-  PairingResponse,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
@@ -15,7 +14,6 @@ import { jsonBody, request } from '../../api/support.ts';
 import { grantSubsystem } from './support.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
-const deviceToken = `fy_device_${'b'.repeat(43)}`;
 const pairingId = `fy_pair_${'c'.repeat(22)}` as PairingId;
 const deviceOneId = `fy_device_id_${'d'.repeat(22)}`;
 const deviceTwoId = `fy_device_id_${'e'.repeat(22)}`;
@@ -32,27 +30,18 @@ const minted: PairingCodeMintResponse = {
   pairUrl:
     'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 };
-const paired: PairingResponse = {
-  deviceToken,
-  daemonId,
-  daemonName: 'workstation',
-  capabilities: ['daemon-api'],
-  carriers: [],
-};
-
 const device = (id: string, name: string): PairedDevice => ({
   id,
   name,
   platform: 'browser',
   createdAt: '2026-08-01T09:00:00.000Z',
   lastSeenAt: '2026-08-03T11:58:00.000Z',
+  idleExpiresAt: '2026-09-02T11:58:00.000Z',
 });
 
 class FakePairing implements PairingSubsystem {
-  readonly redemptions: Array<{ readonly value: unknown; readonly key: string }> = [];
   readonly revoked: PairingId[] = [];
   readonly revokedDevices: string[] = [];
-  redemption: PairingResponse | undefined = paired;
   observation: PairingCodeStatusResponse | undefined = {
     pairingId,
     status: 'pending',
@@ -99,22 +88,16 @@ class FakePairing implements PairingSubsystem {
     return true;
   }
 
-  async redeem(value: unknown, key: string) {
-    this.redemptions.push({ value, key });
-    return this.redemption === undefined
-      ? ({ kind: 'refused' } as const)
-      : ({ kind: 'paired', response: this.redemption } as const);
-  }
 }
 
 const credentials = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { identify: (token: string) => (token === 'device-secret' ? deviceOneId : undefined) },
 };
 
 const admin = { authorization: 'Bearer admin-secret' };
-const browser = { authorization: 'Bearer device-secret' };
+/** A paired browser: whoever its session proved. It sends no credential of its own. */
+const browser = { deviceId: deviceOneId, appSession: 'app-one' } as const;
 
 /**
  * The mount over the REAL grant subsystem.
@@ -133,42 +116,18 @@ async function mount(subject: PairingSubsystem, allow = true) {
 }
 
 describe('pairing routes', () => {
-  it('should redeem publicly, key the rate limit by peer, and leave origin policy to the transport', async () => {
-    const subject = new FakePairing();
+  it('should serve no redemption at all: the plain-HTTP POST /v1/pair is gone', async () => {
+    // Redemption happens only inside a session whose daemon was proved against the QR fingerprint, so
+    // nothing on this surface is public any more: a stranger is refused for having no credential, and
+    // even the host's own token finds no route there.
+    const surface = await mount(new FakePairing());
+    const body = JSON.stringify({ code: '7F3K-Q2ND', deviceName: 'phone' });
 
-    const response = await (
-      await mount(subject)
-    ).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/pair',
-        clientAddress: '198.51.100.7',
-        headers: { origin: 'http://127.0.0.1:7431' },
-        body: JSON.stringify({ code: '7F3K-Q2ND', deviceName: 'phone' }),
-      }),
-    );
+    const anonymous = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', body }));
+    const host = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', headers: admin, loopback: true, body }));
 
-    should(response.status).equal(200);
-    should(response.headers.get('cache-control')).equal('no-store');
-    should(jsonBody(response)).deepEqual(paired);
-    should(subject.redemptions).deepEqual([{ value: { code: '7F3K-Q2ND', deviceName: 'phone' }, key: '198.51.100.7' }]);
-  });
-
-  it('should collapse malformed, unreadable and wrong input into the same refusal', async () => {
-    const subject = new FakePairing();
-    subject.redemption = undefined;
-    const surface = await mount(subject);
-
-    const malformed = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', body: '{' }));
-    const unreadable = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', unreadableBody: true }));
-    const wrong = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair', body: JSON.stringify({ code: 'wrong' }) }),
-    );
-
-    should([malformed.status, unreadable.status, wrong.status]).deepEqual([403, 403, 403]);
-    should([malformed.body, unreadable.body, wrong.body]).deepEqual([malformed.body, malformed.body, malformed.body]);
-    should(jsonBody(malformed)).deepEqual({ error: 'pairing refused', code: 'pairing_refused' });
-    should(subject.redemptions.map(call => call.key)).deepEqual(['remote-unknown', 'remote-unknown', 'remote-unknown']);
+    should(anonymous.status).equal(401);
+    should(host.status).equal(404);
   });
 
   it('should let a BROWSER on this host mint, which the host scope could never do', async () => {
@@ -183,7 +142,7 @@ describe('pairing routes', () => {
     // Act
     const anonymous = await surface.dispatch(request({ method: 'POST', path: '/v1/pair/code', loopback: true }));
     const fromBrowser = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: browser }),
+      request({ method: 'POST', path: '/v1/pair/code', loopback: true, device: browser }),
     );
     const fromHostCli = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
@@ -213,10 +172,10 @@ describe('pairing routes', () => {
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
     );
     const fromLocalBrowser = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: browser }),
+      request({ method: 'POST', path: '/v1/pair/code', loopback: true, device: browser }),
     );
     const fromRemoteBrowser = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', loopback: false, headers: browser }),
+      request({ method: 'POST', path: '/v1/pair/code', loopback: false, device: browser }),
     );
 
     // Assert — byte-identical bodies, which is the strongest available statement that one rule answered.
@@ -234,7 +193,7 @@ describe('pairing routes', () => {
   it('should leave every other pairing route alone on a machine with no password', async () => {
     // LOCAL USE IS NEVER BLOCKED BY THIS. The requirement stands in front of the one act that creates
     // remote access; a daemon with no password still lists its devices, revokes one, reports a code's
-    // fate and redeems. A gate that spread to the rest of this surface would have locked an operator
+    // fate. A gate that spread to the rest of this surface would have locked an operator
     // out of revoking the very device they were worried about.
     // Arrange
     const subject = new FakePairing();
@@ -251,14 +210,9 @@ describe('pairing routes', () => {
     const revokedDevice = await surface.dispatch(
       request({ method: 'DELETE', path: `/v1/pair/devices/${deviceOneId}`, ...host }),
     );
-    const redeemed = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair', body: JSON.stringify({ code: '7F3K-Q2ND', deviceName: 'phone' }) }),
-    );
 
     // Assert
-    should([listed.status, fate.status, revokedCode.status, revokedDevice.status, redeemed.status]).deepEqual([
-      200, 200, 200, 200, 200,
-    ]);
+    should([listed.status, fate.status, revokedCode.status, revokedDevice.status]).deepEqual([200, 200, 200, 200]);
   });
 
   it('should let a REMOTE browser mint while the operator leaves pairing on, and explain it when they do not', async () => {
@@ -267,7 +221,7 @@ describe('pairing routes', () => {
     // — enforced by the grant layer, tested there. What this proves is the two answers this mount gives.
     // Arrange
     const subject = new FakePairing();
-    const remote = { method: 'POST' as const, path: '/v1/pair/code', headers: browser, loopback: false };
+    const remote = { method: 'POST' as const, path: '/v1/pair/code', device: browser, loopback: false };
 
     // Act
     const allowed = await (await mount(subject)).dispatch(request(remote));
@@ -303,11 +257,11 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
     const path = `/v1/pair/code/${pairingId}`;
 
-    const local = await surface.dispatch(request({ path, headers: browser, loopback: true }));
+    const local = await surface.dispatch(request({ path, device: browser, loopback: true }));
     subject.observation = undefined;
-    const absent = await surface.dispatch(request({ path, headers: browser, loopback: true }));
+    const absent = await surface.dispatch(request({ path, device: browser, loopback: true }));
     const malformed = await surface.dispatch(
-      request({ path: '/v1/pair/code/not-an-id', headers: browser, loopback: true }),
+      request({ path: '/v1/pair/code/not-an-id', device: browser, loopback: true }),
     );
 
     should(local.status).equal(200);
@@ -323,11 +277,11 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
     const path = `/v1/pair/code/${pairingId}`;
 
-    const revoked = await surface.dispatch(request({ method: 'DELETE', path, headers: browser, loopback: true }));
+    const revoked = await surface.dispatch(request({ method: 'DELETE', path, device: browser, loopback: true }));
     subject.observation = undefined;
-    const unknown = await surface.dispatch(request({ method: 'DELETE', path, headers: browser, loopback: true }));
+    const unknown = await surface.dispatch(request({ method: 'DELETE', path, device: browser, loopback: true }));
     const malformed = await surface.dispatch(
-      request({ method: 'DELETE', path: '/v1/pair/code/not-an-id', headers: browser, loopback: true }),
+      request({ method: 'DELETE', path: '/v1/pair/code/not-an-id', device: browser, loopback: true }),
     );
 
     should(revoked.status).equal(200);
@@ -346,9 +300,9 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
 
     // Act
-    const fromBrowser = await surface.dispatch(request({ path: '/v1/pair/devices', headers: browser, loopback: true }));
+    const fromBrowser = await surface.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: true }));
     const fromHostCli = await surface.dispatch(request({ path: '/v1/pair/devices', headers: admin, loopback: true }));
-    const fromRemote = await surface.dispatch(request({ path: '/v1/pair/devices', headers: browser, loopback: false }));
+    const fromRemote = await surface.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: false }));
 
     // Assert
     should(jsonBody(fromBrowser)).deepEqual({
@@ -368,13 +322,13 @@ describe('pairing routes', () => {
     const surface = await mount(subject);
 
     const removed = await surface.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, headers: browser, loopback: true }),
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, device: browser, loopback: true }),
     );
     const again = await surface.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, headers: browser, loopback: true }),
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, device: browser, loopback: true }),
     );
     const malformed = await surface.dispatch(
-      request({ method: 'DELETE', path: '/v1/pair/devices/not-an-id', headers: browser, loopback: true }),
+      request({ method: 'DELETE', path: '/v1/pair/devices/not-an-id', device: browser, loopback: true }),
     );
 
     should(removed.status).equal(200);
@@ -397,9 +351,9 @@ describe('pairing routes', () => {
     const surface = await mount(subject, false);
 
     // Act — a caller that did NOT arrive over loopback, which is the only caller grants govern.
-    const listing = await surface.dispatch(request({ path: '/v1/pair/devices', headers: browser, loopback: false }));
+    const listing = await surface.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: false }));
     const revoking = await surface.dispatch(
-      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, headers: browser, loopback: false }),
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceTwoId}`, device: browser, loopback: false }),
     );
 
     // Assert
@@ -425,13 +379,4 @@ describe('pairing routes', () => {
     should([minting.status, listing.status]).deepEqual([403, 403]);
   });
 
-  it('should use separate fail-closed buckets when the transport cannot identify a peer', async () => {
-    const subject = new FakePairing();
-    const surface = await mount(subject);
-
-    await surface.dispatch(request({ method: 'POST', path: '/v1/pair', loopback: true, body: '{}' }));
-    await surface.dispatch(request({ method: 'POST', path: '/v1/pair', body: '{}' }));
-
-    should(subject.redemptions.map(call => call.key)).deepEqual(['loopback-unknown', 'remote-unknown']);
-  });
 });
