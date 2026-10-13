@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { resetFsProbes, type FsChanges, type FsFile, type FsListing } from '../../src/components/files-api.ts';
+import { type FsChanges, type FsFile, type FsListing, resetFsProbes } from '../../src/components/files-api.ts';
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { readFilesTabState, resetFilesTabStates } from '../../src/components/files-tab-model.ts';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { interact, mount, must, type Mounted } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
 const daemon = daemonConnection({
   daemonId: 'files-daemon',
   baseUrl: 'https://files.example.test',
-  deviceToken: 'files-token',
+  deviceId: 'files-token',
 });
 const scope = daemonSessionScope(daemon, 'work');
 
 const second = daemonConnection({
   daemonId: 'second-daemon',
   baseUrl: 'https://second.example.test',
-  deviceToken: 'second-token',
+  deviceId: 'second-token',
 });
 const secondScope = daemonSessionScope(second, 'work');
 

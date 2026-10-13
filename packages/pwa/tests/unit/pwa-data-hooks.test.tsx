@@ -21,7 +21,7 @@ import { getForegroundPinScope } from '../../src/lib/pin-bridge.ts';
 import { DaemonPinClient } from '../../src/lib/pin-client.ts';
 import { render, run } from '../support/react.ts';
 
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
+const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const scope = daemonSessionScope(daemon, 'session-a');
 
 const pins = {

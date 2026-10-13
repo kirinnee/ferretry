@@ -182,6 +182,10 @@ import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
+import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
+import { DaemonClientProvider } from '../src/lib/store.tsx';
+import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
+import { DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
 import type { FleetProject, SessionGroup } from '../src/lib/fleet-grouping.ts';
@@ -245,17 +249,17 @@ import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
   baseUrl: 'https://daemon.invalid/',
-  deviceToken: 'harness-token',
+  deviceId: 'harness-token',
 });
 const unreachableDaemon = daemonConnection({
   daemonId: 'unreachable-daemon',
   baseUrl: 'https://offline.example.test',
-  deviceToken: 'offline-harness-token',
+  deviceId: 'offline-harness-token',
 });
 const checkingDaemon = daemonConnection({
   daemonId: 'checking-daemon',
   baseUrl: 'https://checking.example.test',
-  deviceToken: 'checking-harness-token',
+  deviceId: 'checking-harness-token',
 });
 const HARNESS_SETTINGS_CONNECTIONS = [
   { ...daemon, label: 'Studio workstation', pairedAt: 1, lastSelectedAt: 3 },
@@ -1304,6 +1308,7 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
       platform: 'browser',
       createdAt: '2025-12-20T18:22:00.000Z',
       lastSeenAt: '2025-12-31T22:04:00.000Z',
+      idleExpiresAt: '2026-12-31T00:00:00.000Z',
     },
     {
       id: `fy_device_id_${'Ee'.repeat(11)}`,
@@ -1311,6 +1316,7 @@ const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
       platform: 'browser',
       createdAt: '2025-11-02T09:15:00.000Z',
       lastSeenAt: '2025-11-02T09:15:00.000Z',
+      idleExpiresAt: '2026-12-31T00:00:00.000Z',
     },
   ],
   hostLocal: true,
@@ -4231,6 +4237,48 @@ function Shell() {
         </Card>
       ),
     },
+    /*
+     * The two failures whose sentence IS the remedy. Each card's exchange rejects at once, so a capture
+     * presses "Pair this device" and photographs what a reader is told: the machine is older (and how
+     * to update it), or this browser cannot make the key Ferretry pairs with. The code is the fixed
+     * fake `HARNESS_ARRIVAL` carries, never a real one.
+     */
+    {
+      label: 'Pairing failed — machine is older',
+      render: () => (
+        <Card aria-label="Pairing failed — machine is older" className="min-w-0 overflow-hidden">
+          <PairingScreen
+            connections={[]}
+            selectedDaemonId={null}
+            arrival={HARNESS_ARRIVAL}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => {
+              throw new DaemonOutdatedError();
+            }}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
+    {
+      label: 'Pairing failed — browser cannot make the key',
+      render: () => (
+        <Card aria-label="Pairing failed — browser cannot make the key" className="min-w-0 overflow-hidden">
+          <PairingScreen
+            connections={[]}
+            selectedDaemonId={null}
+            arrival={HARNESS_ARRIVAL}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => {
+              throw new DeviceKeyUnsupportedError();
+            }}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
     {
       label: 'Paired daemon list',
       render: () => (
@@ -4241,7 +4289,7 @@ function Shell() {
               {
                 daemonId: 'archive-daemon' as typeof daemon.daemonId,
                 baseUrl: 'https://archive.invalid',
-                deviceToken: 'harness-archive-token',
+                deviceId: 'harness-archive-token',
                 carriers: [{ kind: 'direct', daemonUrl: 'https://archive.invalid' }],
                 label: 'Archive daemon',
                 pairedAt: HARNESS_NOW - 7_200_000,
@@ -6681,6 +6729,12 @@ const PROJECTS_FRAGMENTS: Readonly<Record<string, HarnessProjectsFrame>> = {
   '#projects-already-registered': 'already-registered',
 };
 
+/** A typed client over the page's own (patched) network, which is where this harness answers. */
+const harnessDaemonClient = async (target: DaemonConnection) =>
+  await daemonApiClient(target, {
+    transport: new DaemonHttpTransport(target, async (input, init) => await globalThis.fetch(input, init)),
+  });
+
 const host = document.getElementById('root');
 if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
@@ -6688,24 +6742,28 @@ if (host) {
   const projectsFrame = PROJECTS_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   createRoot(host).render(
-    <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
-      {settingsHarness ? (
-        <StandaloneSettingsPageHarness />
-      ) : window.location.hash === '#session-workspace' ? (
-        <SessionWorkspaceHarness />
-      ) : window.location.hash === '#session-search' ? (
-        <SessionSearchHarness />
-      ) : window.location.hash === '#browser-full-viewport' ? (
-        <BrowserFullViewportHarness />
-      ) : pickerFrame !== undefined ? (
-        <PickerFrameHarness frame={pickerFrame} />
-      ) : projectsFrame !== undefined ? (
-        <ProjectsFrameHarness frame={projectsFrame} />
-      ) : screen === undefined ? (
-        <Shell />
-      ) : (
-        <OnboardingStageHarness screen={screen} />
-      )}
-    </SessionSearchProvider>,
+    // The harness answers its daemon inside the page, on the plain network, so every surface is handed
+    // a client over it; the app itself only ever has the store's session-routed pool.
+    <DaemonClientProvider client={harnessDaemonClient}>
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        {settingsHarness ? (
+          <StandaloneSettingsPageHarness />
+        ) : window.location.hash === '#session-workspace' ? (
+          <SessionWorkspaceHarness />
+        ) : window.location.hash === '#session-search' ? (
+          <SessionSearchHarness />
+        ) : window.location.hash === '#browser-full-viewport' ? (
+          <BrowserFullViewportHarness />
+        ) : pickerFrame !== undefined ? (
+          <PickerFrameHarness frame={pickerFrame} />
+        ) : projectsFrame !== undefined ? (
+          <ProjectsFrameHarness frame={projectsFrame} />
+        ) : screen === undefined ? (
+          <Shell />
+        ) : (
+          <OnboardingStageHarness screen={screen} />
+        )}
+      </SessionSearchProvider>
+    </DaemonClientProvider>,
   );
 }

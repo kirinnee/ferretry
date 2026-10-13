@@ -85,13 +85,13 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
  * reason — and routing bytes down a different path does not unprove a roster or
  * expire a health result the reader explicitly paid for.
  *
- * THE CREDENTIAL AND DAEMON FENCE IS UNCHANGED. A rotated `deviceToken` or a
+ * THE CREDENTIAL AND DAEMON FENCE IS UNCHANGED. A rotated `deviceId` or a
  * moved `baseUrl` IS a re-pair: it mints a new generation, drops the caches, and
  * fences every late read. Only `carriers` is excluded, and only because it is a
  * set of addresses rather than an authority.
  */
 const sameAccountPickerAuthority = (left: DaemonConnection, right: DaemonConnection): boolean =>
-  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
+  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceId === right.deviceId;
 
 interface AccountPickerEntry {
   readonly daemonId: DaemonId;

@@ -12,7 +12,7 @@ import { interact, mount, must, pressKey } from '../support/dom.ts';
 const daemon = daemonConnection({
   daemonId: 'gallery-daemon',
   baseUrl: 'https://gallery.example.test',
-  deviceToken: 'gallery-token',
+  deviceId: 'gallery-token',
 });
 
 const attachment = (overrides: Partial<StoredTranscriptAttachment> = {}): StoredTranscriptAttachment => ({

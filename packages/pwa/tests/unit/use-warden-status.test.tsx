@@ -8,9 +8,9 @@ import { wardenStatus } from '../support/warden.ts';
 const alpha = daemonConnection({
   daemonId: 'daemon-alpha',
   baseUrl: 'https://alpha.invalid',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
-const beta = daemonConnection({ daemonId: 'daemon-beta', baseUrl: 'https://beta.invalid', deviceToken: 'beta-token' });
+const beta = daemonConnection({ daemonId: 'daemon-beta', baseUrl: 'https://beta.invalid', deviceId: 'beta-token' });
 
 interface Probe {
   readonly daemon: DaemonConnection;

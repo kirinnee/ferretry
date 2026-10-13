@@ -11,9 +11,15 @@ import {
   sameDaemonConnection,
 } from './daemon-connection.ts';
 
-/** Repository key reserved for the browser's IndexedDB-backed connection record. */
-export const CONNECTIONS_KEY = 'fy-connections-v1';
-export const CONNECTIONS_VERSION = 1 as const;
+/**
+ * Repository key reserved for the browser's IndexedDB-backed connection record.
+ *
+ * `v2` BECAUSE A PAIRING IS A DEVICE KEY NOW, not a token. A `v1` record held a bearer token no daemon
+ * accepts any more, so it is not read at all — under its own key it simply is not found — and every
+ * browser pairs once more, which is the owner's decision ("NO backward compatibility needed").
+ */
+export const CONNECTIONS_KEY = 'fy-connections-v2';
+export const CONNECTIONS_VERSION = 2 as const;
 export const MAX_CONNECTIONS = 20;
 
 /** One paired daemon and the reader-local metadata used to order the picker. */
@@ -44,6 +50,12 @@ export interface DaemonConnectionStoreOptions {
   readonly caches?: readonly DaemonScopedCache[];
   readonly maxConnections?: number;
   readonly now?: () => number;
+  /**
+   * Called when a pairing leaves this browser for good — removed, or evicted past the maximum — and
+   * NOT when it is re-paired in place. It is how the device key goes with the pairing it proved: a key
+   * kept after its pairing was removed is a credential for a grant nobody can see in this browser.
+   */
+  readonly forget?: (daemonId: DaemonId) => void;
 }
 
 export interface AddDaemonConnectionOptions {
@@ -64,7 +76,7 @@ const label = (value: unknown): string | undefined => {
   return normalized === '' ? undefined : normalized;
 };
 
-/** One stored carrier, read tolerantly so one damaged address does not erase the pairing credential. */
+/** One stored carrier, read tolerantly so one damaged address does not erase the pairing. */
 const carrierFrom = (value: unknown): ConnectionMethod | undefined => {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -113,7 +125,7 @@ const recordFrom = (value: unknown): DaemonConnectionRecord | undefined => {
   if (
     typeof raw.daemonId !== 'string' ||
     typeof raw.baseUrl !== 'string' ||
-    typeof raw.deviceToken !== 'string' ||
+    typeof raw.deviceId !== 'string' ||
     pairedAt === undefined ||
     lastSelectedAt === undefined
   )
@@ -130,7 +142,7 @@ const recordFrom = (value: unknown): DaemonConnectionRecord | undefined => {
     const connection = daemonConnection({
       daemonId: raw.daemonId,
       baseUrl: raw.baseUrl,
-      deviceToken: raw.deviceToken,
+      deviceId: raw.deviceId,
       ...(storedCarriers === undefined
         ? legacyRelay === undefined
           ? {}
@@ -227,6 +239,7 @@ export class DaemonConnectionStore {
   readonly #repository: DaemonConnectionRepository | undefined;
   readonly #maximum: number;
   readonly #now: () => number;
+  readonly #forget: (daemonId: DaemonId) => void;
   #write: Promise<void> = Promise.resolve();
 
   constructor(initial: DaemonConnectionsSnapshot = emptySnapshot(), options: DaemonConnectionStoreOptions = {}) {
@@ -235,6 +248,7 @@ export class DaemonConnectionStore {
     this.#maximum = maximum;
     this.#repository = options.repository;
     this.#now = options.now ?? Date.now;
+    this.#forget = options.forget ?? (() => undefined);
     const selected = initial.selectedDaemonId;
     let connections = bounded(initial.connections, selected, maximum);
     const selectedDaemonId =
@@ -320,7 +334,9 @@ export class DaemonConnectionStore {
     ];
     const connections = bounded(candidates, record.daemonId, this.#maximum);
     for (const id of previousIds) {
-      if (!connections.some(candidate => candidate.daemonId === id)) this.#clearDaemon(id);
+      if (connections.some(candidate => candidate.daemonId === id)) continue;
+      this.#clearDaemon(id);
+      this.#forget(id);
     }
     this.#publish({ connections, selectedDaemonId: record.daemonId });
     return record;
@@ -377,7 +393,7 @@ export class DaemonConnectionStore {
     // deliberately durable across a re-pair, so it cannot fence a delayed old
     // credential's response by itself. Carriers are excluded on purpose: this
     // operation is the authoritative replacement of that cache.
-    if (existing.baseUrl !== daemon.baseUrl || existing.deviceToken !== daemon.deviceToken) return existing;
+    if (existing.baseUrl !== daemon.baseUrl || existing.deviceId !== daemon.deviceId) return existing;
     if (carriers.length === 0) return existing;
     const updated = daemonConnection({ ...existing, carriers });
     if (sameDaemonCarriers(existing.carriers, updated.carriers)) return existing;
@@ -400,6 +416,7 @@ export class DaemonConnectionStore {
     const selectedDaemonId =
       this.#snapshot.selectedDaemonId === id ? (connections[0]?.daemonId ?? null) : this.#snapshot.selectedDaemonId;
     this.#clearDaemon(id);
+    this.#forget(id);
     this.#publish({ connections, selectedDaemonId });
     return true;
   }

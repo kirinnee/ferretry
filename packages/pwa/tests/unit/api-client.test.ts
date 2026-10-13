@@ -73,8 +73,8 @@ class RecordingTransport implements IFyHttpTransport {
   }
 }
 
-const paired = (daemonId: string, baseUrl: string, deviceToken: string) =>
-  daemonConnection({ daemonId, baseUrl, deviceToken });
+const paired = (daemonId: string, baseUrl: string, deviceId: string) =>
+  daemonConnection({ daemonId, baseUrl, deviceId });
 
 describe('daemon API client', () => {
   it('should bind typed protocol calls to the paired daemon instead of the public page origin', async () => {
@@ -90,7 +90,7 @@ describe('daemon API client', () => {
     should(transport.calls).have.length(1);
     should(transport.calls[0]?.url).equal('https://daemon-a.example.test/v1/health');
     const headers = new Headers(transport.calls[0]?.init.headers);
-    should(headers.get('authorization')).equal('Bearer token-a');
+    should(headers.has('authorization')).be.false();
     should(headers.get('x-fy-version')).equal(PWA_PROTOCOL_VERSION);
     should(headers.get('x-fy-request-id')).equal('request-a');
   });
@@ -114,8 +114,8 @@ describe('daemon API client', () => {
     // Assert
     should(firstTransport.calls[0]?.url).equal('https://daemon-a.example.test/v1/health');
     should(secondTransport.calls[0]?.url).equal('https://daemon-b.example.test/v1/health');
-    should(new Headers(firstTransport.calls[0]?.init.headers).get('authorization')).equal('Bearer token-a');
-    should(new Headers(secondTransport.calls[0]?.init.headers).get('authorization')).equal('Bearer token-b');
+    should(new Headers(firstTransport.calls[0]?.init.headers).has('authorization')).be.false();
+    should(new Headers(secondTransport.calls[0]?.init.headers).has('authorization')).be.false();
   });
 
   it('should isolate migration paths, bodies, and credentials for the same session id on two daemons', async () => {
@@ -142,8 +142,8 @@ describe('daemon API client', () => {
     const secondCall = secondTransport.calls[0];
     should(firstCall?.url).equal('https://daemon-a.example.test/v1/sessions/same-session/migrate');
     should(secondCall?.url).equal('https://daemon-b.example.test/v1/sessions/same-session/migrate');
-    should(new Headers(firstCall?.init.headers).get('authorization')).equal('Bearer token-a');
-    should(new Headers(secondCall?.init.headers).get('authorization')).equal('Bearer token-b');
+    should(new Headers(firstCall?.init.headers).has('authorization')).be.false();
+    should(new Headers(secondCall?.init.headers).has('authorization')).be.false();
     should(JSON.parse(String(firstCall?.init.body))).eql({
       agent: 'codex-auto-atomi',
       model: 'gpt-5.6-terra',

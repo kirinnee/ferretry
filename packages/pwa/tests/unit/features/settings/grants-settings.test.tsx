@@ -13,7 +13,7 @@ import { must } from '../../../support/dom.ts';
 import { render, run, runAsync } from '../../../support/react.ts';
 
 const connection = (id = 'alpha') =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` });
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
 
 const NOW = Date.parse('2026-01-01T00:00:00.000Z');
 

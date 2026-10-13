@@ -1,86 +1,141 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import type { DaemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { DaemonEventSocket } from '../../src/lib/event-transport.ts';
-import { daemonEventTicket, DaemonEventTransport } from '../../src/lib/event-transport.ts';
+import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
+import type { RelayStreamRequest } from '../../src/lib/relay-carrier.ts';
+import type { RelayClientSession, RelayStreamClosed } from '../../src/lib/relay-session.ts';
 
-class FakeSocket implements DaemonEventSocket {
-  static latest: FakeSocket | undefined;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onmessage: ((event: { readonly data: unknown }) => void) | null = null;
-  closes = 0;
+/** A stream session as the transport sees one: frames in, a close out, and a close listener. */
+class FakeStreamSession {
+  readonly closes: RelayStreamClosed[] = [];
+  #listener: ((closed: RelayStreamClosed) => void) | undefined;
 
-  constructor(readonly url: string) {
-    FakeSocket.latest = this;
+  constructor(readonly request: RelayStreamRequest) {}
+
+  text(text: string): void {
+    this.request.onData({ kind: 'text', text });
   }
 
-  close(): void {
-    this.closes += 1;
-    this.onclose?.();
+  bytes(): void {
+    this.request.onData({ kind: 'bytes', bytes: new Uint8Array([1]) });
   }
 
-  message(data: unknown): void {
-    this.onmessage?.({ data });
+  closeStream(code: number, reason: string): void {
+    this.closes.push({ code, reason });
+  }
+
+  onStreamClosed(listener: (closed: RelayStreamClosed) => void): void {
+    this.#listener = listener;
+  }
+
+  daemonCloses(closed: RelayStreamClosed): void {
+    this.#listener?.(closed);
   }
 }
 
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon.example.test',
-  deviceToken: 'durable-device-token',
+  deviceId: 'fy_dev_paired',
 });
 
 const streamInput = (onMessage: (value: unknown) => void) => ({
   url: 'wss://daemon.example.test/v1/events?after=12&sessionId=session-1',
-  token: 'durable-device-token',
+  token: 'session-carried',
   onMessage,
 });
 
+/** An opener that records what it was asked for and hands back one fake session. */
+const opener = (): {
+  readonly opened: Array<{ readonly daemon: DaemonConnection; readonly session: FakeStreamSession }>;
+  readonly open: (target: DaemonConnection, request: RelayStreamRequest) => Promise<RelayClientSession>;
+} => {
+  const opened: Array<{ readonly daemon: DaemonConnection; readonly session: FakeStreamSession }> = [];
+  return {
+    opened,
+    open: async (target, request) => {
+      const session = new FakeStreamSession(request);
+      opened.push({ daemon: target, session });
+      return session as unknown as RelayClientSession;
+    },
+  };
+};
+
+const settle = async (): Promise<void> => {
+  for (let index = 0; index < 5; index += 1) await Promise.resolve();
+};
+
 describe('DaemonEventTransport', () => {
-  it('should open a paired-daemon event URL with a short-lived ticket and no device token', async () => {
+  it('should open the event feed as a stream session naming the path and query, and carry no credential', async () => {
     // Arrange
     const received: unknown[] = [];
     const abort = new AbortController();
-    const transport = new DaemonEventTransport(
-      daemon,
-      async actual => {
-        should(actual).equal(daemon);
-        return 'one-time-ticket';
-      },
-      url => new FakeSocket(url),
-    );
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
 
     // Act
-    const streaming = transport.stream({
-      ...streamInput(value => received.push(value)),
-      signal: abort.signal,
-    });
-    await Promise.resolve();
-    const socket = FakeSocket.latest as FakeSocket;
-    socket.message('{"sequence":12}');
+    const streaming = transport.stream({ ...streamInput(value => received.push(value)), signal: abort.signal });
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.text('{"sequence":12}');
     abort.abort();
     await streaming;
 
     // Assert
-    should(socket.url).equal('wss://daemon.example.test/v1/events?ticket=one-time-ticket&after=12&sessionId=session-1');
-    should(socket.url).not.containEql('durable-device-token');
+    should(streams.opened[0]?.daemon).equal(daemon);
+    should(session.request.path).equal('/v1/events');
+    should(session.request.query).deepEqual([
+      ['after', '12'],
+      ['sessionId', 'session-1'],
+    ]);
+    should(JSON.stringify(session.request)).not.containEql('fy_dev_paired');
     should(received).deepEqual([{ sequence: 12 }]);
+    should(session.closes).deepEqual([{ code: 1000, reason: 'the viewer left this stream' }]);
   });
 
-  it('should reject when the peer closes a stream that was not cancelled', async () => {
+  it('should name no query at all when the feed URL has none', async () => {
     // Arrange
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => 'one-time-ticket',
-      url => new FakeSocket(url),
-    );
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
+
+    // Act
+    const streaming = transport.stream({ ...streamInput(() => undefined), url: 'wss://daemon.example.test/v1/events' });
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.daemonCloses({ code: 1000, reason: 'done' });
+    await streaming;
+
+    // Assert
+    should(session.request).not.have.property('query');
+  });
+
+  it('should resolve when the daemon ends the stream with 1000', async () => {
+    // Arrange
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
 
     // Act
     const streaming = transport.stream(streamInput(() => undefined));
-    await Promise.resolve();
-    const socket = FakeSocket.latest as FakeSocket;
-    socket.close();
+    await settle();
+    streams.opened[0]?.session.daemonCloses({ code: 1000, reason: 'the daemon is done' });
+    const outcome = await streaming;
+
+    // Assert
+    should(outcome).be.undefined();
+  });
+
+  it('should reject with the sealed code when the daemon ends the stream for a reason', async () => {
+    // Arrange
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
+
+    // Act
+    const streaming = transport.stream(streamInput(() => undefined));
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.daemonCloses({ code: 1013, reason: 'the reader fell behind' });
+    session.daemonCloses({ code: 1000, reason: 'a second close changes nothing' });
     const outcome = await streaming.then(
       () => undefined,
       error => error,
@@ -88,20 +143,31 @@ describe('DaemonEventTransport', () => {
 
     // Assert
     should(outcome).be.instanceOf(Error);
-    should((outcome as Error).message).equal('daemon event stream closed unexpectedly');
+    should((outcome as Error).message).equal('daemon event stream closed: 1013 the reader fell behind');
   });
 
-  it('should reject a stream URL outside the paired daemon before opening a socket', async () => {
+  it('should ignore a bytes record, which the event feed never sends', async () => {
     // Arrange
-    let opened = false;
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => 'one-time-ticket',
-      () => {
-        opened = true;
-        return new FakeSocket('unused');
-      },
-    );
+    const received: unknown[] = [];
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
+
+    // Act
+    const streaming = transport.stream(streamInput(value => received.push(value)));
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.bytes();
+    session.daemonCloses({ code: 1000, reason: 'done' });
+    await streaming;
+
+    // Assert
+    should(received).deepEqual([]);
+  });
+
+  it('should reject a stream URL outside the paired daemon before opening a session', async () => {
+    // Arrange
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
 
     // Act
     const outcome = await transport
@@ -114,144 +180,108 @@ describe('DaemonEventTransport', () => {
     // Assert
     should(outcome).be.instanceOf(Error);
     should((outcome as Error).message).equal('event stream must remain on the paired daemon');
-    should(opened).be.false();
+    should(streams.opened).be.empty();
   });
 
-  it('should close and reject when a received frame is not JSON', async () => {
+  it('should refuse a query parameter the feed does not have, and so can never carry a ticket or token', async () => {
     // Arrange
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => 'one-time-ticket',
-      url => new FakeSocket(url),
-    );
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
 
     // Act
-    const streaming = transport.stream(streamInput(() => undefined));
-    await Promise.resolve();
-    const socket = FakeSocket.latest as FakeSocket;
-    socket.message('not-json');
+    const outcome = await transport
+      .stream({ ...streamInput(() => undefined), url: 'wss://daemon.example.test/v1/events?token=abc' })
+      .then(
+        () => undefined,
+        error => error,
+      );
+
+    // Assert
+    should((outcome as Error).message).equal('unsupported event stream parameter: token');
+    should(streams.opened).be.empty();
+  });
+
+  it('should close the stream and reject when a received frame is not JSON', async () => {
+    // Arrange
+    const received: unknown[] = [];
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
+
+    // Act
+    const streaming = transport.stream(streamInput(value => received.push(value)));
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.text('not-json');
+    session.text('{"sequence":13}');
     const outcome = await streaming.then(
       () => undefined,
       error => error,
     );
 
-    // Assert
-    should(outcome).be.instanceOf(Error);
-    should(socket.closes).equal(1);
+    // Assert — nothing after the damaged frame is delivered as if the feed were still whole.
+    should((outcome as Error).message).equal('daemon event stream sent a frame that is not JSON');
+    should(session.closes).deepEqual([{ code: 1003, reason: 'the viewer could not read this stream' }]);
+    should(received).deepEqual([]);
   });
 
-  it('should close the socket, clear listeners, and resolve when cancelled', async () => {
+  it('should refuse a damaged frame that arrived before the session was handed back', async () => {
     // Arrange
-    const abort = new AbortController();
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => 'one-time-ticket',
-      url => new FakeSocket(url),
-    );
+    let session: FakeStreamSession | undefined;
+    const transport = new DaemonEventTransport(daemon, async (_target, request) => {
+      session = new FakeStreamSession(request);
+      session.text('not-json');
+      return session as unknown as RelayClientSession;
+    });
 
     // Act
-    const streaming = transport.stream({ ...streamInput(() => undefined), signal: abort.signal });
-    await Promise.resolve();
-    const socket = FakeSocket.latest as FakeSocket;
-    abort.abort();
-    await streaming;
+    const outcome = await transport.stream(streamInput(() => undefined)).then(
+      () => undefined,
+      error => error,
+    );
 
     // Assert
-    should(socket.closes).equal(1);
-    should(socket.onmessage).be.null();
-    should(socket.onclose).be.null();
-    should(socket.onerror).be.null();
+    should((outcome as Error).message).equal('daemon event stream sent a frame that is not JSON');
+    should(session?.closes).deepEqual([{ code: 1003, reason: 'the viewer could not read this stream' }]);
   });
 
-  it('should not issue a ticket or open a socket when already cancelled', async () => {
+  it('should not open a session when already cancelled', async () => {
     // Arrange
     const abort = new AbortController();
     abort.abort();
-    let issued = 0;
-    let opened = 0;
-    const transport = new DaemonEventTransport(
-      daemon,
-      async () => {
-        issued += 1;
-        return 'unused';
-      },
-      url => {
-        opened += 1;
-        return new FakeSocket(url);
-      },
-    );
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
 
     // Act
     await transport.stream({ ...streamInput(() => undefined), signal: abort.signal });
 
     // Assert
-    should(issued).equal(0);
-    should(opened).equal(0);
+    should(streams.opened).be.empty();
   });
 
-  it('should not open a socket when cancellation arrives during ticket issuance', async () => {
+  it('should leave at once when cancellation arrives while the session is opening', async () => {
     // Arrange
     const abort = new AbortController();
-    let release: ((ticket: string) => void) | undefined;
-    let opened = 0;
+    let release: (() => void) | undefined;
+    let session: FakeStreamSession | undefined;
     const transport = new DaemonEventTransport(
       daemon,
-      async () =>
-        await new Promise<string>(resolve => {
-          release = resolve;
+      async (_target, request) =>
+        await new Promise<RelayClientSession>(resolve => {
+          release = () => {
+            session = new FakeStreamSession(request);
+            resolve(session as unknown as RelayClientSession);
+          };
         }),
-      url => {
-        opened += 1;
-        return new FakeSocket(url);
-      },
     );
 
     // Act
     const streaming = transport.stream({ ...streamInput(() => undefined), signal: abort.signal });
-    await Promise.resolve();
+    await settle();
     abort.abort();
-    release?.('too-late-ticket');
+    release?.();
     await streaming;
 
-    // Assert
-    should(opened).equal(0);
-  });
-});
-
-describe('daemonEventTicket', () => {
-  const ticket = `fy_ticket_${'t'.repeat(43)}`;
-
-  it('should buy a ticket with the device token on the one request that can carry a header', async () => {
-    // Arrange
-    const seen: Array<readonly [string, RequestInit]> = [];
-
-    // Act
-    const issued = await daemonEventTicket(daemon, async (url, init) => {
-      seen.push([url, init]);
-      return new Response(JSON.stringify({ ticket, ttlSeconds: 30, expiresAt: '2026-08-03T12:00:30.000Z' }), {
-        status: 201,
-      });
-    });
-
-    // Assert — the durable credential travels in a header, and only the disposable one may reach a URL.
-    should(issued).equal(ticket);
-    should(seen[0]?.[0]).equal('https://daemon.example.test/v1/events/ticket');
-    should(seen[0]?.[1].method).equal('POST');
-    should(new Headers(seen[0]?.[1].headers).get('authorization')).equal('Bearer durable-device-token');
-  });
-
-  it('should refuse rather than hand back a ticket the daemon would not sell', async () => {
-    // Arrange / Act / Assert — a stream that silently never opens tells a viewer nothing at all.
-    await should(daemonEventTicket(daemon, async () => new Response('nope', { status: 403 }))).be.rejectedWith(/403/u);
-  });
-
-  it('should refuse a response that is not a ticket', async () => {
-    // Arrange / Act / Assert — a body that parses as something else is damaged evidence, not a ticket.
-    await should(
-      daemonEventTicket(
-        daemon,
-        async () => new Response(JSON.stringify({ ticket: 'plain', ttlSeconds: 30 }), { status: 201 }),
-      ),
-    ).be.rejected();
+    // Assert — the session that opened too late is told the viewer left, never left dangling.
+    should(session?.closes).deepEqual([{ code: 1000, reason: 'the viewer left this stream' }]);
   });
 });

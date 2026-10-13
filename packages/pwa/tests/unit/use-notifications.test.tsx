@@ -1,5 +1,5 @@
-import type { PushDeviceView, PushPreferences, SessionStatus, SessionView } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import type { PushDeviceView, PushPreferences, SessionStatus, SessionView } from '@ferretry/protocol';
 
 import {
   type NotificationControls,
@@ -20,32 +20,32 @@ import type {
   NotificationSurface,
 } from '../../src/lib/notify.ts';
 import {
+  DaemonPushDevices,
+  type DaemonPushService,
   PUSH_INACTIVE_MESSAGE,
   PUSH_UNSUPPORTED_MESSAGE,
-  type DaemonPushService,
   type PushEnrolment,
   type PushRegistrationLike,
   type PushSubscriptionHandle,
-  DaemonPushDevices,
 } from '../../src/lib/push-enrolment.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 
 /** The SAME daemon after a credential rotation: a different live connection. */
 const rotatedA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a-rotated',
+  deviceId: 'token-a-rotated',
 });
 
 /** The same daemon and credential reached at a new address. */
 const movedA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a2.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 const prefs: PushPreferences = {
@@ -650,11 +650,11 @@ describe('useNotificationControls', () => {
     expect(push.count()).toBe(2);
 
     const newer = await push.finish(1, [ROTATED_DEVICE]);
-    expect(newer.deviceToken).toBe(rotatedA.deviceToken);
+    expect(newer.deviceId).toBe(rotatedA.deviceId);
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
 
     const superseded = await push.finish(0, [DEVICE]);
-    expect(superseded.deviceToken).toBe(daemonA.deviceToken);
+    expect(superseded.deviceId).toBe(daemonA.deviceId);
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
     expect(probe.controls().delivery).toBe('unavailable');
     expect(probe.controls().deliveryMessage).toBe(PUSH_INACTIVE_MESSAGE);

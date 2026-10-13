@@ -16,7 +16,7 @@ import { sessionView } from '../support/sessions.ts';
 const daemonId = daemonConnection({
   daemonId: 'dashboard-daemon',
   baseUrl: 'https://dashboard.invalid',
-  deviceToken: 'dashboard-token',
+  deviceId: 'dashboard-token',
 }).daemonId;
 const now = Date.parse('2026-08-01T12:00:00.000Z');
 

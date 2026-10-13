@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { BROWSER_LOGIN_PATH } from '../../src/lib/browser-login.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { createAppStore } from '../../src/lib/store.tsx';
+import { autoDial, dialByHost, keyedDaemon, relayCrypto } from '../support/relay.ts';
 
 class MemoryRepository implements DaemonConnectionRepository {
   readonly values = new Map<string, string>();
@@ -15,13 +15,6 @@ class MemoryRepository implements DaemonConnectionRepository {
     this.values.set(key, value);
   }
 }
-
-const alpha = daemonConnection({
-  daemonId: `fy_daemon_${'a'.repeat(43)}`,
-  baseUrl: 'https://alpha.example.test',
-  deviceToken: `fy_device_${'t'.repeat(43)}`,
-  carriers: [{ kind: 'direct', daemonUrl: 'https://alpha.example.test' }],
-});
 
 const CLOSED = { state: 'closed', profilePrimed: false } as const;
 
@@ -37,25 +30,35 @@ const CLOSED = { state: 'closed', profilePrimed: false } as const;
  */
 describe('the app store’s browser-login port', () => {
   it('reaches the named daemon’s own client for both the action and the read', async () => {
-    const requests: Array<{ readonly url: string; readonly method: string }> = [];
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://alpha.example.test', [
+      { kind: 'direct', daemonUrl: 'https://alpha.example.test' },
+    ]);
+    const scripted = autoDial(identity, {
+      respond: request =>
+        request.path === '/v1/carriers'
+          ? { body: { carriers: [{ kind: 'direct', url: daemon.baseUrl }] } }
+          : { body: CLOSED },
+    });
+    // A second paired machine that must hear nothing of this journey.
+    const other = await keyedDaemon('https://beta.example.test');
+    const otherScripted = autoDial(other.identity);
     const store = await createAppStore({
       repository: new MemoryRepository(),
-      fetcher: async (input, init) => {
-        const url = String(input);
-        requests.push({ url, method: init?.method ?? 'GET' });
-        return url.endsWith('/v1/carriers')
-          ? Response.json({ carriers: [{ kind: 'direct', url: alpha.baseUrl }] })
-          : Response.json(CLOSED);
-      },
+      deviceKeys,
+      relayCrypto,
+      relayDial: dialByHost({ 'alpha.example.test': scripted.dial, 'beta.example.test': otherScripted.dial }).dial,
     });
-    store.connections.add(alpha);
+    store.connections.add(daemon);
+    store.connections.add(other.daemon);
 
-    const snapshot = await store.browserLogin.act(alpha, { action: 'confirm' });
+    const snapshot = await store.browserLogin.act(daemon, { action: 'confirm' });
 
     expect(snapshot.state).toBe('closed');
-    expect(requests.filter(request => request.url.endsWith(BROWSER_LOGIN_PATH))).toEqual([
-      { url: `${alpha.baseUrl}${BROWSER_LOGIN_PATH}`, method: 'POST' },
-      { url: `${alpha.baseUrl}${BROWSER_LOGIN_PATH}`, method: 'GET' },
+    const asked = scripted.requests as { method: string; path: string }[];
+    expect(asked.filter(request => request.path === BROWSER_LOGIN_PATH).map(request => request.method)).toEqual([
+      'POST',
+      'GET',
     ]);
+    expect(otherScripted.requests).toEqual([]);
   });
 });

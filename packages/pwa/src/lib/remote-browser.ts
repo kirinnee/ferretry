@@ -112,25 +112,13 @@ export const runRemoteBrowserAction = async (
   return parseBrowserActionResult(scope, await response.json());
 };
 
-/** Buys the short-lived credential the browser WebSocket must carry instead of a durable device token. */
-export const fetchRemoteBrowserStreamTicket = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
-): Promise<string> => {
-  assertScopeDaemon(daemon, scope);
-  const request = daemonRequest(daemon, `${browserPath(scope)}/stream/ticket`, { method: 'POST' });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw await responseError(response);
-  const body = (await response.json()) as { readonly ticket?: unknown };
-  if (typeof body.ticket !== 'string' || body.ticket.trim() === '')
-    throw new DaemonResponseError(502, 'daemon returned no browser stream ticket');
-  return body.ticket;
-};
-
 /**
- * Builds a viewer URL from a per-connection ticket. Device credentials are
- * deliberately absent: WebSocket URLs are routinely retained in diagnostics.
+ * Builds a viewer URL from a per-connection ticket.
+ *
+ * DECLARED GAP: the remote-browser viewer is not mounted in the app yet, and it still speaks the
+ * ticketed WebSocket it was written against. A paired device can no longer buy a ticket — every stream
+ * it opens is a session the device key opened — so mounting the viewer needs it to take a stream
+ * session the way the terminal deck does (`docs/design/zero-trust.md`, PR A).
  */
 export const remoteBrowserStreamUrl = (daemon: DaemonConnection, scope: DaemonSessionScope, ticket: string): string => {
   assertScopeDaemon(daemon, scope);

@@ -109,7 +109,7 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
 interface UsageEntry {
   readonly daemonId: DaemonId;
   readonly baseUrl: string;
-  readonly deviceToken: string;
+  readonly deviceId: string;
 }
 
 interface UsageWatch {
@@ -241,7 +241,7 @@ export class DaemonUsageStore {
 
   #entryFor(daemon: DaemonConnection): UsageEntry {
     const existing = this.#entries.get(daemon.daemonId);
-    if (existing?.baseUrl === daemon.baseUrl && existing.deviceToken === daemon.deviceToken) return existing;
+    if (existing?.baseUrl === daemon.baseUrl && existing.deviceId === daemon.deviceId) return existing;
     // A re-pair replaces the credential behind every row in the feed, so the
     // previous feed stops being something this connection ever claimed.
     this.#index.clearDaemon(daemon.daemonId);
@@ -249,7 +249,7 @@ export class DaemonUsageStore {
     const entry: UsageEntry = {
       daemonId: daemon.daemonId,
       baseUrl: daemon.baseUrl,
-      deviceToken: daemon.deviceToken,
+      deviceId: daemon.deviceId,
     };
     this.#entries.set(daemon.daemonId, entry);
     return entry;

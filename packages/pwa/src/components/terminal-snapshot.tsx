@@ -15,9 +15,10 @@
  */
 
 import { Terminal } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../lib/store.tsx';
 import {
   describeSnapshotError,
   formatSnapshotAge,
@@ -43,15 +44,19 @@ export interface TerminalSnapshotViewProps {
   readSnapshot?: PaneSnapshotReader;
 }
 
-const defaultReader: PaneSnapshotReader = (daemon, scope) => readPaneSnapshot(daemon, scope);
-
 export const TerminalSnapshotView = ({
   daemon,
   scope,
   tmuxSession,
   now = Date.now,
-  readSnapshot = defaultReader,
+  readSnapshot: injectedReader,
 }: TerminalSnapshotViewProps) => {
+  // Through the carrier router by default: a paired device has no bearer value of its own to read with.
+  const fetcher = useDaemonFetch();
+  const readSnapshot = useMemo<PaneSnapshotReader>(
+    () => injectedReader ?? ((daemon, scope) => readPaneSnapshot(daemon, scope, undefined, fetcher)),
+    [fetcher, injectedReader],
+  );
   const [text, setText] = useState('');
   // `stale` only ever turns true after a successful snapshot, so the initial
   // load cannot flash a "stale" chip before the first poll lands.

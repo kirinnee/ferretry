@@ -28,7 +28,8 @@ import {
   HANDSHAKE_SIGNATURE_LABEL,
   HANDSHAKE_TRANSCRIPT_LABEL,
   NONCE_BYTES,
-  RELAY_PROTOCOL_ID,
+  PREVIOUS_SESSION_PROTOCOL_ID,
+  SESSION_PROTOCOL_ID,
   X25519_PUBLIC_KEY_BYTES,
 } from './constants.ts';
 import type { DaemonIdentity, EphemeralKeyPair, RelayCrypto } from './crypto.ts';
@@ -44,7 +45,7 @@ const base64Url = (byteLength: number): z.ZodString =>
 /** Client → daemon. Names the daemon it believes it reached, so a misrouted session fails loudly. */
 export const ClientHelloSchema = z.strictObject({
   t: z.literal('hs1'),
-  protocol: z.literal(RELAY_PROTOCOL_ID),
+  protocol: z.literal(SESSION_PROTOCOL_ID),
   epk: base64Url(X25519_PUBLIC_KEY_BYTES),
   nonce: base64Url(NONCE_BYTES),
   daemonId: z.string().min(1).max(64),
@@ -54,7 +55,7 @@ export type ClientHello = z.infer<typeof ClientHelloSchema>;
 /** Daemon → client. The signature covers the transcript, not just the key, and not just the nonce. */
 export const DaemonHelloSchema = z.strictObject({
   t: z.literal('hs2'),
-  protocol: z.literal(RELAY_PROTOCOL_ID),
+  protocol: z.literal(SESSION_PROTOCOL_ID),
   epk: base64Url(X25519_PUBLIC_KEY_BYTES),
   nonce: base64Url(NONCE_BYTES),
   spki: base64Url(ED25519_SPKI_BYTES),
@@ -84,6 +85,23 @@ export function decodeClientHello(payload: Uint8Array): ClientHello | null {
 export function decodeDaemonHello(payload: Uint8Array): DaemonHello | null {
   const parsed = DaemonHelloSchema.safeParse(decodeJson(payload));
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * WHETHER AN UNREADABLE HELLO IS A PEER FROM BEFORE THE DEVICE KEY, and nothing more.
+ *
+ * A hello that fails its schema is normally just a protocol error. The one exception worth naming is a
+ * peer still speaking `/1`: that is not an attacker or a bug but a machine or an app nobody updated,
+ * and the person reading the failure can only fix it if they are told WHICH side is old. So this reads
+ * the `protocol` field alone and answers that one question; it accepts nothing.
+ */
+export function speaksPreviousSessionProtocol(payload: Uint8Array): boolean {
+  const value = decodeJson(payload);
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { readonly protocol?: unknown }).protocol === PREVIOUS_SESSION_PROTOCOL_ID
+  );
 }
 
 /**
@@ -155,7 +173,7 @@ export async function startClientHandshake(
   const ephemeral = await crypto.generateEphemeralKeyPair();
   const hello: ClientHello = {
     t: 'hs1',
-    protocol: RELAY_PROTOCOL_ID,
+    protocol: SESSION_PROTOCOL_ID,
     epk: toBase64Url(ephemeral.publicKey),
     nonce: toBase64Url(crypto.randomBytes(NONCE_BYTES)),
     daemonId: expectedDaemonId,
@@ -228,7 +246,7 @@ export async function answerClientHandshake(
   const ephemeral = await crypto.generateEphemeralKeyPair();
   const unsigned = {
     t: 'hs2',
-    protocol: RELAY_PROTOCOL_ID,
+    protocol: SESSION_PROTOCOL_ID,
     epk: toBase64Url(ephemeral.publicKey),
     nonce: toBase64Url(crypto.randomBytes(NONCE_BYTES)),
     spki: toBase64Url(identity.publicKeySpki),

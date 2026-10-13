@@ -32,16 +32,28 @@ export const PairingDeviceNameSchema = z
   .transform(value => value.trim())
   .pipe(z.string().min(1).max(PAIRING_DEVICE_NAME_MAX_LENGTH));
 
-/** The unauthenticated exchange. The one-time code is the credential for this request. */
+/**
+ * The redemption's own fields. The one-time code is the credential for this exchange; it now travels
+ * only inside a sealed `pair` record (`docs/relay-protocol.md` §14) beside the device key it registers.
+ */
 export const PairingRequestSchema = z.strictObject({
   code: PairingCodeSchema,
   deviceName: PairingDeviceNameSchema,
 });
 export type PairingRequest = z.infer<typeof PairingRequestSchema>;
 
-/** Device credentials are visibly typed and carry 256 random bits encoded as base64url. */
-export const DeviceTokenSchema = z.string().regex(/^fy_device_[A-Za-z0-9_-]{43}$/u, 'invalid device token');
-export type DeviceToken = z.infer<typeof DeviceTokenSchema>;
+/**
+ * A device identity, as minted for one grant on one daemon. Not a credential and never derived from one.
+ *
+ * THERE IS NO DEVICE TOKEN ANY MORE, AND NO SCHEMA FOR ONE. A paired device proves itself by signing
+ * each session's transcript with a key it cannot export; the daemon holds only the public half. A
+ * token schema left here would be the first line of a bearer path somebody could rebuild.
+ */
+export const PairedDeviceIdSchema = z.string().regex(/^fy_device_id_[A-Za-z0-9_-]{22}$/u, 'invalid device id');
+export type PairedDeviceId = z.infer<typeof PairedDeviceIdSchema>;
+
+/** How long a device may go unused before it must pair again. */
+export const DEVICE_IDLE_EXPIRY_DAYS = 30 as const;
 
 /** A daemon id is the SHA-256 fingerprint of its persisted Ed25519 public key. */
 export const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
@@ -189,11 +201,14 @@ export function parsePairingFragment(fragment: string): PairingLinkSeed {
  * one the rule governs.
  */
 export const PairingResponseSchema = z.strictObject({
-  deviceToken: DeviceTokenSchema,
+  /** Which grant this device now holds. An identity, not a credential: the device KEY is what proves it. */
+  deviceId: PairedDeviceIdSchema,
   daemonId: DaemonIdSchema,
   daemonName: DaemonNameSchema,
   capabilities: z.array(PairingCapabilitySchema).max(64).readonly(),
   carriers: PublishedCarriersSchema.default([]),
+  /** Days of disuse after which this device must pair again (`docs/design/zero-trust.md` A6). */
+  idleExpiryDays: z.number().int().positive().max(3650),
 });
 export type PairingResponse = z.infer<typeof PairingResponseSchema>;
 
@@ -462,18 +477,15 @@ export const PairingCodeStatusResponseSchema = z.discriminatedUnion('status', [
 ]);
 export type PairingCodeStatusResponse = z.infer<typeof PairingCodeStatusResponseSchema>;
 
-/** A device identity, as minted for one grant on one daemon. Not a credential and never derived from one. */
-export const PairedDeviceIdSchema = z.string().regex(/^fy_device_id_[A-Za-z0-9_-]{22}$/u, 'invalid device id');
-export type PairedDeviceId = z.infer<typeof PairedDeviceIdSchema>;
-
 /**
  * One device that may reach this daemon, as anybody but the daemon may see it.
  *
- * THE DIGEST IS NOT HERE, AND THAT IS THE POINT. A device grant is stored as `{ …, tokenHash }`, and
- * this schema is the projection that crosses the wire — so "no route returns a credential or anything
- * derived from one" is a property of the type rather than a discipline every handler has to remember.
- * A digest is not a token, but it is the only thing standing between a leaked file and a forged one,
- * and a UI has no use for it.
+ * THE PUBLIC KEY IS NOT HERE EITHER. A grant is stored as `{ …, publicKey }`, and this schema is the
+ * projection that crosses the wire. A public key is not a secret, but a UI has no use for it, and "no
+ * route returns key material" is easier to keep as a property of the type than as a habit.
+ *
+ * `lastSeenAt` is real now: the daemon advances it when the device opens or renews a session (at most
+ * once an hour on disk), and `idleExpiresAt` is the instant this grant ends if it is not used again.
  *
  * `name` is chosen by the redeeming device and is therefore ATTACKER-INFLUENCED TEXT. It is bounded and
  * control-character-free by `PairingDeviceNameSchema`, and consumers must render it as text content.
@@ -485,6 +497,7 @@ export const PairedDeviceSchema = z.strictObject({
   platform: z.literal('browser'),
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
+  idleExpiresAt: InstantSchema,
 });
 export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
 

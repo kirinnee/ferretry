@@ -23,7 +23,7 @@ test('a touch-safe send preference keeps a reachable New line action', async () 
   const daemon = daemonConnection({
     daemonId: 'mobile-daemon',
     baseUrl: 'https://mobile.example.test',
-    deviceToken: 'mobile-token',
+    deviceId: 'mobile-token',
   });
   const sessionId = 'mobile-enter';
   const drafts = new DaemonDraftStore(new MemoryStorage());

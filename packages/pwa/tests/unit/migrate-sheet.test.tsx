@@ -25,12 +25,12 @@ import { pickerHealth } from './picker-support.ts';
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.invalid',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const daemonB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'https://daemon-b.invalid',
-  deviceToken: 'token-b',
+  deviceId: 'token-b',
 });
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
@@ -116,6 +116,9 @@ describe('migrateSessionWithDaemon', () => {
           allowContextDowngrade: false,
         },
         'request-1',
+        async () => {
+          throw new Error('no client may be built for a crossed scope');
+        },
       ),
     ).rejects.toThrow('migration scope must belong to the requested daemon');
   });
@@ -271,6 +274,23 @@ describe('MigrateSheet', () => {
     expect(text(view.root.findByProps({ role: 'alert' }))).toContain('does not belong to the selected daemon');
     expect(button(view.root, 'Review migration').props.disabled).toBe(true);
     expect(calls).toBe(0);
+  });
+
+  it('migrates through the routed client of the app store when no migration is handed in', async () => {
+    // Outside an app store there is no session to route through, so the routed client refuses — and the
+    // sheet reports it rather than reaching for the plain network.
+    const { migrateSession: _injected, ...routed } = props();
+    const updates: SessionView[] = [];
+    const view = renderSheet(
+      <MigrateSheet {...routed} onMigrated={(_connection, _scope, next) => updates.push(next)} />,
+    );
+    change(field(view.root, 0), 'codex-auto-atomi');
+    change(field(view.root, 1), 'gpt-5.6-terra');
+    review(view.root);
+    await press(view.root, 'Migrate and relaunch');
+
+    expect(text(view.root)).toContain('no daemon client exists outside the app store');
+    expect(updates).toEqual([]);
   });
 
   it('requires a second explicit action before accepting a daemon-confirmed context downgrade', async () => {
@@ -937,7 +957,7 @@ describe('MigrateSheet account picker', () => {
     const rotated = daemonConnection({
       daemonId: daemonA.daemonId,
       baseUrl: daemonA.baseUrl,
-      deviceToken: 'token-a-rotated',
+      deviceId: 'token-a-rotated',
     });
     await must(live, 'a mounted migrate sheet').render(
       <MigrateSheet {...props({ accountPicker: store, connection: rotated, usage, view })} />,

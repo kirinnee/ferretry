@@ -1,22 +1,21 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { ReactElement } from 'react';
-import { act } from 'react-test-renderer';
-import type { ReactTestRenderer } from 'react-test-renderer';
 import type { AnalyticsResponse } from '@ferretry/protocol';
-
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
+import type { ReactElement } from 'react';
+import type { ReactTestRenderer } from 'react-test-renderer';
+import { act } from 'react-test-renderer';
 import { fetchSessionAnalytics } from '../../../src/features/analytics/analytics-api.ts';
 import {
   analyticsIdQuery,
   sessionAnalyticsDefaultQuery,
 } from '../../../src/features/analytics/session-analytics-query.ts';
 import {
+  type SessionAnalyticsRequest,
   SessionAnalyticsSurface,
   sessionAnalyticsLabelValues,
-  type SessionAnalyticsRequest,
 } from '../../../src/features/analytics/session-analytics-surface.tsx';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 // Unmount every renderer inside `act` after each test, so a pending async update
@@ -34,8 +33,8 @@ const mount = (element: ReactElement): ReactTestRenderer => {
   return renderer;
 };
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 // Same id across daemons, and same daemon across sessions, so staleness is about the (daemon, session) pair, not the id alone.
 const scopeASession = daemonSessionScope(daemonA, 'session-a');
 const scopeBSession = daemonSessionScope(daemonA, 'session-b');

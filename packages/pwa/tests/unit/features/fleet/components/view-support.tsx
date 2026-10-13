@@ -13,7 +13,7 @@ import { studioCatalog, studioMachine } from './catalog-fixture.ts';
 const STUDIO = daemonConnection({
   daemonId: 'studio',
   baseUrl: 'https://studio.example.test',
-  deviceToken: 't',
+  deviceId: 't',
 });
 
 export interface Machine {

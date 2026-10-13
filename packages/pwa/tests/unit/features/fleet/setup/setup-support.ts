@@ -32,13 +32,13 @@ export const PASSWORD = 'correct-horse-battery';
 export const STUDIO = daemonConnection({
   daemonId: 'studio',
   baseUrl: 'https://studio.example.test',
-  deviceToken: 't',
+  deviceId: 't',
 });
-export const WORK = daemonConnection({ daemonId: 'work', baseUrl: 'https://work.example.test', deviceToken: 'u' });
+export const WORK = daemonConnection({ daemonId: 'work', baseUrl: 'https://work.example.test', deviceId: 'u' });
 export const ASLEEP = daemonConnection({
   daemonId: 'asleep',
   baseUrl: 'https://asleep.example.test',
-  deviceToken: 'v',
+  deviceId: 'v',
 });
 
 export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMachineView =>

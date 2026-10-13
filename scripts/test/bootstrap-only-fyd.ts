@@ -20,6 +20,7 @@
  * absolute URL without inheriting a repository-specific environment variable.
  */
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type * as DaemonAdapters from '../../packages/daemon/src/adapters/index.ts';
@@ -78,7 +79,8 @@ if (port < 1024 || port > 65_535) fail(`${portFile} must hold an unprivileged po
 const adaptersUrl = pathToFileURL(join(repositoryRoot, 'packages', 'daemon', 'src', 'adapters', 'index.ts')).href;
 const adapters = (await import(adaptersUrl)) as typeof DaemonAdapters;
 const factory = new adapters.DaemonStorageFactory(
-  new adapters.RuntimeEnvironment(),
+  // The isolated journey's own HOME, which the e2e environment sets to a temporary directory.
+  new adapters.RuntimeEnvironment(process.env, () => process.env.HOME ?? homedir()),
   new adapters.StateFileSystemFactory(),
   new adapters.StateHomeLayout(),
   new adapters.SqliteHomeLockFactory(),

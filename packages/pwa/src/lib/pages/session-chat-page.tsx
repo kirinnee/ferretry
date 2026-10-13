@@ -5,6 +5,7 @@ import type { ComposerSuggestionSwitches } from '../../components/composer-autoc
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
+import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
 import {
@@ -16,13 +17,13 @@ import {
   isPromptKnownBusy,
   type RuntimeControlApi,
   RuntimeEffortControls,
+  type RuntimeModelCatalogSource,
   RuntimeModelControls,
 } from '../../components/runtime-controls.tsx';
 import { SessionDetails } from '../../components/session-details.tsx';
-import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { RosterSessionHeader, SessionHeader } from '../../components/session-header.tsx';
-import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
+import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { Transcript } from '../../components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
@@ -47,8 +48,8 @@ import {
 } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
-import type { AttentionLoadStatus } from '../attention-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
+import type { AttentionLoadStatus } from '../attention-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
@@ -57,10 +58,10 @@ import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
-import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
-import { useDaemonFetch } from '../store.tsx';
+import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
+import { useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 
@@ -421,6 +422,11 @@ export function SessionChatPage({
   // until a catalog has actually been read — unread, never "no skills".
   // The carrier router: the `@file` proof and the skills read both reach a relay-only daemon.
   const referenceFetch = useDaemonFetch();
+  // The model catalog is read through the same routed fetch: a paired device has no bearer value.
+  const routedRuntimeCatalogs = useMemo<RuntimeModelCatalogSource>(
+    () => ({ load: async (daemon, scope) => await runtimeModelCatalogs.load(daemon, scope, referenceFetch) }),
+    [referenceFetch],
+  );
   const skills = useSessionSkills(connection, scope, referenceFetch);
   const attentionId = useId();
   const [attentionOpen, setAttentionOpen] = useState(false);
@@ -836,7 +842,7 @@ export function SessionChatPage({
                         <RuntimeEffortControls
                           api={runtimeApi}
                           canControl={canControl}
-                          catalogs={runtimeModelCatalogs}
+                          catalogs={routedRuntimeCatalogs}
                           daemon={connection}
                           onOpenTerminal={openTerminalPane}
                           view={session}
@@ -847,7 +853,7 @@ export function SessionChatPage({
                         <RuntimeModelControls
                           api={runtimeApi}
                           canControl={canControl}
-                          catalogs={runtimeModelCatalogs}
+                          catalogs={routedRuntimeCatalogs}
                           daemon={connection}
                           onOpenTerminal={openTerminalPane}
                           view={session}

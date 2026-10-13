@@ -179,6 +179,7 @@ export class BunRelayCarrier {
       pairing: this.deps.pairing,
       connections: this.deps.connections,
       scheduler: this.deps.scheduler ?? runtimeScheduler,
+      clock: { now: () => this.#now() },
     });
     this.#link = link;
     socket.onopen = () => {

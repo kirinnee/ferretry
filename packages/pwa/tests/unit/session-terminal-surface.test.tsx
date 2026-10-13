@@ -10,12 +10,12 @@ import { fakeDeck, terminalListing } from '../support/terminal-deck.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'beta-token',
 });
 
 type Rendered = ReturnType<typeof render>;

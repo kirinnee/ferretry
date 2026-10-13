@@ -18,7 +18,6 @@ import {
   NameSuggestionsSchema,
   PairingCodeMintResponseSchema,
   PairingCodeStatusResponseSchema,
-  PairingResponseSchema,
   ProposalViewSchema,
   pairingMintOutcome,
   RunManifestSchema,
@@ -30,7 +29,6 @@ import {
   SessionTranscriptPageSchema,
   type SessionView,
   SessionViewSchema,
-  SocketTicketResponseSchema,
   type SttEnhancementResult,
   TerminalListViewSchema,
   TerminalViewSchema,
@@ -75,7 +73,6 @@ import {
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
-  SocketTicketRegistry,
   sessionPaneEnvironment,
   type TerminalRecord,
   type TerminalRuntimePort,
@@ -84,6 +81,7 @@ import {
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { healthViewFixture } from '../../fixtures/health-view.ts';
+import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -896,7 +894,7 @@ describe('daemon boot lifecycle', () => {
     should(verdict).equal('accepted');
   });
 
-  it('should mint, redeem, persist and authenticate a pairing through the production composition root', async () => {
+  it('should mint, redeem over a direct session, persist and authenticate a device key through the production composition root', async () => {
     const home = await tempDirectory('fyd-pairing');
     const port = await freeLoopbackPort();
     const relayPort = await freeLoopbackPort();
@@ -970,34 +968,50 @@ describe('daemon boot lifecycle', () => {
      */
     const invitation = pairingMintOutcome(minted);
     if (invitation.kind !== 'invitation') throw new Error('a loopback-bound daemon still hands out its own address');
-    const pairedResponse = await fetch(`${base}/v1/pair`, {
+    /*
+     * REDEMPTION IS A SESSION NOW, over this daemon's own direct socket: the daemon is proved against
+     * the fingerprint the link names before the code leaves the client, and what it registers is a KEY.
+     * The plain-HTTP route is gone, which this journey also proves.
+     */
+    const device = await newTestDevice();
+    const httpRedemption = await fetch(`${base}/v1/pair`, {
       method: 'POST',
       headers: { origin, 'content-type': 'application/json' },
-      body: JSON.stringify({ code: minted.code, deviceName: '  Browser phone  ' }),
-    });
-    const paired = PairingResponseSchema.parse(await pairedResponse.json());
-    const replay = await fetch(`${base}/v1/pair`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ code: minted.code, deviceName: 'Browser phone' }),
     });
+    const pairing = await pairOverSession(base, minted.daemonId, minted.code, '  Browser phone  ', device);
+    if (pairing.kind !== 'paired') throw new Error('the direct session refused a fresh code');
+    const paired = pairing.response;
+    const replay = await pairOverSession(base, minted.daemonId, minted.code, 'Browser phone', await newTestDevice());
     const statusResponse = await fetch(`${base}/v1/pair/code/${minted.pairingId}`, { headers: admin });
     const status = PairingCodeStatusResponseSchema.parse(await statusResponse.json());
-    const devicePreflight = await fetch(`${base}/v1/usage`, {
-      method: 'OPTIONS',
+    // THE DEVICE KEY IS THE CREDENTIAL: a session it signs is served; the same id signed by another
+    // key is refused; and an app still sending the old bearer token is told to update.
+    const asDevice = await deviceSession(base, minted.daemonId, paired.deviceId, device, { origin });
+    const usage = await asDevice.request('GET', '/v1/usage');
+    const refreshed = DaemonCarriersViewSchema.parse(JSON.parse((await asDevice.request('GET', '/v1/carriers')).body));
+    asDevice.close();
+    const impostor = await TestSession.open(base, minted.daemonId, {
+      kind: 'auth',
+      deviceId: paired.deviceId,
+      device: await newTestDevice(),
+    });
+    const impostorClosed = await impostor.closed();
+    const outdatedApp = await fetch(`${base}/v1/usage`, {
+      headers: { origin, authorization: `Bearer fy_device_${'a'.repeat(43)}` },
+    });
+    // A browser on an origin this daemon was not told to serve cannot even open the socket.
+    const foreignOrigin = await fetch(`${base}/v1/rendezvous/${minted.daemonId}/client`, {
       headers: {
-        origin,
-        'access-control-request-method': 'GET',
-        'access-control-request-headers': 'authorization, x-fy-request-id, x-fy-version',
+        origin: 'https://not-ferretry.example',
+        upgrade: 'websocket',
+        connection: 'upgrade',
+        'sec-websocket-version': '13',
+        'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
       },
     });
-    const asDevice = await fetch(`${base}/v1/usage`, {
-      headers: { origin, authorization: `Bearer ${paired.deviceToken}` },
-    });
-    const refreshedResponse = await fetch(`${base}/v1/carriers`, {
-      headers: { origin, authorization: `Bearer ${paired.deviceToken}` },
-    });
-    const refreshed = DaemonCarriersViewSchema.parse(await refreshedResponse.json());
+    // There is no ticket to buy any more, for anybody: every browser stream is a session.
+    const noTicket = await fetch(`${base}/v1/events/ticket`, { method: 'POST', headers: admin });
     const deviceDocument = await readFile(join(home, 'state', 'devices.json'), 'utf8');
     release();
     const code = await exit;
@@ -1018,26 +1032,29 @@ describe('daemon boot lifecycle', () => {
     should(new URL(invitation.pairUrl).search).not.containEql(minted.code);
     should(invitation.reach).equal('local-only');
     should(invitation.daemonUrl).equal(`${base}/`);
-    should(pairedResponse.status).equal(200);
-    should(pairedResponse.headers.get('access-control-allow-origin')).equal(origin);
+    // No route, and nothing public. An app from before device keys pairing over plain HTTP is told,
+    // in the shared sentence, that IT is the side to update — never a 401 that reads as a wrong code.
+    should(httpRedemption.status).equal(426);
     should(paired.daemonId).equal(minted.daemonId);
-    should(replay.status).equal(403);
+    should(paired.idleExpiryDays).equal(30);
+    should(replay.kind).equal('refused');
     should(status.status).equal('redeemed');
     if (status.status !== 'redeemed') throw new Error('expected a redeemed pairing status');
     should(status.deviceName).equal('Browser phone');
-    should(devicePreflight.status).equal(204);
-    should(devicePreflight.headers.get('access-control-allow-credentials')).equal('true');
-    should(asDevice.status).equal(200);
-    should(asDevice.headers.get('access-control-allow-origin')).equal(origin);
-    should(asDevice.headers.get('access-control-allow-credentials')).equal('true');
-    should(refreshedResponse.status).equal(200);
+    should(usage.status).equal(200);
     should(refreshed.carriers).deepEqual(paired.carriers);
+    should(impostorClosed.code).equal(4403);
+    should(outdatedApp.status).equal(426);
+    should(foreignOrigin.status).equal(403);
+    should(noTicket.status).equal(404);
     should(paired.carriers).deepEqual([
       { kind: 'direct', url: base },
       { kind: 'relay', url: relayUrl },
     ]);
     should(deviceDocument).containEql('Browser phone');
-    should(deviceDocument).not.containEql(paired.deviceToken);
+    // The daemon keeps the PUBLIC half and nothing a copy of this file could replay.
+    should(deviceDocument).containEql(device.publicKey);
+    should(deviceDocument).not.containEql('tokenHash');
   });
 
   /**
@@ -3317,143 +3334,6 @@ describe('daemon boot lifecycle', () => {
     should(absent?.status).equal(404);
     // Shutdown ended the stream rather than leaving a redraw timer firing at a dead socket.
     should(closes).deepEqual([1000]);
-  });
-
-  it('should admit one paired-device terminal socket ticket and refuse every replay or wrong target', async () => {
-    // Arrange — two production daemon worlds prove that ticket state is local to its issuer. The
-    // controllable elapsed clock proves expiry without sleeping for the public thirty-second TTL.
-    const homeA = await tempDirectory('fyd-terminal-ticket-a');
-    const homeB = await tempDirectory('fyd-terminal-ticket-b');
-    const portA = await freeLoopbackPort();
-    const portB = await freeLoopbackPort();
-    const cleanups: Array<() => void | Promise<void>> = [];
-    let releaseA = (): void => {};
-    let releaseB = (): void => {};
-    let now = 1_000;
-    let issued = 0;
-    const tickets = () =>
-      new SocketTicketRegistry({ now: () => now }, { ticket: () => `fy_ticket_${String(++issued).padStart(43, 't')}` });
-    const worldA = {
-      ...(await worldAt(homeA, portA, async () => {
-        await new Promise<void>(resolve => {
-          releaseA = resolve;
-        });
-      })),
-      terminalRuntime: new RecordingTerminalRuntime(),
-      createSocketTickets: tickets,
-    };
-    await seedSession(homeA, '2026-08-04T12:00:00.000Z');
-    const baseA = `http://127.0.0.1:${portA}`;
-    const exitA = start(worldA, cleanups);
-    // `FY_HOME` is process-scoped in this integration harness. Let A finish booting under its own
-    // home before seeding B, exactly as two daemon processes would have separate environments.
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${baseA}/healthz`).catch(() => undefined)) !== undefined) break;
-      await Bun.sleep(50);
-    }
-    const worldB = {
-      ...(await worldAt(homeB, portB, async () => {
-        await new Promise<void>(resolve => {
-          releaseB = resolve;
-        });
-      })),
-      terminalRuntime: new RecordingTerminalRuntime(),
-      createSocketTickets: tickets,
-    };
-    await seedSession(homeB, '2026-08-04T12:00:00.000Z');
-    const exitB = start(worldB, cleanups);
-    const baseB = `http://127.0.0.1:${portB}`;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${baseB}/healthz`).catch(() => undefined)) !== undefined) break;
-      await Bun.sleep(50);
-    }
-    const adminA = (await readFile(join(homeA, 'api-token'), 'utf8')).trim();
-    const adminB = (await readFile(join(homeB, 'api-token'), 'utf8')).trim();
-    const headersA = { authorization: `Bearer ${adminA}`, 'x-ferretry-client': 'cli' };
-    const headersB = { authorization: `Bearer ${adminB}`, 'x-ferretry-client': 'cli' };
-    // A DEVICE TOKEN IS WHAT THIS TEST NEEDS, and a device cannot exist on a machine with no operator
-    // password — the mint refuses, which is proved where that rule lives. So this journey sets one first,
-    // through the host's own always-permitted path, exactly as a person would before adding a phone.
-    await fetch(`${baseA}/v1/grants/password`, {
-      method: 'PUT',
-      headers: { ...headersA, 'content-type': 'application/json' },
-      body: JSON.stringify({ password: 'correct horse battery' }),
-    });
-    const pairingCode = (await (
-      await fetch(`${baseA}/v1/pair/code`, { method: 'POST', headers: headersA })
-    ).json()) as {
-      readonly code: string;
-    };
-    const paired = PairingResponseSchema.parse(
-      await (
-        await fetch(`${baseA}/v1/pair`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ code: pairingCode.code, deviceName: 'ticket phone' }),
-        })
-      ).json(),
-    );
-    const deviceA = { authorization: `Bearer ${paired.deviceToken}` };
-    const terminalsA = `${baseA}/v1/sessions/${SESSION_ID}/terminals`;
-    const terminalsB = `${baseB}/v1/sessions/${SESSION_ID}/terminals`;
-    const first = TerminalViewSchema.parse(
-      await (await fetch(terminalsA, { method: 'POST', headers: headersA })).json(),
-    );
-    const second = TerminalViewSchema.parse(
-      await (await fetch(terminalsA, { method: 'POST', headers: headersA })).json(),
-    );
-    const otherDaemonTerminal = TerminalViewSchema.parse(
-      await (await fetch(terminalsB, { method: 'POST', headers: headersB })).json(),
-    );
-    const streamA = (terminalId: string) => `${terminalsA}/${terminalId}/stream`;
-    const ticketA = async (terminalId: string): Promise<string> => {
-      const response = await fetch(`${streamA(terminalId)}/ticket`, { method: 'POST', headers: deviceA });
-      should(response.status).equal(201);
-      return SocketTicketResponseSchema.parse(await response.json()).ticket;
-    };
-    const handshake = async (url: string): Promise<number | undefined> =>
-      (
-        await fetch(url, {
-          headers: {
-            upgrade: 'websocket',
-            connection: 'upgrade',
-            'sec-websocket-version': '13',
-            'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
-          },
-        }).catch(() => undefined)
-      )?.status;
-
-    // Act — only the first ticketed upgrade becomes a socket; every later refusal is legible before
-    // protocol switch rather than an indistinguishable close frame.
-    const happyTicket = await ticketA(first.id);
-    const viewer = new WebSocket(`${streamA(first.id)}?ticket=${encodeURIComponent(happyTicket)}`);
-    await new Promise<void>((resolve, reject) => {
-      viewer.addEventListener('open', () => resolve());
-      viewer.addEventListener('error', () => reject(new Error('the ticketed terminal socket never opened')));
-    });
-    viewer.close();
-    const replayed = await handshake(`${streamA(first.id)}?ticket=${encodeURIComponent(happyTicket)}`);
-    const wrongTerminalTicket = await ticketA(first.id);
-    const wrongTerminal = await handshake(`${streamA(second.id)}?ticket=${encodeURIComponent(wrongTerminalTicket)}`);
-    const expiredTicket = await ticketA(first.id);
-    now += 30_000;
-    const expired = await handshake(`${streamA(first.id)}?ticket=${encodeURIComponent(expiredTicket)}`);
-    const foreignDaemonTicket = await ticketA(first.id);
-    const foreignDaemon = await handshake(
-      `${terminalsB}/${otherDaemonTerminal.id}/stream?ticket=${encodeURIComponent(foreignDaemonTicket)}`,
-    );
-    releaseA();
-    releaseB();
-    const [codeA, codeB] = await Promise.all([exitA, exitB]);
-    await runCleanups(cleanups);
-
-    // Assert
-    should(codeA).equal(0);
-    should(codeB).equal(0);
-    should(replayed).equal(401);
-    should(wrongTerminal).equal(401);
-    should(expired).equal(401);
-    should(foreignDaemon).equal(401);
   });
 
   /**

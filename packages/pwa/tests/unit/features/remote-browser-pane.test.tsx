@@ -16,15 +16,15 @@ import type { DaemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b' });
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
 /** Daemon A after a re-pair: durable id and session, a rotated device grant. */
 const daemonARepaired = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'a2',
+  deviceId: 'a2',
 });
 const scopeARepaired = daemonSessionScope(daemonARepaired, 'same-session');
 
@@ -448,7 +448,7 @@ describe('RemoteBrowserPane scoping', () => {
       // Keyed by the GRANT, not the id: both pairings answer to `daemon-a`, so
       // an id-only test would not be able to tell them apart either.
       readStatus: async (daemon: DaemonConnection) => {
-        if (daemon.deviceToken !== daemonA.deviceToken) return second;
+        if (daemon.deviceId !== daemonA.deviceId) return second;
         reads += 1;
         if (reads === 1) return first;
         return await new Promise<BrowserStatus>(resolve => {
@@ -465,7 +465,7 @@ describe('RemoteBrowserPane scoping', () => {
         transport={transport}
         schedule={poll.schedule}
         socketFactory={stream.factory}
-        createObjectUrl={() => `blob:${daemon.deviceToken}`}
+        createObjectUrl={() => `blob:${daemon.deviceId}`}
         revokeObjectUrl={() => undefined}
       />
     );

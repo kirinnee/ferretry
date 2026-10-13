@@ -23,20 +23,21 @@ const CARRIERS: readonly DaemonCarrier[] = [
 ];
 
 /** A paired browser: the caller this route is FOR. */
-const DEVICE_TOKEN = 'device-secret';
-const device = { authorization: `Bearer ${DEVICE_TOKEN}`, 'x-ferretry-client': 'pwa' } as const;
+/** A paired device is whoever its session proved; the headers it sends carry no credential. */
+const DEVICE = { deviceId: 'device-1', appSession: 'app-one' } as const;
+const device = { 'x-ferretry-client': 'pwa' } as const;
+const asCaller = (headers: Readonly<Record<string, string>>) => ({
+  headers,
+  ...(headers === device ? { device: DEVICE } : {}),
+});
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
 
 function dispatcher(carriers: readonly DaemonCarrier[] = CARRIERS): ApiDispatcher {
-  return new ApiDispatcher(
-    new ApiRouter(carrierRoutes(carriers)),
-    { ...CREDENTIALS, devices: { identify: token => (token === DEVICE_TOKEN ? 'device-1' : undefined) } },
-    NO_GOVERNED_ROUTES_GUARD,
-  );
+  return new ApiDispatcher(new ApiRouter(carrierRoutes(carriers)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 async function ask(headers: Readonly<Record<string, string>>, carriers?: readonly DaemonCarrier[]) {
-  return await dispatcher(carriers).dispatch(request({ path: '/v1/carriers', headers }));
+  return await dispatcher(carriers).dispatch(request({ path: '/v1/carriers', ...asCaller(headers) }));
 }
 
 describe('the carrier refresh mount', () => {
@@ -159,8 +160,8 @@ describe('the carrier refresh mount', () => {
     const subject = dispatcher();
 
     // Act
-    const first = await subject.dispatch(request({ path: '/v1/carriers', headers: device }));
-    const second = await subject.dispatch(request({ path: '/v1/carriers', headers: device }));
+    const first = await subject.dispatch(request({ path: '/v1/carriers', ...asCaller(device) }));
+    const second = await subject.dispatch(request({ path: '/v1/carriers', ...asCaller(device) }));
 
     // Assert
     should([first.status, second.status]).deepEqual([200, 200]);

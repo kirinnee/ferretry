@@ -22,7 +22,7 @@ const snapshot = (pins: PinSnapshot['pins']): PinSnapshot => ({
 const connection = daemonConnection({
   daemonId: 'pins-daemon',
   baseUrl: 'https://pins.example.test',
-  deviceToken: 'token',
+  deviceId: 'token',
 });
 const scope = daemonSessionScope(connection, 'session-a');
 const response = (value: unknown, status = 200): Response =>
@@ -224,7 +224,7 @@ describe('PinsBoard', () => {
     const other = daemonConnection({
       daemonId: 'other-daemon',
       baseUrl: 'https://other.example.test',
-      deviceToken: 'token',
+      deviceId: 'token',
     });
     await expect(
       mount(<DaemonPinsBoard connection={other} scope={scope} client={new DaemonPinClient()} />),

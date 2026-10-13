@@ -8,14 +8,14 @@ describe('daemon connection', () => {
     const actual = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test/',
-      deviceToken: 'device-a',
+      deviceId: 'device-a',
     });
 
     // Assert
     should(actual).deepEqual({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'device-a',
+      deviceId: 'device-a',
       carriers: [{ kind: 'direct', daemonUrl: 'https://a.example.test' }],
     });
   });
@@ -24,11 +24,11 @@ describe('daemon connection', () => {
     // Act
     const emptyIdentity = (): unknown => daemonId('  ');
     const emptyToken = (): unknown =>
-      daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: '' });
+      daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: '' });
 
     // Assert
     should(emptyIdentity).throw('daemonId must not be empty');
-    should(emptyToken).throw('deviceToken must not be empty');
+    should(emptyToken).throw('deviceId must not be empty');
   });
 
   it('should reject malformed and unsafe daemon URLs', () => {
@@ -53,33 +53,33 @@ describe('daemon connection', () => {
     const paired = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'grant-1',
+      deviceId: 'grant-1',
     });
     const rebuilt = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'grant-1',
+      deviceId: 'grant-1',
     });
     // A re-pair keeps the durable id and moves exactly one of the other two.
     const rotatedToken = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'grant-2',
+      deviceId: 'grant-2',
     });
     const movedUrl = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a2.example.test',
-      deviceToken: 'grant-1',
+      deviceId: 'grant-1',
     });
     const otherDaemon = daemonConnection({
       daemonId: 'daemon-b',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'grant-1',
+      deviceId: 'grant-1',
     });
     const movedCarrier = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://a.example.test',
-      deviceToken: 'grant-1',
+      deviceId: 'grant-1',
       carriers: [
         { kind: 'direct', daemonUrl: 'https://a.example.test' },
         { kind: 'relay', relayUrl: 'https://relay.example' },

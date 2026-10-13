@@ -15,12 +15,12 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 const daemon = daemonConnection({
   daemonId: 'files-daemon',
   baseUrl: 'https://files.example.test',
-  deviceToken: 'files-token',
+  deviceId: 'files-token',
 });
 const other = daemonConnection({
   daemonId: 'other-daemon',
   baseUrl: 'https://other.example.test',
-  deviceToken: 'other-token',
+  deviceId: 'other-token',
 });
 const scope = daemonSessionScope(daemon, 'shared-session-id');
 const otherScope = daemonSessionScope(other, 'shared-session-id');

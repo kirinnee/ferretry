@@ -11,12 +11,12 @@ import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../support/te
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'beta-token',
 });
 const scopeAlpha = daemonSessionScope(alpha, 'shared');
 const scopeBeta = daemonSessionScope(beta, 'shared');
@@ -604,7 +604,12 @@ describe('SessionTerminalDeck theming', () => {
     const repainted = new Promise<void>(resolve => {
       markRepainted = resolve;
     });
-    const stopWatchingTheme = browserTerminalDeckDependencies().watchTheme(() => {
+    const stopWatchingTheme = browserTerminalDeckDependencies(
+      async () => new Response(),
+      async () => {
+        throw new Error('unused');
+      },
+    ).watchTheme(() => {
       repaints += 1;
       markRepainted();
     });

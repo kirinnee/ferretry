@@ -1287,11 +1287,16 @@ describe('the harness login routes', () => {
   const dispatcherFor = (subject: Fixture, guard = GRANTED) =>
     new ApiDispatcher(new ApiRouter(harnessLoginRoutes(subject.service)), CREDENTIALS, guard);
 
-  const startRequest = (body: Record<string, unknown>, headers: Record<string, string> = human) =>
+  const startRequest = (
+    body: Record<string, unknown>,
+    headers: Record<string, string> = human,
+    device?: { readonly deviceId: string; readonly appSession: string },
+  ) =>
     request({
       method: 'POST',
       path: '/v1/fleet/login',
       headers: { ...headers, 'content-type': 'application/json' },
+      ...(device === undefined ? {} : { device }),
       body: JSON.stringify(body),
     });
 
@@ -1385,11 +1390,10 @@ describe('the harness login routes', () => {
    * `minimum: 'operator'` is what admits a device — an `admin-token` minimum would 403 the browser on
    * every one of these paths, and a browser is always a paired device.
    */
-  const paired = {
-    ...CREDENTIALS,
-    devices: { identify: (token: string) => (token === 'paired' ? 'device-1' : undefined) },
-  };
-  const browser = { authorization: 'Bearer paired', 'x-ferretry-client': 'ui' } as const;
+  const paired = CREDENTIALS;
+  /** The device a session proved, and the headers the browser sends — none of them a credential. */
+  const pairedDevice = { deviceId: 'device-1', appSession: 'app-one' } as const;
+  const browser = { 'x-ferretry-client': 'ui' } as const;
   const wardenCaller = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
   const pairedDispatcher = (subject: Fixture, guard = GRANTED) =>
     new ApiDispatcher(new ApiRouter(harnessLoginRoutes(subject.service)), paired, guard);
@@ -1398,7 +1402,7 @@ describe('the harness login routes', () => {
     // Arrange
     const subject = fixture();
     const dispatcher = pairedDispatcher(subject);
-    const start = await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }, browser));
+    const start = await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }, browser, pairedDevice));
     const started = jsonBody(start);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
@@ -1406,17 +1410,25 @@ describe('the harness login routes', () => {
     // Act
     const statuses = [
       start,
-      await dispatcher.dispatch(request({ path: `/v1/fleet/login/${started.flowId}`, headers: browser })),
+      await dispatcher.dispatch(
+        request({ path: `/v1/fleet/login/${started.flowId}`, headers: browser, device: pairedDevice }),
+      ),
       await dispatcher.dispatch(
         request({
           method: 'POST',
           path: `/v1/fleet/login/${started.flowId}`,
           headers: { ...browser, 'content-type': 'application/json' },
+          device: pairedDevice,
           body: JSON.stringify({ code: PASTED_CODE }),
         }),
       ),
       await dispatcher.dispatch(
-        request({ method: 'DELETE', path: `/v1/fleet/login/${started.flowId}`, headers: browser }),
+        request({
+          method: 'DELETE',
+          path: `/v1/fleet/login/${started.flowId}`,
+          headers: browser,
+          device: pairedDevice,
+        }),
       ),
     ].map(response => response.status);
 
@@ -1469,7 +1481,11 @@ describe('the harness login routes', () => {
 
     // Act
     const actual = await pairedDispatcher(subject, NARROWED).dispatch(
-      startRequest({ credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' }, browser),
+      startRequest(
+        { credentialId: CLAUDE_CREDENTIAL, operatorPassword: 'the operator password' },
+        browser,
+        pairedDevice,
+      ),
     );
 
     // Assert

@@ -24,8 +24,8 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { browserFetch } from '../../src/lib/runtime-models.ts';
 import { render, runAsync } from '../support/react.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a-token' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b-token' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b-token' });
 const scopeA = daemonSessionScope(daemonA, 'same/session');
 const scopeB = daemonSessionScope(daemonB, 'same/session');
 
@@ -41,7 +41,7 @@ describe('files API', () => {
     expect(listing.entries).toEqual([]);
     expect(listUrl(scopeA, 'src')).toBe('/v1/sessions/same%2Fsession/fs?path=src');
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs?path=src');
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer a-token');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
     expect(() => fsApi.list(daemonA, scopeB, '', undefined, browserFetch)).toThrow('file scope must belong');
   });
 
@@ -80,7 +80,7 @@ describe('files API', () => {
     expect(indexUrl(scopeA)).not.toContain('?');
     expect(indexUrl(scopeA).endsWith('/fs')).toBe(false);
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs/index');
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer a-token');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
     // The reader's own question is never answered from a cache: the daemon walks
     // the tree inside the request, so a stale index is a wrong answer.
     expect(calls[0]?.init?.cache).toBe('no-store');

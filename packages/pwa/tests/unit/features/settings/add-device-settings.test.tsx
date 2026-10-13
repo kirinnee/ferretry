@@ -29,7 +29,7 @@ const originalFetch = globalThis.fetch;
 const unavailableDaemonFetch = (async () => Response.json({}, { status: 503 })) as unknown as typeof fetch;
 
 const connection = (id = DAEMON_ID) =>
-  daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceToken: `token-${id}` });
+  daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceId: `token-${id}` });
 
 beforeEach(() => {
   // Frame composition is the subject here; its other daemon tabs receive a
@@ -93,6 +93,7 @@ const device = (overrides: Partial<PairedDevice> = {}): PairedDevice => ({
   platform: 'browser',
   createdAt: '2026-08-01T09:00:00.000Z',
   lastSeenAt: '2026-08-03T11:00:00.000Z',
+  idleExpiresAt: '2026-12-31T00:00:00.000Z',
   ...overrides,
 });
 

@@ -21,7 +21,6 @@ import {
   type SocketRoute,
   textResponse,
 } from '../../../src/lib/api/index.ts';
-import { LiveDeviceConnections } from '../../../src/lib/pairing/index.ts';
 import { mayTrustDirectLoopback, parseDaemonConfig } from '../../../src/lib/runtime/config.ts';
 import {
   type EventStreamScheduler,
@@ -40,7 +39,6 @@ const BIND = { host: '127.0.0.1', port: 0, directLoopbackIsPrivileged: true } as
 
 const CREDENTIALS = { admin: 'admin-secret' } as const;
 /** The transport translation is the subject here, so no ticket is redeemable. */
-const NO_TICKETS = { redeem: () => undefined } as const;
 
 const running: ApiServerHandle[] = [];
 
@@ -55,7 +53,7 @@ afterEach(async () => {
 function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = []) {
   return {
     http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD),
-    sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS, NO_TICKETS, NO_GOVERNED_ROUTES_GUARD),
+    sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD),
     corsOrigins: ['https://ferretry.pages.dev'],
   };
 }
@@ -663,6 +661,22 @@ describe('BunApiServer socket upgrades', () => {
     should(await answered(anonymous)).have.property('code', 'unauthorized');
   });
 
+  it('should refuse an upgrade from an origin the daemon does not serve, before any socket route is asked', async () => {
+    // The direct carrier is a socket route, so this is what keeps a page on another site from opening a
+    // session on this daemon through the visitor's browser. An `accept` that ran would throw and answer
+    // 500; the refusal must come first, as the same 403 an HTTP request from that origin gets.
+    const request = await handshakeHost([recordingSocket({ refuse: new Error('accept must not run') })]);
+
+    const foreign = await request('/v1/stream', {
+      upgrade: 'websocket',
+      origin: 'https://evil.example',
+      authorization: `Bearer ${CREDENTIALS.admin}`,
+    });
+
+    should(foreign?.status).equal(403);
+    should(await answered(foreign)).have.property('code', 'origin_not_allowed');
+  });
+
   it('should switch the protocol for an authorized upgrade', async () => {
     // Arrange
     const request = await handshakeHost([recordingSocket()]);
@@ -942,95 +956,6 @@ describe('BunApiServer over a live socket', () => {
 
     // Assert
     should(stopped).equal('stopped');
-  });
-});
-
-describe('BunApiServer and a device that is unpaired while connected', () => {
-  const DEVICE_TOKEN = 'fy_device_live_token';
-  const DEVICE_ID = 'fy_device_id_phone';
-
-  async function listenFor(connections: LiveDeviceConnections, record: Recorded): Promise<ApiServerHandle> {
-    const credentials = {
-      ...CREDENTIALS,
-      devices: { identify: (token: string) => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) },
-    };
-    const handle = await new BunApiServer(undefined, undefined, connections).listen(
-      {
-        http: new ApiDispatcher(new ApiRouter([]), credentials, NO_GOVERNED_ROUTES_GUARD),
-        sockets: new ApiSocketDispatcher(
-          new ApiRouter([recordingSocket({ record })]),
-          credentials,
-          NO_TICKETS,
-          NO_GOVERNED_ROUTES_GUARD,
-        ),
-        corsOrigins: [],
-      },
-      BIND,
-    );
-    running.push(handle);
-    return handle;
-  }
-
-  const urlFor = (handle: ApiServerHandle, token: string): string =>
-    `${handle.url.replace('http://', 'ws://')}/v1/stream?token=${token}`;
-
-  it('should close the device’s open terminal socket, and leave the host’s own socket alone', async () => {
-    // Arrange — the phone's terminal and the host's terminal, both live.
-    const connections = new LiveDeviceConnections();
-    const phoneRecord = recorded();
-    const handle = await listenFor(connections, phoneRecord);
-    const phone = connect(urlFor(handle, DEVICE_TOKEN));
-    const host = connect(urlFor(handle, CREDENTIALS.admin));
-    await Promise.all([phone.opened, host.opened]);
-    await phone.untilFrames(1);
-    await host.untilFrames(1);
-
-    // Act
-    const ended = connections.endDevice(DEVICE_ID);
-    await phone.untilClosed();
-
-    // Assert — the phone's socket is closed with the unpaired reason and its handler released once;
-    // the host's socket was never the device's to lose.
-    should(ended).equal(1);
-    should(phone.closes).deepEqual([[1008, 'this device is no longer paired']]);
-    should(phoneRecord.closed).equal(1);
-    should(host.closes).be.empty();
-  });
-
-  it('should close a socket authorized just after its device was unpaired', async () => {
-    // A ticket bought a moment before the revocation still opens one socket; it must not survive.
-    // Arrange
-    const connections = new LiveDeviceConnections();
-    const record = recorded();
-    const handle = await listenFor(connections, record);
-    connections.endDevice(DEVICE_ID);
-
-    // Act
-    const phone = connect(urlFor(handle, DEVICE_TOKEN));
-    await phone.untilClosed();
-
-    // Assert
-    should(phone.closes).deepEqual([[1008, 'this device is no longer paired']]);
-    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
-    should(record.opened).equal(0);
-    should(record.closed).equal(1);
-  });
-
-  it('should stop tracking a device socket that its peer closed', async () => {
-    // Arrange
-    const connections = new LiveDeviceConnections();
-    const record = recorded();
-    const handle = await listenFor(connections, record);
-    const phone = connect(urlFor(handle, DEVICE_TOKEN));
-    await phone.opened;
-    await phone.untilFrames(1);
-
-    // Act
-    phone.close();
-    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
-
-    // Assert — nothing left to end.
-    should(connections.endDevice(DEVICE_ID)).equal(0);
   });
 });
 

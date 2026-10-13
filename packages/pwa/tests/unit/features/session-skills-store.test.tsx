@@ -9,7 +9,7 @@ import { render, run, runAsync } from '../../support/react.ts';
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
 });
 const scopeA = daemonSessionScope(laptop, 'session-a');
 const scopeB = daemonSessionScope(laptop, 'session-b');

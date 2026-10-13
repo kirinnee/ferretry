@@ -13,8 +13,8 @@
  *
  *     THE RENDEZVOUS FORWARDED EVERY BYTE AND COULD NOT READ ONE OF THEM.
  *
- * Every frame the rendezvous handled is kept, and the device token and the request
- * and answer bodies are searched for across all of them. If a relay can read a
+ * Every frame the rendezvous handled is kept, and the device id, its public key and the
+ * request and answer bodies are searched for across all of them. If a relay can read a
  * session it is wrong however well it works.
  *
  * The three source halves are imported by relative path deliberately. A test that
@@ -37,7 +37,13 @@ import {
   RendezvousDurableObject,
   WebCryptoRelayCrypto,
 } from '../../../relay/src/adapters/index.ts';
-import { daemonIdFromPublicKey, RELAY_CLOSE_CODES, utf8Bytes, utf8Text } from '../../../relay/src/lib/index.ts';
+import {
+  daemonIdFromPublicKey,
+  RELAY_CLOSE_CODES,
+  toBase64Url,
+  utf8Bytes,
+  utf8Text,
+} from '../../../relay/src/lib/index.ts';
 import { newDaemonIdentity } from '../../../relay/tests/support/identities.ts';
 import { FakeObjectState, type FakeSocket, testRuntime } from '../../../relay/tests/support/workers-fakes.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -49,22 +55,43 @@ import {
   relayResponse,
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
-import { redeemPairingOverRelay } from '../../src/lib/relay-pairing.ts';
-import { RELAY_DATA_BYTE_BUDGET, type RelayClientSession, RelaySessionError } from '../../src/lib/relay-session.ts';
+import { redeemPairingInSession } from '../../src/lib/relay-pairing.ts';
+import {
+  RELAY_DATA_BYTE_BUDGET,
+  type RelayClientSession,
+  RelaySessionError,
+  type SessionDeviceClaim,
+} from '../../src/lib/relay-session.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
-import { browserTerminalStreamAttach, type TerminalStream, terminalStreamPath } from '../../src/lib/web-terminals.ts';
+import { browserTerminalStreamAttach, type TerminalStream } from '../../src/lib/web-terminals.ts';
 
 const HOST = 'relay.example';
 const RELAY_URL = `https://${HOST}`;
 const DAEMON_URL = 'https://studio.example';
-const DEVICE_TOKEN = 'fy_device_this-credential-must-never-reach-the-carrier';
+/** The grant a session proves. An identity, not a credential — and still nothing a relay should read. */
+const DEVICE_ID = 'fy_device_id_mustNeverReachCarrier1';
 const SECRET_ANSWER = 'the session list a relay operator may not read';
 const PAIRING_CODE = '7F3K-Q2ND';
 const DEVICE_NAME = 'Ferretry PWA';
-/** A grant the pairing API's own schema accepts, because `paired.response` is validated by it. */
-const MINTED_TOKEN = `fy_device_${'m'.repeat(43)}`;
+/** A grant id the pairing API's own schema accepts, because `paired.response` is validated by it. */
+const MINTED_DEVICE_ID = 'fy_device_id_mintedByThePairing0001';
 
 const crypto = new WebCryptoRelayCrypto();
+
+/** A device key minted the way the browser mints one: non-extractable, real Ed25519. */
+const mintDevice = async (deviceId: string) => {
+  const minted = await crypto.generateDeviceKey();
+  const claim: SessionDeviceClaim = {
+    deviceId,
+    key: crypto.deviceKeyHandle(minted.privateKey),
+    appSession: toBase64Url(crypto.randomBytes(16)),
+  };
+  return { claim, publicKey: toBase64Url(minted.publicKeySpki), privateKey: minted.privateKey };
+};
+
+/** The one device every request and stream case below proves itself with. */
+const DEVICE = await mintDevice(DEVICE_ID);
+const AUTH = { kind: 'auth', device: DEVICE.claim } as const;
 
 const environment: RelayEnvironment = {
   RENDEZVOUS: { idFromName: name => name, get: () => ({ fetch: async () => new Response(null) }) },
@@ -113,6 +140,8 @@ class RelayBridge {
    * worked around.
    */
   readonly #clients: ClientEndpoint[] = [];
+  /** The daemon's device registry as the link reads it: an id, and the ONE public key it may prove. */
+  readonly deviceKeys = new Map<string, string>([[DEVICE_ID, DEVICE.publicKey]]);
 
   constructor() {
     this.rendezvous = new RendezvousDurableObject(this.objectState, environment, testRuntime());
@@ -128,7 +157,7 @@ class RelayBridge {
   async admitDaemon(
     identity: Awaited<ReturnType<typeof newDaemonIdentity>>,
     dispatch: RelayApiDispatch,
-    pairing: RelayPairingRedeemer = { redeemOverRelay: async () => ({ kind: 'refused' }) },
+    pairing: RelayPairingRedeemer = { redeemInSession: async () => ({ kind: 'refused' }) },
     sockets: RelayLinkDependencies['sockets'] = async () => ({ outcome: 'unclaimed' }),
   ): Promise<void> {
     await this.rendezvous.fetch(
@@ -147,7 +176,8 @@ class RelayBridge {
         close: () => undefined,
       },
       dispatch,
-      devices: { identifyDevice: token => (token === DEVICE_TOKEN || token === MINTED_TOKEN ? 'phone' : undefined) },
+      devices: { deviceKey: async deviceId => this.deviceKeys.get(deviceId), seen: () => undefined },
+      clock: { now: () => Date.now() },
       // No device is unpaired in these journeys, so nothing is ever ended through this.
       connections: { track: () => () => undefined },
       pairing,
@@ -165,6 +195,21 @@ class RelayBridge {
     });
     this.#drain();
     await this.settle();
+  }
+
+  /** A socket to an address that does not answer: it closes `1006` before anything is said. */
+  unreachable(): RelayCarrierSocket {
+    const adapted: RelayCarrierSocket = {
+      onOpen: null,
+      onText: null,
+      onBinary: null,
+      onClose: null,
+      send: () => undefined,
+      sendText: () => undefined,
+      close: () => undefined,
+    };
+    queueMicrotask(() => adapted.onClose?.(1006, 'the address did not answer'));
+    return adapted;
   }
 
   /** The dial the browser's carrier uses. It reaches the rendezvous, never the daemon. */
@@ -357,7 +402,7 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
     });
     const session: RelayClientSession = await openRelaySession({
       crypto,
@@ -365,13 +410,15 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
       daemon,
       method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
       heartbeat: () => () => undefined,
+      mode: AUTH,
     });
     should(session.live()).be.true();
 
     const response = relayResponse(
       await session.request(
         relayTunnelRequest(`${DAEMON_URL}/v1/sessions?sessionId=fy_one&sessionId=fy_two`, {
-          headers: { authorization: `Bearer ${DEVICE_TOKEN}`, 'content-type': 'application/json' },
+          // A header no browser holds a value for any more; sent anyway, to prove it never crosses.
+          headers: { authorization: 'Bearer stale-value-from-an-old-app', 'content-type': 'application/json' },
         }),
       ),
     );
@@ -380,19 +427,21 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     should(response.status).equal(200);
     should(await response.text()).equal(SECRET_ANSWER);
 
-    // The daemon served it out of its OWN route table, with the credential this
-    // module put on and the repeated query parameter an object could not have held.
+    // The daemon served it out of its OWN route table, as the device the SESSION proved — never as
+    // anything a header said — with the repeated query parameter an object could not have held.
     should(served?.path).equal('/v1/sessions');
     should(served?.query.get('sessionId')).eql(['fy_one', 'fy_two']);
-    should(served?.headers.get('authorization')).equal(`Bearer ${DEVICE_TOKEN}`);
+    should(served?.headers.get('authorization')).be.undefined();
+    should(served?.device).eql({ deviceId: DEVICE_ID, appSession: DEVICE.claim.appSession });
     should(served?.loopback).be.false();
 
     // ── and now the only assertion that makes any of it worth having ──
     should(bridge.observed.length).be.greaterThan(4);
     should(
       carrierLeaks(bridge, {
-        'the device token': DEVICE_TOKEN,
-        'the name of the credential field': 'deviceToken',
+        'the device id': DEVICE_ID,
+        'the device public key': DEVICE.publicKey,
+        'the name of the credential field': 'deviceId',
         'the answer body': SECRET_ANSWER,
         'the route the request asked for': '/v1/sessions',
       }),
@@ -402,7 +451,7 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     should(identity.daemonId.startsWith('fy_daemon_')).be.true();
   });
 
-  it('should refuse a daemon whose key is not the one the pairing pinned, without sending the token', async () => {
+  it('should refuse a daemon whose key is not the one the pairing pinned, without proving anything', async () => {
     const identity = await newDaemonIdentity();
     const impostor = await newDaemonIdentity();
     const bridge = new RelayBridge();
@@ -415,7 +464,7 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     const pinnedElsewhere = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
     });
 
     await should(
@@ -425,11 +474,32 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
         daemon: pinnedElsewhere,
         method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
         heartbeat: () => () => undefined,
+        mode: AUTH,
       }),
     ).be.rejected();
     await bridge.settle();
 
-    should(carrierLeaks(bridge, { 'the device token': DEVICE_TOKEN })).be.empty();
+    should(carrierLeaks(bridge, { 'the device id': DEVICE_ID })).be.empty();
+  });
+
+  it('should refuse a session whose proof is by a key the daemon never registered for that id', async () => {
+    const identity = await newDaemonIdentity();
+    const bridge = new RelayBridge();
+    await bridge.admitDaemon(identity, answered('never reached'));
+    // Same id, a different key: what a stolen device id is worth now.
+    const thief = await mintDevice(DEVICE_ID);
+    const refusal = await openRelaySession({
+      crypto,
+      dial: () => bridge.dial(identity.daemonId),
+      daemon: daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID }),
+      method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      heartbeat: () => () => undefined,
+      mode: { kind: 'auth', device: thief.claim },
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    should((refusal as RelaySessionError).code).equal(RELAY_CLOSE_CODES.authRejected);
   });
 
   it('should refuse a client at a rendezvous no daemon holds rather than parking it', async () => {
@@ -438,7 +508,7 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
-      deviceToken: DEVICE_TOKEN,
+      deviceId: DEVICE_ID,
     });
 
     const refusal = await openRelaySession({
@@ -447,14 +517,44 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
       daemon,
       method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
       heartbeat: () => () => undefined,
+      mode: AUTH,
     }).then(
       () => undefined,
       (reason: unknown) => reason,
     );
     should(refusal).be.instanceof(RelaySessionError);
     should((refusal as RelaySessionError).code).equal(RELAY_CLOSE_CODES.daemonAbsent);
-    should(carrierLeaks(bridge, { 'the device token': DEVICE_TOKEN })).be.empty();
+    should(carrierLeaks(bridge, { 'the device id': DEVICE_ID })).be.empty();
   });
+});
+
+/**
+ * A pairing redeemer that does what the daemon's does with an accepted attempt: refuse an unproven
+ * one, and otherwise register the key it was handed under the grant it mints.
+ */
+const pairingThatRegisters = (
+  bridge: RelayBridge,
+  daemonId: string,
+  observe: (attempt: { code: string; deviceName: string; deviceKey: string; proven: boolean }) => void = () =>
+    undefined,
+): RelayPairingRedeemer => ({
+  redeemInSession: async attempt => {
+    const proven = await attempt.prove();
+    observe({ code: attempt.code, deviceName: attempt.deviceName, deviceKey: attempt.deviceKey, proven });
+    if (!proven) return { kind: 'refused' };
+    bridge.deviceKeys.set(MINTED_DEVICE_ID, attempt.deviceKey);
+    return {
+      kind: 'paired',
+      response: {
+        deviceId: MINTED_DEVICE_ID,
+        daemonId,
+        daemonName: 'Studio',
+        capabilities: [],
+        carriers: [{ kind: 'relay', url: RELAY_URL }],
+        idleExpiryDays: 30,
+      },
+    };
+  },
 });
 
 describe('first pairing and live streams, through the real rendezvous', () => {
@@ -464,46 +564,46 @@ describe('first pairing and live streams, through the real rendezvous', () => {
    * A browser holding nothing but a QR's fingerprint and a two-minute code redeems it across a
    * rendezvous that can read neither, and comes out the other side with the device grant it needs to
    * reconnect. `docs/relay-protocol.md` §14 "Pairing sessions" is what is being demonstrated, and the
-   * assertions that matter are the two the document is written around: the CODE and the DEVICE NAME
-   * never appear in anything the rendezvous handled, and neither does the token it minted.
+   * assertions that matter are the ones the document is written around: the CODE, the DEVICE NAME and
+   * the PUBLIC KEY being registered never appear in anything the rendezvous handled, and neither does
+   * the grant it minted.
    */
-  it('should redeem a first pairing without the carrier reading the code, the name or the token', async () => {
+  it('should redeem a first pairing without the carrier reading the code, the name, the key or the grant', async () => {
     const identity = await newDaemonIdentity();
     const bridge = new RelayBridge();
-    const response = {
-      deviceToken: MINTED_TOKEN,
-      daemonId: identity.daemonId,
-      daemonName: 'Studio',
-      capabilities: [],
-      carriers: [{ kind: 'relay' as const, url: RELAY_URL }],
-    };
-    let redeemed: { code: string; deviceName: string } | undefined;
-    await bridge.admitDaemon(identity, answered('{}'), {
-      redeemOverRelay: async attempt => {
-        redeemed = { code: attempt.code, deviceName: attempt.deviceName };
-        return { kind: 'paired', response };
-      },
-    });
+    const fresh = await mintDevice(MINTED_DEVICE_ID);
+    let redeemed: { code: string; deviceName: string; deviceKey: string; proven: boolean } | undefined;
+    await bridge.admitDaemon(
+      identity,
+      answered('{}'),
+      pairingThatRegisters(bridge, identity.daemonId, attempt => {
+        redeemed = attempt;
+      }),
+    );
 
-    const paired = await redeemPairingOverRelay({
+    const paired = await redeemPairingInSession({
       crypto,
       seed: { daemonUrl: DAEMON_URL, daemonId: identity.daemonId, code: PAIRING_CODE },
       deviceName: DEVICE_NAME,
-      rendezvous: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      publicKey: fresh.publicKey,
+      key: fresh.claim.key,
       dial: () => bridge.dial(identity.daemonId),
       heartbeat: () => () => undefined,
     });
     await bridge.settle();
 
-    // The daemon received exactly what the browser sent, so the exchange really happened.
-    should(redeemed).eql({ code: PAIRING_CODE, deviceName: DEVICE_NAME });
-    should(paired.deviceToken).equal(MINTED_TOKEN);
+    // The daemon received exactly what the browser sent — and the session layer verified that the
+    // browser HOLDS the key it registered, which is the half of pairing a code alone cannot prove.
+    should(redeemed).eql({ code: PAIRING_CODE, deviceName: DEVICE_NAME, deviceKey: fresh.publicKey, proven: true });
+    should(paired.deviceId).equal(MINTED_DEVICE_ID);
     // And the rendezvous carried every byte of it while reading none.
     should(
       carrierLeaks(bridge, {
         'the pairing code': PAIRING_CODE,
         'the device name the browser sent': DEVICE_NAME,
-        'the minted device token': MINTED_TOKEN,
+        'the public key being registered': fresh.publicKey,
+        'the minted device id': MINTED_DEVICE_ID,
       }),
     ).be.empty();
   });
@@ -517,26 +617,21 @@ describe('first pairing and live streams, through the real rendezvous', () => {
     const count = async (outcome: 'paired' | 'refused'): Promise<number> => {
       const identity = await newDaemonIdentity();
       const bridge = new RelayBridge();
-      await bridge.admitDaemon(identity, answered('{}'), {
-        redeemOverRelay: async () =>
-          outcome === 'refused'
-            ? { kind: 'refused' }
-            : {
-                kind: 'paired',
-                response: {
-                  deviceToken: MINTED_TOKEN,
-                  daemonId: identity.daemonId,
-                  daemonName: 'Studio',
-                  capabilities: [],
-                  carriers: [],
-                },
-              },
-      });
-      await redeemPairingOverRelay({
+      await bridge.admitDaemon(
+        identity,
+        answered('{}'),
+        outcome === 'refused'
+          ? { redeemInSession: async () => ({ kind: 'refused' }) }
+          : pairingThatRegisters(bridge, identity.daemonId),
+      );
+      const fresh = await mintDevice(MINTED_DEVICE_ID);
+      await redeemPairingInSession({
         crypto,
         seed: { daemonUrl: DAEMON_URL, daemonId: identity.daemonId, code: PAIRING_CODE },
         deviceName: DEVICE_NAME,
-        rendezvous: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+        method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+        publicKey: fresh.publicKey,
+        key: fresh.claim.key,
         dial: () => bridge.dial(identity.daemonId),
         heartbeat: () => () => undefined,
       }).catch(() => undefined);
@@ -548,32 +643,24 @@ describe('first pairing and live streams, through the real rendezvous', () => {
   });
 
   /**
-   * The other half of the journey: the token a relayed pairing minted opens an ORDINARY session.
+   * The other half of the journey: the KEY a relayed pairing registered opens an ORDINARY session.
    *
-   * §14 gives a pairing session no edge to serving — "A device that paired reconnects as an ordinary
-   * request session with the token it was just issued" — so this is the reconnect, and it is the
-   * proof that the grant crossing the sealed record is a grant the daemon actually honours.
+   * §14 gives a pairing session no edge to serving — a device that paired reconnects as an ordinary
+   * request session, proving the key it just registered — so this is the reconnect, and it is the
+   * proof that what crossed the sealed record is a grant the daemon actually honours.
    */
-  it('should let the token a relayed pairing minted open an authenticated session', async () => {
+  it('should let the key a relayed pairing registered open an authenticated session', async () => {
     const identity = await newDaemonIdentity();
     const bridge = new RelayBridge();
-    await bridge.admitDaemon(identity, answered(SECRET_ANSWER), {
-      redeemOverRelay: async () => ({
-        kind: 'paired',
-        response: {
-          deviceToken: MINTED_TOKEN,
-          daemonId: identity.daemonId,
-          daemonName: 'Studio',
-          capabilities: [],
-          carriers: [],
-        },
-      }),
-    });
-    const paired = await redeemPairingOverRelay({
+    await bridge.admitDaemon(identity, answered(SECRET_ANSWER), pairingThatRegisters(bridge, identity.daemonId));
+    const fresh = await mintDevice(MINTED_DEVICE_ID);
+    const paired = await redeemPairingInSession({
       crypto,
       seed: { daemonUrl: DAEMON_URL, daemonId: identity.daemonId, code: PAIRING_CODE },
       deviceName: DEVICE_NAME,
-      rendezvous: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      publicKey: fresh.publicKey,
+      key: fresh.claim.key,
       dial: () => bridge.dial(identity.daemonId),
       heartbeat: () => () => undefined,
     });
@@ -585,19 +672,33 @@ describe('first pairing and live streams, through the real rendezvous', () => {
       daemon: daemonConnection({
         daemonId: identity.daemonId,
         baseUrl: DAEMON_URL,
-        deviceToken: paired.deviceToken,
+        deviceId: paired.deviceId,
       }),
       method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
       heartbeat: () => () => undefined,
+      mode: { kind: 'auth', device: fresh.claim },
     });
     should(session.live()).be.true();
-    should(carrierLeaks(bridge, { 'the grant the pairing just issued': paired.deviceToken })).be.empty();
+    should(carrierLeaks(bridge, { 'the grant the pairing just issued': paired.deviceId })).be.empty();
+
+    // And the grant is the KEY, not the id: the same id with any other key opens nothing.
+    const thief = await mintDevice(paired.deviceId);
+    await should(
+      openRelaySession({
+        crypto,
+        dial: () => bridge.dial(identity.daemonId),
+        daemon: daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: paired.deviceId }),
+        method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+        heartbeat: () => () => undefined,
+        mode: { kind: 'auth', device: thief.claim },
+      }),
+    ).be.rejected();
   });
 });
 
 /* ---------- §14 stream sessions, as the app actually opens one -------------- */
 
-/** A terminal identity `TerminalIdSchema` accepts, because `terminalStreamPath` parses what it is given. */
+/** A terminal identity `TerminalIdSchema` accepts, because the attach parses what it is given. */
 const TERMINAL_ID = 'a1b2c3d4e5f6';
 const SESSION_ID = 'fy_studio_one';
 /** The shell's own output: bytes, because §14 gives a terminal's daemon-to-browser direction bytes. */
@@ -629,7 +730,7 @@ interface RelayedTerminal {
   readonly received: readonly Uint8Array[];
   readonly closed: readonly { readonly code: number; readonly reason: string }[];
   readonly refused: readonly { readonly status: number; readonly body: string }[];
-  /** Every URL the direct carrier's HTTP fetcher was asked for. A relayed terminal asks for none. */
+  /** Every URL the router's plain network was asked for. A terminal asks it for nothing but liveness. */
   readonly overHttp: readonly string[];
 }
 
@@ -643,25 +744,24 @@ interface RelayedTerminal {
  * root hands the terminal deck, so this rig exercises the production composition rather than a
  * hand-built stream session that would pass whatever the app did.
  *
- * WHICH IS THE POINT: `browserTerminalStreamAttach` falls back to a direct `wss://` when `openStream`
- * answers `null`, and that fallback first buys a socket ticket over HTTP. `overHttp` below refuses
- * that purchase and records it, so a composition that stopped putting terminals on the rendezvous
- * fails these cases loudly instead of quietly opening a socket at an address a relayed browser
- * cannot reach.
+ * There is no second, ticketed path any more: a terminal is a stream session on whichever carrier
+ * the walk measured. `overHttp` records every plain-network call the router made, and the only one
+ * allowed is the liveness read that follows a direct session failing — so a composition that bought a
+ * ticket, or reached the daemon over plain HTTP, fails these cases loudly.
  */
 const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
   const identity = await newDaemonIdentity();
   const daemon = daemonConnection({
     daemonId: identity.daemonId,
     baseUrl: DAEMON_URL,
-    deviceToken: DEVICE_TOKEN,
+    deviceId: DEVICE_ID,
     carriers: [
       { kind: 'direct', daemonUrl: DAEMON_URL },
       { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
     ],
   });
   const scope = daemonSessionScope(daemon, SESSION_ID);
-  const streamPath = terminalStreamPath(daemon, scope, TERMINAL_ID);
+  const streamPath = `/v1/sessions/${encodeURIComponent(SESSION_ID)}/terminals/${TERMINAL_ID}/stream`;
 
   const bridge = new RelayBridge();
   const fromClient: (string | Uint8Array)[] = [];
@@ -694,18 +794,23 @@ const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
   });
 
   const overHttp: string[] = [];
-  const ticketFetch: DaemonFetch = async input => {
+  const network: DaemonFetch = async input => {
     overHttp.push(input.toString());
-    throw new Error('a relayed terminal must not buy a socket ticket');
+    throw new TypeError('Failed to fetch');
   };
   const router = new DaemonCarrierRouter({
     crypto,
-    // The daemon's own address is offered and does not answer. §1's probe IS the request, and a
-    // transport failure is what "not reachable" means — an HTTP status would not move the walk on.
-    network: async () => {
-      throw new TypeError('Failed to fetch');
+    deviceKey: async () => DEVICE.claim.key,
+    network,
+    // The daemon's own address is offered and does not answer, which is the situation a relay exists
+    // for; every other dial reaches the rendezvous.
+    dial: url => {
+      if (new URL(url).hostname === new URL(DAEMON_URL).hostname) {
+        const refused = bridge.unreachable();
+        return refused;
+      }
+      return bridge.dial(identity.daemonId);
     },
-    dial: () => bridge.dial(identity.daemonId),
     heartbeat: () => () => undefined,
   });
   const measured = await router.send(daemon, `${DAEMON_URL}/v1/carriers`);
@@ -717,11 +822,7 @@ const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
   const closed: { code: number; reason: string }[] = [];
   const refused: { status: number; body: string }[] = [];
   let opens = 0;
-  const attach = browserTerminalStreamAttach(
-    async (target, request) => await router.openStream(target, request),
-    ticketFetch,
-    () => router.activeMethod(daemon.daemonId),
-  );
+  const attach = browserTerminalStreamAttach(async (target, request) => await router.openStream(target, request));
   const stream = await attach(daemon, scope, TERMINAL_ID, {
     onOpen: () => {
       opens += 1;
@@ -770,15 +871,15 @@ describe('a relayed terminal stream, browser to daemon, through the real rendezv
     // that stop a relayed viewer being read as somebody standing at the machine.
     should(terminal.upgrade()?.path).equal(terminal.streamPath);
     should(terminal.upgrade()?.method).equal('GET');
-    should(terminal.upgrade()?.headers.get('authorization')).equal(`Bearer ${DEVICE_TOKEN}`);
+    should(terminal.upgrade()?.headers.get('authorization')).be.undefined();
+    should(terminal.upgrade()?.device?.deviceId).equal(DEVICE_ID);
     should(terminal.upgrade()?.loopback).be.false();
     should(terminal.upgrade()?.clientAddress).match(/^relay-session:/u);
     should(terminal.attached()).equal(1);
     should(terminal.opens()).equal(1);
     should(terminal.refused).be.empty();
-    // NOT ONE HTTP CALL. A direct fallback buys a ticket before it opens a socket, so an empty list
-    // is what says this terminal is on the rendezvous rather than on a `wss://` at the daemon.
-    should(terminal.overHttp).be.empty();
+    // NOTHING OVER PLAIN HTTP but the one liveness read after direct failed: no ticket, no request.
+    should(terminal.overHttp).eql([`${DAEMON_URL}/healthz`]);
 
     // daemon → browser: the handler's own write, arriving as the bytes it wrote.
     should(terminal.received.length).equal(1);
@@ -796,7 +897,7 @@ describe('a relayed terminal stream, browser to daemon, through the real rendezv
     // ── and the assertion this whole file exists for, now for a live stream ──
     should(
       carrierLeaks(terminal.bridge, {
-        'the device token': DEVICE_TOKEN,
+        'the device id': DEVICE_ID,
         'the stream path the browser asked to open': terminal.streamPath,
         'the resize control the viewer sent': RESIZE_CONTROL,
         'what the shell printed': 'ferretry@studio',
@@ -880,7 +981,7 @@ describe('a relayed terminal stream, browser to daemon, through the real rendezv
     should(
       carrierLeaks(terminal.bridge, {
         'the reason the viewer gave': 'the viewer left this stream',
-        'the device token': DEVICE_TOKEN,
+        'the device id': DEVICE_ID,
         'what the shell printed': 'ferretry@studio',
       }),
     ).be.empty();
@@ -904,23 +1005,23 @@ describe('a relayed terminal stream, browser to daemon, through the real rendezv
   it('should find a secret hidden inside a frame no UTF-8 decoder will read', () => {
     // 0x80 is a continuation byte with no lead byte, and 0xff appears in no UTF-8 sequence at all,
     // so both frames below decode to nothing — the exact shape of every sealed record on the wire.
-    const rawFrame = { observed: [Uint8Array.from([0x80, ...utf8Bytes(DEVICE_TOKEN), 0xff])] };
+    const rawFrame = { observed: [Uint8Array.from([0x80, ...utf8Bytes(DEVICE_ID), 0xff])] };
     const base64Frame = {
-      observed: [Uint8Array.from([0x80, ...utf8Bytes(Buffer.from(DEVICE_TOKEN, 'utf8').toString('base64')), 0xff])],
+      observed: [Uint8Array.from([0x80, ...utf8Bytes(Buffer.from(DEVICE_ID, 'utf8').toString('base64')), 0xff])],
     };
 
     // Unreadable as text — which is precisely why the text rendering may not carry a privacy claim.
-    should(carrierText(rawFrame)).not.containEql(DEVICE_TOKEN);
-    should(carrierText(base64Frame)).not.containEql(DEVICE_TOKEN);
+    should(carrierText(rawFrame)).not.containEql(DEVICE_ID);
+    should(carrierText(base64Frame)).not.containEql(DEVICE_ID);
     // And found anyway, in both of the encodings a leak plausibly takes.
-    should(carrierLeaks(rawFrame, { 'the device token': DEVICE_TOKEN })).eql([
-      'the device token appeared in relay-observable frame #0',
+    should(carrierLeaks(rawFrame, { 'the device id': DEVICE_ID })).eql([
+      'the device id appeared in relay-observable frame #0',
     ]);
-    should(carrierLeaks(base64Frame, { 'the device token': DEVICE_TOKEN })).eql([
-      'the device token appeared in relay-observable frame #0',
+    should(carrierLeaks(base64Frame, { 'the device id': DEVICE_ID })).eql([
+      'the device id appeared in relay-observable frame #0',
     ]);
     // A secret nothing carried is still absent, so the search is not simply answering "yes".
-    should(carrierLeaks(rawFrame, { 'a credential nobody sent': MINTED_TOKEN })).be.empty();
+    should(carrierLeaks(rawFrame, { 'a grant nobody sent': MINTED_DEVICE_ID })).be.empty();
     // An empty needle would match every frame ever recorded; the search refuses it rather than
     // reporting a leak that is an artefact of asking for nothing.
     should(() => carrierLeaks(rawFrame, { nothing: '' })).throw(/empty needle/u);

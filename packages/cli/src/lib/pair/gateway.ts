@@ -1,8 +1,8 @@
 import {
   type PairingCodeMintResponse,
   PairingCodeMintResponseSchema,
-  PairingCodeStatusResponseSchema,
   type PairingCodeStatusResponse,
+  PairingCodeStatusResponseSchema,
   type PairingId,
 } from '@ferretry/protocol';
 import type { IPairGateway, PairingApiClient } from './ports.ts';
@@ -10,9 +10,10 @@ import type { IPairGateway, PairingApiClient } from './ports.ts';
 /**
  * Where codes are minted.
  *
- * Distinct from `/v1/pair`, which is where a DEVICE redeems one. The two are different privileges —
- * minting belongs to whoever is already on the host, redeeming to anybody holding a live code — and the
- * daemon enforces that difference. Minting is governed by the `pairing` capability rather than by the
+ * Redemption is not a route at all: a DEVICE redeems a code inside a sealed session whose daemon it has
+ * already proved against the QR fingerprint. The two are different privileges — minting belongs to
+ * whoever is already on the host, redeeming to anybody holding a live code — and the daemon enforces that
+ * difference. Minting is governed by the `pairing` capability rather than by the
  * `host` scope, which is what lets a browser on the machine add a device too: loopback is ungoverned,
  * and off the host the operator's grant decides. This command always runs on the host, so nothing here
  * ever meets that refusal.

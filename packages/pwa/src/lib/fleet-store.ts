@@ -138,7 +138,7 @@ const IDLE_SLICE: DaemonFleetSlice = Object.freeze({
 interface DaemonEntry {
   readonly daemonId: DaemonId;
   readonly baseUrl: string;
-  readonly deviceToken: string;
+  readonly deviceId: string;
   listInflight: Promise<readonly SessionView[]> | null;
   readonly sessionInflight: Map<string, Promise<SessionView>>;
 }
@@ -332,13 +332,13 @@ export class DaemonFleetStore {
   #entryFor(daemon: DaemonConnection): DaemonEntry {
     const existing = this.#entries.get(daemon.daemonId);
     if (existing !== undefined) {
-      if (existing.baseUrl === daemon.baseUrl && existing.deviceToken === daemon.deviceToken) return existing;
+      if (existing.baseUrl === daemon.baseUrl && existing.deviceId === daemon.deviceId) return existing;
       this.#drop(daemon.daemonId);
     }
     const entry: DaemonEntry = {
       daemonId: daemon.daemonId,
       baseUrl: daemon.baseUrl,
-      deviceToken: daemon.deviceToken,
+      deviceId: daemon.deviceId,
       listInflight: null,
       sessionInflight: new Map(),
     };
