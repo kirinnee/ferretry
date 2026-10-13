@@ -28,6 +28,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsTab } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
@@ -56,6 +57,7 @@ import { dictationShortcutLabel } from './features/settings/dictation-shortcut.t
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
+import { securitySettingsTab } from './features/settings/security-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
@@ -1008,6 +1010,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       pricingSettingsTab(createDaemonClient),
+      securitySettingsTab(createDaemonClient),
     ],
     [createDaemonClient, store.clients],
   );
@@ -1495,6 +1498,7 @@ export function AppShell() {
             themeToggle={<ThemeToggle />}
             {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
           />
+          <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
           {/*
             The finder's touch affordance wraps the page area rather than one
             page: a phone has no Cmd/Ctrl+K, and the top bar's own Find button is

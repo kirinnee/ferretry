@@ -114,6 +114,7 @@ import {
   HttpUsageSource,
   hostCgroupFacts,
   JournalGrantAudit,
+  FileAuditJournal,
   KeyedSerialExecutor,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
@@ -325,6 +326,8 @@ import {
   type AssigneeObservation,
   type AttentionActor,
   AttentionService,
+  AuditedPairingService,
+  AuditLog,
   advertisesForeignAddress,
   answerArguments,
   authorizeSessionCommand,
@@ -439,6 +442,7 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
+  PushNewDeviceAlert,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -4636,6 +4640,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * started. Nothing else about it moved.
    */
   const bootNotices = bootJournal(overrides.logLevel);
+  // The security log (docs/design/zero-trust.md §C): one writer, built before pairing and the route table
+  // that both record into. A write it cannot make is said in this boot's journal, never thrown into a request.
+  const auditFailures = { auditWriteFailed: (message: string) => bootNotices.state(message) };
+  const auditLog = new AuditLog({ journal: new FileAuditJournal(paths.state), clock, failures: auditFailures });
   /**
    * The account's own chance to renew before an agent is started on it.
    *
@@ -5282,36 +5290,44 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       return {
         credentials,
         push,
-        subsystem: new PairingService({
-          daemonId: state.daemonId,
-          daemonName: state.daemonName,
-          // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
-          // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
-          // reading its QR names the phone.
-          advertisement: config.advertisement,
-          carriers,
-          // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
-          // rendezvous from an operator's own one, and only the first is something the phone reading
-          // the QR can find for itself.
-          ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
-          clock: pairingClock,
-          cryptography,
-          devices: repository,
-          credentials,
-          // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
-          // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
-          deviceState: [push],
-          // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
-          connections: deviceConnections,
-          // WHY PAIRING HOLDS THE VERIFIER. A machine with no operator password will not hand out a
-          // pairing code, because pairing is the moment access leaves this host and a device paired
-          // without one arrives able to configure the fleet. It is the SAME object the grant subsystem
-          // verifies against, so the requirement and the gate cannot disagree about whether a password
-          // exists. Nothing about local use is gated by it — see `PairingService.mint`.
-          operatorPassword,
-          // So the refusal names the command a person actually types rather than inventing one.
-          clientName: CLIENT_NAME,
-        }),
+        subsystem: new AuditedPairingService(
+          {
+            daemonId: state.daemonId,
+            daemonName: state.daemonName,
+            // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
+            // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
+            // reading its QR names the phone.
+            advertisement: config.advertisement,
+            carriers,
+            // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
+            // rendezvous from an operator's own one, and only the first is something the phone reading
+            // the QR can find for itself.
+            ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
+            clock: pairingClock,
+            cryptography,
+            devices: repository,
+            credentials,
+            // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
+            // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
+            deviceState: [push],
+            // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
+            connections: deviceConnections,
+            // WHY PAIRING HOLDS THE VERIFIER. A machine with no operator password will not hand out a
+            // pairing code, because pairing is the moment access leaves this host and a device paired
+            // without one arrives able to configure the fleet. It is the SAME object the grant subsystem
+            // verifies against, so the requirement and the gate cannot disagree about whether a password
+            // exists. Nothing about local use is gated by it — see `PairingService.mint`.
+            operatorPassword,
+            // So the refusal names the command a person actually types rather than inventing one.
+            clientName: CLIENT_NAME,
+          },
+          // Every redemption, direct or relayed, recorded; a new device announced to the others.
+          {
+            log: auditLog,
+            alert: new PushNewDeviceAlert(push, state.daemonName, auditFailures),
+            nowMs: () => Date.now(),
+          },
+        ),
       };
     },
     sessions: planner,
@@ -5959,6 +5975,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               directorySyscalls,
             });
           },
+        },
+        // The security log's read route, and the sink the audited route table records into. A device's
+        // name is read from the same grant store pairing keeps, so a record names what the list shows.
+        audit: {
+          log: auditLog,
+          recent: async limit => await auditLog.recent(limit),
+          deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,
         },
         pairing,
         push,

@@ -176,6 +176,10 @@ from instead. Every route that acts sits on `fleet.configure` with the existing 
 operator-password confirmation and **no second gate** — the remote risk is account substitution, not token
 theft. `--with-access-token` and `--with-api-key` stay host-and-CLI-only at every layer.
 
+What this machine records about who reached it — pairings, revocations, grant and fleet changes,
+terminals opened, secrets used — is [docs/audit.md](docs/audit.md): a bounded `0600` append-only log of
+**names and ids only**, read through `GET /v1/audit`, `fy daemon audit` and Settings › Security.
+
 How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code,
 a device token the daemon keeps only a hash of, and revocation of either. **No route returns a device
 token or a digest** — the wire projection has no field for one — and a **pairing code is a live

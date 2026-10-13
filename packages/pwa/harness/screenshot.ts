@@ -107,8 +107,8 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and five: thirty-seven MACHINES frames at each viewport, plus seventeen other frames at
- * `mobile` and fourteen at `desktop` (37 + 37 + 17 + 14).
+ * One hundred and seven: thirty-seven MACHINES frames at each viewport, plus eighteen other frames at
+ * `mobile` and fifteen at `desktop` (37 + 37 + 18 + 15).
  *
  * MACHINES, thirty-seven per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
@@ -116,8 +116,8 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * card, two stepper steps, a component with every badge, two edit forms), and three other-machine states
  * (offline, not set up, its first run). Each of these is also a Machines geometry check, below.
  *
- * The rest, fourteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its seven other panels, the unreachable daemon's Warden and Carrier, and the
+ * The rest, fifteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
+ * healthy daemon's Warden and its eight other panels, the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -137,7 +137,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 105;
+const SETTINGS_SIDEWAYS_CHECKS = 107;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -1740,13 +1740,13 @@ try {
           // The fixture is only evidence about the real frame if it carries the
           // panels the composition root supplies. It once carried six of the
           // production eight, so the row that overflowed a desktop could not be
-          // seen here at all. Eight now: the app's nine less Model pricing, which
+          // seen here at all. Nine now: the app's ten less Model pricing, which
           // this fixture has never mounted. Count the
           // rail's rows, which exist in the document at both widths, rather than
           // the sheet's, which are rendered only once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 8)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 8 it mounts`);
+          if (daemonPanels !== 9)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 9 it mounts`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -1761,9 +1761,9 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 8)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 8 it mounts`);
-            // Eight rows is the longest list any sheet in Settings presents. If one of these sheets is
+            if (openPanelChoices !== 9)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 9 it mounts`);
+            // Nine rows is the longest list any sheet in Settings presents. If one of these sheets is
             // going to be the one that widens a phone, it is this one.
             await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
             const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
@@ -1800,6 +1800,8 @@ try {
             ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
+            // The security log, with a gap warning and both badges on it: the widest rows it can draw.
+            ['Security', 'security', '[data-security-log]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {

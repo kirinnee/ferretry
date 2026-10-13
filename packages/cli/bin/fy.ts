@@ -49,6 +49,9 @@ import { AnalyticsController } from '../src/lib/analytics/controller';
 import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
+import { registerAuditCommands } from '../src/lib/audit/commands';
+import { AuditController } from '../src/lib/audit/controller';
+import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
@@ -688,6 +691,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           out: world.io,
           clientName: BINARY_NAME,
         }),
+    ),
+  ({ program, world, client }) =>
+    registerAuditCommands(
+      program,
+      () => new AuditController({ gateway: new ProtocolAuditGateway(client), out: world.io }),
     ),
   // Pairing writes its screen through its own uncoloured writer rather than `world.io`: the screen is
   // mostly a QR, and tinting the one image the onboarding depends on is a risk with nothing to gain.

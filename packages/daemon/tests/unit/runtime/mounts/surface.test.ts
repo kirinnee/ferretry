@@ -433,6 +433,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   grants: grantSubsystem(),
+  audit: {
+    log: { record: async () => undefined },
+    recent: async () => ({ records: [], unreadable: 0 }),
+    deviceName: async () => undefined,
+  },
   socketTickets: new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` }),
 });
 
@@ -460,7 +465,8 @@ describe('the mounted daemon surface', () => {
       2 + // the account model's credential list and its Check now
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
-      3; // the setup scan, tool install and the clone export
+      3 + // the setup scan, tool install and the clone export
+      1; // the security log read
     should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
@@ -499,6 +505,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/grants/unlock',
       'PATCH /v1/grants',
       'PUT /v1/grants/password',
+      'GET /v1/audit',
       // The carrier refresh, beside the pairing exchange whose second half it is. NOTE WHAT IS ABSENT:
       // there is no POST, PUT or DELETE here — a device may read where this daemon can be reached and
       // can never re-point it, because that is a change to the operator's own document.

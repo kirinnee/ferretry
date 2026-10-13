@@ -1,5 +1,6 @@
 export * from './api/index.ts';
 export * from './attachments/index.ts';
+export * from './audit/index.ts';
 export * from './browser/control/index.ts';
 export * from './browser/runtime/index.ts';
 export * from './browser/transport/index.ts';

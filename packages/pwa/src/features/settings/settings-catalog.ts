@@ -341,6 +341,28 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     ],
   },
   {
+    // "Who paired", "log" and "history" are what somebody types after a new-device notice they did not expect.
+    id: 'security',
+    label: 'Security',
+    description:
+      'The security log for this machine: devices paired or removed, refused attempts, permission changes, opened terminals and used secrets. Daemon-wide — opens this daemon’s settings.',
+    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
+    keywords: [
+      'security',
+      'audit',
+      'log',
+      'history',
+      'activity',
+      'events',
+      'who paired',
+      'new device',
+      'paired device',
+      'removed',
+      'refused',
+      'intruder',
+    ],
+  },
+  {
     id: 'warden',
     label: 'Warden',
     description:
