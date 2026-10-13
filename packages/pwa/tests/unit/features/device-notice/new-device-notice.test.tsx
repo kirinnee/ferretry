@@ -108,6 +108,24 @@ describe('the new-device notice', () => {
     await shown.unmount();
   });
 
+  it('announces a device paired later in the same visit as the first look', async () => {
+    const storage = memory();
+    const alphaMachine = machine([device('old', ago(10 * MINUTE))]);
+    const shown = await mount(
+      <NewDeviceNotices
+        connections={[alpha]}
+        clients={pool({ alpha: alphaMachine })}
+        storage={storage}
+        now={now}
+        refreshMs={5}
+      />,
+    );
+    await until(() => storage.entries.size === 1, 'the first look to be remembered');
+    alphaMachine.view = { ...alphaMachine.view, devices: [device('phone', new Date(NOW + MINUTE).toISOString())] };
+    await until(() => shown.container.querySelector('[data-new-device]') !== null, 'the notice after a re-read');
+    await shown.unmount();
+  });
+
   it('names a device paired since this browser last looked, never this device itself', async () => {
     const alphaMachine = machine([
       device('old', ago(60 * MINUTE)),
