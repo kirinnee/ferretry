@@ -230,7 +230,7 @@ export function PageHead({
           type="button"
           data-catalog-back=""
           onClick={onBack}
-          className="kt-btn kt-btn--sm self-start"
+          className="kt-btn kt-btn--sm kt-btn--flush-start self-start"
           data-variant="ghost"
         >
           ‹ Back

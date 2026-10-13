@@ -106,7 +106,14 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
   return (
     <section className="flex min-w-0 flex-col gap-4" data-runtime-page={runtime.name}>
       <div>
-        <Button type="button" variant="ghost" size="sm" data-page-back="" onClick={onBack}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="kt-btn--flush-start"
+          data-page-back=""
+          onClick={onBack}
+        >
           <ChevronLeft size={16} aria-hidden="true" />
           Runtimes
         </Button>
@@ -187,7 +194,10 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
               {layers.map((layer, index) => (
                 <li
                   key={layer.reference}
-                  className={cn('kt-panel flex min-w-0 items-start gap-3 px-3 py-2', layer.skipped && 'opacity-60')}
+                  className={cn(
+                    'kt-panel flex min-w-0 items-start gap-3 px-panel py-row-y',
+                    layer.skipped && 'opacity-60',
+                  )}
                   data-runtime-layer={layer.reference}
                 >
                   <span className="w-5 shrink-0 text-meta text-muted">{layers.length - index}</span>
@@ -252,7 +262,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
             </p>
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {runtime.fixedLayer.entries.map(entry => (
-                <li key={entry.key} className="kt-panel flex min-w-0 items-center gap-2 px-3 py-2 text-cell">
+                <li key={entry.key} className="kt-panel flex min-w-0 items-center gap-2 px-panel py-row-y text-cell">
                   <Lock size={14} aria-hidden="true" className="shrink-0 text-muted" />
                   <span className="min-w-0 break-all font-mono text-fg">
                     {entry.key} = {entry.value}
@@ -371,10 +381,11 @@ export function RuntimesTab({
         </p>
         <a
           href={`${machineDetailHash(machineName, 'settings')}/setup`}
-          className="kt-btn no-underline hover:no-underline"
+          className="kt-btn max-w-full no-underline hover:no-underline"
           data-variant="primary"
         >
-          Set up {machineName}
+          {/* A machine named by its address is longer than a phone: the label truncates inside the button. */}
+          <span className="min-w-0 truncate">Set up {machineName}</span>
         </a>
       </div>
     );

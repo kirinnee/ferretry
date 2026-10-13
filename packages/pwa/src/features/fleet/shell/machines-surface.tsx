@@ -164,7 +164,7 @@ export function MachinesSurface({
             data-machine-switcher=""
             aria-label={`Machine: ${name}. Switch machine`}
             onClick={openList}
-            className="inline-flex min-h-control min-w-0 max-w-full items-center gap-2 rounded-control px-1 text-row font-semibold text-fg transition-colors hover:bg-surface-2"
+            className="inline-flex min-h-control min-w-0 max-w-full items-center gap-2 rounded-control text-row font-semibold text-fg transition-colors hover:text-accent"
           >
             <AccountStatus word={reachWord(current)} label={reachLabel(current)} />
             <span className="min-w-0 truncate">{name}</span>
@@ -243,7 +243,7 @@ export function MachinesSurface({
             {/* EQUAL COLUMNS THAT NEVER CUT A WORD. Every cell grows from the same zero basis but never below its
                 own label, so at the default size five labels fit a 390px phone side by side, and at a larger
                 text size or a wider theme the ROW scrolls inside itself — never the page, and never as "Creden…". */}
-            <ul className="scroll-thin m-0 flex list-none gap-0.5 overflow-x-auto p-0 md:gap-1">
+            <ul className="scroll-thin m-0 flex list-none gap-xs overflow-x-auto p-0 md:gap-sm">
               {MACHINE_TABS.map(definition => {
                 const selected = definition.id === tab;
                 return (
@@ -254,10 +254,10 @@ export function MachinesSurface({
                       aria-current={selected ? 'page' : undefined}
                       onClick={() => onOpen(daemonId, definition.id)}
                       className={cn(
-                        'flex min-h-control w-full flex-col items-center justify-center gap-0.5 rounded-control border whitespace-nowrap px-0.5 py-1 text-meta md:px-2 transition-colors md:flex-row md:gap-2 md:text-ui',
+                        'flex min-h-control w-full flex-col items-center justify-center gap-xs rounded-control border whitespace-nowrap px-xs py-xs text-2xs md:px-control-x transition-colors md:flex-row md:gap-sm md:text-ui',
                         selected
                           ? 'border-accent bg-accent-soft text-accent'
-                          : 'border-border bg-surface-2 text-fg hover:border-accent',
+                          : 'border-border bg-surface-2 text-fg [@media(hover:hover)]:hover:bg-surface-3',
                       )}
                     >
                       {TAB_ICONS[definition.id]}

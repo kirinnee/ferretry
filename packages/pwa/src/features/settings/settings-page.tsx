@@ -576,7 +576,7 @@ export function SettingsPage({
               data-settings-section={section.id}
               className="mt-3 min-w-0 md:mt-0"
             >
-              <header className="mb-3 px-1">
+              <header className="mb-3">
                 <h2
                   id={`settings-section-heading-${section.id}`}
                   className="m-0 font-display text-title font-bold tracking-display text-fg"

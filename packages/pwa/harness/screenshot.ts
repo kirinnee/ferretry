@@ -108,19 +108,23 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and seventeen. MACHINES owes thirty-two at each viewport — its section, four tab switches, the
- * Machines list the switcher opens, ten Runtimes and Credentials pages, twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps,
- * a component with every badge, two edit forms) and four Settings-tab flows (Import again found + names,
- * Clone source, Install) — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
- * and twenty-four at `desktop`. Twenty-four at both viewports —
- * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
- * surface: each step is a different layout, the model step is a card per model beside a custom-value
- * row, and the recap is a two-column definition list. Capturing only the first would have proved that
- * the harness question fits a phone and nothing at all about the six screens after it. The sixteen
- * are three Settings sections (Appearance, Behaviour, Daemons), the healthy daemon's ten panels, the unreachable
- * daemon's Warden and Carrier, and the one-daemon route — plus THREE MOBILE-ONLY open bottom sheets,
- * which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry is
- * the product's, not an omission.
+ * One hundred and twenty-seven: thirty-seven MACHINES frames at each viewport, plus twenty-eight other
+ * frames at `mobile` and twenty-five at `desktop` (37 + 37 + 28 + 25).
+ *
+ * MACHINES, thirty-seven per viewport: its section, four tab switches, four Settings-tab flows (Import
+ * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
+ * Credentials pages, two Add a login steps, twelve Profiles and Components pages (a layer stack, a delete
+ * card, two stepper steps, a component with every badge, two edit forms), and three other-machine states
+ * (offline, not set up, its first run). Each of these is also a Machines geometry check, below.
+ *
+ * The rest, twenty-five at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
+ * healthy daemon's Warden and its ten other panels, EIGHT for the new-account sequence (one per step), the
+ * unreachable daemon's Warden and Carrier, and the one-daemon route. A sequence is not one surface: each
+ * step is a different layout, the model step is a card per model beside a custom-value row, and the recap
+ * is a two-column definition list. Capturing only the first would have proved that the harness question
+ * fits a phone and nothing at all about the six screens after it. Plus THREE MOBILE-ONLY open bottom
+ * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
+ * is the product's, not an omission.
  *
  * Every call site lives in the Settings block, so a `--settings-only` run and a full gallery run owe
  * the same tally — there is no mode reaching Settings in which this number quietly drops.
@@ -136,7 +140,16 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 117;
+const SETTINGS_SIDEWAYS_CHECKS = 127;
+
+/**
+ * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
+ * Machines frame, at each viewport — the same thirty-seven as above (the section itself is measured once
+ * its Runtimes tab has loaded), so 37 + 37. Same tripwire as the number above, for the same reason — a check
+ * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
+ * edits this, and the pull request says which frames the gate covers.
+ */
+const MACHINES_GEOMETRY_CHECKS = 74;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -456,6 +469,304 @@ const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> 
     );
   sidewaysChecks += 1;
   process.stdout.write(`🧭 no sideways scroll: ${where}\n`);
+};
+
+/**
+ * THE MACHINES SECTION HAS ONE LEFT EDGE, and the tab bar fits, checked rather than eyeballed.
+ *
+ * "Be careful of margins" was the owner's ask, and the defect it named is one a sideways-scroll check
+ * cannot see: the section heading, its sentence and the machine switcher sat 4px right of the tab bar
+ * and every card under it, because two stray `px-1`s indented text that nothing else was indented by.
+ * Every box still fitted the phone, so every gate was green. So this reads where things START.
+ *
+ * WHAT "STARTS" MEANS. A card — anything that paints its own border or background — starts at its
+ * border box, because that edge is what the eye lines up. Anything else starts where its CONTENT does
+ * (border box plus padding), because an unpainted box is invisible and only its text is seen: that is
+ * exactly how a `px-1` header hid its indent. The section's own left edge is the reference.
+ *
+ * WHICH THINGS. The outermost visible thing on each line: walking down from the section, a card, a
+ * control, a list, a heading, a paragraph or a bare run of text is collected and not descended into —
+ * a card's inside belongs to its own padding, which is asserted separately. A collected thing that is
+ * not at the edge is allowed only if something else on the same line sits to its left (a Close button
+ * beside a heading, a label beside its icon). Anything left of the edge, right of the section's right
+ * edge, or indented with nothing beside it is a failure, named.
+ *
+ * AND BETWEEN THEM: every top-level panel card is padded by `--pad-panel`, and a card or a control
+ * stacked under another top-level thing is at least `--gap-xs` from it — nothing flush. Text under text
+ * is left to its line height, which is the type scale's business rather than a margin.
+ *
+ * THE TAB BAR, while it is shown: no label wider than its button, the label inside the button's padding,
+ * adjacent tabs at least `--gap-xs` apart, every tab inside the row, the row not scrolling, exactly one
+ * tab marked current, and — hovered — an unselected tab still not painted like the selected one. That
+ * last one is the double-active tab U19 shipped a capture of.
+ *
+ * Transitions are FINISHED first, which is also what the captures do (`animations: 'disabled'`): a tab
+ * mid-fade is a timing artefact of the capture, measured, not a layout — `transition-colors` holds the
+ * tab just left in its selected colours for 150ms, and a capture taken in that window shows two
+ * selected tabs. Settled is the state a person looks at.
+ *
+ * Counted and asserted like the sideways checks, against `MACHINES_GEOMETRY_CHECKS`.
+ */
+let machinesGeometryChecks = 0;
+
+const settleTransitions = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    for (const animation of document.getAnimations()) animation.finish();
+  });
+};
+
+const assertMachinesGeometry = async (page: Page, where: string): Promise<void> => {
+  await settleTransitions(page);
+  const tabs = page.locator('[data-machines-surface] [data-machine-tab]');
+  // The hover half needs a real pointer over a real unselected tab, so it is driven before the read.
+  let hovered: string | null = null;
+  if ((await tabs.count()) > 0) {
+    const unselected = page.locator('[data-machines-surface] [data-machine-tab]:not([aria-current])').first();
+    hovered = await unselected.getAttribute('data-machine-tab');
+    await unselected.hover();
+    await settleTransitions(page);
+  }
+  const problems = await page.evaluate(hoveredTab => {
+    const found: string[] = [];
+    const section = document.querySelector('[data-settings-section="machines"]');
+    if (section === null) return ['the Machines section is not on screen'];
+    const root = getComputedStyle(document.documentElement);
+    const token = (name: string): number => Number.parseFloat(root.getPropertyValue(name));
+    const padPanel = token('--pad-panel');
+    const gapXs = token('--gap-xs');
+    const sectionBox = section.getBoundingClientRect();
+    const edge = sectionBox.left;
+    const right = sectionBox.right;
+    const describe = (element: Element): string => {
+      const hooks = [...element.attributes]
+        .filter(attribute => attribute.name.startsWith('data-'))
+        .map(attribute => `[${attribute.name}${attribute.value === '' ? '' : `="${attribute.value}"`}]`)
+        .slice(0, 2)
+        .join('');
+      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      return `${element.tagName.toLowerCase()}${hooks}${text === '' ? '' : ` "${text}"`}`;
+    };
+    // A colour nobody can see paints nothing: a ghost button's transparent border is not an edge.
+    const seen = (colour: string): boolean => {
+      const alpha = /rgba?\([^)]*?,\s*[^,]+,\s*[^,]+,\s*([\d.]+)\)/.exec(colour);
+      return colour !== 'transparent' && (alpha === null || Number.parseFloat(alpha[1] ?? '1') > 0);
+    };
+    const painted = (style: CSSStyleDeclaration): boolean =>
+      (Number.parseFloat(style.borderLeftWidth) > 0 &&
+        style.borderLeftStyle !== 'none' &&
+        seen(style.borderLeftColor)) ||
+      seen(style.backgroundColor);
+    const visible = (element: Element): boolean => {
+      const box = element.getBoundingClientRect();
+      if (box.width <= 1 || box.height <= 1) return false;
+      const style = getComputedStyle(element);
+      return style.visibility !== 'hidden' && style.position !== 'absolute' && style.position !== 'fixed';
+    };
+    const LEAVES = new Set([
+      'H1',
+      'H2',
+      'H3',
+      'H4',
+      'H5',
+      'H6',
+      'P',
+      'UL',
+      'OL',
+      'DL',
+      'TABLE',
+      'PRE',
+      'BUTTON',
+      'A',
+      'INPUT',
+      'SELECT',
+      'TEXTAREA',
+      'LABEL',
+      'NAV',
+      'FIELDSET',
+      'SVG',
+      'IMG',
+      'DETAILS',
+    ]);
+    const ownText = (element: Element): boolean =>
+      [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '');
+    interface Item {
+      readonly element: Element;
+      readonly start: number;
+      readonly box: DOMRect;
+      readonly card: boolean;
+    }
+    const items: Item[] = [];
+    // `bleed`: inside a card, a painted band that spans the card edge to edge (a header strip, a row
+    // divider) is part of the card's surface rather than content, so its content is what is inset.
+    const walk = (element: Element, into: Item[], bleed?: number): void => {
+      for (const child of element.children) {
+        if (!visible(child)) {
+          // display: contents and zero-size wrappers still hold visible children.
+          if (getComputedStyle(child).display === 'contents' || child.getBoundingClientRect().width > 1)
+            walk(child, into, bleed);
+          continue;
+        }
+        const style = getComputedStyle(child);
+        const card = painted(style);
+        const box = child.getBoundingClientRect();
+        if (card && bleed !== undefined && Math.abs(box.left - bleed) <= 0.5) {
+          walk(child, into, bleed + Number.parseFloat(style.borderLeftWidth));
+          continue;
+        }
+        if (card || LEAVES.has(child.tagName.toUpperCase()) || ownText(child)) {
+          // A bulleted list starts at its box: the bullet hangs in the list's padding by design.
+          const marked = ['UL', 'OL'].includes(child.tagName.toUpperCase()) && style.listStyleType !== 'none';
+          const start =
+            card || marked
+              ? box.left
+              : box.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft);
+          into.push({ element: child, start, box, card });
+          continue;
+        }
+        walk(child, into, bleed);
+      }
+    };
+    walk(section, items);
+    if (items.length === 0) found.push('nothing visible was found in the Machines section');
+    const overlapsVertically = (a: DOMRect, b: DOMRect): boolean =>
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+    for (const item of items) {
+      if (item.start < edge - 0.5)
+        found.push(`${describe(item.element)} starts ${(edge - item.start).toFixed(1)}px LEFT of the section's edge`);
+      else if (item.start > edge + 0.5) {
+        const beside = items.some(
+          other => other !== item && overlapsVertically(other.box, item.box) && other.box.right <= item.box.left + 0.5,
+        );
+        if (!beside)
+          found.push(
+            `${describe(item.element)} starts ${(item.start - edge).toFixed(1)}px right of the section's edge ` +
+              'with nothing beside it — one left edge for the whole section',
+          );
+      }
+      if (item.box.right > right + 0.5)
+        found.push(
+          `${describe(item.element)} ends ${(item.box.right - right).toFixed(1)}px past the section's right edge`,
+        );
+    }
+    // EVERY panel card in the section, nested ones included (a list of cards is the commonest nesting):
+    // its content starts `--pad-panel` in. The INSET, not the padding property — a list card pads its
+    // rows rather than itself, and what a reader sees is where the card's content starts.
+    for (const panel of section.querySelectorAll('.kt-panel')) {
+      if (!visible(panel)) continue;
+      const inner = panel.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(panel).borderLeftWidth);
+      const content: Item[] = [];
+      walk(panel, content, inner);
+      if (content.length === 0) continue;
+      const inset = Math.min(...content.map(entry => entry.start)) - inner;
+      if (Math.abs(inset - padPanel) > 0.5)
+        found.push(
+          `${describe(panel)} is a panel whose content starts ${inset.toFixed(1)}px in, not --pad-panel (${padPanel}px)`,
+        );
+    }
+    // And no card or button is flush under the thing before it, at any depth: the nearest previous
+    // sibling of it or of an ancestor (a card in a list is an `li`'s child) is at least `--gap-xs` above.
+    for (const block of section.querySelectorAll('.kt-panel, .kt-btn, button, a[data-variant]')) {
+      if (!visible(block)) continue;
+      const top = block.getBoundingClientRect();
+      for (let node: Element | null = block; node !== null && node !== section; node = node.parentElement) {
+        let previous = node.previousElementSibling;
+        while (previous !== null && !visible(previous)) previous = previous.previousElementSibling;
+        if (previous === null) continue;
+        const before = previous.getBoundingClientRect();
+        const stacked =
+          before.bottom <= top.top + 0.5 && Math.min(before.right, top.right) - Math.max(before.left, top.left) > 1;
+        // A row of a divided list (`divide-y`) is flush with a rule between, which is the separation.
+        const divided = Number.parseFloat(getComputedStyle(node).borderTopWidth) > 0;
+        if (stacked && !divided && top.top - before.bottom < gapXs - 0.5)
+          found.push(
+            `${describe(block)} is ${(top.top - before.bottom).toFixed(1)}px under ${describe(previous)} — ` +
+              `closer than --gap-xs (${gapXs}px)`,
+          );
+        break;
+      }
+    }
+    const blocks = (item: Item): boolean =>
+      item.card || ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(item.element.tagName.toUpperCase());
+    for (const item of items) {
+      if (!blocks(item)) continue;
+      // The nearest thing above it that shares its columns.
+      const above = items
+        .filter(
+          other =>
+            other !== item &&
+            other.box.bottom <= item.box.top + 0.5 &&
+            Math.min(other.box.right, item.box.right) - Math.max(other.box.left, item.box.left) > 1,
+        )
+        .sort((a, b) => b.box.bottom - a.box.bottom)[0];
+      if (above !== undefined && item.box.top - above.box.bottom < gapXs - 0.5)
+        found.push(
+          `${describe(item.element)} is ${(item.box.top - above.box.bottom).toFixed(1)}px under ` +
+            `${describe(above.element)} — closer than --gap-xs (${gapXs}px)`,
+        );
+    }
+
+    const row = section.querySelector('[data-machine-tabs] ul');
+    if (row !== null) {
+      if (row.scrollWidth > row.clientWidth + 0.5)
+        found.push(`the tab row scrolls: ${row.scrollWidth}px of tabs in a ${row.clientWidth}px row`);
+      const rowBox = row.getBoundingClientRect();
+      const buttons = [...row.querySelectorAll('[data-machine-tab]')];
+      if (buttons.length !== 5) found.push(`the tab row has ${buttons.length} tabs instead of 5`);
+      const current = buttons.filter(button => button.getAttribute('aria-current') === 'page');
+      if (current.length !== 1) found.push(`${current.length} tabs are marked current instead of one`);
+      const cells = buttons.map(button => button.getBoundingClientRect());
+      buttons.forEach((button, index) => {
+        const name = button.getAttribute('data-machine-tab');
+        const box = cells[index] as DOMRect;
+        if (button.scrollWidth > button.clientWidth)
+          found.push(`the ${name} tab's content is ${button.scrollWidth}px in a ${button.clientWidth}px button`);
+        if (box.left < rowBox.left - 0.5 || box.right > rowBox.right + 0.5)
+          found.push(`the ${name} tab is clipped by its row`);
+        const style = getComputedStyle(button);
+        const inner = {
+          left: box.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft),
+          right: box.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight),
+        };
+        const label = button.querySelector('span');
+        const range = document.createRange();
+        if (label !== null) range.selectNodeContents(label);
+        const text = label === null ? null : range.getBoundingClientRect();
+        if (text === null) found.push(`the ${name} tab has no label`);
+        else if (text.left < inner.left - 0.5 || text.right > inner.right + 0.5)
+          found.push(
+            `the ${name} tab's label (${text.left.toFixed(1)}–${text.right.toFixed(1)}px) reaches into its ` +
+              `padding (${inner.left.toFixed(1)}–${inner.right.toFixed(1)}px)`,
+          );
+        const next = cells[index + 1];
+        if (next !== undefined && next.left - box.right < gapXs - 0.5)
+          found.push(
+            `the ${name} tab is ${(next.left - box.right).toFixed(1)}px from the next — under --gap-xs (${gapXs}px)`,
+          );
+      });
+      const look = (button: Element): string => {
+        const style = getComputedStyle(button);
+        return `${style.borderTopColor} ${style.backgroundColor} ${style.color}`;
+      };
+      const selected = current[0];
+      if (selected !== undefined)
+        for (const button of buttons)
+          if (button !== selected) {
+            const a = getComputedStyle(button);
+            const b = getComputedStyle(selected);
+            if (a.borderTopColor === b.borderTopColor || a.color === b.color || a.backgroundColor === b.backgroundColor)
+              found.push(
+                `the ${button.getAttribute('data-machine-tab')} tab${
+                  button.getAttribute('data-machine-tab') === hoveredTab ? ', hovered,' : ''
+                } shares a colour with the selected tab (${look(button)} vs ${look(selected)}) — two tabs read as selected`,
+              );
+          }
+    }
+    return found;
+  }, hovered);
+  if (hovered !== null) await page.mouse.move(0, 0);
+  if (problems.length > 0) fail(`${where}: the Machines layout is off\n${problems.map(p => `   ${p}`).join('\n')}`);
+  machinesGeometryChecks += 1;
+  process.stdout.write(`📐 one left edge${hovered === null ? '' : ', tab bar fits'}: ${where}\n`);
 };
 
 function run(command: string, args: readonly string[]): void {
@@ -1685,28 +1996,37 @@ try {
           process.stdout.write(`📸 Settings removal disclosure ${viewport.name} -> ${removalTarget}\n`);
 
           // MACHINES (account model, O1): the section, each of its five tabs, and the Machines list the
-          // switcher opens. Six checks per viewport. The tab row is five equal columns, which is the
+          // switcher opens. The tab row is five equal columns, which is the
           // shape most likely to widen a 390px phone once a label is longer than its cell. A tab is waited
           // for by its PANEL, so a tab that a unit has filled is walked exactly like an empty frame.
+          //
+          // EVERY MACHINES FRAME IS ALSO A GEOMETRY CHECK (`assertMachinesGeometry`), and every capture here
+          // is taken with transitions finished. The tabs fade their colours, and a capture taken the instant
+          // a tab is clicked shows the one just left still selected: measured, 12 of 12 such captures carried
+          // the old tab's accent label, and 0 of 12 with `animations: 'disabled'`.
+          const settledShot = (target: string) => page.screenshot({ path: target, animations: 'disabled' });
           await selectSettingsSection('machines');
           const machinesSurface = settingsPage.locator('[data-machines-surface="harness-daemon"]');
           await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
+          await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
           for (const tab of ['credentials', 'profiles', 'components', 'settings'] as const) {
             await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
             await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
             await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
+            await assertMachinesGeometry(page, `the Machines ${tab} tab at ${viewport.name}`);
           }
           await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
           const machinesTarget = join(outDir, `settings-machines-${viewport.name}.png`);
-          await page.screenshot({ path: machinesTarget });
+          await settledShot(machinesTarget);
           process.stdout.write(`📸 Settings Machines ${viewport.name} -> ${machinesTarget}\n`);
 
           // THE SETTINGS TAB'S FLOWS (U19): four more checks per viewport, one per layout that differs —
           // Import again's "Found on" list with its long values, its Name step with a duplicate card, the
           // Clone source list with both disabled reasons (E27), and Install with its exact command.
           const machineFrame = async (what: string, file: string): Promise<void> => {
+            await assertMachinesGeometry(page, `the Machines ${what} at ${viewport.name}`);
             const target = join(outDir, `settings-machines-${file}-${viewport.name}.png`);
-            await page.screenshot({ path: target });
+            await settledShot(target);
             process.stdout.write(`📸 Settings Machines ${what} ${viewport.name} -> ${target}\n`);
             await assertNoSidewaysScroll(page, `the Machines ${what} at ${viewport.name}`);
           };
@@ -1739,8 +2059,9 @@ try {
           await machinesSurface.locator('[data-machine-switcher]').click();
           await machinesSurface.locator('[data-machines-list]').waitFor({ state: 'visible' });
           await assertNoSidewaysScroll(page, `the Machines list at ${viewport.name}`);
+          await assertMachinesGeometry(page, `the Machines list at ${viewport.name}`);
           const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
-          await page.screenshot({ path: machinesListTarget });
+          await settledShot(machinesListTarget);
           process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
 
           // RUNTIMES AND CREDENTIALS (account model U17): ten pages per viewport — the two lists, a runtime
@@ -1752,8 +2073,9 @@ try {
           // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
           const accountShot = async (name: string, label: string): Promise<void> => {
             await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
+            await assertMachinesGeometry(page, `the Machines ${label} at ${viewport.name}`);
             const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
-            await page.screenshot({ path: target });
+            await settledShot(target);
             process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
           };
           await machinesSurface.locator('[data-machines-list] button:has-text("Close")').click();
@@ -1801,6 +2123,19 @@ try {
           await accountShot('credential-sign-out', 'sign-out confirmation');
           await credentialsPanel.locator('[data-sign-out-keep]').click();
           await credentialsPanel.locator('[data-page-back]').click();
+          // ADD A LOGIN (U21): which tool, then the sign-in it starts. A stepper is the screen a person
+          // spends longest in, and these two were the only Credentials steps never measured.
+          await credentialsPanel.locator('[data-add-login]').first().click();
+          await credentialsPanel.locator('[data-add-login-step="tool"]').waitFor({ state: 'visible' });
+          await accountShot('add-login-tool', 'Add a login tool step');
+          await credentialsPanel.locator('[data-add-login-tool] input:not([disabled])').first().check();
+          await credentialsPanel.locator('[data-step-next]').click();
+          await credentialsPanel.locator('[data-add-login-step="start"]').waitFor({ state: 'visible' });
+          await accountShot('add-login-start', 'Add a login sign-in step');
+          await credentialsPanel.locator('[data-stepper-cancel]').click();
+          const stopAddLogin = credentialsPanel.locator('[data-stepper-stop]');
+          if ((await stopAddLogin.count()) > 0) await stopAddLogin.click();
+          await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
 
           await machinesSurface.locator('[data-machine-tab="profiles"]').click();
           const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
@@ -1861,6 +2196,27 @@ try {
           await componentsPanel.locator('[data-component-edit]').click();
           await componentsPanel.locator('[data-component-hidden]').waitFor({ state: 'visible' });
           await accountShot('component-settings-edit', 'settings edit with a hidden value');
+
+          // THE OTHER MACHINES (U21): one asleep or offline, and one not set up with the first run it
+          // links to. These are the states a person meets on a second machine, and each is its own
+          // layout — a status card above the tab panel, a set-up card instead of a list, and a stepper.
+          const openMachine = async (daemonId: string): Promise<Locator> => {
+            await settingsPage.locator('[data-machine-switcher]').click();
+            await settingsPage.locator('[data-machines-list]').waitFor({ state: 'visible' });
+            await settingsPage.locator(`[data-machine-choice="${daemonId}"]`).click();
+            const surface = settingsPage.locator(`[data-machines-surface="${daemonId}"]`);
+            await surface.waitFor({ state: 'visible' });
+            return surface;
+          };
+          const offlineSurface = await openMachine('unreachable-daemon');
+          await offlineSurface.locator('[data-machine-offline]').waitFor({ state: 'visible' });
+          await accountShot('offline', 'offline machine');
+          const newMachine = await openMachine('checking-daemon');
+          await newMachine.locator('[data-runtimes-not-set-up]').waitFor({ state: 'visible' });
+          await accountShot('not-set-up', 'machine not set up');
+          await newMachine.locator('[data-runtimes-not-set-up] a').click();
+          await newMachine.locator('[data-first-run-step]').first().waitFor({ state: 'visible' });
+          await accountShot('first-run', 'first run');
 
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh
@@ -2806,9 +3162,20 @@ try {
             : `a narrow mode reached the Settings block and left it part-way, which means it no longer ` +
               `skips Settings cleanly`),
       );
+    const owedGeometry = WALKS_SETTINGS ? MACHINES_GEOMETRY_CHECKS : 0;
+    if (machinesGeometryChecks !== owedGeometry)
+      fail(
+        `the run made ${machinesGeometryChecks} Machines geometry checks instead of the ${owedGeometry} this mode ` +
+          `owes — a Machines frame was added, removed or skipped, so either restore the call site or update ` +
+          `MACHINES_GEOMETRY_CHECKS and say in the pull request which frames the gate covers now`,
+      );
     if (WALKS_SETTINGS)
       process.stdout.write(
         `✅ settings sideways-scroll checks: ${sidewaysChecks}/${SETTINGS_SIDEWAYS_CHECKS} in ${SCHEME}\n`,
+      );
+    if (WALKS_SETTINGS)
+      process.stdout.write(
+        `✅ machines geometry checks: ${machinesGeometryChecks}/${MACHINES_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
   } finally {
     await browser.close();

@@ -177,7 +177,14 @@ function CredentialPage({
   return (
     <section className="flex min-w-0 flex-col gap-4" data-credential-page={credential.id}>
       <div>
-        <Button type="button" variant="ghost" size="sm" data-page-back="" onClick={onBack}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="kt-btn--flush-start"
+          data-page-back=""
+          onClick={onBack}
+        >
           <ChevronLeft size={16} aria-hidden="true" />
           Credentials
         </Button>

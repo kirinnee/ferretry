@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The Settings surfaces, proved to fit a 390px phone and a 1440px desktop in BOTH colour schemes.
+# The Settings surfaces, proved to fit a 390px phone and a 1440px desktop in BOTH colour schemes — and,
+# for Machines, to share one left edge, pad every panel by the token, and fit the tab bar.
 #
 # WHAT THIS GATE IS ACTUALLY FOR, because it is not "take some screenshots".
 # `packages/pwa/harness/screenshot.ts` has always been able to catch a panel whose widest value pushes
@@ -97,6 +98,11 @@ for scheme in dark light; do
   # running while the constant stays put.
   tally="$(grep '^✅ settings sideways-scroll checks: ' "${log}" || true)"
   [ -z "${tally}" ] && echo "❌ the ${scheme} run exited 0 without reporting its sideways-scroll tally" >&2 && echo "   That is not a pass: the harness prints that line only once both viewports finish, so either" >&2 && echo "   the run ended early or the tally assertion in harness/screenshot.ts was removed" >&2 && exit 1
+
+  # The Machines geometry tally (one left edge, padding, spacing, the tab bar), required for the same
+  # reason: the owner's "be careful of margins" is a gate only while its checks are still reached.
+  geometry="$(grep '^✅ machines geometry checks: ' "${log}" || true)"
+  [ -z "${geometry}" ] && echo "❌ the ${scheme} run exited 0 without reporting its Machines geometry tally" >&2 && echo "   The harness prints it only once both viewports finish; either the run ended early or the" >&2 && echo "   MACHINES_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
   # A zero-byte PNG is a capture that failed in a way Playwright did not raise. Cheap to check, and it
   # keeps the artifact honest: a reviewer who opens an empty file learns nothing and blames the viewer.

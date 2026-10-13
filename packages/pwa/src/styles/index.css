@@ -1149,6 +1149,20 @@ body {
   color: var(--fg);
 }
 
+/* A ghost "‹ Back" that STARTS A ROW: its glyph sits on the content edge, as the approved prototype draws
+   it, while the hover fill keeps its padding by reaching into the gutter. Without this the label sat a
+   padding plus a stroke right of every heading and card under it — the Machines geometry gate measures
+   it. Under the contrast families a ghost button has a visible border, so its BOX is what lines up. */
+.kt-btn--flush-start {
+  margin-inline-start: calc(-1 * (var(--pad-control-x) + var(--stroke-control)));
+}
+.kt-btn--sm.kt-btn--flush-start {
+  margin-inline-start: calc(-1 * (var(--pad-control-x) * 0.8 + var(--stroke-control)));
+}
+:root[data-theme^='contrast-'] .kt-btn--flush-start[data-variant='ghost'] {
+  margin-inline-start: 0;
+}
+
 /* ---- badge --------------------------------------------------------------- */
 .kt-badge {
   display: inline-flex;
