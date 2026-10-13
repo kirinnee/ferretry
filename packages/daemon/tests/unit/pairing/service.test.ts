@@ -52,7 +52,7 @@ function redeemDirect(
       code: attempt?.code ?? '',
       deviceName: attempt?.deviceName ?? '',
       deviceKey: options.deviceKey ?? DEVICE_KEY,
-      proven: options.proven ?? true,
+      prove: async () => options.proven ?? true,
     },
     { kind: 'direct', rateLimitKey: peer },
   );
@@ -69,7 +69,7 @@ function redeemRelayed(
       code: attempt.code ?? '',
       deviceName: attempt.deviceName ?? '',
       deviceKey: options.deviceKey ?? DEVICE_KEY,
-      proven: options.proven ?? true,
+      prove: async () => options.proven ?? true,
     },
     { kind: 'relay' },
   );

@@ -661,6 +661,22 @@ describe('BunApiServer socket upgrades', () => {
     should(await answered(anonymous)).have.property('code', 'unauthorized');
   });
 
+  it('should refuse an upgrade from an origin the daemon does not serve, before any socket route is asked', async () => {
+    // The direct carrier is a socket route, so this is what keeps a page on another site from opening a
+    // session on this daemon through the visitor's browser. An `accept` that ran would throw and answer
+    // 500; the refusal must come first, as the same 403 an HTTP request from that origin gets.
+    const request = await handshakeHost([recordingSocket({ refuse: new Error('accept must not run') })]);
+
+    const foreign = await request('/v1/stream', {
+      upgrade: 'websocket',
+      origin: 'https://evil.example',
+      authorization: `Bearer ${CREDENTIALS.admin}`,
+    });
+
+    should(foreign?.status).equal(403);
+    should(await answered(foreign)).have.property('code', 'origin_not_allowed');
+  });
+
   it('should switch the protocol for an authorized upgrade', async () => {
     // Arrange
     const request = await handshakeHost([recordingSocket()]);

@@ -22,7 +22,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
-import { daemonApiClient } from '../lib/api-client.ts';
+import { useDaemonClient } from '../lib/store.tsx';
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
@@ -60,7 +60,7 @@ export const migrateSessionWithDaemon = async (
   scope: DaemonSessionScope,
   input: MigrationTarget,
   requestId: string,
-  createClient: MigrateClientFactory = daemonApiClient,
+  createClient: MigrateClientFactory,
 ): Promise<SessionView> => {
   if (connection.daemonId !== scope.daemonId) throw new Error('migration scope must belong to the requested daemon');
   const client = await createClient(connection);
@@ -211,10 +211,17 @@ export function MigrateSheet({
   open,
   onClose,
   onMigrated,
-  migrateSession = migrateSessionWithDaemon,
+  migrateSession: injectedMigrate,
   accountPicker,
   usage,
 }: MigrateSheetProps) {
+  // Through the carrier-routed client unless a test hands one in: a plain-network client reaches no
+  // daemon at all, because a paired browser is answered only inside its own session.
+  const routedClient = useDaemonClient();
+  const migrateSession: MigrateSession =
+    injectedMigrate ??
+    ((target, sessionScope, input, requestId) =>
+      migrateSessionWithDaemon(target, sessionScope, input, requestId, routedClient));
   const { config, state } = view;
   const headingId = useId();
   const agentHelpId = useId();

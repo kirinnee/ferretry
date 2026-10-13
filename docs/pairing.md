@@ -299,10 +299,12 @@ Two different things are revocable and they are not the same act:
   because a session is authorized once, at its proof, and would otherwise outlive the grant. A request
   already in flight on a closing session is refused at the request boundary too: the dispatcher re-asks
   whether the device is still paired, and an unanswerable question is a refusal.
-- **Idle expiry** — a device that has not opened or renewed a session for **30 days** is removed the
-  next time the daemon looks (at boot, at a session's proof, at a device-list read) and must pair
-  again. `lastSeenAt` advances on every proof and renewal and reaches disk at most once an hour, so a
-  busy phone is not a write per request; `idleExpiresAt` on each row says when the grant ends.
+- **Idle expiry** — a device nobody has USED for **30 days** is removed the next time the daemon looks
+  (at boot, at a session's proof, at a device-list read) and must pair again. Use means a request the
+  page marks `presence` — visible and touched within five minutes, or just opened. A proof or a silent
+  renewal is not use, so a tab left open on a forgotten laptop cannot keep the device paired.
+  `lastSeenAt` reaches disk at most once an hour, so a busy phone is not a write per request;
+  `idleExpiresAt` on each row says when the grant ends.
 
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses
@@ -337,6 +339,11 @@ row states what its revoke will do before the press.
   exported, so a cross-site script or a malicious deploy cannot carry it away, but it can sign sessions
   for as long as it runs. Signed PWA releases ([design/zero-trust.md](design/zero-trust.md) D) narrow
   the deploy half; nothing here narrows the in-page half.
+- **An unanswered attempt can leave a grant nobody can name.** If a direct attempt's record left but its
+  answer never arrived, and the browser's next attempt on the relay is refused (the code was spent),
+  the daemon may hold a grant for a key the browser has but under a `deviceId` it never learned. Nothing
+  can use it — the browser saved no pairing — and it lapses with idle expiry after 30 days; the
+  refusal tells the reader to check the device list and revoke it sooner.
 - **Devices paired before device keys were deleted on upgrade.** A `devices.json` from before schema 2
   held only token digests, which no session can prove against, so the daemon drops those grants at boot
   and says so once. Each such device must pair again.

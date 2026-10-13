@@ -15,6 +15,7 @@
 
 import { beforeAll, describe, it } from 'bun:test';
 import {
+  MAX_SESSION_SECONDS,
   MAX_TUNNEL_BODY_BYTES,
   OLDER_APP_SENTENCE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
@@ -196,6 +197,14 @@ interface FakeTimer {
   cancelled: boolean;
 }
 
+/** One pairing attempt as the harness records it: its fields, and the verdict its own proof gave. */
+interface RecordedPairing {
+  readonly code: string;
+  readonly deviceName: string;
+  readonly deviceKey: string;
+  readonly proven: boolean;
+}
+
 interface Harness {
   readonly link: RelayLink;
   readonly wire: Wire;
@@ -203,7 +212,8 @@ interface Harness {
   /** Every upgrade the link asked the socket route table for. */
   readonly upgrades: ApiRequest[];
   /** Every pairing attempt the link handed to the redeemer. */
-  readonly pairings: SessionPairingAttempt[];
+  /** Each attempt the pairing service was handed, with its proof already run — as the service runs it. */
+  readonly pairings: RecordedPairing[];
   readonly timers: FakeTimer[];
   /** The device registry the link reports to, so a test can unpair the device a session belongs to. */
   readonly connections: LiveDeviceConnections;
@@ -214,11 +224,16 @@ function harness(
   knownToken = DEVICE_TOKEN,
   upgrade: (request: ApiRequest) => Promise<SocketUpgradeDecision> = async () => ({ outcome: 'unclaimed' }),
   redeem: (attempt: SessionPairingAttempt) => Promise<PairingRedemption> = async () => ({ kind: 'refused' }),
+  extra: {
+    readonly now?: () => number;
+    readonly seen?: (deviceId: string) => void;
+    readonly deviceKey?: (deviceId: string) => Promise<string | undefined>;
+  } = {},
 ): Harness {
   const sent = wire();
   const requests: ApiRequest[] = [];
   const upgrades: ApiRequest[] = [];
-  const pairings: SessionPairingAttempt[] = [];
+  const pairings: RecordedPairing[] = [];
   const timers: FakeTimer[] = [];
   const connections = new LiveDeviceConnections();
   const link = new RelayLink({
@@ -236,16 +251,23 @@ function harness(
       return await upgrade(request);
     },
     devices: {
-      deviceKey: async deviceId => (knownToken === DEVICE_TOKEN && deviceId === DEVICE_ID ? deviceKeyText : undefined),
-      seen: () => undefined,
+      deviceKey:
+        extra.deviceKey ??
+        (async deviceId => (knownToken === DEVICE_TOKEN && deviceId === DEVICE_ID ? deviceKeyText : undefined)),
+      seen: extra.seen ?? (() => undefined),
     },
     pairing: {
       redeemInSession: async attempt => {
-        pairings.push(attempt);
+        pairings.push({
+          code: attempt.code,
+          deviceName: attempt.deviceName,
+          deviceKey: attempt.deviceKey,
+          proven: await attempt.prove(),
+        });
         return await redeem(attempt);
       },
     },
-    clock: TEST_CLOCK,
+    clock: extra.now === undefined ? TEST_CLOCK : { now: extra.now },
     scheduler: {
       after: (milliseconds, action) => {
         const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
@@ -2785,5 +2807,224 @@ describe('the access lease', () => {
     const before = harnessed.wire.frames.length;
     renewal?.fire();
     should(harnessed.wire.frames.length).equal(before);
+  });
+});
+
+const sessionTwo = (): SessionId => {
+  const id = sessionIdFromBytes(new Uint8Array(16).fill(9));
+  if (id === null) throw new Error('unreachable: a 16-byte identifier');
+  return id;
+};
+
+/** The close the link sent last, as the rendezvous would read it. */
+const lastClose = (sent: Wire) => controlOf(sent.frames.at(-1));
+
+describe('a device proof is good for one session and one kind only', () => {
+  /*
+   * THE PROPERTY THE WHOLE DESIGN RESTS ON: a proof signs THIS session's transcript. The right key over
+   * another session's transcript must be refused exactly like a stranger — which only a test that
+   * signs a real, different transcript can show; a constant or a reused transcript would pass every
+   * case that signs the right one.
+   */
+  it('should refuse a proof by the right key lifted from another session', async () => {
+    const harnessed = harness();
+    const first = await keyedSession(harnessed, sessionOne());
+    const second = await openSession(harnessed.link, harnessed.wire, sessionTwo());
+    const transcriptOfFirst = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const lifted = await signDeviceProof(
+      crypto_,
+      deviceKey,
+      deviceAuthMessage(transcriptOfFirst, 'auth', DEVICE_ID, APP_SESSION),
+    );
+
+    await clientSend(harnessed.link, second.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof: lifted,
+    });
+
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+    should(harnessed.requests).be.empty();
+    void first;
+  });
+
+  it('should refuse a renewal signed over another session’s transcript, even with the right nonce', async () => {
+    const harnessed = harness();
+    const first = await keyedSession(harnessed, sessionOne());
+    const channel = await clientSend(harnessed.link, first.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    await openSession(harnessed.link, harnessed.wire, sessionTwo());
+    harnessed.timers.filter(timer => timer.milliseconds === 780_000 && !timer.cancelled)[0]?.fire();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const renewRecord = harnessed.wire.frames
+      .filter(frame => frame.kind === FRAME_KINDS.data && frame.sessionId.text === sessionOne().text)
+      .at(-1);
+    if (renewRecord === undefined) throw new Error('no renewal was asked');
+    const { messages } = await clientReadAll(
+      { ...harnessed.wire, frames: harnessed.wire.frames.filter(frame => frame.sessionId.text === sessionOne().text) },
+      first.channel,
+    );
+    const asked = messages.at(-1) as { nonce: string };
+    const otherTranscript = transcripts.get(sessionTwo().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(otherTranscript, asked.nonce));
+
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+  });
+
+  it('should refuse a proof of one kind presented as another', async () => {
+    const swaps = [
+      // An auth-kind proof on a stream record, and a stream-kind proof on an auth record.
+      { record: 't:stream', sign: (th: Uint8Array) => deviceAuthMessage(th, 'auth', DEVICE_ID, APP_SESSION) },
+      { record: 't:auth', sign: (th: Uint8Array) => deviceAuthMessage(th, 'stream', DEVICE_ID, APP_SESSION) },
+      // A pairing-label proof is not an authentication.
+      { record: 't:auth', sign: (th: Uint8Array) => devicePairMessage(th, deviceKeyText) },
+    ];
+    for (const swap of swaps) {
+      const harnessed = harness();
+      const opened = await keyedSession(harnessed);
+      const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+      const proof = await signDeviceProof(crypto_, deviceKey, swap.sign(transcript));
+      await clientSend(harnessed.link, opened.channel, {
+        t: swap.record === 't:stream' ? 'stream' : 'auth',
+        protocol: SESSION_PROTOCOL_ID,
+        deviceId: DEVICE_ID,
+        appSession: APP_SESSION,
+        proof,
+        ...(swap.record === 't:stream' ? { path: '/v1/events' } : {}),
+      });
+      should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+      should(harnessed.upgrades).be.empty();
+    }
+  });
+});
+
+describe('what keeps a device from idling out, and what keeps a session from living forever', () => {
+  const sealed = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 20));
+
+  it('should move the idle clock only for a request the page marked as a person’s', async () => {
+    const seen: string[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { seen: id => seen.push(id) });
+    const opened = await keyedSession(harnessed);
+    let channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    // Opening the session is not a person: a background tab does it by itself.
+    should(seen).be.empty();
+    channel = await clientSend(harnessed.link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    should(seen).be.empty();
+    await clientSend(harnessed.link, channel, { t: 'req', id: 2, method: 'GET', path: '/v1/sessions', presence: true });
+    should(seen).eql([DEVICE_ID]);
+  });
+
+  it('should not move the idle clock when a tab answers a renewal by itself', async () => {
+    const seen: string[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { seen: id => seen.push(id) });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    harnessed.timers.filter(timer => timer.milliseconds === 780_000)[0]?.fire();
+    await sealed();
+    const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+    should(harnessed.link.report().sessions).equal(1);
+    should(seen).be.empty();
+  });
+
+  it('should refuse a renewal for a device revoked or expired since the session opened', async () => {
+    let known = true;
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, {
+      deviceKey: async deviceId => (known && deviceId === DEVICE_ID ? deviceKeyText : undefined),
+    });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    harnessed.timers.filter(timer => timer.milliseconds === 780_000)[0]?.fire();
+    await sealed();
+    const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+    // Gone from the registry between the open and the renewal — revoked, or idle-expired.
+    known = false;
+    await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.authRejected });
+  });
+
+  it('should stop renewing at the session cap, and end the last lease exactly there', async () => {
+    let now = 0;
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { now: () => now });
+    const opened = await keyedSession(harnessed);
+    let channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const capMs = MAX_SESSION_SECONDS * 1_000;
+    // The credential window and stragglers arm their own timers; the lease's are the other two.
+    const leaseTimers = (from: number) => harnessed.timers.slice(from).filter(timer => timer.milliseconds !== 45_000);
+    let armed = leaseTimers(0).filter(timer => !timer.cancelled);
+    let renewal: FakeTimer | undefined = armed.find(timer => timer.milliseconds === 780_000);
+    let lastLease: FakeTimer | undefined = armed.find(timer => timer.milliseconds === 900_000);
+    // A tab that answers every renewal, as a real one does, until the daemon stops asking.
+    for (let round = 0; round < 100 && renewal !== undefined; round += 1) {
+      now += renewal.milliseconds;
+      renewal.fire();
+      await sealed();
+      const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+      // The client returns credit for what it read, as a real one does, so the daemon can keep asking.
+      await harnessed.link.receiveBinary(
+        encodeFrame({
+          kind: FRAME_KINDS.credit,
+          sessionId: sessionOne(),
+          sequence: 0,
+          payload: encodeCreditPayload(1),
+        }),
+      );
+      const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+      const before = harnessed.timers.length;
+      channel = await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+      armed = leaseTimers(before);
+      lastLease = armed.at(-1);
+      renewal = armed.length === 2 ? armed[0] : undefined;
+    }
+    // The last lease ends AT the cap, and nothing is left to ask for another.
+    should(lastLease?.milliseconds).equal(capMs - now);
+    should(
+      harnessed.timers.filter(timer => !timer.cancelled && timer !== lastLease && timer.milliseconds < 900_000),
+    ).be.empty();
+    lastLease?.fire();
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE });
+  });
+
+  it('should refuse a record that arrives after the lease ended, even before its timer has run', async () => {
+    let now = 0;
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { now: () => now });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    now = 900_000;
+    await clientSend(harnessed.link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    should(harnessed.requests).be.empty();
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE });
   });
 });
