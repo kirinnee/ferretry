@@ -154,11 +154,7 @@ describe('a runtime an environment credential authenticates, on a booted daemon'
     const opened = await world().storage.open();
     await opened.storage.close();
     await mkdir(join(home, 'config'), { recursive: true });
-    await writeFile(
-      join(home, 'config', 'daemon.json'),
-      JSON.stringify({ host: '127.0.0.1', port, fleet: { prepareDefaults: false } }),
-      { mode: 0o600 },
-    );
+    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
     await seedProfiledFleet(home);
     const shutdown = new Promise<void>(resolve => {
       release = resolve;

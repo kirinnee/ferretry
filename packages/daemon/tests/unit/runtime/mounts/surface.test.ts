@@ -151,9 +151,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     exportBundle: async () => {
       throw new Error('not exercised by the surface inventory');
     },
-    firstRunAtBoot: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
     executors: {
       setup: {
         describe: async () => {

@@ -63,8 +63,10 @@ export const spawnHarnessLoginChild: HarnessLoginSpawn = (spec: HarnessLoginChil
   // Both pumps are started now and never awaited by the caller: a stream nobody drains fills its pipe
   // and the child blocks writing to it, which would look exactly like a harness that printed nothing.
   // A pump that throws is a stream that ended abruptly, which the exit code already reports.
-  void pump(child.stdout as ReadableStream<Uint8Array> | undefined, spec.onLine).catch(() => undefined);
-  void pump(child.stderr as ReadableStream<Uint8Array> | undefined, spec.onLine).catch(() => undefined);
+  const drained = Promise.all([
+    pump(child.stdout as ReadableStream<Uint8Array> | undefined, spec.onLine).catch(() => undefined),
+    pump(child.stderr as ReadableStream<Uint8Array> | undefined, spec.onLine).catch(() => undefined),
+  ]);
 
   return {
     write: async value => {
@@ -95,7 +97,13 @@ export const spawnHarnessLoginChild: HarnessLoginSpawn = (spec: HarnessLoginChil
         // already gone
       }
     },
-    exited: child.exited,
+    // Settled only once BOTH pipes have been read to the end. The exit can be reported before the last
+    // line is: a Codex device login that says device codes are unavailable and exits at once would
+    // otherwise be read as "printed nothing", and the switch to a link would never happen.
+    exited: child.exited.then(async code => {
+      await drained;
+      return code;
+    }),
   };
 };
 

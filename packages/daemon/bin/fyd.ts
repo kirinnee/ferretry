@@ -78,6 +78,7 @@ import {
   rolloutFiles,
   runCredentialHarness,
 } from '../src/adapters/fleet-credentials/credential-facts.ts';
+import { deliverCodexCallback } from '../src/adapters/fleet-login/callback-delivery.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import {
   FileSessionForkReceiptStore,
@@ -306,7 +307,7 @@ import {
   credentialPassiveUsage,
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
-import { bootFirstRunSentence, createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
+import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
@@ -469,6 +470,7 @@ import {
   QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
   RETIRED_ACCOUNT_MODEL_NOTICE,
+  RETIRED_FLEET_BLOCK_NOTICE,
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
@@ -4701,6 +4703,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     clock: millisecondClock,
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     spawn: spawnHarnessLoginChild,
+    deliverCallback: deliverCodexCallback,
     environment: process.env,
     timer: harnessLoginTimer,
     confirmChange: async password => await grants.confirmChange(password),
@@ -6463,9 +6466,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // be said or they are left believing the opposite.
   for (const failure of harnessOverrideFailures(harnesses)) world.notices.state(failure);
   if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
-  // The one retired daemon.json key that is tolerated rather than refused: said once, every boot it is
-  // still there, so the operator can delete it.
+  // The two retired daemon.json keys that are tolerated rather than refused: each said once, every boot
+  // it is still there, so the operator can delete it.
   if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
+  if (config.retiredFleetBlock) world.notices.state(RETIRED_FLEET_BLOCK_NOTICE);
 
   const usage = await world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
@@ -6480,7 +6484,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     );
   const idleExpired = await pairing.subsystem.expireIdleDevices();
   if (idleExpired > 0)
-    world.notices.state(`${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for 30 days ${idleExpired === 1 ? 'was' : 'were'} removed`);
+    world.notices.state(
+      `${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for 30 days ${idleExpired === 1 ? 'was' : 'were'} removed`,
+    );
   /** Which key a session must prove, answered by the pairing state machine that owns the grants. */
   const sessionDevices: RelayDeviceDirectory = {
     deviceKey: async deviceId => await pairing.subsystem.deviceKey(deviceId),
@@ -6567,20 +6573,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // self-check that could not run is reported by the next one's freshness, and refusing to serve
   // because the daemon could not measure itself is strictly worse than serving and saying so.
   world.notices.step('subsystems mounted');
-  /**
-   * The first run this host gets for starting a daemon: its own Claude Code and Codex setup, imported,
-   * with each login shared in place rather than copied (docs/design/account-model.md §4.3).
-   *
-   * AFTER THE MOUNTS, because the import is the setup subsystem's own executor and this is not a
-   * second one. BEFORE THE BIND, so the first caller that asks what this daemon can launch is answered
-   * by a published manifest rather than by a race. `fleet.prepareDefaults: false` switches it off.
-   *
-   * A FAILURE NEVER REFUSES THE BOOT: every ending is a sentence, said as a `state` so no log level can
-   * hide it — including a `config.yaml` still in the old account format, which is left untouched.
-   */
-  if (config.fleet.prepareDefaults) {
-    world.notices.state(bootFirstRunSentence(await subsystems.fleetSetup.firstRunAtBoot()));
-  }
   /**
    * The grants, read BEFORE the address is bound.
    *

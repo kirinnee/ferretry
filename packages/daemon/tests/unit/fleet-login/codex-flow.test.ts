@@ -9,10 +9,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  CODEX_LINK_LOGIN_ARGV,
+  CODEX_LINK_START,
   CODEX_LOGIN_ARGV,
   CODEX_LOGIN_START,
   CODEX_VERIFICATION_HOSTS,
   type CodexLoginStage,
+  codexAutomaticLink,
+  codexDelivering,
   codexEnding,
   codexProjection,
   decideCodexSubmit,
@@ -42,6 +46,7 @@ const BASE = {
 
 const awaiting: CodexLoginStage = { stage: 'awaiting-approval', verificationUrl: CODEX_URL, userCode: USER_CODE };
 const complete: CodexLoginStage = { stage: 'complete' };
+const PASTE = { code: 'pasted-TESTONLY' } as const;
 const failed: CodexLoginStage = {
   stage: 'failed',
   reason: 'this host’s codex did not offer a sign-in that can be driven from a browser',
@@ -199,7 +204,7 @@ describe('observeCodexLine', () => {
 describe('decideCodexSubmit', () => {
   it('should refuse every submission, because a device grant has no return trip', () => {
     // Act
-    const actual = decideCodexSubmit(awaiting);
+    const actual = decideCodexSubmit(awaiting, PASTE);
 
     // Assert
     should(actual).have.property('decision', 'refused');
@@ -210,7 +215,7 @@ describe('decideCodexSubmit', () => {
 
   it('should refuse a submission before the code is even published, and say the same thing', () => {
     // Act
-    const actual = decideCodexSubmit(CODEX_LOGIN_START);
+    const actual = decideCodexSubmit(CODEX_LOGIN_START, PASTE);
 
     // Assert
     should(actual).have.property('decision', 'refused');
@@ -218,7 +223,7 @@ describe('decideCodexSubmit', () => {
 
   it('should conflict on a finished sign-in rather than explaining the device grant again', () => {
     // Act
-    const actual = decideCodexSubmit(complete);
+    const actual = decideCodexSubmit(complete, PASTE);
 
     // Assert
     should(actual).deepEqual({ decision: 'conflict', reason: 'this login has already finished' });
@@ -226,7 +231,7 @@ describe('decideCodexSubmit', () => {
 
   it('should conflict on a failed sign-in and carry the reason it failed', () => {
     // Act
-    const actual = decideCodexSubmit(failed);
+    const actual = decideCodexSubmit(failed, PASTE);
 
     // Assert
     should(actual)
@@ -243,7 +248,7 @@ describe('decideCodexSubmit', () => {
       failed,
     ];
 
-    for (const stage of stages) should(decideCodexSubmit(stage)).not.have.property('decision', 'write');
+    for (const stage of stages) should(decideCodexSubmit(stage, PASTE)).not.have.property('decision', 'write');
   });
 });
 
@@ -377,5 +382,96 @@ describe('a one-time code nobody approved', () => {
       remedy: 'Start a new sign-in to get a new code, then enter it on the provider’s page.',
       lastCode: 'expired',
     });
+  });
+});
+
+const LINK_URL =
+  'https://auth.openai.com/oauth/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=STATE-TESTONLY';
+const callback = { port: 1455, path: '/auth/callback', state: 'STATE-TESTONLY' };
+const linkAwaiting: CodexLoginStage = { stage: 'awaiting-callback', verificationUrl: LINK_URL, callback };
+
+describe('Codex’s link sign-in stages', () => {
+  it('should run Codex’s ordinary login, with no flag, for a link', () => {
+    should(CODEX_LINK_LOGIN_ARGV).deepEqual(['login']);
+    should(CODEX_LINK_START).deepEqual({ stage: 'linking' });
+    should(codexAutomaticLink()).deepEqual({ stage: 'linking', automatic: true });
+    should(codexDelivering()).deepEqual({ stage: 'finishing' });
+  });
+
+  it('should move a device flow on when Codex could not get a device code, before or after part of one', () => {
+    const lines = [
+      'Error logging in with device code: device code login is not enabled for this Codex server.',
+      'Error logging in with device code: device code request failed with status 403 Forbidden',
+      'Error logging in with device code: failed to request device code: error sending request',
+    ];
+
+    for (const line of lines) {
+      should(observeCodexLine(CODEX_LOGIN_START, line)).deepEqual({ stage: 'device-unavailable' });
+      should(observeCodexLine({ stage: 'collecting', verificationUrl: CODEX_URL }, line)).deepEqual({
+        stage: 'device-unavailable',
+      });
+    }
+  });
+
+  it('should publish the authorize URL and its callback, keeping why the link was chosen', () => {
+    should(observeCodexLine(CODEX_LINK_START, LINK_URL)).deepEqual(linkAwaiting);
+    should(observeCodexLine(codexAutomaticLink(), LINK_URL)).deepEqual({ ...linkAwaiting, automatic: true });
+  });
+
+  it('should drop a link line whose host or callback this flow cannot use', () => {
+    const untrusted = LINK_URL.replace('auth.openai.com', 'auth.example.com');
+    const noCallback = 'https://auth.openai.com/oauth/authorize?state=abc';
+
+    should(observeCodexLine(CODEX_LINK_START, 'Starting local login server on http://localhost:1455.')).equal(
+      CODEX_LINK_START,
+    );
+    should(observeCodexLine(CODEX_LINK_START, untrusted)).equal(CODEX_LINK_START);
+    should(observeCodexLine(CODEX_LINK_START, noCallback)).equal(CODEX_LINK_START);
+    should(observeCodexLine(linkAwaiting, LINK_URL)).equal(linkAwaiting);
+  });
+
+  it('should hold Codex saying its ports are taken, and end on it with the cause', () => {
+    const busy = observeCodexLine(CODEX_LINK_START, 'Error logging in: Port 127.0.0.1:1457 is already in use');
+
+    should(busy).deepEqual({ stage: 'linking', portsBusy: true });
+    should(codexEnding(busy, { exit: 1 })).match({ reason: /ports 1455 and 1457/u });
+    should(codexEnding(busy, { exit: 0 })).be.undefined();
+    should(codexEnding(busy, 'window')).be.undefined();
+    should(codexEnding(CODEX_LINK_START, { exit: 1 })).be.undefined();
+  });
+
+  it('should end on the address only when the address is why', () => {
+    should(codexEnding(linkAwaiting, 'window')).match({ lastCode: 'expired' });
+    should(codexEnding(linkAwaiting, { exit: 1 })).be.undefined();
+    should(codexEnding({ stage: 'finishing' }, { exit: 1 })).match({ lastCode: 'rejected' });
+    should(codexEnding({ stage: 'finishing' }, { exit: 0 })).be.undefined();
+    should(codexEnding({ stage: 'finishing' }, 'window')).be.undefined();
+  });
+
+  it('should decide what a person sent to a link flow by stage', () => {
+    const address = 'http://localhost:1455/auth/callback?code=c-TESTONLY&state=STATE-TESTONLY';
+
+    should(decideCodexSubmit(awaiting, { method: 'link' })).deepEqual({ decision: 'switch' });
+    should(decideCodexSubmit(CODEX_LOGIN_START, { method: 'link' })).deepEqual({ decision: 'switch' });
+    should(decideCodexSubmit(linkAwaiting, { method: 'link' })).have.property('decision', 'conflict');
+    should(decideCodexSubmit(linkAwaiting, { code: address })).have.property('decision', 'deliver');
+    should(decideCodexSubmit(linkAwaiting, { code: 'nope' })).have.property('decision', 'refused');
+    should(decideCodexSubmit({ stage: 'finishing' }, { code: address })).have.property('decision', 'conflict');
+    should(decideCodexSubmit({ stage: 'device-unavailable' }, { code: address })).match({
+      decision: 'refused',
+      reason: /has not shown its link yet/u,
+    });
+  });
+
+  it('should project the link stages in Codex’s own state names, and never the callback', () => {
+    should(codexProjection(BASE, linkAwaiting)).deepEqual({
+      harness: 'codex',
+      ...BASE,
+      state: 'awaiting-callback',
+      verificationUrl: LINK_URL,
+    });
+    should(codexProjection(BASE, { ...linkAwaiting, automatic: true })).have.property('deviceCode', 'unavailable');
+    should(codexProjection(BASE, { stage: 'finishing' })).deepEqual({ harness: 'codex', ...BASE, state: 'finishing' });
+    should(codexProjection(BASE, CODEX_LINK_START)).have.property('state', 'starting');
   });
 });

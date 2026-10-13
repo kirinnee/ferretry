@@ -107,10 +107,13 @@ outstanding around it rather than restating either here.
 credentials, components, profiles and runtimes, and a runtime is one credential plus one profile. The
 contract is [docs/account-model.md](docs/account-model.md); the why is
 [docs/design/account-model.md](docs/design/account-model.md). **A credential is stored once and never
-copied**, and the daemon's first run is an import of the host's own Claude Code and Codex setup with
-`store: host`, so the login is shared in place and never seeded. A `config.yaml` that is not
-`version: 2` is **refused, never converted** — the sentence tells the person to move it aside and
-restart. There is no switch, no old reader and no migration: the old account system is deleted.
+copied**. **Starting a daemon imports nothing**: a machine is "not set up" until somebody chooses.
+The PWA opens the first-run stepper by itself (after pairing, and on Settings › Machines),
+`fy daemon setup` asks the same questions at a terminal, and `fy daemon import claude|codex` is the
+no-questions verb for scripts. Each import is of the host's own setup with `store: host`, so the
+login is shared in place and never seeded. A `config.yaml` that is not `version: 2` is **refused,
+never converted** — the sentence tells the person to move it aside and set the machine up again.
+There is no switch, no old reader and no migration: the old account system is deleted.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one

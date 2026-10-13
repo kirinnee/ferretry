@@ -1056,6 +1056,27 @@ describe('SettingsPage Machines section', () => {
     await view.unmount();
   });
 
+  it('opens the first run by itself for a machine that is not set up, and leaves a flow the link already names', async () => {
+    const fresh: FleetClientFactory = async () =>
+      machineClient(machineView({ name: 'alpha-host', setUp: false, runtimeCount: 0 }));
+
+    // A plain Machines link: the first run opens, on this page's own machine, by moving only the hash.
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/runtimes');
+    const callbacks = calls();
+    const view = await mount(page({ createMachineClient: fresh, calls: callbacks }));
+    await settle();
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings/setup');
+    expect(callbacks.navigated).toEqual([]);
+    await view.unmount();
+
+    // A link that already names a way to set it up (Clone) is somebody's own choice: left alone.
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/settings/clone');
+    const cloning = await mount(page({ createMachineClient: fresh }));
+    await settle();
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings/clone');
+    await cloning.unmount();
+  });
+
   it('says it cannot show machines when the page has no way to reach them', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines');
     const view = await mount(page());

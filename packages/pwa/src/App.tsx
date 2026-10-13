@@ -35,6 +35,7 @@ import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.t
 import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
+import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -365,7 +366,12 @@ function ConnectionPicker() {
       selectedDaemonId={snapshot.selectedDaemonId}
       onPair={async seed => {
         const connection = await store.pair(seed);
-        navigate(daemonSessionsPath(connection.daemonId));
+        // A machine that is not set up opens its first run straight away; anything else, its sessions.
+        navigate(
+          await landingAfterPairing(store.connections.select(connection.daemonId), daemon =>
+            store.clients.client(daemon),
+          ),
+        );
       }}
       onSelect={daemonId => {
         store.connections.select(daemonId);
@@ -484,7 +490,11 @@ function SetupGuide() {
       onOpenFleet={() => {
         // The selected daemon IS the one just paired: adding a connection
         // selects it. Never a hardcoded prefix — the app's own route helper.
-        if (selected !== null) navigate(daemonSessionsPath(selected));
+        // A machine that is not set up opens its first run instead of its sessions.
+        if (selected !== null)
+          void landingAfterPairing(store.connections.select(selected), daemon => store.clients.client(daemon)).then(
+            navigate,
+          );
       }}
       renderPairing={({ onPaired }) => (
         <PairingScreen
