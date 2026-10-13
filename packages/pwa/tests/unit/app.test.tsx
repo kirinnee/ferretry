@@ -3311,4 +3311,73 @@ describe('App', () => {
     expect(must(view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe('Set up');
     await view.unmount();
   });
+
+  it('registers the release checker and shows its notice when an update was refused', async () => {
+    // Arrange: a secure page whose active worker answers every check with a refusal.
+    const undo: (() => void)[] = [];
+    const registered: string[] = [];
+    const active = {
+      scriptURL: '/sw.verified.js',
+      postMessage: (message: { type?: string }, [port]: { postMessage?: never }[]) => {
+        const reply =
+          message.type === 'fy-release-check'
+            ? { type: 'fy-release-outcome', outcome: { status: 'refused', refusal: 'bad-signature', hadRelease: true } }
+            : null;
+        queueMicrotask(() =>
+          (port as unknown as { onmessage?: (event: { data: unknown }) => void }).onmessage?.({ data: reply }),
+        );
+      },
+    };
+    const registration = {
+      active,
+      installing: null,
+      waiting: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      update: async () => undefined,
+    };
+    class Channel {
+      readonly port1: { onmessage: ((event: { data: unknown }) => void) | null; close: () => void } = {
+        onmessage: null,
+        close: () => undefined,
+      };
+      get port2() {
+        return this.port1;
+      }
+    }
+    undo.push(patchGlobal(globalThis, 'isSecureContext', true));
+    undo.push(patchGlobal(globalThis, 'MessageChannel', Channel));
+    undo.push(
+      patchGlobal(navigator, 'serviceWorker', {
+        controller: {},
+        ready: Promise.resolve(registration),
+        register: async (url: string) => {
+          registered.push(url);
+          return registration;
+        },
+        getRegistration: async () => registration,
+        addEventListener: () => undefined,
+      }),
+    );
+    try {
+      setPath('/');
+
+      // Act
+      const view = await mountShell(<App />);
+      await settleUntil(
+        () => view.container.querySelector('[data-release-notice]') !== null,
+        'the release notice to appear',
+        interact,
+      );
+
+      // Assert
+      expect(registered).toEqual(['/sw.verified.js']);
+      expect(must(view.container.querySelector('[data-release-notice]'), 'the release notice').textContent).toContain(
+        'An update failed verification',
+      );
+      await view.unmount();
+    } finally {
+      while (undo.length > 0) undo.pop()?.();
+    }
+  });
 });

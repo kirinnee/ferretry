@@ -107,6 +107,9 @@ or `non-trusted`):
 - **Trusted** actions pin a major tag (`actions/checkout@v5`). Currently trusted:
   `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact`,
   `cachix/install-nix-action`.
+- **A job that holds a long-lived secret** pins EVERY action it runs to an exact SHA, trusted ones
+  included (`pwa-pages.yaml`, whose jobs hold the release signing key and the Cloudflare token). A
+  tag can be moved; a SHA cannot.
 - **Everything else** pins an exact 40-character SHA with its tag as a trailing comment:
 
   ```yaml

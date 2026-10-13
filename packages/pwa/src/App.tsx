@@ -74,11 +74,17 @@ import {
   useNotificationControls,
   useNotificationWatch,
 } from './hooks/use-notifications.ts';
-import { useServiceWorkerUpdate } from './hooks/use-service-worker-update.ts';
+import { browserReleaseAsk, releaseContainer, useReleaseIntegrity } from './hooks/use-release-integrity.ts';
+import {
+  type ServiceWorkerUpdateEnvironment,
+  canRegister,
+  useServiceWorkerUpdate,
+} from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
+import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import type {
   NotificationPermissionState,
   NotificationRegistrationLike,
@@ -116,6 +122,7 @@ import { CommandPalette, type PaletteSettingsSource } from './shell/command-pale
 import { paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ThemeToggle } from './shell/theme-toggle.tsx';
+import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
 
 /**
  * Wraps a one-shot document-lifetime side effect, latching only on SUCCESS.
@@ -1318,19 +1325,45 @@ export function AppShell() {
     installPortraitLockOnce();
   }, []);
 
+  /*
+   * THE SERVICE WORKER IS THE RELEASE CHECKER (`src/worker/service-worker.ts`,
+   * `docs/pwa-release-signing.md`). It is registered wherever a browser allows one, and the page
+   * then only ever ASKS it things: `useReleaseIntegrity` hears whether an update was installed or
+   * refused, and audits any new worker the browser starts installing.
+   */
+  const workerContainer = useMemo(
+    () =>
+      canRegister(typeof navigator === 'undefined' ? undefined : navigator, globalThis.isSecureContext)
+        ? (navigator.serviceWorker as unknown as ServiceWorkerUpdateEnvironment['container'])
+        : null,
+    [],
+  );
   const workerEnvironment = useMemo(
     () => ({
-      release: 'static',
-      // Registration remains off until the build owns a generated worker asset.
-      container: null,
+      release: RELEASE_WORKER_RELEASE,
+      container: workerContainer,
       doc: document,
       win: window,
       reload: () => window.location.reload(),
       onError: () => undefined,
     }),
-    [],
+    [workerContainer],
   );
-  const { updateReady, applyUpdate, raiseRecovery } = useServiceWorkerUpdate(workerEnvironment);
+  const { updateReady, applyUpdate, raiseRecovery, raiseUpdate } = useServiceWorkerUpdate(workerEnvironment);
+  const releaseEnvironment = useMemo(() => {
+    const container = releaseContainer({
+      navigator: workerContainer === null ? undefined : navigator,
+      secure: globalThis.isSecureContext,
+      MessageChannel: globalThis.MessageChannel,
+    });
+    return {
+      container,
+      doc: document,
+      ask: browserReleaseAsk(globalThis.MessageChannel),
+      onUpdateReady: raiseUpdate,
+    };
+  }, [raiseUpdate, workerContainer]);
+  const release = useReleaseIntegrity(releaseEnvironment);
 
   const notificationSurface = useMemo(() => browserNotificationSurface(navigate, setPermission), [navigate]);
   const notificationControlsHost = useMemo<NotificationControlsHost>(
@@ -1531,6 +1564,11 @@ export function AppShell() {
 
   return (
     <NotificationControlsContext.Provider value={notificationControlsHost}>
+      {release.notice === null ? null : (
+        <div className="fixed inset-x-0 top-[var(--app-top,0px)] z-50">
+          <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
+        </div>
+      )}
       {/*
         FIRST IN DOM ORDER, so the Tab that follows a route change lands on the
         new page's own chrome rather than back at the top of the old one.

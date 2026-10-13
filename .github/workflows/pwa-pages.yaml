@@ -9,20 +9,119 @@ concurrency:
   group: pwa-pages-production
   cancel-in-progress: false
 
+# THREE JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD (docs/pwa-release-signing.md).
+#
+#   build   installs dependencies and builds the release. Holds NO secret: any dependency's install
+#           script or build plugin runs here, so NOTHING it produces is trusted downstream.
+#   sign    holds the signing key, and nothing else. It installs nothing and runs no build — only
+#           openssl and jq, through scripts/ci/sign-pwa-release.sh. Before it signs, that script
+#           proves the list says only what THIS run decided (scripts/ci/check-pwa-release.sh): this
+#           run's number and commit, the checkout's next key or none, no Pages server code, and
+#           exactly the built files. A compromised build therefore cannot get a real signature on an
+#           attacker's next key or a frozen sequence; at worst it spoils one release's app code.
+#   deploy  holds only the Cloudflare token. It runs the same check and proves the signature
+#           (scripts/ci/verify-pwa-release.sh) before it uploads a byte.
+#
+# Every action in this workflow is pinned to an exact SHA, because two of its jobs hold long-lived
+# secrets (docs/standards/ci-cd/index.md).
 jobs:
+  build:
+    name: Build PWA release
+    # Production is main-only: `push` is already filtered to main, and this guard stops a
+    # workflow_dispatch on any other ref from deploying it. Every job repeats it.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - name: Build static PWA bundle
+        env:
+          # What orders releases: a counter GitHub owns and only ever raises. A re-run keeps its run's
+          # number, so re-running an old run republishes an OLD release, which installed copies refuse.
+          # Renaming this workflow file restarts the counter at 1 — see docs/pwa-release-signing.md.
+          PWA_RELEASE_SEQUENCE: ${{ github.run_number }}
+        run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pwa-dist
+          path: packages/pwa/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign PWA release
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    # The release signing key lives ONLY in this protected environment. Restrict its deployment
+    # branches to `main` in the repository settings, so no other workflow or ref can read the secret.
+    environment: pwa-release
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      # Only for scripts/ci/sign-pwa-release.sh and the committed public key; nothing is installed.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pwa-dist
+          path: ${{ runner.temp }}/dist
+      # An installed copy of the app refuses any release it cannot verify, so an unsigned deploy
+      # would strand every reader on their current version. A missing secret fails here instead.
+      # The key reaches the signer on STDIN: `printf` is a shell builtin, so no process's arguments
+      # carry it, and the signer itself runs without it in its environment.
+      - name: Sign the release list
+        env:
+          PWA_RELEASE_SIGNING_KEY: ${{ secrets.PWA_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z ${PWA_RELEASE_SIGNING_KEY} ]]; then
+            echo "❌ PWA_RELEASE_SIGNING_KEY is not set; refusing to deploy an unsigned PWA release" >&2
+            echo "   Add it to the protected 'pwa-release' environment (docs/pwa-release-signing.md)." >&2
+            exit 1
+          fi
+          printf '%s\n' "${PWA_RELEASE_SIGNING_KEY}" |
+            env -u PWA_RELEASE_SIGNING_KEY ./scripts/ci/sign-pwa-release.sh \
+              --sequence "${GITHUB_RUN_NUMBER}" --commit "${GITHUB_SHA}" "${RUNNER_TEMP}/dist"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pwa-release-signature
+          path: ${{ runner.temp }}/dist/release-manifest.sig
+          if-no-files-found: error
+          retention-days: 1
+
   deploy:
-    name: Build and Deploy PWA
+    name: Deploy PWA
+    needs: [build, sign]
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       deployments: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31
-      - name: Build static PWA bundle
-        run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pwa-dist
+          path: packages/pwa/dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pwa-release-signature
+          path: ${{ runner.temp }}/signature
+      - name: Verify the signed release
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/signature/release-manifest.sig" packages/pwa/dist/release-manifest.sig
+          ./scripts/ci/check-pwa-release.sh --sequence "${GITHUB_RUN_NUMBER}" --commit "${GITHUB_SHA}" packages/pwa/dist
+          ./scripts/ci/verify-pwa-release.sh packages/pwa/dist
       # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action
       # installs wrangler with whichever package manager it detects, picks bun from this repository's
       # lockfile, and then cannot find bun — it runs outside the nix shell that provides it. Calling

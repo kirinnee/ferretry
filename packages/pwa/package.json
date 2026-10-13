@@ -29,12 +29,13 @@
     "./features/pairing-screen": "./src/features/pairing/pairing-screen.tsx",
     "./features/task-dag-graph": "./src/features/tasks/task-dag-graph.tsx",
     "./features/warden-config-card": "./src/features/warden/warden-config-card.tsx",
-    "./session-screens.css": "./src/components/session-screens.css"
+    "./session-screens.css": "./src/components/session-screens.css",
+    "./worker": "./src/worker/service-worker.ts"
   },
   "types": "./src/lib/index.ts",
   "scripts": {
     "dev": "bun run build:fy-render-shell && vite",
-    "build": "bun run build:fy-render-shell && vite build",
+    "build": "bun run build:fy-render-shell && vite build && bun run scripts/build-release.ts",
     "build:fy-render-shell": "bun run scripts/build-fy-render-libs.ts",
     "preview": "vite preview"
   },
