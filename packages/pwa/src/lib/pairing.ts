@@ -1,10 +1,10 @@
 import { type DaemonCarrier, PAIRING_FRAGMENT_PATTERN, parsePairingFragment } from '@ferretry/protocol';
 import { type ConnectionMethod, publishedConnectionMethods } from '@ferretry/relay';
 import {
+  type DaemonConnection,
   daemonBaseUrl,
   daemonConnection,
   daemonId,
-  type DaemonConnection,
   type RelayCarrier,
 } from './daemon-connection.ts';
 
@@ -27,7 +27,8 @@ export interface PairingSeed {
 
 export interface PairingResult {
   readonly daemonId: string;
-  readonly deviceToken: string;
+  /** Which grant this browser now holds. An identity, not a credential: the device KEY proves it. */
+  readonly deviceId: string;
   readonly carriers: readonly DaemonCarrier[];
 }
 
@@ -146,7 +147,7 @@ const publishesRendezvous = (published: readonly ConnectionMethod[], crossed: Re
 
 /**
  * Binds the daemon's pairing response to the fingerprint carried out of band
- * by the pairing link before the PWA stores or uses its device token.
+ * by the pairing link before the PWA stores or uses the grant it was issued.
  *
  * TWO CHECKS, AND THE SECOND ONE ONLY EXISTS FOR A RELAYED REDEMPTION.
  *
@@ -191,7 +192,7 @@ export const pairedDaemonConnection = (
   return daemonConnection({
     daemonId: actualDaemonId,
     baseUrl: seed.daemonUrl,
-    deviceToken: result.deviceToken,
+    deviceId: result.deviceId,
     carriers: published.length === 0 ? [{ kind: 'direct', daemonUrl: seed.daemonUrl }] : published,
   });
 };

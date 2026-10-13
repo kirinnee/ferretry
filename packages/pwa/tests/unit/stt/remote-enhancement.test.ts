@@ -10,7 +10,7 @@ import { MAX_DICTIONARY_TERMS, MAX_USER_CONTEXT_CHARS } from '../../../src/lib/s
 import {
   MAX_REMOTE_ENHANCEMENT_TEXT_CHARS,
   REMOTE_ENHANCEMENT_TIMEOUT_MS,
-  RemoteEnhancementError,
+  type RemoteEnhancementError,
   type RemoteEnhancementFetch,
   type RemoteEnhancementInput,
   requestRemoteEnhancement,
@@ -20,12 +20,12 @@ import {
 const alpha = daemonConnection({
   daemonId: 'daemon-alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'token-alpha',
+  deviceId: 'token-alpha',
 });
 const beta = daemonConnection({
   daemonId: 'daemon-beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'token-beta',
+  deviceId: 'token-beta',
 });
 
 interface Call {
@@ -83,7 +83,7 @@ describe('requestRemoteEnhancement', () => {
 
     const call = calls[0] as Call;
     should(call.url).equal(`https://alpha.example.test${STT_ENHANCE_PATH}`);
-    should(new Headers(call.init.headers).get('authorization')).equal('Bearer token-alpha');
+    should(new Headers(call.init.headers).has('authorization')).be.false();
     should(new Headers(call.init.headers).get('content-type')).equal('application/json');
   });
 
@@ -92,7 +92,7 @@ describe('requestRemoteEnhancement', () => {
     await requestRemoteEnhancement(beta, ask({ fetchImpl }));
 
     should(calls[0]?.url).startWith('https://beta.example.test');
-    should(new Headers((calls[0] as Call).init.headers).get('authorization')).equal('Bearer token-beta');
+    should(new Headers((calls[0] as Call).init.headers).has('authorization')).be.false();
   });
 
   it('sends the vocabulary but never a credential', async () => {

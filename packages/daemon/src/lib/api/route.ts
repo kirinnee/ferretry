@@ -1,7 +1,7 @@
 import type { ApiActor } from './actor.ts';
+import type { AuthenticatedCredential } from './authentication.ts';
 import type { CallerGovernance, CapabilityDemand } from './capability.ts';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
-import type { AuthenticatedCredential } from './socket-ticket.ts';
 
 /**
  * Who may reach a route.

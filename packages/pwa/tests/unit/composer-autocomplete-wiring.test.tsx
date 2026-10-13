@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { Composer as ProductionComposer, type ComposerProps } from '../../src/components/composer.tsx';
+import { type ComposerProps, Composer as ProductionComposer } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { render, run } from '../support/react.ts';
@@ -12,7 +12,7 @@ test('Composer forwards textarea selection changes to its autocomplete controlle
   const view = render(
     <Composer
       api={{ send: async () => undefined } as unknown as ComposerProps['api']}
-      daemon={daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token' })}
+      daemon={daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token' })}
       sessionId="session-a"
     />,
   );

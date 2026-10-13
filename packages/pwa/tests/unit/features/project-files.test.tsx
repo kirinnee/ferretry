@@ -5,13 +5,13 @@ import type { ReactElement } from 'react';
 import { ProjectFiles } from '../../../src/features/projects/project-files.tsx';
 import { SessionSearchProvider } from '../../../src/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { interact, mount, type Mounted, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const daemon = daemonConnection({
   daemonId: 'workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'device-token',
+  deviceId: 'device-token',
 });
 
 /**

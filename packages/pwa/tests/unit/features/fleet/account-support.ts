@@ -31,7 +31,7 @@ export const UNLOCK_TOKEN = `fy_unlock_${'A'.repeat(22)}`;
 export const STUDIO = daemonConnection({
   daemonId: 'studio',
   baseUrl: 'https://studio.example.test',
-  deviceToken: 't',
+  deviceId: 't',
 });
 
 export const machine = (overrides: Partial<FleetMachineView> = {}): FleetMachineView => ({

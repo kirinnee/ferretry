@@ -5,8 +5,8 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { applyPinAction, DaemonPinClient, fetchPinSnapshot, pinPath } from '../../src/lib/pin-client.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 const scopeA = daemonSessionScope(daemonA, 'same/session');
 const scopeB = daemonSessionScope(daemonB, 'same/session');
 const NOTE_ID = '11111111-1111-4111-8111-111111111111';
@@ -66,7 +66,7 @@ describe('pin transport', () => {
       'https://a.example.test/v1/sessions/same%2Fsession/pins',
       'https://a.example.test/v1/sessions/same%2Fsession/pins',
     ]);
-    expect(new Headers(calls[0]?.init.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[0]?.init.headers).has('authorization')).toBe(false);
     expect(new Headers(calls[0]?.init.headers).get(FY_REQUEST_ID_HEADER)).toBeNull();
     expect(calls[0]?.init.credentials).toBe('include');
     expect(calls[1]?.init.method).toBe('POST');
@@ -418,7 +418,7 @@ describe('DaemonPinClient', () => {
     const rotated = daemonConnection({
       daemonId: 'daemon-a',
       baseUrl: 'https://new-a.example.test',
-      deviceToken: 'new-token',
+      deviceId: 'new-token',
     });
     const rotatedScope = daemonSessionScope(rotated, 'same/session');
     const client = new DaemonPinClient(undefined, async input => {

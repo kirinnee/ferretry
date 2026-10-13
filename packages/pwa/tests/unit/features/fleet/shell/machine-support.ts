@@ -27,7 +27,7 @@ export const machineClient = (answer: FleetMachineView | Error, paths: string[] 
 });
 
 export const pairing = (id: string, label?: string): DaemonConnectionRecord => ({
-  ...daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `${id}-token` }),
+  ...daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `${id}-token` }),
   ...(label === undefined ? {} : { label }),
   pairedAt: 1,
   lastSelectedAt: 2,

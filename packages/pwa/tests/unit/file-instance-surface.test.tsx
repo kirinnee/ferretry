@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
-import { resetFsProbes, type FsChanges, type FsFile } from '../../src/components/files-api.ts';
+import { type FsChanges, type FsFile, resetFsProbes } from '../../src/components/files-api.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 import type { SidePaneTabInstance } from '../../src/shell/side-pane-tab-model.ts';
-import { interact, mount, must, type Mounted } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
 const daemon = daemonConnection({
   daemonId: 'view-daemon',
   baseUrl: 'https://view.example.test',
-  deviceToken: 'view-token',
+  deviceId: 'view-token',
 });
 const scope = daemonSessionScope(daemon, 'work');
 
 const other = daemonConnection({
   daemonId: 'other-daemon',
   baseUrl: 'https://other.example.test',
-  deviceToken: 'other-token',
+  deviceId: 'other-token',
 });
 const otherScope = daemonSessionScope(other, 'work');
 
@@ -581,7 +581,7 @@ describe('a file instance tab body showing a rich preview', () => {
         const frame = must(view.container.querySelector('iframe'), 'the sandboxed preview frame');
         expect(frame.getAttribute('sandbox')).toBe('');
         expect(frame.getAttribute('src')).toBe('blob:instance/1');
-        expect(frame.getAttribute('src')).not.toContain(daemon.deviceToken);
+        expect(frame.getAttribute('src')).not.toContain(daemon.deviceId);
         expect(view.container.textContent).not.toContain('This file is empty');
         expect(view.container.textContent).not.toContain('This file is binary');
       } finally {

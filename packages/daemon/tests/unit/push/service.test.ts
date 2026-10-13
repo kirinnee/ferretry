@@ -3,9 +3,9 @@ import type { RegisterPushDeviceRequest } from '@ferretry/protocol';
 import should from 'should';
 import {
   PairedPushDevices,
-  PushService,
   type PushDelivery,
   type PushDeliveryOutcome,
+  PushService,
   type PushSubscriptionRecord,
   type PushSubscriptionStore,
 } from '../../../src/lib/push/index.ts';
@@ -90,7 +90,7 @@ describe('PairedPushDevices', () => {
           platform: 'browser' as const,
           createdAt: AT,
           lastSeenAt: AT,
-          tokenHash: 'h',
+          publicKey: 'MCowBQYDK2VwAyEA0000000000000000000000000000000000000000000',
         },
       ],
     });

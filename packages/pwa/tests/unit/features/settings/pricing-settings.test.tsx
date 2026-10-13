@@ -17,7 +17,7 @@ import { type DaemonConnection, daemonConnection } from '../../../../src/lib/dae
 import { render, run, runAsync } from '../../../support/react.ts';
 
 const connection = (id = 'alpha') =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` });
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
 
 const manualRate = (overrides: Partial<AnalyticsPricingRate> = {}): AnalyticsPricingRate => ({
   pricingKey: 'openai:gpt-5:2026-08',

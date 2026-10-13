@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
+import should from 'should';
 import { RelayKeyHandleError, WebCryptoRelayCrypto } from '../../src/adapters/index.ts';
 import { AEAD_KEY_BYTES, AEAD_NONCE_BYTES, utf8Bytes } from '../../src/lib/index.ts';
-import should from 'should';
 import { newDaemonIdentity, relayCrypto, toPem } from '../support/identities.ts';
 
 describe('WebCrypto relay crypto', () => {
@@ -52,6 +52,22 @@ describe('WebCrypto relay crypto', () => {
     should(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, message)).be.true();
     should(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, utf8Bytes('something else'))).be.false();
     should(await relayCrypto.verifyEd25519(new Uint8Array(44), signature, message)).be.false();
+  });
+
+  it('should mint a device key whose private half can sign and can never be exported', async () => {
+    const device = await relayCrypto.generateDeviceKey();
+    should(device.publicKeySpki.length).equal(44);
+    should(device.privateKey.extractable).be.false();
+    let exported = true;
+    try {
+      await crypto.subtle.exportKey('pkcs8', device.privateKey);
+    } catch {
+      exported = false;
+    }
+    should(exported).be.false();
+    const message = utf8Bytes('prove me');
+    const signature = await relayCrypto.signEd25519(relayCrypto.deviceKeyHandle(device.privateKey), message);
+    should(await relayCrypto.verifyEd25519(device.publicKeySpki, signature, message)).be.true();
   });
 
   it('should seal and open, and refuse anything altered', async () => {

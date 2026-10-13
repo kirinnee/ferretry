@@ -11,12 +11,12 @@ import { render, run, runAsync } from '../support/react.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'beta-token',
 });
 const scope = daemonSessionScope(alpha, 'shared');
 const TERMINAL = 'a1b2c3d4e5f6';

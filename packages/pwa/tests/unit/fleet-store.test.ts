@@ -11,19 +11,19 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../../src/lib/fleet-stor
  * are minted per daemon, so every isolation test below uses the SAME id on
  * both rather than two convenient distinct ones.
  */
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
 /** Same durable daemon, reached at a new address — a re-pair, not a new daemon. */
 const daemonAMoved = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a2.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 /** Same durable daemon and address, rotated credential — also a re-pair. */
 const daemonARotated = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a-rotated',
+  deviceId: 'token-a-rotated',
 });
 
 const scopeA = daemonSessionScope(daemonA, 'shared');

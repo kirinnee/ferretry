@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
   CloseTerminalResponseSchema,
-  SocketTicketResponseSchema,
   TerminalListViewSchema,
   type TerminalView,
   TerminalViewSchema,
@@ -10,15 +9,13 @@ import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketDownstream } from '../../../../src/lib/api/socket.ts';
-import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import {
   TerminalMountError,
   terminalRoutes,
   terminalSocketRoutes,
-  terminalTicketRoutes,
 } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, FakeTerminals, GRANTED, human, NO_TICKETS } from './support.ts';
+import { CREDENTIALS, FakeTerminals, GRANTED, human } from './support.ts';
 
 /**
  * The terminal lifecycle's HTTP surface, driven through the real router.
@@ -38,6 +35,16 @@ const post = (path: string, body?: unknown, headers: Readonly<Record<string, str
     path,
     headers: { ...headers, 'content-type': 'application/json' },
     body: body === undefined ? '' : JSON.stringify(body),
+  });
+
+/** The same request from a paired device: whoever its session proved, with no header credential. */
+const devicePost = (path: string, body?: unknown) =>
+  request({
+    method: 'POST',
+    path,
+    headers: { 'content-type': 'application/json' },
+    body: body === undefined ? '' : JSON.stringify(body),
+    device: { deviceId: 'device-1', appSession: 'app-one' },
   });
 
 /** Opens one terminal and hands back the dispatcher that owns it. */
@@ -119,19 +126,10 @@ describe('the terminal mount', () => {
 
     it('should record a paired device as the human holding it', async () => {
       // Arrange — the device credential is the one a phone or a browser presents.
-      const dispatch = new ApiDispatcher(
-        new ApiRouter(terminalRoutes(new FakeTerminals())),
-        {
-          ...CREDENTIALS,
-          devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-        },
-        GRANTED,
-      );
+      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(new FakeTerminals())), CREDENTIALS, GRANTED);
 
       // Act
-      const created = await dispatch.dispatch(
-        post('/v1/sessions/s1/terminals', undefined, { authorization: 'Bearer device-secret' }),
-      );
+      const created = await dispatch.dispatch(devicePost('/v1/sessions/s1/terminals'));
 
       // Assert
       should(created.status).equal(201);
@@ -144,19 +142,10 @@ describe('the terminal mount', () => {
       // a human anyway would hide that the caller asked for something else.
       // Arrange
       const terminals = new FakeTerminals();
-      const dispatch = new ApiDispatcher(
-        new ApiRouter(terminalRoutes(terminals)),
-        {
-          ...CREDENTIALS,
-          devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-        },
-        GRANTED,
-      );
+      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), CREDENTIALS, GRANTED);
 
       // Act
-      const refused = await dispatch.dispatch(
-        post('/v1/sessions/s1/terminals', { agentSessionId: 'mse7wwti' }, { authorization: 'Bearer device-secret' }),
-      );
+      const refused = await dispatch.dispatch(devicePost('/v1/sessions/s1/terminals', { agentSessionId: 'mse7wwti' }));
       const listed = await dispatch.dispatch(
         request({ method: 'GET', path: '/v1/sessions/s1/terminals', headers: human }),
       );
@@ -438,50 +427,6 @@ describe('the terminal mount', () => {
   });
 });
 
-describe('the terminal stream ticket counter', () => {
-  const credentials = {
-    ...CREDENTIALS,
-    devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-  };
-  const device = { authorization: 'Bearer device-secret' } as const;
-
-  it('should sell a paired device a ticket for its one terminal stream', async () => {
-    // Arrange — devices share the terminal socket's `admin` scope; the ticket must replay the
-    // device classification rather than silently becoming the daemon owner.
-    const terminals = new FakeTerminals();
-    const created = await dispatcher(terminals).dispatch(post('/v1/sessions/s1/terminals'));
-    const terminal = TerminalViewSchema.parse(jsonBody(created));
-    const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
-    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials, GRANTED);
-    const path = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
-
-    // Act
-    const sold = await counter.dispatch(post(`${path}/ticket`, undefined, device));
-    const body = SocketTicketResponseSchema.parse(jsonBody(sold));
-
-    // Assert
-    should(sold.status).equal(201);
-    should(sold.headers?.get('cache-control')).equal('no-store');
-    should(tickets.redeem(body.ticket, path)).deepEqual({
-      kind: 'authenticated',
-      tokenClass: 'device',
-      deviceId: 'device-1',
-    });
-  });
-
-  it('should refuse to mint a ticket for a terminal this daemon does not hold', async () => {
-    const terminals = new FakeTerminals();
-    const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
-    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials, GRANTED);
-
-    const sold = await counter.dispatch(
-      post('/v1/sessions/s1/terminals/0123456789ab/stream/ticket', undefined, device),
-    );
-
-    should(sold.status).equal(404);
-  });
-});
-
 /**
  * The terminal STREAM's surface — a protocol switch rather than a response.
  *
@@ -492,7 +437,7 @@ describe('the terminal stream ticket counter', () => {
  */
 describe('the mounted terminal stream', () => {
   function sockets(terminals: FakeTerminals = new FakeTerminals()): ApiSocketDispatcher {
-    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, NO_TICKETS, GRANTED);
+    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, GRANTED);
   }
 
   /** A downstream that records, standing in for the socket the transport would supply. */

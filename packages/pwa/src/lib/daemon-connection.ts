@@ -28,14 +28,21 @@ export type RelayCarrier = Extract<ConnectionMethod, { kind: 'relay' }>;
 export interface DaemonConnectionInput {
   daemonId: string;
   baseUrl: string;
-  deviceToken: string;
+  deviceId: string;
   carriers?: readonly ConnectionMethod[] | undefined;
 }
 
 export interface DaemonConnection {
   readonly daemonId: DaemonId;
   readonly baseUrl: string;
-  readonly deviceToken: string;
+  /**
+   * Which grant this browser holds on the daemon. An IDENTITY, not a credential.
+   *
+   * There is nothing here an attacker could replay. The browser proves this grant by signing each
+   * session's transcript with a non-extractable key that lives in IndexedDB (`device-keys.ts`), and
+   * the daemon keeps only the public half; this id merely says which key to check.
+   */
+  readonly deviceId: string;
   /**
    * The daemon's published carrier set, cached in the order the protocol tries it.
    *
@@ -117,7 +124,7 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
   return {
     daemonId: daemonId(input.daemonId),
     baseUrl,
-    deviceToken: requireNonEmpty(input.deviceToken, 'deviceToken'),
+    deviceId: requireNonEmpty(input.deviceId, 'deviceId'),
     carriers: carriers.length === 0 ? [direct] : carriers,
   };
 };
@@ -194,16 +201,14 @@ export const sameDaemonCarriers = (left: readonly ConnectionMethod[], right: rea
  * pixels already painted.
  *
  * `daemonId` alone cannot answer it. The id is DURABLE ACROSS A RE-PAIR, and a
- * re-pair is exactly when the base URL or the device token rotates: the same
+ * re-pair is exactly when the base URL or the device grant rotates: the same
  * daemon id can afterwards name a new endpoint or a new device grant. A holder
  * that treated `(daemonId, sessionId)` as its whole identity would let the old
  * pairing's late answer land in the new one.
  *
  * Compared FIELD BY FIELD, deliberately, and on purpose not as a derived key
  * string. A host that rebuilds an equivalent connection object each render has
- * not re-paired, so object identity is the wrong test; and a key string
- * containing `deviceToken` invites the credential into a cache key, a DOM
- * attribute or a log line, none of which may ever hold it.
+ * not re-paired, so object identity is the wrong test.
  *
  * DURABLE state is a separate question with a separate answer: a remembered
  * preference keyed by `(daemonId, sessionId)` — the browser engine memory, for
@@ -218,5 +223,5 @@ export const sameDaemonCarriers = (left: readonly ConnectionMethod[], right: rea
 export const sameDaemonConnection = (left: DaemonConnection, right: DaemonConnection): boolean =>
   left.daemonId === right.daemonId &&
   left.baseUrl === right.baseUrl &&
-  left.deviceToken === right.deviceToken &&
+  left.deviceId === right.deviceId &&
   sameDaemonCarriers(left.carriers, right.carriers);

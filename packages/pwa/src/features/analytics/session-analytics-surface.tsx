@@ -8,12 +8,14 @@
 // session are explicit inputs: a daemon or session switch renders any in-flight
 // response or error inert, clears the prior ledger during the re-scoped render,
 // and rescopes the autocomplete value cache with it.
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+
 import type { AnalyticsResponse } from '@ferretry/protocol';
+import { Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { fetchSessionAnalytics } from './analytics-api.ts';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';
@@ -63,8 +65,14 @@ export interface SessionAnalyticsSurfaceProps {
 export function SessionAnalyticsSurface({
   connection,
   scope,
-  requestAnalytics = fetchSessionAnalytics,
+  requestAnalytics: injected,
 }: SessionAnalyticsSurfaceProps) {
+  // Through the carrier router by default: a paired device has no bearer value of its own to read with.
+  const fetcher = useDaemonFetch();
+  const requestAnalytics = useMemo<SessionAnalyticsRequest>(
+    () => injected ?? ((daemon, target, query) => fetchSessionAnalytics(daemon, target, query, fetcher)),
+    [fetcher, injected],
+  );
   const queryId = useId();
   // Destructure once: every hook below depends on these stable primitives, not
   // on `scope` itself, so an equivalent recreated scope leaves the hooks stable.

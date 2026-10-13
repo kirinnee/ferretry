@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '@ferretry/protocol';
-
+import { fetchAnalytics, fetchSessionAnalytics } from '../../../src/features/analytics/analytics-api.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
-import { fetchAnalytics, fetchSessionAnalytics } from '../../../src/features/analytics/analytics-api.ts';
 
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
+const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const index = {
   schemaVersion: 6,
   sessions: 0,
@@ -41,7 +40,7 @@ describe('analytics transport', () => {
       'https://a.example.test/v1/analytics',
       'https://a.example.test/v1/analytics?q=count+by+%28status%29',
     ]);
-    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer token-a');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
   });
 
   it('keeps daemon failures and malformed replies explicit', async () => {
@@ -67,7 +66,7 @@ describe('analytics transport', () => {
 describe('session analytics transport', () => {
   // A second paired daemon and two same-id scopes prove the request is fenced to
   // the (connection, scope) pair, never to a bare session id.
-  const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
+  const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
   const scopeA = daemonSessionScope(daemon, 'ms59');
   const scopeB = daemonSessionScope(daemonB, 'ms59');
 

@@ -1,37 +1,54 @@
 /**
- * What a relay session actually carries.
+ * What a session actually carries, on either carrier.
  *
  * The session protocol stops at "the plaintext" (§7 of `docs/relay-protocol.md`). This module is
- * §14: one record is one JSON message, a request names its own answer, and an answer that does not
- * fit one record is a typed refusal rather than a truncated body.
+ * §14: one record is one JSON message, a request names its own answer, and a body that does not fit
+ * one record travels as ordered parts rather than being truncated or refused.
  *
- * TWO PROPERTIES ARE THE WHOLE POINT of translating here rather than letting a relayed request in
+ * TWO PROPERTIES ARE THE WHOLE POINT of translating here rather than letting a session's request in
  * through a side door.
  *
- * **A relayed request reaches the same route table a direct one reaches.** It becomes an
+ * **A session's request reaches the same route table an HTTP one reaches.** It becomes an
  * `ApiRequest` — the transport-free value every route, the router and the authorization boundary are
- * already written against — so there is no second surface to keep in step and no route that is
- * reachable one way and not the other.
+ * already written against — so there is no second surface to keep in step.
  *
- * **A relayed request can never outrank the grant that opened its session.** The credential is the
- * device token the client authenticated with, put on by this module; an `authorization` header from
- * the peer is refused by the schema. And a relayed peer is never loopback, so everything the daemon
- * grants a loopback caller — a token in a query parameter, a host-scoped route — is out of reach by
- * construction rather than by a check somebody has to remember to write.
+ * **A session's request can never outrank the device that opened it.** The identity is the device the
+ * session proved by signing its transcript, attached by this module as `ApiRequest.device`; an
+ * `authorization` header from the peer is refused by the schema. Where the session's socket ARRIVED is
+ * stamped here too, from the carrier — a relayed session is never loopback — so everything the daemon
+ * grants a host caller stays out of reach by construction rather than by a check somebody has to
+ * remember to write.
  */
 
-import { type PairingResponse, type RELAY_SESSION_CONCLUDED_CLOSE_CODE, relayDataByteBudget } from '@ferretry/protocol';
 import {
+  MAX_TUNNEL_BODY_BYTES,
+  PairedDeviceIdSchema,
+  type PairingResponse,
+  partitionTunnelBody,
+  type RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+  type RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+  relayDataByteBudget,
+} from '@ferretry/protocol';
+import {
+  AppSessionSchema,
+  DeviceProofSchema,
   fromBase64Url,
   MAX_PLAINTEXT_BYTES,
-  RELAY_PROTOCOL_ID,
   type RelayCloseCode,
+  SESSION_PROTOCOL_ID,
   toBase64Url,
   utf8Bytes,
   utf8Text,
 } from '@ferretry/relay';
 import { z } from 'zod';
-import { type ApiRequest, type ApiResponse, headersFrom, queryFrom } from '../api/http.ts';
+import {
+  type ApiRequest,
+  type ApiResponse,
+  BodyTooLargeError,
+  headersFrom,
+  queryFrom,
+  type SessionDevice,
+} from '../api/http.ts';
 
 /** The widest request identifier a client may name an answer with. */
 export const MAX_TUNNEL_REQUEST_ID = 0xffff_ffff;
@@ -44,7 +61,10 @@ export const MAX_TUNNEL_REQUEST_ID = 0xffff_ffff;
  * literal here. Both halves of that union are inside the `4000`–`4999` range §5's `closed` control
  * already carries, so a rendezvous deployed before either existed forwards them unchanged.
  */
-export type RelaySessionCloseCode = RelayCloseCode | typeof RELAY_SESSION_CONCLUDED_CLOSE_CODE;
+export type RelaySessionCloseCode =
+  | RelayCloseCode
+  | typeof RELAY_SESSION_CONCLUDED_CLOSE_CODE
+  | typeof RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE;
 
 /**
  * Raw bytes one `data` record may carry, DERIVED and never written down.
@@ -156,6 +176,25 @@ const DataRecordSchema = z.union([
   z.strictObject({ t: z.literal('data'), bytes: z.string().max(MAX_PLAINTEXT_BYTES) }),
 ]);
 
+/** The end-to-end dialect every tunnel record but `data` names. */
+const Dialect = z.literal(SESSION_PROTOCOL_ID);
+
+/**
+ * A device's claim to this session: who it is, which running copy of the app, and the proof.
+ *
+ * The proof is checked by the link against the transcript of THIS session — see
+ * `@ferretry/relay`'s `deviceAuthMessage` — so it can be neither replayed into another session nor
+ * forged without the private key, which never left the browser that generated it.
+ */
+const DeviceClaim = {
+  deviceId: PairedDeviceIdSchema,
+  appSession: AppSessionSchema,
+  proof: DeviceProofSchema,
+} as const;
+
+/** One part of a body that did not fit one record. The first part rides on the `req` itself. */
+const BodyPartSchema = z.string().max(MAX_PLAINTEXT_BYTES);
+
 /**
  * THE RECORD AT SEQUENCE 1 IS A STRICT UNION OF THREE, and the union is the enforcement.
  *
@@ -166,26 +205,25 @@ const DataRecordSchema = z.union([
  */
 export const RelayTunnelClientMessageSchema = z.union([
   z.discriminatedUnion('t', [
-    z.strictObject({
-      t: z.literal('auth'),
-      protocol: z.literal(RELAY_PROTOCOL_ID),
-      deviceToken: z.string().min(1).max(4_096),
-    }),
+    z.strictObject({ t: z.literal('auth'), protocol: Dialect, ...DeviceClaim }),
     z.strictObject({
       t: z.literal('stream'),
-      protocol: z.literal(RELAY_PROTOCOL_ID),
-      deviceToken: z.string().min(1).max(4_096),
+      protocol: Dialect,
+      ...DeviceClaim,
       path: PathSchema,
       query: StreamQuerySchema.optional(),
     }),
     z.strictObject({
       t: z.literal('pair'),
-      protocol: z.literal(RELAY_PROTOCOL_ID),
-      // Bounded here only so a hostile record cannot be enormous. What a code and a device name may
-      // actually BE belongs to the pairing API's own schemas, which the service applies — one owner
-      // for that fact, and this is not it.
+      protocol: Dialect,
+      // Bounded here only so a hostile record cannot be enormous. What a code, a device name and a
+      // device key may actually BE belongs to the pairing API's own schemas, which the service
+      // applies — and a key or proof that is merely malformed must be refused exactly like a wrong
+      // code, never as a parse failure a guesser could tell apart.
       code: z.string().min(1).max(64),
       deviceName: z.string().min(1).max(256),
+      deviceKey: z.string().min(1).max(128),
+      proof: z.string().min(1).max(128),
     }),
     z.strictObject({
       t: z.literal('req'),
@@ -194,11 +232,27 @@ export const RelayTunnelClientMessageSchema = z.union([
       path: PathSchema,
       query: QuerySchema.optional(),
       headers: HeadersSchema.optional(),
-      body: z.string().max(MAX_PLAINTEXT_BYTES).optional(),
+      body: BodyPartSchema.optional(),
+      /** More of this body follows in `req-more` records. */
+      more: z.literal(true).optional(),
+      /**
+       * A person is at this device: the page is visible and was used recently. Only such a request
+       * advances the device's idle clock, so an open background tab that renews by itself does not
+       * keep a forgotten device paired forever (`docs/design/zero-trust.md` A6).
+       */
+      presence: z.literal(true).optional(),
     }),
     z.strictObject({
+      t: z.literal('req-more'),
+      id: RequestIdSchema,
+      body: BodyPartSchema,
+      more: z.literal(true).optional(),
+    }),
+    /** The device's answer to a `renew`: the same key, signing this session's transcript and the nonce. */
+    z.strictObject({ t: z.literal('renewed'), protocol: Dialect, proof: DeviceProofSchema }),
+    z.strictObject({
       t: z.literal('stream-close'),
-      protocol: z.literal(RELAY_PROTOCOL_ID),
+      protocol: Dialect,
       code: StreamCloseCodeSchema,
       reason: StreamCloseReasonSchema,
     }),
@@ -206,22 +260,38 @@ export const RelayTunnelClientMessageSchema = z.union([
   DataRecordSchema,
 ]);
 export type RelayTunnelClientMessage = z.infer<typeof RelayTunnelClientMessageSchema>;
+export type RelayTunnelAuth = Extract<RelayTunnelClientMessage, { t: 'auth' }>;
 export type RelayTunnelRequest = Extract<RelayTunnelClientMessage, { t: 'req' }>;
+export type RelayTunnelRequestPart = Extract<RelayTunnelClientMessage, { t: 'req-more' }>;
 export type RelayTunnelStream = Extract<RelayTunnelClientMessage, { t: 'stream' }>;
 export type RelayTunnelPair = Extract<RelayTunnelClientMessage, { t: 'pair' }>;
 export type RelayTunnelData = Extract<RelayTunnelClientMessage, { t: 'data' }>;
 
 export type RelayTunnelDaemonMessage =
-  | { readonly t: 'authenticated'; readonly protocol: typeof RELAY_PROTOCOL_ID }
+  /** The device's proof verified. `accessExpiresAt` is when this session's lease ends unless renewed. */
+  | { readonly t: 'authenticated'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly accessExpiresAt: string }
   | {
       readonly t: 'res';
       readonly id: number;
       readonly status: number;
       readonly headers: Readonly<Record<string, string>>;
       readonly body: string;
+      readonly more?: true;
     }
-  /** The answer exists and does not fit one record. Named, with its size, rather than truncated. */
-  | { readonly t: 'oversize'; readonly id: number; readonly status: number; readonly byteLength: number }
+  /** The next part of an answer whose `res` said `more`. The last part carries no `more`. */
+  | { readonly t: 'res-more'; readonly id: number; readonly body: string; readonly more?: true }
+  /**
+   * The lease on this session is about to end: sign this nonce to keep it.
+   *
+   * Sent inside the channel, by the daemon, two minutes ahead — an incoming record wakes even a
+   * background tab, where a client-side timer would be throttled into missing it.
+   */
+  | {
+      readonly t: 'renew';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly nonce: string;
+      readonly expiresAt: string;
+    }
   /**
    * A redemption that succeeded, carrying the pairing API's answer WHOLE.
    *
@@ -231,16 +301,20 @@ export type RelayTunnelDaemonMessage =
    * relay-paired device navigates by afterwards, and an envelope that lost it would mint a device
    * that can reach its daemon by nothing at all, with no error anywhere.
    */
-  | { readonly t: 'paired'; readonly protocol: typeof RELAY_PROTOCOL_ID; readonly response: PairingResponse }
+  | { readonly t: 'paired'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly response: PairingResponse }
   /**
    * A redemption that did not succeed — every cause, one answer.
    *
-   * No active code, a wrong code, an expired one, a spent relay budget, a record the pairing schema
-   * refused: all of them are this. A pre-credential surface the whole internet can reach must not be
-   * an oracle, and the single reason matches the public route's own single refusal.
+   * No active code, a wrong code, an expired one, a spent budget, a key whose proof did not verify, a
+   * record the pairing schema refused: all of them are this. A pre-credential surface the whole
+   * internet can reach must not be an oracle.
    */
-  | { readonly t: 'pair-refused'; readonly protocol: typeof RELAY_PROTOCOL_ID; readonly reason: 'pairing_refused' }
-  | { readonly t: 'stream-opened'; readonly protocol: typeof RELAY_PROTOCOL_ID }
+  | {
+      readonly t: 'pair-refused';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly reason: 'pairing_refused';
+    }
+  | { readonly t: 'stream-opened'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly accessExpiresAt: string }
   /**
    * The upgrade was refused, with everything a status can say — said BEFORE anything switched.
    *
@@ -250,7 +324,7 @@ export type RelayTunnelDaemonMessage =
    */
   | {
       readonly t: 'stream-refused';
-      readonly protocol: typeof RELAY_PROTOCOL_ID;
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
       readonly status: number;
       readonly body: string;
     }
@@ -259,7 +333,7 @@ export type RelayTunnelDaemonMessage =
   /** The stream's own close taxonomy, sealed, because a code that says why a viewer left is content. */
   | {
       readonly t: 'stream-close';
-      readonly protocol: typeof RELAY_PROTOCOL_ID;
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
       readonly code: number;
       readonly reason: string;
     };
@@ -302,6 +376,21 @@ export function relayRateLimitIdentity(sessionId: string): string {
   return `relay-session:${sessionId}`;
 }
 
+/**
+ * Where a session's socket ARRIVED, decided by the carrier that accepted it and nothing else.
+ *
+ * A relayed session has none: the relay terminates on the host it serves, so every relayed arrival is
+ * remote whatever address it appears to carry. A DIRECT session is one socket on this daemon's own
+ * listener, classified exactly as an HTTP request on that listener is — `loopback` from the socket's
+ * real peer, `privilegedLoopback` from the bind — so a browser on the machine is host-local over the
+ * tunnel precisely when it would have been over plain HTTP, and never because of anything it sent.
+ */
+export interface SessionArrival {
+  readonly loopback: boolean;
+  readonly privilegedLoopback: boolean;
+  readonly clientAddress?: string;
+}
+
 /** Everything an `ApiRequest` needs that a credential record can supply. A stream names no method,
  *  headers or body, so it passes what it has and this fills the rest. */
 export interface TunnelRequestSource {
@@ -313,31 +402,52 @@ export interface TunnelRequestSource {
 }
 
 /**
- * Turn a relayed request or stream open into the daemon's own request value.
+ * Turn a tunnelled request or stream open into the daemon's own request value.
  *
- * THE ONE CONSTRUCTOR, and every property that makes a relayed caller safe rides on that. The device
- * token is attached here and only here, `loopback` is false here and only here, and the rate-limit
- * identity is stamped here and only here — so a second surface cannot be added that forgets one of
- * them, because there is no other way to build one of these.
+ * THE ONE CONSTRUCTOR, and every property that makes a session caller safe rides on that. The device
+ * a session proved is attached here and only here — as `device`, a field no HTTP request can carry —
+ * the arrival is stamped here and only here, and so is the rate-limit identity. There is no other way
+ * to build one of these, so a second surface cannot be added that forgets one of them.
  */
-export function tunnelApiRequest(source: TunnelRequestSource, deviceToken: string, sessionId: string): ApiRequest {
+export function tunnelApiRequest(
+  source: TunnelRequestSource,
+  device: SessionDevice,
+  sessionId: string,
+  arrival?: SessionArrival,
+): ApiRequest {
   const body = source.body ?? '';
   return {
     method: source.method,
     path: source.path,
     query: queryFrom(source.query ?? []),
-    headers: headersFrom({ ...source.headers, authorization: `Bearer ${deviceToken}` }),
-    clientAddress: relayRateLimitIdentity(sessionId),
+    headers: headersFrom({ ...source.headers }),
+    clientAddress: arrival?.clientAddress ?? relayRateLimitIdentity(sessionId),
     // A relay hop is never loopback, whatever address the socket appears to come from.
-    loopback: false,
-    text: async () => body,
+    loopback: arrival?.loopback ?? false,
+    privilegedLoopback: arrival?.privilegedLoopback ?? false,
+    device,
+    // The route's own bound applies to a session's body exactly as it does to an HTTP one: a body the
+    // tunnel reassembled up to 32 MiB is still refused by a route that reads at most 512 KiB.
+    text: async limitBytes => {
+      if (limitBytes !== undefined && utf8Bytes(body).byteLength > limitBytes) throw new BodyTooLargeError(limitBytes);
+      return body;
+    },
   };
 }
 
 /** The upgrade a stream session asks for. `GET` because every mounted socket route is one, and a
  *  method the peer could choose would be a second way to reach the route table. */
-export function tunnelStreamRequest(stream: RelayTunnelStream, sessionId: string): ApiRequest {
-  return tunnelApiRequest({ method: 'GET', path: stream.path, query: stream.query }, stream.deviceToken, sessionId);
+export function tunnelStreamRequest(
+  stream: RelayTunnelStream,
+  sessionId: string,
+  arrival?: SessionArrival,
+): ApiRequest {
+  return tunnelApiRequest(
+    { method: 'GET', path: stream.path, query: stream.query },
+    { deviceId: stream.deviceId, appSession: stream.appSession },
+    sessionId,
+    arrival,
+  );
 }
 
 /**
@@ -359,22 +469,43 @@ export function tunnelDataFrame(data: RelayTunnelData): string | Uint8Array | nu
   return 'text' in data ? data.text : fromBase64Url(data.bytes);
 }
 
+/** The widest `res-more` envelope, so a part is cut to fit beside it. */
+const RES_MORE_ENVELOPE = encodeTunnelMessage({ t: 'res-more', id: MAX_TUNNEL_REQUEST_ID, body: '', more: true });
+
 /**
- * The answer to one relayed request, or the refusal that says it did not fit.
+ * The answer to one request, as the records that carry it.
  *
- * Encoded twice on the oversize path — once to measure, once by the caller to send. That is a few
- * microseconds on the rare path, and the alternative is a size limit computed in two places that
- * could disagree about the envelope.
+ * One record when the answer fits one; otherwise the `res` carries the status, headers and the first
+ * part with `more`, and `res-more` records carry the rest in order. This replaces the old `oversize`
+ * refusal: the direct carrier now runs through this tunnel too, and a LAN that used to answer a large
+ * session list uncapped must not start refusing it. Past {@link MAX_TUNNEL_BODY_BYTES} the answer is a
+ * `502` naming the size — never a truncated body a client would parse and believe.
  */
-export function tunnelResponseMessage(id: number, response: ApiResponse): RelayTunnelDaemonMessage {
-  const message: RelayTunnelDaemonMessage = {
-    t: 'res',
-    id,
-    status: response.status,
-    headers: Object.fromEntries(response.headers),
-    body: response.body,
-  };
-  const encoded = encodeTunnelMessage(message);
-  if (encoded.byteLength <= MAX_PLAINTEXT_BYTES) return message;
-  return { t: 'oversize', id, status: response.status, byteLength: encoded.byteLength };
+export function tunnelResponseMessages(id: number, response: ApiResponse): readonly RelayTunnelDaemonMessage[] {
+  const headers = Object.fromEntries(response.headers);
+  const whole: RelayTunnelDaemonMessage = { t: 'res', id, status: response.status, headers, body: response.body };
+  if (encodeTunnelMessage(whole).byteLength <= MAX_PLAINTEXT_BYTES) return [whole];
+  const bodyBytes = utf8Bytes(response.body).byteLength;
+  if (bodyBytes > MAX_TUNNEL_BODY_BYTES)
+    return [
+      {
+        t: 'res',
+        id,
+        status: 502,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          error: {
+            code: 'answer_too_large',
+            message: `the daemon's answer is ${bodyBytes} bytes, over the ${MAX_TUNNEL_BODY_BYTES}-byte limit one session carries`,
+          },
+        }),
+      },
+    ];
+  const head = encodeTunnelMessage({ ...whole, body: '', more: true }).byteLength;
+  const budget = MAX_PLAINTEXT_BYTES - Math.max(head, RES_MORE_ENVELOPE.byteLength);
+  const parts = partitionTunnelBody(response.body, budget);
+  return parts.map((body, index): RelayTunnelDaemonMessage => {
+    const more = index < parts.length - 1 ? ({ more: true } as const) : {};
+    return index === 0 ? { ...whole, body, ...more } : { t: 'res-more', id, body, ...more };
+  });
 }

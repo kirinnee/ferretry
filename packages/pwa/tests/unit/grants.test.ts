@@ -49,7 +49,7 @@ import {
 } from '../../src/lib/grants.ts';
 
 const daemonId = (id: string) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` }).daemonId;
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` }).daemonId;
 
 const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantView => ({
   capability: 'fleet',

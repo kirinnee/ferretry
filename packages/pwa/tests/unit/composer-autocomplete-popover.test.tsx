@@ -39,7 +39,7 @@ afterEach(() => {
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token',
+  deviceId: 'token',
 });
 
 const surfaceOf = (overrides: Partial<ComposerAutocompleteSurface> = {}): ComposerAutocompleteSurface => ({

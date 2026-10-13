@@ -14,12 +14,12 @@ import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
 });
 const workstation = daemonConnection({
   daemonId: 'daemon/workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'token-workstation',
+  deviceId: 'token-workstation',
 });
 
 const json = (body: unknown, status = 200): Response =>
@@ -64,7 +64,7 @@ describe('fetchDaemonProjects', () => {
     });
 
     expect(seen).toBe('https://laptop.example.test/v1/projects');
-    expect(authorization).toBe('Bearer token-laptop');
+    expect(authorization).toBe('');
     // Nothing is narrowed away. The earlier version mapped each row down to
     // `{ name, path }`, which made `source` unsearchable in the folder picker
     // and left every provenance surface with nothing to render.
@@ -356,7 +356,7 @@ describe('DaemonProjectsStore', () => {
     const stale = store.hydrate(laptop);
     // The rotated connection is a different entry, so it is not coalesced onto
     // the read issued with the replaced token.
-    await store.hydrate({ ...laptop, deviceToken: 'token-rotated' });
+    await store.hydrate({ ...laptop, deviceId: 'token-rotated' });
     expect(store.projects(laptop.daemonId)).toEqual([worktree]);
 
     release([ferretry]);

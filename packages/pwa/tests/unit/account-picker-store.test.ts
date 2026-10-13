@@ -12,18 +12,18 @@ import { healthMap, pickerAccount, pickerHealth } from './picker-support.ts';
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
 });
 const workstation = daemonConnection({
   daemonId: 'daemon/workstation',
   baseUrl: 'https://workstation.example.test',
-  deviceToken: 'token-workstation',
+  deviceId: 'token-workstation',
 });
 const HOSTED_RELAY: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' };
 const laptopOverRelay = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
-  deviceToken: 'token-laptop',
+  deviceId: 'token-laptop',
   carriers: [{ kind: 'direct', daemonUrl: 'https://laptop.example.test' }, HOSTED_RELAY],
 });
 
@@ -143,7 +143,7 @@ describe('DaemonAccountPickerStore', () => {
     });
 
     const stale = store.hydrate(laptop);
-    const rotated = { ...laptop, deviceToken: 'rotated-token' };
+    const rotated = { ...laptop, deviceId: 'rotated-token' };
     expect(store.sliceFor(rotated)).toMatchObject({ generation: 0, catalog: null, status: 'idle' });
     expect(store.getSnapshot()).toBe(store.getSnapshot());
 

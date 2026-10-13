@@ -4,8 +4,8 @@
  * Everything else about the deck is proved against fakes, which is right: the
  * behaviour under test there is the deck's, not the browser's. But the factory
  * those fakes stand in for is real code on the only path a reader ever takes,
- * and an untested one would let a typo in the stream URL, a missing ticket
- * exchange or a clipboard call that never happens ship behind a green suite.
+ * and an untested one would let a typo in the stream path, a stream opened
+ * outside a session or a clipboard call that never happens ship behind a green suite.
  *
  * Each dependency is driven with its own global stubbed, so nothing here opens a
  * socket, reaches the network, or touches the daemon running on this box.
@@ -22,7 +22,7 @@ import '../support/dom.ts';
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const scope = daemonSessionScope(alpha, 'shared');
 const TERMINAL = 'a1b2c3d4e5f6';
@@ -42,8 +42,10 @@ const fakeStreamSession = (): RelayClientSession =>
     sendStream: () => undefined,
     closeStream: () => undefined,
   }) as unknown as RelayClientSession;
-/** The shape the protocol's socket-ticket schema actually accepts. */
-const TICKET = 'fy_ticket_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+/** A stream opener for cases that never attach. */
+const unusedOpener = async (): Promise<RelayClientSession> => {
+  throw new Error('no stream may be opened by this case');
+};
 
 const restore: (() => void)[] = [];
 
@@ -82,11 +84,10 @@ const listing = {
 /** A daemon that answers exactly the routes the deck calls. */
 const daemonFetch =
   (calls: { url: string; method: string }[]) =>
-  async (url: string, init?: RequestInit): Promise<Response> => {
+  async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
     const method = (init?.method ?? 'GET').toUpperCase();
     calls.push({ url, method });
-    if (url.endsWith('/stream/ticket'))
-      return Response.json({ ticket: TICKET, ttlSeconds: 30, expiresAt: '2026-08-01T10:06:00.000Z' });
     if (url.endsWith('/terminals') && method === 'GET') return Response.json(listing);
     if (url.endsWith('/terminals') && method === 'POST') return Response.json(terminal);
     if (method === 'PATCH') return Response.json({ ...terminal, title: 'watch' });
@@ -97,8 +98,7 @@ const daemonFetch =
 describe('browserTerminalDeckDependencies', () => {
   test('asks the paired daemon for its own terminals and lifecycle', async () => {
     const calls: { url: string; method: string }[] = [];
-    stub('fetch', daemonFetch(calls) as unknown as typeof fetch);
-    const dependencies = browserTerminalDeckDependencies();
+    const dependencies = browserTerminalDeckDependencies(daemonFetch(calls), unusedOpener);
 
     const listed = await dependencies.list(alpha, scope);
     const created = await dependencies.create(alpha, scope);
@@ -115,46 +115,12 @@ describe('browserTerminalDeckDependencies', () => {
     );
   });
 
-  test('buys a ticket over HTTP and opens a socket that carries no device token', async () => {
-    // The URL outlives the socket in history and in any log that retains it, so
-    // the long-lived credential must never be in it. The ticket is one-time and
-    // audience-bound to this exact stream.
-    const calls: { url: string; method: string }[] = [];
-    const opened: string[] = [];
-    class FakeSocket {
-      binaryType = '';
-      constructor(url: string) {
-        opened.push(url);
-      }
-      addEventListener(): void {}
-    }
-    stub('fetch', daemonFetch(calls) as unknown as typeof fetch);
-    stub('WebSocket', FakeSocket as unknown as typeof WebSocket);
-
-    await browserTerminalDeckDependencies(undefined, undefined, () => ({
-      kind: 'direct',
-      daemonUrl: 'https://alpha.example.test',
-    })).attach(alpha, scope, TERMINAL, noHandlers());
-
-    expect(calls.at(0)).toEqual({
-      url: `https://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL}/stream/ticket`,
-      method: 'POST',
-    });
-    expect(opened).toEqual([
-      `wss://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL}/stream?ticket=${TICKET}`,
-    ]);
-    expect(opened[0]).not.toContain('alpha-token');
-  });
-
   /*
-   * §14: "A client must also not BUY a ticket it means to spend here — a single-use ticket minted
-   * for a surface that refuses it is a credential the daemon burned for nothing, so the refusal
-   * happens before the purchase, not after." A relayed attach must therefore reach neither `fetch`
-   * nor `WebSocket`.
+   * There is no ticket to buy any more, on either carrier: a terminal is a stream session the device
+   * key opened, so an attach must reach neither the request fetcher nor a bare `WebSocket`.
    */
-  test('opens a relayed terminal as a stream session, minting no ticket and opening no socket', async () => {
+  test('opens a terminal as a stream session, asking for no ticket and opening no socket of its own', async () => {
     const calls: { url: string; method: string }[] = [];
-    stub('fetch', daemonFetch(calls) as unknown as typeof fetch);
     stub(
       'WebSocket',
       class {
@@ -165,7 +131,7 @@ describe('browserTerminalDeckDependencies', () => {
     );
     const asked: string[] = [];
 
-    await browserTerminalDeckDependencies(undefined, async (_daemon, request) => {
+    await browserTerminalDeckDependencies(daemonFetch(calls), async (_daemon, request) => {
       asked.push(request.path);
       return fakeStreamSession();
     }).attach(alpha, scope, TERMINAL, noHandlers());
@@ -181,7 +147,7 @@ describe('browserTerminalDeckDependencies', () => {
       return true;
     }) as unknown as typeof confirm);
 
-    const confirmed = browserTerminalDeckDependencies().confirmClose('build');
+    const confirmed = browserTerminalDeckDependencies(daemonFetch([]), unusedOpener).confirmClose('build');
 
     expect(confirmed).toBe(true);
     expect(asked[0]).toContain('build');
@@ -196,7 +162,7 @@ describe('browserTerminalDeckDependencies', () => {
       Reflect.deleteProperty(globalThis.navigator, 'clipboard');
     });
 
-    await browserTerminalDeckDependencies().writeClipboard('built ok');
+    await browserTerminalDeckDependencies(daemonFetch([]), unusedOpener).writeClipboard('built ok');
 
     expect(written).toEqual(['built ok']);
   });
@@ -204,7 +170,7 @@ describe('browserTerminalDeckDependencies', () => {
   test('loads the emulator lazily rather than shipping it in the first paint', async () => {
     // Most readers never open a shell. A static import would put a terminal
     // emulator in the initial bundle of a chat app.
-    const modules = await browserTerminalDeckDependencies().loadXterm();
+    const modules = await browserTerminalDeckDependencies(daemonFetch([]), unusedOpener).loadXterm();
 
     expect(typeof modules.Terminal).toBe('function');
     expect(typeof modules.FitAddon).toBe('function');

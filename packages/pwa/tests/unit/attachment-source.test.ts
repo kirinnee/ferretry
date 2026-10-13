@@ -7,14 +7,14 @@ import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 const daemon = daemonConnection({
   daemonId: 'files-daemon',
   baseUrl: 'https://files.example.test',
-  deviceToken: 'files-token',
+  deviceId: 'files-token',
 });
 const scope = daemonSessionScope(daemon, 'files/session');
 
 const other = daemonConnection({
   daemonId: 'other-daemon',
   baseUrl: 'https://other.example.test',
-  deviceToken: 'other-token',
+  deviceId: 'other-token',
 });
 
 describe('loading an attachment blob', () => {
@@ -22,7 +22,7 @@ describe('loading an attachment blob', () => {
     const seen: string[] = [];
     const blob = await loadAttachmentBlob(daemon, scope, 'a 1', undefined, async (url, init) => {
       seen.push(String(url));
-      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer files-token');
+      expect(new Headers(init?.headers).has('authorization')).toBe(false);
       return new Response('bytes', { headers: { 'content-type': 'image/png' } });
     });
     expect(await blob.text()).toBe('bytes');

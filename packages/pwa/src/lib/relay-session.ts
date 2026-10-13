@@ -6,9 +6,12 @@
  * this one: everything here is the mirror of something there, and where the two
  * disagree the document wins.
  *
- * THE BROWSER NEVER DIALS THE DAEMON HERE. It dials the rendezvous, which is
- * already holding a socket the daemon opened outbound from behind its NAT. That
- * is the entire reason a phone can reach a laptop it has no route to.
+ * THE SAME SESSION ON BOTH CARRIERS. Over a relay the browser dials the
+ * rendezvous, which is already holding a socket the daemon opened outbound from
+ * behind its NAT — the entire reason a phone can reach a laptop it has no route
+ * to. Over the DIRECT carrier it dials the daemon's own address, and the daemon
+ * plays the rendezvous's part; everything above the socket is identical, so the
+ * LAN is encrypted end to end and nothing a sniffer sees is worth replaying.
  *
  * WHAT THIS MODULE REFUSES TO DO, in every case where the alternative is a
  * session that looks healthy and is not:
@@ -17,10 +20,12 @@
  *   `completeClientHandshake` checks the presented SPKI against the fingerprint
  *   the QR carried BEFORE it checks the signature and before it derives anything,
  *   so a rendezvous that introduced the wrong daemon never reaches a state where
- *   this side holds usable keys — and above all never reaches the device token.
- * - **It will not send the device token outside the encrypted channel.** The
- *   credential is one §14 record at sequence 1, after keying. A relay operator
- *   sees a session open; it never sees what opened it.
+ *   this side holds usable keys — and above all never reaches a device proof.
+ * - **It will not present anything a carrier could replay.** There is no token.
+ *   The device signs THIS session's transcript with a key it cannot export, in
+ *   one §14 record at sequence 1, after keying — so a relay operator sees a
+ *   session open, never which device opened it, and a captured record proves
+ *   nothing to any other session.
  * - **It will not repair a stream.** A bad tag, a sequence that is not the next
  *   one, a record for another session: the session is over and every request
  *   waiting on it is rejected with the reason. There is no resume in this
@@ -32,8 +37,12 @@
  */
 
 import {
+  MAX_TUNNEL_BODY_BYTES,
+  OLDER_DAEMON_SENTENCE,
   type PairingResponse,
   PairingResponseSchema,
+  partitionTunnelBody,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   RELAY_SESSION_CONCLUDED_CLOSE_CODE,
   relayDataByteBudget,
 } from '@ferretry/protocol';
@@ -46,11 +55,14 @@ import {
   decodeCreditPayload,
   decodeDaemonHello,
   decodeFrame,
+  deviceAuthMessage,
+  devicePairMessage,
+  deviceRenewMessage,
   encodeCreditPayload,
   encodeFrame,
   encodeHandshakeMessage,
-  fromBase64Url,
   FRAME_KINDS,
+  fromBase64Url,
   grantCredit,
   HANDSHAKE_FRAME_SEQUENCE,
   HEARTBEAT_REQUEST,
@@ -62,17 +74,20 @@ import {
   openChannel,
   openRecord,
   type PendingClientHandshake,
+  type PrivateKeyHandle,
   RELAY_CLOSE_CODES,
-  RELAY_PROTOCOL_ID,
   type ReceiveWindow,
   type RelayCrypto,
   type RelayFrame,
   recordConsumed,
   recordCredited,
   recordSent,
+  SESSION_PROTOCOL_ID,
   type SendWindow,
   type SessionId,
   sealRecord,
+  signDeviceProof,
+  speaksPreviousSessionProtocol,
   startClientHandshake,
   toBase64Url,
   utf8Bytes,
@@ -122,7 +137,7 @@ export const RELAY_DATA_BYTE_BUDGET = relayDataByteBudget(MAX_PLAINTEXT_BYTES);
 /**
  * `data` IS THE ONE MESSAGE WITH NO `protocol` FIELD, and it is the one that repeats most.
  *
- * §14 shows every other record carrying `ferretry-relay/1` and shows `data` without it. That is not
+ * §14 shows every other record carrying `ferretry-relay/2` and shows `data` without it. That is not
  * an omission to tidy up: a stream sends these continuously, and a version tag on every keystroke
  * would spend the record budget restating something the session settled at sequence 1. Adding it
  * here would make every conforming daemon's stream `4400` on arrival.
@@ -134,51 +149,66 @@ export const RELAY_DATA_BYTE_BUDGET = relayDataByteBudget(MAX_PLAINTEXT_BYTES);
 const DataTextSchema = z.strictObject({ t: z.literal('data'), text: z.string().max(MAX_PLAINTEXT_BYTES) });
 const DataBytesSchema = z.strictObject({ t: z.literal('data'), bytes: z.string().max(MAX_PLAINTEXT_BYTES) });
 
+/** The end-to-end dialect. The rendezvous control plane keeps `/1`; nothing a relay reads changed. */
+const Dialect = z.literal(SESSION_PROTOCOL_ID);
+
+/** When a session's access lease ends unless the device renews it. */
+const InstantSchema = z.string().min(1).max(64);
+
 /** The close taxonomy a direct socket carries, travelling inside the channel because it is content. */
 const StreamCloseSchema = z.strictObject({
   t: z.literal('stream-close'),
-  protocol: z.literal(RELAY_PROTOCOL_ID),
+  protocol: Dialect,
   code: z.number().int().min(1_000).max(4_999),
   reason: z.string().max(200),
 });
 
 export const RelayTunnelDaemonMessageSchema = z.union([
   z.discriminatedUnion('t', [
-    z.strictObject({ t: z.literal('authenticated'), protocol: z.literal(RELAY_PROTOCOL_ID) }),
+    z.strictObject({ t: z.literal('authenticated'), protocol: Dialect, accessExpiresAt: InstantSchema }),
     z.strictObject({
       t: z.literal('res'),
       id: z.number().int().min(1).max(MAX_TUNNEL_REQUEST_ID),
       status: z.number().int().min(100).max(599),
       headers: z.record(z.string().max(64), z.string().max(4_096)).optional(),
       body: z.string().max(MAX_PLAINTEXT_BYTES).optional(),
+      /** More of this body follows in `res-more` records. */
+      more: z.literal(true).optional(),
     }),
     z.strictObject({
-      t: z.literal('oversize'),
+      t: z.literal('res-more'),
       id: z.number().int().min(1).max(MAX_TUNNEL_REQUEST_ID),
-      status: z.number().int().min(100).max(599),
-      byteLength: z.number().int().nonnegative(),
+      body: z.string().max(MAX_PLAINTEXT_BYTES),
+      more: z.literal(true).optional(),
+    }),
+    // The lease is about to end: sign this nonce to keep the session.
+    z.strictObject({
+      t: z.literal('renew'),
+      protocol: Dialect,
+      nonce: z.string().min(1).max(64),
+      expiresAt: InstantSchema,
     }),
     // `response` is the pairing API's own redemption response, validated by the pairing API's own
     // schema. §14 embeds it verbatim so "the next field the pairing API adds crosses the relay the
     // day it ships"; re-listing the fields here would be the copy that silently drops it.
     z.strictObject({
       t: z.literal('paired'),
-      protocol: z.literal(RELAY_PROTOCOL_ID),
+      protocol: Dialect,
       response: PairingResponseSchema,
     }),
     // One reason for every cause. A pre-auth surface the whole internet can reach must not be an
     // oracle, so there is deliberately nothing here to tell "no code exists" from "wrong guess".
     z.strictObject({
       t: z.literal('pair-refused'),
-      protocol: z.literal(RELAY_PROTOCOL_ID),
+      protocol: Dialect,
       reason: z.literal(PAIRING_REFUSED_REASON),
     }),
-    z.strictObject({ t: z.literal('stream-opened'), protocol: z.literal(RELAY_PROTOCOL_ID) }),
+    z.strictObject({ t: z.literal('stream-opened'), protocol: Dialect, accessExpiresAt: InstantSchema }),
     // `status` and `body` are both REQUIRED: the daemon always has an `ApiResponse` body to send,
     // and an optional one would let a refusal cross with no explanation of itself.
     z.strictObject({
       t: z.literal('stream-refused'),
-      protocol: z.literal(RELAY_PROTOCOL_ID),
+      protocol: Dialect,
       status: z.number().int().min(100).max(599),
       body: z.string().max(MAX_PLAINTEXT_BYTES),
     }),
@@ -191,17 +221,27 @@ export type RelayTunnelDaemonMessage = z.infer<typeof RelayTunnelDaemonMessageSc
 
 /** What this side sends. Exactly the shapes §14 defines for a client, across all three modes. */
 export type RelayTunnelClientMessage =
-  | { readonly t: 'auth'; readonly protocol: typeof RELAY_PROTOCOL_ID; readonly deviceToken: string }
+  | {
+      readonly t: 'auth';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly deviceId: string;
+      readonly appSession: string;
+      readonly proof: string;
+    }
   | {
       readonly t: 'pair';
-      readonly protocol: typeof RELAY_PROTOCOL_ID;
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
       readonly code: string;
       readonly deviceName: string;
+      readonly deviceKey: string;
+      readonly proof: string;
     }
   | {
       readonly t: 'stream';
-      readonly protocol: typeof RELAY_PROTOCOL_ID;
-      readonly deviceToken: string;
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly deviceId: string;
+      readonly appSession: string;
+      readonly proof: string;
       readonly path: string;
       readonly query?: readonly (readonly [string, string])[];
     }
@@ -213,12 +253,17 @@ export type RelayTunnelClientMessage =
       readonly query?: readonly (readonly [string, string])[];
       readonly headers?: Readonly<Record<string, string>>;
       readonly body?: string;
+      readonly more?: true;
+      /** A person is at this device; only such a request moves its idle clock (`presence.ts`). */
+      readonly presence?: true;
     }
+  | { readonly t: 'req-more'; readonly id: number; readonly body: string; readonly more?: true }
+  | { readonly t: 'renewed'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly proof: string }
   | { readonly t: 'data'; readonly text: string }
   | { readonly t: 'data'; readonly bytes: string }
   | {
       readonly t: 'stream-close';
-      readonly protocol: typeof RELAY_PROTOCOL_ID;
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
       readonly code: number;
       readonly reason: string;
     };
@@ -242,21 +287,17 @@ export function decodeTunnelDaemonMessage(plaintext: Uint8Array): RelayTunnelDae
 }
 
 /**
- * The answer to one relayed request, as this side sees it.
+ * The answer to one request, as this side sees it — reassembled from its parts when it had several.
  *
- * `oversize` is kept as its own shape rather than flattened into a status,
- * because §14 made it a typed refusal for a reason: a client that turned "the
- * answer does not fit one record" into a 200 with an empty body would render a
- * fleet that does not exist.
+ * There is no `oversize` any more: a body larger than one record travels as ordered parts, and one
+ * larger than the tunnel will assemble arrives as the daemon's own `502`, never a truncated body.
  */
-export type RelayTunnelAnswer =
-  | {
-      readonly kind: 'response';
-      readonly status: number;
-      readonly headers: Readonly<Record<string, string>>;
-      readonly body: string;
-    }
-  | { readonly kind: 'oversize'; readonly status: number; readonly byteLength: number };
+export interface RelayTunnelAnswer {
+  readonly kind: 'response';
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+}
 
 /* ---------- the session ---------------------------------------------------- */
 
@@ -269,21 +310,40 @@ export type RelayTunnelAnswer =
  *
  * IT IS A UNION RATHER THAN OPTIONAL FIELDS ON PURPOSE, and §14 gives the reason in its own words:
  * "a session that 'should not' send requests is a rule nothing checks, while a session whose message
- * schema has no request in it is a rule nothing can break." So a pairing session has no
- * `deviceToken` field to accidentally acquire one in, and a stream session has no request path.
+ * schema has no request in it is a rule nothing can break." So a pairing session has no device
+ * identity to accidentally present, and a stream session has no request path.
+ *
+ * EVERY MODE CARRIES THE DEVICE KEY, and none carries anything a carrier could replay: the request and
+ * stream modes sign this session's transcript to say which grant they hold, and the pairing mode signs
+ * it to prove possession of the public key it is registering.
  */
 export type RelaySessionMode =
   /** A request session: any number of `req`, each answered by its own `id`. */
-  | { readonly kind: 'auth'; readonly deviceToken: string }
+  | { readonly kind: 'auth'; readonly device: SessionDeviceClaim }
   /** A pairing session: one redemption attempt, one sealed outcome, then the session closes. */
-  | { readonly kind: 'pair'; readonly code: string; readonly deviceName: string }
+  | {
+      readonly kind: 'pair';
+      readonly code: string;
+      readonly deviceName: string;
+      /** The SPKI being registered, and the private half that proves this browser holds it. */
+      readonly publicKey: string;
+      readonly key: PrivateKeyHandle;
+    }
   /** A stream session: exactly one protocol-switching stream, opened by the credential record itself. */
   | {
       readonly kind: 'stream';
-      readonly deviceToken: string;
+      readonly device: SessionDeviceClaim;
       readonly path: string;
       readonly query?: readonly (readonly [string, string])[];
     };
+
+/** Which grant a session proves, the key that proves it, and the running copy of the app it is. */
+export interface SessionDeviceClaim {
+  readonly deviceId: string;
+  readonly key: PrivateKeyHandle;
+  /** Random per page load; a step-up the daemon grants belongs to one of these. */
+  readonly appSession: string;
+}
 
 export interface RelayClientSessionDependencies {
   readonly crypto: RelayCrypto;
@@ -391,19 +451,58 @@ interface PendingRequest {
 const failureReason = (reason: unknown): string =>
   `this session's consumer refused a record: ${reason instanceof Error ? reason.message : String(reason)}`;
 
-/** The record at sequence 1, which is this session's mode expressed on the wire. */
-const credentialRecord = (mode: RelaySessionMode): RelayTunnelClientMessage => {
-  if (mode.kind === 'auth') return { t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: mode.deviceToken };
+/**
+ * The record at sequence 1, which is this session's mode expressed on the wire.
+ *
+ * SIGNED OVER THIS SESSION'S TRANSCRIPT, which is why it can only be built after keying: the proof
+ * names the session it was made for, so a carrier that kept it would hold something no other session
+ * accepts — and it never sees it, because this record is sealed.
+ */
+const credentialRecord = async (
+  crypto: RelayCrypto,
+  mode: RelaySessionMode,
+  transcript: Uint8Array,
+): Promise<RelayTunnelClientMessage> => {
   if (mode.kind === 'pair')
-    return { t: 'pair', protocol: RELAY_PROTOCOL_ID, code: mode.code, deviceName: mode.deviceName };
+    return {
+      t: 'pair',
+      protocol: SESSION_PROTOCOL_ID,
+      code: mode.code,
+      deviceName: mode.deviceName,
+      deviceKey: mode.publicKey,
+      proof: await signDeviceProof(crypto, mode.key, devicePairMessage(transcript, mode.publicKey)),
+    };
+  const { deviceId, appSession, key } = mode.device;
+  const claim = {
+    protocol: SESSION_PROTOCOL_ID,
+    deviceId,
+    appSession,
+    proof: await signDeviceProof(crypto, key, deviceAuthMessage(transcript, mode.kind, deviceId, appSession)),
+  } as const;
+  if (mode.kind === 'auth') return { t: 'auth', ...claim };
   return {
     t: 'stream',
-    protocol: RELAY_PROTOCOL_ID,
-    deviceToken: mode.deviceToken,
+    ...claim,
     path: mode.path,
     ...(mode.query === undefined || mode.query.length === 0 ? {} : { query: mode.query }),
   };
 };
+
+/** The widest `req-more` envelope, so a request part is cut to fit beside it. */
+const REQ_MORE_ENVELOPE = utf8Bytes(
+  JSON.stringify({ t: 'req-more', id: MAX_TUNNEL_REQUEST_ID, body: '', more: true }),
+).byteLength;
+
+/** What an OLD daemon says to a `/2` hello it cannot read: its fixed refusal, verbatim. */
+const PRE_DEVICE_KEY_REFUSAL = 'unparseable client hello';
+
+/** The body of one answer still arriving in parts. */
+interface PartialAnswer {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly parts: string[];
+  bytes: number;
+}
 
 /**
  * One arrived `data` record as the frame a stream consumer reads.
@@ -446,6 +545,12 @@ export class RelayClientSession {
   #send: SendWindow = newSendWindow();
   #receive: ReceiveWindow = newReceiveWindow();
   #nextRequestId = 1;
+  /** This session's handshake transcript hash, which every device proof on it signs. */
+  #transcript: Uint8Array | undefined;
+  /** Whether the credential record has been queued — after which the daemon may have acted on it. */
+  #credentialSent = false;
+  /** Answers still arriving in parts, by request id. */
+  readonly #partial = new Map<number, PartialAnswer>();
   #failure: RelaySessionError | undefined;
   readonly #pending = new Map<number, PendingRequest>();
   /** Records waiting for the peer to return credit. Bounded by one window. */
@@ -630,7 +735,7 @@ export class RelayClientSession {
    */
   closeStream(code = 1000, reason = 'the viewer left this stream'): void {
     if (this.#phase !== 'streaming') return;
-    this.#sendRecord({ t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code, reason });
+    this.#sendRecord({ t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code, reason });
     this.#concludeStream({ code, reason });
   }
 
@@ -653,12 +758,38 @@ export class RelayClientSession {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session has exhausted its request identifiers');
       throw this.#failure ?? new RelaySessionError('request identifiers exhausted', RELAY_CLOSE_CODES.protocolError);
     }
+    const body = message.body ?? '';
+    if (utf8Bytes(body).byteLength > MAX_TUNNEL_BODY_BYTES) {
+      throw new RelaySessionError(
+        `this request body is over the ${MAX_TUNNEL_BODY_BYTES}-byte limit one session carries`,
+        RELAY_CLOSE_CODES.frameTooLarge,
+      );
+    }
     const id = this.#nextRequestId;
     this.#nextRequestId += 1;
     const answer = new Promise<RelayTunnelAnswer>((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
     });
-    this.#sendRecord({ ...message, t: 'req', id });
+    // A body that fits rides on the request itself; a larger one is cut into ordered parts by the
+    // protocol package's own rule, which is the one the daemon reassembles by.
+    const { body: _first, ...head } = message;
+    const envelope = encodeTunnelClientMessage({ ...head, t: 'req', id, body: '', more: true }).byteLength;
+    const parts = partitionTunnelBody(body, MAX_PLAINTEXT_BYTES - Math.max(envelope, REQ_MORE_ENVELOPE));
+    parts.forEach((part, index) => {
+      const more = index < parts.length - 1 ? ({ more: true } as const) : {};
+      if (index === 0)
+        this.#sendRecord({
+          ...head,
+          t: 'req',
+          id,
+          ...(part === '' && parts.length === 1 && message.body === undefined ? {} : { body: part }),
+          ...more,
+        });
+      else this.#sendRecord({ t: 'req-more', id, body: part, ...more }, true);
+    });
+    // Watched from here on: the session can end while the outbox drains, and a rejection nobody is
+    // watching yet is an unhandled one — the caller still receives it through the `await` below.
+    answer.catch(() => undefined);
     await this.#outbox;
     return await answer;
   }
@@ -828,6 +959,23 @@ export class RelayClientSession {
         await this.#onReady(frame.sessionId);
         return;
       case 'closed':
+        // An old daemon reads a `/2` hello as garbage and says so in its own fixed words. Told
+        // which side is old, a person can fix it; told "protocol error", nobody can.
+        if (
+          this.#phase === 'awaiting-hello' &&
+          message.code === RELAY_CLOSE_CODES.protocolError &&
+          message.reason === PRE_DEVICE_KEY_REFUSAL
+        ) {
+          this.#quietly(RELAY_CLOSE_CODES.versionUnsupported, OLDER_DAEMON_SENTENCE);
+          return;
+        }
+        if (message.code === RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE) {
+          this.#quietly(
+            message.code,
+            'the access lease on this session ended; a new session is opened on the next request',
+          );
+          return;
+        }
         this.#quietly(message.code, `the rendezvous ended this session: ${message.code} ${message.reason}`);
         return;
       case 'error':
@@ -901,20 +1049,50 @@ export class RelayClientSession {
     }
     const hello = decodeDaemonHello(frame.payload);
     if (hello === null) {
-      this.#fail(RELAY_CLOSE_CODES.protocolError, 'unparseable daemon hello');
+      // A machine from before device keys is not an attacker; it is a machine nobody updated, and the
+      // person holding this browser can only fix that if they are told which side is old.
+      if (speaksPreviousSessionProtocol(frame.payload))
+        this.#fail(RELAY_CLOSE_CODES.versionUnsupported, OLDER_DAEMON_SENTENCE);
+      else this.#fail(RELAY_CLOSE_CODES.protocolError, 'unparseable daemon hello');
       return;
     }
     const completed = await completeClientHandshake(this.deps.crypto, pending, hello);
     if (!completed.ok) {
       // The fingerprint check lives inside `completeClientHandshake` and runs first,
-      // so a wrong daemon is refused here having never seen the device token.
+      // so a wrong daemon is refused here having never been shown a device proof.
       this.#fail(RELAY_CLOSE_CODES.protocolError, completed.reason);
       return;
     }
     this.#consume();
     this.#channel = openChannel(pending.sessionId, completed.keys, 'client');
+    this.#transcript = completed.keys.transcriptHash;
     this.#phase = 'awaiting-credential';
-    this.#sendRecord(credentialRecord(this.deps.mode));
+    this.#sendRecord(await credentialRecord(this.deps.crypto, this.deps.mode, completed.keys.transcriptHash));
+    this.#credentialSent = true;
+  }
+
+  /**
+   * Whether the credential record left this side. For a pairing that is the line between "nothing
+   * reached the daemon" and "the code may have been redeemed with nobody left to hear the answer".
+   */
+  credentialSent(): boolean {
+    return this.#credentialSent;
+  }
+
+  /**
+   * The daemon is about to end this session's lease: answer with the same key, over this transcript
+   * and the nonce it sent. Silent, and immediate — an incoming record is what woke this tab, so there
+   * is no timer here to be throttled into missing the deadline.
+   */
+  async #renew(nonce: string): Promise<void> {
+    const transcript = this.#transcript;
+    const mode = this.deps.mode;
+    // Unreachable rather than refused: only a serving or streaming session reads a `renew`, and both
+    // are keyed and hold a device. The guard is the type system's, so nothing below assumes it.
+    if (transcript === undefined || mode.kind === 'pair') return;
+    const proof = await signDeviceProof(this.deps.crypto, mode.device.key, deviceRenewMessage(transcript, nonce));
+    if (this.#done()) return;
+    this.#sendRecord({ t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
   }
 
   async #onRecord(frame: RelayFrame): Promise<void> {
@@ -1003,6 +1181,10 @@ export class RelayClientSession {
 
   /** Frames and the end of a live stream. Nothing else may cross a stream session. */
   #onStreamRecord(message: RelayTunnelDaemonMessage): void {
+    if (message.t === 'renew') {
+      void this.#renew(message.nonce);
+      return;
+    }
     if (message.t === 'data') {
       const frame = streamFrame(message);
       if (frame === null) {
@@ -1025,7 +1207,11 @@ export class RelayClientSession {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session is already authenticated');
       return;
     }
-    if (message.t !== 'res' && message.t !== 'oversize') {
+    if (message.t === 'renew') {
+      void this.#renew(message.nonce);
+      return;
+    }
+    if (message.t !== 'res' && message.t !== 'res-more') {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'the daemon sent a record this request session cannot read');
       return;
     }
@@ -1036,12 +1222,36 @@ export class RelayClientSession {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'the daemon answered a request this browser did not send');
       return;
     }
+    const partial = this.#partial.get(message.id);
+    if (message.t === 'res-more' ? partial === undefined : partial !== undefined) {
+      this.#fail(RELAY_CLOSE_CODES.protocolError, 'the daemon sent an answer part out of order');
+      return;
+    }
+    const assembling: PartialAnswer = partial ?? {
+      status: message.t === 'res' ? message.status : 0,
+      headers: message.t === 'res' ? (message.headers ?? {}) : {},
+      parts: [],
+      bytes: 0,
+    };
+    const body = message.body ?? '';
+    assembling.parts.push(body);
+    assembling.bytes += utf8Bytes(body).byteLength;
+    if (assembling.bytes > MAX_TUNNEL_BODY_BYTES) {
+      this.#fail(RELAY_CLOSE_CODES.frameTooLarge, 'the daemon sent an answer larger than one session carries');
+      return;
+    }
+    if (message.more === true) {
+      this.#partial.set(message.id, assembling);
+      return;
+    }
+    this.#partial.delete(message.id);
     this.#pending.delete(message.id);
-    waiting.resolve(
-      message.t === 'res'
-        ? { kind: 'response', status: message.status, headers: message.headers ?? {}, body: message.body ?? '' }
-        : { kind: 'oversize', status: message.status, byteLength: message.byteLength },
-    );
+    waiting.resolve({
+      kind: 'response',
+      status: assembling.status,
+      headers: assembling.headers,
+      body: assembling.parts.join(''),
+    });
   }
 
   /**
@@ -1095,8 +1305,10 @@ export class RelayClientSession {
    * the same length in two places is how two places come to disagree about the
    * envelope.
    */
-  #sendRecord(message: RelayTunnelClientMessage): void {
-    if (this.#waiting.length >= CREDIT_WINDOW_FRAMES) {
+  #sendRecord(message: RelayTunnelClientMessage, part = false): void {
+    // A body's later parts are exempt: the request that owns them was already bounded by
+    // `MAX_TUNNEL_BODY_BYTES`, and they drain as the daemon returns credit.
+    if (!part && this.#waiting.length >= CREDIT_WINDOW_FRAMES) {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session has too many records waiting on credit');
       return;
     }

@@ -1,5 +1,13 @@
 /**
- * FIRST CONTACT WITH A DAEMON THIS BROWSER CANNOT REACH.
+ * FIRST CONTACT WITH A DAEMON, ON EITHER CARRIER.
+ *
+ * Every redemption is a sealed `pair` record inside a session now — over the daemon's own address
+ * first, then the one rendezvous this build discovered. The plain-HTTP `POST /v1/pair` is gone: it
+ * handed a live code to whatever answered at an address nothing had authenticated, and the session
+ * proves the daemon against the QR's fingerprint before the code leaves this browser on every path.
+ * The record also registers this browser's device KEY, and proves possession of it by signing the
+ * session's transcript, so what a pairing mints is a public key on the daemon and nothing at all a
+ * carrier could replay.
  *
  * `docs/relay-protocol.md` §14 "Pairing sessions" is the contract and this is the browser's half of
  * it. The document used to forbid this outright; the error it named in retiring that prohibition is
@@ -14,8 +22,8 @@
  *   nothing has authenticated, which hands the live code to whatever answers at it.
  *
  * WHY THIS IS NOT IN `relay-carrier.ts`. That module's whole subject is a daemon this browser is
- * already paired with: every entry point it owns takes a `DaemonConnection`, which requires a device
- * token. A pairing attempt has none — that is the point of it — and has no entry in the router's
+ * already paired with: every entry point it owns takes a `DaemonConnection`, which names a device
+ * grant. A pairing attempt has none — that is the point of it — and has no entry in the router's
  * registry to be torn down by an unpair, because there is nothing paired yet. Bolting a
  * credential-less branch into the router would put "sometimes there is no credential" into the one
  * class whose invariant is that there always is.
@@ -37,19 +45,45 @@
  */
 
 import type { PairingResponse } from '@ferretry/protocol';
-import { type ConnectionMethod, connectionSocketUrl, parseDaemonId, RELAY_CLOSE_CODES } from '@ferretry/relay';
+import {
+  type ConnectionMethod,
+  connectionSocketUrl,
+  HEARTBEAT_GRACE_SECONDS,
+  type PrivateKeyHandle,
+  parseDaemonId,
+  RELAY_CLOSE_CODES,
+} from '@ferretry/relay';
 import { daemonRelayCarrier, type RelayCarrier } from './daemon-connection.ts';
 import type { PairingSeed } from './pairing.ts';
 import { browserRelayDial, driveRelaySession, type RelayDial, type RelayHeartbeatSchedule } from './relay-carrier.ts';
-import { RelayClientSession, type RelayClientSessionDependencies, RelaySessionError } from './relay-session.ts';
+import {
+  RelayClientSession,
+  type RelayClientSessionDependencies,
+  RelayPairingRefusedError,
+  RelaySessionError,
+} from './relay-session.ts';
 
 /**
- * Every rendezvous this redemption may try — and never the direct address.
+ * Every carrier a redemption walks, in §1's order: the daemon's own address, then the rendezvous.
  *
- * §1's rule does not bend for pairing: direct is attempted first and is attempted by the caller,
- * over ordinary HTTP, because a browser that can reach the daemon has no reason to involve a third
- * party. What comes AFTER that is exactly one address: **the discovery advertisement's hosted
- * rendezvous**, the one this build can find for itself.
+ * A fingerprint this protocol cannot address gets nothing — not even the direct address, because a
+ * session is checked against that fingerprint on BOTH carriers now, and a pairing with nothing to
+ * check the daemon against is exactly the session a hostile answerer would like this browser to open.
+ */
+export const pairingCandidates = (
+  seed: PairingSeed,
+  hostedRelayUrl: string | undefined,
+): readonly ConnectionMethod[] => {
+  if (parseDaemonId(seed.daemonId) === null) return [];
+  return [{ kind: 'direct', daemonUrl: seed.daemonUrl }, ...relayPairingCandidates(seed, hostedRelayUrl)];
+};
+
+/**
+ * Every rendezvous this redemption may try — the part of the walk after the daemon's own address.
+ *
+ * §1's rule does not bend for pairing: direct is attempted first, because a browser that can reach
+ * the daemon has no reason to involve a third party. What comes AFTER that is exactly one address:
+ * **the discovery advertisement's hosted rendezvous**, the one this build can find for itself.
  *
  * A SECOND CANDIDATE WAS BUILT HERE AND IS WITHDRAWN, ahead of the link field it read. It came first
  * in the order and was the link's own `relay=` — daemon-authored and carried out of band with the
@@ -100,14 +134,40 @@ export interface RelayPairingAttemptOptions {
   readonly crypto: RelayClientSessionDependencies['crypto'];
   readonly seed: PairingSeed;
   readonly deviceName: string;
-  /** The one rendezvous this attempt may dial. One attempt is one session is one rendezvous. */
-  readonly rendezvous: RelayCarrier;
+  /** The one carrier this attempt may dial. One attempt is one session is one carrier. */
+  readonly method: ConnectionMethod;
+  /** The device key being registered: its SPKI, and the private half that signs the proof. */
+  readonly publicKey: string;
+  readonly key: PrivateKeyHandle;
   readonly dial?: RelayDial;
   readonly heartbeat?: RelayHeartbeatSchedule;
+  /**
+   * How long a session may take to answer before this attempt gives up and the walk moves on.
+   *
+   * Short for the direct leg: a daemon's advertised address is often a private one, and from cellular
+   * those packets are dropped rather than refused, so a socket would otherwise sit for the full grace
+   * window while the code's two minutes run out.
+   */
+  readonly deadlineMs?: number;
 }
 
 /**
- * One redemption attempt, over one rendezvous, answered by the daemon's own sealed outcome.
+ * The `pair` record crossed, and the session ended before the daemon's sealed answer did.
+ *
+ * Not a transport failure in the usual sense: the daemon may have redeemed the code and registered
+ * this browser's key with nobody left to hear the answer. The walk still tries the next carrier —
+ * the daemon may equally have received nothing — but a refusal that follows THIS is not the whole
+ * story, and the caller says so.
+ */
+export class PairingOutcomeUnknownError extends Error {
+  constructor(override readonly cause: unknown) {
+    super('the pairing code reached the daemon, but the session ended before its answer arrived');
+    this.name = 'PairingOutcomeUnknownError';
+  }
+}
+
+/**
+ * One redemption attempt, over one carrier, answered by the daemon's own sealed outcome.
  *
  * Resolves with the pairing API's verbatim redemption response — §14 embeds it whole rather than
  * re-listing its fields, "so the next field the pairing API adds crosses the relay the day it ships
@@ -118,34 +178,45 @@ export interface RelayPairingAttemptOptions {
  * to keep apart, and it says how they are told apart: "one arrives as a close outside the channel,
  * the other as a record inside it."
  */
-export const redeemPairingOverRelay = async ({
+export const redeemPairingInSession = async ({
   crypto,
   seed,
   deviceName,
-  rendezvous,
+  method,
+  publicKey,
+  key,
   dial = browserRelayDial,
   heartbeat,
+  deadlineMs = HEARTBEAT_GRACE_SECONDS * 1_000,
 }: RelayPairingAttemptOptions): Promise<PairingResponse> => {
-  const url = connectionSocketUrl(rendezvous as ConnectionMethod, seed.daemonId, 'client');
+  const url = connectionSocketUrl(method, seed.daemonId, 'client');
   if (url === null) {
-    throw new RelaySessionError('this daemon fingerprint cannot address a rendezvous', RELAY_CLOSE_CODES.protocolError);
+    throw new RelaySessionError('this daemon fingerprint cannot address a session', RELAY_CLOSE_CODES.protocolError);
   }
   const socket = dial(url);
   const session = new RelayClientSession({
     crypto,
     daemonId: seed.daemonId,
-    mode: { kind: 'pair', code: seed.code, deviceName },
+    mode: { kind: 'pair', code: seed.code, deviceName, publicKey, key },
     socket,
   });
-  const outcome = await driveRelaySession({
-    socket,
-    session,
-    heartbeat: heartbeat ?? defaultHeartbeat,
-    settled: session.paired(),
-    // The daemon closes this session the moment it has answered, so nothing here goes on to carry
-    // traffic and an armed heartbeat would outlive the conversation it was measuring.
-    keepAlive: false,
-  });
+  let outcome: Awaited<ReturnType<RelayClientSession['paired']>>;
+  try {
+    outcome = await driveRelaySession({
+      socket,
+      session,
+      heartbeat: heartbeat ?? defaultHeartbeat,
+      settled: session.paired(),
+      // The daemon closes this session the moment it has answered, so nothing here goes on to carry
+      // traffic and an armed heartbeat would outlive the conversation it was measuring.
+      keepAlive: false,
+      deadlineMs,
+    });
+  } catch (reason) {
+    socket.close(1000, 'this pairing attempt is over');
+    if (reason instanceof RelayPairingRefusedError || !session.credentialSent()) throw reason;
+    throw new PairingOutcomeUnknownError(reason);
+  }
   // The daemon ends the session itself (§14), but a socket this side is finished with is a socket
   // this side closes: an attempt that resolved and then left a rendezvous connection open would hold
   // one of the eight sessions a rendezvous serves for no reason at all.

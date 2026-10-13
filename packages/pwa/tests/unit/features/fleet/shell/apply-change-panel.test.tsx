@@ -24,8 +24,8 @@ import {
 const CHANGE = { kind: 'machine.settings', agentPermissions: 'auto' } as const;
 const PASSWORD = 'correct-horse-battery';
 const NOW = () => Date.parse('2026-10-13T08:00:00.000Z');
-const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceToken: 't' });
-const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceToken: 'u' });
+const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
+const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });
 
 const settle = async (): Promise<void> => {
   await interact(async () => {

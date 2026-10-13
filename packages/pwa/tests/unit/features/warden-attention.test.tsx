@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
-  WardenAttention,
   attentionHeadline,
   attentionOutcome,
   judgementSummary,
   nextStateOnFailure,
   orderedAttentionItems,
+  WardenAttention,
 } from '../../../src/features/warden/warden-attention.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run } from '../../support/react.ts';
@@ -14,7 +14,7 @@ import { render, run } from '../../support/react.ts';
 const connection = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 const item = {
   id: 'A3',

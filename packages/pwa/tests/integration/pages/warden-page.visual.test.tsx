@@ -118,7 +118,7 @@ const fixtureCss = String.raw`
 const connection = daemonConnection({
   daemonId: 'daemon-visual',
   baseUrl: 'http://127.0.0.1',
-  deviceToken: 'visual-only-token',
+  deviceId: 'visual-only-token',
 });
 
 function AttentionSurface(_: WardenSurfaceProps) {

@@ -4,15 +4,18 @@ import { PairingScreen } from '../../../src/features/pairing/pairing-screen.tsx'
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import type { QrScanHost } from '../../../src/lib/pair-scan.ts';
 import type { PairingArrival, PairingSeed } from '../../../src/lib/pairing.ts';
+import { DeviceKeyUnsupportedError, UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../../src/lib/device-keys.ts';
+import { DaemonOutdatedError } from '../../../src/lib/relay-carrier.ts';
 import { RelayPairingRefusedError } from '../../../src/lib/relay-session.ts';
+import { OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import { interact, mount, must } from '../../support/dom.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-secret',
+  deviceId: 'alpha-secret',
 });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-secret' });
+const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'beta-secret' });
 const records = [
   { ...alpha, label: 'Studio daemon', pairedAt: 1, lastSelectedAt: 2 },
   { ...beta, pairedAt: 1, lastSelectedAt: 1 },
@@ -221,6 +224,45 @@ describe('PairingScreen exchange', () => {
 
     expect(screen.container.querySelector('[data-pairing-failure="refusal"]')).not.toBeNull();
     expect(screen.container.textContent).toContain('Pairing codes are single-use and short-lived.');
+    expect(screen.container.textContent).not.toContain('its code is probably still good');
+    await screen.unmount();
+  });
+
+  /*
+   * VERSION SKEW IS ONE SENTENCE NAMING THE SIDE TO UPDATE, never a connection error. The sentence
+   * already IS the remedy — it names the update commands — so neither the fresh-code advice nor the
+   * check-your-network advice may follow it: each would send the reader to fix something that works.
+   */
+  it('names the machine as the side to update, alone, when it runs an older Ferretry', async () => {
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onPair: async () => {
+        throw new DaemonOutdatedError();
+      },
+    });
+
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+
+    const alert = must(screen.container.querySelector('[data-pairing-failure="stated"]'), 'the stated failure');
+    expect(alert.textContent).toBe(OLDER_DAEMON_SENTENCE);
+    expect(screen.container.textContent).not.toContain('its code is probably still good');
+    expect(screen.container.textContent).not.toContain('Pairing codes are single-use');
+    await screen.unmount();
+  });
+
+  it('says plainly when this browser cannot make the key Ferretry pairs with', async () => {
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onPair: async () => {
+        throw new DeviceKeyUnsupportedError();
+      },
+    });
+
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+
+    expect(
+      must(screen.container.querySelector('[data-pairing-failure="stated"]'), 'the stated failure').textContent,
+    ).toBe(UNSUPPORTED_DEVICE_KEY_SENTENCE);
     expect(screen.container.textContent).not.toContain('its code is probably still good');
     await screen.unmount();
   });

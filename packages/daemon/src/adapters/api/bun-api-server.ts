@@ -19,7 +19,6 @@ import {
   type SocketFrame,
   type SocketHandler,
 } from '../../lib/api/index.ts';
-import { DEVICE_UNPAIRED_CLOSE, type DeviceConnectionTracker } from '../../lib/pairing/index.ts';
 
 /**
  * What one upgraded request carries into the socket handlers.
@@ -31,10 +30,6 @@ import { DEVICE_UNPAIRED_CLOSE, type DeviceConnectionTracker } from '../../lib/p
  */
 export interface HostSocketState {
   readonly attach: SocketAttachment;
-  /** The paired device this socket was authorized for. Absent for a host credential. */
-  readonly deviceId?: string;
-  /** Stops the device registry tracking this socket. Set once it is tracked. */
-  release?: () => void;
   /** Frames delivered before the handler was attached, in arrival order. Bounded; see
    *  `admitPendingSocketFrame`. */
   readonly pending: SocketFrame[];
@@ -150,15 +145,10 @@ export class BunApiServer implements ApiServerPort {
      * be measuring the machine it runs on rather than the bound. Nothing in the daemon passes it.
      */
     private readonly maxBodyBytes: number = MAX_REQUEST_BODY_BYTES,
-    /**
-     * Where a socket authorized for a paired device is registered, so unpairing that device closes
-     * it. Absent only where no device can authenticate at all.
-     */
-    private readonly connections?: DeviceConnectionTracker,
   ) {}
 
   async listen(surface: ApiSurface, options: ApiBindOptions): Promise<ApiServerHandle> {
-    const sockets = new HostSocketRegistry(this.connections);
+    const sockets = new HostSocketRegistry();
     const server = this.http.serve({
       hostname: options.host,
       port: options.port,
@@ -183,7 +173,6 @@ export class BunApiServer implements ApiServerPort {
         if (upgrade?.outcome === 'accepted')
           return server.upgrade(request, {
             attach: upgrade.attach,
-            ...(upgrade.deviceId === undefined ? {} : { deviceId: upgrade.deviceId }),
             pending: [],
             closed: false,
           })
@@ -317,8 +306,6 @@ class HostSocketRegistry {
   private readonly live = new Set<HostSocket>();
   private closedHere = false;
 
-  constructor(private readonly connections: DeviceConnectionTracker | undefined) {}
-
   /**
    * Whether this host has closed a socket on its own initiative rather than letting the peer or the
    * runtime do it.
@@ -341,17 +328,8 @@ class HostSocketRegistry {
   opened(socket: HostSocket): void {
     this.live.add(socket);
     const state = socket.data;
-    // Tracked before the attachment runs, so a device unpaired while its terminal is still being
-    // resolved is closed like any other — and one unpaired already is closed right here.
-    if (state.deviceId !== undefined && this.connections !== undefined)
-      state.release = this.connections.track(state.deviceId, () => {
-        if (state.closed) return;
-        this.live.delete(socket);
-        finish(socket);
-        this.close(socket, DEVICE_UNPAIRED_CLOSE);
-      });
     void state
-      .attach(downstreamFor(socket))
+      .attach(this.downstreamFor(socket))
       .then(async handler => {
         if (state.closed) {
           handler.close();
@@ -408,15 +386,21 @@ class HostSocketRegistry {
     this.closedHere = true;
     socket.close(close.code, close.reason);
   }
-}
 
-/** One live socket, as the domain sees it. */
-function downstreamFor(socket: HostSocket): SocketDownstream {
-  return {
-    send: bytes => socket.send(bytes),
-    close: (code, reason) => socket.close(code, reason),
-    bufferedBytes: () => socket.getBufferedAmount(),
-  };
+  /**
+   * One live socket, as the domain sees it.
+   *
+   * A HANDLER'S CLOSE IS THIS HOST'S CLOSE TOO, so it goes through {@link close} and is counted. The
+   * direct carrier ends its socket whenever its one session ends, and a close the registry did not
+   * count left `stop` awaiting the promise Bun never settles after a server-side close.
+   */
+  private downstreamFor(socket: HostSocket): SocketDownstream {
+    return {
+      send: bytes => socket.send(bytes),
+      close: (code, reason) => this.close(socket, { code, reason }),
+      bufferedBytes: () => socket.getBufferedAmount(),
+    };
+  }
 }
 
 /** Ends the handler behind one socket. Idempotent, because `close` arrives once from the peer and
@@ -426,7 +410,6 @@ function finish(socket: HostSocket): void {
   if (state.closed) return;
   state.closed = true;
   state.pending.length = 0;
-  state.release?.();
   state.handler?.close();
 }
 

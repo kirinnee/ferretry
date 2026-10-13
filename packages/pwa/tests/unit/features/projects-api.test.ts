@@ -11,7 +11,7 @@ import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 const connection = daemonConnection({
   daemonId: 'daemon/a',
   baseUrl: 'https://a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 const json = (body: unknown, status = 200): Response =>
@@ -45,7 +45,7 @@ describe('registerProject', () => {
 
     expect(seen[0]?.url).toBe(`https://a.example.test${PROJECT_REGISTRY_PATH}`);
     expect(seen[0]?.method).toBe('POST');
-    expect(seen[0]?.headers.get('authorization')).toBe('Bearer token-a');
+    expect(seen[0]?.headers.has('authorization')).toBe(false);
     expect(seen[0]?.headers.get('content-type')).toBe('application/json');
     expect(seen[0]?.body).toEqual({ kind: 'existing-folder', path: '/work/ferretry' });
     expect(project.id).toBe(record.id);

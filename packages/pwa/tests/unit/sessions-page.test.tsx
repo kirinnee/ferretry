@@ -20,8 +20,8 @@ import { type DaemonUsagePort, DaemonUsageStore } from '../../src/lib/usage-stor
 import { interact, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
-const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.invalid', deviceToken: 'alpha-token' });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.invalid', deviceToken: 'beta-token' });
+const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.invalid', deviceId: 'alpha-token' });
+const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.invalid', deviceId: 'beta-token' });
 const now = () => Date.parse('2026-08-01T12:00:00.000Z');
 
 /**
@@ -520,9 +520,9 @@ describe('SessionsPage', () => {
     const rotated = daemonConnection({
       daemonId: alpha.daemonId,
       baseUrl: 'https://alpha-relay.invalid',
-      deviceToken: 'alpha-token-2',
+      deviceId: 'alpha-token-2',
     });
-    const port = deferredFleet(daemon => daemon.deviceToken);
+    const port = deferredFleet(daemon => daemon.deviceId);
     const fleet = new DaemonFleetStore(port);
     const props = pageProps({ fleet });
     const page = await mount(<SessionsPage {...props} />);
@@ -530,13 +530,13 @@ describe('SessionsPage', () => {
     await page.render(<SessionsPage {...props} connection={rotated} />);
     await settle();
     // Same durable daemon, two connections: the re-pair is its own read.
-    expect(port.calls).toEqual([alpha.deviceToken, rotated.deviceToken]);
+    expect(port.calls).toEqual([alpha.deviceId, rotated.deviceId]);
 
-    await interact(() => port.pending(rotated.deviceToken).resolve(sessions('repaired')));
+    await interact(() => port.pending(rotated.deviceId).resolve(sessions('repaired')));
     await settle();
     expect(page.container.textContent).toContain('Repaired-Team');
 
-    await interact(() => port.pending(alpha.deviceToken).resolve(sessions('stale')));
+    await interact(() => port.pending(alpha.deviceId).resolve(sessions('stale')));
     await settle();
     expect(page.container.textContent).toContain('Repaired-Team');
     expect(page.container.textContent).not.toContain('Stale-Team');

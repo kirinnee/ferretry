@@ -3,8 +3,6 @@ import {
   type CreateTerminalRequest,
   CreateTerminalRequestSchema,
   RenameTerminalRequestSchema,
-  SOCKET_TICKET_TTL_SECONDS,
-  SocketTicketResponseSchema,
   type SurfaceOpener,
   type TerminalErrorCode,
   TerminalIdSchema,
@@ -14,10 +12,9 @@ import {
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
-import { errorResponse, jsonResponse } from '../../api/responses.ts';
+import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
-import type { SocketTicketBroker } from '../../api/socket-ticket.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
 import { TerminalPolicyError } from '../../terminal/policy.ts';
 
@@ -138,12 +135,6 @@ function pathTerminalId(context: RouteContext): string {
   return parsed.data;
 }
 
-/** The canonical stream address, reconstructed from parsed identifiers rather than copied from a
- * request path. This is the ticket audience as well as the socket route: one ticket cannot drift to
- * a sibling terminal merely because both have the same authorization class. */
-const terminalStreamPath = (sessionId: string, terminalId: string): string =>
-  `/v1/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminalId)}/stream`;
-
 /** Every terminal the session owns, with the limits the caller is being held to. */
 async function list(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
@@ -247,46 +238,6 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await close(subsystem, context),
-    },
-  ];
-}
-
-/**
- * The terminal-specific half of the existing socket-ticket exchange.
- *
- * Its scope deliberately matches the terminal socket: a paired device is an `admin` credential and
- * can therefore buy a ticket for the shell it is already allowed to use, while a warden cannot mint
- * a way around the socket's own refusal. The ticket replays that exact credential and is audience
- * bound to this daemon's one session/terminal stream path.
- */
-export function terminalTicketRoutes(
-  subsystem: Pick<TerminalSubsystem, 'get'>,
-  tickets: Pick<SocketTicketBroker, 'issue'>,
-): readonly ApiRoute[] {
-  return [
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/terminals/:terminalId/stream/ticket',
-      minimum: 'operator',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const sessionId = pathSessionId(context);
-        const terminalId = pathTerminalId(context);
-        // Do not sell a credential for an absent target. It both gives callers a useful handshake
-        // refusal early and ensures the audience came from this daemon's terminal directory.
-        await subsystem.get(sessionId, terminalId).catch(reraise);
-        if (context.credential === undefined) return errorResponse(401, 'unauthorized', 'unauthorized');
-        const grant = tickets.issue(context.credential, terminalStreamPath(sessionId, terminalId));
-        return jsonResponse(
-          SocketTicketResponseSchema.parse({
-            ticket: grant.ticket,
-            ttlSeconds: SOCKET_TICKET_TTL_SECONDS,
-            expiresAt: new Date(grant.expiresAtMs).toISOString(),
-          }),
-          201,
-        );
-      },
     },
   ];
 }

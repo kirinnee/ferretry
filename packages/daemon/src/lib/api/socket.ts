@@ -21,7 +21,6 @@ import type { ApiRequest, ApiResponse } from './http.ts';
 import { errorResponse } from './responses.ts';
 import type { RouteContext, ScopedRoute, WardenRemedyAuthorizer } from './route.ts';
 import type { ApiRouter } from './router.ts';
-import type { SocketTicketRedeemer } from './socket-ticket.ts';
 
 /** A client frame as the transport delivers it: text control JSON, or binary bytes. */
 export type SocketFrame = string | ArrayBuffer | ArrayBufferView;
@@ -122,11 +121,6 @@ export type SocketUpgradeDecision =
   | {
       readonly outcome: 'accepted';
       readonly attach: SocketAttachment;
-      /**
-       * The paired device the upgrade was authorized for, absent for a host credential. The
-       * transport tracks the socket under it, so unpairing the device closes the socket too.
-       */
-      readonly deviceId?: string;
     }
   /** No socket route claims this path; it is an ordinary request/response one. */
   | { readonly outcome: 'unclaimed' }
@@ -134,16 +128,9 @@ export type SocketUpgradeDecision =
 
 /** Decides one protocol switch, over the same authorization boundary the HTTP dispatcher uses. */
 export class ApiSocketDispatcher {
-  /**
-   * `tickets` is required rather than optional, and it is the ONE thing this boundary has that the
-   * request/response one does not. A browser cannot put a header on a `WebSocket`, so without a
-   * redeemer here a paired device can never open a socket at all — an optional dependency is how that
-   * capability would go quietly missing again, in a daemon that still looked correctly wired.
-   */
   constructor(
     private readonly router: ApiRouter<SocketRoute>,
     private readonly credentials: ApiCredentials,
-    private readonly tickets: SocketTicketRedeemer,
     /**
      * The operator's per-capability decision, over the SAME boundary the request/response dispatcher
      * uses. A terminal stream is the capability `terminal`, and a socket table that skipped this
@@ -178,24 +165,13 @@ export class ApiSocketDispatcher {
   }
 
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
-    const authorized = authorizeRequest(
-      this.router,
-      this.credentials,
-      request,
-      this.tickets,
-      this.guard,
-      this.remedies,
-    );
+    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
     if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
     try {
-      const attach = await authorized.route.accept(authorized.context);
-      const credential = authorized.context.credential;
-      return {
-        outcome: 'accepted',
-        attach,
-        ...(credential?.tokenClass === 'device' ? { deviceId: credential.deviceId } : {}),
-      };
+      // A paired device's stream is tracked by the SESSION that opened it, which ends it on revocation;
+      // no plain-HTTP upgrade can carry a device at all any more.
+      return { outcome: 'accepted', attach: await authorized.route.accept(authorized.context) };
     } catch (error) {
       // Same taxonomy as a route handler's: a refusal the subsystem named keeps its own status, and
       // anything else is the daemon's fault rather than the caller's.

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import {
-  Composer as ProductionComposer,
   ComposerMarkdownPreview,
   type ComposerProps,
+  Composer as ProductionComposer,
 } from '../../src/components/composer.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -50,7 +50,7 @@ afterEach(() => {
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
-  deviceToken: 'token-a',
+  deviceId: 'token-a',
 });
 
 describe('ComposerMarkdownPreview', () => {

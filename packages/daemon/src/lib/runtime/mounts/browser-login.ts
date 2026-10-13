@@ -1,23 +1,16 @@
-import {
-  BrowserActionSchema,
-  BrowserLoginActionSchema,
-  SOCKET_TICKET_TTL_SECONDS,
-  SocketTicketResponseSchema,
-  type BrowserActionResult,
-} from '@ferretry/protocol';
+import { type BrowserActionResult, BrowserActionSchema, BrowserLoginActionSchema } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
 import {
   BrowserControlError,
   type BrowserLoginLifecycle,
   type BrowserLoginStatus,
 } from '../../browser/control/index.ts';
 import { BrowserSessionError, type BrowserSubsystem } from '../../browser/runtime/index.ts';
-import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
-import type { SocketTicketBroker } from '../../api/socket-ticket.ts';
 
 export interface BrowserMountedSubsystem extends BrowserSubsystem {
   stream(sessionId: string, downstream: SocketDownstream): Promise<SocketHandler>;
@@ -62,15 +55,13 @@ export interface BrowserMountedSubsystem extends BrowserSubsystem {
  * worker and `bin/fyd.ts` has long wired a transport that can drive one. What was missing was the
  * per-session runtime that turns a session id into a launched worker and a production
  * `BrowserViewerHost`. `BrowserSessionService` is that object, so the one call site in
- * `mounts/index.ts` now hands this function a browser host and the socket-ticket broker as well as
- * the login window.
+ * `mounts/index.ts` now hands this function a browser host as well as the login window.
  *
  * THE HOST STAYS OPTIONAL because the refusal it replaces has to remain expressible. A daemon
  * composed without one answers the stated 501 below rather than a 404, for the same reason
  * `/v1/learning/run` does: `fy browser open` is a shipped command, and a 404 is indistinguishable
- * from version skew while a 501 naming the missing piece is actionable. The ticket counter is
- * separately optional, because a counter that could mint nothing would answer 500 where a 404 is the
- * truth.
+ * from version skew while a 501 naming the missing piece is actionable. There is no stream ticket
+ * counter any more: a paired device opens the viewer's stream inside its own session.
  */
 
 /** Every refusal the login domain raises, in the transport's own taxonomy. */
@@ -133,13 +124,8 @@ async function browserAction(browser: BrowserSubsystem, context: RouteContext): 
 
 /** The real per-session browser routes. The projection is BrowserStatus, which carries the active tab
  * and its complete tab list from the daemon-owned worker rather than a UI-local guess. */
-const streamPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/browser/stream`;
 
-export function browserLoginRoutes(
-  window: BrowserLoginLifecycle,
-  browser?: BrowserSubsystem,
-  tickets?: Pick<SocketTicketBroker, 'issue'>,
-): readonly ApiRoute[] {
+export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: BrowserSubsystem): readonly ApiRoute[] {
   const sessionRoutes: readonly ApiRoute[] =
     browser === undefined
       ? [
@@ -181,31 +167,6 @@ export function browserLoginRoutes(
             noStore: true,
             handle: async (context: RouteContext) => await browserAction(browser, context),
           },
-          ...(tickets === undefined
-            ? []
-            : [
-                {
-                  method: 'POST' as const,
-                  path: '/v1/sessions/:sessionId/browser/stream/ticket',
-                  minimum: 'operator' as const,
-                  capability: { capability: 'browser' as const, axis: 'use' as const },
-                  noStore: true,
-                  handle: async (context: RouteContext) => {
-                    const id = sessionId(context);
-                    await browser.status(id).catch(browserFailure);
-                    if (context.credential === undefined) throw new ApiError(401, 'unauthorized', 'unauthorized');
-                    const grant = tickets.issue(context.credential, streamPath(id));
-                    return jsonResponse(
-                      SocketTicketResponseSchema.parse({
-                        ticket: grant.ticket,
-                        ttlSeconds: SOCKET_TICKET_TTL_SECONDS,
-                        expiresAt: new Date(grant.expiresAtMs).toISOString(),
-                      }),
-                      201,
-                    );
-                  },
-                },
-              ]),
         ];
   return [
     {

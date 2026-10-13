@@ -741,30 +741,38 @@ export function stepLedger(steps: readonly LedgerStep[]): StepLedger {
 }
 
 /**
- * The device token, read out of the browser for ONE purpose and never for any other.
+ * What the browser stored for its pairing, read out for the leak search and the key check only.
  *
- * A credential the harness holds is a credential the harness can spill, so this is the narrowest
- * shape that still lets the leak search run: the value is returned, handed straight to
- * {@link plaintextLeaks}, and never printed, written to the report, or compared to anything else.
- * {@link plaintextLeaks} reports the LABEL of a matched secret and never the secret, which is what
- * makes holding it briefly acceptable rather than merely convenient.
+ * There is no device credential to find any more — the grant is proved by a non-extractable key —
+ * so this returns the grant's ID (an identity the relay must still never read) and the NAMES of any
+ * stored field that looks like a token, which must be none: a bearer value surviving in storage would
+ * be the old credential coming back by another route. The id is handed straight to
+ * {@link plaintextLeaks}, which reports the LABEL of a match and never the value.
  */
-export interface StoredDeviceToken {
-  /** The credential, for {@link plaintextLeaks} and nothing else. Empty when none was found. */
-  readonly token: string;
+export interface StoredDeviceGrant {
+  /** The grant's id, for {@link plaintextLeaks} and nothing else. Empty when none was found. */
+  readonly deviceId: string;
+  /** The key paths of every stored string field named like a token. A paired browser has none. */
+  readonly tokenFields: readonly string[];
+  /**
+   * The device key this browser holds for the daemon, described rather than returned: whether it is
+   * a real `CryptoKey`, its algorithm, and — the property the design rests on — whether it can be
+   * exported. `null` when no key is stored.
+   */
+  readonly key: { readonly isCryptoKey: boolean; readonly algorithm: string; readonly extractable: boolean } | null;
   /**
    * Where the reader looked and what it found there, as NAMES ONLY.
    *
    * A failure to find a credential has to be diagnosable without printing one, so this reports
    * database names, store names, record keys and JSON key paths — never a value. It is the whole
-   * difference between "no device token is stored" (which is either a product defect or a reader
+   * difference between "no device grant is stored" (which is either a product defect or a reader
    * that is looking in the wrong place, and does not say which) and an answer.
    */
   readonly shape: string;
 }
 
-export async function deviceTokenForLeakSearchOnly(page: BrowserPage): Promise<StoredDeviceToken> {
-  return page.evaluate<StoredDeviceToken>(`(async () => {
+export async function deviceGrantForLeakSearchOnly(page: BrowserPage): Promise<StoredDeviceGrant> {
+  return page.evaluate<StoredDeviceGrant>(`(async () => {
     const open = name => new Promise((settle, fail) => {
       const request = indexedDB.open(name);
       request.onsuccess = () => settle(request.result);
@@ -772,7 +780,9 @@ export async function deviceTokenForLeakSearchOnly(page: BrowserPage): Promise<S
     });
     const all = typeof indexedDB.databases === 'function' ? await indexedDB.databases() : [{ name: 'ferretry-pwa' }];
     const notes = [];
-    let token = '';
+    let deviceId = '';
+    const tokenFields = [];
+    let key = null;
     for (const entry of all) {
       if (typeof entry.name !== 'string') continue;
       const database = await open(entry.name);
@@ -788,6 +798,7 @@ export async function deviceTokenForLeakSearchOnly(page: BrowserPage): Promise<S
           // The record is a SERIALISED document, not an object graph: the connections store holds
           // one JSON string. Walking it as an object found nothing and reported "no device token is
           // stored", which reads as a product defect and was a reader looking at the wrong shape.
+          // A CryptoKey is not a document; it is described where the key store is read below.
           // (No backticks in this comment: it lives inside a template literal, and one would end it.)
           if (typeof node === 'string') {
             if (!node.trimStart().startsWith('{') && !node.trimStart().startsWith('[')) return;
@@ -801,16 +812,23 @@ export async function deviceTokenForLeakSearchOnly(page: BrowserPage): Promise<S
           if (typeof node !== 'object') return;
           for (const [name, child] of Object.entries(node)) {
             keys.add(path + name);
-            if (typeof child === 'string' && /token/i.test(name) && child !== '' && token === '') token = child;
+            if (typeof child === 'string' && /token/i.test(name) && child !== '') tokenFields.push(path + name);
+            if (typeof child === 'string' && name === 'deviceId' && child !== '' && deviceId === '') deviceId = child;
             walk(child, path + name + '.');
           }
         };
-        for (const record of records) walk(record, '');
+        for (const record of records) {
+          if (record instanceof CryptoKey) {
+            key = { isCryptoKey: true, algorithm: record.algorithm.name, extractable: record.extractable };
+            continue;
+          }
+          walk(record, '');
+        }
         notes.push(entry.name + '/' + store + ' (' + records.length + ' record(s)): ' + [...keys].sort().join(', '));
       }
     }
     const local = Object.keys(localStorage).sort().join(', ');
-    return { token, shape: notes.join(' | ') + ' || localStorage keys: ' + local };
+    return { deviceId, tokenFields, key, shape: notes.join(' | ') + ' || localStorage keys: ' + local };
   })()`);
 }
 

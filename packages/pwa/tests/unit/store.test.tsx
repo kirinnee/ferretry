@@ -4,6 +4,10 @@ import { useState } from 'react';
 import { HOSTED_RELAY_PATH } from '../../src/features/onboarding/hosted-relay.ts';
 import type { DaemonConnectionRepository, DaemonConnectionStore } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../src/lib/device-keys.ts';
+import { DaemonOutdatedError } from '../../src/lib/relay-carrier.ts';
+import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
+import { OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import {
   type AppStore,
   browserConnectionRepository,
@@ -14,10 +18,21 @@ import {
   StoreProvider,
   useAppStore,
   useConnectionSnapshot,
+  useDaemonClient,
+  DaemonClientProvider,
 } from '../../src/lib/store.tsx';
-import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
+import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, mount, must } from '../support/dom.ts';
-import { autoDial, newDaemonIdentity, relayCrypto, settle as settleTasks } from '../support/relay.ts';
+import {
+  autoDial,
+  dialByHost,
+  keyedDaemon,
+  newDaemonIdentity,
+  olderDaemonDial,
+  relayCrypto,
+  ScriptedSocket,
+  settle as settleTasks,
+} from '../support/relay.ts';
 
 const RELAY_DIRECTORY = 'https://directory.example.test';
 const HOSTED_RELAY_URL = 'https://hosted-relay.example.test';
@@ -43,12 +58,12 @@ const withRelayDirectory = async <T,>(value: string, body: () => Promise<T>): Pr
 const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
-  deviceToken: 'alpha-token',
+  deviceId: 'alpha-token',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
-  deviceToken: 'beta-token',
+  deviceId: 'beta-token',
 });
 
 class MemoryRepository implements DaemonConnectionRepository {
@@ -107,306 +122,68 @@ describe('DaemonApiPool', () => {
 });
 
 describe('exchangePairing', () => {
-  it('posts the single-use code only to the reader-supplied daemon and validates its identity', async () => {
-    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
-    const deviceToken = `fy_device_${'t'.repeat(43)}`;
-    const requests: { readonly url: string; readonly init?: RequestInit }[] = [];
-    const connection = await exchangePairing(
-      { daemonUrl: 'https://daemon.example.test', daemonId, code: 'one-time-code' },
-      async (input, init) => {
-        requests.push({ url: String(input), init });
-        return Response.json({
-          daemonId,
-          deviceToken,
-          daemonName: 'workstation',
-          capabilities: [],
-          carriers: [
-            { kind: 'relay', url: 'https://relay.example.test' },
-            { kind: 'direct', url: 'https://daemon.example.test' },
-          ],
-        });
-      },
-    );
-
-    expect(String(connection.daemonId)).toBe(daemonId);
-    expect(connection.baseUrl).toBe('https://daemon.example.test');
-    expect(connection.deviceToken).toBe(deviceToken);
-    expect(connection.carriers).toEqual([
-      { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
-      { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'self' },
-    ]);
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.url).toBe('https://daemon.example.test/v1/pair');
-    expect(requests[0]?.init?.credentials).toBe('omit');
-    expect(requests[0]?.init?.referrerPolicy).toBe('no-referrer');
-    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
-      code: 'one-time-code',
-      deviceName: 'Ferretry PWA',
-    });
+  const DEVICE_ID = 'fy_device_id_pairedDevice0000000001';
+  const STUDIO = 'https://studio.example';
+  const RELAY = 'wss://relay.mine.test';
+  const pairedAs = (daemonId: string, carriers: readonly unknown[] = [{ kind: 'direct', url: STUDIO }]) => ({
+    deviceId: DEVICE_ID,
+    daemonId,
+    daemonName: 'Studio',
+    capabilities: [],
+    carriers,
+    idleExpiryDays: 30,
   });
 
-  it('fails closed on a daemon error, malformed response, or fingerprint mismatch', async () => {
-    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
-    const seed = { daemonUrl: 'https://daemon.example.test', daemonId, code: 'code' };
-
-    await expect(
-      exchangePairing(seed, async () => Response.json({ error: 'expired' }, { status: 410 })),
-    ).rejects.toThrow('expired');
-    await expect(exchangePairing(seed, async () => Response.json({ daemonId: 3 }))).rejects.toThrow(
-      'invalid pairing response',
-    );
-    await expect(
-      exchangePairing(seed, async () =>
-        Response.json({
-          daemonId: `fy_daemon_${'o'.repeat(43)}`,
-          deviceToken: `fy_device_${'t'.repeat(43)}`,
-          daemonName: 'other',
-          capabilities: [],
-          carriers: [],
-        }),
-      ),
-    ).rejects.toThrow('does not match its fingerprint');
-  });
-
-  /*
-   * A RUNTIME WITHOUT `AbortSignal.timeout` USED TO PAIR WITH NOTHING. The unguarded static call
-   * threw a `TypeError` before `fetcher` was reached, the catch read it as direct-unreachable, and a
-   * v1/direct-only link — which has no rendezvous to fall back to — reported that programming error
-   * as the transport verdict. The fallback controller path must still contact a reachable direct
-   * daemon, and the static is restored in `finally` so a thrown assertion cannot leak the absence
-   * into a later case.
-   */
-  it('pairs directly even when the runtime omits AbortSignal.timeout', async () => {
-    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
-    const nativeTimeout = AbortSignal.timeout;
-    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
-    const requests: string[] = [];
-    try {
-      const connection = await exchangePairing(
-        { daemonUrl: 'https://daemon.example.test', daemonId, code: 'one-time-code' },
-        async input => {
-          requests.push(String(input));
-          return Response.json({
-            daemonId,
-            deviceToken: `fy_device_${'t'.repeat(43)}`,
-            daemonName: 'workstation',
-            capabilities: [],
-            carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
-          });
-        },
-      );
-
-      // THE DIRECT DAEMON WAS CALLED — the missing static no longer prevents the fetch — and the
-      // walk's first leg paired, so no rendezvous was spent.
-      expect(requests).toEqual(['https://daemon.example.test/v1/pair']);
-      expect(String(connection.daemonId)).toBe(daemonId);
-    } finally {
-      Object.defineProperty(AbortSignal, 'timeout', {
-        value: nativeTimeout,
-        configurable: true,
-        writable: true,
-      });
-    }
-    expect(typeof AbortSignal.timeout).toBe('function');
-  });
-
-  /*
-   * THE FALLBACK TIMER, NOT THE NATIVE STATIC, IS WHAT HAS TO DEADLINE A HUNG DIRECT FETCH. A
-   * blackholed address never rejects on its own, so the fallback controller's timer firing at the
-   * injected short deadline is what classifies direct as unreachable and hands the same single-use
-   * code to the rendezvous. The static is removed to force the controller path; the relay leg is a
-   * scripted daemon that seals a real redemption, so the case proves the whole walk rather than a
-   * mock of it.
-   */
-  it('aborts a hung direct fetch at the injected deadline over the fallback timer and pairs over the relay', async () => {
-    const identity = await newDaemonIdentity();
-    const RELAY = 'wss://relay.mine.test';
-    const response = {
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
-      daemonId: identity.daemonId,
-      daemonName: 'Studio',
-      capabilities: [],
-      carriers: [{ kind: 'relay', url: RELAY }],
+  /** One scripted daemon per carrier, chosen by the host the browser dialled. */
+  const byHost = (routes: Readonly<Record<string, (() => ScriptedSocket) | 'refuse'>>) => {
+    const dialled: string[] = [];
+    const dial = (url: string): ScriptedSocket => {
+      dialled.push(url);
+      const route = routes[new URL(url).hostname];
+      if (route === undefined || route === 'refuse') {
+        const refused = new ScriptedSocket();
+        queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
+        return refused;
+      }
+      return route();
     };
-    const auto = autoDial(identity, { paired: response });
-    const nativeTimeout = AbortSignal.timeout;
-    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
-    const directStarted = Date.now();
-    let abortedAt: number | undefined;
-    try {
-      const connection = await exchangePairing(
-        { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
-        {
-          // The rendezvous the walk falls back to comes from the DISCOVERED advertisement, not from
-          // the link — the seed above is the ordinary three-field one a v1 fragment produces.
-          hostedRelayUrl: RELAY,
-          fetcher: async (_input, init) =>
-            await new Promise<Response>((_resolve, reject) => {
-              init?.signal?.addEventListener(
-                'abort',
-                () => {
-                  abortedAt = Date.now() - directStarted;
-                  reject(new DOMException('the direct fetch was aborted', 'AbortError'));
-                },
-                { once: true },
-              );
-            }),
-          relayCrypto,
-          relayDial: auto.dial,
-          directTimeoutMs: 20,
-        },
-      );
+    return { dial, dialled };
+  };
 
-      // The walk moved past the aborted direct leg and redeemed the same code over the rendezvous,
-      // which is §1's direct-first walk when direct does not answer.
-      expect(String(connection.daemonId)).toBe(identity.daemonId);
-      const pairRequest = auto.requests[0] as { t: string; code: string; deviceName: string };
-      expect(pairRequest.t).toBe('pair');
-      expect(pairRequest.code).toBe('7F3K-Q2ND');
-      expect(pairRequest.deviceName).toBe('Ferretry PWA');
-    } finally {
-      Object.defineProperty(AbortSignal, 'timeout', {
-        value: nativeTimeout,
-        configurable: true,
-        writable: true,
-      });
-    }
-
-    // THE TIMER FIRED AT THE INJECTED ~20ms, not the four-second default, so the hung fetch was
-    // classified unreachable and the relay leg ran well inside the code's two-minute life.
-    expect(abortedAt).toBeGreaterThanOrEqual(10);
-    expect(abortedAt).toBeLessThan(1000);
-  });
-
-  /*
-   * NO TIMER SURVIVES A SETTLED DIRECT FETCH. The native static owns an internal timer no `clear()`
-   * reaches, so this case forces the controller path and then reads the signal the fetcher received:
-   * had the fallback timer not been cleared in the direct fetch's `finally`, it would have aborted
-   * that signal well inside the wait below. An un-aborted signal past the deadline is the proof, not
-   * an assertion against a mock. The static is restored in `finally` — the same shape every
-   * monkeypatch in this file follows — which is the guarantee that a thrown assertion restores it.
-   */
-  it('clears the fallback timer once a direct fetch settles, and restores the static it stubbed', async () => {
-    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
-    const success = Response.json({
-      daemonId,
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
-      daemonName: 'workstation',
-      capabilities: [],
-      carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
-    });
-    const nativeTimeout = AbortSignal.timeout;
-    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
-    let directSignal: AbortSignal | undefined;
-    try {
-      const connection = await exchangePairing(
-        { daemonUrl: 'https://daemon.example.test', daemonId, code: 'code' },
-        {
-          fetcher: async (_input, init) => {
-            directSignal = init?.signal ?? undefined;
-            return success;
-          },
-          directTimeoutMs: 30,
-        },
-      );
-      expect(String(connection.daemonId)).toBe(daemonId);
-    } finally {
-      Object.defineProperty(AbortSignal, 'timeout', {
-        value: nativeTimeout,
-        configurable: true,
-        writable: true,
-      });
-    }
-
-    // Had `clear()` not run, the 30ms fallback timer would have aborted this signal inside the wait.
-    await new Promise(resolve => setTimeout(resolve, 80));
-    expect(directSignal?.aborted).toBe(false);
-    expect(typeof AbortSignal.timeout).toBe('function');
-  });
-
-  /*
-   * THE DEADLINE CAN BURN A CODE THE DAEMON ACTUALLY REDEEMED, AND THE READER HAS TO BE TOLD.
-   *
-   * The four-second deadline exists because a blackholed address never rejects on its own, and it
-   * stays. What it cannot do is prove the POST never landed: a reachable-but-slow daemon — a
-   * tailnet, a loaded host, the persistence await inside the pairing service's own `grant` — can
-   * consume the code and mint a device while this side has already stopped waiting. The walk then
-   * presents the same single-use code at the rendezvous and gets a sealed `pair-refused`, which is
-   * the daemon telling the truth about a code the CANCELLED attempt may itself have spent.
-   *
-   * Reported as "that code is wrong, expired or already spent" alone, the owner mints another and
-   * never learns that a device is paired under a token nobody holds. So this exact sequence — a
-   * direct fetch aborted at the deadline, then a sealed refusal — must name the possibility and the
-   * remedy. The daemon here is the scripted one, sealing a REAL refusal record.
-   */
-  it('warns that the cancelled direct attempt may have paired when the relay then reports a refusal', async () => {
+  it('pairs over a direct session, registering a fresh key and saving it only once the daemon accepted it', async () => {
     const identity = await newDaemonIdentity();
-    const auto = autoDial(identity, { pairRefused: true });
-    const nativeTimeout = AbortSignal.timeout;
-    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
-    let reason: unknown;
-    try {
-      reason = await exchangePairing(
-        { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
-        {
-          hostedRelayUrl: 'wss://relay.mine.test',
-          // Hangs until the deadline aborts it — the daemon's side of this request is unobserved.
-          fetcher: async (_input, init) =>
-            await new Promise<Response>((_resolve, rejectFetch) => {
-              init?.signal?.addEventListener(
-                'abort',
-                () => rejectFetch(new DOMException('the direct fetch was aborted', 'AbortError')),
-                { once: true },
-              );
-            }),
-          relayCrypto,
-          relayDial: auto.dial,
-          directTimeoutMs: 20,
-        },
-      ).then(
-        () => undefined,
-        (thrown: unknown) => thrown,
-      );
-    } finally {
-      Object.defineProperty(AbortSignal, 'timeout', { value: nativeTimeout, configurable: true, writable: true });
-    }
+    const direct = autoDial(identity, { paired: pairedAs(identity.daemonId) });
+    const route = byHost({ 'studio.example': direct.dial });
+    const deviceKeys = new MemoryDeviceKeyStore();
 
-    // The relay leg really ran and really was refused — the code reached the scripted daemon.
-    expect((auto.requests[0] as { t: string }).t).toBe('pair');
-    // It stays a REFUSAL for every consumer that classifies one: `pairing-screen.tsx` reads this
-    // class to decide between "mint another code" and "check your network", and the daemon did
-    // refuse. Widening it to a plain Error would send the reader to fix a network that was fine.
-    expect(reason).toBeInstanceOf(RelayPairingRefusedError);
-    const message = (reason as Error).message;
-    // The three things the plain refusal cannot say: what may have happened, what to look for, and
-    // that minting again is necessary but may not be sufficient.
-    expect(message).toContain('may have completed that pairing');
-    expect(message).toContain('revoke');
-    expect(message).toContain('fy pair');
+    const connection = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      { deviceKeys, relayCrypto, relayDial: route.dial },
+    );
+
+    expect(String(connection.daemonId)).toBe(identity.daemonId);
+    expect(connection.baseUrl).toBe(STUDIO);
+    expect(connection.deviceId).toBe(DEVICE_ID);
+    expect(route.dialled).toEqual([`wss://studio.example/v1/rendezvous/${identity.daemonId}/client`]);
+    const pair = direct.requests[0] as Record<string, unknown>;
+    expect(pair).toMatchObject({ t: 'pair', code: '7F3K-Q2ND', deviceName: 'Ferretry PWA' });
+    expect(typeof pair.deviceKey).toBe('string');
+    // No bearer value exists anywhere in what was sent or what is kept.
+    expect(JSON.stringify(connection)).not.toContain('7F3K-Q2ND');
+    expect(deviceKeys.saved).toEqual([identity.daemonId]);
+    expect(deviceKeys.keys.get(identity.daemonId)?.extractable).toBe(false);
   });
 
-  /*
-   * AND THE ORDINARY CASE IS UNCHANGED, which is the half that keeps the warning meaningful. A
-   * fetch that REJECTS on its own — a refused connection, a DNS failure, an offline radio — proves
-   * the request never landed, so a refusal after it is only ever about the code. Telling that
-   * reader to go hunting for a phantom device would be the new sentence doing the same damage the
-   * old one did, in the opposite direction.
-   */
-  it('leaves a refusal after an ordinary transport failure saying only that the code is spent', async () => {
+  it('saves no key when the daemon refuses the code, and carries the refusal to no second carrier', async () => {
     const identity = await newDaemonIdentity();
-    const auto = autoDial(identity, { pairRefused: true });
+    const direct = autoDial(identity, { pairRefused: true });
+    const relay = autoDial(identity, { paired: pairedAs(identity.daemonId) });
+    const route = byHost({ 'studio.example': direct.dial, 'relay.mine.test': relay.dial });
+    const deviceKeys = new MemoryDeviceKeyStore();
 
     const reason = await exchangePairing(
-      { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
-      {
-        hostedRelayUrl: 'wss://relay.mine.test',
-        // Rejects immediately and of its own accord: nothing was cancelled, nothing was in flight.
-        fetcher: async () => {
-          throw new TypeError('Failed to fetch');
-        },
-        relayCrypto,
-        relayDial: auto.dial,
-      },
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: 'WRONG-CODE' },
+      { deviceKeys, relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY },
     ).then(
       () => undefined,
       (thrown: unknown) => thrown,
@@ -414,47 +191,212 @@ describe('exchangePairing', () => {
 
     expect(reason).toBeInstanceOf(RelayPairingRefusedError);
     expect((reason as Error).message).toBe('this pairing code is wrong, expired or already spent');
-    expect((reason as Error).message).not.toContain('revoke');
+    expect(relay.requests).toEqual([]);
+    expect(deviceKeys.saved).toEqual([]);
+  });
+
+  it('fails closed, saving nothing, on a response naming another daemon or no carrier at all', async () => {
+    const identity = await newDaemonIdentity();
+    const other = await newDaemonIdentity();
+    const deviceKeys = new MemoryDeviceKeyStore();
+    const seed = { daemonUrl: STUDIO, daemonId: identity.daemonId, code: 'code' };
+
+    const mismatched = autoDial(identity, { paired: pairedAs(other.daemonId) });
+    await expect(
+      exchangePairing(seed, { deviceKeys, relayCrypto, relayDial: byHost({ 'studio.example': mismatched.dial }).dial }),
+    ).rejects.toThrow('does not match its fingerprint');
+
+    await expect(
+      exchangePairing(
+        { ...seed, daemonId: 'not-a-fingerprint' },
+        { deviceKeys, relayCrypto, relayDial: () => new ScriptedSocket() },
+      ),
+    ).rejects.toThrow('no carrier could reach this daemon');
+    expect(deviceKeys.saved).toEqual([]);
+  });
+
+  it('says plainly when this browser cannot make the key it pairs with', async () => {
+    const refusing = {
+      generateDeviceKey: async () => {
+        throw new Error('NotSupportedError');
+      },
+    } as unknown as typeof relayCrypto;
+    await expect(
+      exchangePairing(
+        { daemonUrl: STUDIO, daemonId: (await newDaemonIdentity()).daemonId, code: 'code' },
+        { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto: refusing },
+      ),
+    ).rejects.toThrow(UNSUPPORTED_DEVICE_KEY_SENTENCE);
+  });
+
+  it('reports the FIRST failure when every carrier fails, because that is the one a reader can act on', async () => {
+    const identity = await newDaemonIdentity();
+    const route = byHost({});
+    await expect(
+      exchangePairing(
+        { daemonUrl: STUDIO, daemonId: identity.daemonId, code: 'code' },
+        { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY },
+      ),
+    ).rejects.toThrow(/could not open a socket|did not answer/u);
+    expect(route.dialled.map(url => new URL(url).hostname)).toEqual(['studio.example', 'relay.mine.test']);
   });
 
   /*
-   * A SUCCESSFUL RELAY FALLBACK AFTER THE SAME ABORT IS ALSO UNCHANGED. The ambiguity only ever
-   * decides how a REFUSAL is worded; a redemption that completed over the rendezvous is an ordinary
-   * success and must not acquire a warning about a pairing that plainly did not happen twice.
+   * A DIRECT ADDRESS THAT NEVER ANSWERS IS DEADLINED, and the same code goes to the rendezvous. The
+   * socket here opens nothing and closes nothing — a blackholed LAN address — so it is the injected
+   * deadline, not a close, that ends the direct leg.
    */
-  it('pairs silently over the relay when the cancelled direct attempt is followed by a redemption', async () => {
+  it('gives up on a silent direct address at the injected deadline and pairs over the relay', async () => {
     const identity = await newDaemonIdentity();
-    const RELAY = 'wss://relay.mine.test';
-    const auto = autoDial(identity, {
-      paired: {
-        deviceToken: `fy_device_${'t'.repeat(43)}`,
-        daemonId: identity.daemonId,
-        daemonName: 'Studio',
-        capabilities: [],
-        carriers: [{ kind: 'relay', url: RELAY }],
-      },
-    });
-    const nativeTimeout = AbortSignal.timeout;
-    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
-    try {
-      const connection = await exchangePairing(
-        { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
-        {
-          hostedRelayUrl: RELAY,
-          fetcher: async (_input, init) =>
-            await new Promise<Response>((_resolve, rejectFetch) => {
-              init?.signal?.addEventListener('abort', () => rejectFetch(new Error('aborted')), { once: true });
-            }),
-          relayCrypto,
-          relayDial: auto.dial,
-          directTimeoutMs: 20,
-        },
-      );
+    const relay = autoDial(identity, { paired: pairedAs(identity.daemonId, [{ kind: 'relay', url: RELAY }]) });
+    const route = byHost({ 'studio.example': () => new ScriptedSocket(), 'relay.mine.test': relay.dial });
+    const deviceKeys = new MemoryDeviceKeyStore();
+    const started = Date.now();
 
-      expect(String(connection.daemonId)).toBe(identity.daemonId);
-    } finally {
-      Object.defineProperty(AbortSignal, 'timeout', { value: nativeTimeout, configurable: true, writable: true });
-    }
+    const connection = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      { deviceKeys, relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY, directTimeoutMs: 20 },
+    );
+
+    expect(String(connection.daemonId)).toBe(identity.daemonId);
+    expect((relay.requests[0] as { code: string }).code).toBe('7F3K-Q2ND');
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(deviceKeys.saved).toEqual([identity.daemonId]);
+  });
+
+  /*
+   * THE DEADLINE CAN BURN A CODE THE DAEMON ACTUALLY REDEEMED, AND THE READER HAS TO BE TOLD. Here the
+   * direct daemon TOOK the sealed pair record and never answered, so the code may be spent under a
+   * grant nobody holds; the rendezvous then truthfully refuses the same code.
+   */
+  it('warns that the unheard direct attempt may have paired when the relay then refuses the code', async () => {
+    const identity = await newDaemonIdentity();
+    const direct = autoDial(identity, { pairSilently: true });
+    const relay = autoDial(identity, { pairRefused: true });
+    const route = byHost({ 'studio.example': direct.dial, 'relay.mine.test': relay.dial });
+
+    const reason = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        directTimeoutMs: 40,
+      },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect((direct.requests[0] as { t: string }).t).toBe('pair');
+    expect((relay.requests[0] as { t: string }).t).toBe('pair');
+    // Still a REFUSAL for every consumer that classifies one: the daemon did refuse.
+    expect(reason).toBeInstanceOf(RelayPairingRefusedError);
+    const message = (reason as Error).message;
+    expect(message).toContain('may have paired a device this browser never heard about');
+    expect(message).toContain('revoke');
+    expect(message).toContain('fy pair');
+  });
+
+  /*
+   * VERSION SKEW, from the pairing side. An updated app meeting an old machine must say ONE sentence
+   * naming the machine as the side to update — not the first leg's connection error, which is what the
+   * walk reports for an ordinary failure. Both ways an old machine can show itself are covered: its
+   * liveness route after the direct leg failed, and its words on a rendezvous session.
+   */
+  it('pairs over a working relay even when the direct liveness read looks old, because that read proves nothing', async () => {
+    const identity = await newDaemonIdentity();
+    const relay = autoDial(identity, { paired: pairedAs(identity.daemonId, [{ kind: 'relay', url: RELAY }]) });
+    const route = byHost({ 'relay.mine.test': relay.dial });
+    const connection = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        network: async () => Response.json({ status: 'ok' }),
+      },
+    );
+    expect(String(connection.daemonId)).toBe(identity.daemonId);
+    expect((relay.requests[0] as { t: string }).t).toBe('pair');
+  });
+
+  it('names the machine as old when nothing reached it and its liveness route speaks an older session', async () => {
+    const identity = await newDaemonIdentity();
+    const relay = autoDial(identity, { paired: pairedAs(identity.daemonId) });
+    const route = byHost({});
+    const asked: string[] = [];
+    const deviceKeys = new MemoryDeviceKeyStore();
+
+    const reason = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys,
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        network: async input => {
+          asked.push(String(input));
+          return Response.json({ status: 'ok' });
+        },
+      },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(reason).toBeInstanceOf(DaemonOutdatedError);
+    expect((reason as Error).message).toBe(OLDER_DAEMON_SENTENCE);
+    expect(asked).toEqual([`${STUDIO}/healthz`]);
+    expect(relay.requests).toEqual([]);
+    expect(deviceKeys.saved).toEqual([]);
+  });
+
+  it('names the machine as old when a rendezvous session meets the previous dialect', async () => {
+    const identity = await newDaemonIdentity();
+    const older = olderDaemonDial();
+    const route = byHost({ 'relay.mine.test': older.dial });
+
+    const reason = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        network: async () => {
+          throw new TypeError('Failed to fetch');
+        },
+      },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(reason).toBeInstanceOf(DaemonOutdatedError);
+    expect(older.sockets).toHaveLength(1);
+  });
+
+  it('pairs silently over the relay after an unheard direct attempt, with no warning to give', async () => {
+    const identity = await newDaemonIdentity();
+    const direct = autoDial(identity, { pairSilently: true });
+    const relay = autoDial(identity, { paired: pairedAs(identity.daemonId, [{ kind: 'relay', url: RELAY }]) });
+    const route = byHost({ 'studio.example': direct.dial, 'relay.mine.test': relay.dial });
+
+    const connection = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        directTimeoutMs: 40,
+      },
+    );
+
+    expect(String(connection.daemonId)).toBe(identity.daemonId);
   });
 });
 
@@ -653,25 +595,20 @@ describe('StoreProvider', () => {
   /**
    * THE CASE EVERY OTHER TEST IN THIS FILE IS BLIND TO, BECAUSE THEY ALL INJECT.
    *
-   * `createAppStore` is where the shipped `Illegal invocation` came from: the root
-   * wrote `options.fetcher ?? fetch` and handed that bare builtin to the carrier
-   * router, which stores it and invokes it as a member. A suite that passes its own
-   * `fetcher` never runs that line, and an injected plain function does not care what
-   * its receiver is — so the whole product could not connect while this file was
-   * green.
-   *
-   * This test therefore injects NOTHING and makes the global itself
-   * receiver-sensitive. The router must reach it as the global's own method, never
-   * with the router as the receiver. On main the recorded receiver is the
-   * `DaemonCarrierRouter` instance, which is precisely what a real browser refuses.
+   * `createAppStore` is where the shipped `Illegal invocation` came from: the root handed a bare
+   * builtin to the carrier router, which invoked it as a member. This test injects no fetcher and
+   * makes the global itself receiver-sensitive, then drives both ways the router still reaches the
+   * network: an origin no paired daemon owns, and the liveness read after a direct session failed.
    */
   it('reaches the real network without making the carrier router its receiver', async () => {
+    const { daemon, deviceKeys } = await keyedDaemon('https://alpha.example.test');
     const receivers: unknown[] = [];
+    const urls: string[] = [];
     const globalFetch = globalThis.fetch;
-    // Deliberately not an arrow: an arrow has no receiver to be wrong about, which is
-    // exactly why the existing injected-fetcher cases could not see this.
-    globalThis.fetch = function (this: unknown): Promise<Response> {
+    // Deliberately not an arrow: an arrow has no receiver to be wrong about.
+    globalThis.fetch = function (this: unknown, input: RequestInfo | URL): Promise<Response> {
       receivers.push(this);
+      urls.push(String(input));
       return Promise.resolve(Response.json({}));
     } as unknown as typeof fetch;
 
@@ -679,91 +616,90 @@ describe('StoreProvider', () => {
       const store = await createAppStore({
         repository: new MemoryRepository(),
         connectClient: async () => client('unused'),
+        deviceKeys,
+        relayCrypto,
+        relayDial: dialByHost({}).dial,
       });
-      store.connections.add(alpha);
-      await store.carrier.fetch(`${alpha.baseUrl}/v1/projects`);
+      store.connections.add(daemon);
+      await store.carrier.fetch('https://unpaired.example.test/v1/anything');
+      await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`).catch(() => undefined);
     } finally {
       globalThis.fetch = globalFetch;
     }
 
-    expect(receivers.length).toBeGreaterThan(0);
+    expect(urls).toEqual(['https://unpaired.example.test/v1/anything', 'https://alpha.example.test/healthz']);
     for (const receiver of receivers) expect(receiver).toBe(globalThis);
   });
 
   /**
    * TWO ANSWERS TO ONE QUESTION IS ONE ANSWER TOO MANY.
    *
-   * The typed client used to build its own transport, which dialled the daemon's own
-   * address directly and knew nothing about the carrier router. So Settings could
-   * show a green "Reachable" pill — a typed-client health request — beside a Carrier
-   * panel saying no connection worked, and both were telling the truth about
-   * different code. The probe also could not see a daemon that was only reachable
-   * through the relay, and reported it down.
-   *
-   * There is one path now, so the request the typed client makes is a request the
-   * carrier router carried.
+   * The typed client used to build its own transport, which dialled the daemon's own address directly
+   * and knew nothing about the carrier router. There is one path now, so the request the typed client
+   * makes is a request the carrier router carried — inside a session, with no header of its own.
    */
   it('sends the typed client over the carrier rather than its own direct transport', async () => {
-    const requests: string[] = [];
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://alpha.example.test');
+    const scripted = autoDial(identity, {
+      respond: request =>
+        request.path === '/v1/carriers'
+          ? { body: { carriers: [{ kind: 'direct', url: 'https://alpha.example.test' }] } }
+          : { body: [] },
+    });
     const store = await createAppStore({
       repository: new MemoryRepository(),
-      fetcher: async input => {
-        requests.push(String(input));
-        return String(input).endsWith('/v1/carriers')
-          ? Response.json({ carriers: [{ kind: 'direct', url: 'https://alpha.example.test' }] })
-          : Response.json([]);
-      },
-    });
-    store.connections.add(alpha);
-
-    await (await store.clients.client(alpha)).list();
-
-    expect(requests).toEqual(['https://alpha.example.test/v1/sessions', 'https://alpha.example.test/v1/carriers']);
-    // And the router recorded it as a measurement, which is the whole point: the
-    // probe and the Carrier panel are now reading one answer.
-    expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(true);
-  });
-
-  it('replaces the cached carrier set from the authenticated daemon view after connecting', async () => {
-    const daemon = daemonConnection({
-      daemonId: `fy_daemon_${'d'.repeat(43)}`,
-      baseUrl: 'https://daemon.example.test',
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
-      carriers: [
-        { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
-        { kind: 'relay', relayUrl: 'https://stale.example.test' },
-      ],
-    });
-    const requests: Array<{ readonly url: string; readonly authorization: string | null }> = [];
-    const store = await createAppStore({
-      repository: new MemoryRepository(),
-      fetcher: async (input, init) => {
-        requests.push({
-          url: String(input),
-          authorization: new Headers(init?.headers).get('authorization'),
-        });
-        if (String(input).endsWith('/v1/carriers')) {
-          return Response.json({
-            carriers: [
-              { kind: 'direct', url: 'https://daemon.example.test' },
-              { kind: 'relay', url: 'https://relay-one.example.test' },
-              { kind: 'relay', url: 'https://relay-two.example.test' },
-            ],
-          });
-        }
-        return Response.json({ ok: true });
+      deviceKeys,
+      relayCrypto,
+      relayDial: dialByHost({ 'alpha.example.test': scripted.dial }).dial,
+      fetcher: async () => {
+        throw new Error('no daemon request may reach the plain network');
       },
     });
     store.connections.add(daemon);
 
-    await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`);
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await (await store.clients.client(daemon)).list();
+    await settleTasks();
 
-    expect(requests.map(request => request.url)).toEqual([
-      'https://daemon.example.test/v1/projects',
-      'https://daemon.example.test/v1/carriers',
+    const asked = scripted.requests as { path: string; headers?: Record<string, string> }[];
+    expect(asked.map(request => request.path)).toEqual(['/v1/sessions', '/v1/carriers']);
+    expect(asked.every(request => request.headers?.authorization === undefined)).toBe(true);
+    expect(store.carrier.choice(daemon.daemonId)?.ok).toBe(true);
+  });
+
+  it('replaces the cached carrier set from the authenticated daemon view after connecting', async () => {
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://daemon.example.test', [
+      { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
+      { kind: 'relay', relayUrl: 'https://stale.example.test' },
     ]);
-    expect(requests[1]?.authorization).toBe(`Bearer ${daemon.deviceToken}`);
+    const scripted = autoDial(identity, {
+      respond: request =>
+        request.path === '/v1/carriers'
+          ? {
+              body: {
+                carriers: [
+                  { kind: 'direct', url: 'https://daemon.example.test' },
+                  { kind: 'relay', url: 'https://relay-one.example.test' },
+                  { kind: 'relay', url: 'https://relay-two.example.test' },
+                ],
+              },
+            }
+          : { body: { ok: true } },
+    });
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      deviceKeys,
+      relayCrypto,
+      relayDial: dialByHost({ 'daemon.example.test': scripted.dial }).dial,
+    });
+    store.connections.add(daemon);
+
+    await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`);
+    await settleTasks();
+
+    expect((scripted.requests as { path: string }[]).map(request => request.path)).toEqual([
+      '/v1/projects',
+      '/v1/carriers',
+    ]);
     expect(store.connections.get(daemon.daemonId)?.carriers).toEqual([
       { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
       { kind: 'relay', relayUrl: 'https://relay-one.example.test', operator: 'self' },
@@ -772,18 +708,13 @@ describe('StoreProvider', () => {
   });
 
   it('does not let an old pairing refresh replace a re-paired daemon cache', async () => {
-    const daemon = daemonConnection({
-      daemonId: `fy_daemon_${'d'.repeat(43)}`,
-      baseUrl: 'https://daemon.example.test',
-      deviceToken: `fy_device_${'o'.repeat(43)}`,
-      carriers: [
-        { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
-        { kind: 'relay', relayUrl: 'https://old-relay.example.test' },
-      ],
-    });
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://daemon.example.test', [
+      { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
+      { kind: 'relay', relayUrl: 'https://old-relay.example.test' },
+    ]);
     const repaired = daemonConnection({
       ...daemon,
-      deviceToken: `fy_device_${'n'.repeat(43)}`,
+      deviceId: 'fy_device_id_repairedDevice000000001',
       carriers: [
         { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
         { kind: 'relay', relayUrl: 'https://new-relay.example.test' },
@@ -793,19 +724,22 @@ describe('StoreProvider', () => {
     const requested = new Promise<void>(resolve => {
       refreshRequested = resolve;
     });
-    let releaseRefresh!: (response: Response) => void;
-    const delayedRefresh = new Promise<Response>(resolve => {
+    let releaseRefresh!: (answer: { body: unknown }) => void;
+    const delayedRefresh = new Promise<{ body: unknown }>(resolve => {
       releaseRefresh = resolve;
+    });
+    const scripted = autoDial(identity, {
+      respond: async request => {
+        if (request.path !== '/v1/carriers') return { body: { ok: true } };
+        refreshRequested();
+        return await delayedRefresh;
+      },
     });
     const store = await createAppStore({
       repository: new MemoryRepository(),
-      fetcher: async input => {
-        if (String(input).endsWith('/v1/carriers')) {
-          refreshRequested();
-          return await delayedRefresh;
-        }
-        return Response.json({ ok: true });
-      },
+      deviceKeys,
+      relayCrypto,
+      relayDial: dialByHost({ 'daemon.example.test': scripted.dial }).dial,
     });
     store.connections.add(daemon);
 
@@ -813,15 +747,15 @@ describe('StoreProvider', () => {
     await requested;
     store.connections.remove(daemon.daemonId);
     store.connections.add(repaired);
-    releaseRefresh(
-      Response.json({
+    releaseRefresh({
+      body: {
         carriers: [
           { kind: 'direct', url: 'https://daemon.example.test' },
           { kind: 'relay', url: 'https://stale-relay.example.test' },
         ],
-      }),
-    );
-    await new Promise(resolve => setTimeout(resolve, 0));
+      },
+    });
+    await settleTasks();
 
     expect(store.connections.get(daemon.daemonId)?.carriers).toEqual(repaired.carriers);
   });
@@ -830,38 +764,32 @@ describe('StoreProvider', () => {
    * THE PAIRING THAT PREDATES THE CARRIER SET, THROUGH THE REAL COMPOSITION ROOT.
    *
    * Such a record names one address — the direct one it was paired over — because the relay it was
-   * actually reached over away from that network came from the hosted advertisement and was never
-   * stored. A daemon too old to answer `GET /v1/carriers` cannot replace that, so the browser has to
-   * be able to DIAL the current advertised address without ever adopting it: adopted, it would
+   * actually reached over came from the hosted advertisement and was never stored. So the browser has
+   * to be able to DIAL the current advertised address without ever adopting it: adopted, it would
    * outlive the advertisement that produced it, which is the kill switch not working.
    *
    * What this case owns is the WIRING — that the one advertisement read this document performs is the
-   * address the router dials, for the right daemon, at the right rendezvous path, and that nothing
-   * about it is written down. The dial refuses on purpose: whether a session then works is
-   * `relay-carrier`'s subject and is covered there.
+   * address the router dials, for the right daemon, at the right rendezvous path, after direct, and
+   * that nothing about it is written down. Every dial refuses on purpose: whether a session then works
+   * is `relay-carrier`'s subject and is covered there.
    */
   it('dials the advertised rendezvous for a daemon that published none, and stores nothing about it', async () => {
-    const identity = await newDaemonIdentity();
-    const daemon = daemonConnection({
-      daemonId: identity.daemonId,
-      baseUrl: 'https://old.example.test',
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
-    });
+    const { daemon, deviceKeys } = await keyedDaemon('https://old.example.test');
     const repository = new MemoryRepository();
-    const dialled: string[] = [];
-    const direct: string[] = [];
+    const route = dialByHost({});
     const fetcher = (relayUrl: string | null) => async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === `${RELAY_DIRECTORY}${HOSTED_RELAY_PATH}`) return Response.json({ version: 1, relayUrl });
-      direct.push(url);
       throw new TypeError('Failed to fetch');
     };
-    const refusingDial = (url: string): never => {
-      dialled.push(url);
-      throw new Error('this rendezvous refused the socket');
-    };
     const store = await withRelayDirectory(RELAY_DIRECTORY, async () =>
-      createAppStore({ repository, relayCrypto, relayDial: refusingDial, fetcher: fetcher(HOSTED_RELAY_URL) }),
+      createAppStore({
+        repository,
+        deviceKeys,
+        relayCrypto,
+        relayDial: route.dial,
+        fetcher: fetcher(HOSTED_RELAY_URL),
+      }),
     );
     store.connections.add(daemon);
 
@@ -870,59 +798,56 @@ describe('StoreProvider', () => {
     );
     await settleTasks();
 
-    // Direct was tried first and the advertised rendezvous second — for this daemon's fingerprint,
-    // which is what a rendezvous is addressed by.
-    expect(direct).toEqual(['https://old.example.test/v1/projects']);
-    expect(dialled).toEqual([`wss://hosted-relay.example.test/v1/rendezvous/${identity.daemonId}/client`]);
-    // Nothing was adopted: neither the live record nor the bytes on disk name a rendezvous, so a
-    // withdrawn address is gone on the next load rather than remembered.
+    // Direct first, then the advertised rendezvous — both for this daemon's fingerprint.
+    expect(route.dialled).toEqual([
+      `wss://old.example.test/v1/rendezvous/${daemon.daemonId}/client`,
+      `wss://hosted-relay.example.test/v1/rendezvous/${daemon.daemonId}/client`,
+    ]);
     expect(store.connections.get(daemon.daemonId)?.carriers).toEqual([
       { kind: 'direct', daemonUrl: 'https://old.example.test' },
     ]);
     expect([...repository.values.values()].join('')).not.toContain(HOSTED_RELAY_URL);
 
-    // THE KILL SWITCH, on the next document: `relayUrl: null` is an answer, not a failure, and it
-    // leaves that same daemon with nothing but its own address to try.
+    // THE KILL SWITCH, on the next document: `relayUrl: null` leaves only the daemon's own address.
     const withdrawn = await withRelayDirectory(RELAY_DIRECTORY, async () =>
-      createAppStore({ repository, relayCrypto, relayDial: refusingDial, fetcher: fetcher(null) }),
+      createAppStore({ repository, deviceKeys, relayCrypto, relayDial: route.dial, fetcher: fetcher(null) }),
     );
     await expect(withdrawn.carrier.fetch(`${daemon.baseUrl}/v1/projects`)).rejects.toThrow(
       /No configured connection worked/u,
     );
     await settleTasks();
 
-    expect(dialled).toHaveLength(1);
+    expect(route.dialled.slice(2)).toEqual([`wss://old.example.test/v1/rendezvous/${daemon.daemonId}/client`]);
   });
 
   /**
    * A REFRESH THE DAEMON CANNOT ANSWER CHANGES NOTHING, AND ITS FIRST REAL ANSWER CHANGES EVERYTHING.
    *
    * `404` is what an older daemon says to `GET /v1/carriers`, and it must leave the known-working
-   * cache exactly as it was — a refusal is not a published set. Once that daemon can answer, its
-   * answer REPLACES the cache whole, which is the disagreement rule the route exists for.
+   * cache exactly as it was. Once that daemon can answer, its answer REPLACES the cache whole.
    */
   it('leaves the cache alone when a refresh is refused and replaces it whole once the daemon answers', async () => {
-    const daemonId = `fy_daemon_${'r'.repeat(43)}`;
-    const daemon = daemonConnection({
-      daemonId,
-      baseUrl: 'https://box.example.test',
-      deviceToken: `fy_device_${'t'.repeat(43)}`,
-    });
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://box.example.test');
     const repository = new MemoryRepository();
-    const paths: string[] = [];
     // Mutable on purpose: one document watches the daemon it is paired to gain the route.
     let published: unknown = null;
+    const scripted = autoDial(identity, {
+      respond: request => {
+        if (request.path !== '/v1/carriers') return { body: { ok: true } };
+        return published === null ? { status: 404, body: '' } : { body: published };
+      },
+    });
     const store = await withRelayDirectory(RELAY_DIRECTORY, async () =>
       createAppStore({
         repository,
+        deviceKeys,
+        relayCrypto,
+        relayDial: dialByHost({ 'box.example.test': scripted.dial }).dial,
         fetcher: async input => {
-          const url = String(input);
-          if (url === `${RELAY_DIRECTORY}${HOSTED_RELAY_PATH}`) {
+          if (String(input) === `${RELAY_DIRECTORY}${HOSTED_RELAY_PATH}`) {
             return Response.json({ version: 1, relayUrl: HOSTED_RELAY_URL });
           }
-          paths.push(new URL(url).pathname);
-          if (!url.endsWith('/v1/carriers')) return Response.json({ ok: true });
-          return published === null ? new Response('', { status: 404 }) : Response.json(published);
+          throw new TypeError('Failed to fetch');
         },
       }),
     );
@@ -931,23 +856,24 @@ describe('StoreProvider', () => {
     await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`);
     await settleTasks();
 
-    // The refresh really was attempted and really was refused, so what follows is a statement about
-    // a 404 rather than about a request that had not happened yet.
-    expect(paths).toEqual(['/v1/projects', '/v1/carriers']);
+    const paths = (): string[] => (scripted.requests as { path: string }[]).map(request => request.path);
+    expect(paths()).toEqual(['/v1/projects', '/v1/carriers']);
     expect(store.connections.get(daemon.daemonId)?.carriers).toEqual([
       { kind: 'direct', daemonUrl: 'https://box.example.test' },
     ]);
     expect([...repository.values.values()].join('')).not.toContain(HOSTED_RELAY_URL);
 
-    // The daemon gains the route. Its own answer is adopted whole, and the rendezvous it names is
-    // labelled hosted because it is the address this document discovered for itself.
     published = {
       carriers: [
         { kind: 'direct', url: 'https://box.example.test' },
         { kind: 'relay', url: HOSTED_RELAY_URL },
       ],
     };
+    // Unpairing forgets the device key — that is its job — so the re-pair brings a key of its own.
+    const key = must(deviceKeys.keys.get(daemon.daemonId), 'the paired device key');
     store.connections.remove(daemon.daemonId);
+    expect(deviceKeys.removed).toEqual([daemon.daemonId]);
+    await deviceKeys.save(daemon.daemonId, key);
     store.connections.add(daemon);
     await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`);
     await settleTasks();
@@ -1220,5 +1146,62 @@ describe('StoreProvider', () => {
 
     await view.unmount();
     expect(secondLog).toEqual({ subscribes: 1, unsubscribes: 1 });
+  });
+});
+
+describe('useDaemonClient', () => {
+  /** Calls the hook and hands back what it answers for one daemon. */
+  function ClientProbe({ onClient }: { readonly onClient: (client: Promise<FyApiClient>) => void }) {
+    const createClient = useDaemonClient();
+    onClient(createClient(alpha));
+    return null;
+  }
+
+  it('hands a screen the store pool’s client, so it rides the carrier rather than the plain network', async () => {
+    const pooled = client('pooled');
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => pooled,
+      fetcher: async () => Response.json({}),
+    });
+    let answered: Promise<FyApiClient> | undefined;
+    const view = await mount(
+      <StoreProvider store={store}>
+        <ClientProbe onClient={value => (answered = value)} />
+      </StoreProvider>,
+    );
+    expect(await answered).toBe(pooled);
+    expect(await store.clients.client(alpha)).toBe(pooled);
+    await view.unmount();
+  });
+
+  it('hands a screen the client a DaemonClientProvider names, for a surface with no app store', async () => {
+    const named = client('named');
+    let answered: Promise<FyApiClient> | undefined;
+    const view = await mount(
+      <DaemonClientProvider client={async () => named}>
+        <ClientProbe onClient={value => (answered = value)} />
+      </DaemonClientProvider>,
+    );
+    expect(await answered).toBe(named);
+    await view.unmount();
+  });
+
+  it('refuses outside the app store rather than building a client pointed at nothing', async () => {
+    let answered: Promise<unknown> | undefined;
+    // Settled into a value at once: the refusal happens during render, before anything else could
+    // attach a handler, and an unwatched rejection fails the whole file.
+    const view = await mount(
+      <ClientProbe
+        onClient={value => {
+          answered = value.then(
+            () => undefined,
+            (reason: unknown) => reason,
+          );
+        }}
+      />,
+    );
+    expect(((await answered) as Error).message).toBe('no daemon client exists outside the app store');
+    await view.unmount();
   });
 });

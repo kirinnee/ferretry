@@ -5,6 +5,7 @@ import { ChartNoAxesCombined, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { fetchAnalytics } from './analytics-api.ts';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';
@@ -61,7 +62,13 @@ export interface GlobalAnalyticsPageProps {
  * to this mounted daemon connection: a late response from daemon A cannot
  * overwrite the fresh screen after navigation switches to daemon B.
  */
-export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalytics }: GlobalAnalyticsPageProps) {
+export function GlobalAnalyticsPage({ connection, requestAnalytics: injected }: GlobalAnalyticsPageProps) {
+  // Through the carrier router by default: a paired device has no bearer value of its own to read with.
+  const fetcher = useDaemonFetch();
+  const requestAnalytics = useMemo<AnalyticsRequest>(
+    () => injected ?? ((daemon, query) => fetchAnalytics(daemon, query, fetcher)),
+    [fetcher, injected],
+  );
   const queryId = useId();
   const [query, setQuery] = useState(GLOBAL_ANALYTICS_DEFAULT_QUERY);
   const [result, setResult] = useState<AnalyticsResponse | null>(null);
