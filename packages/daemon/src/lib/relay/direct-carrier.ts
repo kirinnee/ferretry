@@ -64,12 +64,23 @@ export const MAX_DIRECT_SESSIONS = 64;
  *
  * Counted apart so a stranger who can reach the listener cannot starve the devices that can prove
  * themselves: unproven sockets are the cheap ones to open, and each holds a slot for up to ten seconds.
- * Eight admits a household's burst of tabs reconnecting at once.
+ * Sixteen admits a household's burst of tabs reconnecting at once. When they are all taken, the OLDEST
+ * is evicted rather than the newcomer refused, so a squatter must out-race honest arrivals — which prove
+ * themselves in milliseconds — instead of merely arriving first.
  */
-export const MAX_DIRECT_UNPROVEN_SESSIONS = 8;
+export const MAX_DIRECT_UNPROVEN_SESSIONS = 16;
 
 /** How many upgrades one peer may make in one window, before any crypto runs for it. */
 export const DIRECT_UPGRADES_PER_PEER = 30;
+
+/**
+ * How many unproven sockets one REMOTE peer may hold at once. Without it, two addresses could keep
+ * every unproven slot full. A loopback peer is exempt: every tab on the host shares one address.
+ */
+export const MAX_DIRECT_UNPROVEN_PER_PEER = 2;
+
+/** The close an evicted unproven socket gets. Constant, and about this daemon, never the peer. */
+export const EVICTED_REASON = 'too many sessions are awaiting a credential';
 export const DIRECT_UPGRADE_WINDOW_MS = 60_000;
 
 export interface DirectCarrierDependencies {
@@ -188,6 +199,11 @@ export class DirectSession implements SocketHandler {
     this.#ended = true;
     this.#link.close();
     this.release();
+  }
+
+  /** Ends this socket to make room: it had not proved a device, and an honest arrival needs the slot. */
+  evict(): void {
+    this.#end(RELAY_CLOSE_CODES.rendezvousBusy, EVICTED_REASON);
   }
 
   /**

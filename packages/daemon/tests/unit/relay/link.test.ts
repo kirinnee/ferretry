@@ -62,6 +62,7 @@ import {
   sealRecord,
   sessionIdFromBytes,
   signDeviceProof,
+  verifyDeviceProof,
   startClientHandshake,
   toBase64Url,
   utf8Bytes,
@@ -90,6 +91,7 @@ import {
   RELAY_MAX_ENDED_SESSIONS,
   RelayLink,
   type RelayLinkSocket,
+  UNKNOWN_DEVICE_KEY,
 } from '../../../src/lib/relay/link.ts';
 import { MAX_TUNNEL_DATA_BYTES } from '../../../src/lib/relay/tunnel.ts';
 
@@ -3026,5 +3028,42 @@ describe('what keeps a device from idling out, and what keeps a session from liv
     await clientSend(harnessed.link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
     should(harnessed.requests).be.empty();
     should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE });
+  });
+});
+
+describe('the key an unknown device id is verified against', () => {
+  /** RFC 8032 test 1: a key whose SECRET is published, which this key once was. */
+  const RFC_8032_TEST_1_SEED = '9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60';
+
+  it('should verify nothing: not a proof by a real device key, and not one signed with a published secret', async () => {
+    const message = deviceAuthMessage(new Uint8Array(32).fill(7), 'auth', DEVICE_ID, APP_SESSION);
+    const honest = await signDeviceProof(crypto_, deviceKey, message);
+    const seed = Uint8Array.from(RFC_8032_TEST_1_SEED.match(/../g) ?? [], byte => Number.parseInt(byte, 16));
+    const pkcs8 = Uint8Array.from([
+      0x30,
+      0x2e,
+      0x02,
+      0x01,
+      0x00,
+      0x30,
+      0x05,
+      0x06,
+      0x03,
+      0x2b,
+      0x65,
+      0x70,
+      0x04,
+      0x22,
+      0x04,
+      0x20,
+      ...seed,
+    ]);
+    const published = await globalThis.crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
+    const forged = toBase64Url(
+      new Uint8Array(await globalThis.crypto.subtle.sign('Ed25519', published, new Uint8Array(message))),
+    );
+
+    should(await verifyDeviceProof(crypto_, UNKNOWN_DEVICE_KEY, honest, message)).be.false();
+    should(await verifyDeviceProof(crypto_, UNKNOWN_DEVICE_KEY, forged, message)).be.false();
   });
 });

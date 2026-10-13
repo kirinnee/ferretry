@@ -301,8 +301,9 @@ Two different things are revocable and they are not the same act:
   whether the device is still paired, and an unanswerable question is a refusal.
 - **Idle expiry** — a device nobody has USED for **30 days** is removed the next time the daemon looks
   (at boot, at a session's proof, at a device-list read) and must pair again. Use means a request the
-  page marks `presence` — visible and touched within five minutes, or just opened. A proof or a silent
-  renewal is not use, so a tab left open on a forgotten laptop cannot keep the device paired.
+  page marks `presence` — visible and touched within five minutes, by real input. A page that only
+  loaded is not use, and neither is a proof or a silent renewal, so a tab left open on a forgotten
+  laptop cannot keep the device paired.
   `lastSeenAt` reaches disk at most once an hour, so a busy phone is not a write per request;
   `idleExpiresAt` on each row says when the grant ends.
 

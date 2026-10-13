@@ -171,8 +171,10 @@ GET ws(s)://<daemon address>/v1/rendezvous/<daemonId>/client      (WebSocket upg
   stream session before it is mounted again.)
 - **Admission is a cheap check in front of the expensive one.** A socket's hello costs the daemon a
   key agreement and a signature before anything is known about the caller, so the upgrade is admitted
-  first: at most **30 upgrades a minute from one peer address**, at most **8 sockets that have not yet
-  proved a device**, and at most **64 direct sessions** in all. The slot is taken when the upgrade is
+  first: at most **30 admitted upgrades a minute from one peer address** (a refusal spends none), at
+  most **2 unproven sockets per remote address** (the host's loopback is exempt: every tab on it shares
+  one), and at most **16 unproven and 64 direct sessions** in all — a full cap closes the OLDEST
+  unproven socket for the newcomer, so a squatter must out-race honest arrivals. The slot is taken when the upgrade is
   admitted, not when the socket attaches, so a burst of concurrent upgrades cannot all pass the check
   before any is counted; a reserved slot whose socket never attaches is handed back after ten seconds.
   An upgrade from an origin the daemon does not serve is refused with the same `403` an HTTP request
@@ -263,7 +265,8 @@ proof = Ed25519-Sign(device key, "ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖ 
 
 - `lastSeenAt` is now real, and it means **a person used this device**. Only a request the page marks
   `presence: true` advances it: the page is visible and somebody touched, clicked or typed in it in the
-  last five minutes, or it was opened in the last minute (`packages/pwa/src/lib/presence.ts`).
+  last five minutes — trusted input the browser raised, never a script's. A page that only loaded (a
+  restored tab, a launch at login, a reload) is not a person (`packages/pwa/src/lib/presence.ts`).
   Authentication and silent renewal never advance it, so a tab left open on a forgotten laptop still
   expires. It is persisted at most once an hour per device (so a busy phone is not a disk write per
   request). The mark is the device's own word, and that is enough: it answers a forgotten device, not

@@ -53,7 +53,9 @@ import {
 import {
   DIRECT_UPGRADE_WINDOW_MS,
   DIRECT_UPGRADES_PER_PEER,
+  EVICTED_REASON,
   MAX_DIRECT_SESSIONS,
+  MAX_DIRECT_UNPROVEN_PER_PEER,
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../../src/lib/relay/direct-carrier.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
@@ -393,28 +395,47 @@ describe('the direct carrier', () => {
   });
 
   /*
-   * UNPROVEN SOCKETS ARE THE CHEAP ONES, so they have their own small cap: a stranger who can reach the
-   * listener cannot take every slot from the devices that can prove themselves.
+   * UNPROVEN SOCKETS ARE THE CHEAP ONES, so they have their own cap — and a full cap EVICTS the oldest
+   * rather than refusing the newcomer, so a squatter must out-race honest arrivals instead of merely
+   * arriving first.
    */
-  it('should hold only a few unproven sockets at once, and give a slot back once, when one ends', async () => {
+  it('should evict the oldest unproven socket for a newcomer, and give a slot back once when one ends', async () => {
     const { route } = carrier();
-    const held: SocketHandler[] = [];
+    const held: Array<Awaited<ReturnType<typeof connect>>> = [];
     for (let index = 0; index < MAX_DIRECT_UNPROVEN_SESSIONS; index += 1)
-      held.push((await connect(route, { clientAddress: `192.0.2.${index + 1}` })).handler);
-    await connect(route, { clientAddress: '192.0.2.200' }).should.be.rejectedWith({ status: 429 });
-    held[0]?.close();
-    held[0]?.close();
-    const next = await connect(route, { clientAddress: '192.0.2.201' });
-    await connect(route, { clientAddress: '192.0.2.202' }).should.be.rejectedWith({ status: 429 });
-    for (const handler of [...held, next.handler]) handler.close();
+      held.push(await connect(route, { clientAddress: `192.0.2.${index + 1}` }));
+    const newcomer = await connect(route, { clientAddress: '192.0.2.200' });
+    should(held[0]?.wire.closes).eql([{ code: 4429, reason: EVICTED_REASON }]);
+    should(held[1]?.wire.closes).be.empty();
+    // A close counted twice would free two slots, and the next arrival would evict nobody.
+    held[1]?.handler.close();
+    held[1]?.handler.close();
+    await connect(route, { clientAddress: '192.0.2.201' });
+    should(held[2]?.wire.closes).be.empty();
+    await connect(route, { clientAddress: '192.0.2.202' });
+    should(held[2]?.wire.closes).eql([{ code: 4429, reason: EVICTED_REASON }]);
+    for (const { handler } of [...held, newcomer]) handler.close();
+  });
+
+  it('should hold only two unproven sockets per remote address, never charge a refusal, and exempt the host', async () => {
+    const { route } = carrier();
+    const first = await connect(route, { clientAddress: '192.0.2.7' });
+    await connect(route, { clientAddress: '192.0.2.7' });
+    // Far more refusals than the minute's budget: none of them is spent.
+    for (let index = 0; index < DIRECT_UPGRADES_PER_PEER + 5; index += 1)
+      await connect(route, { clientAddress: '192.0.2.7' }).should.be.rejectedWith({ status: 429 });
+    first.handler.close();
+    await connect(route, { clientAddress: '192.0.2.7' });
+    // Every tab on the host shares one address, so the per-address bound would refuse the host itself.
+    for (let index = 0; index < MAX_DIRECT_UNPROVEN_PER_PEER + 2; index += 1)
+      await connect(route, { clientAddress: '127.0.0.1', loopback: true });
   });
 
   it('should stop counting a socket as unproven once its device has proved itself, and still cap the total', async () => {
     const { route } = carrier();
     const held: SocketHandler[] = [];
-    // Every proven session frees its unproven slot, so many more than the unproven cap can be open.
-    for (let index = 0; index < MAX_DIRECT_SESSIONS - MAX_DIRECT_UNPROVEN_SESSIONS; index += 1) {
-      const { handler, wire, sessionId } = await connect(route, { clientAddress: `198.51.100.${index}` });
+    const proven = async (address: string): Promise<SocketHandler> => {
+      const { handler, wire, sessionId } = await connect(route, { clientAddress: address });
       const { channel, transcript } = await handshake(handler, wire, sessionId);
       await send(handler, channel, {
         t: 'auth',
@@ -423,12 +444,18 @@ describe('the direct carrier', () => {
         appSession: APP_SESSION,
         proof: await signDeviceProof(crypto_, deviceKey, deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION)),
       });
-      held.push(handler);
-    }
-    for (let index = 0; index < MAX_DIRECT_UNPROVEN_SESSIONS; index += 1)
-      held.push((await connect(route, { clientAddress: `203.0.113.${index}` })).handler);
-    // Sixty-four in all: the total cap refuses the next one whatever it would have been.
-    await connect(route, { clientAddress: '203.0.113.250' }).should.be.rejectedWith({ status: 429 });
+      return handler;
+    };
+    // Every proven session frees its unproven slot, so many more than the unproven cap can be open.
+    for (let index = 0; index < MAX_DIRECT_SESSIONS - 1; index += 1) held.push(await proven(`198.51.100.${index}`));
+    const waiting = await connect(route, { clientAddress: '203.0.113.1' });
+    // The total is full, but one socket is unproven: it is evicted for the newcomer.
+    const newcomer = await connect(route, { clientAddress: '203.0.113.2' });
+    should(waiting.wire.closes).eql([{ code: 4429, reason: EVICTED_REASON }]);
+    // Now the newcomer proves itself too: sixty-four proven, nothing to evict, and the next is refused.
+    newcomer.handler.close();
+    held.push(await proven('203.0.113.3'));
+    await connect(route, { clientAddress: '203.0.113.4' }).should.be.rejectedWith({ status: 429 });
     for (const handler of held) handler.close();
   });
 
@@ -455,22 +482,26 @@ describe('the direct carrier', () => {
     const timers: FakeTimer[] = [];
     const { route } = carrier({ timers });
     const path = `/v1/rendezvous/${identity.daemonId}/client`;
+    const accept = async (address: string) =>
+      await route.accept({
+        request: request({ path, clientAddress: address }),
+        params: new Map([['daemonId', identity.daemonId]]),
+      });
     const admitted = await Promise.all(
-      Array.from({ length: MAX_DIRECT_UNPROVEN_SESSIONS }, (_unused, index) =>
-        route.accept({
-          request: request({ path, clientAddress: `192.0.2.${index + 40}` }),
-          params: new Map([['daemonId', identity.daemonId]]),
-        }),
+      Array.from(
+        { length: MAX_DIRECT_UNPROVEN_SESSIONS },
+        async (_unused, index) => await accept(`192.0.2.${index + 40}`),
       ),
     );
-    should(admitted).have.length(MAX_DIRECT_UNPROVEN_SESSIONS);
-    await route
-      .accept({
-        request: request({ path, clientAddress: '192.0.2.99' }),
-        params: new Map([['daemonId', identity.daemonId]]),
-      })
-      .should.be.rejectedWith({ status: 429 });
-    // None attached. Each reservation's deadline hands its slot back, once.
+    // Counted at admission: the next one, before any of them attached, already evicts the oldest.
+    await accept('192.0.2.99');
+    const late = downstream();
+    const evicted = await admitted[0]?.(late.port);
+    await evicted?.open();
+    should(late.closes).eql([{ code: 4429, reason: EVICTED_REASON }]);
+    evicted?.fromClient(new Uint8Array());
+    evicted?.close();
+    // None of the rest attached. Each reservation's deadline hands its slot back, once.
     for (const timer of timers.filter(candidate => candidate.milliseconds === 10_000)) {
       timer.fire();
       timer.fire();
