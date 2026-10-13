@@ -674,3 +674,63 @@ describe('first-run import and clone', () => {
     should(ran).deepEqual(['setup.import', 'clone.import']);
   });
 });
+
+describe('component content and the draft-profile preview', () => {
+  it('should show each component file it read, and a check path against this machine’s home', async () => {
+    // Arrange
+    const { service } = world({
+      readAsset: async path =>
+        path.endsWith('watch.json') ? '{"hooks":{"run":"/home/other/bin/x"}}' : ASSETS[path],
+    });
+
+    // Act
+    const catalog = FleetComponentCatalogSchema.parse(await service.components());
+
+    // Assert
+    const named = (kind: string, name: string) =>
+      catalog.kinds.find(group => group.kind === kind)?.components.find(component => component.name === name);
+    should(named('hooks', 'watch')?.content).deepEqual({
+      form: 'text',
+      text: '{"hooks":{"run":"/home/other/bin/x"}}',
+      redacted: false,
+    });
+    should(named('hooks', 'watch')?.checkPath).equal('/home/other/bin/x');
+    should(named('settings', 'claude')?.content).deepEqual({ form: 'entries', entries: [{ key: 'theme', value: 'dark' }] });
+    should(named('instructions', 'main')?.content).deepEqual({ form: 'text', text: 'Main guidance.\n', redacted: false });
+    should(named('settings', 'broken')).not.have.property('content');
+  });
+
+  it('should keep a hidden settings value from the file the component has when an edit sends entries', async () => {
+    // Arrange
+    const { service } = world({
+      readAsset: async path => (path.endsWith('claude.json') ? '{"env":{"API_TOKEN":"sk-abcdefghijklmnop"}}' : ASSETS[path]),
+    });
+
+    // Act
+    const view = await service.propose({
+      kind: 'component.put',
+      name: 'claude',
+      component: { kind: 'settings', harness: 'claude', entries: { 'env.API_TOKEN': { keep: true } } },
+      create: false,
+    });
+
+    // Assert
+    should(view.preview.kind).equal('apply');
+    should(JSON.stringify(view)).not.containEql('sk-abcdefghijklmnop');
+  });
+
+  it('should resolve a draft profile without staging anything, and refuse when the configuration cannot be read', async () => {
+    // Arrange
+    const { service, state } = world();
+
+    // Act
+    const draft = await service.previewProfile({ layers: ['instructions/main', 'mcp/ghost'] });
+    state.documentError = new Error('disk gone');
+    const unreadable = refusal(service.previewProfile({ layers: [] }), 'fleet_catalog_unreadable');
+
+    // Assert
+    should(draft.refusal).equal('no MCP server ghost exists on this machine');
+    should(draft.harnesses.map(stack => stack.harness)).deepEqual(['claude', 'codex']);
+    await unreadable;
+  });
+});

@@ -497,7 +497,8 @@ describe('the mounted daemon surface', () => {
       1 + // the profile catalog the account stepper reads
       1 + // POST /v1/fleet/renew
       2 + // the account model's credential list and its Check now
-      7; // the account model's four catalogue reads and its three change routes
+      7 + // the account model's four catalogue reads and its three change routes
+      1; // the draft-profile preview, a read with a body
     should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),

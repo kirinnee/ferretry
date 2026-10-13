@@ -34,6 +34,8 @@ const component = {
   usedBy: { profiles: ['default'], runtimes: ['claude-default'] },
   editNote: 'Used by 1 profile and 1 runtime. Saving changes it everywhere.',
   remove: { available: false, reason: 'It is a layer in default. Remove it from that profile first.' },
+  content: { form: 'text', text: 'TOKEN=‹hidden›', redacted: true },
+  checkPath: '/Users/other/notes',
 } satisfies FleetComponentView;
 
 const stack = {
@@ -211,6 +213,31 @@ const cases: readonly SchemaCase[] = [
     value: { outcome: 'executed', executor: 'clone', summary: 'Cloned 3 runtimes' },
   },
   { name: 'FleetCatalogRefusalCodeSchema', schema: catalog.FleetCatalogRefusalCodeSchema, value: 'fleet_change_stale' },
+  {
+    name: 'FleetSettingsEntrySchema',
+    schema: catalog.FleetSettingsEntrySchema,
+    value: { key: 'permissions.defaultMode', value: 'plan' },
+  },
+  {
+    name: 'FleetComponentContentSchema',
+    schema: catalog.FleetComponentContentSchema,
+    value: { form: 'entries', entries: [{ key: 'env.API_TOKEN', hidden: true }, { key: 'theme', value: 'dark' }] },
+  },
+  {
+    name: 'FleetSettingsEntriesInputSchema',
+    schema: catalog.FleetSettingsEntriesInputSchema,
+    value: { theme: { value: 'dark' }, 'env.API_TOKEN': { keep: true }, 'permissions.allow': { value: ['Bash'] } },
+  },
+  {
+    name: 'FleetProfileDraftRequestSchema',
+    schema: catalog.FleetProfileDraftRequestSchema,
+    value: { layers: ['profile/default', 'mcp/notes'], editing: 'agent' },
+  },
+  {
+    name: 'FleetProfileDraftViewSchema',
+    schema: catalog.FleetProfileDraftViewSchema,
+    value: { harnesses: [stack], refusal: 'no profile ghost exists on this machine' },
+  },
 ];
 
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
@@ -235,7 +262,13 @@ describe('the account-model catalogue wire contract', () => {
       },
       { kind: 'runtime.remove', name: 'claude-review' },
       { kind: 'profile.put', name: 'agent', layers: ['profile/default', 'settings/claude'], create: false },
-      { kind: 'profile.remove', name: 'agent', switchRuntimesTo: 'default' },
+      { kind: 'profile.remove', name: 'agent', switchRuntimesTo: 'default', removeFromProfiles: true },
+      {
+        kind: 'component.put',
+        name: 'claude',
+        component: { kind: 'settings', harness: 'claude', entries: { theme: { value: 'dark' } } },
+        create: false,
+      },
       { kind: 'component.remove', componentKind: 'skills', name: 'mine', removeFromProfiles: true },
       { kind: 'credential.add', id: 'codex-work', harness: 'codex', label: 'work' },
       { kind: 'credential.label', id: 'codex-work', label: null },
@@ -275,6 +308,15 @@ describe('the account-model catalogue wire contract', () => {
       rejects('text past the limit', catalog.FleetAccountChangeSchema, {
         ...change,
         content: 'x'.repeat(catalog.MAX_COMPONENT_CONTENT_BYTES + 1),
+      }),
+      rejects('a settings entry with both a value and hidden', catalog.FleetSettingsEntrySchema, {
+        key: 'env.TOKEN',
+        value: 'fake',
+        hidden: true,
+      }),
+      rejects('an entry value that is not JSON', catalog.FleetSettingsEntriesInputSchema, { theme: { value: () => 1 } }),
+      rejects('a draft past the layer limit', catalog.FleetProfileDraftRequestSchema, {
+        layers: Array.from({ length: 201 }, (_, index) => `mcp/m${String(index)}`),
       }),
       rejects('a refusal code nobody declared', catalog.FleetCatalogRefusalCodeSchema, 'fleet_change_bad'),
     ]);

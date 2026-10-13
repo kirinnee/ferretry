@@ -251,7 +251,7 @@ const partialSupportOf = (model: AccountModel, facts: CatalogFacts): readonly Pa
 // environment rows follow (K4), so a credential pasted into a file never reaches a browser.
 
 /** What a hidden value is replaced by in a component's text. */
-export const HIDDEN_TEXT = '‹hidden›';
+const HIDDEN_TEXT = '‹hidden›';
 
 /** `NAME=value`, `name: value`, `"name": "value"` — a value with the name that says what it is. */
 const ASSIGNMENT = /([A-Za-z_][A-Za-z0-9_.-]*)(["']?\s*[:=]\s*["']?)([^\s"'`,;)}\]]+)/gu;
