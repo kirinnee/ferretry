@@ -19,6 +19,7 @@ import {
   ASSET_FIELDS,
   type AssetField,
   HARNESS_ASSETS,
+  HARNESS_OWNED_SKILL_ENTRIES,
   type HarnessAssetTable,
   harnessAsset,
   isUsableSkillItemName,
@@ -128,15 +129,6 @@ export function declaredAssetFields(account: ResolvedAccount): readonly AssetFie
   }
   return ASSET_FIELDS.filter(field => declared.has(field));
 }
-
-/**
- * Entries a harness keeps inside its own skills directory, which the sweep must never remove: Codex
- * installs its built-in skills under `.system`, and deleting them on every apply breaks them.
- */
-const HARNESS_OWNED_SKILL_ENTRIES: Readonly<Record<HarnessKind, readonly string[]>> = {
-  claude: [],
-  codex: ['.system'],
-};
 
 /** One selected skill item: the document it comes from, and the name it takes inside the home. */
 interface PlannedSkillItem {
