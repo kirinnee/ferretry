@@ -9,14 +9,11 @@
  * bare "forbidden". The wording lives in `src/lib/grants.ts` so the Fleet tab, the Files pane and this
  * screen cannot word the same refusal three ways.
  *
- * ## LOOPBACK HAS NOTHING TO DECIDE, AND THE SCREEN SAYS SO
+ * ## A BROWSER ON THE MACHINE IS GOVERNED LIKE ANY OTHER
  *
- * A browser on `127.0.0.1` is ungoverned: every capability reads allowed and every reason reads
- * `granted`, because somebody at the machine already has the machine. The rows are still shown — this
- * is where an operator inspects the decision, and hiding it on the one machine that can change it
- * would be perverse — but the screen states, once, that they apply to callers that are not on this
- * host. Without that line a person reads `configure off` and goes hunting for a permission problem
- * their own command line does not have.
+ * Only the host's admin token over loopback — the CLI — is the owner at the machine, so a browser on
+ * `127.0.0.1` reads the same limits, asks for the same passkey, and can switch things off but never back
+ * on. The screen says so once, and widening is only ever offered as the command to run at the machine.
  *
  * ## THE PASSKEY IS OFFERED ONLY WHERE IT WOULD HELP
  *
@@ -46,6 +43,7 @@ import {
   capabilityLabel,
   capabilityReach,
   connectionPosture,
+  deviceGrantNote,
   type GrantGuidance,
   grantAlreadyReads,
   grantChangeable,
@@ -190,11 +188,13 @@ function CapabilityCard({
   /**
    * Whether a switch here can travel back.
    *
-   * `mayGrant` is false for every remote caller, unconditionally — no passkey step-up buys
-   * widening. So for such a caller an OFF axis is not a control at all, and an ON axis is a door that
-   * only closes. Both facts are stated rather than discovered by pressing something.
+   * `mayGrant` is false for every browser, unconditionally — no passkey step-up buys widening, and a
+   * browser on the machine itself is still a browser. So for such a caller an OFF axis is not a control
+   * at all, and an ON axis is a door that only closes. Both facts are stated rather than discovered by
+   * pressing something.
    */
   const oneWay = !entry.mayGrant;
+  const deviceNote = deviceGrantNote(entry);
 
   return (
     <section
@@ -215,6 +215,14 @@ function CapabilityCard({
       </div>
       <p className="m-0 text-meta leading-base text-muted">{capabilityReach(entry.capability)}</p>
       <p className="m-0 text-meta leading-base text-faint">{originNote(entry)}</p>
+      {deviceNote === null ? null : (
+        <p
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+          data-grant-device-note={entry.capability}
+        >
+          {deviceNote}
+        </p>
+      )}
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
         {CAPABILITY_AXES.map(axis => (
           <AxisControl
@@ -228,7 +236,7 @@ function CapabilityCard({
           />
         ))}
       </div>
-      {/* THE ONE-WAY DOOR, said before anybody walks through it. A remote caller may switch this off
+      {/* THE ONE-WAY DOOR, said before anybody walks through it. A browser may switch this off
           and can never switch it back on, so the consequence belongs beside the switch rather than in
           a document read afterwards. It is shown while the capability is still ON, because that is the
           only moment the warning can change what somebody does. */}
@@ -371,7 +379,7 @@ export function GrantsCard({
         </p>
       </section>
 
-      {/* The passkey, for a caller the limits govern. A caller on the machine is never asked for one. */}
+      {/* The passkey, for a caller the limits govern. */}
       {view.governed ? <GrantStepUpPanel steppedUp={view.steppedUp} busy={busy} onStepUp={onStepUp} /> : null}
 
       {entries.map(entry => (

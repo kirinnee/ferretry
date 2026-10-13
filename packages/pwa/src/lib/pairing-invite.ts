@@ -11,7 +11,15 @@
  * holds a live code is the component's own state, for as long as the modal is open.
  */
 
-import type { PairedDevice, PairedDevicesView } from '@ferretry/protocol';
+import type {
+  CapabilityAxis,
+  DaemonCapability,
+  DeviceGrantsPatch,
+  PairedDevice,
+  PairedDevicesView,
+} from '@ferretry/protocol';
+
+import { capabilityLabel, deviceGrantCommand } from './grants.ts';
 
 /**
  * What a reader is told about the two-minute window, once, beside the code.
@@ -145,8 +153,7 @@ export function revokeConsequence(device: PairedDevice, view: PairedDevicesView)
  *
  * THE DAEMON'S OWN REASON IS PREFERRED, WHOLE. It already names the command a person runs, composed by
  * the layer that knows what this product's client is called, and replacing it with wording invented here
- * would either repeat it or contradict it. This adds only what the daemon cannot know: that the machine
- * itself is never governed by any of this, which is the fastest way out of the refusal.
+ * would either repeat it or contradict it, so nothing is added to it.
  *
  * The fallback is used when a request failed for a reason that is not a refusal at all — a daemon that
  * could not be reached. It says so rather than implying a permission problem, because sending somebody
@@ -155,7 +162,7 @@ export function revokeConsequence(device: PairedDevice, view: PairedDevicesView)
 export function pairingRefusal(reason: string): string {
   const trimmed = reason.trim();
   const detail = trimmed === '' ? 'This daemon did not say why.' : trimmed;
-  return `${detail} Pairing from the machine itself is never restricted, so a browser on that machine can always add a device.`;
+  return detail;
 }
 
 /**
@@ -169,3 +176,60 @@ export function pairingRefusal(reason: string): string {
 export function isGrantRefusal(code: string | undefined): boolean {
   return code?.startsWith('grant_') === true;
 }
+
+/**
+ * The partial patch one toggle sends.
+ *
+ * `configure` implies `use`, because a device that may change how a capability behaves but not use it
+ * is a state the daemon would judge as two widens anyway: turning `configure` on also sends `use: true`,
+ * and turning `use` off also sends `configure: false`. Everything else is the single axis touched.
+ */
+export function deviceGrantPatch(capability: DaemonCapability, axis: CapabilityAxis, next: boolean): DeviceGrantsPatch {
+  if (axis === 'configure' && next) return { [capability]: { use: true, configure: true } };
+  if (axis === 'use' && !next) return { [capability]: { use: false, configure: false } };
+  return { [capability]: { [axis]: next } };
+}
+
+/** What one toggle on one device row is, decided from the view the daemon served and nothing else. */
+export interface DeviceAxisControl {
+  readonly checked: boolean;
+  /** True when pressing it would widen something this caller may not widen. */
+  readonly blocked: boolean;
+  /** The sentence beside a blocked toggle: why, and the host command that does it instead. */
+  readonly reason: string | null;
+}
+
+/**
+ * Whether a toggle is offered, or stands as a statement with its remedy.
+ *
+ * TURNING OFF IS ALWAYS OFFERED — it needs a step-up and nothing else. Turning ON needs the axis in
+ * `mayWiden`, and turning `configure` on also turns `use` on, so it needs that too when `use` is off.
+ * Reading `mayWiden` rather than restating the daemon's rule is the point: a second copy of the rule
+ * is a second thing that can disagree with it, and the disagreement shows up as a control that fails.
+ */
+export function deviceAxisControl(
+  view: PairedDevicesView,
+  device: PairedDevice,
+  capability: DaemonCapability,
+  axis: CapabilityAxis,
+  clientName = 'fy',
+): DeviceAxisControl {
+  const checked = device.grants[capability][axis];
+  if (checked) return { checked, blocked: false, reason: null };
+  const needsUse = axis === 'configure' && !device.grants[capability].use;
+  const missing: CapabilityAxis | null = !view.mayWiden[capability][axis]
+    ? axis
+    : needsUse && !view.mayWiden[capability].use
+      ? 'use'
+      : null;
+  if (missing === null) return { checked, blocked: false, reason: null };
+  return {
+    checked,
+    blocked: true,
+    reason: `Only at the machine, or from a device that holds ${capabilityLabel(capability)} ${missing} and can configure pairing: run \`${deviceGrantCommand(capability, missing, clientName)}\`.`,
+  };
+}
+
+/** The warning a device is shown before narrowing ITSELF: only the machine, or another holder, undoes it. */
+export const SELF_NARROW_NOTE =
+  'This is the device you are using. Switching something off here can only be switched back on at the machine, or from another device that holds it and can configure pairing.';

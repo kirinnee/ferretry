@@ -298,7 +298,7 @@ describe('the ceremony’s failures', () => {
 describe('passkeySentence', () => {
   it('should say the design’s exact sentence when there is no passkey', () => {
     should(passkeySentence('no-passkey', ORIGIN)).equal(
-      `This copy of the app at ${ORIGIN} has no passkey for this machine. Add one from a device that already has access, or pair this device again at the machine.`,
+      `This copy of the app at ${ORIGIN} has no passkey for this machine. Add one from a device that already has access, or ask the owner to run \`fy passkey window <this device>\` at the machine.`,
     );
   });
 
@@ -306,7 +306,8 @@ describe('passkeySentence', () => {
     for (const kind of ['no-passkey', 'cancelled', 'unsupported', 'insecure-origin'] as const) {
       const sentence = passkeySentence(kind, ORIGIN);
       should(sentence).containEql(ORIGIN);
-      should(sentence).not.match(/Error|`|<|\*/);
+      // The one command a person must run (`fy passkey window <this device>`) is the only code in any of them.
+      should(sentence.replace('`fy passkey window <this device>`', '')).not.match(/Error|`|<|\*/);
       should(sentence.endsWith('.')).be.true();
     }
   });

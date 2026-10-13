@@ -56,6 +56,10 @@ class MemoryStore implements PasskeyStore {
     return this.held.filter(passkey => passkey.deviceId === id);
   }
 
+  async holder(credentialId: string): Promise<string | undefined> {
+    return this.held.find(passkey => passkey.credentialId === credentialId)?.deviceId;
+  }
+
   async add(passkey: StoredPasskey): Promise<void> {
     this.held = [...this.held.filter(existing => existing.credentialId !== passkey.credentialId), passkey];
   }

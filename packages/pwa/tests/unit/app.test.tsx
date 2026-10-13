@@ -899,7 +899,7 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
-  it('nudges a paired device with no passkey toward Settings → Security, once, and not on Settings itself', async () => {
+  it('nudges a paired device with no passkey toward Settings → Daemons → Security, once, and not on Settings itself', async () => {
     const PASSKEYS = {
       '/v1/passkeys': { passkeys: [], registration: 'first-window' },
       '/v1/security': {

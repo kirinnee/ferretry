@@ -208,6 +208,27 @@ describe('SecuritySurface', () => {
     run(() => surface.unmount());
   });
 
+  it('says when a reopened window closes, and still offers the button', async () => {
+    // Arrange / Act
+    const surface = await mountSurface(
+      machine([view({ registration: 'reopened', registrationClosesAt: '2026-01-01T00:10:00.000Z' })]),
+    );
+
+    // Assert
+    should(marked(surface, 'data-security-add')).have.length(1);
+    expect(text(surface)).toContain('You can add a passkey until');
+    run(() => surface.unmount());
+  });
+
+  it('says nothing about a closing time once a step-up is what allows the registration', async () => {
+    // Arrange / Act
+    const surface = await mountSurface(machine([view({ registration: 'stepped-up' })]));
+
+    // Assert
+    should(marked(surface, 'data-security-closes')).be.empty();
+    run(() => surface.unmount());
+  });
+
   it('says so, with no button, when the browser cannot use passkeys', async () => {
     // Arrange / Act
     const surface = await mountSurface(machine([view()]), { supported: () => false });

@@ -25,7 +25,7 @@ import type { PasskeyClientFactory } from './security-settings.tsx';
 
 export interface PasskeyNudgeProps {
   readonly connection: DaemonConnection;
-  /** Opens Settings → Security for this machine. */
+  /** Opens Settings → Daemons → Security for this machine. */
   readonly onOpenSecurity: () => void;
   readonly createClient?: PasskeyClientFactory;
   readonly storage?: () => NudgeStorage | undefined;
@@ -76,7 +76,7 @@ export function PasskeyNudge({
           onClick={onOpenSecurity}
           className="min-h-[44px] bg-transparent p-0 text-left font-semibold text-accent underline"
         >
-          Settings → Security → Add a passkey
+          Settings → Daemons → Security → Add a passkey
         </button>
       </p>
       <button

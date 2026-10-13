@@ -77,7 +77,7 @@ export class PasskeyCeremonyError extends Error {
 export function passkeySentence(kind: PasskeyCeremonyError['kind'], origin: string): string {
   switch (kind) {
     case 'no-passkey':
-      return `This copy of the app at ${origin} has no passkey for this machine. Add one from a device that already has access, or pair this device again at the machine.`;
+      return `This copy of the app at ${origin} has no passkey for this machine. Add one from a device that already has access, or ask the owner to run \`fy passkey window <this device>\` at the machine.`;
     case 'cancelled':
       return `The passkey check at ${origin} did not finish. It was dismissed or timed out, or this browser had no passkey for this machine to offer. Try again, or add a passkey from a device that already has access.`;
     case 'unsupported':

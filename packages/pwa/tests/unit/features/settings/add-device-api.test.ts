@@ -1,7 +1,16 @@
 import { describe, it } from 'bun:test';
-import type { PairedDevicesView, PairingCodeMintResponse, PairingId } from '@ferretry/protocol';
+import {
+  type CapabilityGrant,
+  type CapabilityGrants,
+  DAEMON_CAPABILITIES,
+  type DaemonCapability,
+  type PairedDevicesView,
+  type PairingCodeMintResponse,
+  type PairingId,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
+  changeDeviceGrants,
   mintPairingCode,
   PAIRED_DEVICES_PATH,
   PAIRING_CODE_PATH,
@@ -28,6 +37,11 @@ const minted: PairingCodeMintResponse = {
   reach: 'any-device',
 };
 
+const grantsOf = (held: Partial<Record<DaemonCapability, Partial<CapabilityGrant>>> = { fleet: { use: true } }) =>
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false, ...held[capability] }]),
+  ) as CapabilityGrants;
+
 const devices: PairedDevicesView = {
   devices: [
     {
@@ -37,10 +51,12 @@ const devices: PairedDevicesView = {
       createdAt: '2026-08-01T09:00:00.000Z',
       lastSeenAt: '2026-08-03T11:00:00.000Z',
       idleExpiresAt: '2026-12-31T00:00:00.000Z',
+      grants: grantsOf(),
     },
   ],
   hostLocal: true,
   thisDeviceId: DEVICE_ID,
+  mayWiden: grantsOf({ terminal: { use: true } }),
 };
 
 interface Call {
@@ -111,7 +127,7 @@ describe('the pairing routes', () => {
     // A screen that guessed at the new state is how a revoked device stays visible, or a surviving one
     // disappears.
     // Arrange
-    const remaining: PairedDevicesView = { devices: [], hostLocal: true };
+    const remaining: PairedDevicesView = { devices: [], hostLocal: true, mayWiden: grantsOf() };
     const { client, calls } = recording(remaining);
 
     // Act, Assert
@@ -120,6 +136,36 @@ describe('the pairing routes', () => {
       should(calls[0]?.path).equal(`${PAIRED_DEVICES_PATH}/${DEVICE_ID}`);
       should(calls[0]?.init?.method).equal('DELETE');
     });
+  });
+
+  it('changes one device’s grants with a PATCH carrying exactly the partial patch, and answers the whole list', async () => {
+    // The patch is partial so a stale tab cannot revert an axis it never looked at, and the answer is
+    // the whole view so a screen never has to guess the new state.
+    // Arrange
+    const widened: PairedDevicesView = {
+      ...devices,
+      devices: [{ ...devices.devices[0], grants: grantsOf({ fleet: { use: true }, terminal: { use: true } }) }],
+    } as PairedDevicesView;
+    const { client, calls } = recording(widened);
+
+    // Act
+    const view = await changeDeviceGrants(client, DEVICE_ID, { terminal: { use: true } });
+
+    // Assert
+    should(view).deepEqual(widened);
+    should(calls[0]?.path).equal(`/v1/pair/devices/${DEVICE_ID}/grants`);
+    should(calls[0]?.init?.method).equal('PATCH');
+    should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({ terminal: { use: true } });
+  });
+
+  it('refuses to send an empty or unknown patch rather than leaving the daemon to', async () => {
+    // Arrange
+    const { client, calls } = recording(devices);
+
+    // Act, Assert
+    await should(changeDeviceGrants(client, DEVICE_ID, {})).be.rejected();
+    await should(changeDeviceGrants(client, DEVICE_ID, { sudo: { use: true } } as never)).be.rejected();
+    should(calls).be.empty();
   });
 
   it('reads a failure’s code structurally, so a wrapped error is not downgraded', () => {

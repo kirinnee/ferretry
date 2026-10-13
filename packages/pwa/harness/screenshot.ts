@@ -117,9 +117,10 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and twenty-five: forty-four MACHINES frames at each viewport, plus twenty frames at
- * `mobile` and seventeen at `desktop` (44 + 44 + 20 + 17); the two extra at each viewport are the Security
- * settings block's loosening sentence and out-of-bounds sentence.
+ * One hundred and twenty-seven: forty-four MACHINES frames at each viewport, plus twenty-one other frames
+ * at `mobile` and eighteen at `desktop` (44 + 44 + 21 + 18). Of the extras at each viewport, one is the
+ * open per-device capabilities disclosure inside Add a device, and two are the Security settings block's
+ * loosening sentence and out-of-bounds sentence.
  *
  * MACHINES, forty-four per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
@@ -129,7 +130,7 @@ const WALKS_SETTINGS = !(
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
- * The rest, fifteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
+ * The rest, fifteen at both viewports plus the open device-capabilities disclosure at both: three Settings sections (Appearance, Behaviour, Daemons), the
  * healthy daemon's Warden and its eight other panels (Security, the passkey panel, among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
@@ -150,7 +151,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 125;
+const SETTINGS_SIDEWAYS_CHECKS = 127;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -1938,6 +1939,23 @@ try {
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
+            if (slug === 'devices') {
+              // The per-device capability switches: seven rows by two axes, the longest block this panel
+              // can grow, with a blocked widen's reason and host command beside its switch. Opened on the
+              // first device (the browser doing the looking, holding fleet.use alone), because a closed
+              // disclosure hides exactly the content that could widen a phone.
+              const disclosure = readySurface.locator('[data-device-capabilities]').first();
+              await disclosure.locator('summary').click();
+              await disclosure.locator('[data-device-capability="secrets"]').waitFor({ state: 'visible' });
+              await disclosure.locator('[data-device-grant-reason]').first().waitFor({ state: 'visible' });
+              await assertNoSidewaysScroll(page, `the open device capabilities at ${viewport.name}`);
+              const capabilitiesTarget = join(outDir, `settings-daemon-devices-capabilities-${viewport.name}.png`);
+              await disclosure.scrollIntoViewIfNeeded();
+              await page.screenshot({ path: capabilitiesTarget });
+              process.stdout.write(
+                `📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`,
+              );
+            }
           }
 
           await selectDaemon('Travel laptop');
@@ -2357,7 +2375,7 @@ try {
             await captureElement(page, page.locator(selector), target);
             process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
           }
-          // The operator's limits, in the five states a paired browser actually meets. Every one of
+          // The operator's limits, in the four states a paired browser actually meets. Every one of
           // them is a frame where a control is refused, so every one has to show the reason beside it
           // — that is the thing being reviewed, not the switches.
           //
@@ -2371,14 +2389,12 @@ try {
           for (const [name, selector] of [
             [`grants-step-up-needed`, `[data-harness="grants-step-up-needed"]`],
             [`grants-step-up-held`, `[data-harness="grants-step-up-held"]`],
-            [`grants-local`, `[data-harness="grants-local"]`],
             [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
             [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
-            // The capability list in all three postures. The remote one is the frame that matters: the
-            // harness daemon's address is loopback, so a capture reading "Direct" there would be the
-            // URL-derived inversion, visible in a PNG.
-            [`capability-list-local`, `[data-harness="capability-list-local"]`],
-            [`capability-list-remote`, `[data-harness="capability-list-remote"]`],
+            // The capability list in both postures that exist. The governed one is the frame that matters:
+            // the harness daemon's address is loopback, so a capture claiming the limits do not apply
+            // there would be the old direct-local reading, visible in a PNG.
+            [`capability-list-governed`, `[data-harness="capability-list-governed"]`],
             [`capability-list-unknown`, `[data-harness="capability-list-unknown"]`],
           ] as const) {
             const frame = page.locator(selector);

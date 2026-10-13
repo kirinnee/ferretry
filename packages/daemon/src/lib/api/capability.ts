@@ -1,4 +1,4 @@
-import type { CapabilityAxis, DaemonCapability, GrantRefusal } from '@ferretry/protocol';
+import type { CapabilityAxis, CapabilityGrants, DaemonCapability, GrantRefusal } from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
 import type { SessionDevice } from './http.ts';
 
@@ -88,6 +88,15 @@ export interface CapabilityPresentation {
    * including a remote warden, which is governed and can never step up.
    */
   readonly stepUp: boolean;
+  /**
+   * The proven device's OWN grants, when the caller is a paired device; `null` when the session proved
+   * a device this daemon no longer holds; absent for a caller that is not a device (the host's admin
+   * token, a warden), which no device grant narrows.
+   *
+   * Read from this daemon's live device registry, keyed by the SESSION's proven device — never by a
+   * header — so nothing a caller sends can move it.
+   */
+  readonly deviceGrants?: CapabilityGrants | null;
 }
 
 /** What the grant layer decided. The reason is not decoration — it is what names the next step. */

@@ -78,7 +78,7 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 `mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
 — a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
-## Six capabilities, two axes
+## Seven capabilities, two axes
 
 | capability   | what it covers                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------------- |
@@ -87,7 +87,8 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | `browser`    | the human login window and per-session browser control                                              |
 | `filesystem` | reading session working trees and registering projects on the host                                  |
 | `warden`     | supervision status, sweeps and the warden configuration                                             |
-| `pairing`    | pairing codes, the paired-device list, and Web Push enrolment                                       |
+| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
+| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
 
 Each has two axes, and they are different questions:
 
@@ -186,6 +187,22 @@ So when a seventh capability is added, ask in this order:
 A capability whose coarse switch disables its own remedy is not a flaw to be gated away. It is a one-way
 door, and a one-way door has to be **labelled on the side somebody approaches it from.**
 
+### Capability seven was added: `secrets`
+
+The questions above, answered for it ([design/zero-trust.md](design/zero-trust.md) B5):
+
+1. **What does somebody reach for this switch to STOP?** A paired device running commands with the
+   machine's stored secrets in their environment (`POST /v1/secrets/use` is code execution on the host),
+   or rewriting and deleting those secrets. Before `secrets` existed these routes named no demand, so any
+   paired device could do both; that is closed, and `secrets.use` also needs a step-up from a governed caller.
+2. **Does switching it off also stop the thing that undoes it?** No. Turning `secrets` off for remote
+   callers stops nothing a remedy needs: the secrets are untouched, a leaked device is revoked through
+   `pairing`, and the host's own `fy secret` commands are ungoverned. Turning it back on is a host act,
+   like every other capability.
+3. **So the way back on the control** is the same sentence every capability's remote turn-off already
+   carries: the host command `fy daemon config set secrets --use`. There is no ordering to follow, so
+   nothing like `pairing`'s "revoke FIRST" note is needed.
+
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
 `rg -rn "adopt" src` prints every hit with `adopt` rewritten to `n`, which reads as "the command is not
@@ -217,8 +234,9 @@ exactly one act and the boundary spends it.
 **What needs one.** A **governed** caller needs a current step-up for:
 
 - **every `configure` demand**, on every capability; and
-- **`use` of `terminal`, `browser` and `pairing`** — session terminals are arbitrary code on the host, the
-  browser capability drives a browser the operator is signed into, and pairing hands out credentials.
+- **`use` of `terminal`, `browser`, `pairing` and `secrets`** — session terminals are arbitrary code on the
+  host, the browser capability drives a browser the operator is signed into, pairing hands out credentials,
+  and using a secret runs a command with it in that command's environment.
 
 Every other `use` — reading the fleet, the filesystem view, supervision status — is ordinary operation and
 needs nothing beyond the grant. The rule is one predicate, `demandNeedsStepUp`, read by the same place that
@@ -285,6 +303,11 @@ and refused whole if any one widens remotely. Reading them (`GET /v1/security`) 
 
 ## Widening is a local act. There is no remote path to it.
 
+This section is about the DAEMON-WIDE document. One device's own grants have one more path: a remote
+device that holds `pairing.configure` and an axis itself may give that axis to another device, with a
+step-up — never more than the daemon-wide document allows, so it is a copy, not a widening of the machine
+(see [Per-device grants](#per-device-grants)).
+
 "Local" below means **the owner at the machine** — `fy` with the admin token. Every other caller, a browser
 on the host included, is governed, and **no step-up buys it a widening**.
 
@@ -320,6 +343,68 @@ The grant layer is consulted **after** authentication and after the route's cred
 turns a refused route into a served one — a paired device's session cannot reach an `admin-token`
 route because a grant says `use: true`, and no document an operator writes can make it.
 
+## Per-device grants
+
+The document above answers **what any remote caller may ever do on this machine**. Each paired device
+also carries its **own** grants, in its record in `<FY_HOME>/state/devices.json`, and a governed caller
+gets both at once ([design/zero-trust.md](design/zero-trust.md) B5):
+
+```
+effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.grants[capability][axis]
+```
+
+- **A newly paired device holds `fleet.use` only** (`DEFAULT_DEVICE_GRANTS`): it can read the fleet and
+  chat with sessions. Terminals, files, the browser, secrets, the warden, pairing and every `configure`
+  axis start off. The daemon-wide document stays permissive by default; the narrowing is per device.
+- **A `fy pair --full` code** gives the device that redeems it every capability on both axes
+  (`FULL_DEVICE_GRANTS`) — for the owner's own browser, which would otherwise need a grant per
+  capability. Minting one is host-only (`arrivedOnHost`); the code carries the choice inside the daemon,
+  never in the QR or the link. The daemon-wide document and the step-up still apply on top.
+- **The host is ungoverned** (B4): `fy`, and anything else that arrived on the host, is narrowed by
+  neither document.
+- **A refusal says which half refused.** The daemon-wide half answers `not-granted` (remedy:
+  `fy daemon config set …`); the device half answers `device-not-granted`, wire code
+  `grant_device_not_granted` (remedy: `fy device grant <device> <capability> --use|--configure`). The
+  daemon-wide answer is asked first, so its remedy — a change for everyone — is named before the per-device one.
+- **A device the session proved but whose record is gone** is refused as `undetermined`, never served
+  unnarrowed. A governed caller that is not a device (a remote warden) has no device record, so only the
+  daemon-wide half and the step-up apply to it.
+- **`devices.json` stays at `schemaVersion: 2`.** A record written before per-device grants has no `grants`
+  field and reads as the default — `fleet.use` only — which is a narrowing and therefore safe. Every write
+  carries the field. A record whose `grants` is malformed fails the document closed, as every other
+  malformed field does.
+
+### Changing a device's grants
+
+`PATCH /v1/pair/devices/:deviceId/grants` with a partial `DeviceGrantsPatch`, answering the whole device
+list. At the machine — `fy` with the admin token, the only ungoverned caller (B4):
+`fy device grant <device> <capability> --use|--no-use|--configure|--no-configure`. In the app, Settings →
+Add a device shows each device's capabilities as toggles; a browser is a governed device wherever it runs, so
+its toggles follow the remote column below — a toggle it may not turn on says so, with the `fy` command.
+
+| change                        | the owner (`fy`) | any device (a browser on the host too)                                                 |
+| ----------------------------- | ---------------- | -------------------------------------------------------------------------------------- |
+| turn an axis **on** (widen)   | allowed          | only an axis it holds itself, effective, **and** it holds `pairing.configure`; step-up |
+| turn an axis **off** (narrow) | allowed          | allowed with a step-up — any device, its own included                                  |
+
+- **No device can grant what it does not hold**, so nothing escalates: the most a device can give another
+  is a copy of what it has. A widen of anything else by a device is `403 grant_forbidden`, naming the host command.
+- **Narrowing is never harder than widening.** The route demands `pairing.use`, so any device holding that
+  — and a step-up — can narrow. A device with no `pairing.use` (the default) cannot reach the route at all;
+  its own grants are narrowed at the machine or by a device that may manage devices.
+- **`configure` implies `use` on the result**: turning `configure` on turns `use` on with it, turning `use`
+  off turns `configure` off, and a field naming both reads as the narrowing.
+- **Judged field by field, refused whole.** One illegal widen refuses the whole patch before anything is
+  written, and before any step-up is asked — a widen no step-up could buy must not ask for a passkey first.
+- **It reaches open streams.** After a change the connection registry re-asks every open stream
+  (`recheckAll`, then `ApiSocketDispatcher.reauthorize`), so a narrowed terminal closes rather than running on.
+- **It is audited** through the same journal as the daemon-wide grants (`state/grant-audit.jsonl`,
+  `fy daemon config history`), one change per axis as `<deviceId>/capability.axis=on|off`, attributed to
+  the actor.
+- `PairedDevicesView.mayWiden` tells a screen which axes **this** caller may turn on, so a toggle that
+  would be refused says so before it is pressed. `CapabilityGrantView.deviceGranted` tells a governed
+  device what its own record says, so a panel can say which half withheld an axis.
+
 ## Unknown is not permitted
 
 Permissive **defaults** settle what an operator's _silence_ meant. They say nothing about damage.
@@ -339,6 +424,7 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 | the authorization boundary | `packages/daemon/src/lib/api/capability.ts`, `dispatcher.ts`               |
 | the routes                 | `packages/daemon/src/lib/runtime/mounts/grants.ts`                         |
 | the grants themselves      | `<FY_HOME>/config/daemon.json`, under `grants`                             |
+| one device's own grants    | `<FY_HOME>/state/devices.json`, each record's `grants`; `fy device`        |
 | the change record          | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history`    |
 | the step-up                | `packages/protocol/src/lib/step-up.ts`, `packages/daemon/src/lib/step-up/` |
 | the command line           | `fy daemon config`                                                         |
@@ -353,12 +439,13 @@ usually asking which of these they chose and which something chose for them.
 Every refusal names a command that fixes it. That is the point of the layer, not a nicety — a person
 meeting a denial should not have to know this file exists:
 
-| refusal            | what the sentence says to do                                              |
-| ------------------ | ------------------------------------------------------------------------- |
-| `granted`          | nothing — the caller was served                                           |
-| `not-granted`      | `fy daemon config set <capability> --use` / `--configure`, on the host    |
-| `step-up-required` | confirm with the passkey on this device; the app does it and retries once |
-| `undetermined`     | `fy daemon config` on the host, to see and repair the document            |
+| refusal              | what the sentence says to do                                               |
+| -------------------- | -------------------------------------------------------------------------- |
+| `granted`            | nothing — the caller was served                                            |
+| `not-granted`        | `fy daemon config set <capability> --use` / `--configure`, on the host     |
+| `device-not-granted` | `fy device grant <device> <capability> --use` / `--configure`, on the host |
+| `step-up-required`   | confirm with the passkey on this device; the app does it and retries once  |
+| `undetermined`       | `fy daemon config` on the host, to see and repair the document             |
 
 `step-up-required` is the one worth explaining. The axis is granted and nothing is broken, so it is the only
 refusal the **caller** can clear without the operator: the person holding the device confirms and carries on.
@@ -427,22 +514,18 @@ command says so at the moment somebody might be tempted to do that instead.
   the whole UI depends on rather than fleet configuration, so tying it to the `fleet` capability
   would make revoking `fleet` break the session list. If a future event kind carries fleet
   configuration, it needs its own decision.
-- **Web Push enrolment is governed by `pairing`, not by a capability of its own.** The four
-  `/v1/push/*` routes each demand `pairing.use`, because what they do is device management: only a
-  paired device may enrol, the enrolment is filed against that device's grant, and revoking the grant
-  destroys it. Pairing is _who may reach this daemon_; push is _who this daemon may reach_; one
-  operator decision about devices governs both, and the list above stays closed.
+- ~~Web Push enrolment is governed by `pairing`.~~ **Closed by B5.** A device enrolling **itself** — reading
+  the key, enrolling, listing and un-enrolling its own enrolments — needs no capability and no step-up,
+  because it grants nothing: it lets this daemon reach the device that asked, and only it. A default
+  device (`fleet.use` only) therefore still gets alerts. Seeing every device's enrolments, or revoking one
+  another device filed, is device management and is decided by `pairing.use`, asked of the same grant
+  layer every governed route is decided by. A caller on the host sees all of them.
 
-  **The honest cost, stated rather than discovered:** an operator who switches `pairing` off for
-  remote callers also loses remote enrolment **and** remote un-enrolment. That is coherent — both are
-  device management, and revoking a device still takes its notifications with it from anywhere — but it
-  is not the same thing as a switch labelled "notifications". If a separately nameable notification
-  decision is wanted, it is one constant in `packages/daemon/src/lib/runtime/mounts/push.ts` plus
-  wherever a capability is declared; that second half is what the unified configuration model owns, and
-  adding a seventh member here before it lands would be the duplication that model exists to remove.
+  **The honest cost, stated rather than discovered:** switching `pairing` off for remote callers no longer
+  stops a paired device enrolling itself for notifications. That is the intended shape — notifications are
+  not a credential — and revoking the device still takes its enrolments with it.
 
-  **A second cost, from the step-up.** `pairing.use` is one of the three `use` demands that need a
-  passkey step-up from a governed caller, so a governed device now needs a step-up to subscribe or
-  unsubscribe too — a touch that notification enrolment does not otherwise warrant. Moving push off
-  `pairing.use` is **B5** in [design/zero-trust.md](design/zero-trust.md) and is out of scope here; this
-  is a declared GAP until it lands.
+- **The secret routes needed no capability before B5**, so a device paired before it could run a command
+  with a stored secret without the operator ever being asked. They now demand `secrets` (see the capability
+  seven section); a device paired before B5 reads as the default, `fleet.use` only, so it lost that access
+  on upgrade and must be widened deliberately.

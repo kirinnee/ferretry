@@ -1,6 +1,6 @@
 import type { ApiActor } from './actor.ts';
 import type { AuthenticatedCredential } from './authentication.ts';
-import type { CallerGovernance, CapabilityDemand } from './capability.ts';
+import type { CallerGovernance, CapabilityDemand, CapabilityPresentation } from './capability.ts';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
 
 /**
@@ -93,6 +93,18 @@ export interface RouteContext {
    * already allowed, so nothing read from it can serve a caller the boundary refused.
    */
   readonly governance?: CallerGovernance;
+  /**
+   * The facts the grant layer reads about this caller — carrier-proved locality, the step-up and the
+   * proven device's own grants — exactly as the boundary assembled them. Present on every request the
+   * dispatcher authenticated, so a handler asking a further grant question never rebuilds them.
+   */
+  readonly presentation?: CapabilityPresentation;
+  /**
+   * Spends this caller's step-up when the machine asks for one every time (`stepUpWindowMinutes: 0`).
+   * For a handler that checks its own step-up rather than declaring it, so one confirmation still buys
+   * one act. A no-op for a caller with no proven device, and under any other window.
+   */
+  readonly spendStepUp?: () => void;
 }
 
 /**

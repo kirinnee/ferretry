@@ -20,17 +20,22 @@
  * Handing another device access is a dangerous act, so a governed browser confirms it with its passkey.
  * The carrier asks for that by itself when the daemon refuses and sends the mint again, so this panel
  * has nothing to pre-check: it offers the button, and whatever the machine answers is rendered whole.
- * A person at the machine itself is asked for nothing.
+ * A browser on the machine itself is asked like any other: only the CLI is the owner at the machine.
  *
  * ## A REFUSAL IS EXPLAINED, NEVER GREYED
  *
- * A caller who is not on the host and whose operator has switched `pairing` off cannot read this panel at
- * all — the routes are governed. That refusal is rendered as the daemon's own sentence, which names the
- * command that changes it, plus the one thing the daemon cannot know: pairing from the machine itself is
- * never restricted. A greyed button with no explanation is the dead end this product keeps removing.
+ * A browser whose operator has switched `pairing` off cannot read this panel at all — the routes are
+ * governed, a browser on the machine itself included. That refusal is rendered as the daemon's own
+ * sentence, which names the command that changes it. A greyed button with no explanation is the dead end
+ * this product keeps removing.
  */
 
 import {
+  CAPABILITY_AXES,
+  type CapabilityAxis,
+  DAEMON_CAPABILITIES,
+  type DaemonCapability,
+  type DeviceGrantsPatch,
   invitationRedeemableByAnotherDevice,
   localOnlyNotice,
   type PairedDevice,
@@ -40,13 +45,16 @@ import {
   pairingMintOutcome,
   refusalNotice,
 } from '@ferretry/protocol';
-import { Check, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import { QrSymbol } from '../../components/qr-symbol.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { axisLabel, capabilityLabel } from '../../lib/grants.ts';
 import {
+  deviceAxisControl,
+  deviceGrantPatch,
   isThisDevice,
   orderedPairedDevices,
   PAIRING_EXPIRED_NOTE,
@@ -60,10 +68,12 @@ import {
   pairingCountdown,
   pairingRefusal,
   revokeConsequence,
+  SELF_NARROW_NOTE,
 } from '../../lib/pairing-invite.ts';
 import { encodeQr, QrEncodeError, type QrMatrix } from '../../lib/qr-code.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import {
+  changeDeviceGrants,
   mintPairingCode,
   type PairingClient,
   type PairingFailure,
@@ -236,20 +246,100 @@ function InviteOffer({ outcome }: { readonly outcome: PairingMintOutcome }) {
   );
 }
 
+/** One axis of one capability on one device: a switch, or a statement with its remedy. */
+function DeviceAxisSwitch({
+  device,
+  view,
+  capability,
+  axis,
+  busy,
+  clientName,
+  onChange,
+}: {
+  readonly device: PairedDevice;
+  readonly view: PairedDevicesView;
+  readonly capability: DaemonCapability;
+  readonly axis: CapabilityAxis;
+  readonly busy: boolean;
+  readonly clientName: string;
+  readonly onChange: (next: boolean) => void;
+}) {
+  const control = deviceAxisControl(view, device, capability, axis, clientName);
+  const reasonId = useId();
+  const disabled = busy || control.blocked;
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={control.checked}
+        aria-label={`${capabilityLabel(capability)} — ${axisLabel(axis)}`}
+        aria-describedby={control.reason === null ? undefined : reasonId}
+        disabled={disabled}
+        data-device-grant={`${device.id}:${capability}.${axis}`}
+        data-device-grant-blocked={control.blocked ? 'yes' : 'no'}
+        onClick={() => onChange(!control.checked)}
+        className={cn(
+          'flex min-h-[44px] w-full items-center justify-between gap-2 rounded-control border px-2 py-1 text-left transition-colors',
+          control.checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
+          disabled ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
+        )}
+      >
+        <span className={cn('text-meta font-semibold', control.checked ? 'text-accent' : 'text-fg')}>
+          {axisLabel(axis)}
+        </span>
+        <span
+          aria-hidden="true"
+          className={cn(
+            'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+            control.checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
+              control.checked ? 'translate-x-[18px]' : 'translate-x-[2px]',
+            )}
+          />
+        </span>
+      </button>
+      {control.reason === null ? null : (
+        <p
+          id={reasonId}
+          className="m-0 mt-1 break-words text-meta leading-base text-warn"
+          data-device-grant-reason={`${device.id}:${capability}.${axis}`}
+        >
+          {control.reason}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** One paired device: what it is, when it arrived, and the control that ends its access. */
 function PairedDeviceRow({
   device,
   view,
   busy,
+  clientName,
+  grantFailure,
+  initiallyOpen,
   onRevoke,
+  onChangeGrants,
 }: {
   readonly device: PairedDevice;
   readonly view: PairedDevicesView;
   readonly busy: boolean;
+  readonly clientName: string;
+  readonly grantFailure: PairingFailure | null;
+  readonly initiallyOpen: boolean;
   readonly onRevoke: () => void;
+  readonly onChangeGrants: (patch: DeviceGrantsPatch) => void;
 }) {
   const mine = isThisDevice(device, view);
   const describedBy = useId();
+  const [open, setOpen] = useState(initiallyOpen);
+  const held = DAEMON_CAPABILITIES.filter(capability => CAPABILITY_AXES.some(axis => device.grants[capability][axis]));
 
   return (
     <li
@@ -289,6 +379,69 @@ function PairedDeviceRow({
       <p id={describedBy} className="m-0 text-meta leading-base text-muted">
         {revokeConsequence(device, view)}
       </p>
+      <details
+        open={open}
+        onToggle={event => setOpen(event.currentTarget.open)}
+        className="min-w-0"
+        data-device-capabilities={device.id}
+      >
+        <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1.5 text-ui font-medium text-fg">
+          <ChevronRight
+            size={14}
+            className={cn('shrink-0 transition-transform', open && 'rotate-90')}
+            aria-hidden="true"
+          />
+          Capabilities
+          <span className="text-meta font-normal text-faint" data-device-capabilities-count="">
+            {held.length === 0 ? 'none' : `${String(held.length)} of ${String(DAEMON_CAPABILITIES.length)}`}
+          </span>
+        </summary>
+        <div className="flex min-w-0 flex-col gap-2 pb-2">
+          {mine ? (
+            <p
+              className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+              data-device-grant-self-note=""
+            >
+              {SELF_NARROW_NOTE}
+            </p>
+          ) : null}
+          <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label={`What ${device.name} may do`}>
+            {DAEMON_CAPABILITIES.map(capability => (
+              <li
+                key={capability}
+                className="flex min-w-0 flex-col gap-1 border-t border-border-soft pt-2 first:border-t-0 first:pt-0"
+                data-device-capability={capability}
+              >
+                <span className="text-meta font-semibold text-fg">{capabilityLabel(capability)}</span>
+                <div className="grid min-w-0 grid-cols-2 gap-2">
+                  {CAPABILITY_AXES.map(axis => (
+                    <DeviceAxisSwitch
+                      key={axis}
+                      device={device}
+                      view={view}
+                      capability={capability}
+                      axis={axis}
+                      busy={busy}
+                      clientName={clientName}
+                      onChange={next => onChangeGrants(deviceGrantPatch(capability, axis, next))}
+                    />
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {grantFailure === null ? null : (
+            <p
+              role="alert"
+              className="m-0 break-words rounded-control border border-err-border bg-err-bg px-3 py-2 text-ui leading-base text-err"
+              data-device-grant-failure={device.id}
+            >
+              <CircleAlert size={14} className="mr-1 inline" aria-hidden="true" />
+              {grantFailure.message}
+            </p>
+          )}
+        </div>
+      </details>
     </li>
   );
 }
@@ -302,10 +455,17 @@ export interface AddDeviceCardProps {
   readonly nowMs: number;
   readonly busy?: boolean;
   readonly failure?: PairingFailure | null;
+  /** A refusal of a per-device grant change, shown on the device it was for. */
+  readonly grantFailure?: { readonly deviceId: string; readonly failure: PairingFailure } | null;
+  /** The host's command name in remedies; the product's binary, threaded rather than spelled here. */
+  readonly clientName?: string;
+  /** Which device's capabilities start open — for a screenshot or a deep link, never persisted. */
+  readonly capabilitiesOpenFor?: string | undefined;
   readonly onMint: () => void;
   readonly onDiscardInvite: () => void;
   readonly onRevokeCode: () => void;
   readonly onRevokeDevice: (deviceId: string) => void;
+  readonly onChangeDeviceGrants: (deviceId: string, patch: DeviceGrantsPatch) => void;
 }
 
 /**
@@ -321,10 +481,14 @@ export function AddDeviceCard({
   nowMs,
   busy = false,
   failure = null,
+  grantFailure = null,
+  clientName = 'fy',
+  capabilitiesOpenFor,
   onMint,
   onDiscardInvite,
   onRevokeCode,
   onRevokeDevice,
+  onChangeDeviceGrants,
 }: AddDeviceCardProps) {
   const headingId = useId();
   const devices = orderedPairedDevices(view);
@@ -342,12 +506,6 @@ export function AddDeviceCard({
             <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
             Devices on this machine
           </h3>
-          <span
-            className="rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta text-faint"
-            data-pair-host-local={view.hostLocal ? 'yes' : 'no'}
-          >
-            {view.hostLocal ? 'you are at this machine' : 'you are away from this machine'}
-          </span>
         </div>
         <p className="m-0 text-cell leading-base text-muted">
           A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
@@ -443,8 +601,8 @@ export function AddDeviceCard({
         </p>
         {devices.length === 0 ? (
           <p className="m-0 text-meta leading-base text-muted">
-            Nothing but this machine itself can reach this daemon yet. Adding a device is how that changes, and every
-            device you add appears here with its own revoke.
+            No paired device can reach this daemon yet. Adding a device is how that changes, and every device you add
+            appears here with its own revoke.
           </p>
         ) : (
           <ul className="m-0 list-none p-0">
@@ -454,7 +612,11 @@ export function AddDeviceCard({
                 device={device}
                 view={view}
                 busy={busy}
+                clientName={clientName}
+                grantFailure={grantFailure?.deviceId === device.id ? grantFailure.failure : null}
+                initiallyOpen={capabilitiesOpenFor === device.id}
                 onRevoke={() => onRevokeDevice(device.id)}
+                onChangeGrants={patch => onChangeDeviceGrants(device.id, patch)}
               />
             ))}
           </ul>
@@ -512,6 +674,10 @@ export function AddDeviceSurface({
   const [invite, setInvite] = useState<HeldInvite | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<PairingFailure | null>(null);
+  const [grantFailure, setGrantFailure] = useState<{
+    readonly deviceId: string;
+    readonly failure: PairingFailure;
+  } | null>(null);
   const [nowMs, setNowMs] = useState(() => now());
   useEffect(() => {
     let current = true;
@@ -519,6 +685,7 @@ export function AddDeviceSurface({
     setLoaded(null);
     setLoadFailure(null);
     setFailure(null);
+    setGrantFailure(null);
     // The code belongs to the daemon that minted it, so switching machines drops it rather than carrying a
     // live credential across the boundary everything else here is keyed by.
     setInvite(null);
@@ -597,6 +764,25 @@ export function AddDeviceSurface({
     [client, connection.daemonId, loaded?.daemonId],
   );
 
+  const changeGrants = useCallback(
+    async (deviceId: string, patch: DeviceGrantsPatch) => {
+      if (client === null || loaded?.daemonId !== connection.daemonId) return;
+      setBusy(true);
+      setFailure(null);
+      setGrantFailure(null);
+      try {
+        // The view the daemon answers with is what gets rendered: a toggle that guessed the new state is
+        // how a refused widen reads as granted.
+        setLoaded({ daemonId: connection.daemonId, view: await changeDeviceGrants(client, deviceId, patch) });
+      } catch (cause) {
+        setGrantFailure({ deviceId, failure: pairingFailure(cause) });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, connection.daemonId, loaded?.daemonId],
+  );
+
   if (loaded?.daemonId === connection.daemonId)
     return (
       <AddDeviceCard
@@ -606,10 +792,12 @@ export function AddDeviceSurface({
         nowMs={nowMs}
         busy={busy}
         failure={failure}
+        grantFailure={grantFailure}
         onMint={() => void mint()}
         onDiscardInvite={() => setInvite(null)}
         onRevokeCode={() => void revokeCode()}
         onRevokeDevice={deviceId => void revokeDevice(deviceId)}
+        onChangeDeviceGrants={(deviceId, patch) => void changeGrants(deviceId, patch)}
       />
     );
   if (loadFailure?.daemonId === connection.daemonId)

@@ -36,7 +36,7 @@ import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
-import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
+import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
 import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { securityRoutes } from './security.ts';
@@ -101,6 +101,8 @@ export interface MountedSubsystems {
   readonly doctor: DoctorSubsystem;
   /** Short-lived pairing codes, durable device grants and their host-local observation surface. */
   readonly pairing: PairingSubsystem;
+  /** Each paired device's own grants, changed — `docs/design/zero-trust.md` B5. */
+  readonly deviceGrants: DeviceGrantSubsystem;
   /** The other direction of that relationship: which browsers this daemon may WAKE. It serves the
    *  application-server key a browser subscribes with, the enrolments filed against paired devices,
    *  and the revocation of one. An enrolment cannot outlive the device grant that made it — see
@@ -299,12 +301,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // every remote route later sees — and it is governed by the `pairing` capability rather than by the
     // `host` scope, because a browser is always a paired device and could otherwise never add a second
     // one. See the mount's header for why that is the correct layer.
-    ...pairingRoutes(subsystems.pairing),
+    ...pairingRoutes(subsystems.pairing, subsystems.deviceGrants),
     // Push enrolment registers beside pairing because it is the same subject: only a paired device may
     // enrol, and its enrolment dies with its grant. Every path is under `/v1/push`, which no other
     // subsystem uses, and its one pattern is registered after its two fixed literals — so it can
     // neither shadow nor be shadowed by anything here.
-    ...pushRoutes(subsystems.push),
+    ...pushRoutes(subsystems.push, subsystems.grants),
     // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
     // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
     // there are no patterns among them, so it can neither shadow nor be shadowed.
@@ -318,7 +320,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // registered EARLY and is itself ungoverned so a restricted UI can always read the reason it is
     // restricted — a grant report a restricted caller could not fetch would be the greyed control
     // with no explanation this whole feature exists to remove.
-    ...grantRoutes(subsystems.grants, subsystems.stepUp),
+    ...grantRoutes(subsystems.grants),
     // The carrier refresh sits beside pairing because it is the SECOND half of one exchange: pairing
     // hands a device the set of ways to reach this daemon, and this is where that device asks again
     // when the set has changed. `/v1/carriers` is a fixed literal no other subsystem uses, so it can

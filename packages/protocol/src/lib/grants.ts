@@ -75,7 +75,7 @@ import { InstantSchema } from './common.ts';
 /**
  * The capabilities an operator is asked about, in the order they are asked.
  *
- * SIX, and the list is closed. Every one of them either reaches out of the daemon's own state onto
+ * SEVEN, and the list is closed. Every one of them either reaches out of the daemon's own state onto
  * the host — spawning a shell, writing an account's wrapper, opening a browser the operator is
  * signed into, reading a working tree — or decides how much of the host the daemon may spend on its
  * own. Everything the daemon does *inside its own state home* (sessions, tasks, attention, pins) is
@@ -86,8 +86,21 @@ import { InstantSchema } from './common.ts';
  * order is the order an operator is asked and reads, so an existing report's rows must not reshuffle
  * because a sixth question exists. What it reaches is not the daemon's own state either — a pairing
  * code is a credential for the machine, redeemable by whoever holds it.
+ *
+ * `secrets` is appended after it for the same reason. Its `use` axis runs a command with a stored
+ * value in that child's environment — code execution on the host — and its `configure` axis sets and
+ * deletes stored values. Before it existed those routes carried no demand at all, so any paired device
+ * could run a command through them.
  */
-export const DAEMON_CAPABILITIES = ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing'] as const;
+export const DAEMON_CAPABILITIES = [
+  'fleet',
+  'terminal',
+  'browser',
+  'filesystem',
+  'warden',
+  'pairing',
+  'secrets',
+] as const;
 export type DaemonCapability = (typeof DAEMON_CAPABILITIES)[number];
 
 export const DaemonCapabilitySchema = z.enum(DAEMON_CAPABILITIES);
@@ -127,6 +140,21 @@ export const CapabilityGrantsSchema = z.strictObject(
 export type CapabilityGrants = z.infer<typeof CapabilityGrantsSchema>;
 
 /**
+ * What a newly paired device is given: `fleet.use`, and nothing else.
+ *
+ * LEAST PRIVILEGE PER DEVICE, on top of the daemon-wide document (`docs/design/zero-trust.md` B5). A
+ * fresh phone can read the fleet and chat with sessions; terminals, files, the browser, secrets, the
+ * warden, pairing and every `configure` axis start off until somebody widens THIS device. The
+ * daemon-wide document stays permissive by default, because it answers a different question — what any
+ * remote caller may ever do on this machine — and the effective answer is both of them at once.
+ */
+export const DEFAULT_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: capability === 'fleet', configure: false }]),
+  ) as CapabilityGrants,
+);
+
+/**
  * WHY a capability is refused, in a vocabulary the UI can turn into a next step.
  *
  * NOT a free string. PR #284 established that a refusal naming the next step beats a bare denial,
@@ -135,13 +163,21 @@ export type CapabilityGrants = z.infer<typeof CapabilityGrantsSchema>;
  *
  * - `granted` — allowed.
  * - `not-granted` — the operator turned this axis off. The next step is a host-side change.
+ * - `device-not-granted` — the machine allows it, but THIS device has not been given it. The next step
+ *   is widening this one device — at the machine, or from a device that holds it and `pairing.configure`.
  * - `step-up-required` — the demand is dangerous and this device holds no recent passkey step-up for
  *   this app session. The next step is a passkey confirmation on the same device, then the retry.
  * - `undetermined` — the grant document could not be read as a complete decision. Denied, loudly.
  *   Permissive DEFAULTS are a choice about what an operator who said nothing meant; they are not a
  *   choice about damaged state, and unknown is never permitted.
  */
-export const GRANT_REFUSALS = ['granted', 'not-granted', 'step-up-required', 'undetermined'] as const;
+export const GRANT_REFUSALS = [
+  'granted',
+  'not-granted',
+  'device-not-granted',
+  'step-up-required',
+  'undetermined',
+] as const;
 export type GrantRefusal = (typeof GRANT_REFUSALS)[number];
 
 export const GrantRefusalSchema = z.enum(GRANT_REFUSALS);
@@ -155,6 +191,12 @@ export const CapabilityGrantViewSchema = z.strictObject({
   configure: z.boolean(),
   /** What the operator's document says, before a step-up is considered. */
   granted: CapabilityGrantSchema,
+  /**
+   * What THIS device has been granted, when the caller is a governed paired device — absent for a
+   * caller on the host (ungoverned) and for a credential that is not a device (a remote warden).
+   * The effective answer is `granted` AND this, axis by axis.
+   */
+  deviceGranted: CapabilityGrantSchema.optional(),
   /** Why `use` reads the way it does. */
   useRefusal: GrantRefusalSchema,
   /** Why `configure` reads the way it does. */
@@ -249,9 +291,12 @@ export const GrantAuditEntryViewSchema = z.strictObject({
    * record of who did something must not become a durable record of the credential they did it with.
    */
   actor: z.string().min(1).max(256),
-  /** Each axis that moved, as `capability.axis=on|off`. Empty is impossible — a patch that changed
-   *  nothing is not recorded. */
-  changes: z.array(z.string().min(1).max(64)).readonly(),
+  /**
+   * Each axis that moved, as `capability.axis=on|off` for the daemon-wide document, or
+   * `<deviceId>/capability.axis=on|off` for one device's own grant. Empty is impossible — a patch that
+   * changed nothing is not recorded.
+   */
+  changes: z.array(z.string().min(1).max(96)).readonly(),
 });
 export type GrantAuditEntryView = z.infer<typeof GrantAuditEntryViewSchema>;
 
@@ -304,3 +349,10 @@ export const GrantsPatchSchema = z
   )
   .refine(patch => Object.values(patch).some(value => value !== undefined), 'a grant patch must change something');
 export type GrantsPatch = z.infer<typeof GrantsPatchSchema>;
+
+/** Every capability on both axes — what a `fy pair --full` code gives the device that redeems it. */
+export const FULL_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }]),
+  ) as CapabilityGrants,
+);

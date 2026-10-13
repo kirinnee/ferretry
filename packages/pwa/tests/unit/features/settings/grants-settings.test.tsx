@@ -84,25 +84,21 @@ describe('GrantsCard', () => {
     expect(marked(confirmed, 'data-grant-stepped-up')[0]?.props['data-grant-stepped-up']).toBe('yes');
     expect(text(confirmed)).toContain('passkey confirmed');
 
-    const local = render(
+    // An ungoverned view is the CLI's, never a browser's; it is asked for no passkey.
+    const ungoverned = render(
       <GrantsCard connection={connection()} view={view({ governed: false, hostLocal: true })} onChange={() => {}} />,
     );
-    expect(marked(local, 'data-grant-step-up')).toHaveLength(0);
-    expect(marked(local, 'data-grant-stepped-up')).toHaveLength(0);
+    expect(marked(ungoverned, 'data-grant-step-up')).toHaveLength(0);
+    expect(marked(ungoverned, 'data-grant-stepped-up')).toHaveLength(0);
   });
 
-  it('states who the rows apply to, differently for each connection', () => {
+  it('states that the rows apply to this browser, a browser on the machine itself included', () => {
     const scope = (renderer: ReactTestRenderer): unknown =>
       marked(renderer, 'data-grant-scope')[0]?.props['data-grant-scope'];
-    const remote = render(<GrantsCard connection={connection()} view={view()} onChange={() => {}} />);
-    expect(scope(remote)).toBe('this-browser');
-    expect(text(remote)).toContain('reached the machine from somewhere else');
-
-    const local = render(
-      <GrantsCard connection={connection()} view={view({ governed: false, hostLocal: true })} onChange={() => {}} />,
-    );
-    expect(scope(local)).toBe('not-on-this-machine');
-    expect(text(local)).toContain('none of them apply to it');
+    const governed = render(<GrantsCard connection={connection()} view={view()} onChange={() => {}} />);
+    expect(scope(governed)).toBe('this-browser');
+    expect(text(governed)).toContain('on the machine itself included');
+    expect(text(governed)).not.toContain('none of them apply');
   });
 
   it('explains a step-up-required row in one plain sentence with no password words', () => {
@@ -174,37 +170,35 @@ describe('GrantsCard', () => {
     expect(text(renderer)).toContain('revoke that device FIRST');
   });
 
-  it('says nothing about one-way doors to a caller at the machine, and keeps its switches live', () => {
+  it('keeps a browser on the machine behind the same one-way door: no switch on, only the command to run', () => {
+    // A local browser reads `governed: true` and `mayGrant: false` like any paired device.
     const renderer = render(
       <GrantsCard
         connection={connection()}
         view={view({
-          governed: false,
-          hostLocal: true,
           capabilities: [
             entry({
               capability: 'terminal',
               use: false,
               granted: { use: false, configure: true },
               useRefusal: 'not-granted',
-              mayGrant: true,
             }),
           ],
         })}
         onChange={() => {}}
       />,
     );
-    expect(marked(renderer, 'data-grant-one-way')).toHaveLength(0);
-    expect(axisSwitch(renderer, 'terminal.use')?.props.disabled).toBe(false);
-    expect(text(renderer)).not.toContain('only be switched on at the machine');
+    expect(axisSwitch(renderer, 'terminal.use')?.props.disabled).toBe(true);
+    expect(text(renderer)).toContain('fy daemon config set terminal --use');
   });
 
   it('hands the capability list the daemon’s own posture rather than deriving one', () => {
     const posture = (renderer: ReactTestRenderer): unknown =>
       marked(renderer, 'data-capability-posture')[0]?.props['data-capability-posture'];
     expect(posture(render(<GrantsCard connection={connection()} view={view()} onChange={() => {}} />))).toBe(
-      'governed-remote',
+      'governed',
     );
+    // A daemon that does not call this browser governed is not believed to mean "you are exempt".
     expect(
       posture(
         render(
@@ -215,7 +209,7 @@ describe('GrantsCard', () => {
           />,
         ),
       ),
-    ).toBe('direct-local');
+    ).toBe('unknown');
   });
 
   it('renders one row per capability in the protocol’s order, and invents none', () => {
@@ -267,7 +261,7 @@ describe('GrantsCard', () => {
     expect(text(renderer)).toContain('may not change this');
   });
 
-  it('leaves the same axis changeable for a caller on the host', () => {
+  it('leaves the same axis changeable for an ungoverned caller, which is never a browser', () => {
     const renderer = render(
       <GrantsCard
         connection={connection()}
@@ -532,5 +526,45 @@ describe('GrantsSurface', () => {
     const renderer = await mountSurface({ create: client().create as never });
     expect(marked(renderer, 'data-grant-step-up')).toHaveLength(1);
     expect(marked(renderer, 'data-grant-step-up-open')).toHaveLength(0);
+  });
+});
+
+describe('GrantsCard per-device grants', () => {
+  it('shows the secret store beside the other six, as a card of its own', () => {
+    // Arrange, Act
+    const renderer = render(<GrantsCard connection={connection()} view={view()} onChange={() => {}} />);
+
+    // Assert
+    expect(marked(renderer, 'data-grant-capability')).toHaveLength(7);
+    expect(marked(renderer, 'data-grant-capability').at(-1)?.props['data-grant-capability']).toBe('secrets');
+    expect(text(renderer)).toContain('Secrets');
+    expect(axisSwitch(renderer, 'secrets.use')).toBeDefined();
+  });
+
+  it('explains a refusal that is this device’s own grant, with the host command, on that capability only', () => {
+    // Arrange, Act
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [
+            entry({
+              capability: 'terminal',
+              use: false,
+              useRefusal: 'device-not-granted',
+              deviceGranted: { use: false, configure: false },
+            }),
+            entry({ capability: 'fleet', deviceGranted: { use: true, configure: true } }),
+          ],
+        })}
+        onChange={() => {}}
+      />,
+    );
+
+    // Assert
+    expect(marked(renderer, 'data-grant-device-note')).toHaveLength(1);
+    expect(text(renderer)).toContain('fy device grant <device> terminal --use');
+    // The refusal reads as a widen of this device, never as a passkey or the operator's decision.
+    expect(text(renderer)).toContain('this device has not been given it');
   });
 });

@@ -271,6 +271,9 @@ export class CapabilityGrantService implements CapabilityGuard {
       use: use.allowed,
       configure: configure.allowed,
       granted,
+      ...(evaluation.device === undefined || evaluation.device === null
+        ? {}
+        : { deviceGranted: evaluation.device[capability] }),
       useRefusal: use.refusal,
       configureRefusal: configure.refusal,
       // LOCALITY decides it, and nothing else can: no caller off this host ever widens.
@@ -286,6 +289,10 @@ export class CapabilityGrantService implements CapabilityGuard {
       governed: isGovernedCaller({ loopback: presentation.loopback }),
       hostLocal: presentation.loopback,
       stepUp: presentation.stepUp,
+      // Only a GOVERNED caller is narrowed by its device: a browser that arrived on the host is not.
+      ...(isGovernedCaller({ loopback: presentation.loopback }) && presentation.deviceGrants !== undefined
+        ? { device: presentation.deviceGrants }
+        : {}),
     };
   }
 }

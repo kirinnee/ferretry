@@ -1,6 +1,9 @@
 import { join } from 'node:path';
 import {
+  type CapabilityGrants,
+  CapabilityGrantsSchema,
   type DaemonId,
+  DEFAULT_DEVICE_GRANTS,
   DaemonIdSchema,
   DaemonNameSchema,
   InstantSchema,
@@ -27,6 +30,9 @@ const DeviceRecordSchema = z.strictObject({
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
   publicKey: DeviceKeySchema,
+  // A record written before per-device grants reads as the DEFAULT, which is a narrowing (fleet.use
+  // only) and therefore safe — so the document stays at schema 2. Every write carries the field.
+  grants: CapabilityGrantsSchema.default(DEFAULT_DEVICE_GRANTS),
   /** When `publicKey` last replaced an earlier one. Absent until a first rotation. */
   keyRotatedAt: InstantSchema.optional(),
 });
@@ -159,6 +165,15 @@ export class StatePairingRepository implements PairingDeviceStore {
         ? records.map(existing =>
             existing.id === id ? DeviceRecordSchema.parse({ ...existing, publicKey, keyRotatedAt }) : existing,
           )
+        : undefined,
+    );
+  }
+
+  async setGrants(id: string, grants: CapabilityGrants): Promise<boolean> {
+    const parsed = CapabilityGrantsSchema.parse(grants);
+    return await this.write(records =>
+      records.some(existing => existing.id === id)
+        ? records.map(existing => (existing.id === id ? { ...existing, grants: parsed } : existing))
         : undefined,
     );
   }

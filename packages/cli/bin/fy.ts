@@ -27,6 +27,7 @@ import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
+import { IntlLocalTime } from '../src/adapters/passkey/local-time';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
 import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/tmux-attacher';
 import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
@@ -57,6 +58,9 @@ import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { MachineSetupNotice } from '../src/lib/daemon/setup-notice';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
+import { registerDeviceCommands } from '../src/lib/device/commands';
+import { DeviceController } from '../src/lib/device/controller';
+import { ProtocolDeviceGateway } from '../src/lib/device/gateway';
 import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
 import { FilesystemController } from '../src/lib/filesystem/controller';
 import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
@@ -80,6 +84,9 @@ import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
+import { registerPasskeyCommands } from '../src/lib/passkey/commands';
+import { PasskeyController } from '../src/lib/passkey/controller';
+import { ProtocolPasskeyGateway } from '../src/lib/passkey/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -679,6 +686,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           clientName: BINARY_NAME,
         }),
     ),
+  // `fy device` reads and changes what each paired device may do. It takes the shared client, which is
+  // lazy, so listing devices is the first thing that resolves the address and the admin token.
+  ({ program, world, client }) =>
+    registerDeviceCommands(
+      program,
+      () =>
+        new DeviceController({
+          gateway: new ProtocolDeviceGateway(client),
+          out: world.io,
+          clientName: BINARY_NAME,
+        }),
+    ),
   // The security verbs mount onto the same group, after it, and take the shared client for the same reason.
   ({ program, world, client }) =>
     registerSecurityCommands(
@@ -704,6 +723,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         qr: new QrCodeTerminal(),
         terminal: new ProcessTerminalSize(),
         browser: desktopBrowserOpener(),
+        binaryName: BINARY_NAME,
+      }),
+    ),
+  // The owner's passkey recovery verb. It dials the daemon with the host's admin credential, which is the
+  // one caller the daemon treats as "at the machine" — no other credential could be answered.
+  ({ program, world, client }) =>
+    registerPasskeyCommands(
+      program,
+      new PasskeyController({
+        gateway: new ProtocolPasskeyGateway(client),
+        out: world.io,
+        time: new IntlLocalTime(),
         binaryName: BINARY_NAME,
       }),
     ),

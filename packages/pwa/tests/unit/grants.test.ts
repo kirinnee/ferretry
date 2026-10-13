@@ -20,6 +20,8 @@ import {
   capabilityReach,
   capabilityWeight,
   connectionPosture,
+  deviceGrantCommand,
+  deviceGrantNote,
   grantAlreadyReads,
   grantChangeable,
   grantGuidance,
@@ -28,13 +30,11 @@ import {
   grantRefusalNotice,
   grantScopeKey,
   grantScopeNote,
-  LOCAL_TWO_WAY_NOTE,
   mayGrantCapability,
   openReason,
   openReasonLabel,
   originNote,
   postureCopy,
-  postureFromCapabilities,
   REMOTE_ONE_WAY_NOTE,
   remoteRevokeWarning,
   STEP_UP_NOTE,
@@ -124,6 +124,26 @@ describe('grant vocabulary', () => {
     expect(grantGuidance('granted', 'fleet').explanation).toBe(grantGuidance('granted').explanation);
   });
 
+  it('words `device-not-granted` as a widen of this one device, and never as a passkey or an operator decision', () => {
+    // The machine allows it; only THIS device lacks it. A passkey cannot help and the operator has not said no.
+    const bare = grantGuidance('device-not-granted');
+    const named = grantGuidance('device-not-granted', 'terminal');
+    expect(bare.tone).toBe('limit');
+    expect(bare.offersStepUp).toBe(false);
+    expect(bare.explanation).toContain('this device has not been given it');
+    expect(named.explanation).toContain(capabilityNoun('terminal'));
+    expect(named.explanation).toContain('fy device grant <device> terminal --use');
+    expect(named.explanation).not.toContain('operator');
+  });
+
+  it('describes the secret store as code on the machine, in the dangerous tier beside the terminal', () => {
+    expect(capabilityNoun('secrets')).toBe('the secret store');
+    expect(capabilityLabel('secrets')).toBe('Secrets');
+    expect(capabilityReach('secrets')).toContain('code on this machine');
+    expect(capabilityReach('secrets')).toContain('sets or deletes stored secrets');
+    expect(capabilityWeight('secrets')).toBe(capabilityWeight('terminal'));
+  });
+
   it('reads each axis and its reason off the view rather than re-deriving them', () => {
     const refused = entry({ use: true, configure: false, useRefusal: 'granted', configureRefusal: 'step-up-required' });
     expect(axisAllowed(refused, 'use')).toBe(true);
@@ -173,9 +193,10 @@ describe('grant vocabulary', () => {
     expect(grantOnlyAtMachine('fleet', 'fyd')).toContain('fyd daemon config set fleet --use');
   });
 
-  it('describes the one-way and two-way doors', () => {
+  it('describes the one-way door, and says a browser on the machine does not get past it', () => {
     expect(REMOTE_ONE_WAY_NOTE).toContain('never back on');
-    expect(LOCAL_TWO_WAY_NOTE).toContain('both ways');
+    expect(REMOTE_ONE_WAY_NOTE).toContain('even on the machine itself');
+    expect(REMOTE_ONE_WAY_NOTE).toContain('fy daemon config set');
     expect(mayGrantCapability(entry({ mayGrant: true }))).toBe(true);
     expect(mayGrantCapability(entry({ mayGrant: false }))).toBe(false);
   });
@@ -207,7 +228,7 @@ describe('grantChangeable', () => {
     expect(grantChangeable(view({ governed: true }), noUse)).toBe(false);
   });
 
-  it('lets a caller on the host change anything, because it is not governed', () => {
+  it('lets an ungoverned caller (the CLI, never a browser) change anything', () => {
     const local = view({ governed: false, hostLocal: true });
     expect(grantChangeable(local, noConfigure)).toBe(true);
     expect(grantChangeable(local, noUse)).toBe(true);
@@ -235,6 +256,7 @@ describe('grantRefusalNotice', () => {
     const codes: ReadonlyArray<readonly [string, GrantRefusal]> = [
       ['grant_not_granted', 'not-granted'],
       [STEP_UP_REQUIRED_CODE, 'step-up-required'],
+      ['grant_device_not_granted', 'device-not-granted'],
       ['grant_undetermined', 'undetermined'],
       ['grants_undetermined', 'undetermined'],
       ['grant_forbidden', 'not-granted'],
@@ -285,39 +307,35 @@ describe('grantRefusalNotice', () => {
 });
 
 describe('the posture', () => {
-  it('reads governed callers as remote and ungoverned ones as at the machine', () => {
-    expect(connectionPosture(false)).toBe('direct-local');
-    expect(connectionPosture(true)).toBe('governed-remote');
+  it('reads a governed connection as governed, and has no direct-local reading at all', () => {
+    expect(connectionPosture(true)).toBe('governed');
+    expect(postureCopy('governed').headline).toContain('even when it runs on the machine itself');
   });
 
   it('keeps “cannot tell” for a daemon that said nothing, rather than assuming the flattering answer', () => {
     expect(connectionPosture(undefined)).toBe('unknown');
   });
 
-  it('falls back to the capabilities only when they agree, and never to the friendly side', () => {
-    expect(postureFromCapabilities([])).toBe('unknown');
-    expect(postureFromCapabilities([entry({ mayGrant: true }), entry({ mayGrant: true })])).toBe('direct-local');
-    expect(postureFromCapabilities([entry({ mayGrant: false })])).toBe('governed-remote');
-    expect(postureFromCapabilities([entry({ mayGrant: true }), entry({ mayGrant: false })])).toBe('unknown');
+  it('never tells a browser that the limits do not apply, even when the daemon says it is not governed', () => {
+    // No browser is ever ungoverned (only the CLI is), so "not governed" is not something to flatter.
+    expect(connectionPosture(false)).toBe('unknown');
   });
 
   it('has copy for every posture, and none of it mentions a password or an unlock', () => {
-    for (const posture of ['direct-local', 'governed-remote', 'unknown'] as const) {
+    for (const posture of ['governed', 'unknown'] as const) {
       const copy = postureCopy(posture);
       expect(copy.badge.length).toBeGreaterThan(0);
-      expect(`${copy.headline} ${copy.detail}`).not.toMatch(/password|unlock/iu);
+      expect(`${copy.headline} ${copy.detail}`).not.toMatch(/password|unlock|standing at the machine/iu);
     }
-    expect(postureCopy('governed-remote').detail).toContain('passkey');
+    expect(postureCopy('governed').detail).toContain('passkey');
   });
 
-  it('says something different to each connection about who the limits apply to', () => {
-    expect(grantScopeKey('governed-remote')).toBe('this-browser');
-    expect(grantScopeNote('governed-remote')).toContain('reached the machine from somewhere else');
-    expect(grantScopeKey('direct-local')).toBe('not-on-this-machine');
-    expect(grantScopeNote('direct-local')).toContain('none of them apply to it');
+  it('says who the limits apply to, and that a browser on the machine is not exempt', () => {
+    expect(grantScopeKey('governed')).toBe('this-browser');
+    expect(grantScopeNote('governed')).toContain('on the machine itself included');
     expect(grantScopeKey('unknown')).toBe('cannot-tell');
     expect(grantScopeNote('unknown')).toContain('safe reading');
-    for (const posture of ['direct-local', 'governed-remote', 'unknown'] as const)
+    for (const posture of ['governed', 'unknown'] as const)
       expect(grantScopeNote(posture)).not.toMatch(/password|unlock/iu);
   });
 });
@@ -325,18 +343,48 @@ describe('the posture', () => {
 describe('why an axis is open', () => {
   it('puts a pending step-up ahead of every other reading, because it is the next step', () => {
     const waiting = entry({ use: false, useRefusal: 'step-up-required' });
-    for (const posture of ['direct-local', 'governed-remote', 'unknown'] as const)
-      expect(openReason(waiting, 'use', posture)).toBe('step-up');
+    for (const posture of ['governed', 'unknown'] as const) expect(openReason(waiting, 'use', posture)).toBe('step-up');
     expect(openReasonLabel('step-up')).toBe('Open — after your passkey');
   });
 
-  it('reads closed, ungoverned, unknown and granted off the axis and the posture', () => {
+  it('reads closed, unknown and granted off the axis and the posture', () => {
     const shut = entry({ configure: false, configureRefusal: 'not-granted' });
-    expect(openReason(shut, 'configure', 'governed-remote')).toBe('closed');
-    expect(openReason(entry(), 'use', 'direct-local')).toBe('ungoverned');
+    expect(openReason(shut, 'configure', 'governed')).toBe('closed');
     expect(openReason(entry(), 'use', 'unknown')).toBe('unknown');
-    expect(openReason(entry(), 'use', 'governed-remote')).toBe('granted');
-    for (const reason of ['ungoverned', 'granted', 'closed', 'unknown'] as const)
+    expect(openReason(entry(), 'use', 'governed')).toBe('granted');
+    for (const reason of ['granted', 'closed', 'unknown'] as const)
       expect(openReasonLabel(reason).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the per-device grant', () => {
+  it('names the host command that widens one device, with the product binary threaded through', () => {
+    expect(deviceGrantCommand('terminal', 'use')).toBe('fy device grant <device> terminal --use');
+    expect(deviceGrantCommand('secrets', 'configure', 'ferret')).toBe(
+      'ferret device grant <device> secrets --configure',
+    );
+  });
+
+  it('is silent on the host, where there is no device grant, and when the device withholds nothing', () => {
+    expect(deviceGrantNote(entry())).toBeNull();
+    expect(deviceGrantNote(entry({ deviceGranted: { use: true, configure: true } }))).toBeNull();
+    // Withheld by the machine as well: the daemon-wide refusal already has its own sentence.
+    expect(
+      deviceGrantNote(
+        entry({ granted: { use: false, configure: false }, deviceGranted: { use: false, configure: false } }),
+      ),
+    ).toBeNull();
+  });
+
+  it('says which axes this device lacks although the machine allows them, with the remedy', () => {
+    const note = deviceGrantNote(
+      entry({ capability: 'terminal', deviceGranted: { use: false, configure: false } }),
+      'ferret',
+    );
+    expect(note).toContain('use or configure of session terminals');
+    expect(note).toContain('ferret device grant <device> terminal --use');
+    const configureOnly = deviceGrantNote(entry({ deviceGranted: { use: true, configure: false } }));
+    expect(configureOnly).toContain('configure of the agent fleet');
+    expect(configureOnly).toContain('--configure');
   });
 });

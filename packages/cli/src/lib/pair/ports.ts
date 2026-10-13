@@ -1,4 +1,10 @@
-import type { IFyApiClient, PairingCodeMintResponse, PairingCodeStatusResponse, PairingId } from '@ferretry/protocol';
+import type {
+  IFyApiClient,
+  PairingCodeMintResponse,
+  PairingCodeStatusResponse,
+  PairingGrantSet,
+  PairingId,
+} from '@ferretry/protocol';
 
 /**
  * Where the pairing screen is drawn.
@@ -76,8 +82,8 @@ export interface IBrowserOpener {
  * is not a credential, so it may sit in a URL path and its access log, and the code may not.
  */
 export interface IPairGateway {
-  /** Ask the daemon to mint a single-use code. */
-  mint(): Promise<PairingCodeMintResponse>;
+  /** Ask the daemon to mint a single-use code whose device will hold `grants`. */
+  mint(grants: PairingGrantSet): Promise<PairingCodeMintResponse>;
   /** Whether that code is still waiting, was redeemed, or has died. */
   status(pairingId: PairingId): Promise<PairingCodeStatusResponse>;
 }

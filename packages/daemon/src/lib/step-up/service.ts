@@ -222,7 +222,10 @@ export class StepUpService {
     const credentialId = toBase64Url(verdict.credentialId);
     // The id the browser reported must be the one the authenticator attested, and must be new here.
     if (credentialId !== registration.credentialId) return refuse('not-verified');
-    if (passkeys.some(passkey => passkey.credentialId === credentialId)) return refuse('not-verified');
+    // ANY device's, not only this one's: a credential is bound to the device that registered it, so one
+    // already held elsewhere — a synced copy, or an id a device learned — is never re-registered here,
+    // which would move another device's passkey out from under it.
+    if ((await this.deps.store.holder(credentialId)) !== undefined) return refuse('not-verified');
     const stored: StoredPasskey = {
       credentialId,
       deviceId: device.deviceId,

@@ -50,6 +50,9 @@ class MemoryPasskeys implements PasskeyStore {
   async list(id: string) {
     return this.rows.filter(row => row.deviceId === id);
   }
+  async holder(credentialId: string) {
+    return this.rows.find(row => row.credentialId === credentialId)?.deviceId;
+  }
   async add(passkey: StoredPasskey) {
     this.rows.push(passkey);
   }
@@ -64,6 +67,8 @@ class MemoryPasskeys implements PasskeyStore {
 }
 
 const phone: StepUpSubject = { deviceId: deviceId('a'), appSession: 'tab-one' };
+/** A second paired device, for the cases where one device's passkey must never work for another. */
+const laptop: StepUpSubject = { deviceId: deviceId('b'), appSession: 'laptop-tab' };
 const remote = (subject: StepUpSubject = phone): StepUpCaller => ({ device: subject, hostLocal: false });
 
 function fixture(
@@ -101,9 +106,9 @@ function fixture(
     clock: { nowMs: () => clock.now },
     devices: {
       device: async id =>
-        options.paired === false || id !== phone.deviceId
+        options.paired === false || (id !== phone.deviceId && id !== laptop.deviceId)
           ? undefined
-          : { name: 'Phone', createdAt: new Date(PAIRED_AT_MS).toISOString() },
+          : { name: id === phone.deviceId ? 'Phone' : 'Laptop', createdAt: new Date(PAIRED_AT_MS).toISOString() },
     },
     allowedOrigins: () => options.origins ?? [ORIGIN, OTHER_ORIGIN],
     relyingPartyName: 'Ferretry',
@@ -469,6 +474,23 @@ describe('StepUpService', () => {
       should(store.rows).have.length(1);
     });
 
+    it('should refuse a credential another device already holds, and leave that device its passkey', async () => {
+      // A synced passkey, or an id a device learned: registering it here would move the phone's passkey.
+      // Arrange
+      const { service, store, registry } = fixture();
+      const authenticator = await es256Authenticator();
+      await enrol(service, authenticator);
+      registry.open(laptop);
+
+      // Act — the laptop is inside its own first window and presents the phone's credential
+      await service.registrationOptions(remote(laptop), ORIGIN);
+      const taken = await service.register(remote(laptop), await registrationBody(authenticator));
+
+      // Assert
+      should(taken).eql({ ok: false, refusal: 'not-verified' });
+      should(store.rows.map(row => row.deviceId)).eql([phone.deviceId]);
+    });
+
     it('should refuse an attestation the verifier rejects, saying only not-verified', async () => {
       // Arrange
       const { service } = fixture({ origins: [OTHER_ORIGIN] });
@@ -515,6 +537,31 @@ describe('StepUpService', () => {
       });
       clock.now += STEP_UP_TTL_SECONDS * 1_000;
       should(service.held(phone)).be.false();
+    });
+
+    it('should accept only a credential registered to THIS device: a synced passkey steps up nobody else', async () => {
+      // iCloud Keychain or Google Password Manager puts the phone's credential on the laptop too. It is the
+      // phone's: a valid signature by it, presented by another paired device, is refused.
+      // Arrange
+      const { service, store, registry } = fixture();
+      const authenticator = await es256Authenticator();
+      await enrol(service, authenticator);
+      registry.open(laptop);
+      // The laptop holds a passkey of its own, so it is offered a challenge at all.
+      const own = toBase64Url(new Uint8Array([7, 7, 7, 7]));
+      const phonesPasskey = store.rows[0];
+      if (phonesPasskey === undefined) throw new Error('the phone enrolled no passkey');
+      store.rows.push({ ...phonesPasskey, credentialId: own, deviceId: laptop.deviceId });
+
+      // Act
+      const options = await service.stepUpOptions(remote(laptop), ORIGIN);
+      const synced = await service.stepUp(remote(laptop), await assertionBody(authenticator));
+
+      // Assert — offered only its own credential, and the phone's is not accepted from it
+      should(options.ok && options.value.allowCredentials).eql([{ type: 'public-key', id: own }]);
+      should(synced).eql({ ok: false, refusal: 'not-verified' });
+      should(service.held(laptop)).be.false();
+      should(store.rows[0]?.signCount).equal(phonesPasskey.signCount);
     });
 
     it('should not let a step-up held by one app session count for another of the same device', async () => {

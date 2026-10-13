@@ -29,6 +29,7 @@ import {
   passkeyFailureSentence,
   passkeyLabel,
   registrationClosedSentence,
+  registrationClosesSentence,
   unsupportedSentence,
   webAuthnSupported,
 } from '../../lib/passkey-panel.ts';
@@ -61,6 +62,10 @@ interface SecurityCardProps {
 function SecurityCard({ view, supported, origin, busy, failure, onAdd }: SecurityCardProps) {
   const headingId = useId();
   const canAdd = supported && view.registration !== 'closed';
+  const closes =
+    view.registration === 'first-window' || view.registration === 'reopened'
+      ? registrationClosesSentence(view.registrationClosesAt)
+      : null;
   return (
     <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-labelledby={headingId} data-security-card="">
       <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
@@ -99,6 +104,11 @@ function SecurityCard({ view, supported, origin, busy, failure, onAdd }: Securit
             <Plus size={15} aria-hidden="true" />
             Add a passkey
           </button>
+          {closes === null ? null : (
+            <span className="text-meta leading-base text-faint" data-security-closes="">
+              {closes}
+            </span>
+          )}
         </div>
       ) : (
         <p className="m-0 text-cell leading-base text-muted" data-security-unavailable="">

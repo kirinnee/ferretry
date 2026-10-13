@@ -33,9 +33,11 @@ const witnessFor = (...held: readonly SessionDevice[]): StepUpWitness => ({
 
 function dispatcherFor(subsystem: GrantSubsystem, stepUps?: StepUpWitness): ApiDispatcher {
   return new ApiDispatcher(
-    new ApiRouter(stepUps === undefined ? grantRoutes(subsystem) : grantRoutes(subsystem, stepUps)),
+    new ApiRouter(grantRoutes(subsystem)),
     CREDENTIALS,
     NO_GOVERNED_ROUTES_GUARD,
+    undefined,
+    stepUps,
   );
 }
 

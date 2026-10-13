@@ -70,7 +70,7 @@ const pairingSubsystem = (): PairingSubsystem => ({
 // A REAL step-up service over in-memory fakes, so the inventory mounts the very type production does.
 const stepUpSubsystem = (): StepUpService =>
   new StepUpService({
-    store: { list: async () => [], add: async () => {}, updateSignCount: async () => {}, forgetDevice: async () => {} },
+    store: { list: async () => [], holder: async () => undefined, add: async () => {}, updateSignCount: async () => {}, forgetDevice: async () => {} },
     verifier: {
       verifyRegistration: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
       verifyAssertion: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
@@ -99,6 +99,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   push: {
     publicKey: async () => 'the-application-server-key',
     list: async () => [],
+    listFor: async () => [],
+    ownerOf: async () => undefined,
     register: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -455,6 +457,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     clock: { nowMs: () => 1_700_000_000_000 },
     widenCommand: 'fy daemon security set <field> <value>',
   }),
+  deviceGrants: { mayWiden: () => DEFAULT_CAPABILITY_GRANTS, change: async () => 'not-found' as const },
 });
 
 describe('the mounted daemon surface', () => {
@@ -483,6 +486,7 @@ describe('the mounted daemon surface', () => {
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
       6 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options, and the owner's re-opened window
+      1 + // one device's own grants, changed (B5)
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       2; // the passkey confirmation on opening: its options and the verified confirmation (zero-trust B6)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
@@ -509,6 +513,8 @@ describe('the mounted daemon surface', () => {
       // that returns a device token or its digest — the list is a projection with no field for one.
       'GET /v1/pair/devices',
       'DELETE /v1/pair/devices/:deviceId',
+      // One device's own grants (B5): widen at the machine, or from a device holding what it grants.
+      'PATCH /v1/pair/devices/:deviceId/grants',
       // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
       // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
       // list is a projection with no field for one.

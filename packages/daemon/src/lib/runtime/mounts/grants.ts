@@ -7,9 +7,8 @@ import {
   STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
-import { type CapabilityPresentation, NO_STEP_UP_WITNESS, type StepUpWitness } from '../../api/capability.ts';
+import type { CapabilityPresentation } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
-import { arrivedOnHost } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { GrantError, type GrantFailure } from '../../grants/index.ts';
@@ -64,28 +63,19 @@ function refuse(error: unknown): never {
 }
 
 /**
- * What the grant layer is told about the caller, assembled from server-derived evidence only.
- *
- * `loopback` is `arrivedOnHost`'s answer — the carrier's proof, so neither a relayed hop nor a
- * remote caller forwarded through a locally bound proxy reads as local — and `stepUp` is the step-up
- * service's answer for the session's PROVEN device, the same witness the dispatcher consults. A
- * request with no device has not stepped up. Nothing is read from the body, and the actor decides
- * nothing: it is carried so a change can be attributed to whoever made it.
+ * What the grant layer is told about the caller: the authorization boundary's own assembly, the same
+ * object every route decision for this request was made with (`arrivedOnHost`'s locality, the step-up
+ * for the session's PROVEN device, and that device's own grants). A handler that rebuilt it would be a
+ * second, quieter definition of locality; a request that arrived without one is a wiring mistake and is
+ * refused rather than described by a guess.
  */
-function presentationOf(context: RouteContext, stepUps: StepUpWitness): CapabilityPresentation {
-  const device = context.request.device;
-  return {
-    loopback: arrivedOnHost(context.request, context.credential?.tokenClass === 'admin'),
-    adminToken: context.credential?.tokenClass === 'admin',
-    actor: context.actor ?? 'unknown',
-    stepUp: device !== undefined && stepUps.held(device),
-  };
+function presentationOf(context: RouteContext): CapabilityPresentation {
+  if (context.presentation === undefined)
+    throw new ApiError(500, 'this daemon cannot say who is asking, so it is refusing', 'internal_error');
+  return context.presentation;
 }
 
-export function grantRoutes(
-  subsystem: GrantSubsystem,
-  stepUps: StepUpWitness = NO_STEP_UP_WITNESS,
-): readonly ApiRoute[] {
+export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
   return [
     {
       method: 'GET',
@@ -94,7 +84,7 @@ export function grantRoutes(
       // the decision. It discloses no secret — booleans and reasons.
       minimum: 'authenticated',
       noStore: true,
-      handle: async context => jsonResponse(subsystem.view(presentationOf(context, stepUps))),
+      handle: async context => jsonResponse(subsystem.view(presentationOf(context))),
     },
     {
       method: 'GET',
@@ -113,11 +103,11 @@ export function grantRoutes(
       noStore: true,
       handle: async context => {
         const view = await subsystem
-          .patch(await parseBody(context.request, GrantsPatchSchema), presentationOf(context, stepUps))
+          .patch(await parseBody(context.request, GrantsPatchSchema), presentationOf(context))
           .catch(refuse);
         // This route asks for its step-up itself rather than at the boundary, so it spends it itself: a
         // machine that asks every time must not let one confirmation change the grants twice.
-        if (context.request.device !== undefined) stepUps.spend?.(context.request.device);
+        context.spendStepUp?.();
         return jsonResponse(view);
       },
     },
