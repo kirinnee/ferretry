@@ -2,6 +2,7 @@ import '../../../support/dom.ts';
 import { describe, expect, it } from 'bun:test';
 import type { PairedDevice, PairedDevicesView } from '@ferretry/protocol';
 import {
+  DEVICES_LOOKED_EVENT,
   type DevicesLookedStorage,
   devicesLookedKey,
   markDevicesLooked,
@@ -287,6 +288,13 @@ describe('the new-device notice', () => {
 
   it('works without storage, says nothing for an unreachable machine, and reads again on a timer', async () => {
     const alphaMachine = machine([]);
+    // Counting READS is not enough on a loaded runner: the read is counted before its answer is applied,
+    // and a device swapped in before the first look is seeded is, correctly, "already there".
+    let seeded = false;
+    const onLooked = (): void => {
+      seeded = true;
+    };
+    window.addEventListener(DEVICES_LOOKED_EVENT, onLooked);
     const shown = await mount(
       <NewDeviceNotices
         connections={[alpha, beta]}
@@ -296,7 +304,8 @@ describe('the new-device notice', () => {
         refreshMs={5}
       />,
     );
-    await until(() => alphaMachine.reads.count >= 1, 'the first read');
+    await until(() => seeded, 'the first look to be seeded');
+    window.removeEventListener(DEVICES_LOOKED_EVENT, onLooked);
     expect(shown.container.querySelector('[data-new-device]')).toBeNull();
     // A device paired after this page first looked is news even with no storage at all.
     alphaMachine.view = { ...alphaMachine.view, devices: [device('phone', new Date(NOW + MINUTE).toISOString())] };
