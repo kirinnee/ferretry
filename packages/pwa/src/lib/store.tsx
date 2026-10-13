@@ -53,6 +53,7 @@ import {
   isOutdatedDaemonRefusal,
   type RelayDial,
 } from './relay-carrier.ts';
+import { KeyRotation } from './key-rotation.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
@@ -339,12 +340,12 @@ export interface AppStore {
    * and the request is sent again when the person has confirmed. Rendered by `StepUpDialog`.
    */
   readonly stepUp: StepUpGate;
-  readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
   /**
    * The prompt a machine that wants a passkey on opening raises (`401 presence_required`): the same
    * gate, its own two routes. Rendered by a second `StepUpDialog` with the presence copy.
    */
   readonly presenceGate: StepUpGate;
+  readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
   /**
    * Whether Ferretry's default relay is advertising itself right now.
    *
@@ -434,7 +435,6 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     }),
     describe: describeStepUpFailure(appOrigin),
   });
-  const carrier = new DaemonCarrierRouter({
   const presenceGate = new StepUpGate({
     ceremony: presenceCeremony({
       client: async daemon => await clients.client(daemon),
@@ -443,11 +443,13 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     }),
     describe: describeStepUpFailure(appOrigin),
   });
+  const carrier = new DaemonCarrierRouter({
     network: fetcher,
     presence: () => presence.present(),
     stepUp: async daemon => await stepUp.require(daemon),
-    crypto: relayCrypto,
     presenceRequired: async daemon => await presenceGate.require(daemon),
+    crypto: relayCrypto,
+    rotation: new KeyRotation({ store: deviceKeys, crypto: relayCrypto }),
     // Read per session, never cached: a key the person removed by clearing site data must stop
     // opening sessions the moment it is gone.
     deviceKey: async daemonId => {
@@ -579,9 +581,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   return {
     carrier,
     stepUp,
+    presenceGate,
     connections,
     clients,
-    presenceGate,
     fleet,
     controls,
     projects,

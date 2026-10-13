@@ -204,6 +204,63 @@ describe('the IndexedDB device key store', () => {
   });
 });
 
+describe('the pending slot of the IndexedDB device key store', () => {
+  const setup = async () => {
+    const database = new ScriptedIndexedDb();
+    const store = new IndexedDbDeviceKeyStore(database);
+    const [current, replacement] = [await freshKey(), await freshKey()];
+    await store.save('fy_daemon_a', current);
+    return { database, store, current, replacement };
+  };
+
+  it('should keep a pending key apart from the key, and find it again', async () => {
+    const { store, current, replacement } = await setup();
+    should(await store.loadPending('fy_daemon_a')).be.undefined();
+
+    await store.savePending('fy_daemon_a', replacement);
+
+    should(await store.loadPending('fy_daemon_a')).equal(replacement);
+    should(await store.load('fy_daemon_a')).equal(current);
+  });
+
+  it('should make the pending key THE key on promotion, and empty the slot', async () => {
+    const { store, replacement } = await setup();
+    await store.savePending('fy_daemon_a', replacement);
+
+    should(await store.promotePending('fy_daemon_a')).be.true();
+
+    should(await store.load('fy_daemon_a')).equal(replacement);
+    should(await store.loadPending('fy_daemon_a')).be.undefined();
+  });
+
+  it('should promote nothing, and change nothing, when no rotation is in flight', async () => {
+    const { store, current } = await setup();
+    should(await store.promotePending('fy_daemon_a')).be.false();
+    should(await store.load('fy_daemon_a')).equal(current);
+  });
+
+  it('should discard a pending key without touching the key, and again harmlessly', async () => {
+    const { store, current, replacement } = await setup();
+    await store.savePending('fy_daemon_a', replacement);
+    await store.discardPending('fy_daemon_a');
+    await store.discardPending('fy_daemon_a');
+    should(await store.loadPending('fy_daemon_a')).be.undefined();
+    should(await store.load('fy_daemon_a')).equal(current);
+  });
+
+  it('should forget the pending key too when the daemon is forgotten, and no other daemon’s', async () => {
+    const { store, replacement } = await setup();
+    const other = await freshKey();
+    await store.savePending('fy_daemon_a', replacement);
+    await store.savePending('fy_daemon_b', other);
+
+    await store.remove('fy_daemon_a');
+
+    should(await store.loadPending('fy_daemon_a')).be.undefined();
+    should(await store.loadPending('fy_daemon_b')).equal(other);
+  });
+});
+
 describe('the two ways a key can be unavailable', () => {
   it('should tell a missing key, which re-pairing fixes, from an unreadable store, which it does not', () => {
     const missing = new DeviceKeyMissingError();

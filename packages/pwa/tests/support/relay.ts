@@ -24,6 +24,7 @@ import {
   deviceAuthMessage,
   devicePairMessage,
   deviceRenewMessage,
+  deviceRotateMessage,
   encodeControlMessage,
   encodeFrame,
   encodeHandshakeMessage,
@@ -220,6 +221,18 @@ export class ScriptedDaemon {
               String(record.appSession),
             );
     return await verifyDeviceProof(relayCrypto, publicKey, proof, message);
+  }
+
+  /** Whether `rotation` is its own key's signature over THIS session's rotate message for `deviceId`. */
+  async provesRotation(rotation: { readonly deviceKey: string; readonly proof: string }, deviceId: string): Promise<boolean> {
+    const transcript = this.#transcript;
+    if (transcript === undefined) throw new Error('this daemon has not keyed a channel');
+    return await verifyDeviceProof(
+      relayCrypto,
+      rotation.deviceKey,
+      rotation.proof,
+      deviceRotateMessage(transcript, deviceId, rotation.deviceKey),
+    );
   }
 
   /** Seal one tunnel message. `text` is sent verbatim so a malformed record is possible. */

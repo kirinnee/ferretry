@@ -69,6 +69,7 @@ import {
   sameDaemonConnection,
 } from './daemon-connection.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
+import type { KeyRotation } from './key-rotation.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -518,6 +519,13 @@ export interface DaemonCarrierRouterOptions {
   readonly dial?: RelayDial;
   readonly heartbeat?: RelayHeartbeatSchedule;
   /**
+   * Device-key rotation (`docs/design/zero-trust.md` B6). When present, a step-up sent once the daemon's
+   * `rotateBy` has passed carries a replacement key signed against the session that carries it, and a
+   * session the old key is refused on is tried once with the pending key. Absent means a router that
+   * never rotates — which is every router built before this existed.
+   */
+  readonly rotation?: KeyRotation;
+  /**
    * THE ONE ADVERTISEMENT READ THIS DOCUMENT PERFORMED, as a last-resort address and nothing else.
    *
    * A FUNCTION RATHER THAN A VALUE because the answer arrives after this router does, and a promise
@@ -536,6 +544,12 @@ export interface DaemonCarrierRouterOptions {
    */
   readonly stepUp?: (daemon: DaemonConnection) => Promise<boolean>;
   /**
+   * Asked when the daemon answers `401 presence_required`: this machine wants a passkey on opening and
+   * this device has not given one. `true` once the person has confirmed, and the request is then sent
+   * again ONCE. Absent means nothing can ask, and the refusal is returned as it came.
+   */
+  readonly presenceRequired?: (daemon: DaemonConnection) => Promise<boolean>;
+  /**
    * Whether a person is at this device right now (`presence.ts`). A request sent while they are is
    * marked, and only marked requests keep the device from idling out on the daemon. Absent means
    * nobody can tell, and nothing is marked.
@@ -543,12 +557,6 @@ export interface DaemonCarrierRouterOptions {
   readonly presence?: () => boolean;
 }
 
-  /**
-   * Asked when the daemon answers `401 presence_required`: this machine wants a passkey on opening and
-   * this device has not given one. `true` once the person has confirmed, and the request is then sent
-   * again ONCE. Absent means nothing can ask, and the refusal is returned as it came.
-   */
-  readonly presenceRequired?: (daemon: DaemonConnection) => Promise<boolean>;
 /**
  * One live rendezvous session this router is holding, and which rendezvous it is on.
  *
@@ -713,7 +721,9 @@ export class DaemonCarrierRouter {
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
   readonly #stepUp: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
+  readonly #presenceRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
   readonly #presence: () => boolean;
+  readonly #rotation: KeyRotation | undefined;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
@@ -721,7 +731,6 @@ export class DaemonCarrierRouter {
   /**
    * THE INJECTED NETWORK IS DETACHED FROM ITS RECEIVER EXACTLY ONCE, HERE.
    *
-  readonly #presenceRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
    * `this.#network(url, init)` is a member call, and a member call passes the holder
    * as `this`. Handed a WebIDL builtin that is a refusal —
    * `Failed to execute 'fetch' on 'Window': Illegal invocation` — thrown before a
@@ -749,7 +758,9 @@ export class DaemonCarrierRouter {
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
     this.#stepUp = options.stepUp;
+    this.#presenceRequired = options.presenceRequired;
     this.#presence = options.presence ?? (() => false);
+    this.#rotation = options.rotation;
   }
 
   /**
@@ -758,7 +769,6 @@ export class DaemonCarrierRouter {
    * Supplied by the composition root from the pairing registry, because the router
    * must not hold its own copy of who is paired: a second copy is how a request
    * keeps going to a daemon that has been unpaired.
-    this.#presenceRequired = options.presenceRequired;
    */
   resolveByOrigin(lookup: (origin: string) => DaemonConnection | undefined): void {
     this.#lookup = lookup;
@@ -1131,9 +1141,20 @@ export class DaemonCarrierRouter {
     const session = await this.#session(entry, method).catch((reason: unknown) => {
       throw new RelayUnsentError(reason);
     });
-    const record = { ...relayTunnelRequest(url, init), ...(this.#presence() ? { presence: true as const } : {}) };
+    // AMENDED HERE, on the session that will carry the request, because the rotation proof signs THAT
+    // session's transcript and the daemon refuses it on any other. A session found dead below is
+    // replaced for a read only, and a step-up is a POST, so the proof is never carried to another.
+    const amended = (await this.#rotation?.amend(session, entry.connection, url, init)) ?? { init, rotated: false };
+    const record = {
+      ...relayTunnelRequest(url, amended.init),
+      ...(this.#presence() ? { presence: true as const } : {}),
+    };
     try {
-      return relayResponse(await session.request(record));
+      const response = relayResponse(await session.request(record));
+      // Only an ANSWER settles the pending key. A request that died without one leaves it pending,
+      // which is the recovery: the daemon may have swapped and the answer is what was lost.
+      if (amended.rotated) await this.#rotation?.settle(entry.connection.daemonId, response);
+      return response;
     } catch (reason) {
       // A LEASE THAT RAN OUT IS NOT A CARRIER THAT FAILED. The device slept through its renewal — a
       // frozen tab, a laptop lid — and the daemon ended the session; a read is simply asked again on a
@@ -1176,14 +1197,7 @@ export class DaemonCarrierRouter {
   async #session(entry: CarrierEntry, method: ConnectionMethod): Promise<RelayClientSession> {
     const address = carrierAddress(method);
     return await this.#hold(entry, requestSessionKey(address), address, async () =>
-      openRelaySession({
-        crypto: this.#crypto,
-        dial: this.#dial,
-        daemon: entry.connection,
-        method,
-        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-        mode: { kind: 'auth', device: await this.#claim(entry) },
-      }),
+      this.#openKeyed(entry, method, device => ({ kind: 'auth', device })),
     );
   }
 
@@ -1198,20 +1212,17 @@ export class DaemonCarrierRouter {
     this.#streams += 1;
     const key = streamSessionKey(address, request.path, query, this.#streams);
     const session = await this.#hold(entry, key, address, async () =>
-      openRelaySession({
-        crypto: this.#crypto,
-        dial: this.#dial,
-        daemon: entry.connection,
+      this.#openKeyed(
+        entry,
         method,
-        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-        mode: {
+        device => ({
           kind: 'stream',
-          device: await this.#claim(entry),
+          device,
           path: request.path,
           ...(query.length === 0 ? {} : { query }),
-        },
-        onData: request.onData,
-      }),
+        }),
+        request.onData,
+      ),
     );
     // EVICTED WHEN IT CONCLUDES, not when something happens to ask for the same key again — and with
     // a per-call key nothing ever does, so without this the map would gain one dead entry for every
@@ -1224,6 +1235,55 @@ export class DaemonCarrierRouter {
       if (held !== undefined && sessions?.get(key) === held) sessions.delete(key);
     });
     return session;
+  }
+
+  /**
+   * Opens one session with the device key, and with the PENDING key once if the daemon refuses the first.
+   *
+   * `4403` is the one code that means this device is not accepted — and after a rotation whose answer
+   * was lost it is also what an old key earns from a daemon that already swapped. So a refusal is
+   * followed by exactly one more attempt, with the replacement the browser kept before it sent it:
+   * accepted, and that key is promoted; refused as well, and the daemon never took it, so it is
+   * discarded. Any OTHER failure of the second attempt is a fact about the carrier, not about the key,
+   * so the pending key is kept for the next session and the failure is reported as it was.
+   */
+  async #openKeyed(
+    entry: CarrierEntry,
+    method: ConnectionMethod,
+    mode: (device: SessionDeviceClaim) => RelaySessionMode,
+    onData?: RelayStreamRequest['onData'],
+  ): Promise<RelayClientSession> {
+    const device = await this.#claim(entry);
+    const open = async (claim: SessionDeviceClaim): Promise<RelayClientSession> =>
+      await openRelaySession({
+        crypto: this.#crypto,
+        dial: this.#dial,
+        daemon: entry.connection,
+        method,
+        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
+        mode: mode(claim),
+        ...(onData === undefined ? {} : { onData }),
+      });
+    const refusedDevice = (reason: unknown): boolean =>
+      reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.authRejected;
+    try {
+      return await open(device);
+    } catch (refused) {
+      const rotation = this.#rotation;
+      const daemonId = entry.connection.daemonId;
+      const pending = refusedDevice(refused)
+        ? await rotation?.pending(daemonId).catch(() => undefined)
+        : undefined;
+      if (rotation === undefined || pending === undefined) throw refused;
+      try {
+        const session = await open({ ...device, key: pending });
+        await rotation.promote(daemonId);
+        return session;
+      } catch (again) {
+        if (refusedDevice(again)) await rotation.discard(daemonId);
+        throw refused;
+      }
+    }
   }
 
   /**

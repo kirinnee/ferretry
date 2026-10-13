@@ -37,6 +37,7 @@
  */
 
 import {
+  type DeviceKeyRotation,
   MAX_TUNNEL_BODY_BYTES,
   OLDER_DAEMON_SENTENCE,
   type PairingResponse,
@@ -58,6 +59,7 @@ import {
   deviceAuthMessage,
   devicePairMessage,
   deviceRenewMessage,
+  deviceRotateMessage,
   encodeCreditPayload,
   encodeFrame,
   encodeHandshakeMessage,
@@ -561,6 +563,8 @@ export class RelayClientSession {
   #transcript: Uint8Array | undefined;
   /** Whether the credential record has been queued — after which the daemon may have acted on it. */
   #credentialSent = false;
+  /** When the daemon said this device's key is due for replacement, if it said. */
+  #rotateBy: string | undefined;
   /** Answers still arriving in parts, by request id. */
   readonly #partial = new Map<number, PartialAnswer>();
   #failure: RelaySessionError | undefined;
@@ -1084,6 +1088,38 @@ export class RelayClientSession {
   }
 
   /**
+   * When the daemon wants this device's key replaced, or `undefined` when it asked for nothing.
+   *
+   * The instant is the daemon's own text and is read by `key-rotation.ts`, which owns what "due"
+   * means; this session only remembers what it was told.
+   */
+  rotateBy(): string | undefined {
+    return this.#rotateBy;
+  }
+
+  /**
+   * The replacement a step-up on THIS session may carry: `newPublicKey` and the NEW key's signature
+   * over this session's transcript (`docs/design/zero-trust.md` B6).
+   *
+   * Signed here rather than in the caller because the transcript never leaves the session — the proof
+   * is only good for the session that carries it, which is exactly why the request must ride this
+   * one. Rejects when the session is not serving, since a proof for a session that cannot carry the
+   * request would be refused by the daemon and strand a pending key for nothing.
+   */
+  async signRotation(deviceId: string, newKey: PrivateKeyHandle, newPublicKey: string): Promise<DeviceKeyRotation> {
+    const transcript = this.#transcript;
+    if (transcript === undefined || this.#phase !== 'serving') {
+      throw new RelaySessionError('this relay session is not serving requests', RELAY_CLOSE_CODES.protocolError);
+    }
+    const proof = await signDeviceProof(
+      this.deps.crypto,
+      newKey,
+      deviceRotateMessage(transcript, deviceId, newPublicKey),
+    );
+    return { deviceKey: newPublicKey, proof };
+  }
+
+  /**
    * Whether the credential record left this side. For a pairing that is the line between "nothing
    * reached the daemon" and "the code may have been redeemed with nobody left to hear the answer".
    */
@@ -1157,6 +1193,7 @@ export class RelayClientSession {
         this.#fail(RELAY_CLOSE_CODES.protocolError, 'the daemon did not accept this device before answering');
         return;
       }
+      this.#rotateBy = message.rotateBy;
       this.#phase = 'serving';
       this.#authenticated?.(this);
       return;
@@ -1177,6 +1214,7 @@ export class RelayClientSession {
       return;
     }
     if (message.t === 'stream-opened') {
+      this.#rotateBy = message.rotateBy;
       this.#phase = 'streaming';
       this.#authenticated?.(this);
       return;
