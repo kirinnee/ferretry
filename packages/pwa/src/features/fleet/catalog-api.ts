@@ -24,6 +24,10 @@ import {
   FleetLayeredProfileCatalogSchema,
   type FleetMachineView,
   FleetMachineViewSchema,
+  type FleetProfileDraftRequest,
+  FleetProfileDraftRequestSchema,
+  type FleetProfileDraftView,
+  FleetProfileDraftViewSchema,
   type FleetProposalApplyRequest,
   FleetProposalApplyRequestSchema,
   type FleetRuntimeCatalog,
@@ -37,6 +41,7 @@ export const FLEET_COMPONENTS_PATH = '/v1/fleet/components';
 export const FLEET_PROFILE_STACKS_PATH = '/v1/fleet/profile-stacks';
 export const FLEET_RUNTIMES_PATH = '/v1/fleet/runtimes';
 export const FLEET_CHANGES_PATH = '/v1/fleet/changes';
+export const FLEET_PROFILE_DRAFT_PATH = '/v1/fleet/profile-stacks/preview';
 
 const unlockHeaders = (unlock: string | undefined): Record<string, string> =>
   unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock };
@@ -98,4 +103,19 @@ export const applyFleetChange = async (
     method: 'POST',
     headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
     body: JSON.stringify(FleetProposalApplyRequestSchema.parse(request)),
+  });
+
+/**
+ * A profile's layers before it is named or saved, resolved per harness exactly as a saved one is, with
+ * the conflicts they would have. Writes nothing.
+ */
+export const previewFleetProfileDraft = async (
+  client: FleetClient,
+  request: FleetProfileDraftRequest,
+  unlock?: string,
+): Promise<FleetProfileDraftView> =>
+  await client.request(FLEET_PROFILE_DRAFT_PATH, FleetProfileDraftViewSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    body: JSON.stringify(FleetProfileDraftRequestSchema.parse(request)),
   });

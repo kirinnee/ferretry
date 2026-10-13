@@ -185,6 +185,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     machine: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    previewProfile: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     components: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -529,6 +532,7 @@ describe('the mounted daemon surface', () => {
       1 + // POST /v1/fleet/renew
       2 + // the account model's credential list and its Check now
       7 + // the account model's four catalogue reads and its three change routes
+      1 + // the draft-profile preview, a read with a body
       5; // the setup scan, tool install, the clone export and the migration's dry run and apply
     should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
     should(
@@ -584,6 +588,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/machine',
       'GET /v1/fleet/components',
       'GET /v1/fleet/profile-stacks',
+      'POST /v1/fleet/profile-stacks/preview',
       'GET /v1/fleet/runtimes',
       'POST /v1/fleet/changes',
       'GET /v1/fleet/changes/:changeId',

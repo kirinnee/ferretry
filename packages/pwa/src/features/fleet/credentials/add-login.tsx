@@ -15,11 +15,12 @@ import type { FleetMachineView } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Button } from '../../../shell/primitives.tsx';
+import { HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
 import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
 import type { MachineData } from '../runtimes/machine-data.ts';
-import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
+import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import {
   currentFlow,
   goToStep,
@@ -33,7 +34,6 @@ import {
 import { CredentialSignIn } from './credential-sign-in.tsx';
 import {
   credentialEmail,
-  HARNESS_NAMES,
   HARNESSES,
   type HarnessKind,
   labelsError,

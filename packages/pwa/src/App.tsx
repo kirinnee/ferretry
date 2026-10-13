@@ -28,8 +28,12 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { accountsSettingsTab } from './features/fleet/accounts-page.tsx';
+import { ComponentsTab } from './features/fleet/components/components-tab.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
+import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.tsx';
+import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
+import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { emptyMachineTab, type MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
@@ -948,10 +952,12 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
  * Components U18, Settings U19.
  */
 const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
-  runtimes: createRuntimesTab(),
+  runtimes: createRuntimesTab({
+    profileBuilder: { kind: BUILD_PROFILE_FLOW_KIND, flowInput: buildProfileFlowInput, Step: BuildProfileStep },
+  }),
   credentials: CredentialsTab,
-  profiles: emptyMachineTab('profiles'),
-  components: emptyMachineTab('components'),
+  profiles: ProfilesTab,
+  components: ComponentsTab,
   settings: emptyMachineTab('settings'),
 };
 

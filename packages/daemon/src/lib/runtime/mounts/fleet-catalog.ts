@@ -4,7 +4,7 @@
  *
  * ## Reads are `fleet.use`; every change is `fleet.configure`
  *
- * The four reads disclose the same class of fact the account roster already gives a caller with
+ * The four reads, and the draft-profile preview (a read with a body that writes nothing), disclose the same class of fact the account roster already gives a caller with
  * `fleet.use`: component names and files, profile layers, runtime names and whether each can launch.
  * No value a credential could occupy travels — an environment entry that looks like a secret is
  * reported as hidden.
@@ -19,7 +19,7 @@
  * `/v1/fleet/changes`, because the old Accounts screen still reads `/v1/fleet/profiles` and stages
  * at `/v1/fleet/proposals` until it is retired; U21 folds them together.
  *
- * ## `noStore` on all seven
+ * ## `noStore` on all eight
  *
  * Every answer is a statement about now: a runtime that can launch, a change that is still pending.
  */
@@ -30,6 +30,8 @@ import {
   FleetComponentCatalogSchema,
   FleetLayeredProfileCatalogSchema,
   FleetMachineViewSchema,
+  FleetProfileDraftRequestSchema,
+  FleetProfileDraftViewSchema,
   FleetProposalApplyRequestSchema,
   FleetRuntimeCatalogSchema,
 } from '@ferretry/protocol';
@@ -45,7 +47,7 @@ import { FleetCatalogRefusal, FleetCatalogService, type FleetCatalogServiceDeps 
 /** The machine, its components, profiles and runtimes, and every change to them. */
 export type FleetCatalogSubsystem = Pick<
   FleetCatalogService,
-  'machine' | 'components' | 'profiles' | 'runtimes' | 'propose' | 'read' | 'apply'
+  'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply'
 >;
 
 /** The largest change body: a component's text and its fields, with room for the envelope. */
@@ -100,6 +102,18 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       capability: USE,
       noStore: true,
       handle: async () => await answer(FleetLayeredProfileCatalogSchema, () => subsystem.profiles()),
+    },
+    {
+      // A read with a body: it resolves a draft and writes nothing, so it is `use`.
+      method: 'POST',
+      path: '/v1/fleet/profile-stacks/preview',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, FleetProfileDraftRequestSchema);
+        return await answer(FleetProfileDraftViewSchema, () => subsystem.previewProfile(request));
+      },
     },
     {
       method: 'GET',

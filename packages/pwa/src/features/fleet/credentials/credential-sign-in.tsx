@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { ClaudeLoginPanel } from '../claude-login-panel.tsx';
 import { CodexLoginPanel } from '../codex-login-panel.tsx';
+import { HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
 import {
   type CredentialLoginFlow,
@@ -26,15 +27,9 @@ import {
   submitCredentialSignInCode,
 } from '../harness-login-api.ts';
 import type { LoginPanelWording } from '../harness-login-model.ts';
-import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
-import {
-  credentialName,
-  finishSignInLabel,
-  HARNESS_NAMES,
-  signInCoverage,
-  signedInSentence,
-} from './credentials-model.ts';
+import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
+import { credentialName, finishSignInLabel, signedInSentence, signInCoverage } from './credentials-model.ts';
 
 /** How often a waiting sign-in is re-read. */
 export const SIGN_IN_POLL_MS = 2_000;

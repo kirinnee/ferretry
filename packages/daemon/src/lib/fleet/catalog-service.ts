@@ -69,6 +69,8 @@ import type {
   FleetCredentialList,
   FleetLayeredProfileCatalog,
   FleetMachineView,
+  FleetProfileDraftRequest,
+  FleetProfileDraftView,
   FleetProposalApplyRequest,
   FleetRuntimeCatalog,
   SessionStatus,
@@ -81,6 +83,7 @@ import {
   componentUsage,
   machineView,
   profileCatalog,
+  profileDraftView,
   runtimeCatalog,
 } from './catalog.ts';
 import { FleetCredentialRefusal, type FleetCredentialSignOutOutcome } from './credentials-service.ts';
@@ -225,6 +228,11 @@ function parsed(text: string | undefined, format: 'json' | 'toml'): SettingsObje
   }
 }
 
+/** The bodies a materialisation reads, and each hooks file's text as the edit screen shows it. */
+interface ReadBodies extends MaterialiseBodies {
+  readonly hooksTexts: Readonly<Record<string, string>>;
+}
+
 /** The configuration's file paths are relative to the asset tree, or `~`/absolute. */
 const assetPath = (layout: FleetLayout, file: string): string =>
   expandAssetPath(file, layout.userHome, layout.assetsDirectory);
@@ -321,6 +329,12 @@ export class FleetCatalogService {
     return runtimeCatalog(reading.model, await this.#facts(reading));
   }
 
+  /** `POST /v1/fleet/profile-stacks/preview`: a profile's layers before they are saved. Writes nothing. */
+  async previewProfile(request: FleetProfileDraftRequest): Promise<FleetProfileDraftView> {
+    const reading = await this.#read();
+    return profileDraftView(reading.model, request, await this.#facts(reading));
+  }
+
   /**
    * Stage one change: derive it, plan it, preview it, and hold it — writing nothing. A change that
    * cannot be applied is refused now rather than stored, because a proposal nobody can apply is
@@ -405,7 +419,7 @@ export class FleetCatalogService {
   }
 
   /** The component bodies the model names, with the documents a change is about to write in their place. */
-  async #bodies(model: AccountModel, pending: readonly AccountComponentFile[] = []): Promise<MaterialiseBodies> {
+  async #bodies(model: AccountModel, pending: readonly AccountComponentFile[] = []): Promise<ReadBodies> {
     const layout = this.deps.layout;
     const overlay = new Map(pending.map(file => [assetPath(layout, file.file), file.content]));
     const text = async (file: string): Promise<string | undefined> => {
@@ -424,10 +438,14 @@ export class FleetCatalogService {
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};
+    const hooksTexts: Record<string, string> = {};
     for (const [name, component] of Object.entries(model.components.hooks)) {
       if (component.file === undefined) continue;
-      const body = parsed(await text(component.file), 'json');
-      if (body !== undefined) hooks[name] = body;
+      const raw = await text(component.file);
+      const body = parsed(raw, 'json');
+      if (body === undefined) continue;
+      hooks[name] = body;
+      hooksTexts[name] = raw as string;
     }
     const skillFrontmatter: Record<string, readonly string[]> = {};
     const items = new Set(Object.values(model.components.skills).flatMap(component => component.items));
@@ -435,14 +453,14 @@ export class FleetCatalogService {
       const body = await text(`${skillSourceReference(item)}/SKILL.md`);
       if (body !== undefined) skillFrontmatter[item] = skillFrontmatterKeys(body);
     }
-    return { instructions, settings, hooks, skillFrontmatter };
+    return { instructions, settings, hooks, skillFrontmatter, hooksTexts };
   }
 
   async #runningSessions(): Promise<number> {
     return countRunningSessions(await this.deps.sessionStatuses());
   }
 
-  async #facts(reading: AccountDocumentReading, read?: MaterialiseBodies): Promise<CatalogFacts> {
+  async #facts(reading: AccountDocumentReading, read?: ReadBodies): Promise<CatalogFacts> {
     const bodies = read ?? (await this.#bodies(reading.model));
     const missingCommands = new Set(
       Object.values(reading.model.components.mcp)
@@ -459,6 +477,8 @@ export class FleetCatalogService {
       settingsBodies: bodies.settings ?? {},
       instructionBodies: bodies.instructions ?? {},
       skillFrontmatter: bodies.skillFrontmatter ?? {},
+      hooksTexts: bodies.hooksTexts,
+      userHome: this.deps.layout.userHome,
       missingCommands,
       credentialStatus: await this.#credentialStatus(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
@@ -497,6 +517,7 @@ export class FleetCatalogService {
       edit = deriveAccountChange(reading.model, change, {
         machineName: this.deps.machineName(),
         runningSessions: await this.#runningSessions(),
+        settingsBodies: (await this.#bodies(reading.model)).settings ?? {},
       });
     } catch (error) {
       throw error instanceof FleetMutationRefusal
@@ -569,7 +590,7 @@ export class FleetCatalogService {
   async #changedRuntimes(
     reading: AccountDocumentReading,
     candidate: AccountModel,
-    bodies: MaterialiseBodies,
+    bodies: ReadBodies,
     textUsers: ReadonlySet<string>,
   ): Promise<Extract<FleetAccountChangePreview, { kind: 'apply' }>['runtimes']> {
     const rows = (catalog: FleetRuntimeCatalog): ReadonlyMap<string, string> =>

@@ -14,11 +14,12 @@ import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonNewSessionPath } from '../../../lib/pages/routes.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
-import { credentialEmail, HARNESS_NAMES } from '../credentials/credentials-model.ts';
+import { HARNESS_NAMES } from '../components/component-model.ts';
+import { credentialEmail } from '../credentials/credentials-model.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { startStepper, type StepperState } from '../shell/stepper-model.ts';
+import { type StepperState, startStepper } from '../shell/stepper-model.ts';
 import {
   AddRuntime,
   type AddRuntimeDraft,

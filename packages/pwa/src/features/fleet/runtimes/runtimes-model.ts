@@ -19,13 +19,8 @@ import type {
   FleetMachineView,
   FleetRuntimeView,
 } from '@ferretry/protocol';
-import {
-  HARNESS_NAMES,
-  HARNESS_SHORT,
-  type HarnessKind,
-  otherHarness,
-  plural,
-} from '../credentials/credentials-model.ts';
+import { HARNESS_NAMES } from '../components/component-model.ts';
+import { HARNESS_SHORT, type HarnessKind, otherHarness, plural } from '../credentials/credentials-model.ts';
 
 const NAME_PATTERN = /^[A-Za-z0-9-]+$/u;
 

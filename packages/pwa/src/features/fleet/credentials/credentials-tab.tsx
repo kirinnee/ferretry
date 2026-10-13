@@ -14,15 +14,16 @@ import { useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
+import { HARNESS_NAMES } from '../components/component-model.ts';
 import { checkFleetCredential } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from '../runtimes/machine-data.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
-import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
+import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { startStepper, type StepperState } from '../shell/stepper-model.ts';
+import { type StepperState, startStepper } from '../shell/stepper-model.ts';
 import { AddLoginStep, addLoginFlowInput } from './add-login.tsx';
 import { CredentialSignIn } from './credential-sign-in.tsx';
 import {
@@ -31,7 +32,6 @@ import {
   credentialName,
   credentialsOf,
   credentialUse,
-  HARNESS_NAMES,
   HARNESSES,
   hasSharedEmails,
   plural,

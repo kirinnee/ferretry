@@ -1,6 +1,6 @@
 /**
- * The account model's catalogue at the daemon's front door: four reads and the stage, read and
- * apply of a change (docs/design/account-model.md §7).
+ * The account model's catalogue at the daemon's front door: four reads, the draft-profile preview,
+ * and the stage, read and apply of a change (docs/design/account-model.md §7).
  *
  * The service behind it is a stub, because what the mount owns is the HTTP shape: which status a
  * refusal becomes, that every answer is parsed through the shared schema and never cached, and that an
@@ -11,6 +11,8 @@ import type {
   FleetAccountChange,
   FleetAccountChangeView,
   FleetMachineView,
+  FleetProfileDraftRequest,
+  FleetProfileDraftView,
   FleetProposalApplyRequest,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -54,20 +56,39 @@ const VIEW: FleetAccountChangeView = {
   preview: { kind: 'apply', operations: [], documents: [], runtimes: [] },
 };
 
+const DRAFT: FleetProfileDraftView = {
+  harnesses: [
+    {
+      harness: 'claude',
+      available: { available: false, reason: 'This profile has no layers yet.' },
+      applied: [],
+      skipped: [],
+      conflicts: [],
+      partial: [],
+    },
+  ],
+  refusal: 'no profile ghost exists on this machine',
+};
+
 interface Calls {
   proposed: FleetAccountChange[];
+  previewed: FleetProfileDraftRequest[];
   read: string[];
   applied: { id: string; request: FleetProposalApplyRequest; governance: CallerGovernance | undefined }[];
 }
 
 function stub(overrides: Partial<FleetCatalogSubsystem> = {}): { subsystem: FleetCatalogSubsystem; calls: Calls } {
-  const calls: Calls = { proposed: [], read: [], applied: [] };
+  const calls: Calls = { proposed: [], previewed: [], read: [], applied: [] };
   return {
     calls,
     subsystem: {
       machine: async () => MACHINE,
       components: async () => ({ format: 'version-2', kinds: [] }),
       profiles: async () => ({ format: 'version-2', profiles: [] }),
+      previewProfile: async request => {
+        calls.previewed.push(request);
+        return DRAFT;
+      },
       runtimes: async () => ({ format: 'version-2', runtimes: [] }),
       propose: async change => {
         calls.proposed.push(change);
@@ -116,6 +137,27 @@ describe('the fleet catalogue mount', () => {
       'no-store',
     ]);
     should(jsonBody(responses[0] as never)).deepEqual(MACHINE);
+  });
+
+  it('should resolve a draft profile as a read: the body to the service, never cached, a bad body refused first', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+    const body = { layers: ['instructions/main', 'profile/ghost'], editing: 'work' };
+
+    // Act
+    const previewed = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/profile-stacks/preview', JSON.stringify(body)),
+    );
+    const bad = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/profile-stacks/preview', JSON.stringify({ layers: 'instructions/main' })),
+    );
+
+    // Assert
+    should(previewed.status).equal(200);
+    should(previewed.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(previewed)).deepEqual(DRAFT);
+    should(bad.status).equal(400);
+    should(calls.previewed).deepEqual([body]);
   });
 
   it('should stage the one change the body names and read it back by id', async () => {

@@ -14,14 +14,12 @@
  */
 
 import type { FleetCredentialList, FleetCredentialUsageWindow, FleetCredentialView } from '@ferretry/protocol';
+import { HARNESS_NAMES } from '../components/component-model.ts';
 import { timeUntil } from '../harness-login-model.ts';
 
 export type HarnessKind = FleetCredentialView['harness'];
 
 export const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
-
-/** The product names. */
-export const HARNESS_NAMES: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
 
 /** The short names used in "Claude settings will be skipped on Codex". */
 export const HARNESS_SHORT: Readonly<Record<HarnessKind, string>> = { claude: 'Claude', codex: 'Codex' };

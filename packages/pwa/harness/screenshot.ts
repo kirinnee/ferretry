@@ -108,8 +108,9 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Sixty-five. MACHINES owes six at each viewport — its section, four tab switches and the Machines list the
- * switcher opens — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
+ * Eighty-nine. MACHINES owes eighteen at each viewport — its section, four tab switches, the Machines list the
+ * switcher opens, and twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps,
+ * a component with every badge, two edit forms) — and the breakdown below accounts for fifty-one of the rest: twenty-seven at `mobile`
  * and twenty-four at `desktop`. Twenty-four at both viewports —
  * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
  * surface: each step is a different layout, the model step is a card per model beside a custom-value
@@ -134,7 +135,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 85;
+const SETTINGS_SIDEWAYS_CHECKS = 109;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1706,7 +1707,11 @@ try {
           // RUNTIMES AND CREDENTIALS (account model U17): ten pages per viewport — the two lists, a runtime
           // with its fixed layer, one whose model set has models this login cannot use, the three Add a
           // runtime decisions, a login that needs sign-in, its sign-in link, and a sign-out confirmation.
-          const loginShot = async (name: string, label: string): Promise<void> => {
+          // (The captures share the helper below.)
+          // PROFILES AND COMPONENTS (account model U18): twelve pages per viewport, each one a different
+          // layout — a layer stack, a conflict sentence with a dotted key, a delete card, a stepper with a
+          // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
+          const accountShot = async (name: string, label: string): Promise<void> => {
             await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
             const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
             await page.screenshot({ path: target });
@@ -1716,47 +1721,107 @@ try {
           await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
           const runtimesPanel = machinesSurface.locator('[data-machine-tab-panel="runtimes"]');
           await runtimesPanel.locator('[data-runtime-row="claude-agent"]').waitFor({ state: 'visible' });
-          await loginShot('runtimes', 'Runtimes list');
+          await accountShot('runtimes', 'Runtimes list');
           await runtimesPanel.locator('[data-runtime-row="claude-agent"]').click();
           await runtimesPanel.locator('[data-runtime-fixed-layer]').waitFor({ state: 'visible' });
-          await loginShot('runtime-agent', 'agent runtime page');
+          await accountShot('runtime-agent', 'agent runtime page');
           await runtimesPanel.locator('[data-page-back]').click();
           await runtimesPanel.locator('[data-runtime-row="codex-default"]').click();
           await runtimesPanel.locator('[data-runtime-models]').waitFor({ state: 'visible' });
-          await loginShot('runtime-models', 'runtime page with unavailable models');
+          await accountShot('runtime-models', 'runtime page with unavailable models');
           await runtimesPanel.locator('[data-page-back]').click();
           await runtimesPanel.locator('[data-add-runtime]').click();
           await runtimesPanel.locator('[data-add-runtime-credential="claude-personal"]').click();
-          await loginShot('add-runtime-credential', 'Add a runtime login step');
+          await accountShot('add-runtime-credential', 'Add a runtime login step');
           await runtimesPanel.locator('[data-step-next]').click();
           await runtimesPanel.locator('[data-add-runtime-profile="Default"]').click();
           await runtimesPanel.locator('[data-add-runtime-duplicate]').waitFor({ state: 'visible' });
-          await loginShot('add-runtime-profile', 'Add a runtime profile step');
+          await accountShot('add-runtime-profile', 'Add a runtime profile step');
           await runtimesPanel.locator('[data-duplicate-ok]').click();
           await runtimesPanel.locator('[data-step-next]').click();
           await runtimesPanel.locator('#add-runtime-name').fill('claude-default');
           await runtimesPanel.locator('[data-runtime-name-problem]').waitFor({ state: 'visible' });
-          await loginShot('add-runtime-name', 'Add a runtime name step');
+          await accountShot('add-runtime-name', 'Add a runtime name step');
           await runtimesPanel.locator('[data-stepper-cancel]').click();
           await runtimesPanel.locator('[data-stepper-stop]').click();
 
           await machinesSurface.locator('[data-machine-tab="credentials"]').click();
           const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="credentials"]');
           await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
-          await loginShot('credentials', 'Credentials list');
+          await accountShot('credentials', 'Credentials list');
           await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
           await credentialsPanel.locator('[data-credential-sign-in="start"]').waitFor({ state: 'visible' });
-          await loginShot('credential-slot', 'empty login page');
+          await accountShot('credential-slot', 'empty login page');
           await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
           await credentialsPanel.locator('[data-credential-sign-in="awaiting-code"]').waitFor({ state: 'visible' });
-          await loginShot('credential-sign-in', 'login sign-in link');
+          await accountShot('credential-sign-in', 'login sign-in link');
           await credentialsPanel.locator('[data-page-back]').click();
           await credentialsPanel.locator('[data-credential-row="claude-personal"]').click();
           await credentialsPanel.locator('[data-credential-sign-out-ask]').click();
           await credentialsPanel.locator('[data-credential-sign-out]').scrollIntoViewIfNeeded();
-          await loginShot('credential-sign-out', 'sign-out confirmation');
+          await accountShot('credential-sign-out', 'sign-out confirmation');
           await credentialsPanel.locator('[data-sign-out-keep]').click();
           await credentialsPanel.locator('[data-page-back]').click();
+
+          await machinesSurface.locator('[data-machine-tab="profiles"]').click();
+          const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
+          await profilesPanel.locator('[data-profile-row="Default"]').waitFor({ state: 'visible' });
+          await accountShot('profiles', 'Profiles list');
+          await profilesPanel.locator('[data-profile-row="Default"]').click();
+          await profilesPanel.locator('[data-layer-stack]').waitFor({ state: 'visible' });
+          await accountShot('profile', 'profile page');
+          await profilesPanel.locator('[data-profile-delete]').click();
+          await profilesPanel.locator('[data-catalog-note="delete"]').scrollIntoViewIfNeeded();
+          await accountShot('profile-delete', 'profile delete card');
+          await profilesPanel.locator('[data-profile-keep]').click();
+          await profilesPanel.locator('[data-profile-edit]').click();
+          await profilesPanel.locator('[data-build-loop]').first().waitFor({ state: 'visible' });
+          await accountShot('profile-edit', 'Edit layers start');
+          await profilesPanel.locator('[data-stepper-cancel]').click();
+          await profilesPanel.locator('[data-stepper-stop]').click();
+          await profilesPanel.locator('[data-catalog-back]').click();
+          await profilesPanel.locator('[data-profile-build]').click();
+          await profilesPanel.locator('[data-build-base="Default"]').click();
+          await profilesPanel.locator('[data-build-base="Agent"]').click();
+          await profilesPanel.locator('[data-build-order]').waitFor({ state: 'visible' });
+          await accountShot('build-start', 'Build a profile start');
+          for (let step = 0; step < 6; step += 1) await profilesPanel.locator('[data-build-next]').click();
+          await profilesPanel.locator('[data-conflicts]').waitFor({ state: 'visible' });
+          await accountShot('build-review', 'Build a profile review');
+          await profilesPanel.locator('[data-stepper-cancel]').click();
+          await profilesPanel.locator('[data-stepper-stop]').click();
+
+          await machinesSurface.locator('[data-machine-tab="components"]').click();
+          const componentsPanel = machinesSurface.locator('[data-machine-tab-panel="components"]');
+          await componentsPanel.locator('[data-component-kind="mcp"]').waitFor({ state: 'visible' });
+          await accountShot('components', 'Components kinds');
+          await componentsPanel.locator('[data-component-kind="mcp"]').click();
+          await componentsPanel.locator('[data-component-row="mcp/notes"]').waitFor({ state: 'visible' });
+          await accountShot('component-list', 'MCP servers list');
+          await componentsPanel.locator('[data-component-row="mcp/notes"]').click();
+          await componentsPanel.locator('[data-catalog-note="path"]').waitFor({ state: 'visible' });
+          await accountShot('component', 'component page with warnings');
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-component-kind="instructions"]').click();
+          await componentsPanel.locator('[data-component-row="instructions/Main instructions"]').click();
+          await componentsPanel.locator('[data-component-edit]').click();
+          await componentsPanel.locator('[data-catalog-note="used"]').waitFor({ state: 'visible' });
+          await accountShot('component-edit', 'component edit used everywhere');
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-component-kind="skills"]').click();
+          await componentsPanel.locator('[data-component-row="skills/My skills"]').click();
+          await componentsPanel.locator('[data-catalog-note="partial"]').waitFor({ state: 'visible' });
+          await accountShot('component-partial', 'component partly supported');
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-component-kind="settings"]').click();
+          await componentsPanel.locator('[data-component-row="settings/Claude settings"]').click();
+          await componentsPanel.locator('[data-component-edit]').click();
+          await componentsPanel.locator('[data-component-hidden]').waitFor({ state: 'visible' });
+          await accountShot('component-settings-edit', 'settings edit with a hidden value');
 
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh

@@ -8,7 +8,6 @@ import {
   credentialUse,
   finishSignInLabel,
   HARNESS_COMMANDS,
-  HARNESS_NAMES,
   HARNESS_SHORT,
   HARNESSES,
   hasSharedEmails,
@@ -41,7 +40,6 @@ const listOf = (...credentials: ReturnType<typeof credential>[]): FleetCredentia
 describe('harness names', () => {
   it('names each harness for a person, a sentence and a terminal', () => {
     expect(HARNESSES).toEqual(['claude', 'codex']);
-    expect(HARNESS_NAMES).toEqual({ claude: 'Claude Code', codex: 'Codex' });
     expect(HARNESS_SHORT).toEqual({ claude: 'Claude', codex: 'Codex' });
     expect(HARNESS_COMMANDS).toEqual({ claude: 'claude', codex: 'codex' });
   });

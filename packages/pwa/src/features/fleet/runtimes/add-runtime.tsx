@@ -18,15 +18,10 @@ import type { ComponentType, ReactNode } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
+import { HARNESS_NAMES } from '../components/component-model.ts';
 import { ADD_LOGIN_FLOW_KIND, AddLoginStep, addLoginFlowInput } from '../credentials/add-login.tsx';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
-import {
-  credentialEmail,
-  HARNESS_NAMES,
-  HARNESSES,
-  type HarnessKind,
-  plural,
-} from '../credentials/credentials-model.ts';
+import { credentialEmail, HARNESSES, type HarnessKind, plural } from '../credentials/credentials-model.ts';
 import type { FleetClientFactory } from '../fleet-configuration-surface.tsx';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';

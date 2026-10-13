@@ -1132,3 +1132,127 @@ describe('deriveAccountChange: machine.settings', () => {
     ]);
   });
 });
+
+describe('deriveAccountChange: profile.remove from the profiles built on it (E21)', () => {
+  it('should take a base out of every profile that names it, then switch and delete', () => {
+    // Act
+    const edit = derive({ kind: 'profile.remove', name: 'base', removeFromProfiles: true, switchRuntimesTo: 'other' });
+
+    // Assert
+    should(edit.model.profiles.base).be.undefined();
+    should(edit.model.profiles.team?.layers).deepEqual(['settings/tuned']);
+    should(edit.model.runtimes.beta?.profile).equal('other');
+    should(edit.consequences).deepEqual([
+      'Removes it from team, which changes 1 runtime. Running sessions keep the old version until restarted.',
+      'Switches 1 runtime to other.',
+      'Its components stay saved.',
+    ]);
+  });
+
+  it('should not count a runtime behind it when only runtimes on the base itself use it', () => {
+    // Arrange
+    const model = modelOf({
+      profiles: { base: { layers: ['instructions/main'] }, crew: { layers: ['profile/base', 'skills/review'] } },
+      runtimes: {},
+      advanced: {},
+    });
+
+    // Act
+    const edit = derive({ kind: 'profile.remove', name: 'base', removeFromProfiles: true }, model);
+
+    // Assert
+    should(edit.consequences[0]).equal('Removes it from crew. Running sessions keep the old version until restarted.');
+  });
+
+  it('should refuse when it would leave a profile with no layers', () => {
+    // Arrange
+    const model = modelOf({
+      profiles: { base: { layers: ['instructions/main'] }, crew: { layers: ['profile/base'] } },
+      runtimes: {},
+      advanced: {},
+    });
+
+    // Act + Assert
+    should(refusalOf({ kind: 'profile.remove', name: 'base', removeFromProfiles: true }, model)).equal(
+      'removing profile base would leave profile crew with no layers; add another layer to it first',
+    );
+  });
+});
+
+describe('deriveAccountChange: settings by entry', () => {
+  const tuned: AccountChangeFacts = {
+    ...FACTS,
+    settingsBodies: { tuned: { theme: 'dark', env: { API_TOKEN: 'sk-abcdefghijklmnop' } } },
+  };
+  const entries = (value: Record<string, unknown>, harness = 'claude', overrides: Record<string, unknown> = {}) =>
+    componentPut({ kind: 'settings', harness, entries: value }, { name: 'tuned', create: false, ...overrides });
+
+  it('should write the entries as nested JSON, keeping a hidden value from the file it has', () => {
+    // Act
+    const edit = derive(
+      entries({
+        'permissions.defaultMode': { value: 'plan' },
+        'env.API_TOKEN': { keep: true },
+        verbose: { value: true },
+      }),
+      modelOf(),
+      tuned,
+    );
+
+    // Assert
+    should(edit.files).deepEqual([
+      {
+        file: 'components/settings/tuned.json',
+        content: `${JSON.stringify(
+          { env: { API_TOKEN: 'sk-abcdefghijklmnop' }, permissions: { defaultMode: 'plan' }, verbose: true },
+          null,
+          2,
+        )}\n`,
+      },
+    ]);
+    should(edit.model.components.settings.tuned?.file).equal('components/settings/tuned.json');
+  });
+
+  it('should write a Codex component as TOML', () => {
+    // Act
+    const edit = derive(
+      componentPut({ kind: 'settings', harness: 'codex', entries: { 'tui.theme': { value: 'dark' } } }),
+    );
+
+    // Assert
+    should(edit.files).deepEqual([{ file: 'components/settings/fresh.toml', content: '[tui]\ntheme = "dark"\n' }]);
+  });
+
+  it('should refuse a keep the file has no value for, or that runs through a value', () => {
+    // Act + Assert
+    should(refusalOf(entries({ 'env.OTHER': { keep: true } }), modelOf(), tuned)).equal(
+      'settings tuned has no value for env.OTHER to keep; type one',
+    );
+    should(refusalOf(entries({ 'theme.mode': { keep: true } }), modelOf(), tuned)).equal(
+      'settings tuned has no value for theme.mode to keep; type one',
+    );
+    should(refusalOf(entries({ theme: { keep: true } }))).equal(
+      'settings tuned has no value for theme to keep; type one',
+    );
+  });
+
+  it('should refuse a new value that looks like a secret, as text or inside JSON (E7)', () => {
+    // Act + Assert
+    for (const value of ['sk-abcdefghijklmnop', { nested: 'sk-abcdefghijklmnop' }]) {
+      should(refusalOf(entries({ 'env.API_TOKEN': { value } }))).equal(
+        `env.API_TOKEN looks like a secret, and a secret never sits in a component. Save it in this machine's secret store and write ${secretRef('NAME')} here instead.`,
+      );
+    }
+  });
+
+  it('should refuse an empty key segment, a key and a key inside it, and text alongside entries', () => {
+    // Act + Assert
+    should(refusalOf(entries({ 'a..b': { value: 1 } }))).equal('settings tuned cannot have a setting named "a..b"');
+    should(refusalOf(entries({ a: { value: 1 }, 'a.b.c': { value: 2 } }))).equal(
+      'settings tuned sets a and a setting inside it',
+    );
+    should(refusalOf(entries({ a: { value: 1 } }, 'claude', { content: '{}' }))).equal(
+      'send settings tuned as its text or as its entries, not both',
+    );
+  });
+});
