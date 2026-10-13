@@ -13,6 +13,7 @@ export * from './catalog.ts';
 export * from './client.ts';
 export * from './common.ts';
 export * from './doctor.ts';
+export * from './fleet-catalog.ts';
 export * from './fleet-changes.ts';
 export * from './fleet-credentials.ts';
 export * from './fleet-environment.ts';

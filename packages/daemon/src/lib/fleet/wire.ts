@@ -14,6 +14,7 @@
  */
 import type {
   FleetApplyCommittedState,
+  FleetApplyFailureError,
   FleetApplyPreview,
   FleetApplyResult,
   FleetManifest,
@@ -23,6 +24,7 @@ import type {
 } from '@ferretry/fleet';
 import type {
   FleetApplyCommittedState as FleetWireCommittedState,
+  FleetApplyOutcome as FleetWireApplyOutcome,
   FleetApplyResult as FleetWireApplyResult,
   FleetManifestSummary,
   FleetPlanSummary,
@@ -31,8 +33,28 @@ import type {
   FleetWriteOperation as FleetWireOperation,
 } from '@ferretry/protocol';
 
+/**
+ * One plan operation as the person approving it reads it.
+ *
+ * THREE BEHAVIOURS GET THEIR OWN WORDS on the wire even though the plan spells them as options on an
+ * older kind. A link allowed to point at nothing yet, a document whose named keys are replaced while
+ * the harness keeps the rest, and a sweep limited to what an earlier apply left behind each do
+ * something a reviewer would misread under the older name — "symlink", "settings", "remove unselected
+ * items" — so the wire says `credential-link`, `json-keys` and `retire`, and every reader renders
+ * those. The plan keeps its options because the provisioner's checks are shared with the plain kinds.
+ */
 export function operationSummary(operation: FleetWriteOperation): FleetWireOperation {
   if (operation.kind === 'file') return { kind: 'file', path: operation.path, mode: operation.mode };
+  if (operation.kind === 'settings' && operation.replaceKeys !== undefined) {
+    return {
+      kind: 'json-keys',
+      path: operation.path,
+      format: operation.format,
+      mode: operation.mode,
+      replaceKeys: [...operation.replaceKeys],
+      layerCount: operation.layers.length,
+    };
+  }
   if (operation.kind === 'settings') {
     return {
       kind: 'settings',
@@ -58,9 +80,14 @@ export function operationSummary(operation: FleetWriteOperation): FleetWireOpera
       ...(operation.mode === undefined ? {} : { mode: operation.mode }),
     };
   }
-  if (operation.kind === 'symlink') return { kind: 'symlink', source: operation.source, path: operation.path };
+  if (operation.kind === 'symlink') {
+    return { kind: operation.dangling === true ? 'credential-link' : 'symlink', source: operation.source, path: operation.path };
+  }
   if (operation.kind === 'prune') {
     return { kind: 'prune', path: operation.path, marker: operation.marker, keep: [...operation.keep] };
+  }
+  if (operation.kind === 'prune-directory' && operation.only !== undefined) {
+    return { kind: 'retire', path: operation.path, only: [...operation.only], keep: [...operation.keep] };
   }
   if (operation.kind === 'prune-directory') {
     return { kind: 'prune-directory', path: operation.path, keep: [...operation.keep] };
@@ -155,3 +182,37 @@ export const committedSummary = (committed: FleetApplyCommittedState): FleetWire
   sharedHistory: historySummary(committed.sharedHistory),
   ...residueOf(committed),
 });
+
+/**
+ * A failed apply as the outcome a person reads: rolled back, rolled back only in part, or committed
+ * with the history step failing afterwards.
+ *
+ * The same reading the old account mount makes of its own failures; it lives here so the account
+ * model's changes report an apply in exactly those words, and the older copy can move onto it when
+ * that mount is retired.
+ */
+export function applyFailureSummary(error: FleetApplyFailureError): FleetWireApplyOutcome {
+  const failure = error.failure;
+  // A claim nobody cleared blocks the next apply whatever else happened, so it travels with every ending.
+  const residue = error.lockResidue === undefined ? {} : { lockResidue: error.lockResidue };
+  if (failure.kind === 'history-failed-after-commit') {
+    return {
+      outcome: 'committed-with-history-failure',
+      failedHarness: failure.failedHarness,
+      reason: failure.reason,
+      committed: committedSummary(failure.committed),
+      ...residue,
+    };
+  }
+  if (failure.kind === 'rollback-incomplete') {
+    return {
+      outcome: 'rollback-incomplete',
+      failedOperation: failure.failedOperation,
+      reason: failure.reason,
+      unrestored: failure.unrestored.map(entry => ({ ...entry })),
+      ...(failure.displaced === undefined ? {} : { displaced: failure.displaced.map(entry => ({ ...entry })) }),
+      ...residue,
+    };
+  }
+  return { outcome: 'rolled-back', failedOperation: failure.failedOperation, reason: failure.reason, ...residue };
+}
