@@ -247,6 +247,8 @@ type ChangePayload =
   | {
       readonly kind: 'executor';
       readonly preview: Extract<FleetAccountChangePreview, { kind: 'executor' }>;
+      /** Runs the executor on exactly the change that was described. */
+      readonly run: () => Promise<string>;
       readonly consequences: readonly string[];
     };
 
@@ -467,11 +469,11 @@ export class FleetCatalogService {
     reading: AccountDocumentReading,
     change: FleetAccountChange,
   ): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
+    if (isAccountPlanChange(change)) return await this.#stagePlan(reading, change);
     if (change.kind === 'credential.signout') return await this.#stageSignOut(change.id);
-    if (change.kind === 'setup.import') return await this.#stageExecutor('setup', change, this.deps.executors?.setup);
-    if (change.kind === 'clone.import') return await this.#stageExecutor('clone', change, this.deps.executors?.clone);
-    if (!isAccountPlanChange(change)) throw new FleetCatalogRefusal('fleet_change_refused', 'this change cannot be staged');
-    return await this.#stagePlan(reading, change);
+    return change.kind === 'setup.import'
+      ? await this.#stageExecutor('setup', change, this.deps.executors?.setup)
+      : await this.#stageExecutor('clone', change, this.deps.executors?.clone);
   }
 
   async #stagePlan(
@@ -485,8 +487,7 @@ export class FleetCatalogService {
         runningSessions: await this.#runningSessions(),
       });
     } catch (error) {
-      if (error instanceof FleetMutationRefusal) throw new FleetCatalogRefusal('fleet_change_refused', error.message);
-      throw error;
+      throw error instanceof FleetMutationRefusal ? new FleetCatalogRefusal('fleet_change_refused', error.message) : error;
     }
     const bodies = await this.#bodies(edit.model, edit.files);
     const layout = this.deps.layout;
@@ -507,10 +508,7 @@ export class FleetCatalogService {
       });
       preview = await this.deps.provisioner.preview(plan);
     } catch (error) {
-      if (error instanceof Error) {
-        throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
-      }
-      throw error;
+      throw error instanceof Error ? new FleetCatalogRefusal('fleet_change_refused', errorMessage(error)) : error;
     }
     const documents: FleetDocumentWrite[] = [
       {
@@ -608,7 +606,12 @@ export class FleetCatalogService {
     const description = await port.describe(change);
     return {
       summary: executor === 'setup' ? 'Import this machine’s setup' : 'Clone another machine’s setup',
-      payload: { kind: 'executor', consequences: [], preview: { kind: 'executor', executor, description } },
+      payload: {
+        kind: 'executor',
+        consequences: [],
+        preview: { kind: 'executor', executor, description },
+        run: async () => await port.execute(change),
+      },
     };
   }
 
@@ -648,7 +651,6 @@ export class FleetCatalogService {
 
   async #execute(record: ChangeRecord): Promise<FleetAccountChangeOutcome> {
     const payload = record.payload;
-    const change = record.mutation;
     if (payload.kind === 'apply') {
       try {
         const result = await this.deps.provisioner.apply(payload.plan, payload.documents);
@@ -658,24 +660,19 @@ export class FleetCatalogService {
         throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
       }
     }
-    if (payload.kind === 'sign-out' && change.kind === 'credential.signout') {
+    if (payload.kind === 'sign-out') {
+      let outcome: FleetCredentialSignOutOutcome;
       try {
-        const outcome = await this.deps.credentials.signOut(change.id);
-        return outcome.outcome === 'signed-out'
-          ? { outcome: 'signed-out', credential: outcome.credential }
-          : { outcome: 'sign-out-failed', reason: outcome.reason, credential: outcome.credential };
+        // U13's executor: the harness's own logout against the one store. Never re-implemented here.
+        outcome = await this.deps.credentials.signOut(payload.preview.credential);
       } catch (error) {
-        if (error instanceof FleetCredentialRefusal) throw new FleetCatalogRefusal('fleet_change_failed', error.message);
-        throw error;
+        throw error instanceof FleetCredentialRefusal ? new FleetCatalogRefusal('fleet_change_failed', error.message) : error;
       }
+      return outcome.outcome === 'signed-out'
+        ? { outcome: 'signed-out', credential: outcome.credential }
+        : { outcome: 'sign-out-failed', reason: outcome.reason, credential: outcome.credential };
     }
-    if (change.kind === 'setup.import' && this.deps.executors?.setup !== undefined) {
-      return { outcome: 'executed', executor: 'setup', summary: await this.deps.executors.setup.execute(change) };
-    }
-    if (change.kind === 'clone.import' && this.deps.executors?.clone !== undefined) {
-      return { outcome: 'executed', executor: 'clone', summary: await this.deps.executors.clone.execute(change) };
-    }
-    throw new FleetCatalogRefusal('fleet_change_failed', 'this change has nothing to run it on this machine');
+    return { outcome: 'executed', executor: payload.preview.executor, summary: await payload.run() };
   }
 
   // ── Views ──────────────────────────────────────────────────────────────────────────────────────
@@ -684,10 +681,9 @@ export class FleetCatalogService {
     try {
       return work();
     } catch (error) {
-      if (error instanceof FleetProposalRefusal) {
-        throw new FleetCatalogRefusal(PROPOSAL_CODES[error.problem], error.message);
-      }
-      throw error;
+      throw error instanceof FleetProposalRefusal
+        ? new FleetCatalogRefusal(PROPOSAL_CODES[error.problem], error.message)
+        : error;
     }
   }
 
