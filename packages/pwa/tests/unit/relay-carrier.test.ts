@@ -24,7 +24,15 @@ import {
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
 import { RelaySessionError, RelayStreamRefusedError } from '../../src/lib/relay-session.ts';
-import { autoDial, newDaemonIdentity, relayCrypto, ScriptedSocket, settle, testDevice } from '../support/relay.ts';
+import {
+  autoDial,
+  newDaemonIdentity,
+  olderDaemonDial,
+  relayCrypto,
+  ScriptedSocket,
+  settle,
+  testDevice,
+} from '../support/relay.ts';
 
 const DAEMON_URL = 'https://studio.example';
 const RELAY: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay.example', operator: 'hosted' };
@@ -1055,6 +1063,49 @@ describe('the carrier router meeting a daemon from before device keys', () => {
     const { router, daemon } = await outdated(
       async () => new Response(JSON.stringify({ status: 'ok', sessionProtocol: 'ferretry-relay/1' }), { status: 200 }),
     );
+    await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
+      DaemonOutdatedError,
+    );
+  });
+
+  it('should name the daemon as old, once, when a rendezvous session meets the previous dialect', async () => {
+    const identity = await newDaemonIdentity();
+    const second: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay-two.example', operator: 'self' };
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY, second],
+    });
+    const older = olderDaemonDial();
+    const dialled: string[] = [];
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      heartbeat: () => () => undefined,
+      // Direct does not answer and its liveness read says nothing, so only the rendezvous can tell.
+      network: unreachable,
+      dial: url => {
+        dialled.push(new URL(url).hostname);
+        if (new URL(url).hostname === DIRECT_HOST) {
+          const refused = new ScriptedSocket();
+          queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
+          return refused;
+        }
+        return older.dial();
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    const request = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    should(request).be.instanceof(DaemonOutdatedError);
+    should((request as Error).message).equal(OLDER_DAEMON_SENTENCE);
+    // The same old machine is behind every rendezvous, so the second one is never dialled.
+    should(dialled).eql([DIRECT_HOST, 'relay.example']);
+
     await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
       DaemonOutdatedError,
     );

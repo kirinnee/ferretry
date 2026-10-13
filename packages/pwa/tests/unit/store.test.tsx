@@ -5,7 +5,9 @@ import { HOSTED_RELAY_PATH } from '../../src/features/onboarding/hosted-relay.ts
 import type { DaemonConnectionRepository, DaemonConnectionStore } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../src/lib/device-keys.ts';
+import { DaemonOutdatedError } from '../../src/lib/relay-carrier.ts';
 import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
+import { OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import {
   type AppStore,
   browserConnectionRepository,
@@ -24,6 +26,7 @@ import {
   dialByHost,
   keyedDaemon,
   newDaemonIdentity,
+  olderDaemonDial,
   relayCrypto,
   ScriptedSocket,
   settle as settleTasks,
@@ -283,6 +286,68 @@ describe('exchangePairing', () => {
     expect(message).toContain('may have paired a device this browser never heard about');
     expect(message).toContain('revoke');
     expect(message).toContain('fy pair');
+  });
+
+  /*
+   * VERSION SKEW, from the pairing side. An updated app meeting an old machine must say ONE sentence
+   * naming the machine as the side to update — not the first leg's connection error, which is what the
+   * walk reports for an ordinary failure. Both ways an old machine can show itself are covered: its
+   * liveness route after the direct leg failed, and its words on a rendezvous session.
+   */
+  it('names the machine as old when its liveness route speaks an older session, and dials no relay', async () => {
+    const identity = await newDaemonIdentity();
+    const relay = autoDial(identity, { paired: pairedAs(identity.daemonId) });
+    const route = byHost({ 'relay.mine.test': relay.dial });
+    const asked: string[] = [];
+    const deviceKeys = new MemoryDeviceKeyStore();
+
+    const reason = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys,
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        network: async input => {
+          asked.push(String(input));
+          return Response.json({ status: 'ok' });
+        },
+      },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(reason).toBeInstanceOf(DaemonOutdatedError);
+    expect((reason as Error).message).toBe(OLDER_DAEMON_SENTENCE);
+    expect(asked).toEqual([`${STUDIO}/healthz`]);
+    expect(relay.requests).toEqual([]);
+    expect(deviceKeys.saved).toEqual([]);
+  });
+
+  it('names the machine as old when a rendezvous session meets the previous dialect', async () => {
+    const identity = await newDaemonIdentity();
+    const older = olderDaemonDial();
+    const route = byHost({ 'relay.mine.test': older.dial });
+
+    const reason = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        deviceKeys: new MemoryDeviceKeyStore(),
+        relayCrypto,
+        relayDial: route.dial,
+        hostedRelayUrl: RELAY,
+        network: async () => {
+          throw new TypeError('Failed to fetch');
+        },
+      },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(reason).toBeInstanceOf(DaemonOutdatedError);
+    expect(older.sockets).toHaveLength(1);
   });
 
   it('pairs silently over the relay after an unheard direct attempt, with no warning to give', async () => {

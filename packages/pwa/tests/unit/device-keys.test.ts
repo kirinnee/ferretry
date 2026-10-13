@@ -13,6 +13,7 @@ import {
   type DeviceKeyDatabaseFactory,
   DeviceKeyMissingError,
   DeviceKeyUnreadableError,
+  DeviceKeyUnsupportedError,
   IndexedDbDeviceKeyStore,
   mintDeviceKey,
   UNSUPPORTED_DEVICE_KEY_SENTENCE,
@@ -113,7 +114,13 @@ describe('minting a device key', () => {
         throw new DOMException('Unrecognized name', 'NotSupportedError');
       },
     };
-    await should(mintDeviceKey(refusing)).be.rejectedWith(UNSUPPORTED_DEVICE_KEY_SENTENCE);
+    const refusal = await mintDeviceKey(refusing).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    should(refusal).be.instanceof(DeviceKeyUnsupportedError);
+    should((refusal as Error).message).equal(UNSUPPORTED_DEVICE_KEY_SENTENCE);
+    should((refusal as Error).name).equal('DeviceKeyUnsupportedError');
   });
 });
 

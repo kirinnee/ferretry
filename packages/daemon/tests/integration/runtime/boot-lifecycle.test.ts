@@ -1040,8 +1040,9 @@ describe('daemon boot lifecycle', () => {
     should(new URL(invitation.pairUrl).search).not.containEql(minted.code);
     should(invitation.reach).equal('local-only');
     should(invitation.daemonUrl).equal(`${base}/`);
-    // No route, and nothing public: a stranger is refused for having no credential at all.
-    should(httpRedemption.status).equal(401);
+    // No route, and nothing public. An app from before device keys pairing over plain HTTP is told,
+    // in the shared sentence, that IT is the side to update — never a 401 that reads as a wrong code.
+    should(httpRedemption.status).equal(426);
     should(paired.daemonId).equal(minted.daemonId);
     should(paired.idleExpiryDays).equal(30);
     should(replay.kind).equal('refused');

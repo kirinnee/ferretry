@@ -94,15 +94,16 @@ export const MAX_TUNNEL_BODY_BYTES = 32 * 1_024 * 1_024;
  * How a person updates the machine, in the words every surface uses.
  *
  * One string so the daemon, the command line and the app cannot name different commands. Each one
- * is a real installation path (INSTALLATION.md); there is no `fy upgrade` verb, so none is named.
+ * is a real installation path (INSTALLATION.md); there is no `fy upgrade` verb, so none is named. Plain
+ * text, no backticks: the sentence is shown as-is on a phone, where markup would read as noise.
  */
 export const DAEMON_UPDATE_COMMANDS =
-  '`brew upgrade --cask ferretry`, `nix profile upgrade`, your apt or dnf upgrade, or the install script again';
+  'brew upgrade --cask ferretry, nix profile upgrade, your apt or dnf upgrade, or the install script again';
 
 /** What an UPDATED app says to a machine still running the Ferretry from before device keys. */
 export const OLDER_DAEMON_SENTENCE =
   `This machine is running an older Ferretry than this app. Update it on the machine (${DAEMON_UPDATE_COMMANDS}), ` +
-  'run `fy daemon restart`, then pair this device again.';
+  'then run fy daemon restart and pair this device again.';
 
 /** What an UPDATED machine says to an app from before device keys. */
 export const OLDER_APP_SENTENCE =

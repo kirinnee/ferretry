@@ -29,6 +29,7 @@
  *   bun harness/screenshot.ts            # writes harness/out/*.png
  *   bun harness/screenshot.ts --serve    # leave it running to look at by hand
  *   bun harness/screenshot.ts --files-only   # just the Files/reload/preview frames
+ *   bun harness/screenshot.ts --pairing-failures-only   # the two pairing failures that are one sentence
  *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
  */
@@ -88,6 +89,8 @@ const PROJECTS_ONLY = process.argv.includes('--projects-only');
 const PROJECTS_FRAMES = ['hub', 'empty', 'loading', 'error', 'refused', 'registered', 'already-registered'] as const;
 
 const FILES_ONLY = process.argv.includes('--files-only');
+/** Just the two pairing failures whose sentence is the remedy, at both viewports and in both themes. */
+const PAIRING_FAILURES_ONLY = process.argv.includes('--pairing-failures-only');
 
 /**
  * Whether this invocation walks the Settings block at all, which decides which tally it owes.
@@ -102,7 +105,14 @@ const FILES_ONLY = process.argv.includes('--files-only');
  * part-way, which is the failure both tallies exist to catch and the only one an "it's a narrow mode"
  * exemption would hide.
  */
-const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOARD_ONLY || PROJECTS_ONLY);
+const WALKS_SETTINGS = !(
+  SEARCH_ONLY ||
+  ATTENTION_ONLY ||
+  FILES_ONLY ||
+  TASK_BOARD_ONLY ||
+  PROJECTS_ONLY ||
+  PAIRING_FAILURES_ONLY
+);
 
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
@@ -350,6 +360,63 @@ function fail(message: string): never {
  * against `SETTINGS_SIDEWAYS_CHECKS` and the CI script requires that closing line to be present.
  */
 let sidewaysChecks = 0;
+
+/**
+ * THE TWO PAIRING FAILURES WHOSE SENTENCE IS THE REMEDY — the machine is older, or this browser cannot
+ * make the key — pressed into their failed state and captured in both themes, each checked for fit and
+ * margins first. Their codes are the harness's fixed fake one, never a real code.
+ */
+const capturePairingFailures = async (page: Page, viewportName: string): Promise<void> => {
+  for (const [label, slug] of [
+    ['Pairing failed — machine is older', 'pairing-failed-older-machine'],
+    ['Pairing failed — browser cannot make the key', 'pairing-failed-no-device-key'],
+  ] as const) {
+    const card = page.getByLabel(label, { exact: true });
+    await card.scrollIntoViewIfNeeded();
+    await card.getByRole('button', { name: 'Pair this device' }).click();
+    await card.locator('[data-pairing-failure="stated"]').waitFor();
+    await assertCardFitsWithMargins(card, `${label} at ${viewportName}`);
+    for (const theme of ['studio-dark', 'studio-light'] as const) {
+      await page.evaluate(name => {
+        document.documentElement.dataset.theme = name;
+      }, theme);
+      const target = join(outDir, `${slug}${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
+      await captureElement(page, card, target);
+      process.stdout.write(`📸 ${label} ${theme} ${viewportName} -> ${target}\n`);
+    }
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = 'studio-dark';
+    });
+  }
+};
+
+/**
+ * One card fits its column and keeps its words off its edges.
+ *
+ * For the pairing failures, whose whole job is one sentence: the card may not be wider than the space
+ * it was given, nothing in it may scroll sideways, and the failure sentence must sit at least 12px in
+ * from every edge of the card — a sentence flush against a border reads as clipped even when it is not.
+ */
+const assertCardFitsWithMargins = async (card: Locator, where: string): Promise<void> => {
+  const problems = await card.evaluate(element => {
+    const found: string[] = [];
+    const box = element.getBoundingClientRect();
+    const parent = element.parentElement?.getBoundingClientRect();
+    if (parent !== undefined && box.width > parent.width + 1) found.push(`card ${box.width}px in ${parent.width}px`);
+    for (const node of [element, ...element.querySelectorAll<HTMLElement>('*')])
+      if (node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX !== 'visible')
+        found.push(`${node.tagName.toLowerCase()} scrolls sideways (${node.scrollWidth}px in ${node.clientWidth}px)`);
+    const sentence = element.querySelector('[data-pairing-failure]')?.getBoundingClientRect();
+    if (sentence === undefined) found.push('no failure sentence');
+    else {
+      const insets = { left: sentence.left - box.left, right: box.right - sentence.right, top: sentence.top - box.top };
+      for (const [side, inset] of Object.entries(insets)) if (inset < 12) found.push(`sentence ${inset}px from the ${side} edge`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`${where}: ${problems.join('; ')}`);
+  process.stdout.write(`🧭 fits with margins: ${where}\n`);
+};
 
 const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> => {
   const overflow = await page.evaluate(() => {
@@ -1310,6 +1377,10 @@ try {
             await captureFiles(page, viewport.name);
             continue;
           }
+          if (PAIRING_FAILURES_ONLY) {
+            await capturePairingFailures(page, viewport.name);
+            continue;
+          }
           if (TASK_BOARD_ONLY) {
             const target = join(outDir, `task-board-${viewport.name}.png`);
             const taskBoard = page.locator('#harness-task-board');
@@ -2190,6 +2261,8 @@ try {
           await page.evaluate(() => {
             document.documentElement.dataset.theme = 'studio-dark';
           });
+
+          await capturePairingFailures(page, viewport.name);
           const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
           await captureElement(
             page,

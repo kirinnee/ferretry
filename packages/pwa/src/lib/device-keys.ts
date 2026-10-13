@@ -25,6 +25,14 @@ import { toBase64Url } from '@ferretry/relay';
 export const UNSUPPORTED_DEVICE_KEY_SENTENCE =
   'This browser cannot create the kind of key Ferretry pairs with (Ed25519). Update the browser, or pair from a different one.';
 
+/** This browser cannot generate an Ed25519 key at all. Final: no carrier and no retry changes it. */
+export class DeviceKeyUnsupportedError extends Error {
+  constructor() {
+    super(UNSUPPORTED_DEVICE_KEY_SENTENCE);
+    this.name = 'DeviceKeyUnsupportedError';
+  }
+}
+
 /** Said when the key this browser paired with is gone — cleared site data, or a copied profile. */
 const MISSING_DEVICE_KEY_SENTENCE =
   'This browser no longer holds the key it paired this machine with — its site data was cleared, or this is a copy of another profile. Pair this device again.';
@@ -85,7 +93,7 @@ export async function mintDeviceKey(generator: DeviceKeyGenerator): Promise<Mint
   try {
     generated = await generator.generateDeviceKey();
   } catch {
-    throw new Error(UNSUPPORTED_DEVICE_KEY_SENTENCE);
+    throw new DeviceKeyUnsupportedError();
   }
   return { privateKey: generated.privateKey, publicKey: toBase64Url(generated.publicKeySpki) };
 }

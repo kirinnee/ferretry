@@ -85,9 +85,11 @@ Running your own relay stays supported as an **expert opt-in path** with its own
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. First-run onboarding asks no carrier
 question: the three-way chooser and the self-hosting steps are gone, and the daemon step only says
-how other devices reach it. **First contact
-is no longer direct-only.** A relay session commits to one of three modes with its first sealed
-record (protocol §14): a request session, one live event or terminal stream, or a one-attempt
+how other devices reach it. **Both carriers are sessions**: direct is a WebSocket session on the
+daemon's own listener (`/v1/rendezvous/<daemonId>/client`), byte-for-byte the protocol a relay carries,
+so the LAN is encrypted end to end too, and there are no socket tickets — every stream is its own
+session. **First contact is no longer direct-only.** A session commits to one of three modes with its
+first sealed record (protocol §14): a request session, one live event or terminal stream, or a one-attempt
 `pair` — sent only after the daemon is proved against the QR-pinned fingerprint, never as an
 anonymous routed request, with its own relay guess budget so an internet stranger cannot expire a
 code a LAN device could still redeem. **The QR stays the ordinary one-version `v1` fragment** — daemon
@@ -176,10 +178,12 @@ from instead. Every route that acts sits on `fleet.configure` with the existing 
 operator-password confirmation and **no second gate** — the remote risk is account substitution, not token
 theft. `--with-access-token` and `--with-api-key` stay host-and-CLI-only at every layer.
 
-How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code,
-a device token the daemon keeps only a hash of, and revocation of either. **No route returns a device
-token or a digest** — the wire projection has no field for one — and a **pairing code is a live
-credential**, so its QR is generated locally and never by an image service, never announced to a screen
+How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code
+redeemed inside a session, which registers a **non-extractable device key** the browser generated; the
+daemon keeps only the public half, and the grant ends on revocation or after 30 days unused. **There is no
+device bearer value at all** — each session's own transcript is signed by the device key, so nothing on the
+wire replays — and the design and its threat model are [docs/design/zero-trust.md](docs/design/zero-trust.md).
+A **pairing code is a live credential**, so its QR is generated locally and never by an image service, never announced to a screen
 reader, never persisted, and never screenshotted for real (committed captures use a fixed fake code).
 Minting is governed by the `pairing` capability rather than by an admin-token minimum, because a browser is
 always a paired device and could otherwise never add a second one.

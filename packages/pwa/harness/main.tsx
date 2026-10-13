@@ -182,6 +182,8 @@ import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
+import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
+import { DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
 import type { FleetProject, SessionGroup } from '../src/lib/fleet-grouping.ts';
@@ -4180,6 +4182,48 @@ function Shell() {
             arrival={HARNESS_ARRIVAL}
             scanHost={HARNESS_SCAN_HOST}
             onPair={async () => await new Promise(() => {})}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
+    /*
+     * The two failures whose sentence IS the remedy. Each card's exchange rejects at once, so a capture
+     * presses "Pair this device" and photographs what a reader is told: the machine is older (and how
+     * to update it), or this browser cannot make the key Ferretry pairs with. The code is the fixed
+     * fake `HARNESS_ARRIVAL` carries, never a real one.
+     */
+    {
+      label: 'Pairing failed — machine is older',
+      render: () => (
+        <Card aria-label="Pairing failed — machine is older" className="min-w-0 overflow-hidden">
+          <PairingScreen
+            connections={[]}
+            selectedDaemonId={null}
+            arrival={HARNESS_ARRIVAL}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => {
+              throw new DaemonOutdatedError();
+            }}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
+    {
+      label: 'Pairing failed — browser cannot make the key',
+      render: () => (
+        <Card aria-label="Pairing failed — browser cannot make the key" className="min-w-0 overflow-hidden">
+          <PairingScreen
+            connections={[]}
+            selectedDaemonId={null}
+            arrival={HARNESS_ARRIVAL}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => {
+              throw new DeviceKeyUnsupportedError();
+            }}
             onRemove={() => {}}
             onSelect={() => {}}
           />

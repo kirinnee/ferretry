@@ -119,15 +119,16 @@ async function mount(subject: PairingSubsystem, allow = true) {
 describe('pairing routes', () => {
   it('should serve no redemption at all: the plain-HTTP POST /v1/pair is gone', async () => {
     // Redemption happens only inside a session whose daemon was proved against the QR fingerprint, so
-    // nothing on this surface is public any more: a stranger is refused for having no credential, and
-    // even the host's own token finds no route there.
+    // nothing on this surface is public any more. An anonymous caller there is an app from before
+    // device keys, so it is told to update rather than that its code is wrong; the host's own token
+    // finds no route there at all.
     const surface = await mount(new FakePairing());
     const body = JSON.stringify({ code: '7F3K-Q2ND', deviceName: 'phone' });
 
     const anonymous = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', body }));
     const host = await surface.dispatch(request({ method: 'POST', path: '/v1/pair', headers: admin, loopback: true, body }));
 
-    should(anonymous.status).equal(401);
+    should(anonymous.status).equal(426);
     should(host.status).equal(404);
   });
 

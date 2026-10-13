@@ -459,6 +459,40 @@ export class DaemonOutdatedError extends Error {
   }
 }
 
+/**
+ * A session that ended because the daemon speaks the previous dialect: its hello named `/1`, or it
+ * refused this one's in the words a `/1` daemon uses (`relay-session.ts` turns both into this).
+ */
+export const isOutdatedDaemonRefusal = (reason: unknown): boolean =>
+  reason instanceof RelaySessionError &&
+  reason.code === RELAY_CLOSE_CODES.versionUnsupported &&
+  reason.message === OLDER_DAEMON_SENTENCE;
+
+/**
+ * After a direct socket failed: is that an OLD daemon rather than an absent one?
+ *
+ * A browser cannot read why a WebSocket was refused, and an old daemon refuses the session path the
+ * way any unknown route is refused. Its public liveness route still answers, though, and a daemon
+ * that answers it without naming the dialect this app speaks is one that needs updating — which is a
+ * sentence a person can act on, where "could not connect" is not. Anything else — no answer, a body
+ * that does not parse — is `false`, because that daemon is not provably old.
+ */
+export const daemonIsOutdated = async (network: DaemonFetch, daemonUrl: string): Promise<boolean> => {
+  let body: unknown;
+  try {
+    const response = await network(new URL('/healthz', `${daemonUrl}/`).toString(), {
+      cache: 'no-store',
+      credentials: 'omit',
+    });
+    if (!response.ok) return false;
+    body = await response.json();
+  } catch {
+    return false;
+  }
+  const answer = body as { readonly status?: unknown; readonly sessionProtocol?: unknown } | null;
+  return answer?.status === 'ok' && answer.sessionProtocol !== SESSION_PROTOCOL_ID;
+};
+
 export interface DaemonCarrierRouterOptions {
   /**
    * The real network — for the one liveness read that tells an old daemon from an absent one, and
@@ -775,6 +809,7 @@ export class DaemonCarrierRouter {
           (reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.rendezvousBusy)
         )
           throw reason;
+        if (isOutdatedDaemonRefusal(reason)) throw new DaemonOutdatedError();
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
         if (method.kind === 'direct') await this.#refuseIfOutdated(method);
       }
@@ -899,6 +934,7 @@ export class DaemonCarrierRouter {
           reason instanceof DaemonOutdatedError
         )
           throw reason;
+        if (isOutdatedDaemonRefusal(reason)) throw new DaemonOutdatedError();
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
         if (method.kind === 'direct') await this.#refuseIfOutdated(method);
         // A session that died AFTER the request left can follow receipt of a POST/PUT/etc. Record
@@ -1147,29 +1183,9 @@ export class DaemonCarrierRouter {
     return { deviceId: entry.connection.deviceId, key, appSession: this.#appSession };
   }
 
-  /**
-   * After a direct socket failed: is that an OLD daemon rather than an absent one?
-   *
-   * A browser cannot read why a WebSocket was refused, and an old daemon refuses the session path the
-   * way any unknown route is refused. Its public liveness route still answers, though, and a daemon
-   * that answers it without naming the dialect this app speaks is one that needs updating — which is a
-   * sentence a person can act on, where "could not connect" is not. Anything else — no answer, a body
-   * that does not parse — leaves the walk to carry on, because that daemon is not provably old.
-   */
+  /** After a direct socket failed: refuse the walk, in words, when that is an OLD daemon. */
   async #refuseIfOutdated(method: Extract<ConnectionMethod, { kind: 'direct' }>): Promise<void> {
-    let body: unknown;
-    try {
-      const response = await this.#network(new URL('/healthz', `${method.daemonUrl}/`).toString(), {
-        cache: 'no-store',
-        credentials: 'omit',
-      });
-      if (!response.ok) return;
-      body = await response.json();
-    } catch {
-      return;
-    }
-    const answer = body as { readonly status?: unknown; readonly sessionProtocol?: unknown } | null;
-    if (answer?.status === 'ok' && answer.sessionProtocol !== SESSION_PROTOCOL_ID) throw new DaemonOutdatedError();
+    if (await daemonIsOutdated(this.#network, method.daemonUrl)) throw new DaemonOutdatedError();
   }
 
   /**

@@ -295,7 +295,7 @@ update and how**:
 
 | who is newer | what is observed                                                                                                    | the sentence the person reads                                                                                                                                                                                                                |
 | ------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the app      | the daemon closes the handshake with `4426`, or answers a direct socket upgrade with no session, or `hs2` says `/1` | "This machine is running an older Ferretry than this app. Update it on the machine (`brew upgrade --cask ferretry`, `nix profile upgrade`, your apt or dnf upgrade, or the install script again), run `fy daemon restart`, then pair again." |
+| the app      | the daemon closes the handshake with `4426`, or answers a direct socket upgrade with no session, or `hs2` says `/1` | "This machine is running an older Ferretry than this app. Update it on the machine (brew upgrade --cask ferretry, nix profile upgrade, your apt or dnf upgrade, or the install script again), then run fy daemon restart and pair this device again." |
 | the daemon   | an old app's plain-HTTP request carrying an `fy_device_` bearer token, or an old `hs1` naming `/1`                  | "This app is older than the machine it is talking to. Reload the page (or reopen the installed app) to update it, then pair again."                                                                                                          |
 
 The second row is the daemon's job, because an old app cannot learn new words: an HTTP request with
@@ -526,6 +526,28 @@ files: { "<path>": "<sha256 b64url>" } }` covering every file in `dist/` — and
   reported loudly to the person and recorded on the daemon's audit log — **detected, not
   prevented**. Preventing it needs a client the deploy cannot rewrite (a native app or an
   extension), which is out of scope.
+- **As built** (`feat/zt-signed-pwa`, runbook [`docs/pwa-release-signing.md`](../pwa-release-signing.md)),
+  where the mechanics differ from the sketch above:
+  - **The worker URL is fixed**, `/sw.verified.js`, not per release. The worker does not change when a
+    release does — it swaps releases itself — and a changed worker script is still re-checked by the
+    browser and reported.
+  - The signed list names that script in a `worker` field, and the signature file is
+    `<sha256 of the signing key's SPKI>.<signature>` (base64url), so "unknown key" and "bad signature"
+    are told apart.
+  - **Order is version, then `createdAt`** (the commit time), because many Pages deploys share one
+    version.
+  - **An unsigned build writes the word `unsigned` as its signature.** It is accepted — as
+    "unverified", with nothing cached — only on a loopback hostname, refused everywhere else, and the
+    deploy workflow refuses to publish one. Until the owner adds `PWA_RELEASE_SIGNING_KEY` to the
+    `pwa-release` environment, the Pages deploy fails at its signing step on purpose: there is no
+    unsigned deploy.
+  - **Rotation:** commit `release-signing-key.next.pub`; the build lists it as `nextKey`; an installed
+    copy that accepts that release trusts both; the first release signed by the new key retires the
+    old one.
+  - **Audit seam for C:** `onUnsignedWorker({ scriptUrl })` in
+    `packages/pwa/src/hooks/use-release-integrity.ts`, not yet wired to the daemon's audit log.
+  - The worker also shows Web Push notifications and handles their clicks — the app had no worker
+    before, so a push could not reach a closed app.
 
 ## What this does NOT protect against
 

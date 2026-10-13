@@ -33,6 +33,8 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
+import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
+import { DaemonOutdatedError } from '../../lib/relay-carrier.ts';
 import { RelayPairingRefusedError } from '../../lib/relay-session.ts';
 import { BrandMark } from '../../shell/brand-mark.tsx';
 import { PairScanner } from './pair-scanner.tsx';
@@ -103,11 +105,22 @@ type Stage =
  * `transport` means nothing reached the daemon at all, and telling that reader to mint a new code
  * would send them to redo the one thing that was not the problem.
  *
- * There is deliberately no third value for "which refusal". §14 gives one machine reason for every
+ * `stated` is a failure whose sentence already IS the remedy, and that neither of the other two fits:
+ * a machine running an older Ferretry (the sentence names the update commands), or a browser that
+ * cannot make the key Ferretry pairs with. Adding "check your network" beneath either would be advice
+ * about the one thing that was working.
+ *
+ * There is deliberately no fourth value for "which refusal". §14 gives one machine reason for every
  * cause because a pre-auth surface the whole internet can reach must not be an oracle, and a screen
  * that branched further would be asking for a distinction the wire does not carry.
  */
-export type PairingFailureCause = 'refusal' | 'transport';
+export type PairingFailureCause = 'refusal' | 'transport' | 'stated';
+
+const failureCause = (reason: unknown): PairingFailureCause => {
+  if (reason instanceof RelayPairingRefusedError) return 'refusal';
+  if (reason instanceof DaemonOutdatedError || reason instanceof DeviceKeyUnsupportedError) return 'stated';
+  return 'transport';
+};
 
 const BROWSE: Stage = { kind: 'browse' };
 
@@ -186,7 +199,7 @@ export function PairingScreen({
         // distinction §14 asks for. Everything else — a rendezvous nobody holds, a busy one, a
         // network that went away mid-attempt — is transport, and a reader whose real problem is
         // their network must not be told to go and mint another code.
-        cause: reason instanceof RelayPairingRefusedError ? 'refusal' : 'transport',
+        cause: failureCause(reason),
       });
     }
   };
@@ -465,6 +478,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
           the reader to look at their network, and telling them to mint again would send them to redo
           the only step that was working.
         */}
+        {stage.cause !== 'stated' && (
         <p className="m-0 text-meta leading-base text-muted">
           {stage.cause === 'refusal' ? (
             <>
@@ -478,6 +492,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
             </>
           )}
         </p>
+        )}
         <button
           type="button"
           className="kt-btn min-h-[56px] w-full text-title"

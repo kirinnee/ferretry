@@ -44,7 +44,13 @@ import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import { DaemonPinClient } from './pin-client.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
-import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
+import {
+  DaemonCarrierRouter,
+  DaemonOutdatedError,
+  daemonIsOutdated,
+  isOutdatedDaemonRefusal,
+  type RelayDial,
+} from './relay-carrier.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
@@ -195,6 +201,11 @@ export interface ExchangePairingOptions {
   readonly relayDial?: RelayDial;
   /** `DIRECT_PAIRING_TIMEOUT_MS` by default. A parameter so a suite can prove the deadline in ms. */
   readonly directTimeoutMs?: number;
+  /**
+   * The plain network, for ONE read: the daemon's public liveness route after the direct leg failed,
+   * which is how an old daemon is told from an absent one. Absent means nobody can ask.
+   */
+  readonly network?: DaemonFetch;
 }
 
 /**
@@ -260,6 +271,11 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
       // A sealed refusal is the DAEMON's answer and ends the walk; anything else is this carrier not
       // working, which is the next one's turn.
       if (reason instanceof RelayPairingRefusedError) throw spentUnheard ? new AmbiguousPairingError(reason) : reason;
+      // AN OLD MACHINE IS ONE SENTENCE, NOT A CARRIER THAT FAILED. Every other carrier reaches the same
+      // daemon, so the walk stops and names the side to update rather than reporting a network fault.
+      if (isOutdatedDaemonRefusal(reason)) throw new DaemonOutdatedError();
+      if (method.kind === 'direct' && options.network !== undefined && (await daemonIsOutdated(options.network, method.daemonUrl)))
+        throw new DaemonOutdatedError();
       if (reason instanceof PairingOutcomeUnknownError) spentUnheard = true;
       first ??= reason instanceof Error ? reason : new Error(String(reason));
       continue;
@@ -534,6 +550,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
         relayCrypto,
         ...(options.relayDial === undefined ? {} : { relayDial: options.relayDial }),
         ...((await hostedRelayUrl) === undefined ? {} : { hostedRelayUrl: await hostedRelayUrl }),
+        network: fetcher,
       });
       connections.add(connection);
       return connection;

@@ -558,3 +558,37 @@ export const fetcherDaemons = (
   };
   return { dial, dialled, requests: host => routes.get(host)?.requests ?? [] };
 };
+
+/**
+ * A daemon from before device keys, reached through a rendezvous: it reads this app's `/2` hello as
+ * garbage and ends the session in the exact words a `/1` daemon uses. Every dial is one such session.
+ */
+export const olderDaemonDial = (): { readonly dial: () => ScriptedSocket; readonly sockets: ScriptedSocket[] } => {
+  const sockets: ScriptedSocket[] = [];
+  const dial = (): ScriptedSocket => {
+    const sessionId = testSessionId(sockets.length + 1);
+    const socket = new ScriptedSocket();
+    const original = socket.send.bind(socket);
+    socket.send = (bytes: Uint8Array): void => {
+      original(bytes);
+      const decoded = decodeFrame(bytes);
+      if (!decoded.ok || decoded.frame.kind !== FRAME_KINDS.handshake) return;
+      queueMicrotask(() =>
+        socket.onBinary?.(
+          controlFrame(sessionId, {
+            t: 'closed',
+            code: RELAY_CLOSE_CODES.protocolError,
+            reason: 'unparseable client hello',
+          }),
+        ),
+      );
+    };
+    sockets.push(socket);
+    queueMicrotask(() => {
+      socket.onOpen?.();
+      socket.onBinary?.(readyFrame(sessionId));
+    });
+    return socket;
+  };
+  return { dial, sockets };
+};
