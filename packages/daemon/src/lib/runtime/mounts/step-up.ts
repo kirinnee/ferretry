@@ -100,6 +100,10 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       path: '/v1/passkeys/options',
       minimum: 'operator',
       noStore: true,
+      // Served before an unlock: a device that has just paired holds no passkey, so registering one is
+      // how it gets in at all. The service's own rule (the first window, or one the owner re-opened) is
+      // what bounds it, not the unlock.
+      unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyOptionsRequestSchema);
         return answer(await service.registrationOptions(caller(context), body.origin), value =>
@@ -112,6 +116,7 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       path: '/v1/passkeys',
       minimum: 'operator',
       noStore: true,
+      unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyRegistrationSchema);
         return answer(await service.register(caller(context), body), value => PasskeyViewSchema.parse(value), 201);
