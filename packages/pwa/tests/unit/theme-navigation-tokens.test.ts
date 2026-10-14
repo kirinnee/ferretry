@@ -134,6 +134,16 @@ const parseColour = (value: string): Rgba | null => {
   }
   const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/i.exec(value);
   if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3]), rgb[4] === undefined ? 1 : Number(rgb[4])];
+  // `color-mix(in srgb, A p%, B)`: the compact families derive roles from their own palette this way, and
+  // an sRGB mix is the weighted average of the encoded channels — what the browser paints.
+  const mix = /^color-mix\(in srgb,\s*(#[0-9a-f]{3,6})\s+([\d.]+)%,\s*(#[0-9a-f]{3,6})\)$/i.exec(value);
+  if (mix?.[1] && mix[2] && mix[3]) {
+    const a = parseColour(mix[1]);
+    const b = parseColour(mix[3]);
+    const weight = Number(mix[2]) / 100;
+    if (a && b)
+      return [0, 1, 2].map(at => (a[at] ?? 0) * weight + (b[at] ?? 0) * (1 - weight)).concat(1) as unknown as Rgba;
+  }
   return null;
 };
 

@@ -2189,6 +2189,65 @@
   --step-todo-edge: var(--muted);
   --step-seg-now: #8f606c;
 }
+/* ============================================================================
+   THE COMPACT FAMILIES' CORE ROLES, which they never declared.
+
+   Phosphor, Blueprint, Broadsheet, Wayfinding, Ledger and Ma restate their palette (bg, surface, fg,
+   muted, accent) and leave every other role to the `:root` baseline — which is Studio LIGHT. So in
+   both their modes a button's ink (`--fg-soft`) was Studio's dark grey, `--surface-3` was near-white,
+   control edges were Studio's mid-grey and the status colours were light-theme ones: on a dark ground
+   every outlined or ghost button, and every Settings row, was close to invisible. Each role is now
+   DERIVED from the family's own palette, so it stays native to it, and the dark modes take the house
+   dark status colours rather than light-theme ones.
+   ============================================================================ */
+:root[data-theme^='phosphor-'],
+:root[data-theme^='blueprint-'],
+:root[data-theme^='broadsheet-'],
+:root[data-theme^='wayfinding-'],
+:root[data-theme^='ledger-'],
+:root[data-theme^='ma-'],
+[data-swatch^='phosphor-'],
+[data-swatch^='blueprint-'],
+[data-swatch^='broadsheet-'],
+[data-swatch^='wayfinding-'],
+[data-swatch^='ledger-'],
+[data-swatch^='ma-'] {
+  --fg-soft: color-mix(in srgb, var(--fg) 78%, var(--muted));
+  --faint: var(--muted);
+  --chrome-fg: var(--muted);
+  --surface-3: color-mix(in srgb, var(--surface) 88%, var(--fg));
+  --border-strong: color-mix(in srgb, var(--fg) 50%, var(--surface));
+  --accent-strong: color-mix(in srgb, var(--accent) 78%, var(--fg));
+  --code-bg: color-mix(in srgb, var(--surface) 92%, var(--fg));
+  --code-border: var(--border);
+  --code-fg: var(--fg);
+}
+:root[data-theme='phosphor-dark'],
+:root[data-theme='blueprint-dark'],
+:root[data-theme='broadsheet-dark'],
+:root[data-theme='wayfinding-dark'],
+:root[data-theme='ledger-dark'],
+:root[data-theme='ma-dark'],
+[data-swatch='phosphor-dark'],
+[data-swatch='blueprint-dark'],
+[data-swatch='broadsheet-dark'],
+[data-swatch='wayfinding-dark'],
+[data-swatch='ledger-dark'],
+[data-swatch='ma-dark'] {
+  --ok: #6fae82;
+  --ok-bg: color-mix(in srgb, #6fae82 14%, var(--surface));
+  --ok-border: color-mix(in srgb, #6fae82 40%, var(--surface));
+  --warn: #c79a52;
+  --warn-bg: color-mix(in srgb, #c79a52 14%, var(--surface));
+  --warn-border: color-mix(in srgb, #c79a52 40%, var(--surface));
+  --err: #e08a8a;
+  --err-bg: color-mix(in srgb, #e08a8a 14%, var(--surface));
+  --err-border: color-mix(in srgb, #e08a8a 40%, var(--surface));
+  --pend: var(--muted);
+  --pend-bg: var(--surface-2);
+  --pend-border: var(--border);
+}
+
 :root[data-theme$='-dark'],
 [data-swatch$='-dark'] {
   color-scheme: dark;
