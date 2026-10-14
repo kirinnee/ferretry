@@ -22,7 +22,8 @@ import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
 const log = process.env.FY_E2E_FAKE_CODEX_LOG;
-if (log !== undefined && log !== '') appendFileSync(log, `${JSON.stringify({ argv, codexHome: process.env.CODEX_HOME ?? null })}\n`);
+if (log !== undefined && log !== '')
+  appendFileSync(log, `${JSON.stringify({ argv, codexHome: process.env.CODEX_HOME ?? null })}\n`);
 
 if (argv[0] === '--version' || argv[0] === '-V') {
   console.log('codex-cli 0.156.1');

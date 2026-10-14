@@ -465,7 +465,9 @@ export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
         new Response(build.stderr).text(),
       ]);
       if (code !== 0)
-        throw new Error(`the PWA bundle failed to build at \`${command.join(' ')}\` (code ${String(code)})\n${out}\n${err}`);
+        throw new Error(
+          `the PWA bundle failed to build at \`${command.join(' ')}\` (code ${String(code)})\n${out}\n${err}`,
+        );
     }
     await stat(join(outDir, 'app', 'index.html'));
     return outDir;

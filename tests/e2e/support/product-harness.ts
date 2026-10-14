@@ -29,7 +29,7 @@ const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 /** Where the full-product journeys put their evidence. Outside the repo; never committed. */
 export const EVIDENCE_ROOT = process.env.FY_E2E_EVIDENCE_ROOT ?? '/tmp/claude-1000/e2e-shots';
 /** One JSON object per line; `scripts`-free so the report can be rebuilt from it at any time. */
-export const JOURNEY_LOG = process.env.FY_E2E_JOURNEY_LOG ?? '/tmp/claude-1000/e2e-runs/journeys.jsonl';
+const JOURNEY_LOG = process.env.FY_E2E_JOURNEY_LOG ?? '/tmp/claude-1000/e2e-runs/journeys.jsonl';
 
 // ─── compiled artifacts ──────────────────────────────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ function hostTarget(): string {
 }
 
 /** The compiled daemon, named the way `scripts/release/compile.sh` names it. */
-export function compiledDaemon(): string {
+function compiledDaemon(): string {
   const explicit = process.env.FYD_BIN;
   if (explicit !== undefined && explicit !== '') return resolve(REPOSITORY_ROOT, explicit);
   return join(REPOSITORY_ROOT, 'dist', 'bin', `fyd-${hostTarget()}`);
@@ -185,8 +185,8 @@ export interface ProductBrowser {
   stop(): Promise<void>;
 }
 
-export const DESKTOP = { width: 1_280, height: 900 } as const;
-export const PHONE = { width: 390, height: 844 } as const;
+const DESKTOP = { width: 1_280, height: 900 } as const;
+const PHONE = { width: 390, height: 844 } as const;
 
 /**
  * Chrome with no profile, every page error kept, loopback permitted.
@@ -318,7 +318,7 @@ const LAYOUT_PROBE = `(() => {
  * properties and are measured correctly.
  */
 /** Screens where the system theme did not follow a live OS switch. Read by the report. */
-export const themeLag = new Set<string>();
+const themeLag = new Set<string>();
 
 export async function captureScreens(
   page: ProductPage,
@@ -406,13 +406,22 @@ export async function recordStep(step: JourneyStep): Promise<void> {
  * Every product journey is a sequence of these, so the report says which step broke and what the
  * screen showed rather than a stack trace about a selector.
  */
-export async function step<T>(journey: string, name: string, body: () => Promise<{ value: T; evidence: string }>): Promise<T> {
+export async function step<T>(
+  journey: string,
+  name: string,
+  body: () => Promise<{ value: T; evidence: string }>,
+): Promise<T> {
   try {
     const { value, evidence } = await body();
     await recordStep({ journey, step: name, status: 'PASS', evidence });
     return value;
   } catch (error) {
-    await recordStep({ journey, step: name, status: 'FAIL', evidence: String((error as Error).message ?? error).slice(0, 1_500) });
+    await recordStep({
+      journey,
+      step: name,
+      status: 'FAIL',
+      evidence: String((error as Error).message ?? error).slice(0, 1_500),
+    });
     throw error;
   }
 }
@@ -456,11 +465,16 @@ export async function installFakeTools(environment: E2eEnvironment): Promise<Fak
   await writeFile(
     join(claudeHome, '.credentials.json'),
     JSON.stringify({
-      claudeAiOauth: { accessToken: 'fake-e2e-access', refreshToken: 'fake-e2e-refresh', expiresAt: Date.now() + 3_600_000 },
+      claudeAiOauth: {
+        accessToken: 'fake-e2e-access',
+        refreshToken: 'fake-e2e-refresh',
+        expiresAt: Date.now() + 3_600_000,
+      },
     }),
     'utf8',
   );
-  if (!(process.env.PATH ?? '').split(':').includes(directory)) process.env.PATH = `${directory}:${process.env.PATH ?? ''}`;
+  if (!(process.env.PATH ?? '').split(':').includes(directory))
+    process.env.PATH = `${directory}:${process.env.PATH ?? ''}`;
   return {
     directory,
     claude,
@@ -492,7 +506,8 @@ export function fakeToolEnvironment(tools: FakeTools): Record<string, string> {
 export async function ensureOperatorPassword(environment: E2eEnvironment): Promise<'set' | 'no-password-model'> {
   const answer = await asOwner(environment, 'PUT', '/v1/grants/password', { password: OPERATOR_PASSWORD });
   if (answer.status === 404) return 'no-password-model';
-  if (answer.status >= 300) throw new Error(`setting the operator password answered ${String(answer.status)}: ${JSON.stringify(answer.body)}`);
+  if (answer.status >= 300)
+    throw new Error(`setting the operator password answered ${String(answer.status)}: ${JSON.stringify(answer.body)}`);
   return 'set';
 }
 
@@ -503,11 +518,16 @@ export interface MintedLink {
 }
 
 /** `fy pair --no-wait`, scraped, and re-hosted on the origin this run serves. */
-export async function mintPairingLink(environment: E2eEnvironment, appOrigin: string, args: readonly string[] = []): Promise<MintedLink> {
+export async function mintPairingLink(
+  environment: E2eEnvironment,
+  appOrigin: string,
+  args: readonly string[] = [],
+): Promise<MintedLink> {
   const minted = await environment.runFy(['pair', '--no-wait', ...args], { FY_URL: environment.httpUrl() });
   const screen = `${minted.out}\n${minted.err}`;
   const link = PAIRING_LINK.exec(screen)?.[0];
-  if (link === undefined) throw new Error(`\`fy pair --no-wait\` printed no link (exit ${String(minted.code)}):\n${screen.trim()}`);
+  if (link === undefined)
+    throw new Error(`\`fy pair --no-wait\` printed no link (exit ${String(minted.code)}):\n${screen.trim()}`);
   const fragment = link.slice(link.indexOf('#') + 1);
   return { url: `${appOrigin}/pair#${fragment}`, fragment, screen };
 }
@@ -530,7 +550,9 @@ export async function confirmPairing(page: ProductPage, url: string): Promise<'p
   await page.click('[data-pair-confirm]', { timeout: 10_000 });
   const settled = await Promise.race([
     page.waitForSelector('[data-pairing-stage="paired"]', { timeout: 45_000 }).then(() => 'paired' as const),
-    page.waitForSelector('[data-pairing-stage]', { state: 'detached', timeout: 45_000 }).then(() => 'unmounted' as const),
+    page
+      .waitForSelector('[data-pairing-stage]', { state: 'detached', timeout: 45_000 })
+      .then(() => 'unmounted' as const),
   ]).catch(() => undefined);
   if (settled === undefined) {
     const stage = await page.evaluate<string | null>(
@@ -563,7 +585,9 @@ export async function textNow(page: ProductPage, selector: string): Promise<stri
  * unlock model it never is; the absent field is then simply not filled.
  */
 export async function answerPasswordIfAsked(page: ProductPage): Promise<boolean> {
-  const asked = await page.evaluate<boolean>(`document.querySelector('[data-change-password] input, input[data-change-password]') !== null`);
+  const asked = await page.evaluate<boolean>(
+    `document.querySelector('[data-change-password] input, input[data-change-password]') !== null`,
+  );
   if (!asked) return false;
   await page.fill('[data-change-password] input, input[data-change-password]', OPERATOR_PASSWORD);
   return true;
@@ -577,7 +601,12 @@ export async function answerPasswordIfAsked(page: ProductPage): Promise<boolean>
  * the DevTools protocol instead, which a page CSP does not govern — and the CSP is part of what these
  * journeys prove, so it is never bypassed.
  */
-export async function waitUntil(page: ProductPage, expression: string, timeoutMs = 20_000, what = expression): Promise<void> {
+export async function waitUntil(
+  page: ProductPage,
+  expression: string,
+  timeoutMs = 20_000,
+  what = expression,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await page.evaluate<boolean>(`Boolean(${expression})`).catch(() => false)) return;
@@ -593,7 +622,12 @@ const softFailures = new Map<string, string[]>();
  * {@link step}, but a failure is RECORDED rather than thrown, so one product bug does not hide every
  * step after it. The journey must call {@link assertNoSoftFailures} last, so the test still fails.
  */
-export async function softStep(journey: string, name: string, body: () => Promise<{ value: unknown; evidence: string }>, bug?: string): Promise<boolean> {
+export async function softStep(
+  journey: string,
+  name: string,
+  body: () => Promise<{ value: unknown; evidence: string }>,
+  bug?: string,
+): Promise<boolean> {
   try {
     const { evidence } = await body();
     await recordStep({ journey, step: name, status: 'PASS', evidence });
@@ -608,7 +642,8 @@ export async function softStep(journey: string, name: string, body: () => Promis
 
 export function assertNoSoftFailures(journey: string): void {
   const failures = softFailures.get(journey) ?? [];
-  if (failures.length > 0) throw new Error(`${journey} — ${String(failures.length)} step(s) failed:\n${failures.join('\n')}`);
+  if (failures.length > 0)
+    throw new Error(`${journey} — ${String(failures.length)} step(s) failed:\n${failures.join('\n')}`);
 }
 
 /**
@@ -623,7 +658,10 @@ export function assertNoSoftFailures(journey: string): void {
 export async function reapLeftovers(environment: E2eEnvironment, journey: string): Promise<readonly string[]> {
   const tmux = Bun.which('tmux');
   if (tmux !== null) {
-    const ended = Bun.spawn([tmux, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], { stdout: 'ignore', stderr: 'ignore' });
+    const ended = Bun.spawn([tmux, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
     await ended.exited;
   }
   await Bun.sleep(300);

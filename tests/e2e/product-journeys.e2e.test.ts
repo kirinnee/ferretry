@@ -75,7 +75,11 @@ interface Product {
   /** How this machine was booted, so a journey can stop and boot it again. */
   readonly boot: BootOptions;
   /** Present when the direct address is a sinkhole and the only way in is the local rendezvous. */
-  readonly relay?: { readonly rendezvous: RendezvousProcess; readonly sinkhole: DirectSinkhole; readonly fingerprint: string };
+  readonly relay?: {
+    readonly rendezvous: RendezvousProcess;
+    readonly sinkhole: DirectSinkhole;
+    readonly fingerprint: string;
+  };
 }
 
 interface ProductOptions {
@@ -84,7 +88,11 @@ interface ProductOptions {
 }
 
 /** Boot one machine and one browser, unpaired. Every journey starts here. */
-async function withProduct(journey: string, body: (product: Product) => Promise<void>, options: ProductOptions = {}): Promise<void> {
+async function withProduct(
+  journey: string,
+  body: (product: Product) => Promise<void>,
+  options: ProductOptions = {},
+): Promise<void> {
   const teardown = harnessTeardown();
   try {
     await withE2eEnvironment(async environment => {
@@ -130,7 +138,9 @@ async function withProduct(journey: string, body: (product: Product) => Promise<
           tools,
           browser,
           boot,
-          ...(rendezvous === undefined || sinkhole === undefined ? {} : { relay: { rendezvous, sinkhole, fingerprint } }),
+          ...(rendezvous === undefined || sinkhole === undefined
+            ? {}
+            : { relay: { rendezvous, sinkhole, fingerprint } }),
         });
         should(browser.pageErrors).be.empty();
         should(origin.missingAssets()).be.empty();
@@ -151,7 +161,10 @@ async function pair(product: Product, journey: string): Promise<string> {
   const model = await ensureOperatorPassword(environment);
   const link = await step(journey, 'mint-pairing-link', async () => {
     const minted = await mintPairingLink(environment, origin.origin);
-    return { value: minted, evidence: `fy pair --no-wait printed a ${minted.fragment.slice(0, 3)} link (password model: ${model})` };
+    return {
+      value: minted,
+      evidence: `fy pair --no-wait printed a ${minted.fragment.slice(0, 3)} link (password model: ${model})`,
+    };
   });
   await browser.page.goto(link.url, { waitUntil: 'networkidle', timeout: 30_000 });
   await browser.page.waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 });
@@ -198,11 +211,18 @@ async function reachClaudeQuestion(page: ProductPage, journey: string): Promise<
       await answerPasswordIfAsked(page);
       await page.click('[data-first-run-locked] [data-change-submit]');
       await page.waitForSelector('[data-first-run-locked]', { state: 'detached', timeout: 20_000 });
-      await recordStep({ journey, step: 'first-run-scan-gate', status: 'PASS', evidence: 'the scan asked for the operator password and read the machine once given it' });
+      await recordStep({
+        journey,
+        step: 'first-run-scan-gate',
+        status: 'PASS',
+        evidence: 'the scan asked for the operator password and read the machine once given it',
+      });
     } else if (at === 'tools') await page.click('[data-machine-stepper][data-step="tools"] [data-step-next]');
     else await Bun.sleep(200);
   }
-  throw new Error(`the first run never reached the Claude question: ${(await renderedDataAttributes(page as never)).slice(0, 800)}`);
+  throw new Error(
+    `the first run never reached the Claude question: ${(await renderedDataAttributes(page as never)).slice(0, 800)}`,
+  );
 }
 
 interface CoreOutcome {
@@ -216,156 +236,219 @@ interface CoreOutcome {
  * Journeys 2, 4 and 5, in the order a new owner walks them. Run once direct and once over the relay.
  */
 async function coreJourney(product: Product, journey: string): Promise<CoreOutcome> {
-      const { environment, browser } = product;
-      const page = browser.page;
+  const { environment, browser } = product;
+  const page = browser.page;
 
-      // Arrange — a machine that is NOT set up, which is what a fresh install is.
-      const before = await asOwner(environment, 'GET', '/v1/fleet/machine');
-      should((before.body as { setUp: boolean }).setUp).be.false();
+  // Arrange — a machine that is NOT set up, which is what a fresh install is.
+  const before = await asOwner(environment, 'GET', '/v1/fleet/machine');
+  should((before.body as { setUp: boolean }).setUp).be.false();
 
-      // Act / Assert — journey 2: pair.
-      const daemonId = await pair(product, journey);
-      await step(journey, 'device-key-non-extractable', async () => {
-        const stored = await deviceGrantForLeakSearchOnly(page as never);
-        if (stored.key === null) throw new Error(`no device key stored. Storage: ${stored.shape}`);
-        if (!stored.key.isCryptoKey || stored.key.algorithm !== 'Ed25519' || stored.key.extractable)
-          throw new Error(`the device key is ${JSON.stringify(stored.key)}`);
-        if (stored.tokenFields.length !== 0) throw new Error(`token-shaped fields in storage: ${stored.tokenFields.join(', ')}`);
-        return { value: undefined, evidence: `Ed25519 CryptoKey, extractable=false; no token-shaped field (${stored.shape.slice(0, 300)})` };
-      });
+  // Act / Assert — journey 2: pair.
+  const daemonId = await pair(product, journey);
+  await step(journey, 'device-key-non-extractable', async () => {
+    const stored = await deviceGrantForLeakSearchOnly(page as never);
+    if (stored.key === null) throw new Error(`no device key stored. Storage: ${stored.shape}`);
+    if (!stored.key.isCryptoKey || stored.key.algorithm !== 'Ed25519' || stored.key.extractable)
+      throw new Error(`the device key is ${JSON.stringify(stored.key)}`);
+    if (stored.tokenFields.length !== 0)
+      throw new Error(`token-shaped fields in storage: ${stored.tokenFields.join(', ')}`);
+    return {
+      value: undefined,
+      evidence: `Ed25519 CryptoKey, extractable=false; no token-shaped field (${stored.shape.slice(0, 300)})`,
+    };
+  });
 
-      // Journey 2 (passkey) and 3 (locked until unlocked) need the unlock model.
-      const unlock = await asOwner(environment, 'GET', '/v1/security');
-      if (unlock.status === 404) {
-        await recordStep({ journey, step: 'passkey-unlock', status: 'SKIP', evidence: 'this build has no /v1/security — the unlock model (#464) is not merged' });
-      } else {
-        const authenticator = await addVirtualAuthenticator(browser);
-        await recordStep({ journey, step: 'passkey-unlock', status: 'FAIL', evidence: `unlock model present (authenticator ${authenticator.authenticatorId}); the unlock journey is written once #464 lands` });
-      }
+  // Journey 2 (passkey) and 3 (locked until unlocked) need the unlock model.
+  const unlock = await asOwner(environment, 'GET', '/v1/security');
+  if (unlock.status === 404) {
+    await recordStep({
+      journey,
+      step: 'passkey-unlock',
+      status: 'SKIP',
+      evidence: 'this build has no /v1/security — the unlock model (#464) is not merged',
+    });
+  } else {
+    const authenticator = await addVirtualAuthenticator(browser);
+    await recordStep({
+      journey,
+      step: 'passkey-unlock',
+      status: 'FAIL',
+      evidence: `unlock model present (authenticator ${authenticator.authenticatorId}); the unlock journey is written once #464 lands`,
+    });
+  }
 
-      // Journey 4: the first run opens by itself.
-      await step(journey, 'first-run-opens-itself', async () => {
-        const open = await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`);
-        if (open) await page.click('[data-onboarding-open-fleet]');
-        await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
-        return { value: undefined, evidence: `the first-run stepper opened at ${page.url()} (${open ? 'via Open my fleet' : 'directly'})` };
-      });
-      await captureScreens(page, journey, '02-first-run-start');
-      await reachClaudeQuestion(page, journey);
-      await step(journey, 'first-run-claude-import', async () => {
-        await captureScreens(page, journey, '03-first-run-claude');
-        await page.click('[data-harness-import]');
-        return { value: undefined, evidence: 'Claude: Import' };
-      });
-      await step(journey, 'first-run-codex-skip', async () => {
-        await expectScreen(page, '[data-machine-stepper][data-step="codex"] [data-harness-skip]');
-        await captureScreens(page, journey, '04-first-run-codex');
-        await page.click('[data-harness-skip]');
-        return { value: undefined, evidence: 'Codex: Skip' };
-      });
-      if (await page.evaluate<boolean>(`document.querySelector('[data-machine-stepper][data-step="updates"]') !== null`))
-        await page.click('[data-step-next]');
-      const runtimeName = 'claude-e2e';
-      await step(journey, 'first-run-names', async () => {
-        await expectScreen(page, '[data-machine-stepper][data-step="names"] input[data-name-input="claude"]');
-        await page.fill('input[data-name-input="claude"]', runtimeName);
-        await captureScreens(page, journey, '05-first-run-names');
-        const asked = await answerPasswordIfAsked(page);
-        await page.click('[data-change-submit]');
-        await expectScreen(page, '[data-first-run-step="done"]', 30_000);
-        const result = await page.evaluate<string | null>(`document.querySelector('[data-first-run-step="done"]').getAttribute('data-first-run-result')`);
-        if (result !== 'imported') throw new Error(`the first run finished with result ${String(result)}: ${String(await textNow(page, '[data-first-run-step="done"]'))}`);
-        return { value: undefined, evidence: `runtime named ${runtimeName}; done=${result}; password asked: ${String(asked)}` };
-      });
-      await captureScreens(page, journey, '06-first-run-done');
-      const runtimes = await asOwner(environment, 'GET', '/v1/fleet/runtimes');
-      should(JSON.stringify(runtimes.body)).containEql(runtimeName);
+  // Journey 4: the first run opens by itself.
+  await step(journey, 'first-run-opens-itself', async () => {
+    const open = await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`);
+    if (open) await page.click('[data-onboarding-open-fleet]');
+    await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
+    return {
+      value: undefined,
+      evidence: `the first-run stepper opened at ${page.url()} (${open ? 'via Open my fleet' : 'directly'})`,
+    };
+  });
+  await captureScreens(page, journey, '02-first-run-start');
+  await reachClaudeQuestion(page, journey);
+  await step(journey, 'first-run-claude-import', async () => {
+    await captureScreens(page, journey, '03-first-run-claude');
+    await page.click('[data-harness-import]');
+    return { value: undefined, evidence: 'Claude: Import' };
+  });
+  await step(journey, 'first-run-codex-skip', async () => {
+    await expectScreen(page, '[data-machine-stepper][data-step="codex"] [data-harness-skip]');
+    await captureScreens(page, journey, '04-first-run-codex');
+    await page.click('[data-harness-skip]');
+    return { value: undefined, evidence: 'Codex: Skip' };
+  });
+  if (await page.evaluate<boolean>(`document.querySelector('[data-machine-stepper][data-step="updates"]') !== null`))
+    await page.click('[data-step-next]');
+  const runtimeName = 'claude-e2e';
+  await step(journey, 'first-run-names', async () => {
+    await expectScreen(page, '[data-machine-stepper][data-step="names"] input[data-name-input="claude"]');
+    await page.fill('input[data-name-input="claude"]', runtimeName);
+    await captureScreens(page, journey, '05-first-run-names');
+    const asked = await answerPasswordIfAsked(page);
+    await page.click('[data-change-submit]');
+    await expectScreen(page, '[data-first-run-step="done"]', 30_000);
+    const result = await page.evaluate<string | null>(
+      `document.querySelector('[data-first-run-step="done"]').getAttribute('data-first-run-result')`,
+    );
+    if (result !== 'imported')
+      throw new Error(
+        `the first run finished with result ${String(result)}: ${String(await textNow(page, '[data-first-run-step="done"]'))}`,
+      );
+    return {
+      value: undefined,
+      evidence: `runtime named ${runtimeName}; done=${result}; password asked: ${String(asked)}`,
+    };
+  });
+  await captureScreens(page, journey, '06-first-run-done');
+  const runtimes = await asOwner(environment, 'GET', '/v1/fleet/runtimes');
+  should(JSON.stringify(runtimes.body)).containEql(runtimeName);
 
-      // Journey 5: start a session from the app, chat, see the transcript.
-      const marker = `e2e-hello-${Math.trunc(Math.random() * 1e9).toString(36)}`;
-      const sessionUrl = await step(journey, 'start-session', async () => {
-        await page.goto(`${product.origin.origin}/d/${daemonId}/new`, { waitUntil: 'networkidle', timeout: 30_000 });
-        await expectScreen(page, '#fy-new-session-prompt');
-        await captureScreens(page, journey, '07-new-session');
-        await page.fill('#fy-new-session-prompt', marker);
-        const workspace = join(environment.paths.root, 'workspace');
-        await mkdir(workspace, { recursive: true });
-        await page.fill('#fy-new-session-cwd', workspace);
-        await page.press('#fy-new-session-cwd', 'Escape');
-        await page.click('button:has-text("Create session")');
-        await waitUntil(page, `location.pathname.includes('/session/')`, 30_000).catch(async (error: unknown) => {
-          await page.screenshot({ path: join(EVIDENCE_ROOT, journey, 'fail-start-session.png') });
-          throw new Error(`${String((error as Error).message)}. Alerts: ${String(await textNow(page, '[role="alert"]'))}. Form: ${String(await textNow(page, 'form'))}`);
-        });
-        return { value: page.url(), evidence: `created from the app; landed on ${page.url()}` };
-      });
-      await step(journey, 'transcript-shows-reply', async () => {
-        await expectScreen(page, '[data-transcript-kind="assistant"]', 45_000);
-        const text = await textNow(page, 'section[aria-label="Transcript"]');
-        // The opening prompt reaches the harness as a pointer to its turn file, so the turn file is
-        // where the marker must be — and the transcript must show the harness reading that file.
-        const turnFile = /Read the file (\S+turn-001\.md)/u.exec(text ?? '')?.[1];
-        if (text === null || turnFile === undefined || !text.includes('FAKE-REPLY 1'))
-          throw new Error(`the transcript shows no turn-1 exchange: ${String(text)}`);
-        const turn = await readFile(turnFile, 'utf8');
-        if (!turn.includes(marker)) throw new Error(`the turn file ${turnFile} does not carry the prompt ${marker}`);
-        return { value: undefined, evidence: `transcript shows the prompt and the fake harness's reply (${text.slice(0, 160)})` };
-      });
-      await captureScreens(page, journey, '08-session-transcript');
-      await step(journey, 'chat-follow-up', async () => {
-        const follow = `${marker}-again`;
-        await page.fill('form.fy-composer textarea', follow);
-        await page.click('form.fy-composer button[type="submit"]');
-        await waitUntil(page, `(document.querySelector('section[aria-label="Transcript"]')?.textContent ?? '').includes('FAKE-REPLY 2')`, 45_000);
-        return { value: undefined, evidence: 'a second message from the composer reached the harness and its reply rendered' };
-      });
+  // Journey 5: start a session from the app, chat, see the transcript.
+  const marker = `e2e-hello-${Math.trunc(Math.random() * 1e9).toString(36)}`;
+  const sessionUrl = await step(journey, 'start-session', async () => {
+    await page.goto(`${product.origin.origin}/d/${daemonId}/new`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await expectScreen(page, '#fy-new-session-prompt');
+    await captureScreens(page, journey, '07-new-session');
+    await page.fill('#fy-new-session-prompt', marker);
+    const workspace = join(environment.paths.root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    await page.fill('#fy-new-session-cwd', workspace);
+    await page.press('#fy-new-session-cwd', 'Escape');
+    await page.click('button:has-text("Create session")');
+    await waitUntil(page, `location.pathname.includes('/session/')`, 30_000).catch(async (error: unknown) => {
+      await page.screenshot({ path: join(EVIDENCE_ROOT, journey, 'fail-start-session.png') });
+      throw new Error(
+        `${String((error as Error).message)}. Alerts: ${String(await textNow(page, '[role="alert"]'))}. Form: ${String(await textNow(page, 'form'))}`,
+      );
+    });
+    return { value: page.url(), evidence: `created from the app; landed on ${page.url()}` };
+  });
+  await step(journey, 'transcript-shows-reply', async () => {
+    await expectScreen(page, '[data-transcript-kind="assistant"]', 45_000);
+    const text = await textNow(page, 'section[aria-label="Transcript"]');
+    // The opening prompt reaches the harness as a pointer to its turn file, so the turn file is
+    // where the marker must be — and the transcript must show the harness reading that file.
+    const turnFile = /Read the file (\S+turn-001\.md)/u.exec(text ?? '')?.[1];
+    if (text === null || turnFile === undefined || !text.includes('FAKE-REPLY 1'))
+      throw new Error(`the transcript shows no turn-1 exchange: ${String(text)}`);
+    const turn = await readFile(turnFile, 'utf8');
+    if (!turn.includes(marker)) throw new Error(`the turn file ${turnFile} does not carry the prompt ${marker}`);
+    return {
+      value: undefined,
+      evidence: `transcript shows the prompt and the fake harness's reply (${text.slice(0, 160)})`,
+    };
+  });
+  await captureScreens(page, journey, '08-session-transcript');
+  await step(journey, 'chat-follow-up', async () => {
+    const follow = `${marker}-again`;
+    await page.fill('form.fy-composer textarea', follow);
+    await page.click('form.fy-composer button[type="submit"]');
+    await waitUntil(
+      page,
+      `(document.querySelector('section[aria-label="Transcript"]')?.textContent ?? '').includes('FAKE-REPLY 2')`,
+      45_000,
+    );
+    return {
+      value: undefined,
+      evidence: 'a second message from the composer reached the harness and its reply rendered',
+    };
+  });
 
-      await step(journey, 'open-terminal', async () => {
-        await page.click('fieldset[aria-label="Workspace panes"] button:has-text("Terminal")');
-        await expectScreen(page, '[data-terminal-deck]');
-        const create = await page.evaluate<boolean>(`[...document.querySelectorAll('[data-terminal-deck] button')].some(b => /New terminal|Create terminal/.test(b.textContent + (b.getAttribute('aria-label') ?? '')))`);
-        if (create) await page.click('[data-terminal-deck] button:has-text("New terminal"), [data-terminal-deck] [aria-label="Create terminal"]');
-        await expectScreen(page, '.kt-webterm__connection[data-state="live"]', 30_000);
-        return { value: undefined, evidence: `a shell terminal opened and went live at ${sessionUrl}` };
-      });
-      await captureScreens(page, journey, '09-terminal');
+  await step(journey, 'open-terminal', async () => {
+    await page.click('fieldset[aria-label="Workspace panes"] button:has-text("Terminal")');
+    await expectScreen(page, '[data-terminal-deck]');
+    const create = await page.evaluate<boolean>(
+      `[...document.querySelectorAll('[data-terminal-deck] button')].some(b => /New terminal|Create terminal/.test(b.textContent + (b.getAttribute('aria-label') ?? '')))`,
+    );
+    if (create)
+      await page.click(
+        '[data-terminal-deck] button:has-text("New terminal"), [data-terminal-deck] [aria-label="Create terminal"]',
+      );
+    await expectScreen(page, '.kt-webterm__connection[data-state="live"]', 30_000);
+    return { value: undefined, evidence: `a shell terminal opened and went live at ${sessionUrl}` };
+  });
+  await captureScreens(page, journey, '09-terminal');
 
-      // Secrets: names only.
-      const secretName = 'E2E_SECRET';
-      await step(journey, 'add-secret', async () => {
-        await page.goto(`${product.origin.origin}/d/${daemonId}/settings#daemons`, { waitUntil: 'networkidle', timeout: 30_000 });
-        await expectScreen(page, '[data-daemon-panel="secrets"], [data-daemon-panel-trigger]');
-        if (await page.evaluate<boolean>(`document.querySelector('[data-daemon-panel="secrets"]') !== null`)) await page.click('[data-daemon-panel="secrets"]');
-        await expectScreen(page, '[data-testid="secrets-card"]');
-        await page.fill('form[aria-label="Add or replace a secret"] input:not([type="password"])', secretName);
-        await page.fill('form[aria-label="Add or replace a secret"] input[type="password"]', 'fake-e2e-secret-value');
-        await answerPasswordIfAsked(page);
-        await page.click('form[aria-label="Add or replace a secret"] button:has-text("Save")');
-        await expectScreen(page, `li[data-secret="${secretName}"]`);
-        const listed = await asOwner(environment, 'GET', '/v1/secrets');
-        if (JSON.stringify(listed.body).includes('fake-e2e-secret-value')) throw new Error('the secrets list returned a VALUE');
-        const pageText = await page.evaluate<string>('document.body.textContent');
-        if (pageText.includes('fake-e2e-secret-value')) throw new Error('the page shows the secret VALUE');
-        return { value: undefined, evidence: `${secretName} is listed by name; neither the route nor the page shows the value` };
-      });
-      await captureScreens(page, journey, '10-secrets');
+  // Secrets: names only.
+  const secretName = 'E2E_SECRET';
+  await step(journey, 'add-secret', async () => {
+    await page.goto(`${product.origin.origin}/d/${daemonId}/settings#daemons`, {
+      waitUntil: 'networkidle',
+      timeout: 30_000,
+    });
+    await expectScreen(page, '[data-daemon-panel="secrets"], [data-daemon-panel-trigger]');
+    if (await page.evaluate<boolean>(`document.querySelector('[data-daemon-panel="secrets"]') !== null`))
+      await page.click('[data-daemon-panel="secrets"]');
+    await expectScreen(page, '[data-testid="secrets-card"]');
+    await page.fill('form[aria-label="Add or replace a secret"] input:not([type="password"])', secretName);
+    await page.fill('form[aria-label="Add or replace a secret"] input[type="password"]', 'fake-e2e-secret-value');
+    await answerPasswordIfAsked(page);
+    await page.click('form[aria-label="Add or replace a secret"] button:has-text("Save")');
+    await expectScreen(page, `li[data-secret="${secretName}"]`);
+    const listed = await asOwner(environment, 'GET', '/v1/secrets');
+    if (JSON.stringify(listed.body).includes('fake-e2e-secret-value'))
+      throw new Error('the secrets list returned a VALUE');
+    const pageText = await page.evaluate<string>('document.body.textContent');
+    if (pageText.includes('fake-e2e-secret-value')) throw new Error('the page shows the secret VALUE');
+    return {
+      value: undefined,
+      evidence: `${secretName} is listed by name; neither the route nor the page shows the value`,
+    };
+  });
+  await captureScreens(page, journey, '10-secrets');
 
-      await step(journey, 'change-setting', async () => {
-        await page.goto(`${product.origin.origin}/d/${daemonId}/settings#text-size`, { waitUntil: 'networkidle', timeout: 30_000 });
-        await expectScreen(page, 'input[name="text-scale"][value="large"]');
-        await page.click('label:has(input[name="text-scale"][value="large"])');
-        await waitUntil(page, `document.documentElement.getAttribute('data-text-scale') === 'large'`, 10_000);
-        return { value: undefined, evidence: 'text size Large applied (<html data-text-scale="large">)' };
-      });
-      await captureScreens(page, journey, '11-settings');
+  await step(journey, 'change-setting', async () => {
+    await page.goto(`${product.origin.origin}/d/${daemonId}/settings#text-size`, {
+      waitUntil: 'networkidle',
+      timeout: 30_000,
+    });
+    await expectScreen(page, 'input[name="text-scale"][value="large"]');
+    await page.click('label:has(input[name="text-scale"][value="large"])');
+    await waitUntil(page, `document.documentElement.getAttribute('data-text-scale') === 'large'`, 10_000);
+    return { value: undefined, evidence: 'text size Large applied (<html data-text-scale="large">)' };
+  });
+  await captureScreens(page, journey, '11-settings');
 
-      // The audit log (#461) records the session, terminal, secret and setting.
-      const audit = await asOwner(environment, 'GET', '/v1/audit');
-      if (audit.status === 404) {
-        await recordStep({ journey, step: 'audit-log', status: 'SKIP', evidence: 'this build has no /v1/audit — the audit log (#461) is not merged' });
-      } else {
-        await recordStep({ journey, step: 'audit-log', status: 'FAIL', evidence: `audit present (${JSON.stringify(audit.body).slice(0, 300)}); assertions written once #461 lands` });
-      }
+  // The audit log (#461) records the session, terminal, secret and setting.
+  const audit = await asOwner(environment, 'GET', '/v1/audit');
+  if (audit.status === 404) {
+    await recordStep({
+      journey,
+      step: 'audit-log',
+      status: 'SKIP',
+      evidence: 'this build has no /v1/audit — the audit log (#461) is not merged',
+    });
+  } else {
+    await recordStep({
+      journey,
+      step: 'audit-log',
+      status: 'FAIL',
+      evidence: `audit present (${JSON.stringify(audit.body).slice(0, 300)}); assertions written once #461 lands`,
+    });
+  }
   return { daemonId, marker, secretValue: 'fake-e2e-secret-value', sessionUrl };
 }
 
@@ -393,12 +476,17 @@ describe('the product, from a fresh machine to a working session', () => {
         // Assert — it crossed THIS rendezvous, the browser knocked on the sinkhole first, the session
         // page says relay, and the rendezvous never saw a payload or a credential in the clear.
         await step(journey, 'carried-by-relay', async () => {
-          const arrivals = (await relay.rendezvous.arrivals()).filter(entry => entry.role === 'client' && entry.daemonId === relay.fingerprint);
-          if (arrivals.length < 2) throw new Error(`only ${String(arrivals.length)} client arrival(s) at the rendezvous`);
+          const arrivals = (await relay.rendezvous.arrivals()).filter(
+            entry => entry.role === 'client' && entry.daemonId === relay.fingerprint,
+          );
+          if (arrivals.length < 2)
+            throw new Error(`only ${String(arrivals.length)} client arrival(s) at the rendezvous`);
           if (relay.sinkhole.attempts() <= directBefore) throw new Error('the browser never tried the direct address');
           await product.browser.page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
           await expectScreen(product.browser.page, '[data-carrier-kind]');
-          const kind = await product.browser.page.evaluate<string | null>(`document.querySelector('[data-carrier-kind]')?.getAttribute('data-carrier-kind') ?? null`);
+          const kind = await product.browser.page.evaluate<string | null>(
+            `document.querySelector('[data-carrier-kind]')?.getAttribute('data-carrier-kind') ?? null`,
+          );
           if (kind !== 'relay') throw new Error(`the session page reports carrier ${String(kind)}`);
           return {
             value: undefined,
@@ -419,15 +507,16 @@ describe('the product, from a fresh machine to a working session', () => {
             'the device id': stored.deviceId,
           });
           if (leaks.length > 0) throw new Error(leaks.join('; '));
-          return { value: undefined, evidence: `${String(frames.length)} relay frames searched (utf-8 and base64): no prompt, reply, secret, password, token or device id` };
+          return {
+            value: undefined,
+            evidence: `${String(frames.length)} relay frames searched (utf-8 and base64): no prompt, reply, secret, password, token or device id`,
+          };
         });
       },
       { relay: true },
     );
   }, 600_000);
-
 });
-
 
 const STALE_DONE_BUG =
   'packages/pwa/src/features/onboarding/onboarding-progress.ts:501 — a stored add-client walk at step "done" is kept when a NEW pairing link arrives (same route), so an already-paired browser opening a second machine\'s link, or re-pairing after a revoke/idle expiry, lands on "You are set up" and the link is ignored. MAJOR';
@@ -438,13 +527,23 @@ const STALE_DONE_BUG =
  * setup guide's place) is taken so the rest of the journey can still be measured.
  */
 async function pairAgain(journey: string, stepName: string, page: ProductPage, url: string): Promise<string> {
-  const first = await softStep(journey, stepName, async () => ({ value: undefined, evidence: `confirm screen reached: ${await confirmPairing(page, url)}` }), STALE_DONE_BUG);
+  const first = await softStep(
+    journey,
+    stepName,
+    async () => ({ value: undefined, evidence: `confirm screen reached: ${await confirmPairing(page, url)}` }),
+    STALE_DONE_BUG,
+  );
   if (first) return 'direct';
   await page.evaluate(`localStorage.removeItem('fy-onboarding-v4')`);
   // A fresh document: the same URL again would be a hash-only navigation and keep the old state.
   await page.goto('about:blank');
   const settled = await confirmPairing(page, url);
-  await recordStep({ journey, step: `${stepName}:workaround`, status: 'PASS', evidence: `after clearing fy-onboarding-v4 the same link paired (${settled})` });
+  await recordStep({
+    journey,
+    step: `${stepName}:workaround`,
+    status: 'PASS',
+    evidence: `after clearing fy-onboarding-v4 the same link paired (${settled})`,
+  });
   return 'workaround';
 }
 
@@ -475,7 +574,8 @@ describe('signing a harness in from the first run', () => {
       const { environment, browser } = product;
       const page = browser.page;
       await pair(product, journey);
-      if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`)) await page.click('[data-onboarding-open-fleet]');
+      if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
+        await page.click('[data-onboarding-open-fleet]');
       await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
       await reachClaudeQuestion(page, journey);
       await page.click('[data-harness-import]');
@@ -502,8 +602,14 @@ describe('signing a harness in from the first run', () => {
           `[...document.querySelectorAll('[data-codex-login] code')].map(node => (node.textContent ?? '').trim()).find(text => text.startsWith('https://auth.openai.com/')) ?? null`,
         );
         const state = authorize === null ? null : new URL(authorize).searchParams.get('state');
-        if (state === null) throw new Error(`no authorize link with a state on the panel: ${String(await textNow(page, '[data-codex-login]'))}`);
-        await page.fill('textarea[name="codex-login-address"]', `http://localhost:1455/auth/callback?code=fake-e2e-code&state=${state}`);
+        if (state === null)
+          throw new Error(
+            `no authorize link with a state on the panel: ${String(await textNow(page, '[data-codex-login]'))}`,
+          );
+        await page.fill(
+          'textarea[name="codex-login-address"]',
+          `http://localhost:1455/auth/callback?code=fake-e2e-code&state=${state}`,
+        );
         await page.click('[data-codex-login] button:has-text("Finish sign-in")');
         // On success the panel says complete and the step re-reads the scan at once, so the panel can be
         // gone before a poll sees it. The re-read is the durable signal: Codex now reads Signed in.
@@ -514,29 +620,46 @@ describe('signing a harness in from the first run', () => {
           'the Codex sign-in to complete',
         ).catch(async (error: unknown) => {
           await page.screenshot({ path: join(EVIDENCE_ROOT, journey, 'fail-codex-paste.png') });
-          throw new Error(`${String((error as Error).message)}. Panel: ${String(await textNow(page, '[data-credential-sign-in]'))}. States: ${await page.evaluate<string>(`[...document.querySelectorAll('[data-codex-login],[data-credential-sign-in]')].map(n => n.getAttribute('data-codex-login') ?? n.getAttribute('data-credential-sign-in')).join(',')`)}`);
+          throw new Error(
+            `${String((error as Error).message)}. Panel: ${String(await textNow(page, '[data-credential-sign-in]'))}. States: ${await page.evaluate<string>(`[...document.querySelectorAll('[data-codex-login],[data-credential-sign-in]')].map(n => n.getAttribute('data-codex-login') ?? n.getAttribute('data-credential-sign-in')).join(',')`)}`,
+          );
         });
-        return { value: undefined, evidence: `pasted the callback for state ${state.slice(0, 14)}…; the sign-in completed` };
+        return {
+          value: undefined,
+          evidence: `pasted the callback for state ${state.slice(0, 14)}…; the sign-in completed`,
+        };
       });
       await captureScreens(page, journey, '53-codex-signed-in');
 
       // Assert — the daemon ran THIS fake, never the host's codex, and the login is now a credential.
       await softStep(journey, 'codex-credential-recorded', async () => {
         const invocations = await readFile(product.tools.codexLog, 'utf8').catch(() => '');
-        if (!invocations.includes('login')) throw new Error(`the fake codex never saw a login: ${invocations.slice(0, 300)}`);
+        if (!invocations.includes('login'))
+          throw new Error(`the fake codex never saw a login: ${invocations.slice(0, 300)}`);
         const credentials = await asOwner(environment, 'GET', '/v1/fleet/credentials');
         const text = JSON.stringify(credentials.body);
         if (!/codex/iu.test(text)) throw new Error(`no Codex credential after signing in: ${text.slice(0, 400)}`);
-        if (text.includes('fake-e2e-access') || text.includes('fake-e2e-refresh')) throw new Error('the credentials route returned a token value');
-        return { value: undefined, evidence: `fake codex ran (${String(invocations.trim().split('\\n').length)} invocation(s)); /v1/fleet/credentials lists a Codex login and no token value` };
+        if (text.includes('fake-e2e-access') || text.includes('fake-e2e-refresh'))
+          throw new Error('the credentials route returned a token value');
+        return {
+          value: undefined,
+          evidence: `fake codex ran (${String(invocations.trim().split('\\n').length)} invocation(s)); /v1/fleet/credentials lists a Codex login and no token value`,
+        };
       });
       // A sign-in left pending when the daemon stops must not outlive it.
       await softStep(
         journey,
         'pending-sign-in-ends-with-daemon',
         async () => {
-          const started = await asOwner(environment, 'POST', '/v1/fleet/login', { credentialId: 'codex-you', method: 'link', operatorPassword: OPERATOR_PASSWORD });
-          if (started.status >= 300) throw new Error(`starting a second sign-in answered ${String(started.status)}: ${JSON.stringify(started.body).slice(0, 200)}`);
+          const started = await asOwner(environment, 'POST', '/v1/fleet/login', {
+            credentialId: 'codex-you',
+            method: 'link',
+            operatorPassword: OPERATOR_PASSWORD,
+          });
+          if (started.status >= 300)
+            throw new Error(
+              `starting a second sign-in answered ${String(started.status)}: ${JSON.stringify(started.body).slice(0, 200)}`,
+            );
           await Bun.sleep(1_500);
           await environment.stopDaemon();
           const left = await reapLeftovers(environment, journey);
@@ -559,7 +682,12 @@ describe('access ends when it should, and the person is told', () => {
       const page = browser.page;
       const outcome = await pairedWithSession(product, journey);
       await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
-      await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'a live session stream');
+      await waitUntil(
+        page,
+        `document.querySelector('[data-live-stream="live"]') !== null`,
+        30_000,
+        'a live session stream',
+      );
       const stored = await deviceGrantForLeakSearchOnly(page as never);
 
       // Act — the owner revokes the device. On main there is no `fy device revoke`, so the route.
@@ -569,8 +697,14 @@ describe('access ends when it should, and the person is told', () => {
         journey,
         step: 'revoke-command',
         status: viaCli ? 'PASS' : 'FLAG',
-        evidence: viaCli ? 'fy device revoke succeeded' : `fy device revoke is not a command here (exit ${String(cli.code)}: ${cli.err.trim().split('\n')[0] ?? ''}); revoked through DELETE /v1/pair/devices/:id`,
-        ...(viaCli ? {} : { bug: 'no CLI verb revokes a device on main (packages/cli/src/lib/pair/commands.ts:33-37 only offers `fy pair`); expected from #464 — minor until then' }),
+        evidence: viaCli
+          ? 'fy device revoke succeeded'
+          : `fy device revoke is not a command here (exit ${String(cli.code)}: ${cli.err.trim().split('\n')[0] ?? ''}); revoked through DELETE /v1/pair/devices/:id`,
+        ...(viaCli
+          ? {}
+          : {
+              bug: 'no CLI verb revokes a device on main (packages/cli/src/lib/pair/commands.ts:33-37 only offers `fy pair`); expected from #464 — minor until then',
+            }),
       });
       const revokedAt = Date.now();
       if (!viaCli) {
@@ -580,41 +714,74 @@ describe('access ends when it should, and the person is told', () => {
 
       // Assert — the live view stops at once, and the screen says what to do.
       await step(journey, 'cut-off-immediately', async () => {
-        await waitUntil(page, `document.querySelector('[data-live-stream="live"]') === null`, 10_000, 'the live stream to stop');
-        return { value: undefined, evidence: `the live stream left "live" ${String(Date.now() - revokedAt)}ms after the revoke: ${await whatTheScreenSays(page)}` };
+        await waitUntil(
+          page,
+          `document.querySelector('[data-live-stream="live"]') === null`,
+          10_000,
+          'the live stream to stop',
+        );
+        return {
+          value: undefined,
+          evidence: `the live stream left "live" ${String(Date.now() - revokedAt)}ms after the revoke: ${await whatTheScreenSays(page)}`,
+        };
       });
       await Bun.sleep(3_000);
       await captureScreens(page, journey, '20-after-revoke');
-      await softStep(journey, 'told-to-pair-again', async () => {
-        const said = await whatTheScreenSays(page);
-        if (!REPAIR_WORDS.test(said)) {
-          await page.reload({ waitUntil: 'networkidle', timeout: 30_000 });
-          await Bun.sleep(3_000);
-          await captureScreens(page, journey, '21-after-revoke-reload');
-          const reloaded = await whatTheScreenSays(page);
-          if (!REPAIR_WORDS.test(reloaded))
-            throw new Error(`a revoked device is never told to pair again. Live screen: ${said}. After reload: ${reloaded}`);
-          return { value: undefined, evidence: `only after a reload: ${reloaded}` };
-        }
-        return { value: undefined, evidence: said };
-      }, 'packages/pwa/src/lib/relay-session.ts:979 — close 4403 (unknown/revoked/idle device) is reported as a generic rendezvous end, even on a direct carrier; packages/relay/src/lib/connection.ts:369-375 then says direct was not reachable; RELAY_CLOSE_CODES.authRejected is never read in packages/pwa, so no screen ever says pair again. MAJOR');
+      await softStep(
+        journey,
+        'told-to-pair-again',
+        async () => {
+          const said = await whatTheScreenSays(page);
+          if (!REPAIR_WORDS.test(said)) {
+            await page.reload({ waitUntil: 'networkidle', timeout: 30_000 });
+            await Bun.sleep(3_000);
+            await captureScreens(page, journey, '21-after-revoke-reload');
+            const reloaded = await whatTheScreenSays(page);
+            if (!REPAIR_WORDS.test(reloaded))
+              throw new Error(
+                `a revoked device is never told to pair again. Live screen: ${said}. After reload: ${reloaded}`,
+              );
+            return { value: undefined, evidence: `only after a reload: ${reloaded}` };
+          }
+          return { value: undefined, evidence: said };
+        },
+        'packages/pwa/src/lib/relay-session.ts:979 — close 4403 (unknown/revoked/idle device) is reported as a generic rendezvous end, even on a direct carrier; packages/relay/src/lib/connection.ts:369-375 then says direct was not reachable; RELAY_CLOSE_CODES.authRejected is never read in packages/pwa, so no screen ever says pair again. MAJOR',
+      );
 
       // And pairing again works.
       const logMark = environment.daemonOutput().err.length + environment.daemonOutput().out.length;
-      const repaired = await softStep(journey, 'pair-again', async () => {
-        const link = await mintPairingLink(environment, product.origin.origin);
-        const settled = await pairAgain(journey, 'pair-again-link', page, link.url);
-        await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
-        await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'a live stream after pairing again');
-        return { value: undefined, evidence: `paired again (${settled}) and the session streams live` };
-      }, 'the same browser cannot pair again with the machine that revoked it — see the daemon log excerpt in pair-again:daemon-log. MAJOR');
+      const repaired = await softStep(
+        journey,
+        'pair-again',
+        async () => {
+          const link = await mintPairingLink(environment, product.origin.origin);
+          const settled = await pairAgain(journey, 'pair-again-link', page, link.url);
+          await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          await waitUntil(
+            page,
+            `document.querySelector('[data-live-stream="live"]') !== null`,
+            30_000,
+            'a live stream after pairing again',
+          );
+          return { value: undefined, evidence: `paired again (${settled}) and the session streams live` };
+        },
+        'the same browser cannot pair again with the machine that revoked it — see the daemon log excerpt in pair-again:daemon-log. MAJOR',
+      );
       if (!repaired) {
         const log = environment.daemonOutput();
-        await recordStep({ journey, step: 'pair-again:daemon-log', status: 'FLAG', evidence: `${log.out}\n${log.err}`.slice(Math.max(0, logMark - 200)).slice(-1_400) });
+        await recordStep({
+          journey,
+          step: 'pair-again:daemon-log',
+          status: 'FLAG',
+          evidence: `${log.out}\n${log.err}`.slice(Math.max(0, logMark - 200)).slice(-1_400),
+        });
         const fresh = await launchProductBrowser(product.teardown);
         await softStep(journey, 'pair-again:fresh-browser', async () => {
           const link = await mintPairingLink(environment, product.origin.origin);
-          return { value: undefined, evidence: `a NEW browser pairs with the same machine: ${await confirmPairing(fresh.page, link.url)}` };
+          return {
+            value: undefined,
+            evidence: `a NEW browser pairs with the same machine: ${await confirmPairing(fresh.page, link.url)}`,
+          };
         });
       }
       assertNoSoftFailures(journey);
@@ -633,7 +800,9 @@ describe('access ends when it should, and the person is told', () => {
       await environment.stopDaemon();
       const document = await readFile(devicesFile, 'utf8');
       const aged = new Date(Date.now() - 31 * 24 * 3_600_000).toISOString();
-      const rewritten = document.replace(/"(lastSeenAt|createdAt)":"[^"]+"/gu, `"$1":"${aged}"`).replace(/"(lastSeenAt|createdAt)": "[^"]+"/gu, `"$1": "${aged}"`);
+      const rewritten = document
+        .replace(/"(lastSeenAt|createdAt)":"[^"]+"/gu, `"$1":"${aged}"`)
+        .replace(/"(lastSeenAt|createdAt)": "[^"]+"/gu, `"$1": "${aged}"`);
       if (rewritten === document) throw new Error(`no lastSeenAt in ${devicesFile} to age`);
       await writeFile(devicesFile, rewritten, 'utf8');
 
@@ -646,15 +815,25 @@ describe('access ends when it should, and the person is told', () => {
       // Assert
       await step(journey, 'idle-device-refused', async () => {
         const listed = await asOwner(environment, 'GET', '/v1/pair/devices');
-        if (JSON.stringify(listed.body).includes(stored.deviceId)) throw new Error(`the daemon still lists the idle device: ${JSON.stringify(listed.body).slice(0, 300)}`);
-        if (await page.evaluate<boolean>(`document.querySelector('[data-live-stream="live"]') !== null`)) throw new Error('the idle-expired device still streams live');
-        return { value: undefined, evidence: `device aged to ${aged} in ${devicesFile}; the daemon dropped it and the app is not live` };
+        if (JSON.stringify(listed.body).includes(stored.deviceId))
+          throw new Error(`the daemon still lists the idle device: ${JSON.stringify(listed.body).slice(0, 300)}`);
+        if (await page.evaluate<boolean>(`document.querySelector('[data-live-stream="live"]') !== null`))
+          throw new Error('the idle-expired device still streams live');
+        return {
+          value: undefined,
+          evidence: `device aged to ${aged} in ${devicesFile}; the daemon dropped it and the app is not live`,
+        };
       });
-      await softStep(journey, 'idle-told-to-pair-again', async () => {
-        const said = await whatTheScreenSays(page);
-        if (!REPAIR_WORDS.test(said)) throw new Error(`an idle-expired device is not told to pair again: ${said}`);
-        return { value: undefined, evidence: said };
-      }, 'packages/pwa/src/lib/relay-session.ts:979 — close 4403 (unknown/revoked/idle device) is reported as a generic rendezvous end, even on a direct carrier; packages/relay/src/lib/connection.ts:369-375 then says direct was not reachable; RELAY_CLOSE_CODES.authRejected is never read in packages/pwa, so no screen ever says pair again. MAJOR');
+      await softStep(
+        journey,
+        'idle-told-to-pair-again',
+        async () => {
+          const said = await whatTheScreenSays(page);
+          if (!REPAIR_WORDS.test(said)) throw new Error(`an idle-expired device is not told to pair again: ${said}`);
+          return { value: undefined, evidence: said };
+        },
+        'packages/pwa/src/lib/relay-session.ts:979 — close 4403 (unknown/revoked/idle device) is reported as a generic rendezvous end, even on a direct carrier; packages/relay/src/lib/connection.ts:369-375 then says direct was not reachable; RELAY_CLOSE_CODES.authRejected is never read in packages/pwa, so no screen ever says pair again. MAJOR',
+      );
       assertNoSoftFailures(journey);
     });
   }, 600_000);
@@ -695,14 +874,23 @@ describe('one browser, two machines', () => {
         const bId = decodeURIComponent(/(?:^|;)fp=([^;]+)/u.exec(link.fragment)?.[1] ?? '');
         const settled = await pairAgain(journey, 'pair-second-machine-link', page, link.url);
         await softStep(journey, 'pair-second-machine', async () => {
-          const connections = await page.evaluate<number>(`new Promise(resolve => { const r = indexedDB.open('ferretry-pwa'); r.onsuccess = () => { const q = r.result.transaction('connections').objectStore('connections').getAll(); q.onsuccess = () => { const raw = q.result[0]; const doc = typeof raw === 'string' ? JSON.parse(raw) : raw; resolve((doc?.connections ?? []).length); }; }; })`);
-          if (connections !== 2) throw new Error(`the browser holds ${String(connections)} connection(s) after pairing a second machine`);
-          return { value: undefined, evidence: `paired with B (${settled}); the browser holds two connections, A ${a.daemonId.slice(0, 18)}… and B ${bId.slice(0, 18)}…` };
+          const connections = await page.evaluate<number>(
+            `new Promise(resolve => { const r = indexedDB.open('ferretry-pwa'); r.onsuccess = () => { const q = r.result.transaction('connections').objectStore('connections').getAll(); q.onsuccess = () => { const raw = q.result[0]; const doc = typeof raw === 'string' ? JSON.parse(raw) : raw; resolve((doc?.connections ?? []).length); }; }; })`,
+          );
+          if (connections !== 2)
+            throw new Error(`the browser holds ${String(connections)} connection(s) after pairing a second machine`);
+          return {
+            value: undefined,
+            evidence: `paired with B (${settled}); the browser holds two connections, A ${a.daemonId.slice(0, 18)}… and B ${bId.slice(0, 18)}…`,
+          };
         });
         await page.goto(`${product.origin.origin}/`, { waitUntil: 'networkidle', timeout: 30_000 });
         await Bun.sleep(1_500);
         await captureScreens(page, journey, '40-two-machines-home');
-        await page.goto(`${product.origin.origin}/d/${bId}/settings#machines`, { waitUntil: 'networkidle', timeout: 30_000 });
+        await page.goto(`${product.origin.origin}/d/${bId}/settings#machines`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        });
         await Bun.sleep(1_500);
         await captureScreens(page, journey, '41-machine-b-settings');
 
@@ -710,10 +898,15 @@ describe('one browser, two machines', () => {
         await softStep(journey, 'sessions-stay-per-machine', async () => {
           const bSessions = await asOwner(second, 'GET', '/v1/sessions');
           if (JSON.stringify(bSessions.body).includes(a.sessionUrl.split('/session/')[1] ?? '@@'))
-            throw new Error('machine B lists machine A\'s session');
+            throw new Error("machine B lists machine A's session");
           await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
-          await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'A\'s session live');
-          return { value: undefined, evidence: 'A\'s session streams from A; B does not list it' };
+          await waitUntil(
+            page,
+            `document.querySelector('[data-live-stream="live"]') !== null`,
+            30_000,
+            "A's session live",
+          );
+          return { value: undefined, evidence: "A's session streams from A; B does not list it" };
         });
         await softStep(journey, 'revoke-at-b-leaves-a', async () => {
           const bDevices = await asOwner(second, 'GET', '/v1/pair/devices');
@@ -723,10 +916,19 @@ describe('one browser, two machines', () => {
           if (removed.status !== 200) throw new Error(`revoking at B answered ${String(removed.status)}`);
           await Bun.sleep(2_000);
           await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
-          await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'A\'s session still live after B revoked this browser');
+          await waitUntil(
+            page,
+            `document.querySelector('[data-live-stream="live"]') !== null`,
+            30_000,
+            "A's session still live after B revoked this browser",
+          );
           const aDevices = await asOwner(product.environment, 'GET', '/v1/pair/devices');
-          if ((aDevices.body as { devices: unknown[] }).devices.length !== 1) throw new Error('A lost its device when B revoked');
-          return { value: undefined, evidence: 'B revoked this browser; A still lists it and its session still streams' };
+          if ((aDevices.body as { devices: unknown[] }).devices.length !== 1)
+            throw new Error('A lost its device when B revoked');
+          return {
+            value: undefined,
+            evidence: 'B revoked this browser; A still lists it and its session still streams',
+          };
         });
 
         // The cross-machine parts of journey 9 need #464 (step-up per daemon) and #468 (clone shows commands).
@@ -735,10 +937,24 @@ describe('one browser, two machines', () => {
           journey,
           step: 'unlock-is-per-machine',
           status: security.status === 404 ? 'SKIP' : 'FAIL',
-          evidence: security.status === 404 ? 'no unlock model on this build (#464 not merged)' : 'unlock model present — write the A-unlock-is-useless-at-B assertion',
+          evidence:
+            security.status === 404
+              ? 'no unlock model on this build (#464 not merged)'
+              : 'unlock model present — write the A-unlock-is-useless-at-B assertion',
         });
-        await recordStep({ journey, step: 'clone-shows-commands', status: 'SKIP', evidence: 'clone A→B with every hook/MCP command shown needs #468' });
-        await recordStep({ journey, step: 'per-machine-notifications', status: 'SKIP', evidence: 'Web Push delivery needs a push service; headless Chrome has none on loopback (see memory: CDP push delivery drops)' });
+        await recordStep({
+          journey,
+          step: 'clone-shows-commands',
+          status: 'SKIP',
+          evidence: 'clone A→B with every hook/MCP command shown needs #468',
+        });
+        await recordStep({
+          journey,
+          step: 'per-machine-notifications',
+          status: 'SKIP',
+          evidence:
+            'Web Push delivery needs a push service; headless Chrome has none on loopback (see memory: CDP push delivery drops)',
+        });
         await second.stopDaemon();
         await reapLeftovers(second, journey);
       });
