@@ -690,9 +690,10 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
       if (said !== '')
         await recordStep({ journey, step: 'audit:daemon-says', status: 'FLAG', evidence: said.slice(0, 1_400) });
     }
-    const events = new Set(
-      ((audit.body as { records?: { event: string }[] }).records ?? []).map(record => record.event),
-    );
+    // Two lists: `records` is recent activity, and `kept` is the security changes (pairings, secrets,
+    // grants) kept apart so activity can never push them out. A record is in the log if it is in either.
+    const body = audit.body as { records?: { event: string }[]; kept?: { event: string }[] };
+    const events = new Set([...(body.records ?? []), ...(body.kept ?? [])].map(record => record.event));
     for (const [event, act] of [
       ['device.paired', 'the pairing'],
       ['terminal.opened', 'the terminal'],

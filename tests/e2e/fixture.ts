@@ -245,9 +245,21 @@ async function runCaptured(
   args: readonly string[],
   options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly timeoutMs?: number },
 ): Promise<CommandResult> {
-  const captured = await captureProcess(executable, args, options);
+  let captured = await captureProcess(executable, args, options);
   try {
-    return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
+    try {
+      return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
+    } catch (error) {
+      /**
+       * The same Bun epoll loss as in `captureProcess`, delivered through the child's 'error' event
+       * instead of thrown by `spawn`. A child that never got a pid never ran, so one more attempt is
+       * still a single run of the command; one that did run is never retried.
+       */
+      if (!isTransientBunSpawnFailure(error) || captured.child.pid !== undefined) throw error;
+      await Bun.sleep(0);
+      captured = await captureProcess(executable, args, options);
+      return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
+    }
   } catch (error) {
     captured.child.kill('SIGKILL');
     await captured.exited.catch(() => undefined);
