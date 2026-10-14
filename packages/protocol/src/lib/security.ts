@@ -147,5 +147,8 @@ export const UNLOCK_REQUIRED_CODE = 'unlock_required' as const;
  * when the unlock carried a key rotation and the daemon now holds the new key — the unlock is the first
  * passkey ceremony an overdue device meets, so it is where the key is replaced.
  */
-export const UnlockGrantedSchema = z.strictObject({ unlockedUntil: InstantSchema, keyRotated: z.literal(true).optional() });
+export const UnlockGrantedSchema = z.strictObject({
+  unlockedUntil: InstantSchema,
+  keyRotated: z.literal(true).optional(),
+});
 export type UnlockGranted = z.infer<typeof UnlockGrantedSchema>;

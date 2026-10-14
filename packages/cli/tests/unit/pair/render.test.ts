@@ -232,7 +232,8 @@ describe('pairing screen', () => {
 });
 
 describe('pairing screen, what the new device will hold', () => {
-  const before = (actual: string, marker: string): boolean => actual.indexOf('can do anything') < actual.indexOf(marker);
+  const before = (actual: string, marker: string): boolean =>
+    actual.indexOf('can do anything') < actual.indexOf(marker);
 
   it('should say a default code gives full access behind the unlock, before the QR, and name the verb that limits it', () => {
     // Act
@@ -263,7 +264,9 @@ describe('pairing screen, what the new device will hold', () => {
 
     // Assert
     const flattened = actual.replace(/\s+/gu, ' ');
-    should(flattened).containEql('LIMITED: a device paired with this code can only read the fleet and chat with sessions');
+    should(flattened).containEql(
+      'LIMITED: a device paired with this code can only read the fleet and chat with sessions',
+    );
     should(flattened).containEql('`foo device grant`');
     should(flattened).not.containEql('can do anything');
     should(actual.indexOf('LIMITED:')).be.below(actual.indexOf('Or scan this compact QR:'));

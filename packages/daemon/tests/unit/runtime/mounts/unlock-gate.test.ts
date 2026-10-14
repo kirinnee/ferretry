@@ -154,11 +154,13 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     should(granted.status).equal(200);
     return jsonBody(granted);
   };
-  const startSession = () =>
-    ask('POST', '/v1/sessions', json({ agent: 'claude-auto-loge', mode: 'auto', prompt: 'go' }), {
-      [FY_REQUEST_ID_HEADER]: `req-${(startSession.count += 1)}`,
+  let sessionsStarted = 0;
+  const startSession = () => {
+    sessionsStarted += 1;
+    return ask('POST', '/v1/sessions', json({ agent: 'claude-auto-loge', mode: 'auto', prompt: 'go' }), {
+      [FY_REQUEST_ID_HEADER]: `req-${sessionsStarted}`,
     });
-  startSession.count = 0;
+  };
   const openTerminal = () => ask('POST', '/v1/sessions/s1/terminals', json({}));
   const upgrade = (terminalId: string) =>
     sockets.upgrade(

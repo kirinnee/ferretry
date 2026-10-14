@@ -189,9 +189,12 @@ export class ApiSocketDispatcher {
   reauthorize(request: ApiRequest): boolean {
     const unlock = this.stepUps?.unlockRequired;
     const standing: StepUpWitness =
-      unlock === undefined ? STANDING_STEP_UP : { held: () => true, unlockRequired: subject => unlock.call(this.stepUps, subject) };
+      unlock === undefined
+        ? STANDING_STEP_UP
+        : { held: () => true, unlockRequired: subject => unlock.call(this.stepUps, subject) };
     return (
-      authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies, standing).kind === 'authorized'
+      authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies, standing).kind ===
+      'authorized'
     );
   }
 

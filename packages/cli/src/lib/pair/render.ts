@@ -190,7 +190,8 @@ function grantsNotice(invitation: PairingInvitation): string {
   const full =
     'The device that scans this can do anything on this machine once it unlocks it with its passkey. ' +
     `To pair a device that can only read and chat, run \`${bin} pair --limited\`.`;
-  if (invitation.requestedGrants === 'limited') return `--limited was NOT applied: this daemon is older than that flag. ${full}`;
+  if (invitation.requestedGrants === 'limited')
+    return `--limited was NOT applied: this daemon is older than that flag. ${full}`;
   return full;
 }
 

@@ -149,7 +149,11 @@ export class StepUpService {
   held(subject: StepUpSubject): boolean {
     const now = this.deps.clock.nowMs();
     const settings = this.deps.settings?.();
-    if (settings !== undefined && !asksStepUpPerAction(settings) && this.#unlockedUntil(subject.deviceId, settings) > now)
+    if (
+      settings !== undefined &&
+      !asksStepUpPerAction(settings) &&
+      this.#unlockedUntil(subject.deviceId, settings) > now
+    )
       return true;
     return this.deps.registry.held(subject, now);
   }
@@ -361,9 +365,12 @@ export class StepUpService {
     purpose: 'step-up' | 'unlock',
     assertion: StepUpAssertion,
     now: number,
-  ): Promise<{ readonly ok: true; readonly rotated: boolean } | { readonly ok: false; readonly refusal: StepUpRefusal }> {
+  ): Promise<
+    { readonly ok: true; readonly rotated: boolean } | { readonly ok: false; readonly refusal: StepUpRefusal }
+  > {
     const rotateBy = this.rotateBy(device.deviceId);
-    if (rotateBy !== undefined && rotateBy <= now && assertion.rotation === undefined) return refuse('rotation-required');
+    if (rotateBy !== undefined && rotateBy <= now && assertion.rotation === undefined)
+      return refuse('rotation-required');
     const rotation = assertion.rotation;
     // Checked BEFORE the assertion spends the challenge: a forged or mismatched rotation must not cost
     // the person their confirmation, and must never reach the swap.
@@ -382,7 +389,9 @@ export class StepUpService {
     if (rotation === undefined || this.deps.rotation === undefined || transcriptHash === undefined)
       return { ok: true, rotated: false };
     // The device was revoked between the assertion and the swap: nothing to step up any more.
-    if (!(await this.deps.rotation.rotate({ deviceId: device.deviceId, deviceKey: rotation.deviceKey, transcriptHash })))
+    if (
+      !(await this.deps.rotation.rotate({ deviceId: device.deviceId, deviceKey: rotation.deviceKey, transcriptHash }))
+    )
       return refuse('not-a-device');
     return { ok: true, rotated: true };
   }

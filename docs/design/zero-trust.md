@@ -60,17 +60,17 @@ when, from where).
 
 Adversaries, and what each must be denied:
 
-| adversary                                      | must NOT be able to                                                                             |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **stolen phone, locked**                       | anything: the app's key is usable only by code running in the unlocked browser                  |
+| adversary                                      | must NOT be able to                                                                                                                                                                                                     |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **stolen phone, locked**                       | anything: the app's key is usable only by code running in the unlocked browser                                                                                                                                          |
 | **stolen phone, unlocked, app open**           | anything before the device unlocks the machine; outlast a revoke; register its own passkey. INSIDE an unlock period it can do what the owner could (B1) — the period, `stepUpOnActions` and revocation are the controls |
-| **copied storage** (backup, profile copy, IDB) | authenticate at all: the private key is non-extractable and never serialised as bytes           |
-| **malicious relay / Cloudflare**               | read, alter, inject, replay or impersonate either end; learn the device id or any credential    |
-| **LAN attacker** (same Wi-Fi as the daemon)    | read or alter direct traffic, learn a credential, impersonate the daemon to a pairing device    |
-| **compromised Pages deploy**                   | silently replace an installed app (detected and refused by D, within the TOFU limits below)     |
-| **XSS in the app**                             | carry the key away; act after the tab closes or before the owner unlocks. Inside an unlock it can act as the owner (B1) |
-| **replay** of any captured frame or assertion  | have it accepted in any other session, or twice in the same one                                 |
-| **downgrade** to an older protocol or path     | reach any path that is weaker: none exists — the bearer path, `POST /v1/pair` and `/1` are gone |
+| **copied storage** (backup, profile copy, IDB) | authenticate at all: the private key is non-extractable and never serialised as bytes                                                                                                                                   |
+| **malicious relay / Cloudflare**               | read, alter, inject, replay or impersonate either end; learn the device id or any credential                                                                                                                            |
+| **LAN attacker** (same Wi-Fi as the daemon)    | read or alter direct traffic, learn a credential, impersonate the daemon to a pairing device                                                                                                                            |
+| **compromised Pages deploy**                   | silently replace an installed app (detected and refused by D, within the TOFU limits below)                                                                                                                             |
+| **XSS in the app**                             | carry the key away; act after the tab closes or before the owner unlocks. Inside an unlock it can act as the owner (B1)                                                                                                 |
+| **replay** of any captured frame or assertion  | have it accepted in any other session, or twice in the same one                                                                                                                                                         |
+| **downgrade** to an older protocol or path     | reach any path that is weaker: none exists — the bearer path, `POST /v1/pair` and `/1` are gone                                                                                                                         |
 
 Out of scope by decision, not oversight: device posture (needs a native client), an attacker with the
 owner's user account on the host, a malicious agent the owner chats with (see the end), and Cloudflare
@@ -436,7 +436,7 @@ challenge is single-use and bound to one device and `appSession`).
   counter is non-zero, `signCount` increased (a stuck or rewound counter refuses and is audited).
 - A verified **unlock** is held **in the daemon's memory** for the `deviceId` — every page of it — for
   `unlockValidityHours` (8 by default). A verified per-act **step-up** is held for `(deviceId,
-  appSession)` for `stepUpWindowMinutes` (15 by default). Both end early on revoke and on a daemon
+appSession)` for `stepUpWindowMinutes` (15 by default). Both end early on revoke and on a daemon
   restart; a step-up also ends when the page closes (a new `appSession`). Neither is a value the browser
   holds.
 - Verification is WebCrypto only: a minimal CBOR reader (attestation object, COSE key) and DER →
