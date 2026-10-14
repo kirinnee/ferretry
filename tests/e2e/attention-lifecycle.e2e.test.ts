@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it, setDefaultTimeout } from 'bun:test';
 import should from 'should';
@@ -21,19 +21,16 @@ import { type E2eEnvironment, withE2eEnvironment } from './fixture';
  * bootstrap health wait below times out and throws with `fyd`'s own stderr attached, rather than
  * silently falling back to some other, uncontrolled port.
  *
- * SESSION START: getting a session INTO the registry needs a fleet account with an "auto" route;
- * `fleet init` only ever declares the interactive one and there is no CLI flag for the other (checked
- * `fleet init --help`), so `bootRealSession` patches one into the generated `config.yaml` before
- * `fleet apply`.
+ * SESSION START: getting a session INTO the registry needs an agent runtime. `fleet init` and
+ * `fleet apply` were retired with the old account system (#458); a machine now gets its runtimes from
+ * `fy daemon import claude`, which reads an invented `~/.claude` in the temp HOME and creates
+ * `claude-default` (an agent runtime). Its login is never signed in, and nothing here needs the agent
+ * process to run: only the session id has to exist in the live registry, and only that id is asserted
+ * on below.
  *
- * The started session's underlying agent process reliably ends up `failed`: the daemon refuses
- * "caller-supplied tmux socket overrides" on principle, and this fixture's `childEnvironment()`
- * carries `FY_E2E_TMUX_SOCKET`/`FY_E2E_REAL_TMUX` for its OWN PATH-level `tmux` routing — the daemon
- * reads them too and (correctly, per its own security posture) refuses. That refusal is a
- * `packages/daemon` decision this file must not paper over or work around; it does not need the agent
- * process to actually run, only for the session's id to exist in the registry — which it does, since
- * the daemon persists the failure rather than declining to create the session at all. Only the
- * returned session id is asserted on below; nothing here asserts the launch itself succeeds.
+ * The daemon gets its own private tmux socket (`useDaemonPrivateTmux`) because it now passes `-S`
+ * itself, which the fixture's PATH router refuses, and its relay discovery points at a closed
+ * loopback port so the boot never dials a real directory.
  */
 
 setDefaultTimeout(60_000);
@@ -49,30 +46,8 @@ async function resolveFydBinary(repositoryRoot: string): Promise<string> {
   return join(repositoryRoot, 'dist', 'bin', `${binaryName}-${platform}-${architecture}`);
 }
 
-/** `fleet init` only ever declares the interactive route; `fy start`'s default mode needs an auto one. */
-async function declareAutoRoute(configPath: string): Promise<void> {
-  const original = await readFile(configPath, 'utf8');
-  const marker = '        models:\n          - claude-opus-5\n\n# ── Example';
-  if (!original.includes(marker)) {
-    throw new Error('expected fleet starter shape changed; update the auto-route patch in this test');
-  }
-  const autoRoute = [
-    '      auto:',
-    `        id: ${crypto.randomUUID()}`,
-    '        wrapper: claude-auto-primary',
-    '        home: claude-auto-primary',
-    '        displayName: Claude (primary, automation)',
-    '        defaultModel: claude-opus-5',
-    '        models:',
-    '          - claude-opus-5',
-    '',
-  ].join('\n');
-  await writeFile(
-    configPath,
-    original.replace(marker, `        models:\n          - claude-opus-5\n${autoRoute}\n# ── Example`),
-    'utf8',
-  );
-}
+/** The one runtime `daemon import claude` creates; it is an agent runtime (`agent: true` in `fy runtimes --json`). */
+const AGENT_RUNTIME = 'claude-default';
 
 async function waitForFile(path: string, timeoutMs: number): Promise<string> {
   const deadline = Date.now() + timeoutMs;
@@ -90,29 +65,30 @@ interface RealSession {
   readonly sessionId: string;
 }
 
-/** Fleet account, real `fyd` on the leased port, and one real (if execution-`failed`) session. */
+/** A Claude runtime imported into a real `fyd` on the leased port, and one real session on it. */
 async function bootRealSession(environment: E2eEnvironment): Promise<RealSession> {
+  // The person's own Claude Code, as `daemon import` reads it — invented, in the temp HOME.
   await environment.installFakeHarness('claude');
   await environment.setFakeHarnessScenario({ version: 1, steps: [{ type: 'exit', code: 0 }] });
-  await environment.runFy(['fleet', 'init', '--first-account=claude']);
-  await declareAutoRoute(join(environment.paths.fyHome, 'fleet', 'config.yaml'));
-  const applied = await environment.runFy(['fleet', 'apply']);
-  should(applied.code).equal(0, applied.err);
+  await mkdir(join(environment.paths.home, '.claude'), { recursive: true });
+  await writeFile(join(environment.paths.home, '.claude', 'CLAUDE.md'), '# e2e\n', 'utf8');
 
   const fydBinary = await resolveFydBinary(environment.repositoryRoot);
   await environment.startDaemon({
     command: [fydBinary, '--host', '127.0.0.1', '--port', String(environment.ports.api)],
     readyUrl: environment.httpUrl('/v1/health'),
     timeoutMs: 15_000,
+    // The daemon drives tmux on its own private socket; the fixture's PATH router refuses that.
+    useDaemonPrivateTmux: true,
+    // Relay discovery pointed at a closed loopback port: nothing here needs a carrier.
+    env: { FY_RELAY_DIRECTORY_ORIGIN: 'http://127.0.0.1:9' },
   });
   const token = await waitForFile(join(environment.paths.fyHome, 'api-token'), 10_000);
   const connection = { FY_URL: environment.httpUrl(), FY_TOKEN: token };
 
-  const fleetBin = join(environment.paths.fyHome, 'fleet', 'bin');
-  const started = await environment.runFy(['start', '--agent', 'claude-auto-primary', 'say hi and exit', '--json'], {
-    ...connection,
-    PATH: `${fleetBin}:${process.env.PATH ?? ''}`,
-  });
+  const imported = await environment.runFy(['daemon', 'import', 'claude'], connection);
+  should(imported.code).equal(0, imported.err);
+  const started = await environment.runFy(['start', '--agent', AGENT_RUNTIME, 'say hi and exit', '--json'], connection);
   should(started.code).equal(0, started.err);
   const sessionId = (JSON.parse(started.out) as { config?: { id?: string } }).config?.id;
   should(sessionId).not.be.undefined();

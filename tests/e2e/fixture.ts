@@ -245,9 +245,21 @@ async function runCaptured(
   args: readonly string[],
   options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly timeoutMs?: number },
 ): Promise<CommandResult> {
-  const captured = await captureProcess(executable, args, options);
+  let captured = await captureProcess(executable, args, options);
   try {
-    return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
+    try {
+      return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
+    } catch (error) {
+      /**
+       * The same Bun epoll loss as in `captureProcess`, delivered through the child's 'error' event
+       * instead of thrown by `spawn`. A child that never got a pid never ran, so one more attempt is
+       * still a single run of the command; one that did run is never retried.
+       */
+      if (!isTransientBunSpawnFailure(error) || captured.child.pid !== undefined) throw error;
+      await Bun.sleep(0);
+      captured = await captureProcess(executable, args, options);
+      return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
+    }
   } catch (error) {
     captured.child.kill('SIGKILL');
     await captured.exited.catch(() => undefined);
@@ -749,6 +761,11 @@ export class E2eEnvironment {
     }
   }
 
+  /** What the running daemon has printed so far — for a journey's failure evidence. */
+  daemonOutput(): Pick<CommandResult, 'out' | 'err'> {
+    return this.daemon?.output() ?? { out: '', err: '' };
+  }
+
   async stopDaemon(timeoutMs = 5_000): Promise<CommandResult | undefined> {
     const daemon = this.daemon;
     if (daemon === undefined) return undefined;
@@ -759,7 +776,15 @@ export class E2eEnvironment {
       return await withTimeout(daemon.exited, timeoutMs, 'E2E daemon shutdown');
     } catch {
       daemon.child.kill('SIGKILL');
-      return daemon.exited;
+      /**
+       * Bounded even after SIGKILL: `exited` resolves on 'close', which waits for EVERY holder of the
+       * daemon's stdio pipes. A grandchild the daemon left running (a pending `codex login`, seen in the
+       * full-product journeys) keeps them open, and an unbounded wait hung a journey for ten minutes.
+       */
+      return withTimeout(daemon.exited, 3_000, 'E2E daemon pipes after SIGKILL').catch(() => ({
+        code: 137,
+        ...daemon.output(),
+      }));
     }
   }
 

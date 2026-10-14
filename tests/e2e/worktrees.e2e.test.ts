@@ -64,14 +64,26 @@ async function compiledDaemon(environment: E2eEnvironment): Promise<string> {
   return daemon;
 }
 
-/** A repository with one commit, inside the isolated root, to fork worktrees out of. */
+/**
+ * A repository with one commit, inside the isolated root, to fork worktrees out of.
+ *
+ * IT HAS A FETCHED `origin`, as a clone does. The removal policy refuses a checkout whose HEAD is in
+ * no remote-tracking ref (`unpushed_commits`), and a repository with no remote at all can never
+ * satisfy that — so a remote-less fixture made "a clean fresh checkout is removable" unreachable
+ * rather than tested. The remote is a bare repository beside it; nothing leaves the temp root.
+ */
 async function repository(environment: E2eEnvironment): Promise<string> {
   const root = await environment.assertSafePath(join(environment.paths.home, 'repo'), 'fixture repository');
+  const remote = await environment.assertSafePath(join(environment.paths.home, 'origin.git'), 'fixture remote');
   await mkdir(join(root, 'packages', 'cli'), { recursive: true });
+  await mkdir(remote, { recursive: true });
+  await git(remote, 'init', '--bare', '-b', 'main', '--quiet');
   await git(root, 'init', '-b', 'main', '--quiet');
   await writeFile(join(root, 'packages', 'cli', 'README.md'), '# fixture\n');
   await git(root, 'add', '--all');
   await git(root, 'commit', '--quiet', '-m', 'chore: seed');
+  await git(root, 'remote', 'add', 'origin', remote);
+  await git(root, 'push', '--quiet', '-u', 'origin', 'main');
   return root;
 }
 
@@ -86,6 +98,19 @@ interface WorktreeRow {
   readonly removal?: { readonly removable: boolean; readonly blockers: readonly { readonly code: string }[] };
 }
 
+/**
+ * PRODUCT BUG (reported to the e2e lead): on a daemon whose private tmux server is not running, no
+ * managed worktree can be removed, and nothing overrides the refusal.
+ *
+ * `TmuxTerminalRuntime.list` (`packages/daemon/src/adapters/terminal/tmux-terminal-runtime.ts`, the
+ * `no server running|failed to connect|no sessions` test) treats only those wordings as "no
+ * terminals". When `<FY_HOME>/tmux.sock` does not exist — a daemon that has not opened a terminal
+ * yet, or one whose tmux server has exited and removed its socket — tmux 3.6 says
+ * `error connecting to <socket> (No such file or directory)`, `list()` throws, and the worktree
+ * service turns that into `undetermined_evidence`, which no flag clears. Both journeys below pass
+ * once a tmux server exists on that socket (verified by starting one by hand); they fail on main
+ * because nothing else about them is wrong.
+ */
 describe('managed worktree journeys against a real daemon', () => {
   it('should fork, list, check and remove a checkout through the shipped binaries', async () => {
     await withE2eEnvironment(async subject => {
@@ -96,6 +121,11 @@ describe('managed worktree journeys against a real daemon', () => {
         command: [daemon, '--host', '127.0.0.1', '--port', String(subject.ports.api), '--log-level', 'error'],
         readyUrl: subject.httpUrl('/healthz'),
         timeoutMs: 30_000,
+        // The daemon drives tmux on its own private socket now; the fixture's PATH router refuses a
+        // caller-chosen socket, which made every terminal listing fail.
+        useDaemonPrivateTmux: true,
+        // Relay discovery pointed at a closed loopback port: this journey never needs a carrier.
+        env: { FY_RELAY_DIRECTORY_ORIGIN: 'http://127.0.0.1:9' },
       });
       // No FY_TOKEN: the CLI reads the owner-only credential `fyd` minted into this state home.
       const connection = { FY_URL: subject.httpUrl() };
@@ -120,8 +150,14 @@ describe('managed worktree journeys against a real daemon', () => {
       const rows = (JSON.parse(listed.out) as { worktrees: WorktreeRow[] }).worktrees;
       const checked = await subject.runFy(['worktree', 'check', created.worktree.path, '--json'], connection);
       const removed = await subject.runFy(['worktree', 'rm', created.worktree.path, '--yes', '--json'], connection);
-      const removal = JSON.parse(removed.out) as { path: string; branchRetained: boolean };
-      const preflight = JSON.parse(removed.err) as { phase: string; decision: { path: string } };
+      // Parsed only on success, so a refusal fails below on its own words rather than as a JSON error.
+      const removal =
+        removed.code === 0 ? (JSON.parse(removed.out) as { path: string; branchRetained: boolean }) : undefined;
+      const preflight =
+        removed.code === 0 ? (JSON.parse(removed.err) as { phase: string; decision: { path: string } }) : undefined;
+      // Read NOW: the re-fork below recreates a checkout at this same deterministic path, so an
+      // existence check placed with the assertions would only ever see the new incarnation.
+      const removedReadme = await Bun.file(join(created.worktree.path, 'packages', 'cli', 'README.md')).exists();
       const after = await subject.runFy(['worktree', 'ls', '--json'], connection);
       const reforked = await subject.runFy(
         [
@@ -136,7 +172,8 @@ describe('managed worktree journeys against a real daemon', () => {
         ],
         connection,
       );
-      const replacement = JSON.parse(reforked.out) as { worktree: WorktreeRow; cwd: string };
+      const replacement =
+        reforked.code === 0 ? (JSON.parse(reforked.out) as { worktree: WorktreeRow; cwd: string }) : undefined;
       const replaced = await subject.runFy(['worktree', 'ls', '--json'], connection);
 
       // Assert — an empty registry is an empty answer, not a 404
@@ -157,15 +194,15 @@ describe('managed worktree journeys against a real daemon', () => {
       should(rows[0]?.path).equal(created.worktree.path);
       should(rows[0]?.live?.head).equal(created.worktree.initialHead);
       should(rows[0]?.live?.status).match({ staged: false, unstaged: false, untracked: false });
-      should(rows[0]?.removal?.removable).be.true();
+      should(rows[0]?.removal?.removable).be.true(JSON.stringify(rows[0]?.removal));
 
       // …the check agrees with it, and the removal really destroys the checkout
       should(checked.code).equal(0);
       should((JSON.parse(checked.out) as { removable: boolean }).removable).be.true();
-      should(removed.code).equal(0);
+      should(removed.code).equal(0, removed.err);
       should(removal).match({ path: created.worktree.path, branchRetained: true });
       should(preflight).match({ phase: 'preflight', decision: { path: created.worktree.path } });
-      should(await Bun.file(join(created.worktree.path, 'packages', 'cli', 'README.md')).exists()).be.false();
+      should(removedReadme).be.false();
 
       // …and the completed incarnation survives as a tombstone until a deliberate same-session,
       // same-branch fork replaces it with the new live incarnation at that deterministic path
@@ -174,7 +211,7 @@ describe('managed worktree journeys against a real daemon', () => {
       should(remaining[0]?.removedAt).be.a.String();
       should(after.out).not.containEql('unknown_route');
       should(reforked.code).equal(0);
-      should(replacement.worktree.path).equal(created.worktree.path);
+      should(replacement?.worktree.path).equal(created.worktree.path);
       const replacementRows = (JSON.parse(replaced.out) as { worktrees: WorktreeRow[] }).worktrees;
       should(replacementRows).have.length(1);
       should(replacementRows[0]?.path).equal(created.worktree.path);
@@ -192,6 +229,11 @@ describe('managed worktree journeys against a real daemon', () => {
         command: [daemon, '--host', '127.0.0.1', '--port', String(subject.ports.api), '--log-level', 'error'],
         readyUrl: subject.httpUrl('/healthz'),
         timeoutMs: 30_000,
+        // The daemon drives tmux on its own private socket now; the fixture's PATH router refuses a
+        // caller-chosen socket, which made every terminal listing fail.
+        useDaemonPrivateTmux: true,
+        // Relay discovery pointed at a closed loopback port: this journey never needs a carrier.
+        env: { FY_RELAY_DIRECTORY_ORIGIN: 'http://127.0.0.1:9' },
       });
       const connection = { FY_URL: subject.httpUrl() };
       const forked = await subject.runFy(['worktree', 'fork', 'feature/dirty', '--from', source, '--json'], connection);
@@ -212,7 +254,7 @@ describe('managed worktree journeys against a real daemon', () => {
       should(refused.err).containEql('--discard-changes');
       should(forced.code).not.equal(0);
       should(forced.err).containEql('--force');
-      should(consented.code).equal(0);
+      should(consented.code).equal(0, consented.err);
       should(await Bun.file(join(created.worktree.path, 'packages', 'cli', 'README.md')).exists()).be.false();
     });
   }, 120_000);

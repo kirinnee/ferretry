@@ -80,6 +80,7 @@ const analyticsFeed = {
       tokens: { value: 2_000_000, known: 2, total: 2 },
       inputTokens: { value: 1_500_000, known: 2, total: 2 },
       outputTokens: { value: 500_000, known: 2, total: 2 },
+      reasoningTokens: { value: 0, known: 2, total: 2 },
       cachedInputTokens: { value: 0, known: 2, total: 2 },
       cacheWriteInputTokens: { value: 0, known: 2, total: 2 },
       cacheWrite5mInputTokens: { value: 0, known: 2, total: 2 },

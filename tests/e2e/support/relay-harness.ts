@@ -67,10 +67,21 @@ export function harnessTeardown(): HarnessTeardown {
       // Reverse order: the browser must go before the origin it is pointed at, and the daemon
       // before the rendezvous it is dialling, or shutdown produces errors that read as defects.
       for (const entry of entries.reverse()) {
+        // Bounded: one close that never settles (a server waiting on a connection a dead peer will never
+        // end) hung a whole journey until the test runner's ten-minute timeout, naming nothing. A
+        // timeout here names the part instead, and the remaining parts are still released.
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          await entry.close();
+          await Promise.race([
+            Promise.resolve().then(() => entry.close()),
+            new Promise<never>((_settle, fail) => {
+              timer = setTimeout(() => fail(new Error(`${entry.label} did not close within 10s`)), 10_000);
+            }),
+          ]);
         } catch (error) {
           failures.push(new Error(`harness teardown failed: ${entry.label}`, { cause: error }));
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
         }
       }
       entries.length = 0;
@@ -437,18 +448,38 @@ export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
     const suiteRoot = process.env.FY_E2E_RUN_ROOT ?? tmpdir();
     const outDir = await assertNoLiveStatePath(join(suiteRoot, 'fy-e2e-pwa-dist'), 'PWA bundle output');
     await mkdir(outDir, { recursive: true });
-    const build = Bun.spawn(['bun', 'run', 'build', '--outDir', outDir, '--emptyOutDir'], {
-      cwd: join(REPOSITORY_ROOT, 'packages', 'pwa'),
-      env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin, NO_COLOR: '1' },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [code, out, err] = await Promise.all([
-      build.exited,
-      new Response(build.stdout).text(),
-      new Response(build.stderr).text(),
-    ]);
-    if (code !== 0) throw new Error(`the PWA bundle failed to build (code ${String(code)})\n${out}\n${err}`);
+    /**
+     * THE THREE STEPS OF `bun run build`, EACH TOLD WHERE TO WRITE.
+     *
+     * This ran `bun run build --outDir <dir>`, which stopped working when the script grew a release
+     * step: `bun run` appends the arguments to the END of the script, so `--outDir` reached
+     * `scripts/build-release.ts` and `vite build` wrote to the package's own `dist/`. The build
+     * exited 0, the output directory stayed empty, and every journey failed on a missing
+     * `app/index.html`. Spelling the steps out keeps the bundle exactly what Pages publishes — the
+     * verified worker and the (unsigned) release list included — in a directory this run owns.
+     */
+    const steps: readonly (readonly string[])[] = [
+      ['bun', 'run', 'build:fy-render-shell'],
+      ['bun', 'x', 'vite', 'build', '--outDir', outDir, '--emptyOutDir'],
+      ['bun', 'run', 'scripts/build-release.ts', outDir],
+    ];
+    for (const command of steps) {
+      const build = Bun.spawn([...command], {
+        cwd: join(REPOSITORY_ROOT, 'packages', 'pwa'),
+        env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin, NO_COLOR: '1' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [code, out, err] = await Promise.all([
+        build.exited,
+        new Response(build.stdout).text(),
+        new Response(build.stderr).text(),
+      ]);
+      if (code !== 0)
+        throw new Error(
+          `the PWA bundle failed to build at \`${command.join(' ')}\` (code ${String(code)})\n${out}\n${err}`,
+        );
+    }
     await stat(join(outDir, 'app', 'index.html'));
     return outDir;
   })();
@@ -583,7 +614,7 @@ interface ChromiumLauncher {
   }>;
 }
 
-function resolvePlaywright(): string {
+export function resolvePlaywright(): string {
   const from = [REPOSITORY_ROOT, join(REPOSITORY_ROOT, 'packages', 'pwa'), join(REPOSITORY_ROOT, 'packages', 'daemon')];
   for (const directory of from) {
     try {
@@ -616,14 +647,16 @@ export interface ChromeOptions {
 
 export async function launchChrome(teardown: HarnessTeardown, options: ChromeOptions = {}): Promise<BrowserSession> {
   const module = (await import(resolvePlaywright())) as { chromium: ChromiumLauncher };
-  const browser = await module.chromium.launch({
-    executablePath: chromeExecutable(),
-    headless: true,
-    // `--no-sandbox` because this host's Chrome refuses to start otherwise under the test runner,
-    // and `--disable-dev-shm-usage` because a small `/dev/shm` in a container crashes the renderer
-    // mid-journey, which looks exactly like an app defect.
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
+  const browser = await launchChromiumWithRetry(() =>
+    module.chromium.launch({
+      executablePath: chromeExecutable(),
+      headless: true,
+      // `--no-sandbox` because this host's Chrome refuses to start otherwise under the test runner,
+      // and `--disable-dev-shm-usage` because a small `/dev/shm` in a container crashes the renderer
+      // mid-journey, which looks exactly like an app defect.
+      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    }),
+  );
   const context = await browser.newContext({
     viewport: { width: 1_280, height: 900 },
     ...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
@@ -663,7 +696,7 @@ export async function launchChrome(teardown: HarnessTeardown, options: ChromeOpt
   page.on('pageerror', payload => pageErrors.push(String(payload)));
 
   const stop = async (): Promise<void> => {
-    await browser.close();
+    await closeChromeBounded(() => browser.close());
   };
   teardown.add('chrome', stop);
   return { page, console: consoleLines, pageErrors, stop };
@@ -919,4 +952,50 @@ export async function renderedDataAttributes(page: BrowserPage): Promise<string>
          .map(attribute => attribute.value === '' ? attribute.name : attribute.name + '="' + attribute.value.slice(0, 40) + '"')
      ))].sort().join(', ')`,
   );
+}
+
+/**
+ * Launch Chrome, retrying ONLY the launch failures Bun produces while it wires Playwright's pipes.
+ *
+ * Seen in full-tier runs, never in isolation: Bun's `child_process.spawn` fails to create the
+ * `--remote-debugging-pipe` stdio with `Failed to connect` (ENOENT) or loses an epoll registration
+ * (`EBADF`) while a previous Chrome is still releasing its pipes. No browser exists when this throws,
+ * so a second attempt is safe. Anything else — a missing Chrome, a bad flag — fails the first time.
+ */
+export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await launch();
+    } catch (error) {
+      const text = String((error as Error).message ?? error);
+      if (!/Failed to connect|EBADF|epoll_ctl/u.test(text)) throw error;
+      lastError = error;
+      await Bun.sleep(250 * attempt);
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Close Chrome, and if Playwright's `close()` never settles, end the Chrome this process started.
+ *
+ * Seen in full-tier runs after a journey had already failed: `browser.close()` hung, and the teardown
+ * behind it never ran. Only Chrome processes whose PARENT is this test process are signalled, so a
+ * browser belonging to any other run on the host is never touched.
+ */
+export async function closeChromeBounded(close: () => Promise<void>): Promise<void> {
+  const closed = await Promise.race([close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(() => false);
+  if (closed) return;
+  const children = Bun.spawn(['pgrep', '-P', String(process.pid), '-f', 'chrom'], { stdout: 'pipe', stderr: 'ignore' });
+  for (const pid of (await new Response(children.stdout).text())
+    .split('\n')
+    .map(Number)
+    .filter(n => Number.isInteger(n) && n > 1)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
 }
