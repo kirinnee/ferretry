@@ -38,13 +38,12 @@ describe('shared settings catalog', () => {
     }
   });
 
-  test('groups every control exactly once under the four stable logical sections', () => {
-    expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'daemons', 'machines']);
-    expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Daemons', 'Machines']);
+  test('groups every control exactly once under the three stable logical sections', () => {
+    expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'machines']);
+    expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Machines']);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
       ['text-size', 'theme', 'density', 'chat-width'],
       ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
-      [],
       [],
     ]);
 
@@ -61,7 +60,8 @@ describe('shared settings catalog', () => {
   test('resolves section ids and setting ownership without accepting invented values', () => {
     expect(isSettingsSectionId('appearance')).toBe(true);
     expect(isSettingsSectionId('behaviour')).toBe(true);
-    expect(isSettingsSectionId('daemons')).toBe(true);
+    // Daemons merged into Machines: its address is a legacy anchor the page redirects, not a section.
+    expect(isSettingsSectionId('daemons')).toBe(false);
     expect(isSettingsSectionId('machines')).toBe(true);
     expect(isSettingsSectionId('notifications')).toBe(false);
     expect(isSettingsSectionId(null)).toBe(false);
@@ -84,7 +84,7 @@ describe('shared settings catalog', () => {
       {
         id: 'open-settings',
         label: 'Open settings',
-        description: 'Appearance, behaviour, and connected daemons for this browser.',
+        description: 'Appearance and behaviour on this browser, and every paired machine.',
         settingId: null,
       },
     ]);
@@ -146,25 +146,37 @@ describe('shared settings catalog', () => {
 
   test('keeps link-row destinations bound to the daemon being searched', () => {
     const warden = SETTINGS_LINKS.find(link => link.id === 'warden');
-    expect(warden?.href(alpha)).toBe('/d/daemon-alpha/settings#daemons');
-    expect(warden?.href(beta)).toBe('/d/daemon-beta/settings#daemons');
+    expect(warden?.href(alpha)).toBe('/d/daemon-alpha/settings#warden');
+    expect(warden?.href(beta)).toBe('/d/daemon-beta/settings#warden');
     for (const query of ['failover', 'round robin', 'warden', 'fallback']) {
       expect(settingsPaletteEntries(alpha, query).find(item => item.id === 'setting-link-warden')?.href).toBe(
-        '/d/daemon-alpha/settings#daemons',
+        '/d/daemon-alpha/settings#warden',
       );
     }
     expect(settingsPaletteEntries(alpha, '').some(item => item.id === 'setting-link-warden')).toBe(false);
   });
 
+  test('opens each machine panel at its own anchor, never the retired Daemons section', () => {
+    const hrefs = Object.fromEntries(SETTINGS_LINKS.map(link => [link.id, link.href(beta)]));
+    expect(hrefs).toMatchObject({
+      grants: '/d/daemon-beta/settings#grants',
+      'security-log': '/d/daemon-beta/settings#security-log',
+      warden: '/d/daemon-beta/settings#warden',
+      security: '/d/daemon-beta/settings#security',
+      'resource-limits': '/d/daemon-beta/settings#resource-limits',
+    });
+    for (const href of Object.values(hrefs)) expect(href).not.toContain('#daemons');
+  });
+
   test('makes the resource-limit panel findable by the symptoms rather than the kernel word', () => {
     const limits = SETTINGS_LINKS.find(link => link.id === 'resource-limits');
-    expect(limits?.href(beta)).toBe('/d/daemon-beta/settings#daemons');
+    expect(limits?.href(beta)).toBe('/d/daemon-beta/settings#resource-limits');
     // "cgroup" is the mechanism and is in the list; the others are what a person types when an agent
     // is eating the machine, and matching only the mechanism would leave the control unfindable by
     // exactly the person who needs it.
     for (const query of ['cpu', 'ram', 'memory', 'throttle', 'cgroup', 'slow', 'out of memory', 'runaway']) {
       expect(settingsPaletteEntries(alpha, query).find(item => item.id === 'setting-link-resource-limits')?.href).toBe(
-        '/d/daemon-alpha/settings#daemons',
+        '/d/daemon-alpha/settings#resource-limits',
       );
     }
   });

@@ -695,6 +695,27 @@ const settle = async (): Promise<void> => {
   });
 };
 
+/**
+ * A paired machine that answers with a whole setup. Settings opens a machine's Machine tab for the old
+ * `#daemons` anchor, and that tab draws the machine's tools, so the fixture's empty `{}` would not do.
+ */
+const SET_UP_SHELL: ShellOptions = {
+  fleet: {
+    '/v1/fleet/machine': {
+      name: 'alpha',
+      format: 'version-2',
+      setUp: true,
+      agentPermissions: 'auto',
+      tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
+      runtimeCount: 1,
+      runningSessions: 0,
+      authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+    },
+    // Picking another machine opens its Runtimes tab first.
+    '/v1/fleet/runtimes': { format: 'version-2', runtimes: [] },
+  },
+};
+
 /** A paired machine that answers it is not set up yet, and the first run's reads of it. */
 const NOT_SET_UP = {
   '/v1/fleet/machine': {
@@ -964,7 +985,7 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
-  it('nudges a paired device with no passkey toward Settings → Daemons → Security, once, and not on Settings itself', async () => {
+  it('nudges a paired device with no passkey toward its Machine tab’s Security panel, once, and not on Settings itself', async () => {
     const PASSKEYS = {
       '/v1/passkeys': { passkeys: [], registration: 'first-window' },
       '/v1/security': {
@@ -993,7 +1014,9 @@ describe('AppShell', () => {
     await settle();
 
     expect(window.location.pathname).toBe(`/d/${ALPHA}/settings`);
-    expect(window.location.hash).toBe('#security');
+    // The nudge still links the old `#security` anchor; Settings rewrites it to where Security lives now.
+    expect(window.location.hash).toBe(`#machines/${encodeURIComponent(alpha.baseUrl)}/machine/security`);
+    expect(view.container.querySelector('[data-daemon-panel-open="security"]')).not.toBeNull();
     expect(view.container.querySelector('[data-security-card]')).not.toBeNull();
     expect(view.container.querySelector('[data-passkey-nudge]')).toBeNull();
     await view.unmount();
@@ -3125,6 +3148,14 @@ describe('one push worker per paired machine', () => {
 /* ---------- the picker, the settings host, and the public root ------------ */
 
 describe('the settings route composition', () => {
+  /** One of the Machine tab's connection and security rows. `#daemons` lands on that tab. */
+  const openPanel = async (view: { readonly container: HTMLElement }, id: string, what = `the ${id} panel row`) => {
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>(`[data-daemon-panel="${id}"]`), what).click(),
+    );
+    await settle();
+  };
+
   /**
    * The panel the icon table can most easily be missing an entry for, through the REAL composition.
    *
@@ -3135,17 +3166,15 @@ describe('the settings route composition', () => {
    * edge alternated between two x positions and the list read as unfinished. All of them or none.
    */
   it('mounts the Model pricing tab, with its icon, through the production Settings composition', async () => {
-    const { view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId]);
+    const { view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId], SET_UP_SHELL);
     await settle();
 
     const tab = must(
-      [...view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(candidate =>
-        candidate.textContent?.includes('Model pricing'),
-      ),
+      view.container.querySelector<HTMLButtonElement>('[data-daemon-panel="model-pricing"]'),
       'Model pricing tab',
     );
 
-    expect(tab.getAttribute('aria-controls')).toBe('daemon-settings-tab-model-pricing');
+    expect(tab.textContent).toContain('Model pricing');
     expect(tab.querySelector('svg')).not.toBeNull();
     // Its OWN glyph, not the fallback the rail draws for an id the table does not name.
     expect(tab.querySelector('svg')?.getAttribute('class')).toContain('lucide-circle-dollar-sign');
@@ -3160,19 +3189,18 @@ describe('the settings route composition', () => {
    * real rather than handed a fabricated choice.
    */
   const carrierPanelText = async (connection: DaemonConnection): Promise<string> => {
-    const { store, view } = await renderShell(`/d/${String(connection.daemonId)}/settings#daemons`, [connection]);
+    const { store, view } = await renderShell(
+      `/d/${String(connection.daemonId)}/settings#daemons`,
+      [connection],
+      SET_UP_SHELL,
+    );
     await settle();
     await interact(async () => {
       // A pairing no session can address is unreachable on every carrier now, so this read is allowed
       // to fail: what is under test is what the panel PROMISES, not whether the read was carried.
       await store.carrier.send(connection, `${connection.baseUrl}/v1/health`).catch(() => undefined);
     });
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-carrier"]'),
-        'the Carrier panel tab',
-      ).click(),
-    );
+    await openPanel(view, 'carrier', 'the Carrier panel tab');
     const rendered = view.container.textContent ?? '';
     await view.unmount();
     return rendered;
@@ -3195,18 +3223,10 @@ describe('the settings route composition', () => {
   });
 
   it('binds the Doctor tab to the selected daemon through the typed diagnostic endpoint', async () => {
-    const { healthReads, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId]);
+    const { healthReads, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId], SET_UP_SHELL);
     await settle();
 
-    await interact(() =>
-      must(
-        [...view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab =>
-          tab.textContent?.includes('Doctor'),
-        ),
-        'Doctor tab',
-      ).click(),
-    );
-    await settle();
+    await openPanel(view, 'doctor', 'Doctor tab');
 
     const doctorRead = healthReads.find(read => read.path === '/v1/doctor');
     expect(doctorRead?.daemonId).toBe(alpha.daemonId);
@@ -3215,27 +3235,26 @@ describe('the settings route composition', () => {
     await view.unmount();
   });
 
-  it('probes each selected sub-tab through the carrier-aware typed health endpoint, then routes switch and add', async () => {
-    const { healthReads, store, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [
-      alpha.daemonId,
-      beta.daemonId,
-    ]);
+  it('probes each selected machine’s Host checks through the carrier-aware typed health endpoint, then routes switch and add', async () => {
+    const { healthReads, store, view } = await renderShell(
+      `/d/${ALPHA}/settings#daemons`,
+      [alpha.daemonId, beta.daemonId],
+      SET_UP_SHELL,
+    );
     await settle();
     // The new-device notice reads every paired machine's device list in the background, by design;
     // its own suite proves that is the ONLY thing it reads, so dropping it here hides nothing else.
-    const probes = () => healthReads.filter(read => read.path !== '/v1/pair/devices');
+    // Settings also asks every paired machine once whether it answers (`/v1/fleet/machine`), so the
+    // sidebar can show each one's status, and a machine's tabs read its setup (`/v1/fleet/...`). Those are
+    // the account model's reads, proved in their own suites; this test is about the health probe.
+    const probes = () =>
+      healthReads.filter(read => read.path !== '/v1/pair/devices' && !read.path.startsWith('/v1/fleet/'));
 
     // A daemon tab does not read another daemon merely by being visible. Opening
     // Host checks is the explicit request, and it travels through the same typed
     // client (and therefore carrier router) as every other daemon read.
     expect(probes()).toEqual([]);
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'alpha host checks tab',
-      ).click(),
-    );
-    await settle();
+    await openPanel(view, 'host-checks', 'alpha host checks tab');
     expect(probes().map(read => String(read.daemonId))).toEqual([ALPHA]);
     for (const read of probes()) {
       expect(read.path).toBe('/v1/health');
@@ -3243,25 +3262,26 @@ describe('the settings route composition', () => {
       expect(read.timeout).toBe(5_000);
     }
     expect(
-      must(view.container.querySelector(`[data-daemon-subtab="${ALPHA}"]`), 'alpha sub-tab').getAttribute(
-        'aria-selected',
+      must(view.container.querySelector(`[data-settings-machine="${ALPHA}"]`), 'alpha sidebar row').getAttribute(
+        'aria-current',
       ),
-    ).toBe('true');
+    ).toBe('page');
 
     await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>(`[data-daemon-subtab="${BETA}"]`), 'beta tab').click(),
+      must(
+        view.container.querySelector<HTMLButtonElement>(`[data-settings-machine="${BETA}"]`),
+        'beta sidebar row',
+      ).click(),
     );
     expect(store.connections.getSnapshot().selectedDaemonId).toBe(beta.daemonId);
     expect(window.location.pathname).toBe(`/d/${BETA}/settings`);
-    expect(window.location.hash).toBe('#daemons');
+    expect(window.location.hash).toMatch(/^#machines\/[^/]+\/runtimes$/u);
     await settle();
     await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'beta host checks tab',
-      ).click(),
+      must(view.container.querySelector<HTMLButtonElement>('[data-machine-tab="machine"]'), 'beta Machine tab').click(),
     );
     await settle();
+    await openPanel(view, 'host-checks', 'beta host checks tab');
     expect(
       probes()
         .map(read => String(read.daemonId))
@@ -3269,7 +3289,7 @@ describe('the settings route composition', () => {
     ).toEqual([ALPHA, BETA].sort());
 
     await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),
+      must(view.container.querySelector<HTMLButtonElement>('[data-machine-add]'), 'add a machine').click(),
     );
     expect(window.location.pathname).toBe('/');
     expect(view.container.querySelector('h1')?.textContent).toBe('Your daemons');
@@ -3278,14 +3298,13 @@ describe('the settings route composition', () => {
   });
 
   it('persists a routed daemon rename and sends active removal to the selected fallback settings', async () => {
-    const { store, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId, beta.daemonId]);
-    await settle();
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'alpha host checks tab',
-      ).click(),
+    const { store, view } = await renderShell(
+      `/d/${ALPHA}/settings#daemons`,
+      [alpha.daemonId, beta.daemonId],
+      SET_UP_SHELL,
     );
+    await settle();
+    await openPanel(view, 'host-checks', 'alpha host checks tab');
     const alphaHostChecks = must(
       view.container.querySelector<HTMLElement>(`[data-daemon-host-checks="${ALPHA}"]`),
       'alpha host checks',
@@ -3316,7 +3335,7 @@ describe('the settings route composition', () => {
     );
     expect(store.connections.get(alpha.daemonId)).toBeUndefined();
     expect(window.location.pathname).toBe(`/d/${BETA}/settings`);
-    expect(window.location.hash).toBe('#daemons');
+    expect(window.location.hash).toBe('#machines');
     await view.unmount();
   });
 });
@@ -3425,8 +3444,8 @@ describe('the connection picker slot', () => {
     );
     await landed();
 
-    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/settings`);
-    expect(window.location.hash).toMatch(/^#machines\/[^/]+\/settings\/setup$/u);
+    // The first run is a full screen of its own now, outside Settings.
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/setup`);
     await view.unmount();
   });
 
@@ -3443,8 +3462,8 @@ describe('the connection picker slot', () => {
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
     await landed();
-    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/settings`);
-    expect(window.location.hash).toMatch(/^#machines\/[^/]+\/settings\/setup$/u);
+    // The first run is a full screen of its own now, outside Settings.
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/setup`);
     await view.unmount();
   });
 
@@ -3682,6 +3701,63 @@ describe('App', () => {
       expect(document.documentElement.style.getPropertyValue('--release-notice-h')).toBe('');
     } finally {
       while (undo.length > 0) undo.pop()?.();
+    }
+  });
+});
+
+describe('the full-screen machine setup route', () => {
+  it('draws only the machine’s own setup at /d/<id>/setup, with no app bar and no tab bar', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/setup`, [alpha.daemonId], { fleet: NOT_SET_UP });
+    try {
+      await settle();
+      // A one-time guided job gets the whole screen: no level-one navigation of any kind.
+      expect(view.container.querySelector(`[data-machine-setup="${ALPHA}"]`)).not.toBeNull();
+      expect(view.container.querySelector('[data-density-region="app-bar"]')).toBeNull();
+      expect(view.container.querySelector('[data-app-tab-bar]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+});
+
+describe('the phone tab bar', () => {
+  const PHONE_WIDTH = 390;
+
+  it('sits under every page but a session, and the top bar offers Find only where it is missing', async () => {
+    const restore = patchGlobal(window, 'innerWidth', PHONE_WIDTH);
+    try {
+      const sessions = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
+      try {
+        await settle();
+        const bar = must(sessions.view.container.querySelector<HTMLElement>('[data-app-tab-bar]'), 'the tab bar');
+        expect(bar.querySelector('[data-app-tab="sessions"]')?.getAttribute('aria-current')).toBe('page');
+        // The bar has its own Find, so the top bar does not repeat it.
+        expect(sessions.view.container.querySelector('[data-app-bar-destination-search]')).toBeNull();
+      } finally {
+        await sessions.view.unmount();
+      }
+
+      const session = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
+      try {
+        await settle();
+        // A transcript needs the whole height, so there is no tab bar — and Find moves into the top bar.
+        expect(session.view.container.querySelector('[data-app-tab-bar]')).toBeNull();
+        expect(session.view.container.querySelector('[data-app-bar-destination-search]')).not.toBeNull();
+      } finally {
+        await session.view.unmount();
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it('is not drawn at desktop width, where the app bar carries the destinations', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
+    try {
+      await settle();
+      expect(view.container.querySelector('[data-app-tab-bar]')).toBeNull();
+    } finally {
+      await view.unmount();
     }
   });
 });

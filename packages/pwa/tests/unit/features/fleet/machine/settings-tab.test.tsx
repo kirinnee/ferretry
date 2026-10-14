@@ -55,6 +55,8 @@ interface Setup {
   readonly hash?: string;
   readonly answers?: Parameters<typeof scriptedClient>[0];
   readonly sources?: readonly DaemonConnectionRecord[];
+  readonly daemonPanels?: MachineSettingsTabProps['daemonPanels'];
+  readonly onSetUp?: () => void;
 }
 
 const props = (
@@ -75,6 +77,8 @@ const props = (
     createClient: async () => client,
     sources: setup.sources ?? [record(WORK, 1)],
     browser: fakeWindow(setup.hash ?? '#machines/studio-mac/machine'),
+    ...(setup.daemonPanels === undefined ? {} : { daemonPanels: setup.daemonPanels }),
+    ...(setup.onSetUp === undefined ? {} : { onSetUp: setup.onSetUp }),
   };
 };
 
@@ -288,10 +292,97 @@ describe('MachineSettingsTab', () => {
     });
   });
 
+  it('a not-set-up machine’s Set up opens the full-screen first run when the shell offers one', async () => {
+    let opened = 0;
+    await withTab(
+      {
+        machine: FRESH_MACHINE,
+        onSetUp: () => {
+          opened += 1;
+        },
+      },
+      async ({ q, browser }) => {
+        await click(q('[data-settings-action="setup"]'), 'set up');
+        expect(opened).toBe(1);
+        // The address is left alone: the first run is a screen of its own, not a flow inside this tab.
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+        expect(q('[data-first-run-step]')).toBeNull();
+        expect(q('[data-machine-settings]')).not.toBeNull();
+      },
+    );
+  });
+
+  describe('the paired daemon’s connection and security panels', () => {
+    /** Records every call the tab makes, and draws a marker for the list or the open panel. */
+    const panelsSpy = () => {
+      const asked: (string | undefined)[] = [];
+      let open: ((panel: string | null) => void) | undefined;
+      const daemonPanels: NonNullable<MachineSettingsTabProps['daemonPanels']> = (panel, onOpen) => {
+        asked.push(panel);
+        open = onOpen;
+        return panel === undefined ? <ul data-panels-list="" /> : <section data-panel-shown={panel} />;
+      };
+      return { asked, daemonPanels, open: (panel: string | null) => must(open, 'the open callback')(panel) };
+    };
+
+    it('lists them between Setup and About this machine once the machine answers', async () => {
+      const spy = panelsSpy();
+      await withTab({ daemonPanels: spy.daemonPanels }, async ({ q }) => {
+        const list = must(q('[data-machine-settings] [data-panels-list]'), 'the panel list');
+        const setup = must(q('[data-setup-section="setup"]'), 'setup');
+        const facts = must(q('[data-setup-section="facts"]'), 'facts');
+        expect(setup.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+        expect(list.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+        expect(spy.asked.every(panel => panel === undefined)).toBe(true);
+      });
+    });
+
+    it('still lists them while the machine has not answered, because Host checks matter most then', async () => {
+      const spy = panelsSpy();
+      await withTab({ machine: null, checking: true, daemonPanels: spy.daemonPanels }, async ({ q }) => {
+        expect(q('[data-machine-settings-waiting]')).not.toBeNull();
+        expect(q('[data-panels-list]')).not.toBeNull();
+      });
+    });
+
+    it('opens one by moving the address, and shows a panel the address names even with no answer', async () => {
+      const spy = panelsSpy();
+      await withTab({ daemonPanels: spy.daemonPanels }, async ({ q, browser }) => {
+        await interact(() => spy.open('warden'));
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine/warden');
+        expect(q('[data-panel-shown="warden"]')).not.toBeNull();
+        expect(q('[data-machine-settings]')).toBeNull();
+        await interact(() => spy.open(null));
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+        expect(q('[data-machine-settings]')).not.toBeNull();
+      });
+      const offline = panelsSpy();
+      await withTab(
+        {
+          machine: null,
+          online: false,
+          hash: '#machines/studio-mac/machine/host-checks',
+          daemonPanels: offline.daemonPanels,
+        },
+        async ({ q }) => {
+          expect(q('[data-panel-shown="host-checks"]')).not.toBeNull();
+          expect(q('[data-machine-settings-waiting]')).toBeNull();
+          expect(offline.asked).toContain('host-checks');
+        },
+      );
+    });
+
+    it('treats a panel word as nothing to show when the shell supplies no panels', async () => {
+      await withTab({ hash: '#machines/studio-mac/machine/warden' }, async ({ q }) => {
+        expect(q('[data-machine-settings]')).not.toBeNull();
+      });
+    });
+  });
+
   it('states the machine facts', async () => {
     await withTab({}, async ({ q }) => {
       const facts = must(q('[data-setup-section="facts"]'), 'facts');
-      expect(facts.querySelector('h4')?.textContent).toBe('Machine');
+      expect(facts.querySelector('h4')?.textContent).toBe('About this machine');
       expect(facts.textContent).toContain('Namestudio-mac');
       expect(facts.textContent).toContain('StatusOnline');
       expect(facts.textContent).toContain('Runtimes2');
@@ -364,7 +455,7 @@ describe('MachineSettingsSurface', () => {
     }
   });
 
-  it('shows the Settings tab itself when no flow is in the address', async () => {
+  it('shows the Machine tab itself when no flow is in the address', async () => {
     const connections = new DaemonConnectionStore({
       connections: [record(STUDIO, 1)],
       selectedDaemonId: STUDIO.daemonId,

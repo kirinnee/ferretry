@@ -2,6 +2,7 @@ import { describe, expect, it, spyOn } from 'bun:test';
 import { useEffect } from 'react';
 import {
   machineItemHash,
+  machinePanelFromHash,
   type SettingsFlow,
   type SettingsFlowRoute,
   settingsFlowFromHash,
@@ -63,7 +64,7 @@ describe('settingsFlowFromHash', () => {
     expect(settingsFlowFromHash(hash)).toBe(flow);
   });
 
-  it('reads the Settings tab itself as no flow', () => {
+  it('reads the Machine tab itself as no flow', () => {
     expect(settingsFlowFromHash('#machines/studio/machine')).toBeNull();
   });
 
@@ -83,7 +84,36 @@ describe('settingsFlowFromHash', () => {
   });
 
   it('accepts a hash without the leading #', () => {
-    expect(settingsFlowFromHash('machines/studio/settings/import')).toBe('import');
+    expect(settingsFlowFromHash('machines/studio/machine/import')).toBe('import');
+  });
+});
+
+describe('machinePanelFromHash', () => {
+  it.each<[string, string]>([
+    ['#machines/studio/machine/security', 'security'],
+    ['#machines/studio/machine/warden', 'warden'],
+    ['#machines/studio/machine/devices', 'devices'],
+    ['#machines/studio/machine/security%20log', 'security log'],
+  ])('reads %s as the %s panel', (hash, panel) => {
+    expect(machinePanelFromHash(hash)).toBe(panel);
+  });
+
+  it('reads a flow word as no panel, so a flow is never also a panel', () => {
+    for (const flow of ['setup', 'import', 'clone', 'install-claude', 'install-codex']) {
+      expect(machinePanelFromHash(`#machines/studio/machine/${flow}`)).toBeNull();
+    }
+  });
+
+  it('reads the Machine tab itself, another tab, or another section as no panel', () => {
+    expect(machinePanelFromHash('#machines/studio/machine')).toBeNull();
+    expect(machinePanelFromHash('#machines/studio/runtimes/security')).toBeNull();
+    expect(machinePanelFromHash('#appearance')).toBeNull();
+    expect(machinePanelFromHash('')).toBeNull();
+  });
+
+  it('reads an item that does not decode as neither a panel nor a flow', () => {
+    expect(machinePanelFromHash('#machines/studio/machine/%E0%A4%A')).toBeNull();
+    expect(settingsFlowFromHash('#machines/studio/machine/%E0%A4%A')).toBeNull();
   });
 });
 
@@ -156,6 +186,34 @@ describe('useSettingsFlow', () => {
     try {
       await interact(() => current().open('setup'));
       expect(browser.location.hash).toBe('#machines/Studio%20Desk/machine/setup');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('openPanel() writes the panel into the address, and openPanel(null) returns to the tab', async () => {
+    const browser = fakeWindow('#machines/studio/machine');
+    const { mounted, current } = await renderProbe('studio', browser);
+    try {
+      expect(current().panel).toBeNull();
+      await interact(() => current().openPanel('warden'));
+      expect(browser.location.hash).toBe('#machines/studio/machine/warden');
+      expect(current().panel).toBe('warden');
+      expect(current().flow).toBeNull();
+      await interact(() => current().openPanel(null));
+      expect(browser.location.hash).toBe('#machines/studio/machine');
+      expect(current().panel).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('starts on the panel the address names', async () => {
+    const browser = fakeWindow('#machines/studio/machine/security');
+    const { mounted, current } = await renderProbe('studio', browser);
+    try {
+      expect(current().panel).toBe('security');
+      expect(current().flow).toBeNull();
     } finally {
       await mounted.unmount();
     }

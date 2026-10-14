@@ -2,12 +2,18 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import {
   APP_BAR_DESTINATIONS,
+  APP_NAVIGATION,
   AppBar,
   type AppBarProps,
+  AppTabBar,
+  type AppTabBarProps,
   appBarDestinationForRoute,
   crumbTrail,
+  MORE_PLACES,
   mobileDestinationMenuOpen,
+  SESSIONS_ENTRY,
   SidebarDrawerTrigger,
+  showsTabBar,
   UPDATE_CHIP,
 } from '../../src/shell/app-bar.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../src/shell/palette-shortcut.ts';
@@ -91,8 +97,49 @@ describe('appBarDestinationForRoute', () => {
     expect(appBarDestinationForRoute({ kind: 'analytics', daemonId: DAEMON })).toBe('analytics');
     expect(appBarDestinationForRoute({ kind: 'learning', daemonId: DAEMON })).toBe('learning');
     expect(appBarDestinationForRoute({ kind: 'settings', daemonId: DAEMON })).toBe('settings');
-    expect(appBarDestinationForRoute({ kind: 'sessions', daemonId: DAEMON })).toBeNull();
     expect(appBarDestinationForRoute({ kind: 'connection-picker' })).toBeNull();
+    expect(appBarDestinationForRoute({ kind: 'imported-history', daemonId: DAEMON })).toBeNull();
+  });
+
+  it('files a session, and starting one, under Sessions, and a project under Projects', () => {
+    expect(appBarDestinationForRoute({ kind: 'sessions', daemonId: DAEMON })).toBe('sessions');
+    expect(appBarDestinationForRoute({ kind: 'session', daemonId: DAEMON, sessionId: 'abc' })).toBe('sessions');
+    expect(appBarDestinationForRoute({ kind: 'new-session', daemonId: DAEMON })).toBe('sessions');
+    expect(appBarDestinationForRoute({ kind: 'project-detail', daemonId: DAEMON, projectId: 'p-1' })).toBe('projects');
+  });
+});
+
+describe('showsTabBar', () => {
+  it('hides the phone bottom bar inside a session, where the composer owns the bottom of the screen', () => {
+    expect(showsTabBar({ kind: 'session', daemonId: DAEMON, sessionId: 'abc' })).toBe(false);
+    expect(showsTabBar({ kind: 'new-session', daemonId: DAEMON })).toBe(false);
+  });
+
+  it('shows it everywhere else', () => {
+    expect(showsTabBar({ kind: 'sessions', daemonId: DAEMON })).toBe(true);
+    expect(showsTabBar({ kind: 'projects', daemonId: DAEMON })).toBe(true);
+    expect(showsTabBar({ kind: 'settings', daemonId: DAEMON })).toBe(true);
+    expect(showsTabBar({ kind: 'connection-picker' })).toBe(true);
+  });
+});
+
+describe('APP_NAVIGATION', () => {
+  it('names Sessions first, then the app destinations, with no place twice', () => {
+    expect(APP_NAVIGATION[0]).toBe(SESSIONS_ENTRY);
+    expect(APP_NAVIGATION.slice(1)).toEqual([...APP_BAR_DESTINATIONS]);
+    expect(APP_NAVIGATION.map(place => place.id)).toEqual([
+      'sessions',
+      'projects',
+      'analytics',
+      'warden',
+      'learning',
+      'settings',
+    ]);
+    expect(SESSIONS_ENTRY.path(DAEMON)).toBe('/d/workshop');
+  });
+
+  it('puts every place either on the phone bar or under More, never both', () => {
+    expect(MORE_PLACES).toEqual(['analytics', 'warden', 'learning']);
   });
 });
 
@@ -103,6 +150,7 @@ describe('AppBar destinations', () => {
     const hrefs = linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'));
 
     expect(hrefs).toEqual([
+      '/d/workshop',
       '/d/workshop/projects',
       '/d/workshop/analytics',
       '/d/workshop/warden',
@@ -121,6 +169,7 @@ describe('AppBar destinations', () => {
     await mounted.render(bar({ daemon: OTHER }));
 
     expect(linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'))).toEqual([
+      '/d/laptop',
       '/d/laptop/projects',
       '/d/laptop/analytics',
       '/d/laptop/warden',
@@ -131,15 +180,36 @@ describe('AppBar destinations', () => {
     await mounted.unmount();
   });
 
-  it('marks exactly the active destination as the current page', async () => {
+  it('draws them as plain text links, marking exactly the active one as the current page', async () => {
     setViewport(DESKTOP);
     const mounted = await mount(bar({ active: 'warden' }));
     const links = linksOf(mounted.container, 'Destinations');
 
-    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
-    expect(links.map(link => link.getAttribute('aria-label'))).toEqual(
-      APP_BAR_DESTINATIONS.map(destination => destination.label),
-    );
+    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, null, 'page', null, null]);
+    expect(links.map(link => link.textContent)).toEqual(APP_NAVIGATION.map(destination => destination.label));
+    expect(links.map(link => link.getAttribute('data-app-nav'))).toEqual(APP_NAVIGATION.map(place => place.id));
+    expect(links.map(link => link.getAttribute('title'))).toEqual(APP_NAVIGATION.map(place => place.title));
+    expect(links.every(link => link.className === 'kt-appnav__link')).toBe(true);
+
+    await mounted.render(bar({ active: 'sessions' }));
+    expect(
+      linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('aria-current') === 'page'),
+    ).toEqual([true, false, false, false, false, false]);
+
+    await mounted.unmount();
+  });
+
+  it('commits a plain click through the host navigation', async () => {
+    setViewport(DESKTOP);
+    const visited: string[] = [];
+    const mounted = await mount(bar({ onNavigate: to => visited.push(to) }));
+    const settings = mounted.container.querySelector('[data-app-nav="settings"]') as HTMLAnchorElement;
+
+    const click = new Event('click', { bubbles: true, cancelable: true });
+    Object.assign(click, { button: 0 });
+    await interact(() => settings.dispatchEvent(click));
+
+    expect(visited).toEqual(['/d/workshop/settings']);
 
     await mounted.unmount();
   });
@@ -155,8 +225,13 @@ describe('AppBar destinations', () => {
 
     expect(primary.querySelector('nav[aria-label="Breadcrumb"]')).not.toBeNull();
     expect(primary.querySelector('nav[aria-label="Destinations"]')).toBeNull();
-    expect(destinationNav.querySelectorAll('a')).toHaveLength(APP_BAR_DESTINATIONS.length);
-    expect(destinationNav.querySelector('[data-app-bar-destination-search]')).not.toBeNull();
+    expect(destinationNav.querySelectorAll('a')).toHaveLength(APP_NAVIGATION.length);
+    // Find is a search box at the end of the same row, beside the links rather than one of them.
+    expect(destinationNav.querySelector('[data-app-bar-destination-search]')).toBeNull();
+    const finder = destinationRow.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
+    expect(finder.className).toBe('kt-findbox');
+    expect(finder.textContent).toContain('Search');
+    expect(primary.querySelector('[data-app-bar-destination-search]')).toBeNull();
 
     await mounted.unmount();
   });
@@ -203,6 +278,7 @@ describe('AppBar command palette entry', () => {
 
     expect(finder.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
     expect(finder.getAttribute('aria-label')).toBe('Find app destinations, settings & sessions');
+    expect(finder.querySelector('kbd')?.textContent).toBe(paletteShortcutLabel());
     expect(slot.contains(finder)).toBe(false);
 
     await interact(() => finder.dispatchEvent(new Event('click', { bubbles: true })));
@@ -212,25 +288,31 @@ describe('AppBar command palette entry', () => {
     await mounted.unmount();
   });
 
-  it('is reachable from the phone destination picker', async () => {
+  it('keeps a Find button in the phone top bar when no bottom bar is under the page', async () => {
     setViewport(PHONE);
     let opened = 0;
     const mounted = await mount(bar({ onOpenPalette: () => (opened += 1) }));
-    const trigger = byLabel('Choose destination') as HTMLButtonElement;
+    const primary = mounted.container.querySelector('[data-app-bar-primary]') as HTMLElement;
+    const finder = primary.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
 
-    await interact(() => trigger.dispatchEvent(new Event('click', { bubbles: true })));
-
-    const sheet = document.getElementById(trigger.getAttribute('aria-controls') as string) as HTMLElement;
-    const finder = sheet.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
-
-    expect(finder.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
-    expect(finder.getAttribute('aria-label')).toBe('Search app, settings & sessions');
-    expect(finder.textContent).toContain('Search app, settings & sessions');
+    expect(finder.getAttribute('aria-label')).toBe('Find app destinations, settings & sessions');
+    expect(finder.getAttribute('data-variant')).toBe('ghost');
+    // On a phone the desktop row is not drawn at all, so this is the only Find.
+    expect(mounted.container.querySelectorAll('[data-app-bar-destination-search]')).toHaveLength(1);
+    expect(mounted.container.querySelector('[data-app-bar-destination-row]')).toBeNull();
 
     await interact(() => finder.dispatchEvent(new Event('click', { bubbles: true })));
 
     expect(opened).toBe(1);
-    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+    await mounted.unmount();
+  });
+
+  it('leaves Find to the bottom bar when the bottom bar is shown', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(bar({ tabBarShown: true }));
+
+    expect(mounted.container.querySelector('[data-app-bar-destination-search]')).toBeNull();
 
     await mounted.unmount();
   });
@@ -261,7 +343,7 @@ describe('AppBar current-session search seam', () => {
     const finder = mounted.container.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
 
     expect(slot.contains(search)).toBe(true);
-    expect(destinations).toHaveLength(APP_BAR_DESTINATIONS.length);
+    expect(destinations).toHaveLength(APP_NAVIGATION.length);
     expect(destinations.every(link => !slot.contains(link))).toBe(true);
     expect(finder.getAttribute('aria-keyshortcuts')).toBeNull();
     expect(finder.textContent).not.toContain(paletteShortcutLabel());
@@ -379,63 +461,172 @@ describe('AppBar theme slot', () => {
   });
 });
 
-describe('AppBar phone destination selector', () => {
-  it('replaces the desktop tab group with a real modal selector', async () => {
-    setViewport(DESKTOP);
-    const desktop = await mount(bar());
-
-    expect(byLabel('Choose destination')).toBeNull();
-
-    await desktop.unmount();
-
+describe('AppBar on a phone', () => {
+  it('has no destination selector of its own: the bottom bar carries the places', async () => {
     setViewport(PHONE);
-    const mounted = await mount(bar());
-    const trigger = byLabel('Choose destination') as HTMLButtonElement;
+    const mounted = await mount(bar({ active: 'settings' }));
     const header = mounted.container.querySelector('header') as HTMLElement;
 
-    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(trigger.getAttribute('aria-expanded')).toBe('false');
-    // The sheet is nested under this header. A backdrop/filter/transform utility
-    // would create a stacking context and put the visible sheet below the page.
-    expect(header.className).not.toMatch(/backdrop|filter|transform/u);
+    expect(byLabel('Choose destination')).toBeNull();
+    expect(linksOf(mounted.container, 'Destinations')).toEqual([]);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+    // A sheet nested under this header would be trapped below the page by a stacking context.
+    expect(header.className).not.toMatch(/backdrop|filter|transform/u);
 
-    await interact(() => trigger.dispatchEvent(new Event('click', { bubbles: true })));
+    await mounted.unmount();
+  });
+});
 
-    expect(trigger.getAttribute('aria-expanded')).toBe('true');
-    expect(document.getElementById(trigger.getAttribute('aria-controls') as string)).not.toBeNull();
+const tabBar = (props: Partial<AppTabBarProps> = {}) => (
+  <AppTabBar daemon={DAEMON} onOpenPalette={() => {}} {...props} />
+);
+
+const primaryClick = (): Event => {
+  const click = new Event('click', { bubbles: true, cancelable: true });
+  Object.assign(click, { button: 0 });
+  return click;
+};
+
+describe('AppTabBar', () => {
+  it('shows Sessions, Projects, Find, Settings and More, in that order, scoped to the daemon', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(tabBar());
+    const nav = mounted.container.querySelector('[data-app-tab-bar]') as HTMLElement;
+
+    expect(nav.getAttribute('aria-label')).toBe('App');
+    expect([...nav.querySelectorAll('[data-app-tab]')].map(item => item.getAttribute('data-app-tab'))).toEqual([
+      'sessions',
+      'projects',
+      'find',
+      'settings',
+      'more',
+    ]);
+    expect([...nav.querySelectorAll('[data-app-tab]')].map(item => item.textContent)).toEqual([
+      'Sessions',
+      'Projects',
+      'Find',
+      'Settings',
+      'More',
+    ]);
+    expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
+      '/d/workshop',
+      '/d/workshop/projects',
+      '/d/workshop/settings',
+    ]);
+
+    await mounted.render(tabBar({ daemon: OTHER }));
+    expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
+      '/d/laptop',
+      '/d/laptop/projects',
+      '/d/laptop/settings',
+    ]);
 
     await mounted.unmount();
   });
 
-  it('closes the selector when a destination is picked and when it is dismissed', async () => {
+  it('marks the current place, and marks More when the current place is under it', async () => {
     setViewport(PHONE);
-    const mounted = await mount(bar());
-    const trigger = byLabel('Choose destination') as HTMLButtonElement;
+    const mounted = await mount(tabBar({ active: 'projects' }));
+    const current = (): (string | null)[] =>
+      [...mounted.container.querySelectorAll('[data-app-tab]')].map(item => item.getAttribute('aria-current'));
 
-    await interact(() => trigger.dispatchEvent(new Event('click', { bubbles: true })));
-    const sheet = document.getElementById(trigger.getAttribute('aria-controls') as string) as HTMLElement;
-    const picked = [...sheet.querySelectorAll('a')].find(
-      link => link.getAttribute('href') === '/d/workshop/settings',
-    ) as HTMLAnchorElement;
+    expect(current()).toEqual([null, 'page', null, null, null]);
 
-    // A plain left click navigates AND closes the menu.
-    const click = new Event('click', { bubbles: true, cancelable: true });
-    Object.assign(click, { button: 0 });
-    await interact(() => picked.dispatchEvent(click));
+    await mounted.render(tabBar({ active: 'warden' }));
+    expect(current()).toEqual([null, null, null, null, 'page']);
 
-    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await mounted.render(tabBar());
+    expect(current()).toEqual([null, null, null, null, null]);
 
-    await interact(() => trigger.dispatchEvent(new Event('click', { bubbles: true })));
+    await mounted.unmount();
+  });
 
-    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  it('opens the palette from Find', async () => {
+    setViewport(PHONE);
+    let opened = 0;
+    const mounted = await mount(tabBar({ onOpenPalette: () => (opened += 1) }));
+    const find = mounted.container.querySelector('[data-app-tab="find"]') as HTMLButtonElement;
 
-    const dismiss = [...sheet.querySelectorAll('button')].find(
-      button => button.textContent?.trim() === 'Dismiss',
-    ) as HTMLButtonElement;
+    expect(find.getAttribute('aria-label')).toBe('Find app destinations, settings & sessions');
+    await interact(() => find.dispatchEvent(new Event('click', { bubbles: true })));
+
+    expect(opened).toBe(1);
+
+    await mounted.unmount();
+  });
+
+  it('navigates a bar place through the host', async () => {
+    setViewport(PHONE);
+    const visited: string[] = [];
+    const mounted = await mount(tabBar({ onNavigate: to => visited.push(to) }));
+    const projects = mounted.container.querySelector('[data-app-tab="projects"]') as HTMLAnchorElement;
+
+    await interact(() => projects.dispatchEvent(primaryClick()));
+
+    expect(visited).toEqual(['/d/workshop/projects']);
+
+    await mounted.unmount();
+  });
+
+  it('opens More as a sheet of Analytics, Warden and Learning, and closes it on a pick', async () => {
+    setViewport(PHONE);
+    const visited: string[] = [];
+    const mounted = await mount(tabBar({ active: 'learning', onNavigate: to => visited.push(to) }));
+    const more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+
+    expect(more.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    const sheet = document.getElementById(more.getAttribute('aria-controls') as string) as HTMLElement;
+    expect(sheet.getAttribute('role')).toBe('dialog');
+    const rows = [...sheet.querySelectorAll('[data-app-more]')] as HTMLAnchorElement[];
+    expect(rows.map(row => row.getAttribute('data-app-more'))).toEqual(['analytics', 'warden', 'learning']);
+    expect(rows.map(row => row.getAttribute('href'))).toEqual([
+      '/d/workshop/analytics',
+      '/d/workshop/warden',
+      '/d/workshop/learning',
+    ]);
+    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual([null, null, 'page']);
+    expect(rows[1]?.textContent).toContain('Open fleet supervision and verdicts');
+
+    await interact(() => rows[1]?.dispatchEvent(primaryClick()));
+
+    expect(visited).toEqual(['/d/workshop/warden']);
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+
+    await mounted.unmount();
+  });
+
+  it('closes More when it is dismissed without a pick', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(tabBar());
+    const more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+
+    const dismiss = document.querySelector('[aria-label="Dismiss more places"]') as HTMLButtonElement;
     await interact(() => dismiss.dispatchEvent(new Event('click', { bubbles: true })));
 
-    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+
+    await mounted.unmount();
+  });
+
+  it('follows a More pick with no host navigation, still closing the sheet', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(tabBar());
+    const more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+    const sheet = document.getElementById(more.getAttribute('aria-controls') as string) as HTMLElement;
+    const analytics = sheet.querySelector('[data-app-more="analytics"]') as HTMLAnchorElement;
+    await interact(() => analytics.dispatchEvent(primaryClick()));
+
+    expect(more.getAttribute('aria-expanded')).toBe('false');
 
     await mounted.unmount();
   });

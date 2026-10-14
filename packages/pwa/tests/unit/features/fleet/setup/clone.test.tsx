@@ -505,7 +505,7 @@ describe('CloneMachine · Existing setup (E28)', () => {
     });
     const screen = await render({ machine: machineView({ runtimeCount: 3 }), createClient });
     try {
-      expect(screen.text('[data-stepper-position]')).toBe('Source · 1 of 4');
+      expect(screen.text('[data-stepper-position]')).toBe('Step 1 of 3 · Source');
       await toPreview(screen);
       await click(screen.q('[data-clone-step="preview"] [data-step-next]'), 'Next');
       expect(screen.step()).toBe('existing');
@@ -566,7 +566,7 @@ describe('CloneMachine · Existing setup (E28)', () => {
     const screen = await render({ createClient });
     try {
       expect(calls.target.some(call => call.path === '/v1/fleet/profiles')).toBe(true);
-      expect(screen.text('[data-stepper-position]')).toBe('Source · 1 of 4');
+      expect(screen.text('[data-stepper-position]')).toBe('Step 1 of 3 · Source');
       await toPreview(screen);
       expect(screen.text('[data-clone-step="preview"] [data-step-next]')).toBe('Next');
       await click(screen.q('[data-clone-step="preview"] [data-step-next]'), 'Next');

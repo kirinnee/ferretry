@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { machineReachSummary, readMachineReach } from '../../../../../src/features/fleet/shell/machine-reach.ts';
+import {
+  machineReachSummary,
+  readMachineReach,
+  reachLabel,
+  reachWord,
+  type ShownReach,
+  shownReachSummary,
+} from '../../../../../src/features/fleet/shell/machine-reach.ts';
 import { machineClient, machineView } from './machine-support.ts';
 
 describe('machine reach', () => {
@@ -35,5 +42,24 @@ describe('machine reach', () => {
     expect(machineReachSummary({ kind: 'online', machine: machineView({ setUp: false, runtimeCount: 0 }) })).toBe(
       'Online · Not set up yet',
     );
+  });
+
+  it('adds Locked to the shown summary, and otherwise says what the read said', () => {
+    expect(shownReachSummary({ kind: 'locked' })).toBe('Locked · Open it to unlock');
+    expect(shownReachSummary({ kind: 'offline' })).toBe('Offline');
+    expect(shownReachSummary({ kind: 'online', machine: machineView() })).toBe('Online · 2 runtimes');
+  });
+
+  it('gives every shown state its status mark and its spoken word', () => {
+    const states: readonly ShownReach[] = [
+      { kind: 'checking' },
+      { kind: 'offline' },
+      { kind: 'locked' },
+      { kind: 'online', machine: machineView() },
+      { kind: 'unreadable', reason: 'x' },
+    ];
+    expect(states.map(reachWord)).toEqual(['checking', 'needs_sign_in', 'refresh_due', 'ready', 'ready']);
+    // A machine that answered with a refusal is still reachable, so it is Online, never Offline.
+    expect(states.map(reachLabel)).toEqual(['Checking', 'Offline', 'Locked', 'Online', 'Online']);
   });
 });

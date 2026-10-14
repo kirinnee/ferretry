@@ -20,7 +20,7 @@ import {
   type DaemonSettingsTabDefinition,
 } from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { must } from '../../../support/dom.ts';
+import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
 
 const alpha = daemonConnection({
@@ -68,6 +68,7 @@ describe('daemon settings panel rail', () => {
         additionalTabs={PRODUCTION_ADDITIONAL_TABS}
         readWardenStatus={unavailable}
         createWardenClient={unavailable}
+        onOpenPanel={() => undefined}
       />,
     );
 
@@ -111,11 +112,11 @@ describe('daemon settings panel rail', () => {
         name="Alpha"
         readWardenStatus={unavailable}
         createWardenClient={unavailable}
+        panel="host-checks"
+        onOpenPanel={() => undefined}
       />,
     );
 
-    const row = must(view.root.findAll(node => node.props['data-daemon-panel'] === 'host-checks')[0], 'host checks');
-    run(() => (row.props as { onClick: () => void }).onClick());
     const notice = must(
       view.root.findAll(node => node.props['aria-label'] === 'Host checks unavailable')[0],
       'the unavailable notice',
@@ -123,5 +124,121 @@ describe('daemon settings panel rail', () => {
     expect(notice.props.role).toBe('status');
 
     run(() => view.unmount());
+  });
+
+  it('gives a panel the composition root has not named a neutral glyph, so the column stays complete', () => {
+    const view = render(
+      <DaemonSettingsFrame
+        connection={alpha}
+        name="Alpha"
+        additionalTabs={[{ id: 'invented', label: 'Invented', description: 'Not in the table.', Surface: () => null }]}
+        readWardenStatus={unavailable}
+        createWardenClient={unavailable}
+        onOpenPanel={() => undefined}
+      />,
+    );
+    const row = must(view.root.findAll(node => node.props['data-daemon-panel'] === 'invented')[0], 'the row');
+    const svg = must(row.findAll(node => node.type === 'svg')[0], 'its glyph');
+    expect(String(svg.props.className)).toContain(FALLBACK_GLYPH);
+    run(() => view.unmount());
+  });
+});
+
+describe('daemon settings panel list', () => {
+  const opened: (string | null)[] = [];
+  const frame = (props: { panel?: string; backLabel?: string } = {}) => (
+    <DaemonSettingsFrame
+      connection={alpha}
+      name="Alpha"
+      additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+      readWardenStatus={unavailable}
+      createWardenClient={unavailable}
+      onOpenPanel={panel => opened.push(panel)}
+      {...props}
+    />
+  );
+
+  beforeEach(() => {
+    opened.length = 0;
+  });
+
+  it('is one titled list of rows, each with its label and its description, and asks to open the one pressed', async () => {
+    const view = await mount(frame());
+    try {
+      const section = must(view.container.querySelector<HTMLElement>('[data-daemon-settings-frame="alpha"]'), 'frame');
+      expect(section.getAttribute('aria-labelledby')).toBe('daemon-settings-heading');
+      expect(section.querySelector('#daemon-settings-heading')?.textContent).toBe('Connection and security');
+      expect(section.textContent).toContain('Shared by every browser paired to Alpha');
+      expect(section.querySelector('ul')?.getAttribute('aria-label')).toBe('Alpha connection and security');
+      expect(section.querySelector('[data-daemon-panel-open]')).toBeNull();
+
+      const warden = must(section.querySelector<HTMLButtonElement>('[data-daemon-panel="warden"]'), 'Warden row');
+      expect(warden.textContent).toBe('WardenSupervision, account failover, and policy for this daemon.');
+
+      await interact(() => warden.click());
+      await interact(() =>
+        must(section.querySelector<HTMLButtonElement>('[data-daemon-panel="doctor"]'), 'Doctor row').click(),
+      );
+      expect(opened).toEqual(['warden', 'doctor']);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('shows only the panel the address names, titled for its machine, with the way back to the list', async () => {
+    const view = await mount(frame({ panel: 'model-pricing' }));
+    try {
+      const section = must(view.container.querySelector<HTMLElement>('[data-daemon-settings-frame="alpha"]'), 'frame');
+      expect(section.getAttribute('aria-label')).toBe('Model pricing on Alpha');
+      expect(section.querySelector('[data-daemon-panel-open]')?.getAttribute('data-daemon-panel-open')).toBe(
+        'model-pricing',
+      );
+      expect(section.querySelector('[data-daemon-panel]')).toBeNull();
+      const back = must(section.querySelector<HTMLButtonElement>('[data-daemon-panel-back]'), 'the back button');
+      // The tab it lives on, by default.
+      expect(back.textContent).toBe('Machine');
+      await interact(() => back.click());
+      expect(opened).toEqual([null]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('says where Back goes when the caller names it', async () => {
+    const view = await mount(frame({ panel: 'warden', backLabel: 'Alpha' }));
+    try {
+      expect(view.container.querySelector('[data-daemon-panel-back]')?.textContent).toBe('Alpha');
+      // Warden's own panel: the status read is missing, and it says so rather than reading as clean.
+      expect(view.container.querySelector('[aria-label="Warden status unavailable"]')).not.toBeNull();
+      expect(view.container.textContent).toContain('Recent verdicts unavailable');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('lands on the list for a panel that does not exist, never on a blank frame', async () => {
+    const view = await mount(frame({ panel: 'retired-panel' }));
+    try {
+      expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
+      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(11);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it.each([
+    ['secrets', '[aria-label="Loading secrets"], [aria-label="Secrets unavailable"]'],
+    ['devices', '[data-daemon-panel-open="devices"] *'],
+    ['grants', '[aria-label="Loading capability grants"], [aria-label="Capability grants unavailable"]'],
+    ['security', '[data-daemon-panel-open="security"] *'],
+    ['carrier', '[data-active-carrier]'],
+  ])('mounts the %s panel against this frame’s daemon', async (panel, marker) => {
+    const view = await mount(frame({ panel }));
+    try {
+      expect(view.container.querySelector(`[data-daemon-panel-open="${panel}"]`)).not.toBeNull();
+      expect(view.container.querySelectorAll(marker).length).toBeGreaterThan(0);
+    } finally {
+      await view.unmount();
+    }
   });
 });

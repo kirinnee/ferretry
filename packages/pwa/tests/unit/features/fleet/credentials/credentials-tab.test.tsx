@@ -675,7 +675,7 @@ describe('CredentialsTab · Add a login from the tab', () => {
     const c = view.container;
     await click(c.querySelector('[data-add-login]'), 'Add a login');
     expect(text(c, '#machine-stepper-title')).toBe('Add a login');
-    expect(text(c, '[data-stepper-position]')).toBe('Choose tool · 1 of 2');
+    expect(text(c, '[data-stepper-position]')).toBe('Step 1 of 2 · Choose tool');
     await click(c.querySelector('[data-add-login-tool="claude"] input'), 'the Claude radio');
     await click(c.querySelector('[data-step-next]'), 'Next');
     await click(c.querySelector('[data-change-submit]'), 'Sign in to Claude Code');
