@@ -75,6 +75,33 @@ const config: Config = {
         scrim: 'var(--scrim)',
         focus: 'var(--focus-color)',
         selection: 'var(--selection-bg)',
+        // Navigation, tabs, stepper and the phone's grouped-card ground. Each key
+        // is its token name, and every pairing is contrast-gated per theme by
+        // tests/unit/theme-navigation-tokens.test.ts.
+        'nav-hover': 'var(--nav-hover)',
+        'nav-sel-bg': 'var(--nav-sel-bg)',
+        'nav-sel-fg': 'var(--nav-sel-fg)',
+        'nav-sel-sub': 'var(--nav-sel-sub)',
+        'nav-sel-edge': 'var(--nav-sel-edge)',
+        ground: 'var(--ground)',
+        'tab-fg': 'var(--tab-fg)',
+        'tab-sel-fg': 'var(--tab-sel-fg)',
+        'tab-underline': 'var(--tab-underline)',
+        'tab-rule': 'var(--tab-rule)',
+        'appnav-fg': 'var(--appnav-fg)',
+        'appnav-sel-fg': 'var(--appnav-sel-fg)',
+        'appnav-underline': 'var(--appnav-underline)',
+        'step-done-bg': 'var(--step-done-bg)',
+        'step-done-fg': 'var(--step-done-fg)',
+        'step-now-edge': 'var(--step-now-edge)',
+        'step-now-fg': 'var(--step-now-fg)',
+        'step-todo-edge': 'var(--step-todo-edge)',
+        'step-todo-fg': 'var(--step-todo-fg)',
+        'step-rail': 'var(--step-rail)',
+        'step-rail-done': 'var(--step-rail-done)',
+        'step-seg': 'var(--step-seg)',
+        'step-seg-done': 'var(--step-seg-done)',
+        'step-seg-now': 'var(--step-seg-now)',
       },
 
       /* The type ramp — what kills the `text-[11px]` literals scattered across

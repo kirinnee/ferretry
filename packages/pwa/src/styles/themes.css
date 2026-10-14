@@ -281,6 +281,47 @@
   --focus-offset: 2px;
   --selection-bg: #d9daf8;
   --selection-fg: #17171b;
+
+  /* ---- navigation, tabs, stepper, grouped cards ----
+     The Settings rail marks its selected row as a soft FILLED pill — never a
+     side bar — so these are fill/ink/edge triples rather than a rail colour.
+     Every family restates the literal ones in its own mode blocks: the compact
+     families 6–11 do not declare --surface-3 / --border-strong / --accent-strong,
+     so a baseline literal or one of those references would leak Studio indigo
+     into them. tests/unit/theme-navigation-tokens.test.ts resolves all 22 themes
+     and gates every pairing below (text >=4.5:1, >=7:1 in High Contrast;
+     graphics >=3:1). */
+  /* Owner ruling: NO all-caps on navigation or buttons, in any family.
+     --label-transform still shouts eyebrows and badges; this one never does. */
+  --control-transform: none;
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent-strong); /* 6.60:1 on --nav-sel-bg */
+  --nav-sel-sub: var(--accent); /* 5.24:1 on --nav-sel-bg */
+  --nav-sel-edge: var(--accent-border);
+  --nav-sel-shadow: none;
+  /* The recessed page behind a phone's inset grouped cards (cards are --surface). */
+  --ground: var(--surface-3);
+  --tab-fg: var(--muted);
+  --tab-sel-fg: var(--accent);
+  --tab-underline: var(--accent);
+  --tab-underline-width: 2px;
+  --tab-rule: var(--border);
+  --appnav-fg: var(--muted);
+  --appnav-sel-fg: var(--fg);
+  --appnav-underline: var(--accent);
+  --step-done-bg: var(--accent);
+  --step-done-fg: var(--accent-fg);
+  --step-now-edge: var(--accent);
+  --step-now-fg: var(--accent);
+  --step-todo-edge: var(--border-strong);
+  --step-todo-fg: var(--muted);
+  --step-rail: var(--border);
+  --step-rail-done: var(--accent);
+  --step-seg: var(--border);
+  --step-seg-done: var(--accent);
+  /* A paler step of the accent — still >=3:1, but plainly not "done". */
+  --step-seg-now: #8486e2;
 }
 
 /* ============================================================================
@@ -384,6 +425,16 @@
   --focus-color: #8f93ee;
   --selection-bg: #2f2f5c;
   --selection-fg: #f2f2f4;
+
+  /* --accent-soft is too close to the rail to read as a pill here; this is the
+     deeper indigo fill the approved proposal used. */
+  --nav-hover: var(--surface-3);
+  --nav-sel-bg: #23234a;
+  --nav-sel-fg: #dcdcff;
+  --nav-sel-sub: #aaacf0;
+  --nav-sel-edge: #3e3c7a;
+  --ground: #09090b;
+  --step-seg-now: #5f619a;
 }
 
 /* ============================================================================
@@ -491,6 +542,13 @@
   --radius-lg: 0px;
   --border-width: 1px;
   --border-width-heavy: 1px;
+
+  /* The mono face stays; the casing does not. Navigation and buttons are
+     sentence case by owner ruling — labels and badges keep the uppercase. The
+     selected row is a square instrument register: a tinted cell boxed by a
+     hairline in the signal colour, read out in that same signal. */
+  --control-transform: none;
+  --nav-sel-edge: var(--accent);
 }
 
 :root[data-theme='mission-dark'],
@@ -594,6 +652,16 @@
   --focus-color: #47f3ff;
   --selection-bg: #47f3ff;
   --selection-fg: #041016;
+
+  /* Opaque on purpose: --accent-soft is 10% cyan, which would composite
+     differently over the rail, a card and the ground. This is that same 10%
+     cyan, pre-composited over --surface. */
+  --nav-hover: var(--surface-3);
+  --nav-sel-bg: #0e2830;
+  --nav-sel-fg: var(--accent);
+  --nav-sel-sub: var(--muted);
+  --ground: #020509;
+  --step-seg-now: #226e77;
 }
 
 :root[data-theme='mission-light'],
@@ -735,6 +803,13 @@
   --focus-color: #06525f;
   --selection-bg: #b7e7ee;
   --selection-fg: #05212a;
+
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent-strong);
+  --nav-sel-sub: var(--accent);
+  --ground: var(--surface-3);
+  --step-seg-now: #519aa6;
 }
 
 /* ============================================================================
@@ -817,6 +892,20 @@
   --radius-lg: 2px;
   --border-width: 2px;
   --border-width-heavy: 3px;
+
+  /* The selected row is a BLOCK: highlighter-yellow fill (the family's own
+     --selection-bg), a hard ink edge, and the same offset ink shadow every Neo
+     control casts. Tabs and the app nav take a chunky ink underline, not a
+     coloured hairline. */
+  --control-transform: none;
+  --nav-sel-bg: #ffe14d;
+  --nav-sel-edge: var(--border);
+  --nav-sel-shadow: 3px 3px 0 var(--shadow-ink);
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --tab-underline-width: 3px;
+  --appnav-underline: var(--fg);
+  --step-todo-edge: var(--faint);
 }
 
 :root[data-theme='neo-light'],
@@ -900,6 +989,14 @@
   --focus-offset: 2px;
   --selection-bg: #ffe14d;
   --selection-fg: #0a0a0a;
+
+  --nav-hover: var(--surface-2);
+  --nav-sel-fg: var(--fg);
+  --nav-sel-sub: var(--muted);
+  --ground: #e6e2d6;
+  --step-rail: #bdb8a8;
+  --step-seg: #bdb8a8;
+  --step-seg-now: #8787df;
 }
 
 :root[data-theme='neo-dark'],
@@ -982,6 +1079,14 @@
   --focus-color: #ffe14d;
   --selection-bg: #ffe14d;
   --selection-fg: #14140f;
+
+  --nav-hover: var(--surface-2);
+  --nav-sel-fg: var(--accent-fg);
+  --nav-sel-sub: #3d3a26;
+  --ground: var(--bg);
+  --step-rail: #4a4a42;
+  --step-seg: #4a4a42;
+  --step-seg-now: #766a2d;
 }
 
 /* ============================================================================
@@ -1073,6 +1178,29 @@
   --body-wash: none;
   --overlay: none;
   --overlay-opacity: 0;
+
+  /* SOLID INVERSION, no tints: the selected row swaps ink and ground, and
+     every selection marker is full-strength ink at 3px. The one coloured
+     marker is the CURRENT step, so "here" never reads like "done". All text
+     pairs hold the family's 7:1. */
+  --control-transform: none;
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--fg);
+  --nav-sel-fg: var(--bg);
+  --nav-sel-edge: var(--fg);
+  --tab-fg: var(--muted);
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --tab-underline-width: 3px;
+  --appnav-underline: var(--fg);
+  --step-done-bg: var(--fg);
+  --step-done-fg: var(--bg);
+  --step-todo-edge: var(--muted);
+  --step-rail: var(--border-soft);
+  --step-rail-done: var(--fg);
+  --step-seg: var(--border-soft);
+  --step-seg-done: var(--fg);
+  --step-seg-now: var(--accent);
 }
 
 :root[data-theme='contrast-light'],
@@ -1154,6 +1282,9 @@
   --focus-color: #0033a0;
   --selection-bg: #ffe14d;
   --selection-fg: #000000;
+
+  --nav-sel-sub: #d9d9d9;
+  --ground: var(--surface-3);
 }
 
 :root[data-theme='contrast-dark'],
@@ -1235,6 +1366,11 @@
   --focus-color: #7fd4ff;
   --selection-bg: #7fd4ff;
   --selection-fg: #000000;
+
+  --nav-sel-sub: #333333;
+  /* Cards ARE pure black here, so nothing can recess behind them: the ground
+     stays black and the family's 2px white card edges do the grouping. */
+  --ground: var(--bg);
 }
 
 /* ============================================================================
@@ -1433,6 +1569,13 @@
      point of the family and its clearest separation from Contrast/Neo in grey. */
   --border-width: 1px;
   --border-width-heavy: 1px;
+
+  /* A quiet blue-tinted pill on a 1px accent hairline — colour spent only
+     where it does a job, and never a heavier edge than the family allows. */
+  --control-transform: none;
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-edge: var(--accent-border);
 }
 
 :root[data-theme='geist-light'],
@@ -1538,6 +1681,11 @@
   --focus-color: #0060df;
   --selection-bg: #cfe3fd;
   --selection-fg: #171717;
+
+  --nav-sel-fg: var(--accent-strong);
+  --nav-sel-sub: var(--accent);
+  --ground: #ebebed;
+  --step-seg-now: #4f91e9;
 }
 
 :root[data-theme='geist-dark'],
@@ -1639,6 +1787,11 @@
   --focus-color: #3b9eff;
   --selection-bg: #163a5f;
   --selection-fg: #ededed;
+
+  --nav-sel-fg: #e6f1ff;
+  --nav-sel-sub: var(--accent-strong);
+  --ground: #000000;
+  --step-seg-now: #2b67a2;
 }
 
 /* ============================================================================
@@ -1666,6 +1819,9 @@
   --row-min-h-desktop: 34px;
   --panel-texture: repeating-linear-gradient(0deg, rgb(var(--accent-rgb) / 0.07) 0 1px, transparent 1px 4px);
   --panel-texture-size: auto;
+  /* Emphasis is the phosphor signal itself: the selected row lights up in it,
+     on a dim green cell, boxed square. Navigation drops the terminal caps. */
+  --control-transform: none;
 }
 :root[data-theme^='blueprint-'],
 [data-swatch^='blueprint-'] {
@@ -1685,6 +1841,12 @@
     linear-gradient(90deg, rgb(var(--accent-rgb) / 0.1) 1px, transparent 1px),
     linear-gradient(0deg, rgb(var(--accent-rgb) / 0.1) 1px, transparent 1px);
   --panel-texture-size: 20px 20px;
+  /* A drafting sheet emphasises by LINE: the selected row is a drawn box in
+     the blueprint ink over a pale wash, and the tab strip sits on the same
+     drafting rule the dividers use. */
+  --control-transform: none;
+  --nav-sel-edge: var(--accent);
+  --tab-rule: var(--accent-border);
 }
 :root[data-theme^='broadsheet-'],
 [data-swatch^='broadsheet-'] {
@@ -1704,6 +1866,22 @@
   --pad-row-y: 4px;
   --row-min-h-desktop: 30px;
   --divider-color: var(--fg);
+  /* A newspaper emphasises by INK RULE and weight, not by colour: the selected
+     row is boxed in body ink, tabs and steps are marked in ink, and the red is
+     kept for the one live thing — the step in progress. */
+  --control-transform: none;
+  --nav-sel-edge: var(--fg);
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --appnav-underline: var(--fg);
+  --step-done-bg: var(--fg);
+  --step-done-fg: var(--surface);
+  --step-now-edge: var(--fg);
+  --step-now-fg: var(--fg);
+  --step-todo-edge: var(--muted);
+  --step-rail-done: var(--fg);
+  --step-seg-done: var(--fg);
+  --step-seg-now: var(--accent);
 }
 :root[data-theme^='wayfinding-'],
 [data-swatch^='wayfinding-'] {
@@ -1723,6 +1901,14 @@
   --pad-panel: 14px;
   --rail-active: inset 8px 0 0 var(--accent);
   --shadow-control: none;
+  /* Signage emphasises with a SOLID PANEL: the selected row is the accent
+     itself with reversed ink, like a lit wayfinding sign, and the selected tab
+     carries a broad bar rather than a hairline. */
+  --control-transform: none;
+  --nav-sel-bg: var(--accent);
+  --nav-sel-fg: var(--accent-fg);
+  --nav-sel-edge: var(--accent);
+  --tab-underline-width: 4px;
 }
 :root[data-theme^='ledger-'],
 [data-swatch^='ledger-'] {
@@ -1740,6 +1926,10 @@
   --pad-row-y: 4px;
   --panel-texture: repeating-linear-gradient(0deg, transparent 0 31px, rgb(var(--accent-rgb) / 0.14) 32px);
   --panel-texture-size: auto;
+  /* A ledger marks an entry by tinting its line in the book's green and
+     posting it in green ink; the tab strip rides one of the ruled lines. */
+  --control-transform: none;
+  --tab-rule: var(--accent-border);
 }
 :root[data-theme^='ma-'],
 [data-swatch^='ma-'] {
@@ -1762,6 +1952,9 @@
   --pad-panel: 24px;
   --pad-row-y: 12px;
   --gap-md: 20px;
+  /* Ma emphasises by restraint: a faint blush of the accent and its quiet
+     edge, no weight, no shadow — the space around the row does the rest. */
+  --control-transform: none;
 }
 
 /* Family colour ramps are deliberately local: structure is inherited above,
@@ -1779,6 +1972,15 @@
   --accent-fg: #041008;
   --accent-soft: #123d20;
   --accent-border: #2c8447;
+  --bar-bg: rgba(6, 16, 10, 0.86);
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent);
+  --nav-sel-sub: var(--muted);
+  --nav-sel-edge: var(--accent-border);
+  --ground: #030a05;
+  --step-todo-edge: var(--accent-border);
+  --step-seg-now: #2b7643;
 }
 :root[data-theme='phosphor-light'],
 [data-swatch='phosphor-light'] {
@@ -1793,6 +1995,15 @@
   --accent-fg: #fff;
   --accent-soft: #d7f0d9;
   --accent-border: #69a878;
+  --bar-bg: rgba(238, 249, 237, 0.86);
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent);
+  --nav-sel-sub: var(--muted);
+  --nav-sel-edge: var(--accent-border);
+  --ground: var(--surface-2);
+  --step-todo-edge: var(--muted);
+  --step-seg-now: #599c72;
 }
 :root[data-theme='blueprint-dark'],
 [data-swatch='blueprint-dark'] {
@@ -1807,6 +2018,14 @@
   --accent-fg: #062039;
   --accent-soft: #10496c;
   --accent-border: #49a9c8;
+  --bar-bg: rgba(6, 27, 54, 0.86);
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--fg);
+  --nav-sel-sub: var(--muted);
+  --ground: #041327;
+  --step-todo-edge: var(--accent-border);
+  --step-seg-now: #387b9b;
 }
 :root[data-theme='blueprint-light'],
 [data-swatch='blueprint-light'] {
@@ -1821,6 +2040,14 @@
   --accent-fg: #fff;
   --accent-soft: #c7ebf7;
   --accent-border: #4c9dbc;
+  --bar-bg: rgba(223, 244, 251, 0.86);
+  --nav-hover: var(--bg);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--fg);
+  --nav-sel-sub: var(--muted);
+  --ground: var(--surface-2);
+  --step-todo-edge: var(--muted);
+  --step-seg-now: #4a97b3;
 }
 :root[data-theme='broadsheet-light'],
 [data-swatch='broadsheet-light'] {
@@ -1835,6 +2062,12 @@
   --accent-fg: #fff;
   --accent-soft: #f4d9cf;
   --accent-border: #c98573;
+  --bar-bg: rgba(243, 237, 223, 0.86);
+  --nav-hover: var(--bg);
+  --nav-sel-bg: var(--surface-2);
+  --nav-sel-fg: var(--fg);
+  --nav-sel-sub: var(--muted);
+  --ground: #e8dfcc;
 }
 :root[data-theme='broadsheet-dark'],
 [data-swatch='broadsheet-dark'] {
@@ -1849,6 +2082,12 @@
   --accent-fg: #2a120b;
   --accent-soft: #553022;
   --accent-border: #9e5d46;
+  --bar-bg: rgba(29, 26, 22, 0.86);
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: #433a2e;
+  --nav-sel-fg: var(--fg);
+  --nav-sel-sub: var(--muted);
+  --ground: #15120f;
 }
 :root[data-theme^='wayfinding-'],
 [data-swatch^='wayfinding-'] {
@@ -1857,6 +2096,10 @@
   --accent-fg: #fff;
   --accent-soft: #d7e8ff;
   --accent-border: #4789d3;
+  /* Light keeps the Studio neutrals, so these restate only what the cascade
+     would otherwise hand down as Studio indigo. */
+  --nav-sel-sub: #dbe9ff;
+  --step-seg-now: #5c93d2;
 }
 :root[data-theme='wayfinding-dark'],
 [data-swatch='wayfinding-dark'] {
@@ -1871,6 +2114,12 @@
   --accent-fg: #071b32;
   --accent-soft: #153b69;
   --accent-border: #397fc6;
+  --bar-bg: rgba(17, 27, 39, 0.86);
+  --nav-hover: var(--surface-2);
+  --nav-sel-sub: #0f2d52;
+  --ground: #0b131d;
+  --step-todo-edge: var(--muted);
+  --step-seg-now: #3f75b2;
 }
 :root[data-theme^='ledger-'],
 [data-swatch^='ledger-'] {
@@ -1879,6 +2128,11 @@
   --accent-fg: #fff;
   --accent-soft: #d6eadc;
   --accent-border: #75ab86;
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent);
+  --nav-sel-sub: #345a40;
+  --nav-sel-edge: var(--accent-border);
+  --step-seg-now: #649b82;
 }
 :root[data-theme='ledger-dark'],
 [data-swatch='ledger-dark'] {
@@ -1893,6 +2147,13 @@
   --accent-fg: #0b2414;
   --accent-soft: #214b2b;
   --accent-border: #4f9a60;
+  --bar-bg: rgba(16, 37, 27, 0.86);
+  --nav-hover: var(--surface-2);
+  --nav-sel-fg: var(--fg);
+  --nav-sel-sub: var(--muted);
+  --ground: #0c1d14;
+  --step-todo-edge: var(--muted);
+  --step-seg-now: #498859;
 }
 :root[data-theme^='ma-'],
 [data-swatch^='ma-'] {
@@ -1901,6 +2162,11 @@
   --accent-fg: #fff;
   --accent-soft: #f5dce3;
   --accent-border: #d090a1;
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent);
+  --nav-sel-sub: #6a4651;
+  --nav-sel-edge: var(--accent-border);
+  --step-seg-now: #c17c8e;
 }
 :root[data-theme='ma-dark'],
 [data-swatch='ma-dark'] {
@@ -1915,6 +2181,13 @@
   --accent-fg: #35121c;
   --accent-soft: #4d2933;
   --accent-border: #9d5b6c;
+  --bar-bg: rgba(25, 22, 23, 0.86);
+  --nav-hover: var(--surface-2);
+  --nav-sel-fg: var(--fg);
+  --nav-sel-sub: var(--muted);
+  --ground: #120f10;
+  --step-todo-edge: var(--muted);
+  --step-seg-now: #8f606c;
 }
 :root[data-theme$='-dark'],
 [data-swatch$='-dark'] {
