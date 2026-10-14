@@ -870,10 +870,10 @@ describe('PairingService revocation', () => {
     should(ended).be.empty();
   });
 
-  it('should leave the device fully paired when its other state cannot be purged', async () => {
-    // THE ORDER IS THE OPPOSITE OF THE DOCUMENT'S, and deliberately: purging first means a failure
-    // leaves a device that is still paired with its state intact — retryable, nothing half-done —
-    // where revoking first would leave a phone that is unpaired and still being notified.
+  it('should revoke the device first, so a purge that fails leaves it unpaired, never paired without state', async () => {
+    // Review L5: purging first left a window in which a still-paired device was served, and a failed
+    // revocation left a paired device whose passkeys were gone. The grant goes first now; a failed purge
+    // surfaces as an error AFTER the phone has lost its access, and leaves only harmless orphans.
     // Arrange
     const push = new RecordingDeviceState(new Error('the enrolment document could not be written'));
     const { credentials, devices, service, mint } = fixture({ deviceState: [push] });
@@ -884,8 +884,8 @@ describe('PairingService revocation', () => {
     await service.revokeDevice(FIRST_DEVICE_ID).should.be.rejectedWith(/enrolment document/u);
 
     // Assert
-    should(devices.records.map(record => record.id)).deepEqual([FIRST_DEVICE_ID]);
-    should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
+    should(devices.records).be.empty();
+    should(credentials.get(FIRST_DEVICE_ID)).be.undefined();
   });
 
   it('should purge a device’s other state even when there was no grant left to remove', async () => {

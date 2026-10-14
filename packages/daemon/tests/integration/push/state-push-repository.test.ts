@@ -30,7 +30,7 @@ function record(overrides: Partial<PushSubscriptionRecord> = {}): PushSubscripti
     id: pushId('a'),
     deviceId: deviceId('a'),
     deviceName: 'Pixel 8',
-    subscription: subscription('https://push.example.test/send/one'),
+    subscription: subscription('https://fcm.googleapis.com/send/one'),
     prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
     createdAt: AT,
     updatedAt: AT,
@@ -82,7 +82,7 @@ describe('StatePushRepository', () => {
   it('should forget a group and report how many there were to forget', async () => {
     const { repository } = await fixture('push-forget');
     const one = record();
-    const two = record({ id: pushId('b'), subscription: subscription('https://push.example.test/send/two', 5) });
+    const two = record({ id: pushId('b'), subscription: subscription('https://fcm.googleapis.com/send/two', 5) });
     await repository.save(one);
     await repository.save(two);
 
@@ -95,7 +95,7 @@ describe('StatePushRepository', () => {
   it('should serialize concurrent writes so neither loses the other', async () => {
     const { repository } = await fixture('push-concurrent');
     const enrolments = ['a', 'b', 'c', 'd'].map((marker, index) =>
-      record({ id: pushId(marker), subscription: subscription(`https://push.example.test/send/${index}`, index + 1) }),
+      record({ id: pushId(marker), subscription: subscription(`https://fcm.googleapis.com/send/${index}`, index + 1) }),
     );
 
     // A read-modify-write of one array: without the queue each of these reads the document before any

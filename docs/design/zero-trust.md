@@ -174,7 +174,7 @@ GET ws(s)://<daemon address>/v1/rendezvous/<daemonId>/client      (WebSocket upg
   first: at most **30 admitted upgrades a minute from one peer address** (a refusal spends none), at
   most **2 unproven sockets per remote address** (the host's loopback is exempt: every tab on it shares
   one), and at most **16 unproven and 64 direct sessions** in all — a full cap closes the OLDEST
-  unproven socket for the newcomer, so a squatter must out-race honest arrivals. The slot is taken when the upgrade is
+  unproven socket for the newcomer, so a squatter must out-race honest arrivals. The per-address exemption for the host's own tabs applies only on a host-proven carrier (a loopback-only bind): behind a proxy on a wildcard bind, every remote caller arrives from `127.0.0.1` and shares one bounded address. Declared: a proxy in front of a loopback-only bind still shares the exemption, so that deployment is exposed to a cheap denial of direct sessions (the relay is unaffected). The slot is taken when the upgrade is
   admitted, not when the socket attaches, so a burst of concurrent upgrades cannot all pass the check
   before any is counted; a reserved slot whose socket never attaches is handed back after ten seconds.
   An upgrade from an origin the daemon does not serve is refused with the same `403` an HTTP request
@@ -382,6 +382,9 @@ state home (sessions, chat, tasks, attention, pins) do not. A refusal is
 `403 { code: "grant_step_up_required" }`, which the app answers by raising the passkey prompt and retrying
 once.
 
+Starting an agent with your own flags, mode or directory is covered by the unlock (owner decision
+2026-10-14).
+
 ### B2. The ceremony, and who verifies it
 
 The **browser performs** the WebAuthn ceremony; the **daemon is the verifier**. The relay carries
@@ -489,7 +492,7 @@ was kept.
   biometric check in the last 15 minutes", which is weaker against a replayed request and stronger against
   a known password — and replay is no longer possible inside a sealed session anyway.
 - ~~**A declared GAP:** `pairing.use` also guarded the four `/v1/push/*` enrolment routes.~~ **Closed by B5:**
-  a device enrolling itself needs no capability and no step-up.
+  a device enrolling itself needs no capability. It does need a step-up (review M2, below).
 
 ### B4. Only the owner's admin token is ungoverned, and it is the recovery path
 
@@ -570,8 +573,19 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   in `state/grant-audit.jsonl` as `<deviceId>/capability.axis=on|off`. At the host: `fy device ls` and
   `fy device grant`. In the app: a per-device Capabilities disclosure with a toggle per axis, disabled with
   its reason where `PairedDevicesView.mayWiden` says the caller may not widen.
-- **Web Push self-enrolment** needs no capability: a device reads the key, enrols, lists and un-enrols its
-  OWN enrolments freely. Another device's enrolments are behind `pairing.use`, decided by the same guard.
+- **Web Push self-enrolment** needs no capability: a device reads the key, lists and un-enrols its OWN
+  enrolments freely, and enrols itself with a step-up. Another device's enrolments are behind `pairing.use`,
+  decided by the same guard.
+- **Enrolling is a request the HOST makes** (review M2): the daemon POSTs to the endpoint at once and on
+  every alert, from its own network position. So:
+  - the endpoint must be a browser push service on its default port (`PUSH_SERVICE_HOSTS`: FCM, Mozilla
+    autopush, `*.push.apple.com`, `*.notify.windows.com`), never an IP literal, a private range or a
+    metadata address;
+  - an endpoint another device holds is refused, never re-filed under the caller;
+  - the answer never reports whether the confirmation push was accepted — that would be a reachability
+    oracle — and a subscription the push service has discarded is dropped by the ordinary delivery path;
+  - a governed device confirms with its passkey before it enrols.
+    Declared cost: a browser whose push service is not on the list cannot enrol.
 - **A race closed on the way:** a sighting's `lastSeenAt` refresh and a grant change each used to
   re-insert the record they read before their write, so the second to land could undo the first in memory;
   both now refresh the latest record.

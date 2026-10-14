@@ -32,6 +32,8 @@ import {
   PushDeviceListResponseSchema,
   PushDeviceViewSchema,
   RegisterPushDeviceRequestSchema,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpRequiredBody,
   VapidPublicKeyResponseSchema,
   type PushDeviceView,
   type RegisterPushDeviceRequest,
@@ -65,6 +67,8 @@ export interface PushSubscriptionSubsystem {
 
 /** What managing ANOTHER device's enrolment demands. A device's own needs none — see the header. */
 const MANAGE_DEMAND: CapabilityDemand = { capability: 'pairing', axis: 'use' };
+/** What a self-enrolment step-up names on the prompt: managing this device, not granting anything. */
+const ENROL_DEMAND = { capability: 'pairing', axis: 'use' } as const;
 
 /**
  * Whether this caller may manage every device's enrolments, asked of the grant layer's own decision.
@@ -155,10 +159,21 @@ export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: Capabili
       path: '/v1/push/subscriptions',
       minimum: 'operator',
       noStore: true,
-      handle: async ({ request, actor }) => {
+      handle: async ({ request, actor, presentation }) => {
         const deviceId = callerDeviceId(actor);
         if (deviceId === undefined)
           return errorResponse(403, 'only a paired device can enrol for notifications', 'push_device_required');
+        // No capability — a default device still gets its alerts — but a governed device confirms with a
+        // passkey: enrolling sends requests from this host to the endpoint, now and on every alert.
+        if (presentation !== undefined && !presentation.loopback && !presentation.stepUp)
+          return jsonResponse(
+            {
+              error: 'enrolling this device for notifications needs a passkey confirmation from it',
+              code: STEP_UP_REQUIRED_CODE,
+              demand: ENROL_DEMAND,
+            } satisfies StepUpRequiredBody,
+            403,
+          );
         const body = await parseBody(request, RegisterPushDeviceRequestSchema);
         try {
           return jsonResponse(PushDeviceViewSchema.parse(await subsystem.register(deviceId, body)), 201);

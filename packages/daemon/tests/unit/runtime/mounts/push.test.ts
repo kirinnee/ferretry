@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  STEP_UP_REQUIRED_CODE,
   type CapabilityGrants,
   DEFAULT_DEVICE_GRANTS,
   type PushDeviceView,
@@ -30,7 +31,7 @@ const view = (id: string, deviceName: string): PushDeviceView => ({
 const body: RegisterPushDeviceRequest = {
   deviceName: 'Pixel 8',
   subscription: {
-    endpoint: 'https://push.example.test/send/one',
+    endpoint: 'https://fcm.googleapis.com/send/one',
     expirationTime: null,
     keys: { p256dh: Buffer.alloc(65, 4).toString('base64url'), auth: Buffer.alloc(16, 4).toString('base64url') },
   },
@@ -129,6 +130,25 @@ async function mount(subject: PushSubscriptionSubsystem, allow = true) {
 }
 
 describe('push routes', () => {
+  it('should ask a governed device for a passkey confirmation before it enrols, naming the act, and store nothing', async () => {
+    // Enrolling makes this host send requests to the endpoint, now and on every alert (review M2).
+    const subject = new FakePush();
+    const unconfirmed = { deviceId: otherDeviceId, appSession: 'app-two' } as const;
+
+    const response = await (
+      await mount(subject)
+    ).dispatch(
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: unconfirmed, body: JSON.stringify(body) }),
+    );
+
+    should(response.status).equal(403);
+    should(jsonBody(response)).containDeep({
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { capability: 'pairing', axis: 'use' },
+    });
+    should(subject.registrations).be.empty();
+  });
+
   it('should answer a paired browser with the application-server key, cacheable because it is public', async () => {
     const subject = new FakePush();
 
@@ -153,7 +173,7 @@ describe('push routes', () => {
     should(response.status).equal(200);
     should(response.headers.get('cache-control')).equal('no-store');
     should(jsonBody(response)).deepEqual({ devices: [view(enrolmentId, 'Pixel 8')] });
-    should(response.body).not.match(/push\.example\.test/u);
+    should(response.body).not.match(/fcm\.googleapis\.com/u);
   });
 
   it('should file an enrolment against the CALLER, with no way for a body to claim otherwise', async () => {

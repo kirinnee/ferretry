@@ -7,7 +7,7 @@ import {
   STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
-import type { CapabilityPresentation } from '../../api/capability.ts';
+import { type CapabilityPresentation, grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
@@ -48,6 +48,8 @@ export interface GrantSubsystem {
 const REFUSALS: Readonly<Record<GrantFailure, { status: number; code: string }>> = {
   invalid: { status: 400, code: 'invalid_request' },
   forbidden: { status: 403, code: 'grant_forbidden' },
+  // The wire code every other device-narrowed refusal uses, so the app's guidance for it applies here too.
+  'device-not-granted': { status: 403, code: grantRefusalCode('device-not-granted') },
   'step-up-required': { status: 403, code: STEP_UP_REQUIRED_CODE },
   // 503 rather than 500: the daemon is working, it has lost the ANSWER, and the remedy is to repair
   // the document rather than to report a crash.

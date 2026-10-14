@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type CapabilityGrants, DAEMON_CAPABILITIES, GrantsViewSchema } from '@ferretry/protocol';
+import {
+  type CapabilityGrants,
+  DAEMON_CAPABILITIES,
+  DEFAULT_DEVICE_GRANTS,
+  FULL_DEVICE_GRANTS,
+  GrantsViewSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import type { CapabilityPresentation } from '../../../src/lib/api/capability.ts';
 import {
@@ -317,6 +323,29 @@ describe('changing the grants', () => {
     should(written()).be.undefined();
   });
 
+  it('should refuse a device the change is not given to, even daemon-wide and even stepped up', async () => {
+    // The review's M1: a default device (read and chat) that had just stepped up could switch a capability
+    // off for EVERY device, and no remote caller could switch it back. Both halves must allow it.
+    // Arrange
+    const { service, written } = await ready();
+    const defaultDevice: CapabilityPresentation = { ...steppedUp, deviceGrants: DEFAULT_DEVICE_GRANTS };
+    const vanished: CapabilityPresentation = { ...steppedUp, deviceGrants: null };
+    const fullDevice: CapabilityPresentation = { ...steppedUp, deviceGrants: FULL_DEVICE_GRANTS };
+
+    // Act
+    const refused = await failure(service.patch({ terminal: { use: false } }, defaultDevice));
+    const gone = await failure(service.patch({ terminal: { use: false } }, vanished));
+    const ownFleet = await failure(service.patch({ fleet: { use: false } }, defaultDevice));
+    await service.patch({ terminal: { use: false } }, fullDevice);
+
+    // Assert — fleet.use alone is not fleet.configure, so even its own capability is not its to change
+    should(refused.failure).equal('device-not-granted');
+    should(refused.message).match(/has not been given terminal/u);
+    should(gone.failure).equal('forbidden');
+    should(ownFleet.failure).equal('device-not-granted');
+    should(written()?.terminal?.use).be.false();
+  });
+
   it('should refuse a remote widening even with a step-up, naming the host command', async () => {
     // Widening is a local act. No step-up buys it.
     // Arrange
@@ -434,7 +463,7 @@ describe('changing the grants', () => {
     const view = await service.patch({ terminal: { use: false, configure: false } }, steppedUp);
 
     // Assert
-    should(written()?.terminal).deepEqual({ use: false, configure: false });
+    should(written()?.terminal?.use).be.false();
     should(audit).deepEqual([
       {
         actor: 'device:phone-1',

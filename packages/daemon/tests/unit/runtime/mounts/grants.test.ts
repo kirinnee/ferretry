@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   DAEMON_CAPABILITIES,
+  DEFAULT_DEVICE_GRANTS,
   GRANT_AUDIT_MAX_ENTRIES,
   GrantAuditViewSchema,
   GrantsViewSchema,
@@ -215,6 +216,27 @@ describe('changing the grants over the API', () => {
     should(jsonBody(answered)).have.property('code', STEP_UP_REQUIRED_CODE);
     should(jsonBody(answered)).have.property('code', 'grant_step_up_required');
     should(answered.body).match(/passkey confirmation/u);
+    should(subsystem.enforced()?.terminal.use).be.true();
+  });
+
+  it('should refuse a stepped-up DEFAULT device, which was never given the capability it would change', async () => {
+    // Arrange — the same daemon-wide document, and a device holding only read-and-chat
+    const subsystem = grantSubsystem();
+    await subsystem.refresh();
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter(grantRoutes(subsystem)),
+      { ...CREDENTIALS, devices: { ...CREDENTIALS.devices, grants: () => DEFAULT_DEVICE_GRANTS } },
+      NO_GOVERNED_ROUTES_GUARD,
+      undefined,
+      witnessFor(PHONE),
+    );
+
+    // Act
+    const answered = await dispatcher.dispatch(fromDevice('PATCH', '/v1/grants', PHONE, { terminal: { use: false } }));
+
+    // Assert
+    should(answered.status).equal(403);
+    should(jsonBody(answered)).have.property('code', 'grant_device_not_granted');
     should(subsystem.enforced()?.terminal.use).be.true();
   });
 
