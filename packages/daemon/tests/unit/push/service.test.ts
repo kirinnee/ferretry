@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { DEFAULT_DEVICE_GRANTS, type RegisterPushDeviceRequest } from '@ferretry/protocol';
+import { LIMITED_DEVICE_GRANTS, type RegisterPushDeviceRequest } from '@ferretry/protocol';
 import should from 'should';
 import {
   PairedPushDevices,
@@ -91,7 +91,7 @@ describe('PairedPushDevices', () => {
           createdAt: AT,
           lastSeenAt: AT,
           publicKey: 'MCowBQYDK2VwAyEA0000000000000000000000000000000000000000000',
-          grants: DEFAULT_DEVICE_GRANTS,
+          grants: LIMITED_DEVICE_GRANTS,
         },
       ],
     });

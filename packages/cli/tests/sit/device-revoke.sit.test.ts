@@ -8,7 +8,7 @@
  * pairing mount's tests — a double cannot prove it.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { DEFAULT_DEVICE_GRANTS, FULL_DEVICE_GRANTS, type PairedDeviceId } from '@ferretry/protocol';
+import { LIMITED_DEVICE_GRANTS, FULL_DEVICE_GRANTS, type PairedDeviceId } from '@ferretry/protocol';
 import should from 'should';
 import pkg from '../../package.json' with { type: 'json' };
 import { BinaryCliDriver, type CliDriver, type CliResult, InProcessCliDriver } from './driver';
@@ -33,7 +33,7 @@ const device = (id: PairedDeviceId, name: string) => ({
   createdAt: '2026-10-01T09:00:00.000Z',
   lastSeenAt: '2026-10-12T09:00:00.000Z',
   idleExpiresAt: '2026-11-11T09:00:00.000Z',
-  grants: DEFAULT_DEVICE_GRANTS,
+  grants: LIMITED_DEVICE_GRANTS,
 });
 
 /** The paired-device list and the revoke route, answering the way the daemon does. */

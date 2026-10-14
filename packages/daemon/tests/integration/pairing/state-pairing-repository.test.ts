@@ -1,7 +1,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type DaemonId, DEFAULT_DEVICE_GRANTS, FULL_DEVICE_GRANTS, PairingCodeSchema } from '@ferretry/protocol';
+import { type DaemonId, LIMITED_DEVICE_GRANTS, FULL_DEVICE_GRANTS, PairingCodeSchema } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { NodePairingCryptography, StatePairingRepository } from '../../../src/adapters/pairing/index.ts';
@@ -49,7 +49,7 @@ function record(daemonId: DaemonId, id: string): PairingDeviceRecord {
     createdAt: '2026-08-03T12:00:00.000Z',
     lastSeenAt: '2026-08-03T12:00:00.000Z',
     publicKey: DEVICE_KEY,
-    grants: DEFAULT_DEVICE_GRANTS,
+    grants: LIMITED_DEVICE_GRANTS,
   };
 }
 
@@ -366,7 +366,7 @@ describe('StatePairingRepository device keys', () => {
     const reopened = await new StatePairingRepository(paths, files).open('workstation');
 
     // Assert
-    should(reopened.devices[0]?.grants).deepEqual(DEFAULT_DEVICE_GRANTS);
+    should(reopened.devices[0]?.grants).deepEqual(LIMITED_DEVICE_GRANTS);
   });
 
   it('should refuse a device grant document whose grants are malformed, rather than guess', async () => {

@@ -9,7 +9,7 @@ import {
   type PairingId,
   pairingMintOutcome,
   type CapabilityGrants,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   FULL_DEVICE_GRANTS,
 } from '@ferretry/protocol';
 import { toBase64Url } from '@ferretry/relay';
@@ -461,7 +461,7 @@ describe('PairingService redemption', () => {
         lastSeenAt: '2026-08-03T12:00:00.000Z',
         publicKey: DEVICE_KEY,
         // Least privilege: a newly paired device reads the fleet and chats, and nothing more (B5).
-        grants: DEFAULT_DEVICE_GRANTS,
+        grants: LIMITED_DEVICE_GRANTS,
       },
     ]);
     should(JSON.stringify(result.response)).not.containEql(DEVICE_KEY);
@@ -769,7 +769,7 @@ describe('PairingService revocation', () => {
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
         idleExpiresAt: '2026-09-02T12:00:00.000Z',
-        grants: DEFAULT_DEVICE_GRANTS,
+        grants: LIMITED_DEVICE_GRANTS,
       },
     ]);
     should(JSON.stringify(listed)).not.containEql(DEVICE_KEY);
@@ -1039,7 +1039,7 @@ describe('PairingDeviceRegistry', () => {
     createdAt: '2026-08-03T12:00:00.000Z',
     lastSeenAt: '2026-08-03T12:00:00.000Z',
     publicKey: DEVICE_KEY,
-    grants: DEFAULT_DEVICE_GRANTS,
+    grants: LIMITED_DEVICE_GRANTS,
     ...overrides,
   });
 
@@ -1529,15 +1529,15 @@ describe('PairingService device grants', () => {
     if (redemption.kind !== 'paired') throw new Error('expected a pairing');
     return built;
   }
-  const WIDENED: CapabilityGrants = { ...DEFAULT_DEVICE_GRANTS, terminal: { use: true, configure: false } };
+  const WIDENED: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, terminal: { use: true, configure: false } };
 
   it('should give a newly paired device fleet.use only, and report it', async () => {
     // Arrange
     const { service } = await paired();
 
     // Act + Assert
-    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(DEFAULT_DEVICE_GRANTS);
-    should((await service.devices())[0]?.grants).deepEqual(DEFAULT_DEVICE_GRANTS);
+    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(LIMITED_DEVICE_GRANTS);
+    should((await service.devices())[0]?.grants).deepEqual(LIMITED_DEVICE_GRANTS);
   });
 
   it('should write a change to the document first, then to the live grant the boundary reads', async () => {
@@ -1560,7 +1560,7 @@ describe('PairingService device grants', () => {
 
     // Act + Assert
     await should(service.setDeviceGrants(FIRST_DEVICE_ID, WIDENED)).be.rejectedWith('disk unavailable');
-    should(credentials.get(FIRST_DEVICE_ID)?.grants).deepEqual(DEFAULT_DEVICE_GRANTS);
+    should(credentials.get(FIRST_DEVICE_ID)?.grants).deepEqual(LIMITED_DEVICE_GRANTS);
   });
 
   it('should report a device it does not hold, or one revoked mid-write, as unchanged', async () => {
@@ -1638,6 +1638,6 @@ describe('PairingService full-access codes', () => {
 
     // Assert
     should(minted.grants).equal('default');
-    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(DEFAULT_DEVICE_GRANTS);
+    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(LIMITED_DEVICE_GRANTS);
   });
 });

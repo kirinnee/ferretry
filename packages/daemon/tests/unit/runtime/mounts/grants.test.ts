@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   DAEMON_CAPABILITIES,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   GRANT_AUDIT_MAX_ENTRIES,
   GrantAuditViewSchema,
   GrantsViewSchema,
@@ -225,7 +225,7 @@ describe('changing the grants over the API', () => {
     await subsystem.refresh();
     const dispatcher = new ApiDispatcher(
       new ApiRouter(grantRoutes(subsystem)),
-      { ...CREDENTIALS, devices: { ...CREDENTIALS.devices, grants: () => DEFAULT_DEVICE_GRANTS } },
+      { ...CREDENTIALS, devices: { ...CREDENTIALS.devices, grants: () => LIMITED_DEVICE_GRANTS } },
       NO_GOVERNED_ROUTES_GUARD,
       undefined,
       witnessFor(PHONE),

@@ -5,7 +5,7 @@ import {
   type CapabilityGrants,
   DAEMON_CAPABILITIES,
   type DaemonCapability,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   type GrantRefusal,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -141,7 +141,7 @@ describe('effective = daemon-wide AND device, for a governed caller', () => {
     // Act
     const allowed = DAEMON_CAPABILITIES.flatMap(capability =>
       AXES.filter(
-        axis => decideCapability({ capability, axis }, governed({ device: DEFAULT_DEVICE_GRANTS })).allowed,
+        axis => decideCapability({ capability, axis }, governed({ device: LIMITED_DEVICE_GRANTS })).allowed,
       ).map(axis => `${capability}.${axis}`),
     );
 
@@ -153,7 +153,7 @@ describe('effective = daemon-wide AND device, for a governed caller', () => {
     // Act
     const unGranted = decideCapability(
       { capability: 'secrets', axis: 'use' },
-      governed({ device: DEFAULT_DEVICE_GRANTS }),
+      governed({ device: LIMITED_DEVICE_GRANTS }),
     );
     const unconfirmed = decideCapability({ capability: 'secrets', axis: 'use' }, governed({ stepUp: false }));
     const setting = decideCapability(
@@ -233,7 +233,7 @@ describe('judging one device-grant change', () => {
   it('should allow any change at the machine, with no step-up', () => {
     // Act
     const verdict = judgeDeviceGrantChange({
-      current: DEFAULT_DEVICE_GRANTS,
+      current: LIMITED_DEVICE_GRANTS,
       next: ALL_ON,
       hostLocal: true,
       stepUp: false,
@@ -246,18 +246,18 @@ describe('judging one device-grant change', () => {
 
   it('should allow a remote widen of what the caller holds, with a step-up, and refuse it without one', () => {
     // Arrange
-    const next = withGrant(DEFAULT_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
+    const next = withGrant(LIMITED_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
 
     // Act
     const confirmed = judgeDeviceGrantChange({
-      current: DEFAULT_DEVICE_GRANTS,
+      current: LIMITED_DEVICE_GRANTS,
       next,
       hostLocal: false,
       stepUp: true,
       holder: manager,
     });
     const unconfirmed = judgeDeviceGrantChange({
-      current: DEFAULT_DEVICE_GRANTS,
+      current: LIMITED_DEVICE_GRANTS,
       next,
       hostLocal: false,
       stepUp: false,
@@ -271,11 +271,11 @@ describe('judging one device-grant change', () => {
 
   it('should refuse a remote widen of what the caller does not hold, even with a step-up', () => {
     // Arrange
-    const next = withGrant(DEFAULT_DEVICE_GRANTS, 'secrets', { use: true, configure: false });
+    const next = withGrant(LIMITED_DEVICE_GRANTS, 'secrets', { use: true, configure: false });
 
     // Act
     const verdict = judgeDeviceGrantChange({
-      current: DEFAULT_DEVICE_GRANTS,
+      current: LIMITED_DEVICE_GRANTS,
       next,
       hostLocal: false,
       stepUp: true,
@@ -289,11 +289,11 @@ describe('judging one device-grant change', () => {
   it('should refuse a remote widen by a device without pairing.configure, even of what it holds', () => {
     // Arrange
     const holder = withGrant(manager, 'pairing', { use: true, configure: false });
-    const next = withGrant(DEFAULT_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
+    const next = withGrant(LIMITED_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
 
     // Act
     const verdict = judgeDeviceGrantChange({
-      current: DEFAULT_DEVICE_GRANTS,
+      current: LIMITED_DEVICE_GRANTS,
       next,
       hostLocal: false,
       stepUp: true,
@@ -306,8 +306,8 @@ describe('judging one device-grant change', () => {
 
   it('should let a remote narrowing through with a step-up and nothing else — even by a device with no grants', () => {
     // Arrange — the caller holds NOTHING beyond the default; narrowing must still never be harder.
-    const current = withGrant(DEFAULT_DEVICE_GRANTS, 'terminal', { use: true, configure: true });
-    const next = DEFAULT_DEVICE_GRANTS;
+    const current = withGrant(LIMITED_DEVICE_GRANTS, 'terminal', { use: true, configure: true });
+    const next = LIMITED_DEVICE_GRANTS;
 
     // Act
     const confirmed = judgeDeviceGrantChange({
@@ -315,7 +315,7 @@ describe('judging one device-grant change', () => {
       next,
       hostLocal: false,
       stepUp: true,
-      holder: DEFAULT_DEVICE_GRANTS,
+      holder: LIMITED_DEVICE_GRANTS,
     });
     const unconfirmed = judgeDeviceGrantChange({ current, next, hostLocal: false, stepUp: false, holder: undefined });
 
@@ -326,7 +326,7 @@ describe('judging one device-grant change', () => {
 
   it('should refuse a mixed patch WHOLE when any field widens illegally, before asking for a step-up', () => {
     // Arrange — terminal narrows (fine) while secrets widens (not held).
-    const current = withGrant(DEFAULT_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
+    const current = withGrant(LIMITED_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
     const next = withGrant(withGrant(current, 'terminal', { use: false, configure: false }), 'secrets', {
       use: true,
       configure: false,
@@ -343,7 +343,7 @@ describe('judging one device-grant change', () => {
 describe('applying a device-grant patch', () => {
   it('should turn use on with configure, and configure off with use', () => {
     // Act
-    const widened = applyDeviceGrantPatch(DEFAULT_DEVICE_GRANTS, { terminal: { configure: true } });
+    const widened = applyDeviceGrantPatch(LIMITED_DEVICE_GRANTS, { terminal: { configure: true } });
     const narrowed = applyDeviceGrantPatch(ALL_ON, { terminal: { use: false } });
 
     // Assert

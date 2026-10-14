@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import {
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   FULL_DEVICE_GRANTS,
   PairedDevicesViewSchema,
   SecretListSchema,
@@ -41,7 +41,7 @@ const devicesBody = {
       createdAt: '2026-07-01T00:00:00.000Z',
       lastSeenAt: '2026-07-05T00:00:00.000Z',
       idleExpiresAt: '2026-08-04T00:00:00.000Z',
-      grants: DEFAULT_DEVICE_GRANTS,
+      grants: LIMITED_DEVICE_GRANTS,
     },
     {
       id: `fy_device_id_${'b'.repeat(22)}`,
@@ -50,7 +50,7 @@ const devicesBody = {
       createdAt: '2026-07-02T00:00:00.000Z',
       lastSeenAt: '2026-07-06T00:00:00.000Z',
       idleExpiresAt: '2026-08-05T00:00:00.000Z',
-      grants: DEFAULT_DEVICE_GRANTS,
+      grants: LIMITED_DEVICE_GRANTS,
     },
   ],
   hostLocal: true,

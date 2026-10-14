@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import {
   type CapabilityGrants,
   DAEMON_CAPABILITIES,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   FULL_DEVICE_GRANTS,
   GrantsViewSchema,
 } from '@ferretry/protocol';
@@ -328,7 +328,7 @@ describe('changing the grants', () => {
     // off for EVERY device, and no remote caller could switch it back. Both halves must allow it.
     // Arrange
     const { service, written } = await ready();
-    const defaultDevice: CapabilityPresentation = { ...steppedUp, deviceGrants: DEFAULT_DEVICE_GRANTS };
+    const defaultDevice: CapabilityPresentation = { ...steppedUp, deviceGrants: LIMITED_DEVICE_GRANTS };
     const vanished: CapabilityPresentation = { ...steppedUp, deviceGrants: null };
     const fullDevice: CapabilityPresentation = { ...steppedUp, deviceGrants: FULL_DEVICE_GRANTS };
 

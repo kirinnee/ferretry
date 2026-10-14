@@ -1,5 +1,5 @@
 import {
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   type PairedDevice,
   type PairedDeviceId,
   type PasskeyWindowOpened,
@@ -18,7 +18,7 @@ export const device = (id: PairedDeviceId, name: string): PairedDevice => ({
   createdAt: '2026-10-01T09:00:00.000Z',
   lastSeenAt: '2026-10-12T09:00:00.000Z',
   idleExpiresAt: '2026-11-11T09:00:00.000Z',
-  grants: DEFAULT_DEVICE_GRANTS,
+  grants: LIMITED_DEVICE_GRANTS,
 });
 
 export const PIXEL = device(PIXEL_ID, 'Pixel 8');

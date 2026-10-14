@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import {
   STEP_UP_REQUIRED_CODE,
   type CapabilityGrants,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   type PushDeviceView,
   type RegisterPushDeviceRequest,
 } from '@ferretry/protocol';
@@ -102,7 +102,7 @@ const credentials = {
     grants: (_deviceId: string) => deviceGrants,
   },
 };
-let deviceGrants: CapabilityGrants = DEFAULT_DEVICE_GRANTS;
+let deviceGrants: CapabilityGrants = LIMITED_DEVICE_GRANTS;
 
 const admin = { authorization: 'Bearer admin-secret' };
 /** A paired browser: whoever its session proved. It sends no credential of its own. */
@@ -364,7 +364,7 @@ describe('push routes', () => {
     // B5: self-enrolment grants nothing — it lets this daemon reach the device that asked — so it needs
     // no `pairing.use` and no passkey. A least-privilege device (`fleet.use` only) still gets alerts.
     // Arrange
-    deviceGrants = DEFAULT_DEVICE_GRANTS;
+    deviceGrants = LIMITED_DEVICE_GRANTS;
     const subject = new FakePush();
     const surface = await mount(subject, false);
     const unconfirmed = { deviceId, appSession: 'app-without-step-up' } as const;
@@ -386,7 +386,7 @@ describe('push routes', () => {
 
   it('should show a device that may not manage devices only its OWN enrolments, and refuse it another device’s', async () => {
     // Arrange
-    deviceGrants = DEFAULT_DEVICE_GRANTS;
+    deviceGrants = LIMITED_DEVICE_GRANTS;
     const otherEnrolment = 'push-22222222-2222-4222-8222-222222222222';
     const subject = new FakePush(
       [view(enrolmentId, 'Pixel 8'), view(otherEnrolment, 'iPad')],
@@ -417,7 +417,7 @@ describe('push routes', () => {
         undefined,
         new Map([[otherEnrolment, otherDeviceId]]),
       );
-    deviceGrants = { ...DEFAULT_DEVICE_GRANTS, pairing: { use: true, configure: false } };
+    deviceGrants = { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: false } };
     const manager = fresh();
     const managing = await mount(manager);
     const host = fresh();
@@ -438,7 +438,7 @@ describe('push routes', () => {
         loopback: true,
       }),
     );
-    deviceGrants = DEFAULT_DEVICE_GRANTS;
+    deviceGrants = LIMITED_DEVICE_GRANTS;
 
     // Assert
     should((jsonBody(managerList) as { devices: unknown[] }).devices).have.length(2);

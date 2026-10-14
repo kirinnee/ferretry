@@ -33,6 +33,7 @@ const MIDDLE: SecuritySettings = {
   stepUpWindowMinutes: 30,
   deviceKeyRotationDays: 40,
   unlockOnOpen: true,
+  stepUpOnActions: false,
   unlockValidityHours: 12,
   idleExpiryDays: 40,
 };

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   type CapabilityGrants,
   DAEMON_CAPABILITIES,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   type DeviceGrantsPatch,
   type PairedDevice,
   type PairedDevicesView,
@@ -19,7 +19,7 @@ const PHONE = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
 const TABLET = 'fy_device_id_bbbbbbbbbbbbbbbbbbbbbb';
 const OTHER_TABLET = 'fy_device_id_cccccccccccccccccccccc';
 
-const device = (id: string, name: string, grants: CapabilityGrants = DEFAULT_DEVICE_GRANTS): PairedDevice => ({
+const device = (id: string, name: string, grants: CapabilityGrants = LIMITED_DEVICE_GRANTS): PairedDevice => ({
   id: id as PairedDevice['id'],
   name,
   platform: 'browser',
@@ -30,14 +30,14 @@ const device = (id: string, name: string, grants: CapabilityGrants = DEFAULT_DEV
 });
 
 const withTerminal = (): CapabilityGrants => ({
-  ...DEFAULT_DEVICE_GRANTS,
+  ...LIMITED_DEVICE_GRANTS,
   terminal: { use: true, configure: false },
 });
 
 const view = (devices: readonly PairedDevice[], overrides: Partial<PairedDevicesView> = {}): PairedDevicesView => ({
   devices,
   hostLocal: true,
-  mayWiden: DEFAULT_DEVICE_GRANTS,
+  mayWiden: LIMITED_DEVICE_GRANTS,
   ...overrides,
 });
 

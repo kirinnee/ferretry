@@ -21,6 +21,7 @@ const SETTINGS: SecuritySettings = {
   stepUpWindowMinutes: 5,
   deviceKeyRotationDays: 14,
   unlockOnOpen: true,
+  stepUpOnActions: false,
   unlockValidityHours: 2,
   idleExpiryDays: 9,
 };

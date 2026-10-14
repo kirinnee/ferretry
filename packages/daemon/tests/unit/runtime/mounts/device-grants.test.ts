@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type CapabilityGrants,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   type PairedDevice,
   type PairedDevicesView,
   STEP_UP_REQUIRED_CODE,
@@ -63,8 +63,8 @@ interface World {
 
 async function mount(world: World = {}) {
   const devices = new Map<string, CapabilityGrants>([
-    [callerId, world.caller ?? DEFAULT_DEVICE_GRANTS],
-    [targetId, world.target ?? DEFAULT_DEVICE_GRANTS],
+    [callerId, world.caller ?? LIMITED_DEVICE_GRANTS],
+    [targetId, world.target ?? LIMITED_DEVICE_GRANTS],
   ]);
   const grants = grantSubsystem(world.daemonWide === undefined ? {} : { grants: world.daemonWide });
   await grants.refresh();
@@ -118,7 +118,7 @@ const fromHost = (body: unknown) =>
 
 /** A device allowed to manage devices and holding the terminal. */
 const MANAGER: CapabilityGrants = {
-  ...DEFAULT_DEVICE_GRANTS,
+  ...LIMITED_DEVICE_GRANTS,
   pairing: { use: true, configure: true },
   terminal: { use: true, configure: false },
 };
@@ -171,7 +171,7 @@ describe('changing one device’s grants', () => {
     // Assert — refused at the boundary (pairing.use needs a step-up) before the subsystem is asked.
     should(response.status).equal(403);
     should(jsonBody(response).code).equal(STEP_UP_REQUIRED_CODE);
-    should(devices.get(targetId)).deepEqual(DEFAULT_DEVICE_GRANTS);
+    should(devices.get(targetId)).deepEqual(LIMITED_DEVICE_GRANTS);
   });
 
   it('should refuse a remote widen of an axis the caller does not hold, naming the host command', async () => {
@@ -185,7 +185,7 @@ describe('changing one device’s grants', () => {
     should(response.status).equal(403);
     should(jsonBody(response).code).equal('grant_forbidden');
     should(String(jsonBody(response).error)).match(new RegExp(`fy device grant ${targetId} secrets --use`, 'u'));
-    should(devices.get(targetId)).deepEqual(DEFAULT_DEVICE_GRANTS);
+    should(devices.get(targetId)).deepEqual(LIMITED_DEVICE_GRANTS);
     should(audit).be.empty();
   });
 
@@ -219,7 +219,7 @@ describe('changing one device’s grants', () => {
 
   it('should refuse a mixed patch WHOLE when any field widens illegally', async () => {
     // Arrange — the target holds terminal; narrowing it is fine, widening secrets is not.
-    const target = { ...DEFAULT_DEVICE_GRANTS, terminal: { use: true, configure: false } };
+    const target = { ...LIMITED_DEVICE_GRANTS, terminal: { use: true, configure: false } };
     const { dispatcher, devices } = await mount({ caller: MANAGER, target });
 
     // Act
@@ -233,8 +233,8 @@ describe('changing one device’s grants', () => {
   it('should let a device with pairing.use narrow ANOTHER device, and itself, with a step-up and nothing else', async () => {
     // Narrowing is never harder than widening: no pairing.configure, no holding of the axis, needed.
     // Arrange
-    const holder = { ...DEFAULT_DEVICE_GRANTS, pairing: { use: true, configure: false } };
-    const target = { ...DEFAULT_DEVICE_GRANTS, browser: { use: true, configure: true } };
+    const holder = { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: false } };
+    const target = { ...LIMITED_DEVICE_GRANTS, browser: { use: true, configure: true } };
     const { dispatcher, devices } = await mount({ caller: holder, target });
 
     // Act
@@ -303,7 +303,7 @@ describe('what the device list says a caller may widen', () => {
   it('should list exactly what a remote manager holds, and nothing for a device that may not manage', async () => {
     // Arrange
     const manager = await mount({ caller: MANAGER });
-    const plain = await mount({ caller: { ...DEFAULT_DEVICE_GRANTS, pairing: { use: true, configure: false } } });
+    const plain = await mount({ caller: { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: false } } });
     const list = request({ path: '/v1/pair/devices', device: caller, loopback: false });
 
     // Act
@@ -331,7 +331,7 @@ describe('the device-grant service on its own', () => {
     // Arrange
     const grants = grantSubsystem({ broken: true });
     await grants.refresh().catch(() => undefined);
-    const service = deviceGrantsOver(grants, new Map([[targetId, DEFAULT_DEVICE_GRANTS]]));
+    const service = deviceGrantsOver(grants, new Map([[targetId, LIMITED_DEVICE_GRANTS]]));
 
     // Act + Assert
     await should(service.change(targetId, { terminal: { use: true } }, presentation())).be.rejectedWith({
@@ -344,7 +344,7 @@ describe('the device-grant service on its own', () => {
     // Arrange
     const grants = grantSubsystem();
     await grants.refresh();
-    const service = deviceGrantsOver(grants, new Map([[targetId, DEFAULT_DEVICE_GRANTS]]));
+    const service = deviceGrantsOver(grants, new Map([[targetId, LIMITED_DEVICE_GRANTS]]));
     const { deviceGrants: _none, ...noDevice } = presentation();
 
     // Act + Assert
@@ -360,7 +360,7 @@ describe('the device-grant service on its own', () => {
     const grants = grantSubsystem();
     await grants.refresh();
     const racing = new DeviceGrantService({
-      devices: { deviceGrants: () => DEFAULT_DEVICE_GRANTS, setDeviceGrants: async () => false },
+      devices: { deviceGrants: () => LIMITED_DEVICE_GRANTS, setDeviceGrants: async () => false },
       daemonWide: () => grants.enforced(),
       audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
       clock: { nowMs: () => 0 },

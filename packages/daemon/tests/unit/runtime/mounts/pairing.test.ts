@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   type PairedDevice,
   type PairingCodeMintResponse,
   type PairingCodeStatusResponse,
@@ -38,7 +38,7 @@ const device = (id: string, name: string): PairedDevice => ({
   createdAt: '2026-08-01T09:00:00.000Z',
   lastSeenAt: '2026-08-03T11:58:00.000Z',
   idleExpiresAt: '2026-09-02T11:58:00.000Z',
-  grants: DEFAULT_DEVICE_GRANTS,
+  grants: LIMITED_DEVICE_GRANTS,
 });
 
 class FakePairing implements PairingSubsystem {
