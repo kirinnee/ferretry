@@ -37,6 +37,9 @@ const DEVICE_KEY = Buffer.from([
   ...new Array(32).fill(5),
 ]).toString('base64url');
 
+/** A second Ed25519 SPKI, the key a device rotates to. */
+const ROTATED_KEY = `${DEVICE_KEY.slice(0, -2)}Bg`;
+
 function record(daemonId: DaemonId, id: string): PairingDeviceRecord {
   return {
     id,
@@ -318,6 +321,34 @@ describe('StatePairingRepository device keys', () => {
     should([missing, changed]).deepEqual([false, true]);
     should(unchanged).equal(before);
     should(reopened.devices[0]?.grants).deepEqual(FULL_DEVICE_GRANTS);
+  });
+
+  it('should replace one device’s key durably with when it happened, and write nothing for a device it does not hold', async () => {
+    // Arrange
+    const { paths, files, repository } = await fixture('pairing-state-rotate');
+    const state = await repository.open('workstation');
+    await repository.add(record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'));
+    const before = await files.readText(join(paths.state, 'devices.json'));
+
+    // Act
+    const missing = await repository.rotateKey(
+      'fy_device_id_cccccccccccccccccccccc',
+      ROTATED_KEY,
+      '2026-08-05T12:00:00.000Z',
+    );
+    const unchanged = await files.readText(join(paths.state, 'devices.json'));
+    const rotated = await repository.rotateKey(
+      'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa',
+      ROTATED_KEY,
+      '2026-08-05T12:00:00.000Z',
+    );
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+
+    // Assert
+    should([missing, rotated]).deepEqual([false, true]);
+    should(unchanged).equal(before);
+    should(reopened.devices[0]?.publicKey).equal(ROTATED_KEY);
+    should(reopened.devices[0]?.keyRotatedAt).equal('2026-08-05T12:00:00.000Z');
   });
 
   it('should read a schema-2 device written before per-device grants as the DEFAULT, a narrowing', async () => {

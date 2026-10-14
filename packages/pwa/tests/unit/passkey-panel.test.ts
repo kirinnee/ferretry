@@ -77,6 +77,7 @@ describe('passkey panel sentences', () => {
     should(passkeyFailureSentence(refusal('step_up_too_many_passkeys'), ORIGIN)).containEql('as many passkeys');
     should(passkeyFailureSentence(refusal('step_up_no_passkey'), ORIGIN)).containEql('no passkey for this machine');
     should(passkeyFailureSentence(refusal('step_up_not_verified'), ORIGIN)).containEql('did not check out');
+    should(passkeyFailureSentence(refusal('step_up_rotation_required'), ORIGIN)).containEql('new key');
     should(passkeyFailureSentence(refusal('step_up_not_at_machine'), ORIGIN)).containEql('owner at the machine');
     should(passkeyFailureSentence(refusal('step_up_unknown_device'), ORIGIN)).containEql('does not know this device');
     // Anything else is one sentence too, and never the raw text or a status.
