@@ -114,7 +114,7 @@ function durableState(tree: readonly string[]): readonly string[] {
  */
 async function startOnTerminal(
   environment: E2eEnvironment,
-  timeoutMs = 200_000,
+  { keepShell = true, timeoutMs = 200_000 }: { readonly keepShell?: boolean; readonly timeoutMs?: number } = {},
 ): Promise<{ code: number; screen: string }> {
   const cli = process.env.CLI_BIN ?? join(REPOSITORY_ROOT, 'dist', 'bin', 'fy-linux-x64-baseline');
   const start = ['env', '-u', 'FY_URL', '-u', 'FY_TOKEN', `FY_DAEMON_BIN=${compiledDaemon()}`, cli, 'daemon', 'start']
@@ -128,7 +128,7 @@ async function startOnTerminal(
     '#{pane_id}',
     '-n',
     'fy-daemon-start',
-    `${start}; echo "${EXIT_MARKER}$?"; exec sleep 3600`,
+    `${start}; echo "${EXIT_MARKER}$?"${keepShell ? '; exec sleep 3600' : ''}`,
   ]);
   if (launched.code !== 0) throw new Error(`could not open a terminal for fy daemon start: ${launched.err}`);
   const pane = launched.out.trim();
@@ -330,4 +330,49 @@ describe('first install with the real daemon', () => {
       should((JSON.parse(actual.out) as { reachability: string }).reachability).equal('serving');
     });
   }, 240_000);
+
+  /**
+   * PRODUCT BUG (reported to the e2e lead): the daemon `fy daemon start` launches dies with the
+   * terminal that launched it.
+   *
+   * The direct supervisor spawns the daemon with `Bun.spawn` and `unref()` but no new session
+   * (`packages/cli/src/adapters/daemon/process.ts`, `spawnDetached`), so the daemon keeps the
+   * terminal as its controlling tty and stays in the launching job's process group. When the
+   * session leader goes — `ssh -t host fy daemon start`, a `sh -c` script, a closed terminal tab — the
+   * hangup reaches the daemon and it dies without its own "stopping" line. An interactive shell
+   * with job control happens to move it out of the way, which is why this is easy to miss by hand.
+   */
+  it('should keep serving after the terminal that started it has gone', async () => {
+    await withE2eEnvironment(async environment => {
+      // Arrange — a home a first boot already claimed, with its port recorded where the CLI looks.
+      const outsideConfig = join(environment.paths.root, 'daemon.json');
+      await writeFile(outsideConfig, daemonDocument(environment.ports.api), 'utf8');
+      await environment.startDaemon({
+        command: [compiledDaemon(), '--config', outsideConfig],
+        readyUrl: environment.httpUrl('/v1/health'),
+        timeoutMs: 60_000,
+      });
+      await environment.stopDaemon(15_000);
+      await mkdir(join(environment.paths.fyHome, 'config'), { recursive: true });
+      await writeFile(
+        join(environment.paths.fyHome, 'config', 'daemon.json'),
+        daemonDocument(environment.ports.api),
+        'utf8',
+      );
+
+      try {
+        // Act — the shell that ran `start` exits as soon as it returns, as a script's would.
+        const started = await startOnTerminal(environment, { keepShell: false });
+        await Bun.sleep(2_000);
+        const status = await environment.runFy(['daemon', 'status', '--json'], { FY_URL: '' });
+
+        // Assert — `start` said ready, so the daemon must still be there two seconds later.
+        should(started.code).equal(0, started.screen);
+        should(started.screen).containEql('fyd ready (pid ');
+        should((JSON.parse(status.out) as { reachability: string }).reachability).equal('serving');
+      } finally {
+        await stopEverything(environment);
+      }
+    });
+  }, 480_000);
 });
