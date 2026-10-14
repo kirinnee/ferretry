@@ -53,7 +53,7 @@
  */
 
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import { type ReactNode, type RefObject, useEffect, useRef, useSyncExternalStore } from 'react';
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
@@ -108,6 +108,11 @@ const SHELL =
 export interface OnboardingPairingHost {
   /** The daemon answered and this browser is paired; the journey is finished. */
   readonly onPaired: () => void;
+  /**
+   * The pairing screen is showing a failure whose sentence is the whole remedy (an older Ferretry on
+   * one side, say), so this step stops adding advice about codes expiring or the step finishing itself.
+   */
+  readonly onStatedFailure: (stated: boolean) => void;
 }
 
 export interface OnboardingPageProps {
@@ -387,7 +392,14 @@ function RouteFlow({
    * between pairing and the end, so they are unaffected — which is the point of
    * asking the journey rather than naming a step.
    */
-  const pairing = renderPairing({ onPaired: () => onGoTo(nextOnboardingStep(path, at.current)) });
+  // Kept per step, so a stated failure on one step never hides the advice of the next.
+  const [statedAt, setStatedAt] = useState<OnboardingStepId | null>(null);
+  const stated = statedAt === at.current;
+  const onStatedFailure = useCallback((failed: boolean) => setStatedAt(failed ? at.current : null), [at.current]);
+  const pairing = renderPairing({
+    onPaired: () => onGoTo(nextOnboardingStep(path, at.current)),
+    onStatedFailure,
+  });
   /*
    * THE HAND-OFF IS BUILT ONCE, HERE, AND HANDED DOWN AS A NODE.
    *
@@ -442,6 +454,7 @@ function RouteFlow({
           write={write}
           channel={channel}
           pairing={pairing}
+          stated={stated}
           handoff={handoff}
           fleetReady={fleetReady}
           connectionStatus={connectionStatus}
@@ -458,7 +471,7 @@ function RouteFlow({
 
       {at.current === 'done' ? null : (
         <div className="mt-auto flex min-w-0 flex-col gap-1 pt-2">
-          <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[at.current]}</p>
+          {stated ? null : <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[at.current]}</p>}
           <div className="flex min-w-0 items-center gap-2">
             {/*
               BACK ALWAYS GOES SOMEWHERE, AND SAYS WHERE. On the first step of a
@@ -526,6 +539,8 @@ interface StageProps {
   readonly onChooseTarget: (target: SetupTargetId) => void;
   readonly href: string;
   readonly share: SetupSharePort | undefined;
+  /** The pairing screen shows a failure that already says its remedy; see {@link OnboardingPairingHost}. */
+  readonly stated: boolean;
 }
 
 /**
@@ -558,6 +573,7 @@ function Stage({
   onChooseTarget,
   href,
   share,
+  stated,
 }: StageProps) {
   /*
    * THE PAIRING JOURNEY REACHES NONE OF THE STAGES THAT READ THESE — it has no
@@ -574,7 +590,7 @@ function Stage({
     case 'brief':
       return <BriefStage write={write} target={target} plainUrl={setupPageUrl(href)} share={share} />;
     case 'agent-pair':
-      return <AgentPairStage pairing={pairing} target={target} />;
+      return <AgentPairStage pairing={pairing} target={target} stated={stated} />;
     case 'install':
       return (
         <InstallStage
@@ -614,7 +630,7 @@ function Stage({
     case 'pair':
       return <PairStage write={write} />;
     case 'scan':
-      return <ScanStage pairing={pairing} />;
+      return <ScanStage pairing={pairing} stated={stated} />;
     case 'done':
       return (
         <DoneStage

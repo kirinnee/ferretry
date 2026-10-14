@@ -4112,7 +4112,7 @@ describe('daemon boot lifecycle', () => {
     should((await enhanced.json()) as { text: string }).have.property('text', 'Ship the protocol package.');
     // The body arrived as the client sent it, and the daemon version travels like on every response.
     should(enhancer.seen).deepEqual([{ text: 'ship the protocall package', provider: 'groq' }]);
-    should(enhanced.headers.get('x-ferretry-version')).equal(daemonVersion);
+    should(enhanced.headers.get('x-fy-version')).equal(daemonVersion);
     // `admin`, over the same authorization boundary as the rest of the surface: one call spends the
     // operator's provider account.
     should(anonymous.status).equal(401);

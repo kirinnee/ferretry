@@ -288,6 +288,8 @@ export interface SettingsPageProps {
    * Without one the section says it cannot read a machine rather than dialling an address itself.
    */
   readonly createMachineClient?: FleetClientFactory;
+  /** Machines whose background reads are waiting on an unlock, which the Machines list shows as locked. */
+  readonly lockedMachines?: readonly DaemonId[];
   /** The Machines tabs' surfaces; a tab nobody supplies is the shell's honest empty frame. */
   readonly machineTabs?: MachineTabSurfaces;
   readonly onSelectDaemon: (daemonId: DaemonId) => void;
@@ -334,6 +336,7 @@ export function SettingsPage({
   daemonSettingsTabs,
   createMachineClient,
   machineTabs,
+  lockedMachines,
   onSelectDaemon,
   onRenameDaemon,
   onMachineNamed,
@@ -689,6 +692,7 @@ export function SettingsPage({
                       onSetUp={openSetup}
                       {...(onMachineNamed === undefined ? {} : { onNamed: onMachineNamed })}
                       createClient={createMachineClient}
+                      {...(lockedMachines === undefined ? {} : { locked: lockedMachines })}
                       {...(machineTabs ? { tabs: machineTabs } : {})}
                     />
                   )

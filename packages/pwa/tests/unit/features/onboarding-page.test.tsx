@@ -89,11 +89,17 @@ const pageWith = async (options: PageOptions = {}) => {
       connectionStatus={null}
       fallback={options.fallback ?? CHECKING_HOSTED_RELAY}
       onOpenFleet={options.onOpenFleet ?? (() => opened.push('fleet'))}
-      renderPairing={({ onPaired }) => (
+      renderPairing={({ onPaired, onStatedFailure }) => (
         <>
           <input id="fake-pairing-link" aria-label="Pairing link" />
           <button type="button" data-test-pair="" onClick={onPaired}>
             pretend the daemon answered
+          </button>
+          <button type="button" data-test-stated="" onClick={() => onStatedFailure(true)}>
+            pretend an older Ferretry refused
+          </button>
+          <button type="button" data-test-cleared="" onClick={() => onStatedFailure(false)}>
+            pretend the failure cleared
           </button>
         </>
       )}
@@ -982,6 +988,24 @@ describe('the add-a-client route', () => {
     // could declare a browser paired with nothing "done".
     expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
     expect(view.container.textContent).toContain('single-use');
+    await view.unmount();
+  });
+
+  it('adds no advice of its own beneath a failure that already says its remedy', async () => {
+    // B6: an older Ferretry on one side names the update commands; the step still added "the code
+    // expires, run fy pair again" and "this step finishes itself", advice about what was working.
+    const { view } = await pageWith();
+    await enter(view.container, 'add-client');
+    await next(view.container);
+
+    await click(buttonWith(view.container, '[data-test-stated]'));
+    const stated = view.container.textContent;
+    await click(buttonWith(view.container, '[data-test-cleared]'));
+
+    expect(stated).not.toContain('single-use');
+    expect(stated).not.toContain('This step finishes itself');
+    expect(view.container.textContent).toContain('single-use');
+    expect(view.container.textContent).toContain('This step finishes itself');
     await view.unmount();
   });
 

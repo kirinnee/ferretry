@@ -1,4 +1,4 @@
-import { isLoopbackPeer } from '@ferretry/protocol';
+import { FY_VERSION_HEADER, isLoopbackPeer } from '@ferretry/protocol';
 import {
   type ApiBindOptions,
   type ApiRequest,
@@ -246,7 +246,7 @@ const CORS_REQUEST_HEADERS = new Set([
   'x-fy-request-id',
   'x-fy-version',
 ]);
-const CORS_EXPOSE_HEADERS = 'accept-ranges, content-range, etag, x-ferretry-version';
+const CORS_EXPOSE_HEADERS = `accept-ranges, content-range, etag, ${FY_VERSION_HEADER}`;
 
 /** Refuses a browser origin before any route can observe or spend its request. */
 function corsRefusal(): Response {

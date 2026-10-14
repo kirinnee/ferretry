@@ -50,6 +50,7 @@ interface SurfaceOptions {
   readonly tabs?: Parameters<typeof MachinesSurface>[0]['tabs'];
   readonly setUp?: string[];
   readonly named?: string[];
+  readonly locked?: readonly DaemonId[];
 }
 
 const surface = (options: SurfaceOptions = {}) => (
@@ -66,6 +67,7 @@ const surface = (options: SurfaceOptions = {}) => (
       : { onNamed: (id: DaemonId, name: string) => options.named?.push(`${String(id)}=${name}`) })}
     createClient={options.createClient ?? factory({ studio: machineView() })}
     {...(options.tabs === undefined ? {} : { tabs: options.tabs })}
+    {...(options.locked === undefined ? {} : { locked: options.locked })}
   />
 );
 
@@ -241,6 +243,33 @@ describe('MachinesSurface', () => {
     );
     await interact(() => close.click());
     expect(view.container.querySelector('[data-machines-list]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows a machine waiting on an unlock as locked, and tells machines that share a name apart', async () => {
+    // B19: a locked machine's reads wait for it to come on screen, so its row must not say "Checking" for
+    // ever; and two machines on one host both answer to its name.
+    const box = pairing('studio', 'box');
+    const twin = pairing('twin', 'box');
+    const clone = { ...pairing('clone', 'box'), baseUrl: twin.baseUrl };
+    const view = await mount(
+      surface({
+        connections: [box, twin, clone],
+        locked: [twin.daemonId],
+        createClient: factory({ studio: machineView(), clone: machineView() }),
+      }),
+    );
+    await settle();
+    const switcher = must(view.container.querySelector('[data-machine-switcher]'), 'switcher');
+    expect(switcher.getAttribute('aria-label')).toBe('Machine: box (studio.example.test). Switch machine');
+    await click(view.container, '[data-machine-switcher]');
+    await settle();
+    const row = (id: string) => view.container.querySelector(`[data-machine-choice="${id}"]`);
+    expect(row('twin')?.querySelector('.truncate')?.textContent).toBe('box (twin)');
+    expect(row('clone')?.querySelector('.truncate')?.textContent).toBe('box (clone)');
+    expect(row('twin')?.querySelector('.text-cell')?.textContent).toBe('Locked · Open it to unlock');
+    expect(row('twin')?.querySelector('[data-status-shape]')?.textContent).toContain('Locked');
+    expect(row('clone')?.querySelector('.text-cell')?.textContent).toBe('Online · 2 runtimes');
     await view.unmount();
   });
 

@@ -431,3 +431,115 @@ describe('a device that may add its first passkey, read when the prompt opens', 
     should(unknown.snapshot()?.firstPasskey).be.undefined();
   });
 });
+
+describe('a prompt comes from the machine on screen', () => {
+  it('should hold a background request for a machine off screen, list it, and ask once it comes on screen', async () => {
+    // Arrange — B19: with two machines paired, a locked second machine's background read raised its
+    // prompt over the first machine's page.
+    const gate = gateWith(async () => undefined);
+    gate.focus(first.daemonId);
+    const answers: boolean[] = [];
+
+    // Act
+    const waiting = gate.require(second, FALLBACK, 'background').then(answer => answers.push(answer));
+    const held = gate.snapshot();
+    const listed = gate.waitingDaemons();
+    gate.focus(second.daemonId);
+    const shown = gate.snapshot()?.daemon;
+    await gate.confirm();
+    await waiting;
+
+    // Assert
+    should(held).be.null();
+    should(listed).deepEqual([second.daemonId]);
+    should(shown).equal(second);
+    should(answers).deepEqual([true]);
+    should(gate.waitingDaemons()).have.length(0);
+  });
+
+  it('should ask at once for the machine on screen, and for a request a person started anywhere', () => {
+    // Arrange
+    const onScreen = gateWith(async () => undefined);
+    onScreen.focus(first.daemonId);
+    const pressed = gateWith(async () => undefined);
+    pressed.focus(first.daemonId);
+
+    // Act
+    void onScreen.require(first, FALLBACK, 'background');
+    void pressed.require(second);
+
+    // Assert
+    should(onScreen.snapshot()?.daemon).equal(first);
+    should(pressed.snapshot()?.daemon).equal(second);
+  });
+
+  it('should open a held machine when a person starts a request on it, and pass over it to the next', async () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    gate.focus(first.daemonId);
+    void gate.require(second, FALLBACK, 'background');
+    void gate.require(first, FALLBACK, 'background');
+
+    // Act — the machine on screen asks first; the held one is not shown when it settles.
+    const before = gate.snapshot()?.daemon;
+    gate.dismiss();
+    const afterSettle = gate.snapshot();
+    void gate.require(second, 'open a terminal');
+
+    // Assert
+    should(before).equal(first);
+    should(afterSettle).be.null();
+    should(gate.snapshot()?.daemon).equal(second);
+    should(gate.snapshot()?.acts).deepEqual([FALLBACK, 'open a terminal']);
+  });
+
+  it('should send a background prompt back to waiting when its machine leaves the screen, unless it is being answered', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    gate.focus(first.daemonId);
+    void gate.require(first, FALLBACK, 'background');
+    const busy = gateWith(ceremony);
+    busy.focus(first.daemonId);
+    void busy.require(first, FALLBACK, 'background');
+    const confirming = busy.confirm();
+
+    // Act
+    gate.focus(second.daemonId);
+    busy.focus(second.daemonId);
+    const left = gate.snapshot();
+    const answering = busy.snapshot()?.busy;
+    gate.focus(first.daemonId);
+    gate.focus(first.daemonId);
+
+    // Assert
+    should(left).be.null();
+    should(gate.waitingDaemons()).deepEqual([first.daemonId]);
+    should(answering).be.true();
+    should(gate.snapshot()?.daemon).equal(first);
+    pending[0]?.resolve();
+    await confirming;
+  });
+
+  it('should keep what one machine said off another machine’s prompt', async () => {
+    // Arrange
+    const reads: ((scope: string) => void)[] = [];
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: String,
+      scope: () => new Promise<string>(resolve => reads.push(resolve)),
+    });
+    gate.focus(second.daemonId);
+    void gate.require(second, FALLBACK, 'background');
+    gate.focus(first.daemonId);
+    void gate.require(first);
+
+    // Act — the held machine's read lands while the other machine's prompt is on screen.
+    reads[0]?.('for the held machine');
+    await flush();
+
+    // Assert
+    should(gate.snapshot()?.daemon).equal(first);
+    should(gate.snapshot()?.scope).be.undefined();
+  });
+});

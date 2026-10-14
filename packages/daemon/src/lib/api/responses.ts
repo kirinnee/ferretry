@@ -1,9 +1,6 @@
+import { FY_VERSION_HEADER } from '@ferretry/protocol';
 import { daemonVersion } from '../version.ts';
 import type { ApiResponse } from './http.ts';
-
-/** Every API response carries the daemon version so a client can name a skew instead of guessing
- *  why a route it knows about answered 404. */
-export const VERSION_HEADER = 'x-ferretry-version';
 
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 
@@ -13,7 +10,9 @@ export const PROMETHEUS_CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8
 function baseHeaders(contentType: string): Map<string, string> {
   return new Map([
     ['content-type', contentType],
-    [VERSION_HEADER, daemonVersion],
+    // Every response carries the daemon version under the protocol-owned name, so a client can name a
+    // skew instead of guessing why a route it knows about answered 404.
+    [FY_VERSION_HEADER, daemonVersion],
   ]);
 }
 

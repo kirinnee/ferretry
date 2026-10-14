@@ -28,6 +28,7 @@ import type { DaemonIdentity, RelayCrypto } from '@ferretry/relay';
 import { RELAY_CLOSE_CODES } from '@ferretry/relay';
 import type { DeviceConnectionTracker } from '../../lib/pairing/index.ts';
 import type {
+  AccessLeasePolicy,
   RelayApiDispatch,
   RelayDeviceDirectory,
   RelayLinkScheduler,
@@ -76,6 +77,8 @@ export interface BunRelayCarrierDependencies {
   /** How often this side pings. A seam, so the liveness sweep can be proved without a test that
    *  waits half a minute for one tick — production passes nothing and gets the protocol's cadence. */
   readonly heartbeatMs?: number;
+  /** The lease and its cap; absent means the protocol's own. */
+  readonly lease?: AccessLeasePolicy;
 }
 
 export type RelayCarrierPhase = 'idle' | 'none' | 'dialling' | 'carrying' | 'stopped';
@@ -180,6 +183,7 @@ export class BunRelayCarrier {
       connections: this.deps.connections,
       scheduler: this.deps.scheduler ?? runtimeScheduler,
       clock: { now: () => this.#now() },
+      ...(this.deps.lease === undefined ? {} : { lease: this.deps.lease }),
     });
     this.#link = link;
     socket.onopen = () => {

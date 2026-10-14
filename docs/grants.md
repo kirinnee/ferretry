@@ -236,6 +236,12 @@ with the unlock turned off always asks per act. **Adding access always asks:** m
 widening another device want a passkey proved for that one act, from any device, unlocked or not
 ([design/zero-trust.md](design/zero-trust.md) B6). At the machine, nothing is asked.
 
+**The app asks only for the machine on screen.** With several machines paired, every page reads all of
+them in the background, so a locked second machine used to raise its unlock over the first machine's
+page. A background read (`GET`, `HEAD`) that meets `unlock_required` or a step-up now waits until its
+machine is on screen, and the Machines list shows that machine as locked; anything a person pressed asks at
+once. Two machines that answer to the same name are told apart by address in the prompt and the list.
+
 There is no operator password. The passkey step-up replaced it for every purpose it had — the local
 browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for
 compatibility**. [design/zero-trust.md](design/zero-trust.md) B owns the ceremony (who verifies it, the

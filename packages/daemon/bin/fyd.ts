@@ -391,6 +391,7 @@ import {
   defaultStartWaitPolicy,
   describeAbsentRelayCarrier,
   describeConfiguration,
+  describeDaemonTimings,
   describeGrantPosture,
   describeRelayCarrierPosture,
   dialledRelayUrl,
@@ -469,6 +470,7 @@ import {
   StepUpService,
   packageRole,
   paneShowsActiveWork,
+  parseDaemonTimings,
   parseSessionId,
   parseWardenConfigPatch,
   planInitialAttachments,
@@ -606,6 +608,7 @@ import {
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
+  TEST_TIMINGS_VARIABLE,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -4662,6 +4665,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * started. Nothing else about it moved.
    */
   const bootNotices = bootJournal(overrides.logLevel);
+  // The lease, its cap and the idle day, shortened only for a test run and never lengthened. A value
+  // that would lengthen one refuses the boot; any shortening in force is said once, here.
+  const timings = parseDaemonTimings(process.env[TEST_TIMINGS_VARIABLE]);
+  const timingNote = describeDaemonTimings(timings);
+  if (timingNote !== undefined) bootNotices.state(timingNote);
   // The security log (docs/design/zero-trust.md §C): one writer, built before pairing and the route table
   // that both record into. A write it cannot make is said in this boot's journal, never thrown into a request.
   const auditFailures = { auditWriteFailed: (message: string) => bootNotices.state(message) };
@@ -5391,6 +5399,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // A revocation somebody asked for lands in the owner's journal beside the grant changes.
           audit: grantAudit,
           idleExpiryDays: () => security.current().idleExpiryDays,
+          idleDayMs: timings.idleDayMs,
         },
         {
           log: auditLog,
@@ -5442,6 +5451,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           },
           clock: { now: () => Date.now() },
+          lease: timings.lease,
           connections: deviceConnections,
         }),
       };
@@ -5473,6 +5483,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             devices,
             pairing,
             connections: deviceConnections,
+            lease: timings.lease,
           }),
         })),
       };

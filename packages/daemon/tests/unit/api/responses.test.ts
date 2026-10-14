@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { FY_VERSION_HEADER } from '@ferretry/protocol';
 import should from 'should';
 import {
   errorResponse,
@@ -8,7 +9,6 @@ import {
   PROMETHEUS_CONTENT_TYPE,
   textResponse,
   unknownRouteResponse,
-  VERSION_HEADER,
 } from '../../../src/lib/api/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { jsonBody } from './support.ts';
@@ -29,7 +29,7 @@ describe('jsonResponse', () => {
     const response = jsonResponse({});
 
     // Assert
-    should(response.headers.get(VERSION_HEADER)).equal(daemonVersion);
+    should(response.headers.get(FY_VERSION_HEADER)).equal(daemonVersion);
   });
 
   it('should let a caller add headers, case-insensitively', () => {

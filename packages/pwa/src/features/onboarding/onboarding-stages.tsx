@@ -393,6 +393,8 @@ export function BriefStage({ write, target, plainUrl, share }: BriefStageProps) 
 
 export interface AgentPairStageProps {
   readonly pairing: ReactNode;
+  /** The pairing failure on screen already says its remedy, so the code-expiry advice is not added. */
+  readonly stated?: boolean;
   /**
    * Which computer the agent is on — which decides whether "you may already be
    * connected" is true or a lie.
@@ -424,7 +426,7 @@ export interface AgentPairStageProps {
  * said only when the daemon is on this machine, because otherwise that tab opened
  * somewhere the reader is not sitting.
  */
-export function AgentPairStage({ pairing, target }: AgentPairStageProps) {
+export function AgentPairStage({ pairing, target, stated = false }: AgentPairStageProps) {
   return (
     <div className={STAGE}>
       <div className="min-w-0" data-onboarding-pairing="">
@@ -436,10 +438,12 @@ export function AgentPairStage({ pairing, target }: AgentPairStageProps) {
           has already opened Ferretry in another tab, paired. Nothing to do here — carry on there.
         </p>
       ) : null}
-      <p className="m-0 text-meta leading-base text-muted">
-        The code is single-use and expires after about two minutes. If it has expired, ask your agent to run{' '}
-        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again and show you the fresh one.
-      </p>
+      {stated ? null : (
+        <p className="m-0 text-meta leading-base text-muted">
+          The code is single-use and expires after about two minutes. If it has expired, ask your agent to run{' '}
+          <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again and show you the fresh one.
+        </p>
+      )}
     </div>
   );
 }
@@ -574,17 +578,19 @@ export function PairStage({ write }: { readonly write: ClipboardWriter }) {
  * they may not be standing at. The pairing surface itself is the same one, and
  * is not forked.
  */
-export function ScanStage({ pairing }: { readonly pairing: ReactNode }) {
+export function ScanStage({ pairing, stated = false }: { readonly pairing: ReactNode; readonly stated?: boolean }) {
   return (
     <div className={STAGE}>
       <div className="min-w-0" data-onboarding-pairing="">
         {pairing}
       </div>
-      <p className="m-0 text-meta leading-base text-muted">
-        This code is single-use and expires after about two minutes. If it has expired, go back to your computer, run{' '}
-        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again, then return here with the fresh QR or
-        link.
-      </p>
+      {stated ? null : (
+        <p className="m-0 text-meta leading-base text-muted">
+          This code is single-use and expires after about two minutes. If it has expired, go back to your computer, run{' '}
+          <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again, then return here with the fresh QR or
+          link.
+        </p>
+      )}
     </div>
   );
 }

@@ -771,8 +771,10 @@ pre,
   height: var(--app-h, 100dvh);
   /* Notch and home indicator. `viewport-fit=cover` lets the app paint edge to
      edge; these pay the insets back exactly once, at the outermost box, so no
-     component has to know about them and desktop (`env()` = 0) is untouched. */
-  padding-top: env(safe-area-inset-top, 0px);
+     component has to know about them and desktop (`env()` = 0) is untouched.
+     The release notice is pinned above the shell, so its measured height
+     (`--release-notice-h`, App.tsx) is room the page starts below, not under. */
+  padding-top: calc(env(safe-area-inset-top, 0px) + var(--release-notice-h, 0px));
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);

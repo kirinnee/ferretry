@@ -318,7 +318,7 @@ export interface ThemeToggleProps {
   /**
    * Injectable so a test — or a second mount that must not share a snapshot —
    * can drive the control without the tab-wide store. Passed straight to
-   * `useTheme`, so there is still exactly ONE subscription and one publisher.
+   * `useTheme`. The shell root follows the same tab-wide store, so every publisher writes one value.
    */
   readonly store?: ThemePreferenceStore;
 }

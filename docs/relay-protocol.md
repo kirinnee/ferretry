@@ -1338,6 +1338,13 @@ channel needs a device signature at least every fifteen minutes and never outliv
 every renewal re-reads revocation and expiry from the daemon's own state. Neither an auth nor a
 renewal counts as USE of the device: see `presence` below.
 
+**For a test, and only shorter.** An end-to-end run cannot wait out fifteen minutes, twelve hours or
+the shortest idle period (one day), so `fyd` reads `FYD_TEST_TIMINGS` once at boot — JSON naming any of
+`leaseSeconds`, `renewLeadSeconds`, `maxSessionSeconds` and `idleDaySeconds`. Each may only be at most
+the shipped value: a longer one refuses the boot rather than being clamped, because a longer lease
+would keep a revoked device's channel open longer. Shortened timings in force are said once in the
+boot log. Unset, the numbers above hold exactly.
+
 #### Replacing the device key
 
 A machine's owner sets how often a device's key is replaced (`deviceKeyRotationDays`,

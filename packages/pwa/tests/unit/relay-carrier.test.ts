@@ -32,6 +32,7 @@ import {
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
 import { RelaySessionError, RelayStreamRefusedError } from '../../src/lib/relay-session.ts';
+import type { PromptOrigin } from '../../src/lib/step-up-gate.ts';
 import {
   autoDial,
   newDaemonIdentity,
@@ -1804,8 +1805,15 @@ describe('the carrier router meeting a presence requirement', () => {
   const unlockRouter = async (
     respond: (attempt: number) => { status: number; body: unknown },
     handlers: {
-      readonly unlockRequired?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>;
-      readonly stepUp?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>;
+      readonly unlockRequired?: (
+        daemon: ReturnType<typeof daemonConnection>,
+        origin?: PromptOrigin,
+      ) => Promise<boolean>;
+      readonly stepUp?: (
+        daemon: ReturnType<typeof daemonConnection>,
+        act?: string,
+        origin?: PromptOrigin,
+      ) => Promise<boolean>;
     } = {},
   ) => {
     const identity = await newDaemonIdentity();
@@ -1916,5 +1924,31 @@ describe('the carrier router meeting a presence requirement', () => {
     should(response.status).equal(200);
     should(order).eql(['unlock', 'step-up']);
     should(attempts()).equal(3);
+  });
+
+  it('should tell the prompt a read is background work and anything else is a press', async () => {
+    // Arrange — B19: a read is how a page polls every paired machine, so it must not raise a prompt for a
+    // machine that is not on screen; a write is something a person pressed.
+    const origins: (PromptOrigin | undefined)[] = [];
+    const { router } = await unlockRouter(
+      attempt => (attempt % 2 === 1 ? { status: 401, body: PRESENCE } : { status: 403, body: STEP_UP }),
+      {
+        unlockRequired: async (_, origin) => {
+          origins.push(origin);
+          return true;
+        },
+        stepUp: async (_daemon, _act, origin) => {
+          origins.push(origin);
+          return false;
+        },
+      },
+    );
+
+    // Act
+    await router.fetch(`${DAEMON_URL}/v1/fleet`);
+    await router.fetch(`${DAEMON_URL}/v1/fleet/import`, { method: 'post', body: '{}' });
+
+    // Assert
+    should(origins).eql(['background', 'background', 'explicit', 'explicit']);
   });
 });

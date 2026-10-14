@@ -39,6 +39,7 @@ import {
 import type { SocketDownstream, SocketFrame, SocketHandler } from '../api/socket.ts';
 import type { DeviceConnectionTracker } from '../pairing/index.ts';
 import {
+  type AccessLeasePolicy,
   type RelayApiDispatch,
   type RelayDeviceDirectory,
   RelayLink,
@@ -92,6 +93,8 @@ export interface DirectCarrierDependencies {
   readonly pairing: RelayPairingRedeemer;
   readonly scheduler: RelayLinkScheduler;
   readonly clock: RelayLinkClock;
+  /** The lease and its cap; absent means the protocol's own (`DEFAULT_ACCESS_LEASE_POLICY`). */
+  readonly lease?: AccessLeasePolicy;
   readonly connections: DeviceConnectionTracker;
 }
 
@@ -139,6 +142,7 @@ export class DirectSession implements SocketHandler {
       pairing: deps.pairing,
       scheduler: deps.scheduler,
       clock: deps.clock,
+      ...(deps.lease === undefined ? {} : { lease: deps.lease }),
       // Seen on the way through: a device's proof is registered here first, which is the moment this
       // socket stops being an unproven one.
       connections: {

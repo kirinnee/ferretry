@@ -10,6 +10,12 @@
  * passkey sheet nobody asked for is precisely the prompt a person must learn to refuse — so the gate
  * only opens a prompt; `confirm` (the button) runs the ceremony.
  *
+ * A PROMPT COMES FROM THE MACHINE ON SCREEN. With two machines paired, every page reads both in the
+ * background, so a locked second machine used to raise its prompt over the first machine's pages, named
+ * by a host both share. A background request for any other machine now WAITS: it is listed by
+ * `waitingDaemons()` — which the machine list shows as locked — and its prompt opens when that machine
+ * comes on screen (`focus`). A request a person started (`explicit`) still asks wherever it came from.
+ *
  * NOTHING HERE HOLDS A CREDENTIAL. A verified step-up is a fact the DAEMON remembers about this copy of
  * the app; the browser holds nothing it could lose, replay or leak.
  */
@@ -34,6 +40,13 @@ export interface StepUpPrompt {
   readonly firstPasskey?: boolean;
 }
 
+/**
+ * Who started the request that needs a passkey: a person pressing something (`explicit`), or a page
+ * reading in the background (`background`). Only the first may raise a prompt for a machine that is not
+ * on screen.
+ */
+export type PromptOrigin = 'explicit' | 'background';
+
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
   readonly ceremony: (daemon: DaemonConnection) => Promise<void>;
@@ -55,13 +68,20 @@ interface Waiting {
   readonly daemon: DaemonConnection;
   readonly acts: string[];
   readonly resolvers: ((stepped: boolean) => void)[];
+  /** A person started at least one of these requests, so it may ask from off screen. */
+  explicit: boolean;
 }
+
+const NOTHING_WAITING: readonly DaemonId[] = Object.freeze([]);
 
 export class StepUpGate {
   readonly #listeners = new Set<() => void>();
-  /** Machines with requests waiting, in the order they first asked. The first one is on screen. */
+  /** Machines with requests waiting, in the order they first asked. */
   readonly #waiting = new Map<DaemonId, Waiting>();
   #prompt: StepUpPrompt | null = null;
+  /** The machine on screen, whose background requests may ask. `null` until the shell says. */
+  #focus: DaemonId | null = null;
+  #waitingIds: readonly DaemonId[] = NOTHING_WAITING;
 
   constructor(private readonly deps: StepUpGateDependencies) {}
 
@@ -76,28 +96,61 @@ export class StepUpGate {
   }
 
   /**
+   * Every machine with a request waiting on this gate, in the order it first asked — the machines the
+   * list shows as locked. A stable array between changes, for `useSyncExternalStore`.
+   */
+  waitingDaemons(): readonly DaemonId[] {
+    return this.#waitingIds;
+  }
+
+  /**
    * Waits for a step-up on this machine. `true` when the person confirmed and the daemon accepted it;
    * `false` when they dismissed the prompt.
    *
    * `act` is the phrase for what is being approved ("open a terminal"). Absent, the prompt says
    * {@link STEP_UP_FALLBACK_ACT} rather than leave a blank. Requests waiting on one machine share ONE
    * prompt, which names every distinct act in it.
+   *
+   * A `background` request for a machine that is not on screen raises nothing: it waits until that
+   * machine is {@link focus}ed. Absent, the request is a person's own and asks wherever it came from.
    */
-  require(daemon: DaemonConnection, act: string = STEP_UP_FALLBACK_ACT): Promise<boolean> {
+  require(
+    daemon: DaemonConnection,
+    act: string = STEP_UP_FALLBACK_ACT,
+    origin: PromptOrigin = 'explicit',
+  ): Promise<boolean> {
     return new Promise(resolve => {
+      const explicit = origin === 'explicit';
       const waiting = this.#waiting.get(daemon.daemonId);
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
+        waiting.explicit ||= explicit;
         if (!waiting.acts.includes(act)) {
           waiting.acts.push(act);
           this.#refreshActs(daemon.daemonId);
         }
+        if (this.#prompt === null && this.#mayShow(waiting)) this.#show(waiting);
         return;
       }
-      const entry: Waiting = { daemon, acts: [act], resolvers: [resolve] };
+      const entry: Waiting = { daemon, acts: [act], resolvers: [resolve], explicit };
       this.#waiting.set(daemon.daemonId, entry);
-      if (this.#prompt === null) this.#show(entry);
+      if (this.#prompt === null && this.#mayShow(entry)) this.#show(entry);
+      else this.#set(this.#prompt);
     });
+  }
+
+  /**
+   * The machine now on screen, or `null` for a page that shows none. Its waiting background requests
+   * open their prompt; a background prompt for the machine just left goes back to waiting, unless the
+   * person is already answering it.
+   */
+  focus(daemonId: DaemonId | null): void {
+    if (daemonId === this.#focus) return;
+    this.#focus = daemonId;
+    const prompt = this.#prompt;
+    const shown = prompt === null ? undefined : this.#waiting.get(prompt.daemon.daemonId);
+    if (prompt !== null && !prompt.busy && shown !== undefined && !this.#mayShow(shown)) this.#prompt = null;
+    if (this.#prompt === null) this.#showNext();
   }
 
   /** The prompt's button: runs the ceremony for the machine on screen. */
@@ -122,13 +175,26 @@ export class StepUpGate {
     this.#settle(prompt.daemon.daemonId, false);
   }
 
+  #mayShow(waiting: Waiting): boolean {
+    return waiting.explicit || waiting.daemon.daemonId === this.#focus;
+  }
+
   #settle(daemonId: DaemonId, stepped: boolean): void {
     const waiting = this.#waiting.get(daemonId);
     this.#waiting.delete(daemonId);
     for (const resolve of waiting?.resolvers ?? []) resolve(stepped);
-    const next = this.#waiting.values().next();
-    if (next.done === true) this.#set(null);
-    else this.#show(next.value);
+    this.#prompt = null;
+    this.#showNext();
+  }
+
+  /** The first waiting machine allowed to ask, or nothing on screen. */
+  #showNext(): void {
+    for (const waiting of this.#waiting.values())
+      if (this.#mayShow(waiting)) {
+        this.#show(waiting);
+        return;
+      }
+    this.#set(null);
   }
 
   #show(waiting: Waiting): void {
@@ -150,7 +216,8 @@ export class StepUpGate {
   /** What the machine said about this prompt, if its prompt is still the one on screen. */
   #adopt(waiting: Waiting, said: Pick<StepUpPrompt, 'scope' | 'firstPasskey'>): void {
     const prompt = this.#prompt;
-    if (prompt === null || this.#waiting.get(waiting.daemon.daemonId) !== waiting) return;
+    if (prompt?.daemon.daemonId !== waiting.daemon.daemonId || this.#waiting.get(waiting.daemon.daemonId) !== waiting)
+      return;
     this.#set({ ...prompt, ...said });
   }
 
@@ -163,6 +230,9 @@ export class StepUpGate {
 
   #set(prompt: StepUpPrompt | null): void {
     this.#prompt = prompt;
+    const ids = [...this.#waiting.keys()];
+    if (ids.length !== this.#waitingIds.length || ids.some((id, index) => id !== this.#waitingIds[index]))
+      this.#waitingIds = ids.length === 0 ? NOTHING_WAITING : Object.freeze(ids);
     for (const listener of this.#listeners) listener();
   }
 }

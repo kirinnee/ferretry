@@ -470,8 +470,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
     presence: () => presence.present(),
-    stepUp: async (daemon, act) => await stepUp.require(daemon, act),
-    unlockRequired: async daemon => await unlockGate.require(daemon),
+    stepUp: async (daemon, act, origin) => await stepUp.require(daemon, act, origin),
+    unlockRequired: async (daemon, origin) => await unlockGate.require(daemon, undefined, origin),
     crypto: relayCrypto,
     rotation: new KeyRotation({ store: deviceKeys, crypto: relayCrypto }),
     // Read per session, never cached: a key the person removed by clearing site data must stop
@@ -860,6 +860,18 @@ export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) =>
         ? undefined
         : async (daemon: DaemonConnection, act?: string) => await store.stepUp.require(daemon, act),
     [store],
+  );
+}
+
+/**
+ * The machines whose background reads are waiting on an unlock: each one waits for its machine to come on
+ * screen rather than prompting over another's page, and the machine list shows it as locked.
+ */
+export function useLockedMachines(gate: StepUpGate): readonly DaemonId[] {
+  return useSyncExternalStore(
+    listener => gate.subscribe(listener),
+    () => gate.waitingDaemons(),
+    () => gate.waitingDaemons(),
   );
 }
 
