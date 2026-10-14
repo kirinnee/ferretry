@@ -798,17 +798,24 @@ describe('auditedRoutes', () => {
       },
       devicesExpiring: 4,
     };
-    const { journal, routes } = decorated({ 'PATCH /v1/security': async () => jsonResponse(body) });
+    let raw: string | undefined;
+    const { journal, routes } = decorated({
+      'PATCH /v1/security': async () =>
+        raw === undefined ? jsonResponse(body) : { status: 200, headers: new Map(), body: raw },
+    });
     const api = await dispatcher(routes);
 
     // Act
     await api.dispatch(request({ method: 'PATCH', path: '/v1/security', device: DEVICE, body: '{}' }));
     body = { view: { settings: 'not an object' } };
     await api.dispatch(request({ method: 'PATCH', path: '/v1/security', headers: ADMIN, loopback: true, body: '{}' }));
+    raw = 'not json';
+    await api.dispatch(request({ method: 'PATCH', path: '/v1/security', device: DEVICE, body: '{}' }));
 
     // Assert
     should(records(journal).map(record => record.detail)).deepEqual([
       { idleExpiryDays: 1, unlockOnOpen: true, status: 200 },
+      { status: 200 },
       { status: 200 },
     ]);
   });
