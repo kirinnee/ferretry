@@ -518,7 +518,15 @@ export async function mintPairingLink(environment: E2eEnvironment, appOrigin: st
  */
 export async function confirmPairing(page: ProductPage, url: string): Promise<'paired' | 'unmounted'> {
   await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 });
-  await page.waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 });
+  await page.waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 }).catch(async () => {
+    const shot = join(EVIDENCE_ROOT, 'pairing-never-confirmed-' + String(Date.now()) + '.png');
+    await mkdir(EVIDENCE_ROOT, { recursive: true });
+    await page.screenshot({ path: shot });
+    const seen = await page.evaluate<string>(
+      `JSON.stringify({ href: location.href, route: document.querySelector('p[data-route]')?.getAttribute('data-route') ?? null, stage: document.querySelector('[data-pairing-stage]')?.getAttribute('data-pairing-stage') ?? null, onboarding: document.querySelector('[data-onboarding-screen]')?.getAttribute('data-onboarding-screen') ?? null, text: (document.body.textContent ?? '').trim().replace(/\\s+/g, ' ').slice(0, 400) })`,
+    );
+    throw new Error(`the pairing link never reached the confirm screen (${shot}): ${seen}`);
+  });
   await page.click('[data-pair-confirm]', { timeout: 10_000 });
   const settled = await Promise.race([
     page.waitForSelector('[data-pairing-stage="paired"]', { timeout: 45_000 }).then(() => 'paired' as const),
@@ -576,4 +584,29 @@ export async function waitUntil(page: ProductPage, expression: string, timeoutMs
     await Bun.sleep(150);
   }
   throw new Error(`timed out after ${String(timeoutMs)}ms waiting for ${what} at ${page.url()}`);
+}
+
+/** Soft failures per journey: recorded and reported, and the journey goes on to its later steps. */
+const softFailures = new Map<string, string[]>();
+
+/**
+ * {@link step}, but a failure is RECORDED rather than thrown, so one product bug does not hide every
+ * step after it. The journey must call {@link assertNoSoftFailures} last, so the test still fails.
+ */
+export async function softStep(journey: string, name: string, body: () => Promise<{ value: unknown; evidence: string }>, bug?: string): Promise<boolean> {
+  try {
+    const { evidence } = await body();
+    await recordStep({ journey, step: name, status: 'PASS', evidence });
+    return true;
+  } catch (error) {
+    const message = String((error as Error).message ?? error).slice(0, 1_500);
+    await recordStep({ journey, step: name, status: 'FAIL', evidence: message, ...(bug === undefined ? {} : { bug }) });
+    softFailures.set(journey, [...(softFailures.get(journey) ?? []), `${name}: ${message}`]);
+    return false;
+  }
+}
+
+export function assertNoSoftFailures(journey: string): void {
+  const failures = softFailures.get(journey) ?? [];
+  if (failures.length > 0) throw new Error(`${journey} — ${String(failures.length)} step(s) failed:\n${failures.join('\n')}`);
 }

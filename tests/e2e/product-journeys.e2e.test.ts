@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
@@ -10,6 +10,7 @@ import {
   answerPasswordIfAsked,
   asOwner,
   bootDaemon,
+  type BootOptions,
   captureScreens,
   EVIDENCE_ROOT,
   confirmPairing,
@@ -23,6 +24,8 @@ import {
   type ProductBrowser,
   type ProductPage,
   recordStep,
+  softStep,
+  assertNoSoftFailures,
   step,
   textNow,
   waitUntil,
@@ -68,6 +71,8 @@ interface Product {
   readonly origin: PwaOrigin;
   readonly tools: FakeTools;
   readonly browser: ProductBrowser;
+  /** How this machine was booted, so a journey can stop and boot it again. */
+  readonly boot: BootOptions;
   /** Present when the direct address is a sinkhole and the only way in is the local rendezvous. */
   readonly relay?: { readonly rendezvous: RendezvousProcess; readonly sinkhole: DirectSinkhole; readonly fingerprint: string };
 }
@@ -125,6 +130,7 @@ async function withProduct(journey: string, body: (product: Product) => Promise<
         origin,
         tools,
         browser,
+        boot,
         ...(rendezvous === undefined || sinkhole === undefined ? {} : { relay: { rendezvous, sinkhole, fingerprint } }),
       });
       should(browser.pageErrors).be.empty();
@@ -397,4 +403,251 @@ describe('the product, from a fresh machine to a working session', () => {
       { relay: true },
     );
   }, 600_000);
+
 });
+
+
+const STALE_DONE_BUG =
+  'packages/pwa/src/features/onboarding/onboarding-progress.ts:501 — a stored add-client walk at step "done" is kept when a NEW pairing link arrives (same route), so an already-paired browser opening a second machine\'s link, or re-pairing after a revoke/idle expiry, lands on "You are set up" and the link is ignored. MAJOR';
+
+/**
+ * Pair with a link in a browser that has paired before. A refusal to show the confirm screen is the
+ * known stale-"done" bug: it is recorded as a FAIL, then the person's only way past it (forget the
+ * setup guide's place) is taken so the rest of the journey can still be measured.
+ */
+async function pairAgain(journey: string, stepName: string, page: ProductPage, url: string): Promise<string> {
+  const first = await softStep(journey, stepName, async () => ({ value: undefined, evidence: `confirm screen reached: ${await confirmPairing(page, url)}` }), STALE_DONE_BUG);
+  if (first) return 'direct';
+  await page.evaluate(`localStorage.removeItem('fy-onboarding-v4')`);
+  // A fresh document: the same URL again would be a hash-only navigation and keep the old state.
+  await page.goto('about:blank');
+  const settled = await confirmPairing(page, url);
+  await recordStep({ journey, step: `${stepName}:workaround`, status: 'PASS', evidence: `after clearing fy-onboarding-v4 the same link paired (${settled})` });
+  return 'workaround';
+}
+
+/** Pair, set up and start one session — the minimum a cut-off can be observed against. */
+async function pairedWithSession(product: Product, journey: string): Promise<CoreOutcome> {
+  return coreJourney(product, journey);
+}
+
+/** What the screen is telling the person right now, for an evidence line or a failure. */
+async function whatTheScreenSays(page: ProductPage): Promise<string> {
+  return page.evaluate<string>(`JSON.stringify({
+    route: document.querySelector('p[data-route]')?.getAttribute('data-route') ?? null,
+    live: document.querySelector('[data-live-stream]')?.getAttribute('data-live-stream') ?? null,
+    session: document.querySelector('[data-session-state]')?.getAttribute('data-session-state') ?? null,
+    alerts: [...document.querySelectorAll('[role="alert"], [role="status"]')].map(n => (n.textContent ?? '').trim()).filter(Boolean).slice(0, 4),
+    pairing: document.querySelector('[data-pairing-stage]')?.getAttribute('data-pairing-stage') ?? null,
+  })`);
+}
+
+/** The words a person needs after losing access: that this device must be paired again. */
+const REPAIR_WORDS = /pair(ed)? (this device|it )?again|no longer paired|not paired|pair this (device|browser)/iu;
+
+describe('access ends when it should, and the person is told', () => {
+  it('should cut a revoked device off at once, say so, and pair again', async () => {
+    const journey = 'j08-revoke';
+    await withProduct(journey, async product => {
+      // Arrange — a paired browser watching a live session.
+      const { environment, browser } = product;
+      const page = browser.page;
+      const outcome = await pairedWithSession(product, journey);
+      await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+      await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'a live session stream');
+      const stored = await deviceGrantForLeakSearchOnly(page as never);
+
+      // Act — the owner revokes the device. On main there is no `fy device revoke`, so the route.
+      const cli = await environment.runFy(['device', 'revoke', stored.deviceId], { FY_URL: environment.httpUrl() });
+      const viaCli = cli.code === 0;
+      await recordStep({
+        journey,
+        step: 'revoke-command',
+        status: viaCli ? 'PASS' : 'FLAG',
+        evidence: viaCli ? 'fy device revoke succeeded' : `fy device revoke is not a command here (exit ${String(cli.code)}: ${cli.err.trim().split('\n')[0] ?? ''}); revoked through DELETE /v1/pair/devices/:id`,
+        ...(viaCli ? {} : { bug: 'no CLI verb revokes a device on main (packages/cli/src/lib/pair/commands.ts:33-37 only offers `fy pair`); expected from #464 — minor until then' }),
+      });
+      const revokedAt = Date.now();
+      if (!viaCli) {
+        const revoked = await asOwner(environment, 'DELETE', `/v1/pair/devices/${encodeURIComponent(stored.deviceId)}`);
+        should(revoked.status).equal(200);
+      }
+
+      // Assert — the live view stops at once, and the screen says what to do.
+      await step(journey, 'cut-off-immediately', async () => {
+        await waitUntil(page, `document.querySelector('[data-live-stream="live"]') === null`, 10_000, 'the live stream to stop');
+        return { value: undefined, evidence: `the live stream left "live" ${String(Date.now() - revokedAt)}ms after the revoke: ${await whatTheScreenSays(page)}` };
+      });
+      await Bun.sleep(3_000);
+      await captureScreens(page, journey, '20-after-revoke');
+      await softStep(journey, 'told-to-pair-again', async () => {
+        const said = await whatTheScreenSays(page);
+        if (!REPAIR_WORDS.test(said)) {
+          await page.reload({ waitUntil: 'networkidle', timeout: 30_000 });
+          await Bun.sleep(3_000);
+          await captureScreens(page, journey, '21-after-revoke-reload');
+          const reloaded = await whatTheScreenSays(page);
+          if (!REPAIR_WORDS.test(reloaded))
+            throw new Error(`a revoked device is never told to pair again. Live screen: ${said}. After reload: ${reloaded}`);
+          return { value: undefined, evidence: `only after a reload: ${reloaded}` };
+        }
+        return { value: undefined, evidence: said };
+      }, 'packages/pwa/src/lib/relay-session.ts:979 — close 4403 (unknown/revoked/idle device) is reported as a generic rendezvous end, even on a direct carrier; packages/relay/src/lib/connection.ts:369-375 then says direct was not reachable; RELAY_CLOSE_CODES.authRejected is never read in packages/pwa, so no screen ever says pair again. MAJOR');
+
+      // And pairing again works.
+      const logMark = environment.daemonOutput().err.length + environment.daemonOutput().out.length;
+      const repaired = await softStep(journey, 'pair-again', async () => {
+        const link = await mintPairingLink(environment, product.origin.origin);
+        const settled = await pairAgain(journey, 'pair-again-link', page, link.url);
+        await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+        await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'a live stream after pairing again');
+        return { value: undefined, evidence: `paired again (${settled}) and the session streams live` };
+      }, 'the same browser cannot pair again with the machine that revoked it — see the daemon log excerpt in pair-again:daemon-log. MAJOR');
+      if (!repaired) {
+        const log = environment.daemonOutput();
+        await recordStep({ journey, step: 'pair-again:daemon-log', status: 'FLAG', evidence: `${log.out}\n${log.err}`.slice(Math.max(0, logMark - 200)).slice(-1_400) });
+        const fresh = await launchProductBrowser(product.teardown);
+        await softStep(journey, 'pair-again:fresh-browser', async () => {
+          const link = await mintPairingLink(environment, product.origin.origin);
+          return { value: undefined, evidence: `a NEW browser pairs with the same machine: ${await confirmPairing(fresh.page, link.url)}` };
+        });
+      }
+      assertNoSoftFailures(journey);
+    });
+  }, 600_000);
+
+  it('should expire a device left idle past the idle period and ask for a new pairing', async () => {
+    const journey = 'j07-idle';
+    await withProduct(journey, async product => {
+      // Arrange — paired, then the daemon stopped and the device's last sighting moved 31 days back.
+      const { environment, browser } = product;
+      const page = browser.page;
+      const outcome = await pairedWithSession(product, journey);
+      const stored = await deviceGrantForLeakSearchOnly(page as never);
+      const devicesFile = await findStateFileContaining(environment.paths.fyHome, stored.deviceId);
+      await environment.stopDaemon();
+      const document = await readFile(devicesFile, 'utf8');
+      const aged = new Date(Date.now() - 31 * 24 * 3_600_000).toISOString();
+      const rewritten = document.replace(/"(lastSeenAt|createdAt)":"[^"]+"/gu, `"$1":"${aged}"`).replace(/"(lastSeenAt|createdAt)": "[^"]+"/gu, `"$1": "${aged}"`);
+      if (rewritten === document) throw new Error(`no lastSeenAt in ${devicesFile} to age`);
+      await writeFile(devicesFile, rewritten, 'utf8');
+
+      // Act
+      await bootDaemon(environment, product.boot);
+      await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+      await Bun.sleep(5_000);
+      await captureScreens(page, journey, '30-idle-expired');
+
+      // Assert
+      await step(journey, 'idle-device-refused', async () => {
+        const listed = await asOwner(environment, 'GET', '/v1/pair/devices');
+        if (JSON.stringify(listed.body).includes(stored.deviceId)) throw new Error(`the daemon still lists the idle device: ${JSON.stringify(listed.body).slice(0, 300)}`);
+        if (await page.evaluate<boolean>(`document.querySelector('[data-live-stream="live"]') !== null`)) throw new Error('the idle-expired device still streams live');
+        return { value: undefined, evidence: `device aged to ${aged} in ${devicesFile}; the daemon dropped it and the app is not live` };
+      });
+      await softStep(journey, 'idle-told-to-pair-again', async () => {
+        const said = await whatTheScreenSays(page);
+        if (!REPAIR_WORDS.test(said)) throw new Error(`an idle-expired device is not told to pair again: ${said}`);
+        return { value: undefined, evidence: said };
+      }, 'packages/pwa/src/lib/relay-session.ts:979 — close 4403 (unknown/revoked/idle device) is reported as a generic rendezvous end, even on a direct carrier; packages/relay/src/lib/connection.ts:369-375 then says direct was not reachable; RELAY_CLOSE_CODES.authRejected is never read in packages/pwa, so no screen ever says pair again. MAJOR');
+      assertNoSoftFailures(journey);
+    });
+  }, 600_000);
+
+  it('should record that the lease, idle and session-cap durations have no test seam', async () => {
+    // Arrange / Act / Assert — a declared gap, not a pass. See the report's journey 7.
+    await recordStep({
+      journey: 'j07-lease-cap',
+      step: 'lease-4441-and-12h-cap',
+      status: process.env.FY_E2E_LONG === '1' ? 'FAIL' : 'SKIP',
+      evidence:
+        'ACCESS_LEASE_SECONDS=900, MAX_SESSION_SECONDS=43200 and DEVICE_IDLE_EXPIRY_DAYS=30 are compiled constants (packages/protocol/src/lib/relay-session.ts:79,92; pairing.ts:56) with no config key, env var, flag or clock seam in the compiled fyd (fyd.ts:5364 hard-wires Date.now). A silent 4441 reopen and the 12 h reconnect cannot be driven end to end without waiting them out.',
+      bug: 'testability gap, minor: give fyd a test-only clock or a short-duration override so lease end / cap are provable in e2e',
+    });
+    should(true).be.true();
+  });
+});
+
+describe('one browser, two machines', () => {
+  it('should hold two machines apart: separate pairings, separate sessions, revoking one leaves the other', async () => {
+    const journey = 'j09-two-machines';
+    await withProduct(journey, async product => {
+      // Arrange — machine A is set up and has a session; machine B is a second fresh install.
+      const page = product.browser.page;
+      const a = await coreJourney(product, journey);
+      await withE2eEnvironment(async second => {
+        const tools = await installFakeTools(second);
+        const directory = await startRelayDirectory();
+        const configPath = await writeDaemonConfig(join(second.paths.root, 'daemon.json'), {
+          bindPort: second.ports.api,
+          appOrigins: [product.origin.origin],
+        });
+        await bootDaemon(second, { configPath, directoryOrigin: directory.origin, env: fakeToolEnvironment(tools) });
+        await ensureOperatorPassword(second);
+
+        // Act — pair the SAME browser with B.
+        const link = await mintPairingLink(second, product.origin.origin);
+        const bId = decodeURIComponent(/(?:^|;)fp=([^;]+)/u.exec(link.fragment)?.[1] ?? '');
+        const settled = await pairAgain(journey, 'pair-second-machine-link', page, link.url);
+        await softStep(journey, 'pair-second-machine', async () => {
+          const connections = await page.evaluate<number>(`new Promise(resolve => { const r = indexedDB.open('ferretry-pwa'); r.onsuccess = () => { const q = r.result.transaction('connections').objectStore('connections').getAll(); q.onsuccess = () => { const raw = q.result[0]; const doc = typeof raw === 'string' ? JSON.parse(raw) : raw; resolve((doc?.connections ?? []).length); }; }; })`);
+          if (connections !== 2) throw new Error(`the browser holds ${String(connections)} connection(s) after pairing a second machine`);
+          return { value: undefined, evidence: `paired with B (${settled}); the browser holds two connections, A ${a.daemonId.slice(0, 18)}… and B ${bId.slice(0, 18)}…` };
+        });
+        await page.goto(`${product.origin.origin}/`, { waitUntil: 'networkidle', timeout: 30_000 });
+        await Bun.sleep(1_500);
+        await captureScreens(page, journey, '40-two-machines-home');
+        await page.goto(`${product.origin.origin}/d/${bId}/settings#machines`, { waitUntil: 'networkidle', timeout: 30_000 });
+        await Bun.sleep(1_500);
+        await captureScreens(page, journey, '41-machine-b-settings');
+
+        // Assert — A's session is still A's, B has none, and each answers only for itself.
+        await softStep(journey, 'sessions-stay-per-machine', async () => {
+          const bSessions = await asOwner(second, 'GET', '/v1/sessions');
+          if (JSON.stringify(bSessions.body).includes(a.sessionUrl.split('/session/')[1] ?? '@@'))
+            throw new Error('machine B lists machine A\'s session');
+          await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'A\'s session live');
+          return { value: undefined, evidence: 'A\'s session streams from A; B does not list it' };
+        });
+        await softStep(journey, 'revoke-at-b-leaves-a', async () => {
+          const bDevices = await asOwner(second, 'GET', '/v1/pair/devices');
+          const id = (bDevices.body as { devices: { id: string }[] }).devices[0]?.id;
+          if (id === undefined) throw new Error('machine B lists no device');
+          const removed = await asOwner(second, 'DELETE', `/v1/pair/devices/${encodeURIComponent(id)}`);
+          if (removed.status !== 200) throw new Error(`revoking at B answered ${String(removed.status)}`);
+          await Bun.sleep(2_000);
+          await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          await waitUntil(page, `document.querySelector('[data-live-stream="live"]') !== null`, 30_000, 'A\'s session still live after B revoked this browser');
+          const aDevices = await asOwner(product.environment, 'GET', '/v1/pair/devices');
+          if ((aDevices.body as { devices: unknown[] }).devices.length !== 1) throw new Error('A lost its device when B revoked');
+          return { value: undefined, evidence: 'B revoked this browser; A still lists it and its session still streams' };
+        });
+
+        // The cross-machine parts of journey 9 need #464 (step-up per daemon) and #468 (clone shows commands).
+        const security = await asOwner(product.environment, 'GET', '/v1/security');
+        await recordStep({
+          journey,
+          step: 'unlock-is-per-machine',
+          status: security.status === 404 ? 'SKIP' : 'FAIL',
+          evidence: security.status === 404 ? 'no unlock model on this build (#464 not merged)' : 'unlock model present — write the A-unlock-is-useless-at-B assertion',
+        });
+        await recordStep({ journey, step: 'clone-shows-commands', status: 'SKIP', evidence: 'clone A→B with every hook/MCP command shown needs #468' });
+        await recordStep({ journey, step: 'per-machine-notifications', status: 'SKIP', evidence: 'Web Push delivery needs a push service; headless Chrome has none on loopback (see memory: CDP push delivery drops)' });
+        await second.stopDaemon();
+      });
+      assertNoSoftFailures(journey);
+    });
+  }, 900_000);
+});
+
+/** The state file under `home` whose text mentions `needle` — how the idle journey finds the device record. */
+async function findStateFileContaining(home: string, needle: string): Promise<string> {
+  const glob = new Bun.Glob('**/*.json');
+  for await (const relative of glob.scan({ cwd: home, dot: true })) {
+    const path = join(home, relative);
+    const text = await readFile(path, 'utf8').catch(() => '');
+    if (text.includes(needle) && /lastSeenAt/u.test(text)) return path;
+  }
+  throw new Error(`no state file under ${home} records ${needle.slice(0, 12)}…`);
+}

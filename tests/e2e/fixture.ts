@@ -749,6 +749,11 @@ export class E2eEnvironment {
     }
   }
 
+  /** What the running daemon has printed so far — for a journey's failure evidence. */
+  daemonOutput(): Pick<CommandResult, 'out' | 'err'> {
+    return this.daemon?.output() ?? { out: '', err: '' };
+  }
+
   async stopDaemon(timeoutMs = 5_000): Promise<CommandResult | undefined> {
     const daemon = this.daemon;
     if (daemon === undefined) return undefined;
