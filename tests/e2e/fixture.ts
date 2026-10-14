@@ -252,10 +252,33 @@ async function runCaptured(
     } catch (error) {
       /**
        * The same Bun epoll loss as in `captureProcess`, delivered through the child's 'error' event
-       * instead of thrown by `spawn`. A child that never got a pid never ran, so one more attempt is
-       * still a single run of the command; one that did run is never retried.
+       * instead of thrown by `spawn`: Bun could not register to hear the child exit, so its result is
+       * lost, not wrong.
+       *
+       * A child that never got a pid never ran, and one more attempt is still a single run. One that DID
+       * get a pid is waited out first — polled until the pid is gone, inside the same timeout — so two
+       * copies never run at once, and only then run once more. That second run is acceptable for this
+       * tier's commands (a second `fy pair` mints a fresh code; a read reads again) and is the price of
+       * a runner that drops epoll registrations; a command that must never run twice does not belong in
+       * `runFy`.
        */
-      if (!isTransientBunSpawnFailure(error) || captured.child.pid !== undefined) throw error;
+      if (!isTransientBunSpawnFailure(error)) throw error;
+      const pid = captured.child.pid;
+      if (pid !== undefined) {
+        const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+        for (;;) {
+          try {
+            process.kill(pid, 0);
+          } catch {
+            break;
+          }
+          // A child Bun lost track of may never be reaped: a zombie has exited, whatever kill(0) says.
+          const state = await readFile(`/proc/${String(pid)}/stat`, 'utf8').catch(() => '');
+          if (/^\d+ \(.*\) Z /u.test(state)) break;
+          if (Date.now() > deadline) throw error;
+          await Bun.sleep(50);
+        }
+      }
       await Bun.sleep(0);
       captured = await captureProcess(executable, args, options);
       return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
