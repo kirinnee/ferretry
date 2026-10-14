@@ -201,6 +201,10 @@ ships a new service worker is **not prevented and only occasionally detected**.
 The runbook — key custody, rotation, compromise, and exactly what this does not protect — is
 [docs/pwa-release-signing.md](docs/pwa-release-signing.md).
 
+The **reader-facing security model** — every layer and what it stops, the threat table (one compromised
+machine included), recovery steps and what is not protected — is [docs/security.md](docs/security.md). It
+summarises the contracts above and owns none of them: when one of them moves, correct that page too.
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security
