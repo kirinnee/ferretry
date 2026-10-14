@@ -35,6 +35,7 @@ import {
   type GrantsPatch,
   type GrantsView,
   STEP_UP_REQUIRED_CODE,
+  type StepUpDemand,
 } from '@ferretry/protocol';
 
 /**
@@ -78,6 +79,30 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
 };
 
 export const capabilityLabel = (capability: DaemonCapability): string => CAPABILITY_LABELS[capability];
+
+/**
+ * What a person is confirming, as a verb phrase that finishes "Confirm with your passkey to …".
+ *
+ * ONE TABLE, written once, beside the labels it sits with. Every `use` is listed even though only four
+ * of them ever ask for a step-up, so the function is total and a capability added later cannot reach a
+ * prompt with a blank where its act should be (a test pins the table to `DAEMON_CAPABILITIES`).
+ */
+const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
+  fleet: 'use the agent fleet',
+  terminal: 'open a terminal',
+  browser: 'open the remote browser',
+  filesystem: 'use the project filesystem',
+  warden: 'use fleet supervision',
+  pairing: 'add or manage a paired device',
+  secrets: 'run a command with a stored secret',
+};
+
+/** The act a step-up demand stands for. A `configure` is always a change to that capability's settings. */
+export const stepUpAct = (demand: StepUpDemand): string =>
+  demand.axis === 'use' ? USE_ACTS[demand.capability] : `change the settings for ${capabilityNoun(demand.capability)}`;
+
+/** What a prompt says when the daemon named no act: the machine is still named, and the act is "this change". */
+export const STEP_UP_FALLBACK_ACT = 'make this change';
 
 /**
  * What each capability actually reaches, in one line.

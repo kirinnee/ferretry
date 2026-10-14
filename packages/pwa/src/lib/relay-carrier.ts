@@ -43,6 +43,8 @@ import {
   PRESENCE_REQUIRED_CODE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   STEP_UP_REQUIRED_CODE,
+  type StepUpDemand,
+  StepUpRequiredBodySchema,
 } from '@ferretry/protocol';
 import {
   APP_SESSION_BYTES,
@@ -70,6 +72,7 @@ import {
 } from './daemon-connection.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
 import type { KeyRotation } from './key-rotation.ts';
+import { stepUpAct } from './grants.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -542,7 +545,7 @@ export interface DaemonCarrierRouterOptions {
    * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
    * nothing can ask, and the refusal is returned as it came.
    */
-  readonly stepUp?: (daemon: DaemonConnection) => Promise<boolean>;
+  readonly stepUp?: (daemon: DaemonConnection, act?: string) => Promise<boolean>;
   /**
    * Asked when the daemon answers `401 presence_required`: this machine wants a passkey on opening and
    * this device has not given one. `true` once the person has confirmed, and the request is then sent
@@ -720,7 +723,7 @@ export class DaemonCarrierRouter {
   readonly #hostedRelay: () => Promise<string | undefined>;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
-  readonly #stepUp: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
+  readonly #stepUp: ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined;
   readonly #presenceRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
   readonly #presence: () => boolean;
   readonly #rotation: KeyRotation | undefined;
@@ -945,9 +948,12 @@ export class DaemonCarrierRouter {
     // confirm; once they have, the same request is sent again exactly once — its body is text, so it
     // can be — and a dismissed prompt returns the refusal unchanged for the caller to say.
     const ask = this.#stepUp;
-    if (ask === undefined || response.status !== 403 || !(await answersWithCode(response, STEP_UP_REQUIRED_CODE)))
-      return response;
-    if (!(await ask(daemon))) return response;
+    if (ask === undefined || response.status !== 403) return response;
+    const demand = await stepUpDemand(response);
+    if (demand === undefined) return response;
+    // The act the daemon NAMED, or nothing: an unparseable demand still asks, and the prompt says "this change".
+    const act = demand === null ? undefined : stepUpAct(demand);
+    if (!(await ask(daemon, act))) return response;
     return await this.#sendOnce(daemon, url, init);
   }
 
@@ -1368,6 +1374,26 @@ const answersWithCode = async (response: Response, code: string): Promise<boolea
   } catch {
     return false;
   }
+};
+
+/**
+ * Whether a refusal is the daemon asking for a passkey step-up, and for which demand. Read from a copy;
+ * the body stays.
+ *
+ * `undefined` is not a step-up at all; `null` is one whose demand did not parse (an older daemon names
+ * none), which still asks.
+ */
+const stepUpDemand = async (response: Response): Promise<StepUpDemand | null | undefined> => {
+  let body: unknown;
+  try {
+    body = await response.clone().json();
+  } catch {
+    return undefined;
+  }
+  const named = StepUpRequiredBodySchema.safeParse(body);
+  if (named.success) return named.data.demand;
+  const code = typeof body === 'object' && body !== null ? (body as { readonly code?: unknown }).code : undefined;
+  return code === STEP_UP_REQUIRED_CODE ? null : undefined;
 };
 
 /** Marks a failure to OPEN a session: nothing of the request left this browser, whatever it was. */

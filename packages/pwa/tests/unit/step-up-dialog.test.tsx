@@ -100,6 +100,40 @@ describe('the passkey prompt', () => {
     });
   });
 
+  it('says the act and the machine in one sentence, naming each act when several are waiting', async () => {
+    const { gate } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      // Act
+      await interact(() => void gate.require(studio, 'open a terminal'));
+
+      // Assert
+      const purpose = must(container.querySelector('[id$="-purpose"]'), 'the purpose sentence');
+      expect(purpose.textContent).toBe('Confirm with your passkey to open a terminal on Name of daemon-studio.');
+      expect(must(container.querySelector('[data-step-up-act]'), 'the act').textContent).toBe('open a terminal');
+      expect(must(container.querySelector('[data-step-up-machine]'), 'the machine').textContent).toBe(
+        'Name of daemon-studio',
+      );
+
+      // Act — a second act joins the same prompt.
+      await interact(() => void gate.require(studio, 'open the remote browser'));
+      expect(purpose.textContent).toBe(
+        'Confirm with your passkey to open a terminal and open the remote browser on Name of daemon-studio.',
+      );
+    });
+  });
+
+  it('falls back to naming the machine and "this change" when no act came with the request', async () => {
+    const { gate } = harness();
+
+    await withDialog(gate, async ({ container }) => {
+      await interact(() => void gate.require(studio));
+
+      const purpose = must(container.querySelector('[id$="-purpose"]'), 'the purpose sentence');
+      expect(purpose.textContent).toBe('Confirm with your passkey to make this change on Name of daemon-studio.');
+    });
+  });
+
   it('shows a failed attempt as an alert and lets the person try again', async () => {
     const { gate, fail } = harness();
 
@@ -229,7 +263,8 @@ describe('the passkey prompt in its presence wording', () => {
       const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
       expect(dialog.textContent).toContain('Confirm it’s you');
       expect(dialog.textContent).toContain('Name of daemon-studio');
-      expect(dialog.textContent).toContain(PRESENCE_COPY.purpose);
+      expect(dialog.textContent).toContain('asks for your passkey before it shows anything.');
+      expect(mounted.container.querySelector('[data-step-up-act]')).toBeNull();
       expect(must(mounted.container.querySelector('[data-step-up-scope]'), 'the scope note').textContent).toBe(
         PRESENCE_SCOPE_NOTE,
       );

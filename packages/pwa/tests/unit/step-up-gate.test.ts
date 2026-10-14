@@ -6,6 +6,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { STEP_UP_FALLBACK_ACT as FALLBACK } from '../../src/lib/grants.ts';
 import { StepUpGate } from '../../src/lib/step-up-gate.ts';
 
 const machine = (name: string): DaemonConnection =>
@@ -59,7 +60,7 @@ describe('asking for a step-up', () => {
 
     // Assert — one prompt, nobody resolved, no ceremony started by itself.
     should(changes).equal(1);
-    should(gate.snapshot()).eql({ daemon: first, busy: false });
+    should(gate.snapshot()).eql({ daemon: first, acts: [FALLBACK], busy: false });
     should(answers).eql([]);
     should(calls).eql([]);
 
@@ -88,7 +89,7 @@ describe('confirming', () => {
     const confirming = gate.confirm();
 
     // Assert — the prompt says so while the passkey sheet is up.
-    should(gate.snapshot()).eql({ daemon: first, busy: true });
+    should(gate.snapshot()).eql({ daemon: first, acts: [FALLBACK], busy: true });
     pending[0]?.resolve();
     await confirming;
     should(await one).be.true();
@@ -112,12 +113,17 @@ describe('confirming', () => {
     await flush();
 
     // Assert — the request still waits; the person can try again.
-    should(gate.snapshot()).eql({ daemon: first, busy: false, failure: 'described: Error: sheet closed' });
+    should(gate.snapshot()).eql({
+      daemon: first,
+      acts: [FALLBACK],
+      busy: false,
+      failure: 'described: Error: sheet closed',
+    });
     should(settled).be.undefined();
 
     // Act — a second try that works clears the failure and resolves the waiter.
     const retrying = gate.confirm();
-    should(gate.snapshot()).eql({ daemon: first, busy: true });
+    should(gate.snapshot()).eql({ daemon: first, acts: [FALLBACK], busy: true });
     pending[1]?.resolve();
     await retrying;
     await waiting;
@@ -193,7 +199,7 @@ describe('dismissing', () => {
     await flush();
 
     // Assert — still busy, nobody resolved.
-    should(gate.snapshot()).eql({ daemon: first, busy: true });
+    should(gate.snapshot()).eql({ daemon: first, acts: [FALLBACK], busy: true });
     should(answer).be.undefined();
     pending[0]?.resolve();
     await confirming;
@@ -216,7 +222,7 @@ describe('two machines asking', () => {
     });
 
     // Assert — only the first is on screen.
-    should(gate.snapshot()).eql({ daemon: first, busy: false });
+    should(gate.snapshot()).eql({ daemon: first, acts: [FALLBACK], busy: false });
 
     // Act — the first is confirmed.
     const confirming = gate.confirm();
@@ -226,7 +232,7 @@ describe('two machines asking', () => {
 
     // Assert — the second takes the screen, unsettled and not busy.
     should(answers).eql({ first: true });
-    should(gate.snapshot()).eql({ daemon: second, busy: false });
+    should(gate.snapshot()).eql({ daemon: second, acts: [FALLBACK], busy: false });
 
     // Act — the second is dismissed.
     gate.dismiss();
@@ -266,5 +272,81 @@ describe('watching the gate', () => {
 
     // Act, Assert — `useSyncExternalStore` needs stability between changes.
     should(gate.snapshot()).equal(gate.snapshot());
+  });
+});
+
+describe('naming the act', () => {
+  it('should keep the act a request named, and fall back to "make this change" when it named none', () => {
+    // Arrange
+    const named = gateWith(async () => undefined);
+    const unnamed = gateWith(async () => undefined);
+
+    // Act
+    void named.require(first, 'open a terminal');
+    void unnamed.require(first);
+
+    // Assert
+    should(named.snapshot()?.acts).eql(['open a terminal']);
+    should(unnamed.snapshot()?.acts).eql([FALLBACK]);
+    should(FALLBACK).equal('make this change');
+  });
+
+  it('should add each distinct act of one machine to the one prompt, once, keeping its state', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    let changes = 0;
+    gate.subscribe(() => {
+      changes += 1;
+    });
+    void gate.require(first, 'open a terminal');
+    void gate.confirm();
+    await flush();
+    changes = 0;
+
+    // Act — a second request, then the same act again.
+    void gate.require(first, 'open the remote browser');
+    void gate.require(first, 'open the remote browser');
+    void gate.require(first, 'open a terminal');
+
+    // Assert — one prompt, both acts once, and it is still busy.
+    should(gate.snapshot()).eql({ daemon: first, acts: ['open a terminal', 'open the remote browser'], busy: true });
+    should(changes).equal(1);
+    pending[0]?.resolve();
+  });
+
+  it('should show a queued machine its own acts, not the first machine’s', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    void gate.require(first, 'open a terminal');
+    void gate.require(second, 'run a command with a stored secret');
+    void gate.require(second, 'open a terminal');
+
+    // Act — the first machine is confirmed.
+    const confirming = gate.confirm();
+    pending[0]?.resolve();
+    await confirming;
+
+    // Assert
+    should(gate.snapshot()).eql({
+      daemon: second,
+      acts: ['run a command with a stored secret', 'open a terminal'],
+      busy: false,
+    });
+  });
+
+  it('should not touch the prompt when an act joins a machine that is waiting but not on screen', () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    void gate.require(first, 'open a terminal');
+    void gate.require(second, 'open the remote browser');
+    const before = gate.snapshot();
+
+    // Act
+    void gate.require(second, 'open a terminal');
+
+    // Assert — the screen still shows the first machine, unchanged.
+    should(gate.snapshot()).equal(before);
   });
 });

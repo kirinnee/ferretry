@@ -1345,7 +1345,7 @@ describe('the carrier router meeting a passkey step-up', () => {
   /** A router whose daemon answers by `respond`, with `stepUp` as the only thing that can ask a person. */
   const steppedRouter = async (
     respond: (attempt: number) => { status: number; body: unknown } | { status: number; body: string },
-    stepUp?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>,
+    stepUp?: (daemon: ReturnType<typeof daemonConnection>, act?: string) => Promise<boolean>,
   ) => {
     const identity = await newDaemonIdentity();
     const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
@@ -1387,6 +1387,60 @@ describe('the carrier router meeting a passkey step-up', () => {
     should(await response.json()).eql({ ok: true });
     should(asked).eql([daemon.daemonId]);
     should(attempts()).equal(2);
+  });
+
+  it('should hand the act the daemon named to the prompt, for a use demand and a configure demand', async () => {
+    // Arrange
+    const acts: (string | undefined)[] = [];
+    const named = (capability: string, axis: string) => ({
+      status: 403,
+      body: { error: 'Confirm with your passkey.', code: REQUIRED.code, demand: { capability, axis } },
+    });
+    const use = await steppedRouter(
+      attempt => (attempt === 1 ? named('terminal', 'use') : { status: 200, body: {} }),
+      async (_daemon, act) => {
+        acts.push(act);
+        return true;
+      },
+    );
+    const configure = await steppedRouter(
+      attempt => (attempt === 1 ? named('secrets', 'configure') : { status: 200, body: {} }),
+      async (_daemon, act) => {
+        acts.push(act);
+        return true;
+      },
+    );
+
+    // Act
+    await use.router.fetch(`${DAEMON_URL}/v1/terminals`, { method: 'POST', body: '{}' });
+    await configure.router.fetch(`${DAEMON_URL}/v1/secrets`, { method: 'POST', body: '{}' });
+
+    // Assert
+    should(acts).eql(['open a terminal', 'change the settings for the secret store']);
+  });
+
+  it('should still ask, with no act, when the demand is missing or does not parse', async () => {
+    // Arrange — an older daemon names none; a newer one may name a capability this app has never heard of.
+    const asked: (string | undefined)[] = [];
+    const stepUp = async (_daemon: unknown, act?: string): Promise<boolean> => {
+      asked.push(act);
+      return false;
+    };
+    const missing = await steppedRouter(() => ({ status: 403, body: REQUIRED }), stepUp);
+    const unknown = await steppedRouter(
+      () => ({ status: 403, body: { ...REQUIRED, demand: { capability: 'teleporter', axis: 'use' } } }),
+      stepUp,
+    );
+    const array = await steppedRouter(() => ({ status: 403, body: [REQUIRED] }), stepUp);
+
+    // Act
+    await missing.router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+    await unknown.router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+    const refused = await array.router.fetch(`${DAEMON_URL}/v1/fleet/import`);
+
+    // Assert — two ask with no act; a JSON array is not a step-up refusal at all.
+    should(asked).eql([undefined, undefined]);
+    should(refused.status).equal(403);
   });
 
   it('should not send a third time when the retry is refused again', async () => {

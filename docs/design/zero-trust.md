@@ -455,6 +455,11 @@ passkey over.
   panel. It is read once per machine, never polled, hidden on Settings itself, and not shown when
   registration is `closed`, because a line pointing at a dead end is worse than none. Dismissal is
   remembered per machine in `localStorage`; storage that throws means the line may return next load.
+- **The prompt names the machine and the act.** A `403 grant_step_up_required` (and a socket upgrade
+  refused for a step-up) also carries `demand: { capability, axis }` — the closed pair, never a path or
+  a session name — and the app turns it into one sentence: "Confirm with your passkey to open a terminal
+  on ‹machine›." A missing or unparseable demand says "make this change" instead, never a blank.
+  It names the act; it does not prove the person started it — code in the open page can still ask.
 - **Not built, because the daemon has no route or field for it**: a passkey's name, its last use, and
   removing one passkey. `PasskeyView` is id, origin and created-at. Revoking the device still forgets
   all of its passkeys.

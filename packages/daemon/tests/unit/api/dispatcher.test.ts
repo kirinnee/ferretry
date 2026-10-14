@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { type CapabilityAxis, type DaemonCapability, StepUpRequiredBodySchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   ApiDispatcher,
@@ -705,6 +706,56 @@ describe('the operator grant layer', () => {
       error: 'using the agent fleet needs a passkey confirmation from this device.',
     });
     should(served.status).equal(200);
+  });
+
+  it('should name the demand in a step-up refusal, for a use demand and for a configure demand, and nothing else', async () => {
+    // Arrange — a guard that wants a step-up for everything, over two routes with different demands.
+    const stepUpGuard: CapabilityGuard = {
+      decide: () => ({ allowed: false, refusal: 'step-up-required' }),
+      governance: () => UNGOVERNED,
+      explain: () => 'a passkey confirmation is needed.',
+    };
+    const route = (path: string, capability: DaemonCapability, axis: CapabilityAxis): ApiRoute => ({
+      method: 'GET',
+      path,
+      minimum: 'operator',
+      capability: { capability, axis },
+      handle: async () => jsonResponse({}),
+    });
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([
+        route('/v1/terminals/secret-name', 'terminal', 'use'),
+        route('/v1/secrets', 'secrets', 'configure'),
+      ]),
+      credentials,
+      stepUpGuard,
+    );
+
+    // Act
+    const use = await dispatcher.dispatch(request({ path: '/v1/terminals/secret-name', device: DEVICE }));
+    const configure = await dispatcher.dispatch(request({ path: '/v1/secrets', device: DEVICE }));
+
+    // Assert — the closed pair, the existing envelope, and nothing taken from the request.
+    should(use.status).equal(403);
+    should(jsonBody(use)).deepEqual({
+      error: 'a passkey confirmation is needed.',
+      code: 'grant_step_up_required',
+      demand: { capability: 'terminal', axis: 'use' },
+    });
+    should(JSON.stringify(jsonBody(use))).not.containEql('secret-name');
+    should(StepUpRequiredBodySchema.safeParse(jsonBody(configure)).success).be.true();
+    should(jsonBody(configure)).have.property('demand', { capability: 'secrets', axis: 'configure' });
+  });
+
+  it('should add no demand to a refusal that is not a step-up', async () => {
+    // Arrange
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, guard(false));
+
+    // Act
+    const refused = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', device: DEVICE }));
+
+    // Assert
+    should(jsonBody(refused)).not.have.property('demand');
   });
 
   it('should present every device as remote, even on a host-proven carrier, and only the owner as local', async () => {

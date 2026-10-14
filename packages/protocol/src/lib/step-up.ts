@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { InstantSchema } from './common.ts';
+import { ApiErrorResponseSchema, InstantSchema } from './common.ts';
+import { CapabilityAxisSchema, DaemonCapabilitySchema } from './grants.ts';
 import { PairedDeviceIdSchema } from './pairing.ts';
 
 /**
@@ -189,6 +190,30 @@ export const stepUpRefusalCode = (refusal: StepUpRefusal): string => `step_up_${
  * refusal: the operator allowed the act, and this copy of the app has not proved its owner recently.
  */
 export const STEP_UP_REQUIRED_CODE = 'grant_step_up_required' as const;
+
+/**
+ * The demand that needed the step-up: which capability, and which of its two axes.
+ *
+ * A closed pair and nothing else, on purpose — never a path, a session name or anything taken from the
+ * request, because the person reads a sentence built from it on a prompt the DAEMON caused.
+ */
+export const StepUpDemandSchema = z.strictObject({
+  capability: DaemonCapabilitySchema,
+  axis: CapabilityAxisSchema,
+});
+export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
+
+/**
+ * The `403 grant_step_up_required` body: the ordinary error envelope plus the {@link StepUpDemand}.
+ *
+ * The daemon builds it and the app parses it, so a person tapping "Use passkey" is told WHICH act they
+ * are confirming. It names the act; it does not prove it — code in the page can still ask.
+ */
+export const StepUpRequiredBodySchema = ApiErrorResponseSchema.extend({
+  code: z.literal(STEP_UP_REQUIRED_CODE),
+  demand: StepUpDemandSchema,
+});
+export type StepUpRequiredBody = z.infer<typeof StepUpRequiredBodySchema>;
 
 /**
  * The OWNER, at the machine, re-opens the passkey registration window for one paired device.
