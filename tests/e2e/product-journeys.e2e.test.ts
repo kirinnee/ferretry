@@ -477,8 +477,20 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
 
   // Journey 4: the first run opens by itself.
   await step(journey, 'first-run-opens-itself', async () => {
-    const open = await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`);
-    if (open) await page.click('[data-onboarding-open-fleet]');
+    // With the one-tap first passkey (#470) the unlock itself lands on the stepper; navigating would leave it.
+    const landed = await waitUntil(
+      page,
+      `document.querySelector('[data-machine-stepper="first-run"]') !== null`,
+      3_000,
+    ).then(
+      () => true,
+      () => false,
+    );
+    const open =
+      !landed && (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`));
+    if (landed) {
+      // Already there.
+    } else if (open) await page.click('[data-onboarding-open-fleet]');
     // Under the unlock model the guide's last screen was left to unlock; the documented trigger is
     // Settings › Machines on a machine that is not set up.
     else
@@ -489,7 +501,7 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
     await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
     return {
       value: undefined,
-      evidence: `the first-run stepper opened at ${page.url()} (${open ? 'via Open my fleet' : 'on opening Settings › Machines'})`,
+      evidence: `the first-run stepper opened at ${page.url()} (${landed ? 'by itself, straight after the unlock' : open ? 'via Open my fleet' : 'on opening Settings › Machines'})`,
     };
   });
   await captureScreens(page, journey, '02-first-run-start');
@@ -846,7 +858,17 @@ describe('signing a harness in from the first run', () => {
       const page = browser.page;
       const daemonId = await pair(product, journey);
       await registerPasskeyAndUnlock(product, daemonId, journey);
-      if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
+      const landed = await waitUntil(
+        page,
+        `document.querySelector('[data-machine-stepper="first-run"]') !== null`,
+        3_000,
+      ).then(
+        () => true,
+        () => false,
+      );
+      if (landed) {
+        // The one-tap setup (#470) already landed on the stepper.
+      } else if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
         await page.click('[data-onboarding-open-fleet]');
       else
         await page.goto(`${product.origin.origin}/d/${daemonId}/settings#machines`, {
