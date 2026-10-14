@@ -108,37 +108,46 @@ describe('pair --open', () => {
   });
 });
 
-describe('pair --full', () => {
-  it('should mint the default set unless asked', async () => {
+describe('pair --limited', () => {
+  it('should mint the full set unless asked', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(['pair', '--no-wait']);
-    await parsed;
-
-    // Assert
-    should(gateway.mintedWith).eql(['default']);
-  });
-
-  it('should mint the full set under --full', async () => {
-    // Arrange + Act
-    const { parsed, gateway } = run(['pair', '--full', '--no-wait']);
     await parsed;
 
     // Assert
     should(gateway.mintedWith).eql(['full']);
   });
 
-  it('should say who it is for, that it is host-only, and that the step-up still applies, naming the binary it runs as', async () => {
+  it('should mint the limited set under --limited', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['pair', '--limited', '--no-wait']);
+    await parsed;
+
+    // Assert
+    should(gateway.mintedWith).eql(['limited']);
+  });
+
+  it('should refuse the removed --full flag', async () => {
+    // Arrange + Act
+    const { parsed } = run(['pair', '--full', '--no-wait']);
+
+    // Assert
+    await should(parsed).be.rejected();
+  });
+
+  it('should say a device can do anything behind its unlock, what --limited does, and name the binary it runs as', async () => {
     // Arrange + Act
     const { parsed, printed } = run(['pair', '--help'], 'foo');
     await should(parsed).be.rejected();
 
     // Assert
     const help = printed.join('').replace(/\s+/gu, ' ');
-    should(help).containEql('--full');
-    should(help).containEql('YOUR OWN browser');
-    should(help).containEql('only from this host');
-    should(help).containEql('passkey step-up');
+    should(help).containEql('--limited');
+    should(help).containEql('can do anything on this machine');
+    should(help).containEql('unlocks it with its passkey');
+    should(help).containEql('read the fleet and chat with sessions');
     should(help).containEql('`foo device grant`');
+    should(help).not.containEql('--full');
     should(help).not.match(/\bfy device/u);
   });
 });

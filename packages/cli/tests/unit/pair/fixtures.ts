@@ -262,5 +262,5 @@ export class RecordingBrowserOpener implements IBrowserOpener {
   }
 }
 
-/** A mint whose daemon echoes that the device will hold every capability. */
-export const FULL_MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({ ...MINT, grants: 'full' });
+/** A mint whose daemon echoes that the device will hold read-and-chat only. */
+export const LIMITED_MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({ ...MINT, grants: 'limited' });

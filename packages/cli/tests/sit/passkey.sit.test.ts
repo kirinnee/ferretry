@@ -13,8 +13,8 @@
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
 import {
-  LIMITED_DEVICE_GRANTS,
   FULL_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   PASSKEY_WINDOW_PATH,
   type PairedDeviceId,
   PasskeyWindowRequestSchema,

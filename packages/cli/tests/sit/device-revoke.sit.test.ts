@@ -8,7 +8,7 @@
  * pairing mount's tests — a double cannot prove it.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { LIMITED_DEVICE_GRANTS, FULL_DEVICE_GRANTS, type PairedDeviceId } from '@ferretry/protocol';
+import { FULL_DEVICE_GRANTS, LIMITED_DEVICE_GRANTS, type PairedDeviceId } from '@ferretry/protocol';
 import should from 'should';
 import pkg from '../../package.json' with { type: 'json' };
 import { BinaryCliDriver, type CliDriver, type CliResult, InProcessCliDriver } from './driver';

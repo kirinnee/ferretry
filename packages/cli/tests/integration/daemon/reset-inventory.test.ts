@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import {
-  LIMITED_DEVICE_GRANTS,
   FULL_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   PairedDevicesViewSchema,
   SecretListSchema,
 } from '@ferretry/protocol';

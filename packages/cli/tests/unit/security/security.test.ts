@@ -78,7 +78,8 @@ describe('the security report', () => {
     expect(rendered).toContain('stepUpWindowMinutes');
     for (const [field, { min, max }] of Object.entries(SECURITY_SETTING_BOUNDS))
       expect(rendered).toMatch(new RegExp(`${field}\\s+\\d+\\s+\\(${String(min)}-${String(max)}\\)`, 'u'));
-    expect(rendered).toMatch(/unlockOnOpen\s+off\s+\(on \| off\)/u);
+    expect(rendered).toMatch(/unlockOnOpen\s+on\s+\(on \| off\)/u);
+    expect(rendered).toMatch(/stepUpOnActions\s+off\s+\(on \| off\)/u);
     expect(rendered).toContain('fy daemon security set <field> <value>');
   });
 
@@ -101,8 +102,10 @@ describe('the security report', () => {
 
   it('should format the switch as on/off and numbers as themselves', () => {
     // Act + Assert
-    expect(formatSettingValue('unlockOnOpen', view().settings)).toBe('off');
-    expect(formatSettingValue('unlockOnOpen', view({}, { unlockOnOpen: true }).settings)).toBe('on');
+    expect(formatSettingValue('unlockOnOpen', view().settings)).toBe('on');
+    expect(formatSettingValue('unlockOnOpen', view({}, { unlockOnOpen: false }).settings)).toBe('off');
+    expect(formatSettingValue('stepUpOnActions', view().settings)).toBe('off');
+    expect(formatSettingValue('stepUpOnActions', view({}, { stepUpOnActions: true }).settings)).toBe('on');
     expect(formatSettingValue('idleExpiryDays', view().settings)).toBe('30');
   });
 });
@@ -157,6 +160,10 @@ describe('changing a setting', () => {
     ['unlockOnOpen', 'TRUE', { unlockOnOpen: true }],
     ['unlockOnOpen', 'off', { unlockOnOpen: false }],
     ['unlockOnOpen', 'False', { unlockOnOpen: false }],
+    ['stepUpOnActions', 'on', { stepUpOnActions: true }],
+    ['stepUpOnActions', 'TRUE', { stepUpOnActions: true }],
+    ['stepUpOnActions', 'off', { stepUpOnActions: false }],
+    ['stepUpOnActions', 'False', { stepUpOnActions: false }],
   ])('should send %s=%s as %j', async (field, value, expected) => {
     // Arrange
     const gateway = new FakeGateway();
@@ -217,10 +224,10 @@ describe('changing a setting', () => {
     const { instance, out } = controller(gateway);
 
     // Act
-    await instance.set('unlockOnOpen', 'maybe');
+    await instance.set('stepUpOnActions', 'maybe');
 
     // Assert
-    expect(out.errors[0]).toContain('takes on, off, true or false');
+    expect(out.errors[0]).toContain('stepUpOnActions takes on, off, true or false');
     expect(out.exitCode).toBe(1);
     expect(gateway.patch).toBeUndefined();
   });
@@ -302,7 +309,9 @@ describe('the verbs', () => {
     set?.outputHelp();
 
     // Assert
-    expect(help).toContain('daemon security set unlockOnOpen on');
+    expect(help).toContain('daemon security set unlockValidityHours 4');
+    expect(help).toContain('daemon security set stepUpOnActions on');
+    expect(help).toContain('daemon security set unlockOnOpen off');
   });
 });
 

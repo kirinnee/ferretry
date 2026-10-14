@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import {
   type CapabilityGrants,
   DAEMON_CAPABILITIES,
-  LIMITED_DEVICE_GRANTS,
   type DeviceGrantsPatch,
+  LIMITED_DEVICE_GRANTS,
   type PairedDevice,
   type PairedDevicesView,
 } from '@ferretry/protocol';

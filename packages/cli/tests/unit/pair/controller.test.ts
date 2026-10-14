@@ -15,7 +15,7 @@ import {
   expired,
   FakeClock,
   FixedTerminalSize,
-  FULL_MINT,
+  LIMITED_MINT,
   LOCAL_ONLY_MINT,
   LOCAL_PAIR_URL,
   MINT,
@@ -391,23 +391,23 @@ describe('fy pair --open', () => {
   });
 });
 
-describe('fy pair --full', () => {
-  it('should ask the daemon for the full set and say so before the QR when it is echoed', async () => {
+describe('fy pair --limited', () => {
+  it('should ask the daemon for the limited set and say so before the QR when it is echoed', async () => {
     // Arrange
-    const gateway = new ScriptedPairGateway([redeemed()], FULL_MINT);
+    const gateway = new ScriptedPairGateway([redeemed()], LIMITED_MINT);
     const h = harness({}, gateway);
 
     // Act
-    await h.subject.pair({ full: true });
+    await h.subject.pair({ limited: true });
 
     // Assert
-    should(gateway.mintedWith).eql(['full']);
+    should(gateway.mintedWith).eql(['limited']);
     const screen = h.screen.writes.join('\n');
-    should(screen).containEql('FULL ACCESS');
-    should(screen.indexOf('FULL ACCESS')).be.below(screen.indexOf('Or scan this compact QR:'));
+    should(screen).containEql('LIMITED:');
+    should(screen.indexOf('LIMITED:')).be.below(screen.indexOf('Or scan this compact QR:'));
   });
 
-  it('should ask for the default set otherwise, and never claim full access', async () => {
+  it('should ask for the full set by default, and never call the device limited', async () => {
     // Arrange
     const gateway = new ScriptedPairGateway([redeemed()]);
     const h = harness({}, gateway);
@@ -416,21 +416,23 @@ describe('fy pair --full', () => {
     await h.subject.pair({});
 
     // Assert
-    should(gateway.mintedWith).eql(['default']);
-    should(h.screen.writes.join('\n')).not.containEql('FULL ACCESS');
+    should(gateway.mintedWith).eql(['full']);
+    const screen = h.screen.writes.join('\n');
+    should(screen).containEql('can do anything on this machine once it unlocks it with its passkey');
+    should(screen).not.containEql('LIMITED:');
   });
 
-  it('should not claim full access when an older daemon echoes nothing to a --full request', async () => {
+  it('should not claim a limited device when an older daemon echoes nothing to a --limited request', async () => {
     // Arrange
     const gateway = new ScriptedPairGateway([redeemed()]);
     const h = harness({}, gateway);
 
     // Act
-    await h.subject.pair({ full: true });
+    await h.subject.pair({ limited: true });
 
     // Assert
     const screen = h.screen.writes.join('\n');
-    should(screen).containEql('--full was NOT applied');
-    should(screen).not.containEql('FULL ACCESS');
+    should(screen).containEql('--limited was NOT applied');
+    should(screen).not.containEql('LIMITED:');
   });
 });

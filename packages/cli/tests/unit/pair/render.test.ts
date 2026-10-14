@@ -23,7 +23,7 @@ const invitation = (overrides: Partial<PairingInvitation> = {}): string =>
   renderInvitation({
     mint: MINT,
     offer: { kind: 'qr', link: LINK, qr: QR },
-    requestedGrants: 'default',
+    requestedGrants: 'full',
     columns: 100,
     remainingMs: 120_000,
     binaryName: 'fy',
@@ -232,43 +232,53 @@ describe('pairing screen', () => {
 });
 
 describe('pairing screen, what the new device will hold', () => {
-  const before = (actual: string, marker: string): boolean => actual.indexOf('FULL ACCESS') < actual.indexOf(marker);
+  const before = (actual: string, marker: string): boolean => actual.indexOf('can do anything') < actual.indexOf(marker);
 
-  it('should say a plain code gives read-and-chat only, and name the verbs that widen it', () => {
+  it('should say a default code gives full access behind the unlock, before the QR, and name the verb that limits it', () => {
     // Act
     const actual = invitation({ binaryName: 'foo' });
 
     // Assert
     const flattened = actual.replace(/\s+/gu, ' ');
-    should(flattened).containEql('can only read the fleet and chat with sessions');
-    should(flattened).containEql('`foo device grant`');
-    should(flattened).containEql('`foo pair --full`');
-    should(actual).not.containEql('FULL ACCESS');
+    should(flattened).containEql('can do anything on this machine once it unlocks it with its passkey');
+    should(flattened).containEql('`foo pair --limited`');
+    should(flattened).not.containEql('NOT applied');
+    should(actual).not.containEql('LIMITED:');
     should(actual).not.containEql('fy ');
-  });
-
-  it('should say a full code gives every capability, before the QR, and that the passkey still applies', () => {
-    // Act
-    const actual = invitation({ mint: { ...MINT, grants: 'full' }, requestedGrants: 'full' });
-
-    // Assert
-    const flattened = actual.replace(/\s+/gu, ' ');
-    should(flattened).containEql('FULL ACCESS: the device that scans this gets every capability on this machine');
-    should(flattened).containEql('still asks for its passkey');
-    should(flattened).not.containEql('can only read the fleet');
     should(before(actual, 'Or scan this compact QR:')).be.true();
     should(before(actual, LINK)).be.true();
   });
 
-  it('should not claim full access when an older daemon echoes the default to a --full request', () => {
+  it('should treat an echo of the full set the same as no echo', () => {
     // Act
-    const actual = invitation({ mint: MINT, requestedGrants: 'full', binaryName: 'foo' });
+    const actual = invitation({ mint: { ...MINT, grants: 'full' } });
+
+    // Assert
+    should(actual.replace(/\s+/gu, ' ')).containEql('can do anything on this machine');
+  });
+
+  it('should say a limited code gives read-and-chat only, before the QR, and name the verb that widens it', () => {
+    // Act
+    const actual = invitation({ mint: { ...MINT, grants: 'limited' }, requestedGrants: 'limited', binaryName: 'foo' });
 
     // Assert
     const flattened = actual.replace(/\s+/gu, ' ');
-    should(flattened).containEql('--full was NOT applied: this daemon is older');
-    should(flattened).containEql('can only read the fleet and chat with sessions');
+    should(flattened).containEql('LIMITED: a device paired with this code can only read the fleet and chat with sessions');
     should(flattened).containEql('`foo device grant`');
-    should(actual).not.containEql('FULL ACCESS');
+    should(flattened).not.containEql('can do anything');
+    should(actual.indexOf('LIMITED:')).be.below(actual.indexOf('Or scan this compact QR:'));
+    should(actual.indexOf('LIMITED:')).be.below(actual.indexOf(LINK));
+  });
+
+  it('should not claim a limited device when an older daemon echoes the full set to a --limited request', () => {
+    // Act
+    const actual = invitation({ mint: MINT, requestedGrants: 'limited', binaryName: 'foo' });
+
+    // Assert
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('--limited was NOT applied: this daemon is older');
+    should(flattened).containEql('can do anything on this machine');
+    should(flattened).containEql('`foo pair --limited`');
+    should(actual).not.containEql('LIMITED:');
   });
 });
