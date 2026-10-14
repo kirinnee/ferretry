@@ -5,6 +5,8 @@ import should from 'should';
 import { type E2eEnvironment, withE2eEnvironment } from './fixture';
 import {
   addVirtualAuthenticator,
+  adminToken,
+  OPERATOR_PASSWORD,
   answerPasswordIfAsked,
   asOwner,
   bootDaemon,
@@ -35,6 +37,13 @@ import {
   renderedDataAttributes,
   startPwaOrigin,
   startRelayDirectory,
+  startRendezvous,
+  startDirectSinkhole,
+  type DirectSinkhole,
+  type RendezvousProcess,
+  waitForDaemonAtRendezvous,
+  waitForDaemonFingerprint,
+  plaintextLeaks,
 } from './support/relay-harness.ts';
 
 /**
@@ -59,31 +68,65 @@ interface Product {
   readonly origin: PwaOrigin;
   readonly tools: FakeTools;
   readonly browser: ProductBrowser;
+  /** Present when the direct address is a sinkhole and the only way in is the local rendezvous. */
+  readonly relay?: { readonly rendezvous: RendezvousProcess; readonly sinkhole: DirectSinkhole; readonly fingerprint: string };
+}
+
+interface ProductOptions {
+  /** Block the direct carrier and carry everything over a local rendezvous (journey 6). */
+  readonly relay?: boolean;
 }
 
 /** Boot one machine and one browser, unpaired. Every journey starts here. */
-async function withProduct(journey: string, body: (product: Product) => Promise<void>): Promise<void> {
+async function withProduct(journey: string, body: (product: Product) => Promise<void>, options: ProductOptions = {}): Promise<void> {
   const teardown = harnessTeardown();
   try {
     await withE2eEnvironment(async environment => {
       const directory = await startRelayDirectory();
-      // No rendezvous for the direct journeys: the advertisement says "none", so the daemon is
-      // direct-only and nothing here can be carried by a relay by accident.
-      directory.publish(null);
+      const rendezvous = options.relay === true ? await startRendezvous(environment.paths.root, teardown) : undefined;
+      const sinkhole = options.relay === true ? await startDirectSinkhole(teardown) : undefined;
+      // Direct journeys publish "no rendezvous", so nothing can be carried by a relay by accident.
+      // The relay journey publishes this run's rendezvous, which BOTH ends then discover.
+      directory.publish(rendezvous?.relayUrl ?? null);
       const distDir = await buildPwaBundle(directory.origin);
       const origin = await startPwaOrigin(distDir, teardown);
       const tools = await installFakeTools(environment);
       const configPath = await writeDaemonConfig(join(environment.paths.root, 'daemon.json'), {
         bindPort: environment.ports.api,
         appOrigins: [origin.origin],
+        // The advertised direct address is the sinkhole: a browser that uses it fails at transport.
+        ...(sinkhole === undefined ? {} : { publicUrl: sinkhole.origin }),
       });
-      await bootDaemon(environment, { configPath, directoryOrigin: directory.origin, env: fakeToolEnvironment(tools) });
+      const boot = { configPath, directoryOrigin: directory.origin, env: fakeToolEnvironment(tools) };
+      let fingerprint = '';
+      if (rendezvous !== undefined) {
+        // First boot mints the identity and dials; the rendezvous refuses it until it is listed.
+        const seen = await rendezvous.dialled();
+        await bootDaemon(environment, boot);
+        fingerprint = await waitForDaemonFingerprint(rendezvous, seen);
+        await environment.stopDaemon();
+        await rendezvous.allow(fingerprint);
+      }
+      await bootDaemon(environment, boot);
+      if (rendezvous !== undefined) await waitForDaemonAtRendezvous(rendezvous);
       teardown.add('daemon', async () => {
         await environment.stopDaemon();
       });
       const browser = await launchProductBrowser(teardown);
-      await recordStep({ journey, step: 'boot', status: 'PASS', evidence: `fyd on ${environment.httpUrl()}, app ${origin.origin}` });
-      await body({ environment, teardown, origin, tools, browser });
+      await recordStep({
+        journey,
+        step: 'boot',
+        status: 'PASS',
+        evidence: `fyd on ${environment.httpUrl()}, app ${origin.origin}${rendezvous === undefined ? '' : `, direct advertised as the sinkhole ${sinkhole?.origin ?? ''}, rendezvous ${rendezvous.relayUrl}`}`,
+      });
+      await body({
+        environment,
+        teardown,
+        origin,
+        tools,
+        browser,
+        ...(rendezvous === undefined || sinkhole === undefined ? {} : { relay: { rendezvous, sinkhole, fingerprint } }),
+      });
       should(browser.pageErrors).be.empty();
       should(origin.missingAssets()).be.empty();
     });
@@ -124,10 +167,17 @@ async function expectScreen(page: ProductPage, selector: string, timeout = 20_00
   }
 }
 
-describe('the product, from a fresh machine to a working session', () => {
-  it('should pair, set the machine up, run an agent, open a terminal, use a secret and change a setting', async () => {
-    const journey = 'j02-j05-core';
-    await withProduct(journey, async product => {
+interface CoreOutcome {
+  readonly daemonId: string;
+  readonly marker: string;
+  readonly secretValue: string;
+  readonly sessionUrl: string;
+}
+
+/**
+ * Journeys 2, 4 and 5, in the order a new owner walks them. Run once direct and once over the relay.
+ */
+async function coreJourney(product: Product, journey: string): Promise<CoreOutcome> {
       const { environment, browser } = product;
       const page = browser.page;
 
@@ -288,6 +338,63 @@ describe('the product, from a fresh machine to a working session', () => {
       } else {
         await recordStep({ journey, step: 'audit-log', status: 'FAIL', evidence: `audit present (${JSON.stringify(audit.body).slice(0, 300)}); assertions written once #461 lands` });
       }
+  return { daemonId, marker, secretValue: 'fake-e2e-secret-value', sessionUrl };
+}
+
+describe('the product, from a fresh machine to a working session', () => {
+  it('should pair, set the machine up, run an agent, open a terminal, use a secret and change a setting', async () => {
+    // Arrange / Act / Assert — every step asserts as it goes and is written to the journey log.
+    await withProduct('j02-j05-core', async product => {
+      await coreJourney(product, 'j02-j05-core');
     });
+  }, 600_000);
+
+  it('should do all of it over the local rendezvous when the direct address is unreachable', async () => {
+    const journey = 'j06-relay';
+    await withProduct(
+      journey,
+      async product => {
+        // Arrange
+        const relay = product.relay;
+        if (relay === undefined) throw new Error('the relay journey booted without a rendezvous');
+        const directBefore = relay.sinkhole.attempts();
+
+        // Act
+        const outcome = await coreJourney(product, journey);
+
+        // Assert — it crossed THIS rendezvous, the browser knocked on the sinkhole first, the session
+        // page says relay, and the rendezvous never saw a payload or a credential in the clear.
+        await step(journey, 'carried-by-relay', async () => {
+          const arrivals = (await relay.rendezvous.arrivals()).filter(entry => entry.role === 'client' && entry.daemonId === relay.fingerprint);
+          if (arrivals.length < 2) throw new Error(`only ${String(arrivals.length)} client arrival(s) at the rendezvous`);
+          if (relay.sinkhole.attempts() <= directBefore) throw new Error('the browser never tried the direct address');
+          await product.browser.page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          await expectScreen(product.browser.page, '[data-carrier-kind]');
+          const kind = await product.browser.page.evaluate<string | null>(`document.querySelector('[data-carrier-kind]')?.getAttribute('data-carrier-kind') ?? null`);
+          if (kind !== 'relay') throw new Error(`the session page reports carrier ${String(kind)}`);
+          return {
+            value: undefined,
+            evidence: `${String(arrivals.length)} client sessions crossed the rendezvous; ${String(relay.sinkhole.attempts() - directBefore)} direct attempt(s) hit the sinkhole; data-carrier-kind=relay`,
+          };
+        });
+        await step(journey, 'rendezvous-sees-no-payload', async () => {
+          const frames = await relay.rendezvous.observations();
+          const stored = await deviceGrantForLeakSearchOnly(product.browser.page as never);
+          const leaks = plaintextLeaks(frames, {
+            'the opening prompt': outcome.marker,
+            'the follow-up message': `${outcome.marker}-again`,
+            'the fake harness reply': 'FAKE-REPLY',
+            'the secret value': outcome.secretValue,
+            'the secret name': 'E2E_SECRET',
+            'the operator password': OPERATOR_PASSWORD,
+            'the admin token': await adminToken(product.environment),
+            'the device id': stored.deviceId,
+          });
+          if (leaks.length > 0) throw new Error(leaks.join('; '));
+          return { value: undefined, evidence: `${String(frames.length)} relay frames searched (utf-8 and base64): no prompt, reply, secret, password, token or device id` };
+        });
+      },
+      { relay: true },
+    );
   }, 600_000);
 });
