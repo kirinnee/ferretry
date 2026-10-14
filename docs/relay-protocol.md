@@ -1342,9 +1342,9 @@ renewal counts as USE of the device: see `presence` below.
 
 A machine's owner sets how often a device's key is replaced (`deviceKeyRotationDays`,
 [design/zero-trust.md](design/zero-trust.md) B6). Once `rotateBy` has passed, the device replaces its key
-inside its next passkey step-up — there is no separate record and no extra prompt. It mints a new
-non-extractable key, keeps it as **pending** before anything is sent, and adds to the `POST /v1/step-up`
-body, carried by a session the OLD key opened:
+inside its next passkey ceremony — the unlock, or a step-up — with no separate record and no extra prompt. It mints a new
+non-extractable key, keeps it as **pending** before anything is sent, and adds to the `POST /v1/unlock` or
+`POST /v1/step-up` body, carried by a session the OLD key opened:
 
 ```
 proof = Ed25519-Sign( NEW device key, "ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey) )
@@ -1352,7 +1352,7 @@ proof = Ed25519-Sign( NEW device key, "ferretry-device-rotate-v2" ‖ 0x00 ‖ T
 ```
 
 `TH` is the carrying session's transcript hash and `deviceKey` is the new key's base64url text, so the
-proof is good for one session and one device. An overdue step-up without a rotation is refused
+proof is good for one session and one device. An overdue unlock or step-up without a rotation is refused
 `403 step_up_rotation_required` without spending its challenge. The daemon checks the proof, then the
 passkey assertion, then rewrites the device's key, closes every OTHER session the device holds with
 `4441` (each reopens with the new key), keeps the carrying one, records `device.key-rotated`, and answers
@@ -1360,14 +1360,16 @@ passkey assertion, then rewrites the device's key, closes every OTHER session th
 (`4403`). If the answer is lost, the browser's next session is refused on the old key and it tries the
 pending key once — so a dropped response never strands the device.
 
-#### Presence on opening
+#### The unlock
 
-When the machine asks for a passkey on opening (`unlockOnOpen`), a session still opens — the device key
-is proved as always — but every request answers `401 { "code": "unlock_required" }` until the device
-confirms with a passkey through `POST /v1/unlock/options` and `POST /v1/unlock`, which are served, as
-are `GET /v1/passkeys` and `GET /v1/security`. One confirmation lasts `unlockValidityHours` for that
-device, across page loads; it is never a step-up. This is a daemon response, not a session record: nothing
-on the wire beside it changes.
+A machine unlocks on opening by default (`unlockOnOpen`, [design/zero-trust.md](design/zero-trust.md) B1).
+A session still opens — the device key is proved as always — but every request and every stream open
+answers `401 { "code": "unlock_required" }` until the device unlocks with a passkey through
+`POST /v1/unlock/options` and `POST /v1/unlock`, which are served, as are `GET /v1/passkeys` and
+`GET /v1/security`. One unlock lasts `unlockValidityHours` for that device, across page loads, and is the
+step-up for every act inside it unless the owner asks per act. A stream already open when the unlock lapses
+ends with the sealed `1008` at its next lease renewal. This is a daemon response, not a session record:
+nothing on the wire beside it changes.
 
 Afterwards, any number of requests:
 

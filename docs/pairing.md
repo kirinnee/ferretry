@@ -99,27 +99,31 @@ contract is [relay-protocol.md](relay-protocol.md) §13.
 
 ### What a new device may do
 
-**A newly paired device can read the fleet and chat with sessions — `fleet.use` — and nothing else**
-([grants.md](grants.md), "Per-device grants"; [design/zero-trust.md](design/zero-trust.md) B5). Terminals,
-files, the browser, secrets, the warden, pairing and every `configure` axis start off for it, and are
-widened one device at a time: by the owner with `fy device grant <device> <capability> --use` (the admin
-token, the only ungoverned caller — B4), or from any browser's Settings → Add a device toggles by a device
-that holds `pairing.configure` and the capability it is giving, with a step-up. A browser on the host is a
-governed device like any other, so its toggles follow the same rule.
+**A newly paired device can do anything on this machine — once it unlocks it with its passkey**
+(owner decision 2026-10-14; [design/zero-trust.md](design/zero-trust.md) B1 and B5; [grants.md](grants.md)).
+Before its first unlock it can do nothing but unlock and register its first passkey. Every unlock lasts the
+machine's unlock period (8 hours unless the owner changed it), for every page of that device, and a revoke
+ends it at once.
 
-**`fy pair --full`** mints a code whose redemption gives the device every capability on both axes, for the
-owner's own browser, which would otherwise need a grant per capability. Its rules:
+**`fy pair --limited`** mints a code whose redemption gives the device `fleet.use` only: it can read the
+fleet and chat with sessions, and terminals, files, the browser, secrets, the warden, pairing and every
+`configure` axis start off. A limited device is widened one capability at a time: by the owner with
+`fy device grant <device> <capability> --use` (the admin token, the only ungoverned caller — B4), or from
+any browser's Settings → Add a device toggles by a device that holds `pairing.configure` and the capability
+it is giving.
 
-- **Host-only.** `POST /v1/pair/code` with `{ "grants": "full" }` is refused (`403 grant_forbidden`) unless the
-  request `arrivedOnHost` — the owner's admin token over loopback, i.e. `fy pair --full`. A browser on the
-  host is refused too (B4). Any device could otherwise mint a code giving a new device more than it holds.
+- **A full code from another device is checked.** `POST /v1/pair/code` mints `full` by default; from a
+  paired device it is refused (`403 grant_forbidden`) unless that device holds every capability itself,
+  so no device can mint a code giving a new device more than it holds. At the machine anything goes. A
+  limited code, `{ "grants": "limited" }`, can be minted by any device allowed to pair.
 - **The code carries the choice, the link does not.** The daemon holds the grant set with the live code and
   applies it at redemption; the QR stays the one-version `v1` fragment, so nothing about what a code grants
   is visible to whoever reads it. A newer mint replaces the code and its choice together.
-- **It is not a bypass.** The daemon-wide document still narrows the device, and every dangerous act still
-  needs its passkey step-up. The mint answers `grants: "full" | "default"`, so the host's screen says which
-  it drew; a daemon too old to know the field echoes nothing, read as `default`, and `fy pair` says
-  `--full` was not applied.
+- **It is not a bypass.** The daemon-wide document still narrows the device, and the device still has to
+  unlock before it can do anything. The mint answers `grants: "full" | "limited"`, so the host's screen says
+  which it drew; a daemon too old to know `limited` echoes nothing, read as `full`, and `fy pair --limited`
+  says it was not applied.
+- **`fy pair --full` is gone**: it is the default now.
 
 ### Asking again — `GET /v1/carriers`
 
@@ -158,20 +162,21 @@ indistinguishable from a local browser). The two facts a UI needs before it offe
 caller is the owner at the machine, and which grant is the caller's own — are on `GET /v1/pair/devices` as
 `hostLocal` and `thisDeviceId`. `hostLocal` is `arrivedOnHost`, never the bare loopback flag, so a caller behind
 a local proxy is never told it is at the machine. Since B5 a paired device also needs `pairing.use` in its
-OWN grants, which a newly paired device does not hold. Both are
+OWN grants, which a newly paired device holds unless it was paired `--limited`. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
 ### Minting needs no password
 
 **`POST /v1/pair/code` asks for no secret.** The owner's `fy pair` mints freely. A **governed** caller — a
 paired phone, a browser across the network or on the host itself — mints only while the operator leaves `pairing`
-on **and** it holds a current passkey step-up, because `pairing.use` is one of the four `use` demands the
-step-up guards ([grants.md](grants.md)). The refusal is `step-up-required` and the app answers it by raising
+on **and** it holds a current passkey step-up — which its unlock is, unless the owner asked per act —
+because `pairing.use` is one of the `use` demands the step-up guards ([grants.md](grants.md)). The refusal is `step-up-required` and the app answers it by raising
 the passkey prompt and retrying once; a remote warden has no device and can never mint.
 
 There is no first-password requirement, because there is no password. What stops a stolen or unattended
-phone from handing out more access is the step-up, not a secret that had to exist before the first
-device did — and a newly paired device is not trusted with the fleet's configuration without one.
+phone from handing out more access is the unlock, not a secret that had to exist before the first device
+did. An unlocked phone in the wrong hands can pair another device for the rest of its unlock period; the
+unlock period, the per-act step-up setting and revocation are the controls.
 
 What this deliberately does **not** do:
 

@@ -7,8 +7,9 @@ than the name suggests.
 
 **Only the owner at the machine — `fy` with the host's admin token — is ungoverned. Everything here is about
 every other caller**: a paired phone, a browser across the network, a session carried over the relay, and a
-browser on the host itself. Each may do what the operator granted, and needs a passkey step-up for the
-dangerous parts.
+browser on the host itself. Being **governed means needing an unlock**: such a caller can do nothing until its
+device unlocks the machine with a passkey, and then may do what the operator granted for the unlock period,
+with no further prompt unless the owner asked for one per act.
 
 ## Why the host command line is exempt
 
@@ -222,16 +223,23 @@ The third is the one that needed a gate rather than a note, because nothing was 
 right about the artefact it was handed, and the formatter had changed the artefact. See
 `scripts/validate/conflict-markers.sh`, which knows the laundered shape as well as the raw one.
 
-## The passkey step-up
+## The unlock, and the passkey step-up inside it
+
+**The unlock comes first** (owner decision 2026-10-14, [design/zero-trust.md](design/zero-trust.md) B1): a
+governed device is answered `401 unlock_required` on everything but the routes it needs to get in, until it
+unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default) for that device.
+**While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
+the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
+with the unlock turned off always asks per act.
 
 There is no operator password. The passkey step-up replaced it for every purpose it had — the local
 browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for
 compatibility**. [design/zero-trust.md](design/zero-trust.md) B owns the ceremony (who verifies it, the
 step-up window, which origin a passkey belongs to); this section owns what the grant layer does with it.
-The window is the `stepUpWindowMinutes` security setting (0–60, default 15); at `0` a step-up admits
-exactly one act and the boundary spends it.
+When a per-act step-up is asked for, its window is the `stepUpWindowMinutes` security setting (0–60, default
+15); at `0` a step-up admits exactly one act and the boundary spends it. An unlock is never spent.
 
-**What needs one.** A **governed** caller needs a current step-up for:
+**What needs one** — which an unlock satisfies by default. A **governed** caller needs a current step-up for:
 
 - **every `configure` demand**, on every capability; and
 - **`use` of `terminal`, `browser`, `pairing` and `secrets`** — session terminals are arbitrary code on the
@@ -283,8 +291,9 @@ request schemas are empty objects. That is a real weakening and it is stated rat
 - The old property was "bound to one diff". The new one is "bound to a biometric check on this device within
   the window". It is weaker against a request an attacker could replay, which a sealed session no longer
   allows, and stronger against a password somebody watched being typed or reused elsewhere.
-- Within the window, a step-up covers any number of `configure` acts. There is no per-act confirmation for
-  any capability, and none is planned: the artifact worth binding to (a staged diff, one sign-in identity)
+- Within the window, a step-up covers any number of `configure` acts — and by default the window is the whole
+  unlock. The opt-in per-act confirmation (`stepUpOnActions`) is a window, not a confirmation bound to one
+  diff; none bound to one diff is planned: the artifact worth binding to (a staged diff, one sign-in identity)
   exists only for the fleet, and a prompt on every act of a capability without one trains people to click
   through.
 - The remote risk in a sign-in is still **account substitution**, not disclosure: a caller who can start one
@@ -293,8 +302,8 @@ request schemas are empty objects. That is a real weakening and it is stated rat
 
 ## Who may change the security settings
 
-The per-machine security settings ([design/zero-trust.md](design/zero-trust.md) B6 — step-up window, key
-rotation, presence on opening, idle expiry) follow the same asymmetry as the grants. Changing one is a
+The per-machine security settings ([design/zero-trust.md](design/zero-trust.md) B6 — the unlock and its period,
+the per-act step-up and its window, key rotation, idle expiry) follow the same asymmetry as the grants. Changing one is a
 `configure` act on `pairing`: `PATCH /v1/security` demands `pairing.configure`, so a remote caller needs
 that grant **and** a current step-up, and may only **narrow**. Widening any field is host-only
 (`arrivedOnHost`): a remote widen is `403 security_widen_at_machine`, whose sentence names
@@ -353,13 +362,13 @@ gets both at once ([design/zero-trust.md](design/zero-trust.md) B5):
 effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.grants[capability][axis]
 ```
 
-- **A newly paired device holds `fleet.use` only** (`DEFAULT_DEVICE_GRANTS`): it can read the fleet and
-  chat with sessions. Terminals, files, the browser, secrets, the warden, pairing and every `configure`
-  axis start off. The daemon-wide document stays permissive by default; the narrowing is per device.
-- **A `fy pair --full` code** gives the device that redeems it every capability on both axes
-  (`FULL_DEVICE_GRANTS`) — for the owner's own browser, which would otherwise need a grant per
-  capability. Minting one is host-only (`arrivedOnHost`); the code carries the choice inside the daemon,
-  never in the QR or the link. The daemon-wide document and the step-up still apply on top.
+- **A newly paired device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), behind
+  the unlock: it can do nothing until it unlocks, and then anything the daemon-wide document allows.
+- **A `fy pair --limited` code** gives the device that redeems it `fleet.use` only (`LIMITED_DEVICE_GRANTS`):
+  it can read the fleet and chat with sessions, and every other axis starts off until somebody widens it.
+  A full code minted from another device is refused unless that device holds every capability itself, so no
+  device can pass on more than it holds; at the machine anything goes. The code carries the choice inside
+  the daemon, never in the QR or the link.
 - **The host is ungoverned** (B4): `fy`, and anything else that arrived on the host, is narrowed by
   neither document.
 - **A refusal says which half refused.** The daemon-wide half answers `not-granted` (remedy:

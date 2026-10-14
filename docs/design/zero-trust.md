@@ -63,12 +63,12 @@ Adversaries, and what each must be denied:
 | adversary                                      | must NOT be able to                                                                             |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | **stolen phone, locked**                       | anything: the app's key is usable only by code running in the unlocked browser                  |
-| **stolen phone, unlocked, app open**           | a dangerous act without the owner's biometric/PIN; outlast a revoke; register its own passkey   |
+| **stolen phone, unlocked, app open**           | anything before the device unlocks the machine; outlast a revoke; register its own passkey. INSIDE an unlock period it can do what the owner could (B1) — the period, `stepUpOnActions` and revocation are the controls |
 | **copied storage** (backup, profile copy, IDB) | authenticate at all: the private key is non-extractable and never serialised as bytes           |
 | **malicious relay / Cloudflare**               | read, alter, inject, replay or impersonate either end; learn the device id or any credential    |
 | **LAN attacker** (same Wi-Fi as the daemon)    | read or alter direct traffic, learn a credential, impersonate the daemon to a pairing device    |
 | **compromised Pages deploy**                   | silently replace an installed app (detected and refused by D, within the TOFU limits below)     |
-| **XSS in the app**                             | carry the key away; act after the tab closes; perform a dangerous act without the owner's UV    |
+| **XSS in the app**                             | carry the key away; act after the tab closes or before the owner unlocks. Inside an unlock it can act as the owner (B1) |
 | **replay** of any captured frame or assertion  | have it accepted in any other session, or twice in the same one                                 |
 | **downgrade** to an older protocol or path     | reach any path that is weaker: none exists — the bearer path, `POST /v1/pair` and `/1` are gone |
 
@@ -361,9 +361,30 @@ forged signal on the direct path therefore cannot stop the app from reaching a w
 
 ## B. Passkey step-up and least privilege
 
-### B1. Which acts need a step-up
+### B1. The unlock: everything needs it, and it lasts N hours
 
-A **governed** caller (every caller but the host's admin token — a browser on the host included, B4) must hold a current step-up for:
+**Owner decision (2026-10-14), which replaces the per-act step-up as the default:** "once we unlock the
+app with a passkey, feel free to do anything (including start sessions)". It trades a prompt per
+dangerous act for one prompt per machine per unlock period, and it is chosen for friendliness, with the
+cost stated below.
+
+- **Before an unlock, a device can do nothing.** A governed caller (every caller but the host's admin
+  token — a browser on the host included, B4) whose device has not unlocked this machine within
+  `unlockValidityHours` is answered `401 { code: "unlock_required" }` on EVERY request and every stream
+  open, by the shared authorization boundary. The only routes served are the ones a device needs to get
+  in: `POST /v1/unlock/options`, `POST /v1/unlock`, `GET /v1/passkeys`, `GET /v1/security`, and passkey
+  registration within its own rules (B2). Pairing redemption is not a session route and is unaffected.
+- **An unlock is one passkey assertion**, verified by the daemon exactly like a step-up (B2), held in the
+  daemon's memory for the **device** — every page and tab of it — for `unlockValidityHours` (default 8,
+  1–24). A restart, a revoke or the period ending locks the device again.
+- **While unlocked, the device may do anything its grants allow, with no further prompt** — terminals,
+  files, secrets, settings, starting sessions with any flags, mode or directory, pairing devices. The
+  unlock IS the step-up for its whole validity: every demand below that needs a step-up is satisfied.
+- **The per-act step-up remains as an option** (`stepUpOnActions`, off by default). When the owner turns
+  it on, the acts below ask for a passkey again inside an unlock, for `stepUpWindowMinutes`. A machine
+  with the unlock turned off always asks per act.
+
+The acts a per-act step-up covers, when it is asked for:
 
 | act                                                        | route demand                      |
 | ---------------------------------------------------------- | --------------------------------- |
@@ -377,13 +398,19 @@ A **governed** caller (every caller but the host's admin token — a browser on 
 
 The rule is one line in the dispatcher: **a route whose capability demand is `*.configure`, or is
 `terminal.use`, `secrets.use`, `browser.use` or `pairing.use`, requires a step-up from a governed
-caller.** Reads (`fleet.use`, `filesystem.use`, `warden.use`) and everything in the daemon's own
-state home (sessions, chat, tasks, attention, pins) do not. A refusal is
+caller** — and a current unlock is one unless `stepUpOnActions` is on. A refusal is
 `403 { code: "grant_step_up_required" }`, which the app answers by raising the passkey prompt and retrying
 once.
 
 Starting an agent with your own flags, mode or directory is covered by the unlock (owner decision
 2026-10-14).
+
+**What this costs, said plainly.** A stolen phone that is **unlocked and inside its unlock period** can do
+everything the owner could do from that phone until the period ends — open a terminal on the host, use a
+secret, start agents, pair another device. The per-act model stopped such a phone at its next dangerous
+act; this one does not. The controls are: the unlock period (shorten it), `stepUpOnActions` (turn the
+per-act prompt back on), and **revocation** — revoking the device ends every session it holds and every
+unlock at once, from the machine or from any other device.
 
 ### B2. The ceremony, and who verifies it
 
@@ -395,17 +422,23 @@ challenge is single-use and bound to one device and `appSession`).
   then `POST /v1/passkeys` with the attestation (`clientDataJSON`, `attestationObject`). Attestation
   format `none`; ES256, EdDSA and RS256 credentials are accepted. The daemon stores the credential
   id, its public key (as SPKI) and `signCount` on the device's record.
-- Step-up — `POST /v1/step-up/options` → `{ challenge, rpId, allowCredentials }`, then
-  `POST /v1/step-up` with `credentialId`, `clientDataJSON`, `authenticatorData`, `signature`.
+- Unlock — `POST /v1/unlock/options` → `{ challenge, rpId, allowCredentials }`, then `POST /v1/unlock`
+  with `credentialId`, `clientDataJSON`, `authenticatorData`, `signature` (B1). The ceremony a device
+  meets first, so an overdue device key is replaced here too (B6).
+- Step-up — `POST /v1/step-up/options` and `POST /v1/step-up`, the same shapes on their own challenge,
+  asked only when the machine wants a per-act confirmation inside an unlock (`stepUpOnActions`) or has no
+  unlock at all.
 - The daemon checks, in order: the challenge is one it issued to this device and `appSession`,
   unexpired (2 minutes) and unspent, and it is spent now; `clientData.type` is `webauthn.create` /
   `webauthn.get`; `clientData.origin` is one of the daemon's `corsOrigins`; `rpIdHash` equals
   SHA-256 of that origin's host; flags **UP and UV** are set; the credential belongs to this device;
   the signature verifies over `authenticatorData ‖ SHA-256(clientDataJSON)`; and, when either
   counter is non-zero, `signCount` increased (a stuck or rewound counter refuses and is audited).
-- A verified step-up is held **in the daemon's memory** for `(deviceId, appSession)` for **15
-  minutes**. It ends early on revoke, on a daemon restart and when the page closes (a new
-  `appSession`). It is never a value the browser holds.
+- A verified **unlock** is held **in the daemon's memory** for the `deviceId` — every page of it — for
+  `unlockValidityHours` (8 by default). A verified per-act **step-up** is held for `(deviceId,
+  appSession)` for `stepUpWindowMinutes` (15 by default). Both end early on revoke and on a daemon
+  restart; a step-up also ends when the page closes (a new `appSession`). Neither is a value the browser
+  holds.
 - Verification is WebCrypto only: a minimal CBOR reader (attestation object, COSE key) and DER →
   raw conversion for ES256 are written here rather than imported, because the verifier is ~300 lines
   with a fixed input shape and every dependency on this path is attack surface.
@@ -530,8 +563,11 @@ Grants become **per device**, on top of the daemon-wide document:
 effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.grants[capability][axis]
 ```
 
-- A newly paired device gets **`fleet.use` only**: it can read the fleet and chat with sessions.
-  Terminal, filesystem, browser, secrets, warden, pairing and every `configure` axis start off.
+- **A newly paired device gets FULL grants, behind the unlock** (owner decision 2026-10-14, which
+  replaces the `fleet.use`-only default this section first specified). It can do nothing until it
+  unlocks the machine (B1), and then anything the daemon-wide document allows. Narrowing one device is
+  still available: `fy pair --limited` mints a code whose device holds `fleet.use` only, and any device
+  can be narrowed afterwards.
 - A **seventh capability, `secrets`**, is added: `secrets.use` governs `POST /v1/secrets/use` (it
   runs a command — code execution) and the list; `secrets.configure` governs set and delete. Today
   those routes carry no capability demand at all, so any paired device can run a command through
@@ -560,10 +596,14 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   rides on every authenticated `RouteContext`, so no mount re-derives a caller. A device whose record is
   gone is refused `undetermined`. The device half refuses with `device-not-granted`
   (`grant_device_not_granted`), asked after the daemon-wide half.
-- **The default device holds `fleet.use` only** (`DEFAULT_DEVICE_GRANTS`). **`fy pair --full`** (owner
-  decision, 2026-10-13) mints a code whose redemption grants `FULL_DEVICE_GRANTS` instead; the mint request
-  is `{ grants: "full" }`, it is refused unless the request `arrivedOnHost` (the owner's admin token, B4 — a browser on the host is refused), and the pairing service keeps
-  the choice with the live code — the link carries nothing extra.
+- **The default device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), gated
+  by the unlock. **`fy pair --limited`** mints a code whose redemption grants `LIMITED_DEVICE_GRANTS`
+  (`fleet.use` only); the mint request is `{ grants: "limited" }`, and the default is `full`.
+  `fy pair --full` (owner decision 2026-10-13) is removed: it is the default now. A remote mint of a
+  `full` code is refused `403 grant_forbidden` unless the minting device holds every capability itself
+  (the same `mayWiden` rule a device widen reads), so no device can pass on more than it holds; at the
+  machine anything goes. The pairing service keeps the choice with the live code — the link carries
+  nothing extra. A `devices.json` record written before B5 still reads as `limited`.
 - **Changing one device** is `PATCH /v1/pair/devices/:deviceId/grants` (demand `pairing.use`), judged by
   `judgeDeviceGrantChange` in `src/lib/grants/policy.ts` and applied by `DeviceGrantService`: host —
   anything; any device (a browser on the host included) — a widen only of an axis the caller holds effectively (daemon-wide ∧ its own) and only
@@ -574,7 +614,7 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   `fy device grant`. In the app: a per-device Capabilities disclosure with a toggle per axis, disabled with
   its reason where `PairedDevicesView.mayWiden` says the caller may not widen.
 - **Web Push self-enrolment** needs no capability: a device reads the key, lists and un-enrols its OWN
-  enrolments freely, and enrols itself with a step-up. Another device's enrolments are behind `pairing.use`,
+  enrolments freely, and enrols itself with a step-up — which the unlock is, unless the owner asked per act. Another device's enrolments are behind `pairing.use`,
   decided by the same guard.
 - **Enrolling is a request the HOST makes** (review M2): the daemon POSTs to the endpoint at once and on
   every alert, from its own network position. So:
@@ -590,39 +630,41 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   re-insert the record they read before their write, so the second to land could undo the first in memory;
   both now refresh the latest record.
 - **Not built:** naming a device by its untrusted display name inside a refusal (the remedy names
-  `<device>`), and a grant set other than `default` and `full` for a code.
+  `<device>`), and a grant set other than `full` and `limited` for a code.
 
 ### B6. Per-daemon security settings
 
-Owner decision (2026-10-13). One **Security** section per machine — in the app's Settings for that
-machine, and `fy daemon security` at the host — holds the knobs below. Each has a default and hard
-bounds; a value outside the bounds is refused, never clamped.
+Owner decisions (2026-10-13, and 2026-10-14 for the unlock). One **Security** section per machine — in the
+app's Settings for that machine, and `fy daemon security` at the host — holds the knobs below. Each has a
+default and hard bounds; a value outside the bounds is refused, never clamped.
 
 | Setting                 | Default    | Bounds                   | Narrower means |
 | ----------------------- | ---------- | ------------------------ | -------------- |
+| `unlockOnOpen`          | **on**     | on / off                 | on             |
+| `unlockValidityHours`   | 8          | 1–24                     | smaller        |
+| `stepUpOnActions`       | off        | on / off                 | on             |
 | `stepUpWindowMinutes`   | 15         | 0–60 (0 = every time)    | smaller        |
 | `deviceKeyRotationDays` | 30         | 7–90                     | smaller        |
-| `unlockOnOpen`        | off        | on / off                 | on             |
-| `unlockValidityHours` | 8          | 1–24                     | smaller        |
 | `idleExpiryDays`        | 30         | 1–90                     | smaller        |
 | access lease            | 15 minutes | **fixed, not a setting** | —              |
 
-- **Step-up window.** How long one passkey assertion covers dangerous actions (B1) for one
-  `appSession`. `0` asks every time.
+- **Unlock on open** (B1). On by default: a device does nothing until it unlocks this machine with a
+  passkey, and then may do anything its grants allow for `unlockValidityHours`, across page loads. **The
+  unlock IS the step-up** for its whole validity — a deliberate reversal of the first version of this
+  section, which said a confirmation on opening never counted as one.
+- **Ask again for each change** (`stepUpOnActions`). Off by default, so the unlock covers every act.
+  When on, the acts B1 lists ask for a passkey again inside an unlock, and each confirmation lasts
+  `stepUpWindowMinutes` for one `appSession` (`0` asks every time). A machine with the unlock turned
+  off always asks per act, whatever this says.
 - **Device-key rotation.** The `authenticated` and `stream-opened` records carry `rotateBy`. Once it
-  has passed, the next step-up ceremony also rotates the key: the browser mints a new non-extractable
-  key, the daemon receives `{ deviceKey, proof }` where `proof` is the NEW key's signature over
-  `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey)`, inside a session the OLD
-  key opened, together with the assertion. The daemon swaps the SPKI, closes the device's other
-  sessions with `4441` (so they reopen with the new key), and audits `device.key-rotated`. The old key
-  then opens nothing. No extra prompt exists for this: a device that is overdue cannot complete a
-  step-up-gated action without rotating in the same ceremony, while plain `fleet.use` keeps working.
-  Lost answer: the browser stores the new key as _pending_ before sending and, if the old key is
-  refused, tries the pending one once — so a dropped response never strands the device.
-- **Presence on open.** Off by default. When on, a session still opens (the device key is proved as
-  always), but every request answers `401 unlock_required` until the device completes a passkey
-  assertion; one assertion is good for `unlockValidityHours` for that device, across page loads.
-  Dangerous actions still need their own step-up window — presence never counts as a step-up.
+  has passed, the next passkey ceremony — the unlock, or a step-up — also rotates the key: the browser
+  mints a new non-extractable key, the daemon receives `{ deviceKey, proof }` where `proof` is the NEW
+  key's signature over `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey)`, inside a
+  session the OLD key opened, together with the assertion. The daemon swaps the SPKI, closes the device's
+  other sessions with `4441` (so they reopen with the new key), and audits `device.key-rotated`. The old
+  key then opens nothing. No extra prompt exists for this: an overdue device cannot finish the ceremony
+  without rotating in it. Lost answer: the browser stores the new key as _pending_ before sending and, if
+  the old key is refused, tries the pending one once — so a dropped response never strands the device.
 - **Idle expiry.** A6's 30 days, now a setting. Shortening it applies at the next check (boot, auth,
   device list), so it can expire devices immediately; the confirmation says how many.
 - **The access lease stays fixed at 15 minutes**, deliberately. Renewal is silent, so a longer lease
@@ -632,75 +674,84 @@ bounds; a value outside the bounds is refused, never clamped.
 **Who may change them — the grants.md asymmetry, again.** Changing any setting is a _configure_
 action on the `pairing` capability.
 
-- **Narrowing** (a smaller window or period, `unlockOnOpen` → on) is allowed remotely by a device
-  holding `pairing.configure` **with a current step-up**.
-- **Widening** (a larger window or period, `unlockOnOpen` → off) is allowed **only at the machine**
-  — the owner's admin token over loopback, i.e. the CLI (B4); a browser on the host is a device like any
+- **Narrowing** (a smaller window or period, a switch turned ON) is allowed remotely by a device
+  holding `pairing.configure` **with a current step-up** — which the unlock is, unless the owner asked per
+  act.
+- **Widening** (a larger window or period, a switch turned OFF) is allowed **only at the machine** —
+  the owner's admin token over loopback, i.e. the CLI (B4); a browser on the host is a device like any
   other. A remote widen is `403` with a sentence naming the command to run at the machine.
 - A request that changes several fields is judged field by field and refused whole if any field
   widens remotely.
 - Where it lives: `<FY_HOME>/state/security.json` (`schemaVersion: 1`, written atomically, mode
-  `0600`). An unreadable or invalid document **fails closed to the defaults' narrowest reading**
-  (presence on, window 0) with a notice naming the file, never to "off".
+  `0600`). An unreadable or invalid document **fails closed to the narrowest reading** with a notice
+  naming the file, never to "off".
 - Every change is audited as `security.changed` with the field, old value, new value and actor.
 
 Tests: each bound accepted at its edges and refused one past them; each field's widen refused
 remotely and accepted at loopback; narrow refused without a step-up and accepted with one; a mixed
-request refused whole; rotation end to end (old key refused afterwards, other sessions closed, the
-pending-key recovery); presence gating on and off; the corrupt-document fail-closed path; and the
-audit record for every change.
-
-Delivery: built after B (it needs the step-up ceremony), as part of B if it fits, otherwise as a
-small PR E immediately after it.
+request refused whole; before an unlock nothing but the exempt routes, after it everything with no
+further step-up; the unlock lapsing at its validity; a per-act window that is turned on asking again;
+rotation end to end; a stream ending at its renewal once the unlock lapsed; the corrupt-document
+fail-closed path; and the audit record for every change.
 
 **As built** (`feat/zt-security-settings`, PR E):
 
 - **Contract.** `@ferretry/protocol` `security.ts` owns the fields, bounds, defaults, the patch and view
-  schemas and `widensSecurity`, so the daemon, `fy` and the app agree on what "narrower" means. `GET
-/v1/security` answers `{ settings, source, mayWiden, widenCommand, updatedAt? }` to any paired caller;
+  schemas, `widensSecurity`, `isSecuritySwitch` and `asksStepUpPerAction`, so the daemon, `fy` and the
+  app agree on what "narrower" means and on when a per-act step-up is asked. `GET /v1/security` answers
+  `{ settings, source, mayWiden, widenCommand, updatedAt? }` to any paired caller, before an unlock too;
   `PATCH /v1/security` demands `pairing.configure` and answers `{ view, devicesExpiring }`. A remote widen
   is `403 security_widen_at_machine` naming `fy daemon security set <setting> <value>`; an out-of-bounds
   value is `400`. "At the machine" is `arrivedOnHost`, the one host-locality rule (B4).
 - **Store.** `state/security.json`, `schemaVersion: 1`, atomic write, mode `0600`. Read once at boot; the
   service is then synchronous, so no enforcement waits on a file. A missing file is the defaults.
-- **Damaged document — one deliberate departure from the spec text.** It fails closed to window `0`,
-  presence on, validity 1 hour and rotation 7 days, with a boot notice naming the file. Idle expiry is
-  **kept at the default**, not shortened to 1 day: the narrowest reading would unpair every device a day
-  after a corrupted file, and an unpairing cannot be undone. A remote caller cannot patch a damaged
-  document (`503 security_unavailable`); the host replaces it.
+- **Damaged document — one deliberate departure from the spec text.** It fails closed to the unlock on
+  for 1 hour, a per-act confirmation every time on top (`stepUpOnActions` on, window `0`) and rotation 7
+  days, with a boot notice naming the file. Idle expiry is **kept at the default**, not shortened to 1
+  day: the narrowest reading would unpair every device a day after a corrupted file, and an unpairing
+  cannot be undone. A remote caller cannot patch a damaged document (`503 security_unavailable`); the
+  host replaces it.
 - **Audit.** `state/security-audit.jsonl`, one `security.changed` record per change with
   `security.<field>=<old>-><new>` and the actor, an empty change included, and one `device.key-rotated`
   record per rotation. Its own file, so the grant history reader is unchanged.
-- **Step-up window.** `StepUpRegistry` reads the window at every question, so a shortened window applies
-  to step-ups already held. `0` makes a step-up single-use: the authorization boundary spends it when it
-  admits a step-up-gated act (`GrantDecision.steppedUp`), and so does `PATCH /v1/grants`, which checks its
-  own step-up. An unspent single-use step-up lives two minutes, enough for the app's one re-send.
+- **The unlock.** The shared request boundary answers every request of a governed device
+  `401 unlock_required` until that device unlocks. Exempt (`unlockExempt` on the route): `GET /v1/passkeys`,
+  `GET /v1/security`, `POST /v1/unlock/options` and `POST /v1/unlock`; registration keeps its own rules
+  (B2). A stream open is refused the same way, because both route tables share the boundary. An unlock is
+  held in the daemon's memory per **device** for `unlockValidityHours`, so it survives page loads and ends
+  on a restart or a revoke. Registering a first passkey counts as an unlock, so a device on a new machine
+  can still get in. Every browser is asked, on the host too (B4).
+- **The unlock is the step-up.** `StepUpService.held` — the witness the boundary asks — answers yes for a
+  device inside its unlock unless `asksStepUpPerAction` (the owner turned `stepUpOnActions` on, or the
+  unlock off), so every step-up-gated act is served with no further prompt. `spend` never spends an
+  unlock. An unlock also records a per-act step-up for its `appSession`, so a machine that asks per act
+  does not ask again for the act that follows the unlock at once.
+- **Per-act window.** `StepUpRegistry` reads the window at every question, so a shortened window applies
+  to step-ups already held. `0` makes a per-act step-up single-use: the boundary spends it when it admits a
+  step-up-gated act (`GrantDecision.steppedUp`), and `PATCH /v1/grants`, which checks its own step-up,
+  spends it through `RouteContext.spendStepUp`. An unspent single-use step-up lives two minutes, enough
+  for the app's one re-send.
+- **Streams lapse at their renewal.** `ApiSocketDispatcher.reauthorize` — asked at every lease renewal
+  and grant change — keeps the step-up that admitted the stream standing but re-asks the unlock, so a
+  stream whose device's unlock lapsed ends with the sealed `1008` at its next renewal (at most 15 minutes
+  later), and the device reopens it after unlocking again.
 - **Idle expiry.** `PairingService` reads `idleExpiryDays` at every check, so a shortened period applies
   at the next boot, session proof or device list; the pairing response reports the current value.
   `devicesExpiring` counts the devices the new period will end, and only when it shortened.
-- **Presence on open.** When on, the request boundary answers every device request
-  `401 unlock_required` until that device confirms with a passkey. Exempt: `GET /v1/passkeys`,
-  `GET /v1/security`, `POST /v1/unlock/options` and `POST /v1/unlock`. A confirmation is held in the
-  daemon's memory per **device** for `unlockValidityHours`, so it survives page loads and ends on a
-  restart or a revoke. Registering a first passkey counts as a confirmation, so a device on a machine
-  with presence on can still get in. It is never a step-up. Every browser is asked, on the host too: only the owner's admin token is at the machine (B4). The
-  app shows "Confirm it's you" with the same dialog component as the step-up prompt and re-sends once.
 - **Rotation.** `authenticated` and `stream-opened` carry `rotateBy` (key age counted from the last
-  `keyRotatedAt` on the device record, or from pairing). Past it, `POST /v1/step-up` without a
-  `rotation` is `403 step_up_rotation_required` **without spending the challenge**, so the browser can
-  answer the same challenge again with a new key, and reads that need no step-up keep working. The new
-  key's proof is checked over the carrying session's transcript before the assertion is verified; after
-  it verifies, the daemon rewrites the device's key, ends the device's other sessions with `4441`, keeps
-  the carrying session, audits `device.key-rotated`, and answers `keyRotated: true`. The label and
-  message builder are `deviceRotateMessage` in `@ferretry/relay`.
+  `keyRotatedAt` on the device record, or from pairing). Past it, `POST /v1/unlock` or `POST /v1/step-up`
+  without a `rotation` is `403 step_up_rotation_required` **without spending the challenge**, so the
+  browser can answer the same challenge again with a new key. One shared ceremony checks the new key's
+  proof over the carrying session's transcript before the assertion is verified; after it verifies, the
+  daemon rewrites the device's key, ends the device's other sessions with `4441`, keeps the carrying
+  session, audits `device.key-rotated`, and answers `keyRotated: true`. The label and message builder are
+  `deviceRotateMessage` in `@ferretry/relay`.
 - **Not exercised end to end:** a real authenticator; a real browser rotating its key against a real
-  daemon; presence on a machine reached only through the hosted relay. Each half is unit-tested against
+  daemon; an unlock on a machine reached only through the hosted relay. Each half is unit-tested against
   the other half's contract.
-- **Declared gap:** the daemon refuses a stream open (terminal, event feed) for presence too, because
-  both route tables share the one authorization boundary. The app raises the "Confirm it's you" prompt
-  only for a refused **request**; a refused stream open is reported as a refusal, and the prompt appears
-  with the page's next request. A stream already open when a confirmation lapses keeps running: presence
-  is asked when something opens, and a renewal re-asks only the grant.
+- **Declared gap:** the app raises the unlock screen only for a refused **request**; a refused stream open
+  is reported as a refusal, and the screen appears with the page's next request, which every page makes
+  first.
 
 ## C. Audit log and alerts
 
