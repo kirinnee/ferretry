@@ -71,6 +71,8 @@ import {
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { ApiSocketDispatcher, type SocketRoute } from '../../../src/lib/api/socket.ts';
 import type {
   SocketDownstream,
   SocketFrame,
@@ -3068,6 +3070,76 @@ describe('the access lease', () => {
       .map(controlOf)
       .some(control => control?.t === 'closed' && control.code === RELAY_CLOSE_CODES.authRejected);
     should(refused).be.false();
+  });
+
+  it('should end a stream at renewal with a sealed 1008 once its device’s unlock lapsed, over the real socket dispatcher', async () => {
+    // Arrange — the boundary the daemon runs: a governed terminal route, an unlock the case can lapse,
+    // and NO per-act step-up held, so the unlock is the only thing that admits the stream.
+    const unlocked = { value: true };
+    const terminal: SocketRoute = {
+      method: 'GET',
+      path: '/v1/events',
+      minimum: 'operator',
+      capability: { capability: 'terminal', axis: 'use' },
+      accept: async () => async () => ({
+        open: async () => undefined,
+        fromClient: () => undefined,
+        close: () => undefined,
+      }),
+    };
+    const dispatcher = new ApiSocketDispatcher(
+      new ApiRouter([terminal]),
+      { admin: 'admin-secret', warden: 'warden-secret', devices: { has: () => true } },
+      {
+        decide: (_demand, presentation) =>
+          presentation.stepUp ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' },
+        governance: () => ({ governed: true, decide: () => ({ allowed: false, refusal: 'undetermined' }) }),
+        explain: () => 'confirm with your passkey',
+      },
+      undefined,
+      { held: () => unlocked.value, unlockRequired: () => !unlocked.value },
+    );
+    const stream = fakeStream();
+    const asked: ApiRequest[] = [];
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream), undefined, {
+      reauthorize: request => {
+        asked.push(request);
+        return dispatcher.reauthorize(request);
+      },
+    });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    await sealed();
+    const renewOnce = async (renewing: Awaited<ReturnType<typeof clientSend>>) => {
+      live(harnessed.timers, RENEW_AT_MS)?.fire();
+      await sealed();
+      const renew = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+      const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+      const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, renew.nonce));
+      const next = await clientSend(harnessed.link, renewing, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+      await sealed();
+      return next;
+    };
+
+    // Act — a renewal while unlocked keeps the stream; one after the unlock lapsed ends it.
+    const renewed = await renewOnce(channel);
+    const keptWhileUnlocked = stream.closed.length === 0;
+    unlocked.value = false;
+    const lapsed = await renewOnce(renewed);
+
+    // Assert
+    should(keptWhileUnlocked).be.true();
+    should(asked.map(request => request.path)).eql(['/v1/events', '/v1/events']);
+    should(stream.closed).not.be.empty();
+    const after = await clientReadAll(harnessed.wire, lapsed);
+    should(after.messages).containDeep([
+      { t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code: 1008, reason: 'this stream is no longer allowed' },
+    ]);
   });
 
   it('should ask every live stream again when grants change, and keep the ones still allowed', async () => {

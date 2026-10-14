@@ -824,7 +824,7 @@ describe('StepUpService step-up window (B6)', () => {
   });
 });
 
-describe('StepUpService presence on opening (B6)', () => {
+describe('StepUpService unlock on opening (B6)', () => {
   /** Enrols the phone's passkey, then lets the confirmation that registering counts as lapse. */
   async function enrolled(options: Parameters<typeof fixture>[0]) {
     const world = fixture(options);
@@ -837,7 +837,7 @@ describe('StepUpService presence on opening (B6)', () => {
   const nextAssertion = (authenticator: Authenticator, signCount: number) =>
     assertionBody(authenticator, { auth: { signCount }, storedCount: signCount - 1 });
 
-  it('should ask nobody for presence when the service is built without settings', async () => {
+  it('should ask nobody for an unlock when the service is built without settings', async () => {
     // Arrange
     const { service } = fixture();
 
@@ -845,7 +845,7 @@ describe('StepUpService presence on opening (B6)', () => {
     should(service.unlockRequired(phone)).be.false();
   });
 
-  it('should ask nobody for presence when the machine does not ask for it on opening', async () => {
+  it('should ask nobody for an unlock when the machine does not ask for it on opening', async () => {
     // Arrange
     const { service } = fixture({ settings: { unlockOnOpen: false } });
 
@@ -927,18 +927,124 @@ describe('StepUpService presence on opening (B6)', () => {
     should(service.unlockRequired({ deviceId: deviceId('b'), appSession: 'tab-one' })).be.true();
   });
 
-  it('should never count a confirmation on opening as a step-up', async () => {
-    // Arrange
+  it('should make the unlock the step-up while it holds, with no per-act step-up in the registry', async () => {
+    // Arrange — the unlock IS the step-up (owner decision 2026-10-14), and nothing else is held.
     const { service, authenticator, registry, clock } = await enrolled({ settings: { unlockOnOpen: true } });
     registry.forgetDevice(phone.deviceId);
+    should(service.held(phone)).be.false();
     await service.unlockOptions(remote(), ORIGIN);
 
     // Act
     await service.unlock(remote(), await nextAssertion(authenticator, 1));
+    registry.forgetDevice(phone.deviceId);
 
     // Assert
-    should(service.held(phone)).be.false();
     should(registry.held(phone, clock.now)).be.false();
+    should(service.held(phone)).be.true();
+  });
+
+  it('should stop holding the step-up at the instant the unlock lapses', async () => {
+    // Arrange
+    const { clock, service, authenticator, registry } = await enrolled({
+      settings: { unlockOnOpen: true, unlockValidityHours: 2 },
+    });
+    await service.unlockOptions(remote(), ORIGIN);
+    const unlockedAt = clock.now;
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
+    registry.forgetDevice(phone.deviceId);
+
+    // Act / Assert
+    clock.now = unlockedAt + 2 * HOUR_MS - 1;
+    should(service.held(phone)).be.true();
+    clock.now = unlockedAt + 2 * HOUR_MS;
+    should(service.held(phone)).be.false();
+  });
+
+  it('should never spend an unlock: an act leaves the device unlocked and the step-up held', async () => {
+    // Arrange
+    const { service, authenticator, registry } = await enrolled({ settings: { unlockOnOpen: true } });
+    await service.unlockOptions(remote(), ORIGIN);
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
+    registry.forgetDevice(phone.deviceId);
+
+    // Act
+    service.spend(phone);
+    service.spend(phone);
+
+    // Assert
+    should(service.unlockRequired(phone)).be.false();
+    should(service.held(phone)).be.true();
+  });
+
+  it('should ask a per-act step-up inside an unlock when the owner turned stepUpOnActions on', async () => {
+    // Arrange
+    const { service, authenticator, registry } = await enrolled({
+      settings: { unlockOnOpen: true, stepUpOnActions: true },
+    });
+    await service.unlockOptions(remote(), ORIGIN);
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
+    registry.forgetDevice(phone.deviceId);
+
+    // Act / Assert — unlocked, and still not stepped up for an act.
+    should(service.unlockRequired(phone)).be.false();
+    should(service.held(phone)).be.false();
+  });
+
+  it('should ask a per-act step-up when the unlock is off, even with stepUpOnActions off', async () => {
+    // Arrange — with no unlock there is nothing to cover the act.
+    const { service, registry, clock } = fixture({ settings: { unlockOnOpen: false, stepUpOnActions: false } });
+    registry.grant(phone, clock.now);
+    registry.forgetDevice(phone.deviceId);
+
+    // Act / Assert
+    should(service.held(phone)).be.false();
+  });
+
+  it('should hold the unlock’s own per-act step-up after an unlock on a machine that asks per act, and spend it once at window 0', async () => {
+    // Arrange — an unlock grants a per-act step-up for this app session, so the first act right after
+    // unlocking is not asked again; a single-use window spends it.
+    const { service, authenticator } = await enrolled({
+      settings: { unlockOnOpen: true, stepUpOnActions: true, stepUpWindowMinutes: 0 },
+      window: { minutes: 0 },
+    });
+    await service.unlockOptions(remote(), ORIGIN);
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
+
+    // Act
+    const before = service.held(phone);
+    service.spend(phone);
+
+    // Assert
+    should(before).be.true();
+    should(service.held(phone)).be.false();
+    should(service.unlockRequired(phone)).be.false();
+  });
+
+  it('should spend a single-use per-act step-up on a machine with no unlock', async () => {
+    // Arrange
+    const { service, registry, clock } = fixture({
+      settings: { unlockOnOpen: false },
+      window: { minutes: 0 },
+    });
+    registry.grant(phone, clock.now);
+
+    // Act
+    const before = service.held(phone);
+    service.spend(phone);
+
+    // Assert
+    should(before).be.true();
+    should(service.held(phone)).be.false();
+  });
+
+  it('should hold the step-up as the per-act registry decides when the service has no settings', async () => {
+    // Arrange
+    const { service, registry, clock } = fixture();
+
+    // Act / Assert
+    should(service.held(phone)).be.false();
+    registry.grant(phone, clock.now);
+    should(service.held(phone)).be.true();
   });
 
   it('should count registering a passkey as a confirmation on opening', async () => {
@@ -992,7 +1098,7 @@ describe('StepUpService presence on opening (B6)', () => {
     });
   });
 
-  it('should refuse presence options for an origin the machine does not serve or a device with no passkey', async () => {
+  it('should refuse unlock options for an origin the machine does not serve or a device with no passkey', async () => {
     // Arrange
     const { service } = fixture({ origins: [ORIGIN], settings: { unlockOnOpen: true } });
 
@@ -1001,12 +1107,12 @@ describe('StepUpService presence on opening (B6)', () => {
     should(await service.unlockOptions(remote(), ORIGIN)).eql({ ok: false, refusal: 'no-passkey' });
   });
 
-  it('should answer a confirmation only with a challenge issued for presence, spending it either way', async () => {
+  it('should answer an unlock only with a challenge issued for an unlock, spending it either way', async () => {
     // Arrange
     const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
     const body = await nextAssertion(authenticator, 1);
 
-    // Act — a step-up challenge answers no presence, and a presence challenge answers once
+    // Act — a step-up challenge answers no unlock, and an unlock challenge answers once
     await service.stepUpOptions(remote(), ORIGIN);
     const crossed = await service.unlock(remote(), body);
     await service.unlockOptions(remote(), ORIGIN);
@@ -1252,5 +1358,121 @@ describe('StepUpService key rotation (B6)', () => {
     // Assert
     should(refused).eql({ ok: false, refusal: 'not-a-device' });
     should(service.held(phone)).be.false();
+  });
+
+  describe('inside an unlock', () => {
+    /** An enrolled phone on a machine that unlocks on opening, its unlock long lapsed by the case's clock. */
+    async function unlocking(daysIn: number) {
+      const rotation = new FakeRotation(PAIRED_AT_MS);
+      const world = fixture({ rotation, settings: { deviceKeyRotationDays: 30, unlockOnOpen: true } });
+      const authenticator = await es256Authenticator();
+      await enrol(world.service, authenticator);
+      world.clock.now = PAIRED_AT_MS + daysIn * DAY_MS;
+      return { ...world, rotation, authenticator };
+    }
+
+    it('should unlock without a rotation while the key is not yet due', async () => {
+      // Arrange
+      const { service, authenticator, rotation } = await unlocking(29);
+      await service.unlockOptions(inSession(), ORIGIN);
+
+      // Act
+      const granted = await service.unlock(inSession(), await assertWith(authenticator, 1));
+
+      // Assert
+      should(granted.ok && granted.value.keyRotated).be.undefined();
+      should(rotation.rotated).eql([]);
+      should(service.unlockRequired(phone)).be.false();
+    });
+
+    it('should refuse an unlock with rotation-required once the key is due, keep the challenge, and leave the device locked', async () => {
+      // Arrange
+      const { service, authenticator, rotation } = await unlocking(30);
+      await service.unlockOptions(inSession(), ORIGIN);
+      const body = await assertWith(authenticator, 1);
+
+      // Act
+      const refused = await service.unlock(inSession(), body);
+      const lockedAfterRefusal = service.unlockRequired(phone);
+      const followUp = await service.unlock(inSession(), { ...body, rotation: ROTATION });
+
+      // Assert
+      should(refused).eql({ ok: false, refusal: 'rotation-required' });
+      should(lockedAfterRefusal).be.true();
+      should(followUp.ok).be.true();
+      should(rotation.rotated).have.length(1);
+    });
+
+    it('should rotate the key in the unlock, answering keyRotated, with the session’s transcript', async () => {
+      // Arrange
+      const { clock, service, authenticator, rotation } = await unlocking(31);
+      await service.unlockOptions(inSession(), ORIGIN);
+
+      // Act
+      const granted = await service.unlock(inSession(), {
+        ...(await assertWith(authenticator, 1)),
+        rotation: ROTATION,
+      });
+
+      // Assert
+      should(granted).eql({
+        ok: true,
+        value: { unlockedUntil: new Date(clock.now + 8 * HOUR_MS).toISOString(), keyRotated: true },
+      });
+      should(rotation.verified).eql([
+        { transcriptHash: TRANSCRIPT, deviceId: phone.deviceId, deviceKey: NEW_KEY, proof: PROOF },
+      ]);
+      should(rotation.rotated).eql([{ deviceId: phone.deviceId, deviceKey: NEW_KEY, transcriptHash: TRANSCRIPT }]);
+      should(service.unlockRequired(phone)).be.false();
+    });
+
+    it('should refuse a rotation whose proof does not verify, never swap, and keep the device locked', async () => {
+      // Arrange
+      const { service, authenticator, rotation } = await unlocking(31);
+      rotation.verdict = false;
+      await service.unlockOptions(inSession(), ORIGIN);
+
+      // Act
+      const refused = await service.unlock(inSession(), {
+        ...(await assertWith(authenticator, 1)),
+        rotation: ROTATION,
+      });
+
+      // Assert
+      should(refused).eql({ ok: false, refusal: 'not-verified' });
+      should(rotation.rotated).eql([]);
+      should(service.unlockRequired(phone)).be.true();
+    });
+
+    it('should refuse with not-a-device and leave the device locked when it was revoked before the swap', async () => {
+      // Arrange
+      const { service, authenticator, rotation } = await unlocking(31);
+      rotation.swapped = false;
+      await service.unlockOptions(inSession(), ORIGIN);
+
+      // Act
+      const refused = await service.unlock(inSession(), {
+        ...(await assertWith(authenticator, 1)),
+        rotation: ROTATION,
+      });
+
+      // Assert
+      should(refused).eql({ ok: false, refusal: 'not-a-device' });
+      should(service.unlockRequired(phone)).be.true();
+    });
+
+    it('should not swap the key when the passkey answer itself does not check out', async () => {
+      // Arrange
+      const { service, authenticator, rotation } = await unlocking(31);
+      await service.unlockOptions(inSession(), ORIGIN);
+      const body = await assertWith(authenticator, 1);
+
+      // Act
+      const refused = await service.unlock(inSession(), { ...body, signature: 'A', rotation: ROTATION });
+
+      // Assert
+      should(refused).eql({ ok: false, refusal: 'not-verified' });
+      should(rotation.rotated).eql([]);
+    });
   });
 });

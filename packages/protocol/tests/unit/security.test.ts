@@ -25,7 +25,12 @@ const securityCases: SchemaCase[] = [
     value: { ...view, updatedAt: undefined },
   },
   { name: 'change', schema: security.SecuritySettingsChangeSchema, value: { view, devicesExpiring: 2 } },
-  { name: 'presence granted', schema: security.UnlockGrantedSchema, value: { unlockedUntil: LATER_INSTANT } },
+  { name: 'an unlock granted', schema: security.UnlockGrantedSchema, value: { unlockedUntil: LATER_INSTANT } },
+  {
+    name: 'an unlock granted with a rotation',
+    schema: security.UnlockGrantedSchema,
+    value: { unlockedUntil: LATER_INSTANT, keyRotated: true },
+  },
 ];
 
 describe('the security settings wire', () => {
@@ -64,12 +69,22 @@ describe('the security settings wire', () => {
 
   it('should declare the fields once, each with a default inside its own bounds', () => {
     should([...security.SECURITY_SETTING_FIELDS]).deepEqual([
-      'stepUpWindowMinutes',
-      'deviceKeyRotationDays',
       'unlockOnOpen',
       'unlockValidityHours',
+      'stepUpOnActions',
+      'stepUpWindowMinutes',
+      'deviceKeyRotationDays',
       'idleExpiryDays',
     ]);
+    should([...security.SECURITY_SWITCH_FIELDS]).deepEqual(['unlockOnOpen', 'stepUpOnActions']);
+    should(security.DEFAULT_SECURITY_SETTINGS).deepEqual({
+      unlockOnOpen: true,
+      unlockValidityHours: 8,
+      stepUpOnActions: false,
+      stepUpWindowMinutes: 15,
+      deviceKeyRotationDays: 30,
+      idleExpiryDays: 30,
+    });
     for (const [field, { min, max }] of Object.entries(bounds)) {
       const value = defaults[field as keyof typeof bounds];
       should(value).be.within(min, max);
@@ -94,6 +109,46 @@ describe('the security settings wire', () => {
     should(security.widensSecurity('unlockOnOpen', false, true)).be.false();
     should(security.widensSecurity('unlockOnOpen', true, true)).be.false();
     should(security.widensSecurity('unlockOnOpen', false, false)).be.false();
+  });
+
+  it('should call a confirmation per act inside the unlock a loosening only when it is turned off', () => {
+    should(security.widensSecurity('stepUpOnActions', true, false)).be.true();
+    should(security.widensSecurity('stepUpOnActions', false, true)).be.false();
+    should(security.widensSecurity('stepUpOnActions', true, true)).be.false();
+    should(security.widensSecurity('stepUpOnActions', false, false)).be.false();
+  });
+
+  it('should tell the two switches from the numbers', () => {
+    for (const field of security.SECURITY_SETTING_FIELDS)
+      should(security.isSecuritySwitch(field)).equal(field === 'unlockOnOpen' || field === 'stepUpOnActions');
+  });
+
+  it('should ask a step-up per act only when the owner asked for it or there is no unlock to cover it', () => {
+    const settings = (unlockOnOpen: boolean, stepUpOnActions: boolean) => ({
+      ...defaults,
+      unlockOnOpen,
+      stepUpOnActions,
+    });
+    should(security.asksStepUpPerAction(settings(true, false))).be.false();
+    should(security.asksStepUpPerAction(settings(true, true))).be.true();
+    should(security.asksStepUpPerAction(settings(false, false))).be.true();
+    should(security.asksStepUpPerAction(settings(false, true))).be.true();
+    should(security.asksStepUpPerAction(defaults)).be.false();
+  });
+
+  it('should refuse a rotation flag that is not literally true on an unlock', () => {
+    assertRejects([
+      {
+        name: 'a false rotation',
+        schema: security.UnlockGrantedSchema,
+        value: { unlockedUntil: LATER_INSTANT, keyRotated: false },
+      },
+      {
+        name: 'an unknown field',
+        schema: security.UnlockGrantedSchema,
+        value: { unlockedUntil: LATER_INSTANT, presence: 1 },
+      },
+    ]);
   });
 
   it('should spell the two codes a client branches on', () => {

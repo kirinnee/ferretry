@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
+  type CapabilityGrants,
+  FULL_DEVICE_GRANTS,
   LIMITED_DEVICE_GRANTS,
   type PairedDevice,
   type PairingCodeMintResponse,
@@ -124,14 +126,23 @@ const confirmedStepUp: StepUpWitness = { held: () => true };
  * daemon enforced something else. `pairing` is permissive by default, so `allow: false` is how a fixture
  * states that the operator switched it off.
  */
-async function mount(subject: PairingSubsystem, allow = true, stepUps?: StepUpWitness) {
+async function mount(
+  subject: PairingSubsystem,
+  allow = true,
+  stepUps?: StepUpWitness,
+  /** What the paired browser itself holds, before the daemon-wide document; every capability by default. */
+  ownGrants: CapabilityGrants = DEFAULT_CAPABILITY_GRANTS,
+) {
   const grants = grantSubsystem({
     grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: allow, configure: allow } },
   });
   await grants.refresh();
   return new ApiDispatcher(
     new ApiRouter(pairingRoutes(subject, deviceGrantsOver(grants))),
-    credentials,
+    {
+      ...credentials,
+      devices: { ...credentials.devices, grants: (id: string) => (id === 'unpaired-device' ? undefined : ownGrants) },
+    },
     grants,
     undefined,
     stepUps,
@@ -459,38 +470,102 @@ describe('pairing routes', () => {
     should([minting.status, listing.status]).deepEqual([403, 403]);
   });
 
-  it('should mint a full-access code only at the machine, and a default one otherwise', async () => {
-    // `fy pair --full`: the redeeming device gets every capability, which no remote device holds to
-    // give — so only a caller that arrived on the host may ask for one. The rule is `arrivedOnHost`.
+  it('should mint a full-access code by default for a caller that holds every capability, and a limited one on request', async () => {
+    // A new device is FULL by default (owner decision 2026-10-14), so the default mint is `full`.
     // Arrange
     const subject = new FakePairing();
     const surface = await mount(subject, true, { held: () => true });
+
+    // Act
+    const plain = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false }),
+    );
+    const limited = await surface.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/pair/code',
+        device: browser,
+        loopback: false,
+        body: JSON.stringify({ grants: 'limited' }),
+      }),
+    );
+
+    // Assert
+    should([plain.status, limited.status]).deepEqual([201, 201]);
+    should(subject.grantSets).deepEqual(['full', 'limited']);
+  });
+
+  it('should mint a full-access code at the machine whatever the grants say, and over a device that holds everything', async () => {
+    // Arrange
+    const subject = new FakePairing();
+    const surface = await mount(subject, true, { held: () => true }, FULL_DEVICE_GRANTS);
     const full = JSON.stringify({ grants: 'full' });
 
     // Act
     const atHost = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin, body: full }),
     );
-    const remote = await surface.dispatch(
+    const byHolder = await surface.dispatch(
       request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false, body: full }),
-    );
-    // A loopback peer without the host proof (a local proxy) is not the machine either.
-    const proxied = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: true, body: full }),
-    );
-    // Nor is a browser ON the host with the carrier's proof (B4): only the admin token is the owner.
-    const localBrowserFull = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', ...localBrowser, body: full }),
-    );
-    const plain = await surface.dispatch(
-      request({ method: 'POST', path: '/v1/pair/code', device: browser, loopback: false }),
     );
 
     // Assert
-    should([atHost.status, remote.status, proxied.status, localBrowserFull.status, plain.status]).deepEqual([
-      201, 403, 403, 403, 201,
-    ]);
-    should(jsonBody(remote).code).equal('grant_forbidden');
-    should(subject.grantSets).deepEqual(['full', 'default']);
+    should([atHost.status, byHolder.status]).deepEqual([201, 201]);
+    should(subject.grantSets).deepEqual(['full', 'full']);
+  });
+
+  it('should refuse a remote full mint by a device that does not hold every capability: 403 grant_forbidden', async () => {
+    // A device may pass on only what it holds, by the rule a device widen reads (`mayWiden`).
+    // Arrange
+    const subject = new FakePairing();
+    const holdsMostButNotSecrets: CapabilityGrants = {
+      ...FULL_DEVICE_GRANTS,
+      secrets: { use: true, configure: false },
+    };
+    const pairsOnly: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: true } };
+    const limitedDevice = await mount(subject, true, { held: () => true }, pairsOnly);
+    const almostEverything = await mount(subject, true, { held: () => true }, holdsMostButNotSecrets);
+    const full = JSON.stringify({ grants: 'full' });
+    const ask = { method: 'POST' as const, path: '/v1/pair/code', body: full };
+
+    // Act
+    const byLimited = await limitedDevice.dispatch(request({ ...ask, device: browser, loopback: false }));
+    const byAlmost = await almostEverything.dispatch(request({ ...ask, device: browser, loopback: false }));
+    // A loopback peer without the host proof is not the machine either, and a browser on the host is an
+    // ordinary device: both are judged by what the device holds.
+    const proxied = await limitedDevice.dispatch(request({ ...ask, device: browser, loopback: true }));
+
+    // Assert
+    should([byLimited.status, byAlmost.status, proxied.status]).deepEqual([403, 403, 403]);
+    should(jsonBody(byLimited).code).equal('grant_forbidden');
+    should(jsonBody(byAlmost).code).equal('grant_forbidden');
+    should(subject.grantSets).deepEqual([]);
+  });
+
+  it('should let a device that holds only some capabilities mint a limited code, and refuse a device with no pairing at all', async () => {
+    // Arrange
+    const subject = new FakePairing();
+    const pairsOnly: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: true } };
+    const asker = (ownGrants: CapabilityGrants) =>
+      mount(subject, true, { held: () => true }, ownGrants).then(surface =>
+        surface.dispatch(
+          request({
+            method: 'POST',
+            path: '/v1/pair/code',
+            device: browser,
+            loopback: false,
+            body: JSON.stringify({ grants: 'limited' }),
+          }),
+        ),
+      );
+
+    // Act
+    const pairer = await asker(pairsOnly);
+    const fleetOnly = await asker(LIMITED_DEVICE_GRANTS);
+
+    // Assert — a device with no `pairing.use` is stopped at the boundary, before the route ever asks what it holds.
+    should([pairer.status, fleetOnly.status]).deepEqual([201, 403]);
+    should(jsonBody(fleetOnly).code).equal('grant_device_not_granted');
+    should(subject.grantSets).deepEqual(['limited']);
   });
 });

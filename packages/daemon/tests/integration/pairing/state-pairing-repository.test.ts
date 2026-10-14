@@ -351,7 +351,7 @@ describe('StatePairingRepository device keys', () => {
     should(reopened.devices[0]?.keyRotatedAt).equal('2026-08-05T12:00:00.000Z');
   });
 
-  it('should read a schema-2 device written before per-device grants as the DEFAULT, a narrowing', async () => {
+  it('should read a schema-2 device written before per-device grants as LIMITED, a narrowing', async () => {
     // A missing `grants` is safe to read as fleet.use only, which is why the document stays at schema 2.
     // Arrange
     const { paths, files, repository } = await fixture('pairing-state-legacy-grants');

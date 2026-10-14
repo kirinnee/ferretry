@@ -33,7 +33,7 @@ const MIDDLE: SecuritySettings = {
   stepUpWindowMinutes: 30,
   deviceKeyRotationDays: 40,
   unlockOnOpen: true,
-  stepUpOnActions: false,
+  stepUpOnActions: true,
   unlockValidityHours: 12,
   idleExpiryDays: 40,
 };
@@ -153,7 +153,7 @@ describe('reading the settings document', () => {
 
 describe('a damaged settings document', () => {
   it('should fail closed with a sentence, never throw, and keep serving on the strict reading', async () => {
-    // A corrupted file must not quietly turn presence-on-open off.
+    // A corrupted file must not quietly turn the unlock off.
     // Arrange
     const { service, announced } = build({ unreadable: new Error('/state/security.json is not valid JSON') });
 
@@ -179,13 +179,14 @@ describe('a damaged settings document', () => {
     should(sentence).match(/disk gone/u);
   });
 
-  it('should read as a confirmation every time, a passkey on opening and the shortest periods', () => {
+  it('should read as an unlock for an hour, a confirmation per act every time and the shortest periods', () => {
     // Act + Assert — and the idle period deliberately stays the default: unpairing cannot be undone.
     should(DAMAGED_SECURITY_SETTINGS).deepEqual({
       stepUpWindowMinutes: 0,
       deviceKeyRotationDays: SECURITY_SETTING_BOUNDS.deviceKeyRotationDays.min,
       unlockOnOpen: true,
       unlockValidityHours: SECURITY_SETTING_BOUNDS.unlockValidityHours.min,
+      stepUpOnActions: true,
       idleExpiryDays: DEFAULT_SECURITY_SETTINGS.idleExpiryDays,
     });
   });
@@ -254,6 +255,7 @@ describe('loosening, field by field', () => {
     { deviceKeyRotationDays: 41 },
     { unlockOnOpen: false },
     { unlockValidityHours: 13 },
+    { stepUpOnActions: false },
     { idleExpiryDays: 41 },
   ];
 
@@ -322,7 +324,7 @@ describe('tightening', () => {
     }
   });
 
-  it('should accept turning the passkey on opening ON from a device', async () => {
+  it('should accept turning the unlock on opening ON from a device', async () => {
     // Arrange
     const { service } = await ready({ stored: { settings: { ...MIDDLE, unlockOnOpen: false }, updatedAt: AT } });
 
@@ -332,6 +334,18 @@ describe('tightening', () => {
     // Assert
     should(outcome.ok).be.true();
     should(service.current().unlockOnOpen).be.true();
+  });
+
+  it('should accept turning the confirmation per act ON from a device', async () => {
+    // Arrange
+    const { service } = await ready({ stored: { settings: { ...MIDDLE, stepUpOnActions: false }, updatedAt: AT } });
+
+    // Act
+    const outcome = await service.patch({ stepUpOnActions: true }, REMOTE);
+
+    // Assert
+    should(outcome.ok).be.true();
+    should(service.current().stepUpOnActions).be.true();
   });
 
   it('should accept restating the current value from a device, as nothing widens', async () => {
@@ -355,10 +369,7 @@ describe('a mixed request', () => {
     const { service, writes, audited, announced } = await ready();
 
     // Act
-    const outcome = await service.patch(
-      { idleExpiryDays: 5, unlockValidityHours: 24, stepUpWindowMinutes: 0 },
-      REMOTE,
-    );
+    const outcome = await service.patch({ idleExpiryDays: 5, unlockValidityHours: 24, stepUpWindowMinutes: 0 }, REMOTE);
 
     // Assert
     should(outcome).deepEqual({ ok: false, refusal: 'widen-remote', fields: ['unlockValidityHours'] });

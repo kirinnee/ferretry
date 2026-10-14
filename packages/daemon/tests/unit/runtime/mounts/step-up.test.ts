@@ -43,8 +43,8 @@ const SPKI = b64([9, 9, 9, 9]);
  * The ONE place the registry is built. The browser's copy of the app holds a live session throughout,
  * as it does whenever it can reach these routes, so its step-up span is open.
  */
-const newRegistry = (): StepUpRegistry => {
-  const registry = new StepUpRegistry({ nowMs: () => NOW });
+const newRegistry = (clock?: { now: number }): StepUpRegistry => {
+  const registry = new StepUpRegistry({ nowMs: () => clock?.now ?? NOW });
   registry.open(browser);
   return registry;
 };
@@ -117,12 +117,14 @@ interface World {
   /** The machine's security settings, over the defaults. Absent builds the service without settings. */
   readonly settings?: Partial<SecuritySettings>;
   readonly rotation?: DeviceKeyRotationPort;
+  /** A clock a case may move; the fixed instant otherwise. */
+  readonly clock?: { now: number };
 }
 
 function mount(world: World = {}) {
   const store = world.store ?? new MemoryStore();
   const verifier = new FakeVerifier();
-  const registry = newRegistry();
+  const registry = newRegistry(world.clock);
   const audited: { readonly actor: string; readonly changes: readonly string[] }[] = [];
   const service = new StepUpService({
     store,
@@ -130,7 +132,7 @@ function mount(world: World = {}) {
     registry,
     challenges: new ChallengeLedger(),
     random: { bytes: length => new Uint8Array(length).fill(7) },
-    clock: { nowMs: () => NOW },
+    clock: { nowMs: () => world.clock?.now ?? NOW },
     devices: {
       device: async id =>
         world.known === false || id !== deviceId
@@ -507,11 +509,11 @@ describe('step-up routes', () => {
   });
 });
 
-describe('step-up routes: presence on opening (B6)', () => {
+describe('step-up routes: unlock on opening (B6)', () => {
   const ask = { settings: { unlockOnOpen: true } } as const;
   const post = (path: string, body: string) => request({ method: 'POST', path, body, ...asDevice });
 
-  it('should exempt exactly the passkey panel and the two presence routes from the presence demand', () => {
+  it('should exempt exactly the passkey panel, passkey registration and the two unlock routes from the unlock demand', () => {
     // Arrange
     const routes = stepUpRoutes(mount().service);
 
@@ -519,19 +521,25 @@ describe('step-up routes: presence on opening (B6)', () => {
     const exempt = routes.filter(route => route.unlockExempt === true).map(route => `${route.method} ${route.path}`);
 
     // Assert
-    should(exempt).deepEqual(['GET /v1/passkeys', 'POST /v1/unlock/options', 'POST /v1/unlock']);
+    should(exempt).deepEqual([
+      'GET /v1/passkeys',
+      'POST /v1/passkeys/options',
+      'POST /v1/passkeys',
+      'POST /v1/unlock/options',
+      'POST /v1/unlock',
+    ]);
   });
 
-  it('should serve the presence routes with no capability demand, never cached, to operators only', () => {
+  it('should serve the unlock routes with no capability demand, never cached, to operators only', () => {
     // Arrange
     const routes = stepUpRoutes(mount().service);
 
     // Act
-    const presence = routes.filter(route => route.path.startsWith('/v1/unlock'));
+    const unlockRoutes = routes.filter(route => route.path.startsWith('/v1/unlock'));
 
     // Assert
-    should(presence).have.length(2);
-    for (const route of presence) {
+    should(unlockRoutes).have.length(2);
+    for (const route of unlockRoutes) {
       should([route.path, route.minimum, route.noStore, route.capability]).deepEqual([
         route.path,
         'operator',
@@ -544,8 +552,8 @@ describe('step-up routes: presence on opening (B6)', () => {
   it('should answer 401 unlock_required to every other route until the device confirms', async () => {
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
-    const refused = ROUTES.filter(route => route.path !== '/v1/passkeys' || route.method !== 'GET').filter(
-      route => !route.path.startsWith('/v1/unlock'),
+    const refused = ROUTES.filter(
+      route => !route.path.startsWith('/v1/unlock') && !route.path.startsWith('/v1/passkeys'),
     );
 
     for (const route of refused) {
@@ -555,15 +563,39 @@ describe('step-up routes: presence on opening (B6)', () => {
       );
 
       // Assert
-      should([route.path, response.status, jsonBody(response).code]).deepEqual([
-        route.path,
-        401,
-        UNLOCK_REQUIRED_CODE,
-      ]);
+      should([route.path, response.status, jsonBody(response).code]).deepEqual([route.path, 401, UNLOCK_REQUIRED_CODE]);
     }
   });
 
-  it('should still serve the passkey panel and both presence routes while presence is required', async () => {
+  it('should serve passkey registration before an unlock inside the first window, not refuse it as locked', async () => {
+    // Arrange — a device that has just paired holds no passkey, and registering one is how it gets in.
+    const world = mount({ ...ask, pairedAgoMs: 60_000 });
+    const dispatcher = await world.surface;
+
+    // Act
+    const options = await dispatcher.dispatch(post('/v1/passkeys/options', originBody));
+    const registered = await dispatcher.dispatch(post('/v1/passkeys', registrationBody));
+
+    // Assert
+    should(options.status).equal(200);
+    should(registered.status).equal(201);
+    should(world.store.held).have.length(1);
+  });
+
+  it('should refuse passkey registration outside its window by the registration rules, not as unlock_required', async () => {
+    // Arrange — paired long ago, no passkey, and the owner has not re-opened the window.
+    const dispatcher = await mount({ ...ask, pairedAgoMs: 3_600_000 }).surface;
+
+    // Act
+    const options = await dispatcher.dispatch(post('/v1/passkeys/options', originBody));
+    const registered = await dispatcher.dispatch(post('/v1/passkeys', registrationBody));
+
+    // Assert
+    for (const response of [options, registered])
+      should([response.status, jsonBody(response).code]).deepEqual([403, stepUpRefusalCode('registration-closed')]);
+  });
+
+  it('should still serve the passkey panel and both unlock routes while an unlock is required', async () => {
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
 
@@ -579,7 +611,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     should(confirmed.status).equal(200);
   });
 
-  it('should answer a confirmation with when presence lapses, and then serve every route', async () => {
+  it('should answer an unlock with when it lapses, and then serve every route', async () => {
     // Arrange
     const dispatcher = await mount({
       settings: { unlockOnOpen: true, unlockValidityHours: 2 },
@@ -598,17 +630,42 @@ describe('step-up routes: presence on opening (B6)', () => {
     should(served.status).equal(200);
   });
 
-  it('should not count a confirmation on opening as a step-up', async () => {
+  it('should make the unlock the step-up: a gated act is admitted after it with no per-act step-up', async () => {
     // Arrange
-    const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
+    const world = mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) });
+    const dispatcher = await world.surface;
     await dispatcher.dispatch(post('/v1/unlock/options', originBody));
     await dispatcher.dispatch(post('/v1/unlock', assertionBody));
+    world.registry.forgetDevice(deviceId);
 
     // Act
     const view = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
 
-    // Assert
+    // Assert — the registry holds nothing, and the service still says the step-up is held.
     should(jsonBody(view).stepUpUntil).be.undefined();
+    should(world.service.held(browser)).be.true();
+  });
+
+  it('should answer 401 unlock_required again once the unlock has lapsed', async () => {
+    // Arrange
+    const clock = { now: NOW };
+    const world = mount({
+      settings: { unlockOnOpen: true, unlockValidityHours: 1 },
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+      clock,
+    });
+    const dispatcher = await world.surface;
+    await dispatcher.dispatch(post('/v1/unlock/options', originBody));
+    await dispatcher.dispatch(post('/v1/unlock', assertionBody));
+    const during = await dispatcher.dispatch(post('/v1/step-up/options', originBody));
+
+    // Act
+    clock.now = NOW + 3_600_000;
+    const after = await dispatcher.dispatch(post('/v1/step-up/options', originBody));
+
+    // Assert
+    should(during.status).equal(200);
+    should([after.status, jsonBody(after).code]).deepEqual([401, UNLOCK_REQUIRED_CODE]);
   });
 
   it('should refuse a confirmation with no challenge: 401 step_up_not_verified', async () => {
@@ -636,7 +693,7 @@ describe('step-up routes: presence on opening (B6)', () => {
   });
 
   it('should ask a browser the carrier proved local, and never ask a caller that is not a device', async () => {
-    // B4: a browser is never at the machine, so presence is asked of it wherever it runs.
+    // B4: a browser is never at the machine, so an unlock is asked of it wherever it runs.
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
 
@@ -653,7 +710,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     should([noDevice.status, jsonBody(noDevice).code]).deepEqual([400, stepUpRefusalCode('not-a-device')]);
   });
 
-  it('should refuse the presence routes to a caller that is not a device: 400 step_up_not_a_device', async () => {
+  it('should refuse the unlock routes to a caller that is not a device: 400 step_up_not_a_device', async () => {
     // Arrange
     const dispatcher = await mount(ask).surface;
 
@@ -672,7 +729,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     }
   });
 
-  it('should refuse presence options for an origin the machine does not serve: 403', async () => {
+  it('should refuse unlock options for an origin the machine does not serve: 403', async () => {
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
 
@@ -714,7 +771,7 @@ describe('step-up routes: key rotation (B6)', () => {
     // Arrange
     const { port } = rotationPort(30);
     const world = mount({
-      settings: { deviceKeyRotationDays: 30 },
+      settings: { deviceKeyRotationDays: 30, unlockOnOpen: false },
       rotation: port,
       store: new MemoryStore([stored(CREDENTIAL_ID)]),
     });
@@ -736,7 +793,7 @@ describe('step-up routes: key rotation (B6)', () => {
     // Arrange
     const { port, rotated } = rotationPort(31);
     const dispatcher = await mount({
-      settings: { deviceKeyRotationDays: 30 },
+      settings: { deviceKeyRotationDays: 30, unlockOnOpen: false },
       rotation: port,
       store: new MemoryStore([stored(CREDENTIAL_ID)]),
     }).surface;
@@ -760,7 +817,7 @@ describe('step-up routes: key rotation (B6)', () => {
     // Arrange
     const { port } = rotationPort(31, false);
     const dispatcher = await mount({
-      settings: { deviceKeyRotationDays: 30 },
+      settings: { deviceKeyRotationDays: 30, unlockOnOpen: false },
       rotation: port,
       store: new MemoryStore([stored(CREDENTIAL_ID)]),
     }).surface;
@@ -777,7 +834,7 @@ describe('step-up routes: key rotation (B6)', () => {
     // Arrange
     const { port, rotated } = rotationPort(31);
     const dispatcher = await mount({
-      settings: { deviceKeyRotationDays: 30 },
+      settings: { deviceKeyRotationDays: 30, unlockOnOpen: false },
       rotation: port,
       store: new MemoryStore([stored(CREDENTIAL_ID)]),
     }).surface;
@@ -791,5 +848,81 @@ describe('step-up routes: key rotation (B6)', () => {
     // Assert
     should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
     should(rotated).deepEqual([]);
+  });
+
+  describe('inside an unlock', () => {
+    const unlocking = (ageDays: number, swapped = true) => {
+      const { port, rotated } = rotationPort(ageDays, swapped);
+      const world = mount({
+        settings: { deviceKeyRotationDays: 30, unlockOnOpen: true },
+        rotation: port,
+        store: new MemoryStore([stored(CREDENTIAL_ID)]),
+      });
+      return { world, rotated };
+    };
+
+    it('should answer 403 step_up_rotation_required to an unlock once the key is due, and stay locked', async () => {
+      // Arrange
+      const { world } = unlocking(30);
+      const dispatcher = await world.surface;
+      await dispatcher.dispatch(inSession(originBody, '/v1/unlock/options'));
+
+      // Act
+      const response = await dispatcher.dispatch(inSession(assertionBody, '/v1/unlock'));
+
+      // Assert
+      should([response.status, jsonBody(response).code]).deepEqual([403, stepUpRefusalCode('rotation-required')]);
+      should(world.service.unlockRequired(browser)).be.true();
+    });
+
+    it('should rotate the key in the unlock that was refused, answering unlockedUntil and keyRotated', async () => {
+      // Arrange
+      const { world, rotated } = unlocking(31);
+      const dispatcher = await world.surface;
+      await dispatcher.dispatch(inSession(originBody, '/v1/unlock/options'));
+      const refused = await dispatcher.dispatch(inSession(assertionBody, '/v1/unlock'));
+
+      // Act
+      const granted = await dispatcher.dispatch(inSession(rotationBody, '/v1/unlock'));
+
+      // Assert
+      should(refused.status).equal(403);
+      should(granted.status).equal(200);
+      should(jsonBody(granted)).deepEqual({
+        unlockedUntil: new Date(NOW + 8 * 3_600_000).toISOString(),
+        keyRotated: true,
+      });
+      should(rotated).deepEqual([{ deviceId, deviceKey: 'bmV3LWtleQ', transcriptHash: TRANSCRIPT }]);
+      should(world.service.unlockRequired(browser)).be.false();
+    });
+
+    it('should answer 400 step_up_not_a_device when the device was revoked between the assertion and the swap', async () => {
+      // Arrange
+      const { world } = unlocking(31, false);
+      const dispatcher = await world.surface;
+      await dispatcher.dispatch(inSession(originBody, '/v1/unlock/options'));
+
+      // Act
+      const response = await dispatcher.dispatch(inSession(rotationBody, '/v1/unlock'));
+
+      // Assert
+      should([response.status, jsonBody(response).code]).deepEqual([400, stepUpRefusalCode('not-a-device')]);
+    });
+
+    it('should refuse a rotation the request carried no session transcript for: 401 step_up_not_verified', async () => {
+      // Arrange
+      const { world, rotated } = unlocking(31);
+      const dispatcher = await world.surface;
+      await dispatcher.dispatch(inSession(originBody, '/v1/unlock/options'));
+
+      // Act
+      const response = await dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/unlock', body: rotationBody, ...asDevice }),
+      );
+
+      // Assert
+      should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
+      should(rotated).deepEqual([]);
+    });
   });
 });

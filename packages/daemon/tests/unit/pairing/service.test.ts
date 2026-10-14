@@ -291,8 +291,8 @@ describe('PairingService minting and status', () => {
       // Who can redeem it travels WITH it. A link and no audience is the shape that put a QR of a
       // loopback address in front of a phone, and the protocol has no value for it any more.
       reach: 'any-device',
-      // What a device redeeming it will hold: least privilege unless minted `--full` at the machine.
-      grants: 'default',
+      // What a device redeeming it will hold: full access behind the unlock, unless minted `--limited`.
+      grants: 'full',
     });
     should(service.status(PAIRING_ID)).deepEqual({
       pairingId: PAIRING_ID,
@@ -460,8 +460,8 @@ describe('PairingService redemption', () => {
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
         publicKey: DEVICE_KEY,
-        // Least privilege: a newly paired device reads the fleet and chats, and nothing more (B5).
-        grants: LIMITED_DEVICE_GRANTS,
+        // Full access behind the unlock (owner decision 2026-10-14): the default for a newly paired device.
+        grants: FULL_DEVICE_GRANTS,
       },
     ]);
     should(JSON.stringify(result.response)).not.containEql(DEVICE_KEY);
@@ -769,7 +769,7 @@ describe('PairingService revocation', () => {
         createdAt: '2026-08-03T12:00:00.000Z',
         lastSeenAt: '2026-08-03T12:00:00.000Z',
         idleExpiresAt: '2026-09-02T12:00:00.000Z',
-        grants: LIMITED_DEVICE_GRANTS,
+        grants: FULL_DEVICE_GRANTS,
       },
     ]);
     should(JSON.stringify(listed)).not.containEql(DEVICE_KEY);
@@ -1530,10 +1530,26 @@ describe('PairingService device grants', () => {
     return built;
   }
   const WIDENED: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, terminal: { use: true, configure: false } };
+  const limited = async () => {
+    const built = fixture();
+    built.service.mint('limited');
+    const redemption = await redeemDirect(built.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    return built;
+  };
 
-  it('should give a newly paired device fleet.use only, and report it', async () => {
+  it('should give a newly paired device full access behind the unlock, and report it', async () => {
     // Arrange
     const { service } = await paired();
+
+    // Act + Assert
+    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(FULL_DEVICE_GRANTS);
+    should((await service.devices())[0]?.grants).deepEqual(FULL_DEVICE_GRANTS);
+  });
+
+  it('should give a device paired with a limited code fleet.use only, and report it', async () => {
+    // Arrange
+    const { service } = await limited();
 
     // Act + Assert
     should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(LIMITED_DEVICE_GRANTS);
@@ -1559,8 +1575,8 @@ describe('PairingService device grants', () => {
     devices.failure = new Error('disk unavailable');
 
     // Act + Assert
-    await should(service.setDeviceGrants(FIRST_DEVICE_ID, WIDENED)).be.rejectedWith('disk unavailable');
-    should(credentials.get(FIRST_DEVICE_ID)?.grants).deepEqual(LIMITED_DEVICE_GRANTS);
+    await should(service.setDeviceGrants(FIRST_DEVICE_ID, LIMITED_DEVICE_GRANTS)).be.rejectedWith('disk unavailable');
+    should(credentials.get(FIRST_DEVICE_ID)?.grants).deepEqual(FULL_DEVICE_GRANTS);
   });
 
   it('should report a device it does not hold, or one revoked mid-write, as unchanged', async () => {
@@ -1627,17 +1643,30 @@ describe('PairingService full-access codes', () => {
     should(minted.pairUrl).not.match(/full|grant/u);
   });
 
-  it('should give a default code’s device fleet.use only, and let a newer mint replace the choice', async () => {
+  it('should give a default code’s device full access, and let a newer mint replace the choice', async () => {
     // Arrange
     const { service } = fixture();
-    service.mint('full');
+    service.mint('limited');
     const minted = service.mint();
 
     // Act
     await redeemDirect(service, { code: SECOND_CODE, deviceName: 'phone' }, 'peer-one');
 
     // Assert
-    should(minted.grants).equal('default');
+    should(minted.grants).equal('full');
+    should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(FULL_DEVICE_GRANTS);
+  });
+
+  it('should give a limited code’s device fleet.use only, and echo the choice at the mint', async () => {
+    // Arrange
+    const { service } = fixture();
+    const minted = service.mint('limited');
+
+    // Act
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Assert
+    should(minted.grants).equal('limited');
     should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(LIMITED_DEVICE_GRANTS);
   });
 });

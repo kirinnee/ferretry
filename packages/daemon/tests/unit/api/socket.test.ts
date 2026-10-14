@@ -206,6 +206,93 @@ describe('ApiSocketDispatcher', () => {
     should(presented.map(presentation => presentation.stepUp)).eql([false, true]);
   });
 
+  describe('the unlock at renewal', () => {
+    const device = { deviceId: 'fy_device_id_phone', appSession: 'app-one' } as const;
+    const terminal = { ...streamRoute(), capability: { capability: 'terminal', axis: 'use' } } as const;
+    /** A guard that allows the act only when a step-up stands, as a governed terminal does. */
+    const stepUpGuard: CapabilityGuard = {
+      decide: (_demand, presentation) =>
+        presentation.stepUp ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' },
+      governance: () => ({ governed: true, decide: () => ({ allowed: false, refusal: 'undetermined' }) }),
+      explain: () => 'confirm with your passkey',
+    };
+    const dispatcherUnder = (unlocked: { value: boolean }) =>
+      new ApiSocketDispatcher(new ApiRouter([terminal]), CREDENTIALS, stepUpGuard, undefined, {
+        // No per-act step-up is held: only the unlock stands in for it, and only at the upgrade.
+        held: () => unlocked.value,
+        unlockRequired: () => !unlocked.value,
+      });
+
+    it('should open a stream for an unlocked device and keep it open while the unlock holds', async () => {
+      // Arrange
+      const unlocked = { value: true };
+      const dispatcher = dispatcherUnder(unlocked);
+
+      // Act
+      const opened = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+      const standing = dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }));
+
+      // Assert
+      should(opened.outcome).equal('accepted');
+      should(standing).be.true();
+    });
+
+    it('should refuse a stream for a locked device with 401 unlock_required', async () => {
+      // Arrange
+      const dispatcher = dispatcherUnder({ value: false });
+
+      // Act
+      const refused = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+
+      // Assert
+      should(refused.outcome).equal('refused');
+      should(
+        refused.outcome === 'refused' ? [refused.response.status, jsonBody(refused.response).code] : null,
+      ).deepEqual([401, 'unlock_required']);
+    });
+
+    it('should end an open stream at its renewal once its device’s unlock lapsed, step-up standing or not', async () => {
+      // Arrange — admitted while unlocked, then the unlock lapses.
+      const unlocked = { value: true };
+      const dispatcher = dispatcherUnder(unlocked);
+      const opened = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+      unlocked.value = false;
+
+      // Act
+      const standing = dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }));
+
+      // Assert — the step-up counts as standing, so what ends the stream is the unlock alone.
+      should(opened.outcome).equal('accepted');
+      should(standing).be.false();
+    });
+
+    it('should call the witness as its own, so a witness that reads its own state still answers', () => {
+      // Arrange — an unlockRequired that reads `this`, as the step-up service's does.
+      class Witness {
+        locked = true;
+        held(): boolean {
+          return false;
+        }
+        unlockRequired(): boolean {
+          return this.locked;
+        }
+      }
+      const witness = new Witness();
+      const dispatcher = new ApiSocketDispatcher(
+        new ApiRouter([terminal]),
+        CREDENTIALS,
+        stepUpGuard,
+        undefined,
+        witness,
+      );
+
+      // Act + Assert
+      should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }))).be.false();
+      witness.locked = false;
+      should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }))).be.true();
+    });
+  });
+
   it('should refuse an unauthenticated upgrade before the route is ever accepted', async () => {
     // The whole point of deciding this on the handshake: an anonymous peer must never hold a socket,
     // not even briefly, and must never learn which sockets exist by watching how one dies.
