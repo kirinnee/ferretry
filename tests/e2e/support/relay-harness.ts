@@ -437,18 +437,36 @@ export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
     const suiteRoot = process.env.FY_E2E_RUN_ROOT ?? tmpdir();
     const outDir = await assertNoLiveStatePath(join(suiteRoot, 'fy-e2e-pwa-dist'), 'PWA bundle output');
     await mkdir(outDir, { recursive: true });
-    const build = Bun.spawn(['bun', 'run', 'build', '--outDir', outDir, '--emptyOutDir'], {
-      cwd: join(REPOSITORY_ROOT, 'packages', 'pwa'),
-      env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin, NO_COLOR: '1' },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [code, out, err] = await Promise.all([
-      build.exited,
-      new Response(build.stdout).text(),
-      new Response(build.stderr).text(),
-    ]);
-    if (code !== 0) throw new Error(`the PWA bundle failed to build (code ${String(code)})\n${out}\n${err}`);
+    /**
+     * THE THREE STEPS OF `bun run build`, EACH TOLD WHERE TO WRITE.
+     *
+     * This ran `bun run build --outDir <dir>`, which stopped working when the script grew a release
+     * step: `bun run` appends the arguments to the END of the script, so `--outDir` reached
+     * `scripts/build-release.ts` and `vite build` wrote to the package's own `dist/`. The build
+     * exited 0, the output directory stayed empty, and every journey failed on a missing
+     * `app/index.html`. Spelling the steps out keeps the bundle exactly what Pages publishes — the
+     * verified worker and the (unsigned) release list included — in a directory this run owns.
+     */
+    const steps: readonly (readonly string[])[] = [
+      ['bun', 'run', 'build:fy-render-shell'],
+      ['bun', 'x', 'vite', 'build', '--outDir', outDir, '--emptyOutDir'],
+      ['bun', 'run', 'scripts/build-release.ts', outDir],
+    ];
+    for (const command of steps) {
+      const build = Bun.spawn([...command], {
+        cwd: join(REPOSITORY_ROOT, 'packages', 'pwa'),
+        env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin, NO_COLOR: '1' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [code, out, err] = await Promise.all([
+        build.exited,
+        new Response(build.stdout).text(),
+        new Response(build.stderr).text(),
+      ]);
+      if (code !== 0)
+        throw new Error(`the PWA bundle failed to build at \`${command.join(' ')}\` (code ${String(code)})\n${out}\n${err}`);
+    }
     await stat(join(outDir, 'app', 'index.html'));
     return outDir;
   })();
@@ -583,7 +601,7 @@ interface ChromiumLauncher {
   }>;
 }
 
-function resolvePlaywright(): string {
+export function resolvePlaywright(): string {
   const from = [REPOSITORY_ROOT, join(REPOSITORY_ROOT, 'packages', 'pwa'), join(REPOSITORY_ROOT, 'packages', 'daemon')];
   for (const directory of from) {
     try {
