@@ -160,6 +160,7 @@ interface CdpSession {
 }
 
 interface ProductContext {
+  addInitScript(script: string): Promise<void>;
   newPage(): Promise<ProductPage>;
   newCDPSession(page: ProductPage): Promise<CdpSession>;
   grantPermissions(permissions: readonly string[], options?: { origin?: string }): Promise<void>;

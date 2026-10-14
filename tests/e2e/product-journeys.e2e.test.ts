@@ -5,6 +5,7 @@ import should from 'should';
 import { type E2eEnvironment, withE2eEnvironment } from './fixture';
 import {
   addVirtualAuthenticator,
+  type VirtualAuthenticator,
   adminToken,
   OPERATOR_PASSWORD,
   answerPasswordIfAsked,
@@ -123,7 +124,26 @@ async function withProduct(
       }
       await bootDaemon(environment, boot);
       if (rendezvous !== undefined) await waitForDaemonAtRendezvous(rendezvous);
-      const browser = await launchProductBrowser(teardown);
+      let browser = await launchProductBrowser(teardown);
+      /**
+       * An intermittent HARNESS failure, seen twice in ~20 journeys: the first navigation of a freshly
+       * launched Chrome reports "Target page, context or browser has been closed". It never reproduced
+       * in isolation, so a fresh browser is probed once and relaunched if it is already dead — and the
+       * event is recorded, so it stays visible instead of being retried away silently.
+       */
+      const alive = await browser.page.goto(`${origin.origin}/`, { waitUntil: 'load', timeout: 15_000 }).then(
+        () => true,
+        () => false,
+      );
+      if (!alive) {
+        await recordStep({
+          journey,
+          step: 'harness:chrome-relaunched',
+          status: 'FLAG',
+          evidence: 'a freshly launched Chrome was already closed at its first navigation; relaunched once',
+        });
+        browser = await launchProductBrowser(teardown);
+      }
       await recordStep({
         journey,
         step: 'boot',
@@ -225,6 +245,145 @@ async function reachClaudeQuestion(page: ProductPage, journey: string): Promise<
   );
 }
 
+/** Whether this build has the unlock model (#464): its security settings route exists. */
+async function hasUnlockModel(environment: E2eEnvironment): Promise<boolean> {
+  return (await asOwner(environment, 'GET', '/v1/security')).status !== 404;
+}
+
+const authenticators = new WeakMap<ProductBrowser, VirtualAuthenticator>();
+
+/** One CDP virtual authenticator per browser — a browser is one device with one platform authenticator. */
+async function authenticatorFor(browser: ProductBrowser): Promise<VirtualAuthenticator> {
+  const known = authenticators.get(browser);
+  if (known !== undefined) return known;
+  const made = await addVirtualAuthenticator(browser);
+  authenticators.set(browser, made);
+  // Every unlock or step-up prompt this tab ever shows is counted, across navigations, so "no further
+  // prompts after the unlock" is a number rather than an impression.
+  await browser.context.addInitScript(`(() => {
+    const seen = new WeakSet();
+    const count = () => {
+      for (const node of document.querySelectorAll('[data-step-up-dialog]')) {
+        if (seen.has(node)) continue;
+        seen.add(node);
+        try { sessionStorage.setItem('fy-e2e-prompts', String(Number(sessionStorage.getItem('fy-e2e-prompts') ?? '0') + 1)); } catch {}
+      }
+    };
+    new MutationObserver(count).observe(document, { subtree: true, childList: true });
+  })()`);
+  return made;
+}
+
+async function promptsShown(page: ProductPage): Promise<number> {
+  return page.evaluate<number>(`Number(sessionStorage.getItem('fy-e2e-prompts') ?? '0')`);
+}
+
+/** Answer the unlock prompt with the passkey, if it is on screen or appears within `waitMs`. */
+async function unlockIfAsked(page: ProductPage, waitMs = 15_000): Promise<boolean> {
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    if (
+      await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog] [data-step-up-confirm]') !== null`)
+    ) {
+      await page.click('[data-step-up-dialog] [data-step-up-confirm]');
+      await page.waitForSelector('[data-step-up-dialog]', { state: 'detached', timeout: 30_000 }).catch(async () => {
+        throw new Error(`the unlock prompt did not close: ${String(await textNow(page, '[data-step-up-dialog]'))}`);
+      });
+      return true;
+    }
+    await Bun.sleep(200);
+  }
+  return false;
+}
+
+/**
+ * Journeys 2 and 3 under the unlock model: register a passkey with the virtual authenticator, see the
+ * machine refuse until it is unlocked, unlock it once, and from then on meet no prompt at all.
+ *
+ * On a build without the model (main before #464) this records SKIP and returns.
+ */
+async function registerPasskeyAndUnlock(product: Product, daemonId: string, journey: string): Promise<void> {
+  const { environment, browser, origin } = product;
+  const page = browser.page;
+  if (!(await hasUnlockModel(environment))) {
+    await recordStep({
+      journey,
+      step: 'passkey-unlock',
+      status: 'SKIP',
+      evidence: 'this build has no /v1/security — the unlock model (#464) is not merged',
+    });
+    return;
+  }
+  const authenticator = await authenticatorFor(browser);
+
+  // Locked: the first thing the app asks for is refused until the device is unlocked.
+  await softStep(journey, 'locked-before-unlock', async () => {
+    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await expectScreen(page, '[data-step-up-dialog]', 20_000);
+    await captureScreens(page, journey, '12-locked-unlock-prompt');
+    const said = String(await textNow(page, '[data-step-up-dialog]'));
+    // With no passkey yet the prompt cannot succeed; it must say so rather than fail mutely.
+    await page.click('[data-step-up-dialog] [data-step-up-confirm]');
+    await expectScreen(page, '[data-step-up-failure]', 20_000);
+    const failure = String(await textNow(page, '[data-step-up-failure]'));
+    if (!/passkey/iu.test(failure)) throw new Error(`unlocking with no passkey says: ${failure}`);
+    await captureScreens(page, journey, '13-locked-no-passkey');
+    await page.click('[data-step-up-dialog] button:has-text("Cancel")');
+    return {
+      value: undefined,
+      evidence: `prompt: "${said.slice(0, 120)}"; with no passkey: "${failure.slice(0, 160)}"`,
+    };
+  });
+
+  await step(journey, 'register-passkey', async () => {
+    await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, { waitUntil: 'networkidle', timeout: 30_000 });
+    // The settings page reads non-exempt panels too, so the prompt may come up first; with no passkey
+    // it cannot succeed, so dismiss it and use the card that registers one.
+    if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))
+      await page.click('[data-step-up-dialog] button:has-text("Cancel")');
+    await expectScreen(page, '[data-security-card] [data-security-add]', 20_000);
+    await captureScreens(page, journey, '14-security-card-empty');
+    const before = await authenticator.credentials();
+    await page.click('[data-security-card] [data-security-add]');
+    await expectScreen(page, '[data-security-card] [data-security-passkey]', 30_000);
+    const after = await authenticator.credentials();
+    if (after !== before + 1)
+      throw new Error(`the authenticator holds ${String(after)} credential(s), was ${String(before)}`);
+    await captureScreens(page, journey, '15-security-card-passkey');
+    return {
+      value: undefined,
+      evidence: `a passkey was registered by the CDP virtual authenticator (UV) and listed; ${String(after)} credential(s)`,
+    };
+  });
+
+  await step(journey, 'unlock', async () => {
+    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    const asked = await unlockIfAsked(page, 20_000);
+    if (!asked) throw new Error('the app never asked to unlock a locked machine');
+    await Bun.sleep(1_000);
+    if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))
+      throw new Error('the unlock prompt came straight back');
+    return {
+      value: undefined,
+      evidence: `unlocked with the passkey; prompts so far: ${String(await promptsShown(page))}`,
+    };
+  });
+}
+
+/** After an unlock: assert the journey that followed met no further prompt. */
+async function assertNoFurtherPrompts(product: Product, journey: string, since: number): Promise<void> {
+  if (!(await hasUnlockModel(product.environment))) return;
+  await softStep(journey, 'no-prompts-after-unlock', async () => {
+    const now = await promptsShown(product.browser.page);
+    if (now !== since) throw new Error(`${String(now - since)} more prompt(s) appeared after the unlock`);
+    return {
+      value: undefined,
+      evidence:
+        'full access after one unlock: no further prompt across the first run, session, terminal, secret and setting',
+    };
+  });
+}
+
 interface CoreOutcome {
   readonly daemonId: string;
   readonly marker: string;
@@ -258,24 +417,9 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
     };
   });
 
-  // Journey 2 (passkey) and 3 (locked until unlocked) need the unlock model.
-  const unlock = await asOwner(environment, 'GET', '/v1/security');
-  if (unlock.status === 404) {
-    await recordStep({
-      journey,
-      step: 'passkey-unlock',
-      status: 'SKIP',
-      evidence: 'this build has no /v1/security — the unlock model (#464) is not merged',
-    });
-  } else {
-    const authenticator = await addVirtualAuthenticator(browser);
-    await recordStep({
-      journey,
-      step: 'passkey-unlock',
-      status: 'FAIL',
-      evidence: `unlock model present (authenticator ${authenticator.authenticatorId}); the unlock journey is written once #464 lands`,
-    });
-  }
+  // Journeys 2 (passkey) and 3 (locked until unlocked), under the unlock model when it exists.
+  await registerPasskeyAndUnlock(product, daemonId, journey);
+  const promptsAtUnlock = (await hasUnlockModel(environment)) ? await promptsShown(page) : 0;
 
   // Journey 4: the first run opens by itself.
   await step(journey, 'first-run-opens-itself', async () => {
@@ -432,8 +576,28 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   });
   await captureScreens(page, journey, '11-settings');
 
-  // The audit log (#461) records the session, terminal, secret and setting.
-  const audit = await asOwner(environment, 'GET', '/v1/audit');
+  // A secret is USED by name: the child gets the value, the caller sees only the redaction.
+  await softStep(journey, 'use-secret', async () => {
+    const used = await environment.runFy(
+      ['secret', 'use', '--with', 'E2E_SECRET', '--', 'sh', '-c', 'printf "%s" "$E2E_SECRET"'],
+      {
+        FY_URL: environment.httpUrl(),
+      },
+    );
+    if (used.code !== 0)
+      throw new Error(`fy secret use failed (${String(used.code)}): ${used.err.trim().slice(0, 200)}`);
+    if (`${used.out}${used.err}`.includes('fake-e2e-secret-value'))
+      throw new Error('fy secret use printed the secret VALUE');
+    if (!used.out.includes('[redacted:E2E_SECRET]'))
+      throw new Error(`the child's output was not masked: ${used.out.slice(0, 200)}`);
+    return {
+      value: undefined,
+      evidence: `the child printed the value and the caller saw "${used.out.trim().slice(0, 60)}"`,
+    };
+  });
+
+  // The audit log (#461): every act above is recorded, and Settings shows it.
+  const audit = await asOwner(environment, 'GET', '/v1/audit?limit=200');
   if (audit.status === 404) {
     await recordStep({
       journey,
@@ -442,13 +606,51 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
       evidence: 'this build has no /v1/audit — the audit log (#461) is not merged',
     });
   } else {
-    await recordStep({
+    const events = new Set(
+      ((audit.body as { records?: { event: string }[] }).records ?? []).map(record => record.event),
+    );
+    for (const [event, act] of [
+      ['device.paired', 'the pairing'],
+      ['terminal.opened', 'the terminal'],
+      ['secrets.changed', 'adding the secret'],
+      ['secrets.used', 'using the secret'],
+    ] as const)
+      await softStep(journey, `audited:${event}`, async () => {
+        if (!events.has(event)) throw new Error(`${act} is not in the audit log; it holds ${[...events].join(', ')}`);
+        return { value: undefined, evidence: `${event} recorded` };
+      });
+    await softStep(
       journey,
-      step: 'audit-log',
-      status: 'FAIL',
-      evidence: `audit present (${JSON.stringify(audit.body).slice(0, 300)}); assertions written once #461 lands`,
+      'audited:session-start',
+      async () => {
+        if (![...events].some(event => event.startsWith('session.')))
+          throw new Error(`starting a session is not in the audit log; it holds ${[...events].join(', ')}`);
+        return { value: undefined, evidence: 'a session event recorded' };
+      },
+      'pr461 declares session.opened but never emits it, and lists POST /v1/sessions as not audited (tests/unit/audit/not-audited.ts:23); the brief expects session start in the log',
+    );
+    await softStep(journey, 'settings-shows-security-log', async () => {
+      await page.goto(`${product.origin.origin}/d/${daemonId}/settings#daemons`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      });
+      await unlockIfAsked(page, 3_000);
+      // The tab id depends on how #461 and #464 resolve their shared `security` id; take whichever offers the log.
+      for (const id of ['security-log', 'security']) {
+        if (await page.evaluate<boolean>(`document.querySelector('[data-security-log]') !== null`)) break;
+        if (await page.evaluate<boolean>(`document.querySelector('[data-daemon-panel="${id}"]') !== null`))
+          await page.click(`[data-daemon-panel="${id}"]`);
+        await Bun.sleep(1_000);
+      }
+      await expectScreen(page, '[data-security-log] [data-security-event="device.paired"]', 20_000);
+      await captureScreens(page, journey, '18-security-log');
+      return {
+        value: undefined,
+        evidence: `Settings shows the security log with ${String(await page.evaluate<number>(`document.querySelectorAll('[data-security-event]').length`))} event(s)`,
+      };
     });
   }
+  await assertNoFurtherPrompts(product, journey, promptsAtUnlock);
   return { daemonId, marker, secretValue: 'fake-e2e-secret-value', sessionUrl };
 }
 
@@ -457,6 +659,7 @@ describe('the product, from a fresh machine to a working session', () => {
     // Arrange / Act / Assert — every step asserts as it goes and is written to the journey log.
     await withProduct('j02-j05-core', async product => {
       await coreJourney(product, 'j02-j05-core');
+      assertNoSoftFailures('j02-j05-core');
     });
   }, 600_000);
 
@@ -673,6 +876,157 @@ describe('signing a harness in from the first run', () => {
   }, 600_000);
 });
 
+describe('the unlock model: passkeys, unlock, and who may loosen security', () => {
+  it('should re-lock on restart, tighten from the device, loosen only at the machine, and audit both', async () => {
+    const journey = 'j03-j12-unlock-security';
+    await withProduct(journey, async product => {
+      const { environment, browser, origin } = product;
+      const page = browser.page;
+      if (!(await hasUnlockModel(environment))) {
+        // Arrange / Act / Assert — nothing to drive on a build without the model.
+        await recordStep({
+          journey,
+          step: 'unlock-model',
+          status: 'SKIP',
+          evidence: 'no /v1/security on this build (#464 not merged)',
+        });
+        return;
+      }
+
+      // Arrange — paired, a passkey registered, unlocked.
+      const daemonId = await pair(product, journey);
+      await registerPasskeyAndUnlock(product, daemonId, journey);
+      const stored = await deviceGrantForLeakSearchOnly(page as never);
+
+      // Act / Assert — a restart forgets the unlock; the next open asks again and one passkey answers.
+      await softStep(journey, 'relock-on-restart', async () => {
+        await environment.stopDaemon();
+        await bootDaemon(environment, product.boot);
+        await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+        if (!(await unlockIfAsked(page, 20_000)))
+          throw new Error('a restarted machine did not ask to be unlocked again');
+        return {
+          value: undefined,
+          evidence: 'after fyd restarted, the app asked to unlock and the passkey unlocked it',
+        };
+      });
+
+      // Tighten from the device: shorter unlock validity.
+      await softStep(journey, 'tighten-from-device', async () => {
+        await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        });
+        await unlockIfAsked(page, 3_000);
+        await expectScreen(page, '[data-security-settings] [data-security-input="unlockValidityHours"]', 20_000);
+        await captureScreens(page, journey, '16-security-settings');
+        await page.fill('[data-security-input="unlockValidityHours"]', '4');
+        await page.click('[data-security-save="unlockValidityHours"]');
+        await waitUntil(
+          page,
+          `(document.querySelector('[data-security-value="unlockValidityHours"]')?.textContent ?? '').includes('4')`,
+          15_000,
+          'the new validity to show',
+        );
+        const read = await asOwner(environment, 'GET', '/v1/security');
+        const hours = (read.body as { settings?: { unlockValidityHours?: number } }).settings?.unlockValidityHours;
+        if (hours !== 4) throw new Error(`the daemon reads unlockValidityHours=${String(hours)}`);
+        return { value: undefined, evidence: 'the device shortened the unlock to 4 h; the daemon holds 4' };
+      });
+
+      // Loosen from the device: the control refuses, and says where to do it.
+      await softStep(journey, 'loosen-refused-on-device', async () => {
+        await page.fill('[data-security-input="unlockValidityHours"]', '12');
+        const disabled = await page.evaluate<boolean>(
+          `document.querySelector('[data-security-save="unlockValidityHours"]')?.disabled === true`,
+        );
+        const note = String(await textNow(page, '[data-security-note="unlockValidityHours"]'));
+        await captureScreens(page, journey, '17-security-loosen-refused');
+        if (!disabled) throw new Error('the device is offered a Save that would loosen security');
+        if (!/fy daemon security set/u.test(note))
+          throw new Error(`the refusal does not say where to loosen it: ${note}`);
+        return { value: undefined, evidence: `Save disabled; note: "${note.slice(0, 160)}"` };
+      });
+
+      // Loosen at the machine.
+      await softStep(journey, 'loosen-at-machine', async () => {
+        const set = await environment.runFy(['daemon', 'security', 'set', 'unlockValidityHours', '8'], {
+          FY_URL: environment.httpUrl(),
+        });
+        if (set.code !== 0) throw new Error(`fy daemon security set failed (${String(set.code)}): ${set.err.trim()}`);
+        const read = await asOwner(environment, 'GET', '/v1/security');
+        const hours = (read.body as { settings?: { unlockValidityHours?: number } }).settings?.unlockValidityHours;
+        if (hours !== 8) throw new Error(`after fy set, the daemon reads ${String(hours)}`);
+        return {
+          value: undefined,
+          evidence: `fy daemon security set → "${set.out.trim().slice(0, 120)}"; the daemon holds 8`,
+        };
+      });
+
+      // Both changes are in the audit log (#461) and Settings shows them.
+      await softStep(
+        journey,
+        'security-changes-audited',
+        async () => {
+          const audit = await environment.runFy(['daemon', 'audit', '--json'], { FY_URL: environment.httpUrl() });
+          if (audit.code !== 0)
+            throw new Error(`fy daemon audit failed (${String(audit.code)}): ${audit.err.trim().slice(0, 200)}`);
+          if (!/security/u.test(audit.out))
+            throw new Error(`the audit log has no security-settings change: ${audit.out.slice(0, 400)}`);
+          return { value: undefined, evidence: 'fy daemon audit lists the security changes' };
+        },
+        'cross-PR gap: #461 audits the deleted password routes and has no rule for PATCH /v1/security (pr461 packages/daemon/src/lib/audit/routes.ts:61,63); #464 writes security changes to state/security-audit.jsonl instead. MAJOR if the audit log is meant to hold them',
+      );
+
+      // fy passkey window re-opens registration for one device, and a second passkey can be added.
+      await softStep(journey, 'passkey-window', async () => {
+        const opened = await environment.runFy(['passkey', 'window', stored.deviceId], {
+          FY_URL: environment.httpUrl(),
+        });
+        if (opened.code !== 0)
+          throw new Error(`fy passkey window failed (${String(opened.code)}): ${opened.err.trim()}`);
+        const authenticator = await authenticatorFor(browser);
+        const before = await authenticator.credentials();
+        await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        });
+        await unlockIfAsked(page, 3_000);
+        await expectScreen(page, '[data-security-card] [data-security-add]', 20_000);
+        await page.click('[data-security-card] [data-security-add]');
+        await waitUntil(
+          page,
+          `document.querySelectorAll('[data-security-card] [data-security-passkey]').length >= 2`,
+          30_000,
+          'a second passkey',
+        );
+        if ((await authenticator.credentials()) !== before + 1)
+          throw new Error('the authenticator did not gain a credential');
+        return {
+          value: undefined,
+          evidence: `"${opened.out.trim().slice(0, 140)}"; a second passkey was then added from the device`,
+        };
+      });
+
+      // A limited pairing gives a second device only fleet.use.
+      await softStep(journey, 'pair-limited', async () => {
+        const limited = await mintPairingLink(environment, origin.origin, ['--limited']);
+        const second = await launchProductBrowser(product.teardown);
+        await confirmPairing(second.page, limited.url);
+        const devices = await asOwner(environment, 'GET', '/v1/pair/devices');
+        const rows = (devices.body as { devices: { id: string; grants?: unknown }[] }).devices;
+        const fresh = rows.find(row => row.id !== stored.deviceId);
+        if (fresh === undefined) throw new Error('the limited device is not listed');
+        const grants = JSON.stringify(fresh.grants ?? {});
+        if (/"terminal":\s*\{[^}]*"use":\s*true/u.test(grants))
+          throw new Error(`a --limited device holds terminal.use: ${grants}`);
+        return { value: undefined, evidence: `limited device grants: ${grants.slice(0, 200)}` };
+      });
+      assertNoSoftFailures(journey);
+    });
+  }, 900_000);
+});
+
 describe('access ends when it should, and the person is told', () => {
   it('should cut a revoked device off at once, say so, and pair again', async () => {
     const journey = 'j08-revoke';
@@ -691,7 +1045,9 @@ describe('access ends when it should, and the person is told', () => {
       const stored = await deviceGrantForLeakSearchOnly(page as never);
 
       // Act — the owner revokes the device. On main there is no `fy device revoke`, so the route.
-      const cli = await environment.runFy(['device', 'revoke', stored.deviceId], { FY_URL: environment.httpUrl() });
+      const cli = await environment.runFy(['device', 'revoke', stored.deviceId, '--yes'], {
+        FY_URL: environment.httpUrl(),
+      });
       const viaCli = cli.code === 0;
       await recordStep({
         journey,
