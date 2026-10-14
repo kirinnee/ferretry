@@ -67,10 +67,21 @@ export function harnessTeardown(): HarnessTeardown {
       // Reverse order: the browser must go before the origin it is pointed at, and the daemon
       // before the rendezvous it is dialling, or shutdown produces errors that read as defects.
       for (const entry of entries.reverse()) {
+        // Bounded: one close that never settles (a server waiting on a connection a dead peer will never
+        // end) hung a whole journey until the test runner's ten-minute timeout, naming nothing. A
+        // timeout here names the part instead, and the remaining parts are still released.
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          await entry.close();
+          await Promise.race([
+            Promise.resolve().then(() => entry.close()),
+            new Promise<never>((_settle, fail) => {
+              timer = setTimeout(() => fail(new Error(`${entry.label} did not close within 10s`)), 10_000);
+            }),
+          ]);
         } catch (error) {
           failures.push(new Error(`harness teardown failed: ${entry.label}`, { cause: error }));
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
         }
       }
       entries.length = 0;
@@ -685,7 +696,7 @@ export async function launchChrome(teardown: HarnessTeardown, options: ChromeOpt
   page.on('pageerror', payload => pageErrors.push(String(payload)));
 
   const stop = async (): Promise<void> => {
-    await browser.close();
+    await closeChromeBounded(() => browser.close());
   };
   teardown.add('chrome', stop);
   return { page, console: consoleLines, pageErrors, stop };
@@ -964,4 +975,27 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
     }
   }
   throw lastError;
+}
+
+/**
+ * Close Chrome, and if Playwright's `close()` never settles, end the Chrome this process started.
+ *
+ * Seen in full-tier runs after a journey had already failed: `browser.close()` hung, and the teardown
+ * behind it never ran. Only Chrome processes whose PARENT is this test process are signalled, so a
+ * browser belonging to any other run on the host is never touched.
+ */
+export async function closeChromeBounded(close: () => Promise<void>): Promise<void> {
+  const closed = await Promise.race([close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(() => false);
+  if (closed) return;
+  const children = Bun.spawn(['pgrep', '-P', String(process.pid), '-f', 'chrom'], { stdout: 'pipe', stderr: 'ignore' });
+  for (const pid of (await new Response(children.stdout).text())
+    .split('\n')
+    .map(Number)
+    .filter(n => Number.isInteger(n) && n > 1)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
 }

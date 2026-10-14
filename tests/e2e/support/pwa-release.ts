@@ -18,7 +18,12 @@ import { spawnSync } from 'node:child_process';
 import { appendFile, cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { assertNoLiveStatePath } from '../fixture.ts';
-import { chromeExecutable, type HarnessTeardown, launchChromiumWithRetry } from './relay-harness.ts';
+import {
+  chromeExecutable,
+  type HarnessTeardown,
+  closeChromeBounded,
+  launchChromiumWithRetry,
+} from './relay-harness.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 const PWA_ROOT = join(REPOSITORY_ROOT, 'packages', 'pwa');
@@ -285,7 +290,7 @@ export async function launchReleaseBrowser(
   page.on('console', payload => consoleLines.push(String((payload as { text(): string }).text())));
   page.on('pageerror', payload => consoleLines.push(`pageerror: ${String(payload)}`));
   const stop = async (): Promise<void> => {
-    await browser.close();
+    await closeChromeBounded(() => browser.close());
   };
   teardown.add('release chrome', stop);
   return { page, console: consoleLines, setOffline: offline => context.setOffline(offline), stop };
