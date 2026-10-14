@@ -5,6 +5,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A new push to a PR (or to a feature branch) supersedes the run for its old SHA, so that run is
+# cancelled instead of holding a runner. Everything else — main, tags, manual dispatch — gets a
+# group of its own run id: a shared group would still cancel a *pending* main run when a newer
+# one queued, and Release needs every main CI run to complete.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') && github.ref
+      || github.run_id
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
+
 jobs:
   precommit:
     name: Pre-Commit
