@@ -5,11 +5,15 @@
  * destinations and live state that name a daemon are built from explicit
  * connections. That distinction lets this page switch pairings without
  * retaining the previous daemon's link, health result, or action target.
+ *
+ * ONE LOOK PER LEVEL (the approved usability proposal). The app's own navigation is above this page;
+ * here, the sidebar (desktop) or grouped cards (phone) choose a section or a machine; inside a machine,
+ * underlined tabs choose a view; and only actions look like buttons.
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { ChevronLeft, MonitorCog, Palette, Server, SlidersHorizontal } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { ChevronLeft } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
@@ -19,39 +23,40 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../lib/pages/routes.ts';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
-import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
-import { PickerTrigger } from '../../shell/picker-trigger.tsx';
-import { RouteLink } from '../../shell/route-link.tsx';
+import { Button } from '../../shell/primitives.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
 import { machineItemHash, settingsFlowFromHash } from '../fleet/setup/settings-route.ts';
 import { DEFAULT_MACHINE_TAB, type MachineRoute, machineHash, parseMachineHash } from '../fleet/shell/machine-route.ts';
-import { MachinesSurface, type MachineTabSurfaces } from '../fleet/shell/machines-surface.tsx';
+import {
+  type DaemonPanelsRenderer,
+  MachinesSurface,
+  type MachineTabSurfaces,
+} from '../fleet/shell/machines-surface.tsx';
+import { useMachineReach } from '../fleet/shell/use-machine-reach.ts';
+import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
-import { type DaemonReachabilityProbe, DaemonSettings, daemonDisplayName } from './daemon-settings.tsx';
+import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import type { PasskeyClientFactory } from './security-settings.tsx';
-import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import {
   isSettingId,
   isSettingsSectionId,
-  SETTINGS_SECTIONS,
   type SettingDefinition,
   type SettingId,
-  type SettingsSectionDefinition,
   type SettingsSectionId,
   settingDefinition,
   settingsSectionDefinition,
   settingsSectionForSetting,
 } from './settings-catalog.ts';
+import { type SettingsMachineEntry, SettingsHome, SettingsSidebar } from './settings-navigation.tsx';
 
 export const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
@@ -59,119 +64,47 @@ export const TEXT_SCALE_OPTIONS = [
   { id: 'larger', label: 'Larger', description: '125% of default.' },
 ] as const;
 
-const SETTINGS_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
+/**
+ * Addresses that used to open the Daemons section or one of its panels. Daemons is part of each
+ * machine now, so these land on that machine's Machine tab — a bookmark, a notice's link or a palette
+ * row written before the merge still arrives where it meant to.
+ */
+const LEGACY_DAEMONS_ANCHOR = 'daemons';
+const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
+  'warden',
+  'secrets',
+  'devices',
+  'grants',
+  'security',
+  'resource-limits',
+  'doctor',
+  'model-pricing',
+  'security-log',
+  'carrier',
+  'host-checks',
+]);
 
-/** The daemon panel `#security` opens, inside the Daemons section. */
-const SECURITY_PANEL = 'security';
+const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));
 
 const settingFromHash = (): SettingId | null => {
-  if (typeof window === 'undefined') return null;
-  const value = window.location.hash.replace(/^#/, '');
+  const value = hashWord();
   return isSettingId(value) ? value : null;
 };
 
+/** The section the address opens, or `null` for Settings' own first screen. */
 const sectionFromHash = (): SettingsSectionId | null => {
-  if (typeof window === 'undefined') return null;
-  const value = window.location.hash.replace(/^#/, '');
-  if (value === SECURITY_PANEL) return 'daemons';
+  const value = hashWord();
   if (isSettingsSectionId(value)) return value;
   if (parseMachineHash(window.location.hash) !== null) return 'machines';
   return isSettingId(value) ? settingsSectionForSetting(value) : null;
 };
 
-/**
- * ONE ICON PER SECTION, for the same reason the daemon panel rail has one per panel: all the rows or
- * none of them, at one size, from the one set this app already draws from.
- *
- * Three rows is few enough that iconless was defensible on its own — but it is not on its own. It sits
- * beside a ten-row rail that now has them, and the two rails are the same component at two levels of the
- * same screen; one of them being a column of glyphs and the other a column of bare text is the
- * inconsistency, not the fix for it.
- */
-const SETTINGS_SECTION_ICONS: Readonly<Record<SettingsSectionId, ReactNode>> = {
-  appearance: <Palette size={16} aria-hidden="true" />,
-  behaviour: <SlidersHorizontal size={16} aria-hidden="true" />,
-  // The machines, not the pairing: this section is where a reader picks WHICH host they are configuring.
-  daemons: <Server size={16} aria-hidden="true" />,
-  // What runs on a machine, so the machine with a gear rather than a second server.
-  machines: <MonitorCog size={16} aria-hidden="true" />,
+/** Where a legacy Daemons address now lives, for this page's machine; `null` when it is not one. */
+const legacyDaemonsTarget = (machineName: string): string | null => {
+  const value = hashWord();
+  if (value === LEGACY_DAEMONS_ANCHOR) return machineHash(machineName, 'machine');
+  return LEGACY_PANEL_ANCHORS.has(value) ? machineItemHash(machineName, 'machine', value) : null;
 };
-
-/**
- * Level one of the shared rail. The section catalogue is a constant, not runtime
- * state, so the rows are built once at module scope rather than per render.
- */
-const SETTINGS_SECTION_ITEMS: readonly ChoiceRailItem<SettingsSectionId>[] = SETTINGS_SECTIONS.map(section => ({
-  id: section.id,
-  label: section.label,
-  detail: section.description,
-  icon: SETTINGS_SECTION_ICONS[section.id],
-}));
-
-function MobileSettingsSectionPicker({
-  active,
-  definition,
-  open,
-  onOpen,
-  onClose,
-  onSelect,
-}: {
-  readonly active: SettingsSectionId;
-  readonly definition: SettingsSectionDefinition;
-  readonly open: boolean;
-  readonly onOpen: () => void;
-  readonly onClose: () => void;
-  readonly onSelect: (id: SettingsSectionId) => void;
-}) {
-  const titleId = useId();
-  return (
-    <div className="md:hidden">
-      <PickerTrigger
-        eyebrow="Settings section"
-        value={definition.label}
-        icon={
-          <span className="flex w-4 shrink-0 items-center justify-center text-accent" aria-hidden="true">
-            {SETTINGS_SECTION_ICONS[definition.id]}
-          </span>
-        }
-        open={open}
-        controls="settings-section-picker"
-        marker="data-settings-section-trigger"
-        onOpen={onOpen}
-      />
-      <BottomSheet
-        id="settings-section-picker"
-        open={open}
-        onClose={onClose}
-        labelledBy={titleId}
-        closeLabel="Close settings section picker"
-        panelClassName="bg-surface"
-        maxHeight={SETTINGS_PICKER_HEIGHT}
-        zIndexClass="z-50"
-      >
-        <div className="min-h-0 overflow-y-auto px-panel pb-4">
-          <h2 id={titleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
-            Choose a settings section
-          </h2>
-          <p className="mb-3 mt-1 text-cell leading-base text-muted">
-            Pick one area; the settings underneath stay on this page.
-          </p>
-          <nav aria-label="Settings sections">
-            <ChoiceRail
-              items={SETTINGS_SECTION_ITEMS}
-              activeId={active}
-              marker="data-settings-section-choice"
-              onSelect={id => {
-                onSelect(id);
-                onClose();
-              }}
-            />
-          </nav>
-        </div>
-      </BottomSheet>
-    </div>
-  );
-}
 
 export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
@@ -292,7 +225,6 @@ export interface SettingsPageProps {
   readonly lockedMachines?: readonly DaemonId[];
   /** The Machines tabs' surfaces; a tab nobody supplies is the shell's honest empty frame. */
   readonly machineTabs?: MachineTabSurfaces;
-  readonly onSelectDaemon: (daemonId: DaemonId) => void;
   readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
   /** A machine answered with the name it goes by, so a pairing that predates keeping it can learn it. */
   readonly onMachineNamed?: (daemonId: DaemonId, name: string) => void;
@@ -309,15 +241,15 @@ export interface SettingsPageProps {
   readonly carrier?: ConnectionChoice | undefined;
   /** Whether the live advertisement offers a rendezvous to fall back to at all. */
   readonly relayAdvertised?: boolean;
-  /** Called for the header's in-app Back action. */
+  /** How the page commits an in-app navigation; without one it assigns the address. */
   readonly onNavigate?: (to: string) => void;
   readonly className?: string;
 }
 
 /**
  * One Settings implementation for desktop and narrow screens. Desktop keeps a
- * vertical section list beside the active content; narrow screens replace that
- * persistent list with the app's shared BottomSheet picker. The page keeps one
+ * grouped sidebar beside the open section; a phone shows one level per screen —
+ * the grouped cards first, then the section with “‹ Settings” — and the page keeps one
  * scroll owner on both layouts.
  */
 export function SettingsPage({
@@ -337,7 +269,6 @@ export function SettingsPage({
   createMachineClient,
   machineTabs,
   lockedMachines,
-  onSelectDaemon,
   onRenameDaemon,
   onMachineNamed,
   onRemoveDaemon,
@@ -356,34 +287,33 @@ export function SettingsPage({
   const densityState = useDensity(controls);
   const density = densityState.density;
   const theme = useTheme();
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => sectionFromHash() ?? 'appearance');
-  const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
-  const [requestedPanel, setRequestedPanel] = useState<string | undefined>(() =>
-    window.location.hash === `#${SECURITY_PANEL}` ? SECURITY_PANEL : undefined,
-  );
+  // `null` is Settings' own first screen: the grouped cards on a phone, Appearance on a desktop.
+  const [openedSection, setOpenedSection] = useState<SettingsSectionId | null>(() => sectionFromHash());
   const [machineRoute, setMachineRoute] = useState<MachineRoute>(
     () => parseMachineHash(window.location.hash) ?? { tab: DEFAULT_MACHINE_TAB },
   );
   const followedHash = useRef<string | null>(null);
   const focusFrame = useRef<number | undefined>(undefined);
+  const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
+  const selectedName = selectedRecord === undefined ? undefined : daemonDisplayName(selectedRecord);
 
   const followHash = useCallback((): void => {
     if (followedHash.current === window.location.hash) return;
+    // An address from before Daemons joined Machines is rewritten in place, so Back does not return to it.
+    const legacy = selectedName === undefined ? null : legacyDaemonsTarget(selectedName);
+    if (legacy !== null) window.history.replaceState(window.history.state, '', legacy);
     followedHash.current = window.location.hash;
-    const nextSection = sectionFromHash();
     const target = settingFromHash();
     const nextMachineRoute = parseMachineHash(window.location.hash);
-    setRequestedPanel(window.location.hash === `#${SECURITY_PANEL}` ? SECURITY_PANEL : undefined);
     if (nextMachineRoute !== null) setMachineRoute(nextMachineRoute);
-    if (nextSection === null) return;
-    setActiveSection(nextSection);
+    setOpenedSection(sectionFromHash());
     if (target === null) return;
     if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current);
     focusFrame.current = requestAnimationFrame(() => {
       const setting = document.getElementById(`settings-${target}`);
       setting?.focus({ preventScroll: false });
     });
-  }, []);
+  }, [selectedName]);
 
   // Router.navigate uses pushState, which causes a React render but no native
   // hashchange. Compare the hash after every commit so a same-route palette
@@ -401,6 +331,7 @@ export function SettingsPage({
     };
   }, [followHash]);
 
+  const activeSection: SettingsSectionId = openedSection ?? 'appearance';
   const section = settingsSectionDefinition(activeSection);
 
   const controlsById = useMemo<Record<SettingId, ReactNode>>(
@@ -491,7 +422,6 @@ export function SettingsPage({
     // behind the next one that is added.
     [controls, density, densityState.explicit, densityState.setDensity, device, dictation, notifications, theme],
   );
-  const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
 
   /**
    * A Machines link names a machine by the name this browser shows for it. The PATH decides which
@@ -520,17 +450,20 @@ export function SettingsPage({
     },
     [connections, go],
   );
+  const openSection = (id: Exclude<SettingsSectionId, 'machines'>): void => go(`${daemonSettingsPath(daemonId)}#${id}`);
+  /** Back to Settings' first screen — on a phone, the grouped cards. */
+  const home = (): void => go(daemonSettingsPath(daemonId));
   /**
    * A machine that is not set up opens its first run by itself. A flow the address already names — Clone
    * from another machine, installing a tool, the first run itself — is left alone: that is somebody's
    * own choice of how to set it up. It is always THIS page's machine, so only the hash moves — the way
-   * the Settings tab opens its own flows, which is the event that tab follows.
+   * the Machine tab opens its own flows, which is the event that tab follows.
    */
   const openSetup = useCallback(
     (target: DaemonId): void => {
       const record = connections.find(candidate => candidate.daemonId === target);
       if (record === undefined || settingsFlowFromHash(window.location.hash) !== null) return;
-      window.location.hash = machineItemHash(daemonDisplayName(record), 'settings', 'setup');
+      window.location.hash = machineItemHash(daemonDisplayName(record), 'machine', 'setup');
     },
     [connections],
   );
@@ -539,10 +472,76 @@ export function SettingsPage({
     if (switchToId !== undefined) openMachine(switchToId, machineRoute.tab);
   }, [machineRoute.tab, openMachine, switchToId]);
 
+  const reach = useMachineReach({
+    daemonId,
+    connections,
+    createClient: createMachineClient,
+    ...(lockedMachines === undefined ? {} : { locked: lockedMachines }),
+    ...(onMachineNamed === undefined ? {} : { onNamed: onMachineNamed }),
+  });
+  const machines: readonly SettingsMachineEntry[] = connections.map(connection => ({
+    daemonId: connection.daemonId,
+    name: distinctDaemonName(connection, connections),
+    reach: reach.reachOf(connection.daemonId),
+  }));
+
+  const daemonPanels = useMemo<DaemonPanelsRenderer | undefined>(
+    () =>
+      selectedRecord === undefined
+        ? undefined
+        : (panel, onOpenPanel) => (
+            <DaemonSettingsFrame
+              key={String(daemonId)}
+              connection={selectedRecord}
+              connectionRecord={selectedRecord}
+              name={daemonDisplayName(selectedRecord)}
+              readWardenStatus={readWardenStatus}
+              createWardenClient={createWardenClient}
+              {...(createGrantClient ? { createGrantClient } : {})}
+              {...(createPairingClient ? { createPairingClient } : {})}
+              {...(createPasskeyClient ? { createPasskeyClient } : {})}
+              {...(createSecretClient ? { createSecretClient } : {})}
+              panel={panel}
+              onOpenPanel={onOpenPanel}
+              additionalTabs={daemonSettingsTabs}
+              carrier={carrier}
+              relayAdvertised={relayAdvertised}
+              probeDaemon={probeDaemon}
+              onRenameDaemon={onRenameDaemon}
+              onRemoveDaemon={onRemoveDaemon}
+            />
+          ),
+    [
+      carrier,
+      createGrantClient,
+      createPairingClient,
+      createPasskeyClient,
+      createSecretClient,
+      createWardenClient,
+      daemonId,
+      daemonSettingsTabs,
+      onRemoveDaemon,
+      onRenameDaemon,
+      probeDaemon,
+      readWardenStatus,
+      relayAdvertised,
+      selectedRecord,
+    ],
+  );
+
+  const navigation = {
+    machines,
+    onSection: openSection,
+    onMachine: (target: DaemonId) => openMachine(target, DEFAULT_MACHINE_TAB),
+    onAddMachine: onAddDaemon,
+  };
+  const atHome = openedSection === null;
+
   return (
     <main
       data-settings-scroller
       data-density={density}
+      data-settings-at-home={atHome ? 'true' : 'false'}
       // `relative` is not layout here — it is what keeps this page's own
       // scrolling INSIDE this element. Half the controls below are `sr-only`
       // radios, and `sr-only` is `position: absolute`: an absolutely positioned
@@ -555,70 +554,46 @@ export function SettingsPage({
       // surface below it, and nothing can scroll a `position: fixed` box back.
       className={cn(
         'scroll-thin relative h-full min-h-0 w-full overflow-y-auto overscroll-contain px-panel pb-4 [touch-action:pan-y]',
+        // The phone's first screen is inset cards on a RECESSED ground, so each group reads as one block.
+        atHome && 'max-md:bg-ground',
         className,
       )}
     >
-      {/* WIDER, because the wrapped paths and the four-line rail rows were the SAME defect as the empty
-          gutters either side of this column. At 1440 the old 1080px cap left ~180px unused on both sides
-          while a 200px rail tore `/Users/…/claude-personal` into five fragments; the content column is
-          what was short of room, not the page. 1320px keeps a measure that is still readable — the prose
-          inside every panel is capped by its own card, not by this — and hands the rest to the rail and
-          the values. */}
-      <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-3 py-2">
-        <header className="flex min-w-0 flex-wrap items-center gap-2">
-          <RouteLink
-            to={`/d/${encodeURIComponent(daemonId)}`}
-            onNavigate={onNavigate}
-            aria-label="Back to sessions"
-            title="All sessions"
-            className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-surface-2 hover:text-fg"
-          >
-            <ChevronLeft size={18} aria-hidden="true" />
-          </RouteLink>
-          <div className="min-w-0">
-            <h1 className="m-0 font-display text-display font-bold tracking-display">Settings</h1>
-            <p className="mt-0.5 text-ui text-muted">Browser preferences and daemon connections.</p>
+      {/* WIDER, because the wrapped paths were the SAME defect as the empty gutters either side of this
+          column: the content column is what was short of room, not the page. 1320px keeps a measure that
+          is still readable — the prose inside every panel is capped by its own card. */}
+      <div className="mx-auto grid w-full max-w-[1320px] min-w-0 grid-cols-1 items-start gap-3 py-2 md:grid-cols-[15rem_minmax(0,1fr)] md:gap-6 md:py-4">
+        <div className="sticky top-2 hidden min-w-0 md:block">
+          <h1 className="m-0 mb-3 px-control-x font-display text-display font-bold tracking-display">Settings</h1>
+          <SettingsSidebar {...navigation} active={activeSection} activeMachine={daemonId} />
+        </div>
+
+        {/* THE PHONE'S FIRST SCREEN, and only there: one level per screen, so the cards are the whole page
+            until one is tapped. */}
+        {atHome ? (
+          <div className="min-w-0 md:hidden">
+            <h1 className="m-0 mb-2 pt-1 font-display text-display font-bold tracking-display">Settings</h1>
+            <SettingsHome {...navigation} />
           </div>
-        </header>
+        ) : null}
 
-        <div className="grid min-w-0 grid-cols-1 items-start gap-3 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-5">
-          {/* NO CARD, and a single rule instead. As a bordered box this was a short floating panel beside
-              a much taller bordered panel, then a THIRD bordered rail inside that one — three cards at one
-              depth, each drawing its own edge. Navigation is not a thing being read, so it is separated
-              from the content by a rule and the grid gap, which is what every settings sidebar the reader
-              already knows looks like. `border-strong`, not `border-soft`: a soft hairline is invisible
-              against these surfaces, which is how the rail ended up needing a whole card to be seen. */}
-          <nav
-            className="sticky top-2 hidden md:block md:border-r md:border-border-strong md:pr-3"
-            aria-label="Settings sections"
+        <div className={cn('min-w-0', atHome && 'hidden md:block')}>
+          <div className="mb-2 md:hidden">
+            <Button type="button" variant="ghost" className="kt-btn--flush-start" data-settings-back="" onClick={home}>
+              <ChevronLeft size={16} aria-hidden="true" />
+              Settings
+            </Button>
+          </div>
+
+          <section
+            id="settings-section-panel"
+            aria-labelledby={
+              section.id === 'machines' ? 'settings-machine-heading' : `settings-section-heading-${section.id}`
+            }
+            data-settings-section={section.id}
+            className="min-w-0"
           >
-            <ChoiceRail
-              items={SETTINGS_SECTION_ITEMS}
-              activeId={activeSection}
-              marker="data-settings-section-choice"
-              onSelect={setActiveSection}
-              // The section's own description is already the panel heading's second line, one column to
-              // the right and visible at the same time, so a second copy in the row was pure repetition.
-              rows="single-line"
-            />
-          </nav>
-
-          <div className="min-w-0">
-            <MobileSettingsSectionPicker
-              active={activeSection}
-              definition={section}
-              open={sectionPickerOpen}
-              onOpen={() => setSectionPickerOpen(true)}
-              onClose={() => setSectionPickerOpen(false)}
-              onSelect={setActiveSection}
-            />
-
-            <section
-              id="settings-section-panel"
-              aria-labelledby={`settings-section-heading-${section.id}`}
-              data-settings-section={section.id}
-              className="mt-3 min-w-0 md:mt-0"
-            >
+            {section.id === 'machines' ? null : (
               <header className="mb-3">
                 <h2
                   id={`settings-section-heading-${section.id}`}
@@ -628,78 +603,42 @@ export function SettingsPage({
                 </h2>
                 <p className="mb-0 mt-1 text-cell leading-base text-muted">{section.description}</p>
               </header>
+            )}
 
-              <div className="flex min-w-0 flex-col gap-3">
-                {section.settingIds.map(id => {
-                  const definition = settingDefinition(id);
-                  return (
-                    <SettingsSection key={definition.id} definition={definition}>
-                      {controlsById[definition.id]}
-                    </SettingsSection>
-                  );
-                })}
+            <div className="flex min-w-0 flex-col gap-3">
+              {section.settingIds.map(id => {
+                const definition = settingDefinition(id);
+                return (
+                  <SettingsSection key={definition.id} definition={definition}>
+                    {controlsById[definition.id]}
+                  </SettingsSection>
+                );
+              })}
 
-                {section.id === 'daemons' ? (
-                  <>
-                    <DaemonSettings
-                      activeDaemonId={daemonId}
-                      connections={connections}
-                      onSelectDaemon={onSelectDaemon}
-                      onAddDaemon={onAddDaemon}
-                    />
-                    {selectedRecord === undefined ? (
-                      <p className="m-0 text-ui leading-base text-warn" role="alert">
-                        This daemon is not present in the browser’s pairing registry, so its settings cannot be shown.
-                      </p>
-                    ) : (
-                      <DaemonSettingsFrame
-                        key={String(daemonId)}
-                        connection={selectedRecord}
-                        connectionRecord={selectedRecord}
-                        name={daemonDisplayName(selectedRecord)}
-                        readWardenStatus={readWardenStatus}
-                        createWardenClient={createWardenClient}
-                        {...(createGrantClient ? { createGrantClient } : {})}
-                        {...(createPairingClient ? { createPairingClient } : {})}
-                        {...(createPasskeyClient ? { createPasskeyClient } : {})}
-                        {...(createSecretClient ? { createSecretClient } : {})}
-                        requestedPanel={requestedPanel}
-                        additionalTabs={daemonSettingsTabs}
-                        carrier={carrier}
-                        relayAdvertised={relayAdvertised}
-                        probeDaemon={probeDaemon}
-                        onRenameDaemon={onRenameDaemon}
-                        onRemoveDaemon={onRemoveDaemon}
-                      />
-                    )}
-                  </>
-                ) : null}
-
-                {section.id === 'machines' ? (
-                  createMachineClient === undefined ? (
-                    <p className="m-0 text-ui leading-base text-warn" role="alert">
-                      Machines cannot be shown because this page was opened without a way to reach them.
-                    </p>
-                  ) : (
-                    <MachinesSurface
-                      key={String(daemonId)}
-                      daemonId={daemonId}
-                      connections={connections}
-                      tab={machineRoute.tab}
-                      {...(unknownMachine === undefined ? {} : { unknownMachine })}
-                      onOpen={openMachine}
-                      onAddMachine={onAddDaemon}
-                      onSetUp={openSetup}
-                      {...(onMachineNamed === undefined ? {} : { onNamed: onMachineNamed })}
-                      createClient={createMachineClient}
-                      {...(lockedMachines === undefined ? {} : { locked: lockedMachines })}
-                      {...(machineTabs ? { tabs: machineTabs } : {})}
-                    />
-                  )
-                ) : null}
-              </div>
-            </section>
-          </div>
+              {section.id === 'machines' ? (
+                createMachineClient === undefined ? (
+                  <p className="m-0 text-ui leading-base text-warn" role="alert">
+                    Machines cannot be shown because this page was opened without a way to reach them.
+                  </p>
+                ) : (
+                  <MachinesSurface
+                    key={String(daemonId)}
+                    daemonId={daemonId}
+                    connections={connections}
+                    tab={machineRoute.tab}
+                    reach={reach.reachOf(daemonId)}
+                    onRetry={() => reach.check(daemonId)}
+                    {...(unknownMachine === undefined ? {} : { unknownMachine })}
+                    onOpen={openMachine}
+                    onSetUp={openSetup}
+                    createClient={createMachineClient}
+                    {...(machineTabs ? { tabs: machineTabs } : {})}
+                    {...(daemonPanels === undefined ? {} : { daemonPanels })}
+                  />
+                )
+              ) : null}
+            </div>
+          </section>
         </div>
       </div>
     </main>

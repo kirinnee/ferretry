@@ -151,16 +151,17 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 133;
+const SETTINGS_SIDEWAYS_CHECKS = 130;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — the same forty-five as above (the section itself is measured once
- * its Runtimes tab has loaded), so 45 + 45. Same tripwire as the number above, for the same reason — a check
+ * Machines frame, at each viewport — forty-five frames (the section itself is measured once
+ * its Runtimes tab has loaded), less the Machines list on a phone, which is a screen of its own outside any
+ * machine: 45 + 44. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 90;
+const MACHINES_GEOMETRY_CHECKS = 89;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -565,16 +566,54 @@ const settleTransitions = async (page: Page): Promise<void> => {
   });
 };
 
+/**
+ * The machine tab strip scrolls the current tab to its centre SMOOTHLY (unless the reader asked for
+ * reduced motion), so a read taken the frame after a click measures a strip still on its way there.
+ * Wait until it has stopped moving — what a person looks at — rather than for a fixed time.
+ */
+const settleTabStrip = async (page: Page): Promise<void> => {
+  await page.evaluate(
+    async () =>
+      await new Promise<void>(resolve => {
+        const strip = document.querySelector('[data-machines-surface] [data-underline-tabs] ul');
+        if (strip === null) return resolve();
+        let last = -1;
+        let still = 0;
+        const tick = (): void => {
+          still = strip.scrollLeft === last ? still + 1 : 0;
+          last = strip.scrollLeft;
+          if (still >= 3) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+};
+
 const assertMachinesGeometry = async (page: Page, where: string): Promise<void> => {
   await settleTransitions(page);
+  await settleTabStrip(page);
   const tabs = page.locator('[data-machines-surface] [data-machine-tab]');
-  // The hover half needs a real pointer over a real unselected tab, so it is driven before the read.
+  // The hover half needs a real pointer over a real unselected tab, so it is driven before the read. It
+  // is an unselected tab ALREADY IN VIEW, moved to by coordinates: `locator.hover()` would scroll the
+  // strip to reach the first one, and a strip scrolled by the measurement is not the strip a person sees.
   let hovered: string | null = null;
   if ((await tabs.count()) > 0) {
-    const unselected = page.locator('[data-machines-surface] [data-machine-tab]:not([aria-current])').first();
-    hovered = await unselected.getAttribute('data-machine-tab');
-    await unselected.hover();
-    await settleTransitions(page);
+    const target = await page.evaluate(() => {
+      const strip = document.querySelector('[data-machines-surface] [data-underline-tabs] ul');
+      const stripBox = strip?.getBoundingClientRect();
+      for (const tab of document.querySelectorAll('[data-machines-surface] [data-machine-tab]:not([aria-current])')) {
+        const box = tab.getBoundingClientRect();
+        if (stripBox === undefined || (box.left >= stripBox.left && box.right <= stripBox.right))
+          return { id: tab.getAttribute('data-machine-tab'), x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      }
+      return null;
+    });
+    if (target !== null) {
+      hovered = target.id;
+      await page.mouse.move(target.x, target.y);
+      await settleTransitions(page);
+    }
   }
   const problems = await page.evaluate(hoveredTab => {
     const found: string[] = [];
@@ -755,10 +794,20 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
         );
     }
 
-    const row = section.querySelector('[data-machine-tabs] ul');
+    const row = section.querySelector('[data-machines-surface] [data-underline-tabs] ul');
     if (row !== null) {
-      if (row.scrollWidth > row.clientWidth + 0.5)
-        found.push(`the tab row scrolls: ${row.scrollWidth}px of tabs in a ${row.clientWidth}px row`);
+      // THE STRIP MAY SCROLL — on a phone it is meant to — but never silently: the current tab is kept in
+      // view, and an edge with tabs beyond it says so with its fade.
+      const strip = row.closest('[data-underline-tabs]');
+      const more = { start: row.scrollLeft > 1, end: row.scrollLeft + row.clientWidth < row.scrollWidth - 1 };
+      for (const [edgeName, beyond] of [
+        ['start', more.start],
+        ['end', more.end],
+      ] as const)
+        if (strip?.getAttribute(`data-more-${edgeName}`) !== String(beyond))
+          found.push(
+            `the tab strip's ${edgeName} fade says ${strip?.getAttribute(`data-more-${edgeName}`)} with tabs beyond it: ${beyond}`,
+          );
       const rowBox = row.getBoundingClientRect();
       const buttons = [...row.querySelectorAll('[data-machine-tab]')];
       if (buttons.length !== 5) found.push(`the tab row has ${buttons.length} tabs instead of 5`);
@@ -770,8 +819,11 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
         const box = cells[index] as DOMRect;
         if (button.scrollWidth > button.clientWidth)
           found.push(`the ${name} tab's content is ${button.scrollWidth}px in a ${button.clientWidth}px button`);
-        if (box.left < rowBox.left - 0.5 || box.right > rowBox.right + 0.5)
-          found.push(`the ${name} tab is clipped by its row`);
+        if (
+          button.getAttribute('aria-current') === 'page' &&
+          (box.left < rowBox.left - 0.5 || box.right > rowBox.right + 0.5)
+        )
+          found.push(`the current ${name} tab is scrolled out of view`);
         const style = getComputedStyle(button);
         const inner = {
           left: box.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft),
@@ -795,7 +847,7 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
       });
       const look = (button: Element): string => {
         const style = getComputedStyle(button);
-        return `${style.borderTopColor} ${style.backgroundColor} ${style.color}`;
+        return `${style.borderBottomColor} ${style.color}`;
       };
       const selected = current[0];
       if (selected !== undefined)
@@ -803,7 +855,8 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
           if (button !== selected) {
             const a = getComputedStyle(button);
             const b = getComputedStyle(selected);
-            if (a.borderTopColor === b.borderTopColor || a.color === b.color || a.backgroundColor === b.backgroundColor)
+            // The underline and the ink are what mark a tab selected; no tab paints a fill.
+            if (a.borderBottomColor === b.borderBottomColor || a.color === b.color)
               found.push(
                 `the ${button.getAttribute('data-machine-tab')} tab${
                   button.getAttribute('data-machine-tab') === hoveredTab ? ', hovered,' : ''
@@ -1145,10 +1198,8 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
   const shellSelector = '#harness-session-workspace-page';
   const shell = page.locator(shellSelector);
   await shell.waitFor({ state: 'visible' });
-  if (viewport.name === 'mobile') {
-    await shell.getByRole('button', { name: 'Choose destination' }).click();
-    await page.locator('[data-app-bar-destination-search]').waitFor({ state: 'visible' });
-  }
+  // A phone inside a session has no bottom bar, so the top bar carries its own Find button.
+  await page.locator('[data-app-bar-destination-search]').first().waitFor({ state: 'visible' });
   const destinationShortcut = await page.evaluate(() => {
     const finders = Array.from(document.querySelectorAll<HTMLElement>('[data-app-bar-destination-search]'));
     return {
@@ -1164,10 +1215,6 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
       `global Find still claims the current-session shortcut at ${viewport.name}: ` +
         `${destinationShortcut.ariaClaims} aria claim(s), ${destinationShortcut.physicalLegends} physical legend(s)`,
     );
-  if (viewport.name === 'mobile') {
-    await page.keyboard.press('Escape');
-    await page.locator('[data-app-bar-destination-search]').waitFor({ state: 'hidden' });
-  }
   const shellField = shell.locator('[data-app-bar-session-search-slot] [data-current-session-search] input');
   // Programmatic keyboard focus makes the focus-visible ring part of the
   // evidence without pretending a phone has a physical Ctrl key.
@@ -1724,12 +1771,53 @@ try {
           settingsUrl.searchParams.set('settings-harness', '1');
           await page.goto(settingsUrl.toString());
           let settingsPage = page.getByLabel('Settings page preview', { exact: true });
-          await settingsPage.locator('[data-settings-section="appearance"]').waitFor({ state: 'visible' });
+          const phone = viewport.name === 'mobile';
 
-          // Appearance is the section Settings OPENS ON, which is the one reason it went unchecked:
-          // `selectSettingsSection` asserts the sections a reader navigates to, and nobody navigates
-          // to the one that is already there. It is also the section carrying six theme-family cards,
-          // so it has more ways to widen a phone than any section that was being checked.
+          // ONE LEVEL PER SCREEN ON A PHONE: Settings opens on its grouped cards, and each card opens a
+          // screen of its own with "‹ Settings" back. A desktop opens on Appearance beside the sidebar.
+          const settingsHome = settingsPage.locator('[data-settings-home]');
+          const settingsSidebar = settingsPage.locator('[data-settings-sidebar]');
+          if (phone) {
+            await settingsHome.waitFor({ state: 'visible' });
+            // The first screen is a layout of its own — two groups of inset cards on a recessed ground,
+            // with machine names as long as a reader cares to type.
+            await assertNoSidewaysScroll(page, `the Settings home at ${viewport.name}`);
+            const homeTarget = join(outDir, 'settings-home-mobile.png');
+            await page.screenshot({ path: homeTarget, animations: 'disabled' });
+            process.stdout.write(`📸 Settings home -> ${homeTarget}\n`);
+          }
+          /** On a phone, back to the grouped cards from whatever screen is open. */
+          const settingsBack = async (): Promise<void> => {
+            if (!phone || (await settingsHome.isVisible())) return;
+            await settingsPage.locator('[data-settings-back]').click();
+            await settingsHome.waitFor({ state: 'visible' });
+          };
+          const settingsNavigation = (): Locator => (phone ? settingsHome : settingsSidebar);
+          const selectSettingsSection = async (id: 'appearance' | 'behaviour') => {
+            const label = { appearance: 'Appearance', behaviour: 'Behaviour' }[id];
+            await settingsBack();
+            await settingsNavigation().locator(`[data-settings-section-choice="${id}"]`).click();
+            await settingsPage.locator(`[data-settings-section="${id}"]`).waitFor({ state: 'visible' });
+            // Rows fade their colours; capture the settled state so the row just left cannot read as selected.
+            await settleTransitions(page);
+            await assertNoSidewaysScroll(page, `the ${label} section at ${viewport.name}`);
+          };
+          /** Open one paired machine from the sidebar or the Machines card: the only machine picker now. */
+          const openMachine = async (daemonId: string): Promise<Locator> => {
+            await settingsBack();
+            await settingsNavigation().locator(`[data-settings-machine="${daemonId}"]`).click();
+            const surface = settingsPage.locator(`[data-machines-surface="${daemonId}"]`);
+            await surface.waitFor({ state: 'visible' });
+            await settleTransitions(page);
+            return surface;
+          };
+
+          if (phone) await selectSettingsSection('appearance');
+          else await settingsPage.locator('[data-settings-section="appearance"]').waitFor({ state: 'visible' });
+
+          // Appearance is the section Settings OPENS ON at a desktop, which is the one reason it once went
+          // unchecked. It is also the section carrying the theme-family cards, so it has more ways to widen
+          // a phone than any other.
           await assertNoSidewaysScroll(page, `the Appearance section at ${viewport.name}`);
 
           const appearanceTarget = join(outDir, `settings-appearance-${viewport.name}.png`);
@@ -1743,55 +1831,6 @@ try {
             process.stdout.write(`📸 Theme ${family} ${viewport.name} -> ${target}\n`);
           }
 
-          if (viewport.name === 'mobile') {
-            // Closed and open are both review states. The latter is a viewport
-            // shot because BottomSheet is fixed to the viewport, not to the
-            // Settings card that happened to open it.
-            const pickerDismissedTarget = join(outDir, 'settings-picker-dismissed-mobile.png');
-            await page.screenshot({ path: pickerDismissedTarget });
-            process.stdout.write(`📸 Settings picker dismissed -> ${pickerDismissedTarget}\n`);
-
-            await settingsPage.locator('[data-settings-section-trigger]').click();
-            const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
-            await picker.waitFor({ state: 'visible' });
-            // AN OPEN SHEET IS CHECKED TOO, and a viewport capture is not evidence that it is safe.
-            // `BottomSheet` is fixed to the viewport, so a row too wide for a phone does not visibly
-            // spill — it widens the DOCUMENT behind it, and the shot of the sheet still looks correct
-            // while the whole app has become draggable sideways. This repository has already had a
-            // hidden control inside a scrollport scroll the app away, which is the same shape.
-            await assertNoSidewaysScroll(page, `the open settings-section sheet at ${viewport.name}`);
-            const pickerOpenTarget = join(outDir, 'settings-picker-open-mobile.png');
-            await page.screenshot({ path: pickerOpenTarget });
-            process.stdout.write(`📸 Settings picker open -> ${pickerOpenTarget}\n`);
-            await page.keyboard.press('Escape');
-            await picker.waitFor({ state: 'hidden' });
-          }
-
-          const selectSettingsSection = async (id: 'appearance' | 'behaviour' | 'daemons' | 'machines') => {
-            const label = {
-              appearance: 'Appearance',
-              behaviour: 'Behaviour',
-              daemons: 'Daemons',
-              machines: 'Machines',
-            }[id];
-            if (viewport.name === 'mobile') {
-              await settingsPage.locator('[data-settings-section-trigger]').click();
-              const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
-              await picker.waitFor({ state: 'visible' });
-              await picker.getByRole('button', { name: new RegExp(`^${label}`) }).click();
-              await picker.waitFor({ state: 'hidden' });
-            } else {
-              await settingsPage.getByRole('button', { name: new RegExp(`^${label}`) }).click();
-            }
-            await settingsPage.locator(`[data-settings-section="${id}"]`).waitFor({ state: 'visible' });
-            if (viewport.name === 'desktop') {
-              // ChoiceRail rows fade their colours over 150ms. Capture the
-              // settled state so the row we left cannot read as selected too.
-              await page.waitForTimeout(200);
-            }
-            await assertNoSidewaysScroll(page, `the ${label} section at ${viewport.name}`);
-          };
-
           await selectSettingsSection('behaviour');
           const behaviourTarget = join(outDir, `settings-behaviour-${viewport.name}.png`);
           await page.screenshot({ path: behaviourTarget });
@@ -1801,133 +1840,55 @@ try {
           await captureElement(page, settingsPage.locator('#settings-composer-enter-key'), composerEnterTarget);
           process.stdout.write(`📸 Settings composer Enter key ${viewport.name} -> ${composerEnterTarget}\n`);
 
-          await selectSettingsSection('daemons');
-          const daemonTabs = await settingsPage.locator('[data-daemon-subtab]').count();
-          if (daemonTabs !== 3)
-            fail(`settings many-daemon fixture rendered ${daemonTabs} daemon sub-tabs instead of 3`);
-          const daemonsTarget = join(outDir, `settings-daemons-${viewport.name}.png`);
-          await page.screenshot({ path: daemonsTarget });
-          process.stdout.write(`📸 Settings Daemons (many) ${viewport.name} -> ${daemonsTarget}\n`);
-
-          const selectDaemon = async (name: string) => {
-            if (viewport.name === 'mobile') {
-              await settingsPage.locator('[data-daemon-subtab-trigger]').click();
-              const picker = page.getByRole('dialog', { name: 'Choose a daemon' });
-              await picker.waitFor({ state: 'visible' });
-              await picker.getByRole('button', { name: new RegExp(`^${name}`) }).click();
-              await picker.waitFor({ state: 'hidden' });
-            } else {
-              await settingsPage
-                .locator('[data-daemon-subtabs="desktop"]')
-                .getByRole('tab', { name: new RegExp(`^${name}`) })
-                .click();
-            }
-          };
+          // EVERY PAIRED MACHINE IS LISTED BY NAME with its status line, in the sidebar or on the Machines
+          // card — Daemons is no longer a section of its own, so this list is where a machine is chosen.
+          await settingsBack();
+          const listedMachines = await settingsNavigation().locator('[data-settings-machine]').count();
+          if (listedMachines !== 3) fail(`settings many-daemon fixture listed ${listedMachines} machines instead of 3`);
 
           /**
-           * Open one of the daemon's panels — the third and innermost level of
-           * Settings navigation, which the two presentations reach differently.
-           *
-           * A desktop reads the vertical rail beside the panel, which is a real
-           * tablist. A phone has no tablist at all: one trigger names the open
-           * panel and the app's shared BottomSheet lists the rest as ordinary
-           * navigation rows, deliberately without `role="tab"` — so asking for a
-           * tab there would find the hidden desktop rail and click nothing a
-           * reader can see.
+           * One of the machine's connection and security panels — what the Daemons section used to hold —
+           * opened from its Machine tab. The list is one card of rows; a row opens its panel as a page of
+           * its own with "‹ Machine" back.
            */
-          const selectDaemonPanel = async (frame: Locator, label: string) => {
-            if (viewport.name === 'mobile') {
-              await frame.locator('[data-daemon-panel-trigger]').click();
-              const picker = page.getByRole('dialog', { name: 'Choose a panel' });
-              await picker.waitFor({ state: 'visible' });
-              await picker
-                .locator('[data-daemon-panel-choice]')
-                .filter({ has: page.getByText(label, { exact: true }) })
-                .click();
-              await picker.waitFor({ state: 'hidden' });
-              return;
-            }
-            await frame
-              .locator('[data-daemon-settings-tabs="desktop"]')
-              // A prefix, because the name runs on into the panel's description — but never into another
-              // label: "Security" must not also match "Security log".
-              .getByRole('tab', { name: new RegExp(`^${label}(?! log)`) })
-              .click();
-            // The rail's rows carry `transition-colors`, so a capture taken the
-            // instant a panel opens catches the row it left mid-fade and reads as
-            // two selected rows. Let the 150ms colour transition land first.
-            await page.waitForTimeout(200);
+          const openDaemonPanel = async (frame: Locator, slug: string): Promise<void> => {
+            await frame.locator(`[data-daemon-panel="${slug}"]`).click();
+            await frame.locator(`[data-daemon-panel-open="${slug}"]`).waitFor({ state: 'visible' });
+          };
+          const closeDaemonPanel = async (frame: Locator): Promise<void> => {
+            await frame.locator('[data-daemon-panel-back]').click();
+            await frame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
+          };
+          const openMachineTab = async (surface: Locator): Promise<void> => {
+            await surface.locator('[data-machine-tab="machine"]').click();
+            await surface.locator('[data-machine-tab-panel="machine"]').waitFor({ state: 'visible' });
           };
 
-          if (viewport.name === 'mobile') {
-            await settingsPage.locator('[data-daemon-subtab-trigger]').click();
-            const daemonPicker = page.getByRole('dialog', { name: 'Choose a daemon' });
-            await daemonPicker.waitFor({ state: 'visible' });
-            await assertNoSidewaysScroll(page, `the open daemon sheet at ${viewport.name}`);
-            const daemonPickerTarget = join(outDir, 'settings-daemon-picker-open-mobile.png');
-            await page.screenshot({ path: daemonPickerTarget });
-            process.stdout.write(`📸 Settings daemon picker open -> ${daemonPickerTarget}\n`);
-            await page.keyboard.press('Escape');
-            await daemonPicker.waitFor({ state: 'hidden' });
-          }
-
+          const studioMachine = await openMachine('harness-daemon');
+          await openMachineTab(studioMachine);
           const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
-          await wardenFrame.scrollIntoViewIfNeeded();
-
-          // The fixture is only evidence about the real frame if it carries the
-          // panels the composition root supplies. It once carried six of the
-          // production eight, so the row that overflowed a desktop could not be
-          // seen here at all. Ten now: the app's eleven less Model pricing, which
-          // this fixture has never mounted. Count the
-          // rail's rows, which exist in the document at both widths, rather than
-          // the sheet's, which are rendered only once that sheet has been opened.
+          await wardenFrame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
+          // The fixture is only evidence about the real frame if it carries the panels the composition
+          // root supplies: the app's eleven less Model pricing, which this fixture has never mounted.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
           if (daemonPanels !== 10)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 10 it mounts`);
+            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 10 it mounts`);
+          await wardenFrame.scrollIntoViewIfNeeded();
+          // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
+          await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
+          const panelListTarget = join(outDir, `settings-machine-panels-${viewport.name}.png`);
+          await page.screenshot({ path: panelListTarget, animations: 'disabled' });
+          process.stdout.write(`📸 Settings connection and security ${viewport.name} -> ${panelListTarget}\n`);
 
-          if (viewport.name === 'mobile') {
-            // The level-three picker: the resting trigger that names the open
-            // panel, and the shared sheet it opens. Both are review states, and
-            // the sheet is a viewport shot because BottomSheet is fixed to the
-            // viewport rather than to the frame that opened it.
-            const panelPickerDismissedTarget = join(outDir, 'settings-daemon-panel-picker-dismissed-mobile.png');
-            await page.screenshot({ path: panelPickerDismissedTarget });
-            process.stdout.write(`📸 Settings daemon panel picker dismissed -> ${panelPickerDismissedTarget}\n`);
-
-            await wardenFrame.locator('[data-daemon-panel-trigger]').click();
-            const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
-            await panelPicker.waitFor({ state: 'visible' });
-            const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 10)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 10 it mounts`);
-            // Ten rows is the longest list any sheet in Settings presents. If one of these sheets is
-            // going to be the one that widens a phone, it is this one.
-            await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
-            const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
-            await page.screenshot({ path: panelPickerOpenTarget });
-            process.stdout.write(`📸 Settings daemon panel picker open -> ${panelPickerOpenTarget}\n`);
-
-            await page.keyboard.press('Escape');
-            await panelPicker.waitFor({ state: 'hidden' });
-          }
-
-          // Warden has the same blind spot Appearance had, one level deeper: the loop below asserts
-          // every panel a reader OPENS, and Warden is the panel the frame is already showing, so the
-          // one panel nobody navigates to was the one panel nothing measured. It is also the widest
-          // content in the frame — supervision status, account failover and policy — which makes it a
-          // poor thing to have been the exception.
-          await assertNoSidewaysScroll(page, `the Warden panel at ${viewport.name}`);
-
-          const wardenFrameTarget = join(outDir, `settings-daemon-warden-${viewport.name}.png`);
-          await page.screenshot({ path: wardenFrameTarget });
-          process.stdout.write(`📸 Settings daemon Warden ${viewport.name} -> ${wardenFrameTarget}\n`);
-
-          // Every panel the daemon owns, in the order the frame lists them.
+          // Every panel the daemon owns, in the order the list shows them.
           for (const [label, slug, ready] of [
             // Each waits for SETTLED content, not for a spinner or a refusal:
             // the harness daemon answers `/v1/secrets` in the page, so a capture
             // that still showed "Reading…" or "Failed to fetch" would be a
             // regression to review, not a state to accept.
+            // Warden first: it is the first panel the list offers, and its widest content (supervision status,
+            // account failover and policy) is exactly what could widen a phone.
+            ['Warden', 'warden', '[data-daemon-panel-open="warden"] > *'],
             ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
             // The live panel, inside the frame, because that is where a reader meets it. The gallery
             // cards prove the individual states; this proves it is reachable and fits both widths.
@@ -1945,7 +1906,7 @@ try {
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {
-            await selectDaemonPanel(wardenFrame, label);
+            await openDaemonPanel(wardenFrame, slug);
             const readySurface = wardenFrame.locator(ready).first();
             await readySurface.waitFor({ state: 'visible' });
             // Every panel, at both widths, with its real values on it — this is the one check that
@@ -2019,11 +1980,13 @@ try {
                 `📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`,
               );
             }
+            await closeDaemonPanel(wardenFrame);
           }
 
-          await selectDaemon('Travel laptop');
+          const unreachableMachine = await openMachine('unreachable-daemon');
+          await openMachineTab(unreachableMachine);
           const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
-          await unavailableWardenFrame.scrollIntoViewIfNeeded();
+          await openDaemonPanel(unavailableWardenFrame, 'warden');
           await unavailableWardenFrame.getByLabel('Warden status unavailable').waitFor({ state: 'visible' });
           // A FAILURE STATE IS A LAYOUT, not an absence of one. These two frames explain why a panel
           // could not be read, and the sentences that do the explaining are the longest unbroken text
@@ -2036,11 +1999,12 @@ try {
           process.stdout.write(
             `📸 Settings unavailable daemon Warden ${viewport.name} -> ${unavailableWardenTarget}\n`,
           );
+          await closeDaemonPanel(unavailableWardenFrame);
 
           // The unavailable pairing must not borrow the healthy daemon's
           // measured relay. Capture its own failed direct + relay evidence so
           // that daemon scoping is reviewable in pixels, not only in fixture code.
-          await selectDaemonPanel(unavailableWardenFrame, 'Carrier');
+          await openDaemonPanel(unavailableWardenFrame, 'carrier');
           await unavailableWardenFrame.locator('[data-active-carrier]').waitFor({ state: 'visible' });
           await assertNoSidewaysScroll(page, `the unavailable daemon's Carrier panel at ${viewport.name}`);
           const unavailableCarrierTarget = join(outDir, `settings-daemon-carrier-unavailable-${viewport.name}.png`);
@@ -2049,9 +2013,10 @@ try {
             `📸 Settings unavailable daemon Carrier ${viewport.name} -> ${unavailableCarrierTarget}\n`,
           );
 
-          await selectDaemon('Studio workstation');
+          const currentMachine = await openMachine('harness-daemon');
+          await openMachineTab(currentMachine);
           const currentFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
-          await selectDaemonPanel(currentFrame, 'Host checks');
+          await openDaemonPanel(currentFrame, 'host-checks');
           const currentDaemon = currentFrame.locator('[data-daemon-host-checks="harness-daemon"]');
           await currentDaemon.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
           await currentDaemon.getByText('Manage daemon', { exact: true }).click();
@@ -2072,11 +2037,10 @@ try {
           // a tab is clicked shows the one just left still selected: measured, 12 of 12 such captures carried
           // the old tab's accent label, and 0 of 12 with `animations: 'disabled'`.
           const settledShot = (target: string) => page.screenshot({ path: target, animations: 'disabled' });
-          await selectSettingsSection('machines');
-          const machinesSurface = settingsPage.locator('[data-machines-surface="harness-daemon"]');
+          const machinesSurface = await openMachine('harness-daemon');
           await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
           await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
-          for (const tab of ['credentials', 'profiles', 'components', 'settings'] as const) {
+          for (const tab of ['credentials', 'profiles', 'components', 'machine'] as const) {
             await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
             await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
             await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
@@ -2099,7 +2063,7 @@ try {
             await assertNoSidewaysScroll(page, `the Machines ${what} at ${viewport.name}`);
           };
           const backToSettingsTab = async (): Promise<void> => {
-            await machinesSurface.locator('[data-machine-tab="settings"]').click();
+            await machinesSurface.locator('[data-machine-tab="machine"]').click();
             await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
           };
           await machinesSurface.locator('[data-settings-action="import"]').click();
@@ -2144,15 +2108,17 @@ try {
           await backToSettingsTab();
           // By its address: the shared machine data lists only Claude Code, and the flow is linkable anyway.
           await page.evaluate(() => {
-            window.location.hash = `#machines/${encodeURIComponent('Studio workstation')}/settings/install-codex`;
+            window.location.hash = `#machines/${encodeURIComponent('Studio workstation')}/machine/install-codex`;
           });
           await machinesSurface.locator('[data-install-flow="codex"]').waitFor({ state: 'visible' });
           await machineFrame('Install Codex', 'install');
           await backToSettingsTab();
-          await machinesSurface.locator('[data-machine-switcher]').click();
-          await machinesSurface.locator('[data-machines-list]').waitFor({ state: 'visible' });
+          // THE MACHINES LIST is the sidebar on a desktop and the Machines card on a phone — one picker, with
+          // every machine's name and status line on it.
+          await settingsBack();
           await assertNoSidewaysScroll(page, `the Machines list at ${viewport.name}`);
-          await assertMachinesGeometry(page, `the Machines list at ${viewport.name}`);
+          // On a phone the list is its own screen, outside any machine, so there is no machine layout to measure.
+          if (!phone) await assertMachinesGeometry(page, `the Machines list at ${viewport.name}`);
           const machinesListTarget = join(outDir, `settings-machines-list-${viewport.name}.png`);
           await settledShot(machinesListTarget);
           process.stdout.write(`📸 Settings Machines list ${viewport.name} -> ${machinesListTarget}\n`);
@@ -2174,7 +2140,7 @@ try {
             await settledShot(target);
             process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
           };
-          await machinesSurface.locator('[data-machines-list] button:has-text("Close")').click();
+          await openMachine('harness-daemon');
           await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
           const runtimesPanel = machinesSurface.locator('[data-machine-tab-panel="runtimes"]');
           await runtimesPanel.locator('[data-runtime-row="claude-agent"]').waitFor({ state: 'visible' });
@@ -2319,14 +2285,6 @@ try {
           // THE OTHER MACHINES (U21): one asleep or offline, and one not set up with the first run it
           // links to. These are the states a person meets on a second machine, and each is its own
           // layout — a status card above the tab panel, a set-up card instead of a list, and a stepper.
-          const openMachine = async (daemonId: string): Promise<Locator> => {
-            await settingsPage.locator('[data-machine-switcher]').click();
-            await settingsPage.locator('[data-machines-list]').waitFor({ state: 'visible' });
-            await settingsPage.locator(`[data-machine-choice="${daemonId}"]`).click();
-            const surface = settingsPage.locator(`[data-machines-surface="${daemonId}"]`);
-            await surface.waitFor({ state: 'visible' });
-            return surface;
-          };
           const offlineSurface = await openMachine('unreachable-daemon');
           await offlineSurface.locator('[data-machine-offline]').waitFor({ state: 'visible' });
           await accountShot('offline', 'offline machine');
@@ -2362,22 +2320,15 @@ try {
           settingsUrl.searchParams.set('settings-daemons', 'one');
           await page.goto(settingsUrl.toString());
           settingsPage = page.getByLabel('Settings page preview', { exact: true });
-          if (viewport.name === 'mobile') {
-            await settingsPage.locator('[data-settings-section-trigger]').click();
-            const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
-            await picker.getByRole('button', { name: /^Daemons/ }).click();
-            await picker.waitFor({ state: 'hidden' });
-          } else {
-            await settingsPage.getByRole('button', { name: /^Daemons/ }).click();
-          }
-          await settingsPage.locator('[data-settings-section="daemons"]').waitFor({ state: 'visible' });
+          // The single machine is still LISTED, by name with its status — one row, never a hidden list.
+          if (phone) await settingsHome.waitFor({ state: 'visible' });
+          const oneMachineRows = await settingsNavigation().locator('[data-settings-machine]').count();
+          if (oneMachineRows !== 1) fail(`settings one-daemon fixture listed ${oneMachineRows} machines instead of 1`);
+          const oneMachine = await openMachine('harness-daemon');
+          await openMachineTab(oneMachine);
           const oneDaemonFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
-          await oneDaemonFrame.scrollIntoViewIfNeeded();
-          await selectDaemonPanel(oneDaemonFrame, 'Host checks');
+          await openDaemonPanel(oneDaemonFrame, 'host-checks');
           await settingsPage.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
-          const oneDaemonTabs = await settingsPage.locator('[data-daemon-subtab]').count();
-          if (oneDaemonTabs !== 1)
-            fail(`settings one-daemon fixture rendered ${oneDaemonTabs} daemon sub-tab instead of 1`);
           // The one-daemon route is a DIFFERENT MOUNT, not the many-daemon page with rows hidden: it
           // remounts the frame with no daemon switcher above it, so the panel gets width the checked
           // page never gave it. A layout that only breaks when it is given more room is not a strange
@@ -2784,37 +2735,6 @@ try {
             Math.abs(topBarGeometry.slotCentre - topBarGeometry.viewportCentre) > 1
           ) {
             fail(`the current-session search slot is not centred at ${viewport.name}`);
-          }
-          if (viewport.name === 'mobile') {
-            const destinationTrigger = page.getByRole('button', { name: 'Choose destination' });
-            await destinationTrigger.click();
-            const destinationDialog = page.getByRole('dialog', { name: 'Choose destination' });
-            await destinationDialog.waitFor({ state: 'visible' });
-            const pickerGeometry = await destinationDialog.evaluate(dialog => {
-              const box = dialog.getBoundingClientRect();
-              return {
-                left: Math.round(box.left),
-                right: Math.round(box.right),
-                viewport: window.innerWidth,
-                pageScrollsX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-              };
-            });
-            if (
-              pickerGeometry.pageScrollsX ||
-              pickerGeometry.left < 0 ||
-              pickerGeometry.right > pickerGeometry.viewport + 1
-            ) {
-              fail(`the mobile destination picker overflows its ${pickerGeometry.viewport}px viewport`);
-            }
-            const pickerTarget = join(outDir, 'top-bar-picker-open-mobile.png');
-            await page.screenshot({ path: pickerTarget });
-            process.stdout.write(`📸 top bar picker open mobile -> ${pickerTarget}\n`);
-
-            await destinationDialog.getByRole('button', { name: 'Dismiss', exact: true }).click();
-            await destinationDialog.waitFor({ state: 'hidden' });
-            const dismissedTarget = join(outDir, 'top-bar-picker-dismissed-mobile.png');
-            await captureElement(page, topBar, dismissedTarget);
-            process.stdout.write(`📸 top bar picker dismissed mobile -> ${dismissedTarget}\n`);
           }
 
           // Geometry, printed rather than eyeballed. A screenshot cannot tell a

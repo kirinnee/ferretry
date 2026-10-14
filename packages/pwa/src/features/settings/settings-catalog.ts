@@ -22,7 +22,7 @@ export type SettingId =
   | 'dictation'
   | 'notifications';
 
-export type SettingsSectionId = 'appearance' | 'behaviour' | 'daemons' | 'machines';
+export type SettingsSectionId = 'appearance' | 'behaviour' | 'machines';
 
 export interface SettingsSectionDefinition {
   readonly id: SettingsSectionId;
@@ -201,8 +201,8 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
 
 /**
  * Settings is deliberately grouped by the thing a choice changes. Appearance
- * owns presentation, Behaviour owns reader-local interaction, and Daemons owns
- * runtime pairings. Keeping this catalog beside the individual definitions
+ * owns presentation and Behaviour owns reader-local interaction, both on this
+ * browser only; Machines owns each paired machine. Keeping this catalog beside the individual definitions
  * also gives deep links one unambiguous section to open.
  */
 export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
@@ -219,20 +219,14 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     settingIds: ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
   },
   {
-    id: 'daemons',
-    label: 'Daemons',
-    description: 'Pair, check, switch, name, or remove the machines this browser can reach.',
-    settingIds: [],
-  },
-  {
     /**
-     * The account model's surface (O1), BESIDE Daemons rather than inside it: Daemons is about the
-     * pairing — reaching a machine — and this is about what runs on one. Its own address is
-     * , which the Settings page reads.
+     * ONE PLACE PER MACHINE. Daemons used to sit beside this as its own section — the pairing on one
+     * screen, what runs on the machine on another. Its panels now live on each machine's Machine tab,
+     * and the address is `#machines/<machine>/<tab>`.
      */
     id: 'machines',
     label: 'Machines',
-    description: 'The runtimes, logins, profiles and components on each machine.',
+    description: 'Each machine’s runtimes, credentials, profiles and components, and its connection and security.',
     settingIds: [],
   },
 ] as const;
@@ -260,7 +254,7 @@ export const settingsSectionForSetting = (id: SettingId): SettingsSectionId => {
 export const SETTINGS_DESTINATION = {
   id: 'open-settings',
   label: 'Open settings',
-  description: 'Appearance, behaviour, and connected daemons for this browser.',
+  description: 'Appearance and behaviour on this browser, and every paired machine.',
   keywords: ['preferences', 'options', 'appearance', 'behaviour', 'daemon', 'pairing', 'configure'],
 } as const;
 
@@ -317,8 +311,8 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'grants',
     label: 'What devices may do',
     description:
-      'Per-capability limits for paired devices, a browser on the machine included, why a control is refused, and the passkey confirmation a paired device gives before it changes one. Daemon-wide — opens this daemon’s settings.',
-    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
+      'Per-capability limits for paired devices, a browser on the machine included, why a control is refused, and the passkey confirmation a paired device gives before it changes one. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#grants`,
     keywords: [
       'grant',
       'grants',
@@ -344,7 +338,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'security-log',
     label: 'Security log',
     description:
-      'The security log for this machine: devices paired or removed, refused attempts, permission changes, opened terminals and used secrets. Daemon-wide — opens this daemon’s settings.',
+      'The security log for this machine: devices paired or removed, refused attempts, permission changes, opened terminals and used secrets. On this machine — opens its Machine tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#security-log`,
     keywords: [
       'security',
@@ -365,8 +359,8 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'warden',
     label: 'Warden',
     description:
-      'Supervision, current checks, account failover, and policy for this daemon. Daemon-wide — opens this daemon’s settings.',
-    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
+      'Supervision, current checks, account failover, and policy for this daemon. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#warden`,
     keywords: ['warden', 'failover', 'round robin', 'fallback', 'account', 'quota', 'token', 'wrapper', 'supervision'],
   },
   {
@@ -374,7 +368,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'security',
     label: 'Security',
     description:
-      'The passkeys this device holds for this machine, and adding another. Daemon-wide — opens this daemon’s settings.',
+      'The passkeys this device holds for this machine, and adding another. On this machine — opens its Machine tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#security`,
     keywords: [
       'passkey',
@@ -403,8 +397,8 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'resource-limits',
     label: 'Resource limits',
     description:
-      'CPU and RAM caps for the agents this daemon runs, fleet-wide and per agent, and whether they are enforced. Daemon-wide — opens this daemon’s settings.',
-    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
+      'CPU and RAM caps for the agents this daemon runs, fleet-wide and per agent, and whether they are enforced. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#resource-limits`,
     keywords: [
       'cpu',
       'ram',

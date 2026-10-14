@@ -136,7 +136,7 @@ import {
 } from './lib/push-enrolment.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
-import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
+import { AppBar, AppTabBar, appBarDestinationForRoute, type Crumb, showsTabBar } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { paletteSessionEntries } from './shell/palette-model.ts';
@@ -1009,7 +1009,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsSurface,
-  settings: MachineSettingsSurface,
+  machine: MachineSettingsSurface,
 };
 
 function SettingsRoute({ connection }: DaemonPageProps) {
@@ -1080,10 +1080,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       createMachineClient={createDaemonClient}
       lockedMachines={lockedMachines}
       machineTabs={MACHINE_TAB_SURFACES}
-      onSelectDaemon={daemonId => {
-        store.connections.select(daemonId);
-        navigate(`${daemonSettingsPath(daemonId)}#daemons`);
-      }}
       onRenameDaemon={(daemonId, label) => {
         store.connections.rename(daemonId, label);
       }}
@@ -1093,7 +1089,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         store.connections.remove(daemonId);
         if (!removedActiveDaemon) return;
         const fallback = store.connections.getSnapshot().selectedDaemonId;
-        navigate(fallback === null ? connectionPickerPath() : `${daemonSettingsPath(fallback)}#daemons`);
+        navigate(fallback === null ? connectionPickerPath() : `${daemonSettingsPath(fallback)}#machines`);
       }}
       onAddDaemon={() => navigate(connectionPickerPath())}
       carrier={carrier}
@@ -1321,6 +1317,7 @@ function DeviceRefusedGate({
 
 /** The mounted shell; exported so render tests can inject the router and store providers. */
 export function AppShell() {
+  const layout = useLayoutMode();
   useAppViewport();
   const store = useAppStore();
   const connectionSnapshot = useConnectionSnapshot();
@@ -1644,6 +1641,7 @@ export function AppShell() {
             active={appBarDestinationForRoute(pageRoute)}
             onNavigate={navigate}
             themeToggle={<ThemeToggle />}
+            tabBarShown={layout === 'drawer' && showsTabBar(pageRoute)}
             {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
           />
           <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
@@ -1673,6 +1671,15 @@ export function AppShell() {
               </ChunkErrorBoundary>
             </DeviceRefusedGate>
           </PullToPaletteRegion>
+          {/* The phone's level one sits under the page, above the home indicator. */}
+          {layout === 'drawer' && showsTabBar(pageRoute) ? (
+            <AppTabBar
+              daemon={connection.daemonId}
+              active={appBarDestinationForRoute(pageRoute)}
+              onNavigate={navigate}
+              onOpenPalette={openPalette}
+            />
+          ) : null}
           <CommandPalette
             open={palette.open}
             focusSignal={palette.focusSignal}

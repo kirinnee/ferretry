@@ -8,7 +8,7 @@
  * shown as such with the reason, rather than being called offline.
  */
 
-import type { FleetMachineView } from '@ferretry/protocol';
+import type { FleetCredentialStatusWord, FleetMachineView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { readFleetMachine } from '../catalog-api.ts';
 import type { FleetClient } from '../fleet-client.ts';
@@ -52,3 +52,34 @@ export const machineReachSummary = (reach: MachineReach): string => {
         : 'Online · Not set up yet';
   }
 };
+
+/**
+ * What a row shows: the machine's answer, or LOCKED — it wants a passkey before it says anything, and its
+ * prompt waits until it is on screen. Locked is the gate's fact, never the read's.
+ */
+export type ShownReach = MachineReach | { readonly kind: 'locked' };
+
+/** The status line under a machine's name wherever machines are listed. */
+export const shownReachSummary = (reach: ShownReach): string =>
+  reach.kind === 'locked' ? 'Locked · Open it to unlock' : machineReachSummary(reach);
+
+const REACH_WORDS: Readonly<Record<ShownReach['kind'], FleetCredentialStatusWord>> = {
+  checking: 'checking',
+  offline: 'needs_sign_in',
+  locked: 'refresh_due',
+  online: 'ready',
+  unreadable: 'ready',
+};
+
+/** The status mark a machine wears: the account model's four shapes, reused for reachability. */
+export const reachWord = (reach: ShownReach): FleetCredentialStatusWord => REACH_WORDS[reach.kind];
+
+const REACH_LABELS: Readonly<Record<ShownReach['kind'], string>> = {
+  checking: 'Checking',
+  offline: 'Offline',
+  locked: 'Locked',
+  online: 'Online',
+  unreadable: 'Online',
+};
+
+export const reachLabel = (reach: ShownReach): string => REACH_LABELS[reach.kind];

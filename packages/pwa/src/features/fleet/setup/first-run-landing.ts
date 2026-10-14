@@ -19,9 +19,9 @@ import type { FleetClientFactory } from '../fleet-client.ts';
 import { readMachineReach } from '../shell/machine-reach.ts';
 import { machineItemHash } from './settings-route.ts';
 
-/** The first run's address on one machine: `/d/<id>/settings#machines/<name>/settings/setup`. */
+/** The first run's address on one machine: `/d/<id>/settings#machines/<name>/machine/setup`. */
 export const firstRunPath = (daemonId: DaemonId, machineName: string): string =>
-  `${daemonSettingsPath(daemonId)}${machineItemHash(machineName, 'settings', 'setup')}`;
+  `${daemonSettingsPath(daemonId)}${machineItemHash(machineName, 'machine', 'setup')}`;
 
 /** Where a browser that just paired with `connection` goes next. Never throws. */
 export const landingAfterPairing = async (

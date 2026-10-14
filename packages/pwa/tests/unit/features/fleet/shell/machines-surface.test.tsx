@@ -140,9 +140,9 @@ describe('MachinesSurface', () => {
   });
 
   it('the empty frame factory renders the honest empty tab', async () => {
-    const Settings = emptyMachineTab('settings');
-    const view = await mount(surface({ tab: 'settings', tabs: { settings: Settings } }));
-    expect(view.container.querySelector('[data-machine-tab-empty="settings"] h3')?.textContent).toBe('Settings');
+    const Settings = emptyMachineTab('machine');
+    const view = await mount(surface({ tab: 'machine', tabs: { machine: Settings } }));
+    expect(view.container.querySelector('[data-machine-tab-empty="machine"] h3')?.textContent).toBe('Machine');
     expect(view.container.textContent).toContain('Nothing is shown here yet for studio-mac.');
     await view.unmount();
   });
@@ -294,8 +294,8 @@ describe('MachinesSurface: a machine that is not set up', () => {
     expect(setUp).toEqual(['studio']);
 
     // Coming back to the tabs in the same visit (Leave setup, or Done with nothing) does not go round again.
-    await click(view.container, '[data-machine-tab="settings"]');
-    await view.render(surface({ setUp, createClient: notSetUp, tab: 'settings' }));
+    await click(view.container, '[data-machine-tab="machine"]');
+    await view.render(surface({ setUp, createClient: notSetUp, tab: 'machine' }));
     await settle();
     expect(setUp).toEqual(['studio']);
     await view.unmount();

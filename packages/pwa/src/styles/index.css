@@ -1076,7 +1076,12 @@ body {
 /* ---- button --------------------------------------------------------------
    `[data-variant]` is state/role, not theme. Neo's block visibly depresses into
    its own offset shadow on press; every other family resolves
-   `--press-translate` to 0 and simply ignores the rule. */
+   `--press-translate` to 0 and simply ignores the rule.
+
+   CASING IS `--control-transform`, NOT `--label-transform`. The owner asked for no ALL CAPS on
+   buttons, tabs or navigation, and the label token is uppercase in most families because it is the
+   eyebrow's identity. Sharing one token made every button shout in those families; a control now reads
+   in sentence case everywhere, while eyebrows and badges keep the family's caps. */
 .kt-btn {
   display: inline-flex;
   align-items: center;
@@ -1095,8 +1100,8 @@ body {
   font-family: var(--font-ui);
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-label);
-  text-transform: var(--label-transform);
+  letter-spacing: var(--control-tracking, 0.01em);
+  text-transform: var(--control-transform, none);
   white-space: nowrap;
   transition:
     background-color 120ms ease,
@@ -1221,8 +1226,8 @@ body {
   font-family: var(--font-ui);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-label);
-  text-transform: var(--label-transform);
+  letter-spacing: var(--control-tracking, 0.01em);
+  text-transform: var(--control-transform, none);
   white-space: nowrap;
   transition:
     background-color 120ms ease,
@@ -1295,6 +1300,365 @@ body {
   background: transparent;
   box-shadow: none;
   color: var(--accent);
+}
+
+/* ============================================================================
+   NAVIGATION HIERARCHY — one look per level, so a reader can tell at a glance whether a thing takes
+   them somewhere or does something (the approved usability proposal).
+
+     L1 app        `.kt-appnav`   plain text links, the current page underlined
+     L2 section    `.kt-navpill`  a sidebar list; the selected row is a soft filled pill with its own
+                                  ink and a thin outline — never a side bar
+     L3 view       `.kt-utabs`    underlined tabs in sentence case, scrolling sideways on a phone
+     actions       `.kt-btn`      filled = main, outlined = alternative, ghost = cancel or later
+
+   Every colour is a role token from themes.css; the fallbacks only keep a swatch readable while a
+   family is missing one.
+   ============================================================================ */
+
+/* ---- L1: app navigation ------------------------------------------------- */
+.kt-appnav {
+  display: flex;
+  align-items: stretch;
+  gap: var(--gap-xs);
+  min-width: 0;
+}
+.kt-appnav__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-h);
+  padding-inline: var(--pad-control-x);
+  border-bottom: var(--tab-underline-width, 2px) solid transparent;
+  margin-bottom: calc(-1 * var(--divider-width));
+  color: var(--appnav-fg, var(--muted));
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--control-tracking, 0.01em);
+  text-transform: var(--control-transform, none);
+  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.kt-appnav__link:hover {
+  color: var(--fg);
+}
+.kt-appnav__link[aria-current='page'] {
+  border-bottom-color: var(--appnav-underline, var(--fg));
+  color: var(--appnav-sel-fg, var(--fg));
+  font-weight: var(--weight-strong);
+}
+
+/* The Find box: a search field in look, a button in behaviour (it opens the palette). */
+.kt-findbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 11rem;
+  height: var(--control-h-sm);
+  padding-inline: var(--pad-control-x);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+.kt-findbox:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.kt-findbox kbd {
+  margin-inline-start: auto;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+/* The phone's app bar: the four most-used places plus More, above the home indicator. */
+.kt-tabbar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  flex-shrink: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-top: var(--divider-width) solid var(--border-strong);
+  background: var(--surface);
+}
+.kt-tabbar__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 6px 2px;
+  color: var(--appnav-fg, var(--muted));
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-transform: var(--control-transform, none);
+}
+.kt-tabbar__item[aria-current='page'],
+.kt-tabbar__item[aria-expanded='true'] {
+  color: var(--tab-sel-fg, var(--accent));
+  font-weight: var(--weight-strong);
+}
+
+/* ---- L2: section list --------------------------------------------------- */
+.kt-navgroup__title {
+  padding: var(--gap-sm) var(--pad-control-x) var(--gap-xs);
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  letter-spacing: var(--tracking-label);
+  text-transform: var(--label-transform);
+  font-variant-caps: var(--label-variant);
+}
+.kt-navpill {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+  min-height: var(--row-min-h);
+  padding: var(--pad-row-y) var(--pad-control-x);
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-soft);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  text-align: left;
+  text-transform: var(--control-transform, none);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.kt-navpill:hover {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.kt-navpill__sub {
+  display: block;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+}
+.kt-navpill[aria-current='page'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  box-shadow: var(--nav-sel-shadow, none);
+  color: var(--nav-sel-fg, var(--accent));
+  font-weight: var(--weight-strong);
+}
+.kt-navpill[aria-current='page'] .kt-navpill__sub {
+  color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));
+}
+.kt-navpill--add {
+  color: var(--accent);
+  font-weight: var(--weight-strong);
+}
+
+/* The phone's form of the same level: inset grouped cards on a recessed ground. */
+.kt-ground {
+  background: var(--ground, var(--bg));
+}
+.kt-groupcard {
+  overflow: hidden;
+  border: var(--stroke-panel) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--nav-sel-shadow, none);
+}
+.kt-grouprow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-md);
+  width: 100%;
+  min-height: 52px;
+  padding: var(--gap-md) var(--pad-panel);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  text-align: left;
+  text-transform: var(--control-transform, none);
+}
+/* A real border on the row's list item, not a pseudo-element: it is the separation a divided list
+   promises, and the Machines geometry gate reads it as one. */
+.kt-groupcard > li + li {
+  border-top: var(--divider-width) solid var(--border);
+}
+@media (hover: hover) {
+  .kt-grouprow:hover {
+    background: var(--nav-hover, var(--surface-2));
+  }
+}
+.kt-grouprow:active {
+  background: var(--nav-hover, var(--surface-2));
+}
+
+/* ---- L3: underlined tabs ------------------------------------------------ */
+.kt-utabs {
+  position: relative;
+  min-width: 0;
+  border-bottom: var(--divider-width) solid var(--tab-rule, var(--border-strong));
+}
+/* The strip scrolls INSIDE itself; the fades say "there is more this way" without arrow buttons. */
+.kt-utabs__strip {
+  display: flex;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  list-style: none;
+  scrollbar-width: none;
+  --fade-start: 0px;
+  --fade-end: 0px;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
+    transparent 100%
+  );
+}
+.kt-utabs__strip::-webkit-scrollbar {
+  display: none;
+}
+.kt-utabs[data-more-start='true'] .kt-utabs__strip {
+  --fade-start: 28px;
+}
+.kt-utabs[data-more-end='true'] .kt-utabs__strip {
+  --fade-end: 28px;
+}
+.kt-utab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-height: var(--control-h);
+  padding-inline: var(--pad-control-x);
+  border-bottom: var(--tab-underline-width, 2px) solid transparent;
+  color: var(--tab-fg, var(--muted));
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--control-tracking, 0.01em);
+  text-transform: var(--control-transform, none);
+  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.kt-utab:hover {
+  color: var(--fg);
+}
+.kt-utab[aria-current='page'],
+.kt-utab[aria-selected='true'] {
+  border-bottom-color: var(--tab-underline, var(--accent));
+  color: var(--tab-sel-fg, var(--accent));
+  font-weight: var(--weight-strong);
+}
+.kt-utab:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* ---- the setup stepper -------------------------------------------------- */
+.kt-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kt-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: var(--gap-md);
+  padding-bottom: 22px;
+}
+.kt-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 32px;
+  bottom: 4px;
+  left: 13px;
+  width: 2px;
+  background: var(--step-rail, var(--border-strong));
+}
+.kt-step[data-state='done']:not(:last-child)::after {
+  background: var(--step-rail-done, var(--accent));
+}
+.kt-step__num {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--step-todo-edge, var(--border-strong));
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--step-todo-fg, var(--muted));
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.kt-step[data-state='done'] .kt-step__num {
+  border-color: var(--step-done-bg, var(--accent));
+  background: var(--step-done-bg, var(--accent));
+  color: var(--step-done-fg, var(--accent-fg));
+}
+.kt-step[data-state='now'] .kt-step__num {
+  border-color: var(--step-now-edge, var(--accent));
+  color: var(--step-now-fg, var(--accent));
+}
+.kt-step__name {
+  display: block;
+  padding-top: 3px;
+  color: var(--muted);
+  font-weight: var(--weight-medium);
+}
+.kt-step[data-state='done'] .kt-step__name,
+.kt-step[data-state='now'] .kt-step__name {
+  color: var(--fg);
+}
+.kt-step[data-state='now'] .kt-step__name {
+  font-weight: var(--weight-strong);
+}
+.kt-step__hint {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.kt-stepsegs {
+  display: flex;
+  gap: 6px;
+}
+.kt-stepsegs > span {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--step-seg, var(--border-strong));
+}
+.kt-stepsegs > span[data-state='done'] {
+  background: var(--step-seg-done, var(--accent));
+}
+.kt-stepsegs > span[data-state='now'] {
+  background: var(--step-seg-now, var(--accent-border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kt-appnav__link,
+  .kt-navpill,
+  .kt-utab {
+    transition: none;
+  }
 }
 
 /* ---- input / composer surface -------------------------------------------

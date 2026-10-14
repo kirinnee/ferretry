@@ -7,7 +7,7 @@ const studio = pairing('studio', 'studio mac');
 
 describe('firstRunPath', () => {
   it('names the first run on one machine, by the name this browser shows for it', () => {
-    expect(firstRunPath(studio.daemonId, 'studio mac')).toBe('/d/studio/settings#machines/studio%20mac/settings/setup');
+    expect(firstRunPath(studio.daemonId, 'studio mac')).toBe('/d/studio/settings#machines/studio%20mac/machine/setup');
   });
 });
 
@@ -17,7 +17,7 @@ describe('landingAfterPairing', () => {
     const landing = await landingAfterPairing(studio, async () =>
       machineClient(machineView({ setUp: false, runtimeCount: 0 }), paths),
     );
-    expect(landing).toBe('/d/studio/settings#machines/studio%20mac/settings/setup');
+    expect(landing).toBe('/d/studio/settings#machines/studio%20mac/machine/setup');
     expect(paths).toEqual(['/v1/fleet/machine']);
   });
 

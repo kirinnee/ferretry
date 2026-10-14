@@ -865,12 +865,12 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   // Measured for the daemon on screen, never carried over from the last one.
   const activeCarrier = harnessSettingsCarrier(activeDaemonId);
 
-  // The Settings tab reads the OTHER paired machines from the app store; the harness has none, so it
+  // The Machine tab reads the OTHER paired machines from the app store; the harness has none, so it
   // hands them over itself. The other tabs are the harness map's.
   const machineTabs = useMemo<MachineTabSurfaces>(
     () => ({
       ...HARNESS_MACHINE_TABS,
-      settings: function HarnessMachineSettings(props: MachineTabProps) {
+      machine: function HarnessMachineSettings(props: MachineTabProps) {
         return (
           <MachineSettingsTab
             {...props}
@@ -936,7 +936,6 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${target.hash}`);
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       }}
-      onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
         setConnections(current =>
           current.map(connection =>

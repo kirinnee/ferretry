@@ -74,7 +74,7 @@ const props = (
     },
     createClient: async () => client,
     sources: setup.sources ?? [record(WORK, 1)],
-    browser: fakeWindow(setup.hash ?? '#machines/studio-mac/settings'),
+    browser: fakeWindow(setup.hash ?? '#machines/studio-mac/machine'),
   };
 };
 
@@ -224,7 +224,7 @@ describe('MachineSettingsTab', () => {
       expect(install?.textContent).toBe('Install');
       expect(install?.disabled).toBe(false);
       await click(install, 'install codex');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/install-codex');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/install-codex');
     });
   });
 
@@ -239,7 +239,7 @@ describe('MachineSettingsTab', () => {
       { machine, answers: { '/v1/fleet/setup/scan': NOTHING_INSTALLED } },
       async ({ q, browser, container }) => {
         await click(q('[data-tool-install="claude"]'), 'install claude');
-        expect(browser.location.hash).toBe('#machines/studio-mac/settings/install-claude');
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine/install-claude');
         expect(q('[data-install-flow="claude"]')).not.toBeNull();
         expect(container.textContent).toContain('Claude Code isn’t installed on studio-mac. Ferretry can install it.');
       },
@@ -265,7 +265,7 @@ describe('MachineSettingsTab', () => {
         'Logins and history stay behind.',
       );
       await click(setup.querySelector('[data-settings-action="clone"]'), 'clone');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/clone');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/clone');
     });
   });
 
@@ -275,7 +275,7 @@ describe('MachineSettingsTab', () => {
       expect(setup.querySelector('[data-settings-action="setup"]')).toBeNull();
       expect(setup.querySelector('[data-settings-action="import"]')?.textContent).toContain('Import again');
       await click(setup.querySelector('[data-settings-action="import"]'), 'import');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/import');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/import');
       expect(q('[data-first-run-step]')).not.toBeNull();
     });
   });
@@ -283,7 +283,7 @@ describe('MachineSettingsTab', () => {
   it('Set up opens the first run', async () => {
     await withTab({ machine: FRESH_MACHINE, answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
       await click(q('[data-settings-action="setup"]'), 'set up');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/setup');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/setup');
       expect(q('[data-first-run-step="tools"]')).not.toBeNull();
     });
   });
@@ -318,11 +318,11 @@ describe('MachineSettingsTab', () => {
       ['install-codex', '[data-install-flow="codex"]'],
     ];
     for (const [flow, marker] of flows)
-      await withTab({ hash: `#machines/studio-mac/settings/${flow}`, answers }, async ({ q }) => {
+      await withTab({ hash: `#machines/studio-mac/machine/${flow}`, answers }, async ({ q }) => {
         expect(q(marker)).not.toBeNull();
         expect(q('[data-machine-settings]')).toBeNull();
       });
-    await withTab({ hash: '#machines/studio-mac/settings/nonsense', answers }, async ({ q }) => {
+    await withTab({ hash: '#machines/studio-mac/machine/nonsense', answers }, async ({ q }) => {
       expect(q('[data-machine-settings]')).not.toBeNull();
     });
   });
@@ -337,7 +337,7 @@ describe('MachineSettingsSurface', () => {
     const store = { connections } as unknown as AppStore;
     const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const saved = window.location.hash;
-    window.location.hash = '#machines/studio-mac/settings/clone';
+    window.location.hash = '#machines/studio-mac/machine/clone';
     const view = await mount(
       <StoreProvider store={store}>
         <MachineSettingsSurface
@@ -372,7 +372,7 @@ describe('MachineSettingsSurface', () => {
     const store = { connections } as unknown as AppStore;
     const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const saved = window.location.hash;
-    window.location.hash = '#machines/studio-mac/settings';
+    window.location.hash = '#machines/studio-mac/machine';
     const view = await mount(
       <StoreProvider store={store}>
         <MachineSettingsSurface

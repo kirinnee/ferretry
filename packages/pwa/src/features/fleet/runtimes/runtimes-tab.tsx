@@ -70,7 +70,7 @@ function MissingHarness({
     <p className="m-0 flex flex-wrap items-center gap-1 text-cell text-warn" data-runtime-missing-harness="">
       <TriangleAlert size={14} aria-hidden="true" />
       <span>{HARNESS_NAMES[runtime.harness]} isn’t installed here</span> ·{' '}
-      <a href={machineDetailHash(machineName, 'settings')} className="font-semibold text-accent underline">
+      <a href={machineDetailHash(machineName, 'machine')} className="font-semibold text-accent underline">
         Install
       </a>
     </p>
@@ -128,10 +128,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
           <p className="m-0 text-row font-semibold text-fg">{HARNESS_NAMES[runtime.harness]} isn’t installed here</p>
           <p className="m-0 text-cell text-muted">Install it on {machineName} to launch this runtime.</p>
-          <a
-            href={machineDetailHash(machineName, 'settings')}
-            className="text-cell font-semibold text-accent underline"
-          >
+          <a href={machineDetailHash(machineName, 'machine')} className="text-cell font-semibold text-accent underline">
             Install {HARNESS_NAMES[runtime.harness]}
           </a>
         </div>
@@ -380,7 +377,7 @@ export function RuntimesTab({
           Setting it up finds Claude Code and Codex on {machineName} and brings in what they already have.
         </p>
         <a
-          href={`${machineDetailHash(machineName, 'settings')}/setup`}
+          href={`${machineDetailHash(machineName, 'machine')}/setup`}
           className="kt-btn max-w-full no-underline hover:no-underline"
           data-variant="primary"
         >

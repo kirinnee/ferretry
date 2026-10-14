@@ -1,5 +1,5 @@
 /**
- * The Settings tab (docs/design/account-model.md §4.2, §3.6 F4–F5, §4.3, §4.7, E32): what this
+ * The Machine tab (docs/design/account-model.md §4.2, §3.6 F4–F5, §4.3, §4.7, E32): what this
  * machine does for every runtime on it.
  *
  * - **Agent permissions** — Auto mode or Skip all permission checks, each with a plain sentence. It
@@ -7,7 +7,9 @@
  * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
  * - **Setup** — **Set up <machine>** while it is not set up, otherwise **Import again**; **Clone from
  *   another machine**.
- * - **Machine** — its name, whether it answers, how many runtimes it has, and its format.
+ * - **Connection and security** — the paired daemon's own panels (Warden, Secrets, devices, security…),
+ *   which used to be a separate Daemons section; one place per machine now.
+ * - **About this machine** — its name, whether it answers, how many runtimes it has, and its format.
  *
  * Each flow is a linkable address under this tab (`settings-route.ts`), so the Runtimes tab's
  * "Set up <machine>" link lands straight in the first run.
@@ -161,6 +163,8 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const leave = (): void => route.open(null);
   const toRuntimes = (): void => route.goTo('runtimes');
   const flow: SettingsFlow | null = route.flow;
+  const { daemonPanels } = props;
+  const panels = daemonPanels === undefined ? null : daemonPanels(undefined, route.openPanel);
 
   if (flow === 'setup' || flow === 'import')
     return <MachineFirstRun key={flow} {...props} mode={flow} onDone={toRuntimes} onLeave={leave} />;
@@ -169,12 +173,18 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
     return (
       <InstallTool key={flow} {...props} harness={flow === 'install-claude' ? 'claude' : 'codex'} onLeave={leave} />
     );
+  // A daemon panel is a page of its own, so a link to one shows it even while the machine is not answering:
+  // Host checks and removing a pairing matter most exactly then.
+  if (route.panel !== null && daemonPanels !== undefined) return daemonPanels(route.panel, route.openPanel);
 
   if (machine === null)
     return (
-      <p role="status" className="m-0 text-cell text-muted" data-machine-settings-waiting="">
-        {checking ? `Checking ${machineName}…` : `${machineName}’s settings show once it answers.`}
-      </p>
+      <div className="flex min-w-0 flex-col gap-5">
+        <p role="status" className="m-0 text-cell text-muted" data-machine-settings-waiting="">
+          {checking ? `Checking ${machineName}…` : `${machineName}’s settings show once it answers.`}
+        </p>
+        {panels}
+      </div>
     );
 
   return (
@@ -236,7 +246,9 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         />
       </SetupSection>
 
-      <SetupSection title="Machine" name="facts">
+      {panels}
+
+      <SetupSection title="About this machine" name="facts">
         <dl className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-cell">
           <dt className="text-muted">Name</dt>
           <dd className="m-0 min-w-0 break-all font-mono text-fg">{machine.name}</dd>

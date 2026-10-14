@@ -1098,9 +1098,9 @@ describe('SettingsPage Machines section', () => {
     await settle();
     expect(view.container.querySelector('[data-runtimes-tab]')?.textContent).toBe('Alpha workstation');
     await interact(() =>
-      must(view.container.querySelector<HTMLElement>('[data-machine-tab="settings"]'), 'settings tab').click(),
+      must(view.container.querySelector<HTMLElement>('[data-machine-tab="machine"]'), 'settings tab').click(),
     );
-    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings');
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/machine');
     await view.unmount();
   });
 
@@ -1113,15 +1113,15 @@ describe('SettingsPage Machines section', () => {
     const callbacks = calls();
     const view = await mount(page({ createMachineClient: fresh, calls: callbacks }));
     await settle();
-    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings/setup');
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/machine/setup');
     expect(callbacks.navigated).toEqual([]);
     await view.unmount();
 
     // A link that already names a way to set it up (Clone) is somebody's own choice: left alone.
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/settings/clone');
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/machine/clone');
     const cloning = await mount(page({ createMachineClient: fresh }));
     await settle();
-    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings/clone');
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/machine/clone');
     await cloning.unmount();
   });
 

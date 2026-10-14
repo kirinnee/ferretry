@@ -8,33 +8,18 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { ChevronDown, LoaderCircle, Plus, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { ChevronDown, LoaderCircle, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { sameDaemonConnection } from '../../lib/daemon-connection.ts';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 import { PanelPath } from '../../shell/panel-typography.tsx';
-import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 
 const DAEMON_REACHABILITY_INTERVAL_MS = 30_000;
 
 export type DaemonReachabilityProbe = (connection: DaemonConnection) => Promise<unknown>;
-
-export interface DaemonSettingsProps {
-  readonly activeDaemonId: DaemonId;
-  readonly connections: readonly DaemonConnectionRecord[];
-  readonly probeDaemon: DaemonReachabilityProbe;
-  /** A live carrier refusal can only make a prior health result worse, never better. */
-  readonly activeCarrier?: ConnectionChoice | undefined;
-  readonly onSelectDaemon: (daemonId: DaemonId) => void;
-  readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
-  readonly onRemoveDaemon: (daemonId: DaemonId) => void;
-  readonly onAddDaemon: () => void;
-}
 
 /**
  * What every screen calls a paired machine: the owner's label, else the name the machine gave itself.
@@ -262,127 +247,6 @@ function DaemonManagement({
         </div>
       </div>
     </details>
-  );
-}
-
-const DAEMON_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
-
-/**
- * Level two of the shared rail. The address is the second line only when it is
- * not already the label, so an unnamed daemon is not printed twice, and both
- * lines clip: an address is long and opaque, and Host checks shows it in full.
- */
-const daemonRailItems = (connections: readonly DaemonConnectionRecord[]): readonly ChoiceRailItem<DaemonId>[] =>
-  connections.map(connection => {
-    const name = daemonDisplayName(connection);
-    return {
-      id: connection.daemonId,
-      label: name,
-      detail: name === connection.baseUrl ? undefined : connection.baseUrl,
-    };
-  });
-
-/** The named daemon selector. On a phone it deliberately becomes a picker, never a cramped tab strip. */
-export function DaemonSettings({
-  activeDaemonId,
-  connections,
-  onSelectDaemon,
-  onAddDaemon,
-}: Omit<DaemonSettingsProps, 'probeDaemon' | 'activeCarrier' | 'onRenameDaemon' | 'onRemoveDaemon'>) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const titleId = useId();
-  const active = connections.find(connection => connection.daemonId === activeDaemonId);
-  const activeName = active ? daemonDisplayName(active) : 'Selected daemon unavailable';
-
-  return (
-    <section className="min-w-0" aria-label="Daemon settings">
-      <div className="hidden min-w-0 items-center gap-2 md:flex" data-daemon-subtabs="desktop">
-        <div
-          role="tablist"
-          aria-label="Connected daemons"
-          className="flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden rounded-panel border border-border bg-surface p-1 shadow-panel"
-        >
-          {connections.map(connection => {
-            const name = daemonDisplayName(connection);
-            const selected = connection.daemonId === activeDaemonId;
-            return (
-              <button
-                key={connection.daemonId}
-                type="button"
-                role="tab"
-                data-daemon-subtab={String(connection.daemonId)}
-                aria-selected={selected}
-                aria-controls={`daemon-subtab-panel-${String(connection.daemonId)}`}
-                title={connection.baseUrl}
-                onClick={() => onSelectDaemon(connection.daemonId)}
-                className={cn(
-                  'flex min-h-[44px] min-w-[132px] max-w-[220px] flex-1 items-center rounded-control px-control-x py-2 text-left focus-visible:outline-focus focus-visible:outline-offset-focus',
-                  selected ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-surface-2 hover:text-fg',
-                )}
-              >
-                <span className="truncate text-ui font-semibold">{name}</span>
-              </button>
-            );
-          })}
-        </div>
-        <button
-          type="button"
-          className="kt-btn min-h-[44px] shrink-0"
-          onClick={onAddDaemon}
-          data-add-daemon=""
-          aria-label="Add daemon"
-        >
-          <Plus size={16} aria-hidden="true" />
-          Add
-        </button>
-      </div>
-
-      <div className="md:hidden" data-daemon-subtabs="mobile">
-        <PickerTrigger
-          eyebrow="Configuring daemon"
-          value={activeName}
-          open={pickerOpen}
-          controls="daemon-subtab-picker"
-          marker="data-daemon-subtab-trigger"
-          onOpen={() => setPickerOpen(true)}
-        />
-        <BottomSheet
-          id="daemon-subtab-picker"
-          open={pickerOpen}
-          onClose={() => setPickerOpen(false)}
-          labelledBy={titleId}
-          closeLabel="Close daemon picker"
-          panelClassName="bg-surface"
-          maxHeight={DAEMON_PICKER_HEIGHT}
-          zIndexClass="z-50"
-        >
-          <div className="min-h-0 overflow-y-auto px-panel pb-4">
-            <h2 id={titleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
-              Choose a daemon
-            </h2>
-            <p className="mb-3 mt-1 text-cell leading-base text-muted">
-              Every panel below belongs to the daemon you choose here.
-            </p>
-            <nav aria-label="Connected daemons">
-              <ChoiceRail
-                items={daemonRailItems(connections)}
-                activeId={activeDaemonId}
-                marker="data-daemon-subtab"
-                truncate
-                onSelect={daemonId => {
-                  onSelectDaemon(daemonId);
-                  setPickerOpen(false);
-                }}
-              />
-            </nav>
-            <button type="button" className="kt-btn mt-3 min-h-[44px] w-full" onClick={onAddDaemon} data-add-daemon="">
-              <Plus size={16} aria-hidden="true" />
-              Add daemon
-            </button>
-          </div>
-        </BottomSheet>
-      </div>
-    </section>
   );
 }
 

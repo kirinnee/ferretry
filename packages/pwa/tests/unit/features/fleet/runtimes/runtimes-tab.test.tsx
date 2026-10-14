@@ -135,7 +135,7 @@ describe('Runtimes tab list', () => {
     const notes = view.container.querySelectorAll('[data-runtime-missing-harness]');
     expect(notes).toHaveLength(1);
     expect(notes[0]?.textContent).toBe('Codex isn’t installed here · Install');
-    expect(notes[0]?.querySelector('a')?.getAttribute('href')).toBe('#machines/studio-mac/settings');
+    expect(notes[0]?.querySelector('a')?.getAttribute('href')).toBe('#machines/studio-mac/machine');
     await view.unmount();
 
     const unknown = await open({ machine: null });
@@ -165,7 +165,7 @@ describe('Runtimes tab list', () => {
     );
     const link = must(note.querySelector('a'), 'set up link');
     expect(link.textContent).toBe('Set up studio-mac');
-    expect(link.getAttribute('href')).toBe('#machines/studio-mac/settings/setup');
+    expect(link.getAttribute('href')).toBe('#machines/studio-mac/machine/setup');
     expect(view.container.querySelector('[data-runtimes-tab]')).toBeNull();
     expect(view.container.querySelector('[data-add-runtime]')).toBeNull();
     await view.unmount();
@@ -340,7 +340,7 @@ describe('a runtime’s own page', () => {
     expect(note.textContent).toContain('Claude Code isn’t installed here');
     expect(note.textContent).toContain('Install it on studio-mac to launch this runtime.');
     expect(note.querySelector('a')?.textContent).toBe('Install Claude Code');
-    expect(note.querySelector('a')?.getAttribute('href')).toBe('#machines/studio-mac/settings');
+    expect(note.querySelector('a')?.getAttribute('href')).toBe('#machines/studio-mac/machine');
     await view.unmount();
   });
 
