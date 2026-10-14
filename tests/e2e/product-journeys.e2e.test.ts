@@ -1436,8 +1436,7 @@ describe('one browser, two machines', () => {
               }
               return { value: undefined, evidence: "A's session page shows no prompt, and A stays unlocked" };
             },
-            'B19 — packages/pwa: a locked second machine raises its passkey prompt over whatever page is open, naming only a host name the machines can share. MAJOR (UX). KNOWN: tracked on the e2e report',
-            /machine B's "set up a passkey" offer appeared/u,
+            'B19: a locked second machine raised its passkey prompt over the page open on another machine (fixed in #475)',
           );
         else
           await recordStep({
