@@ -511,7 +511,9 @@ command says so at the moment somebody might be tempted to do that instead.
 
   **The honest cost, stated rather than discovered:** switching `pairing` off for remote callers no longer
   stops a paired device enrolling itself for notifications. That is the intended shape — notifications are
-  not a credential — and revoking the device still takes its enrolments with it.
+  not a credential — and revoking the device still takes its enrolments with it. Enrolling still needs a
+  passkey step-up from a governed device, and the endpoint must be a browser push service: the host sends
+  requests to it ([design/zero-trust.md](design/zero-trust.md) B5).
 
 - **The secret routes needed no capability before B5**, so a device paired before it could run a command
   with a stored secret without the operator ever being asked. They now demand `secrets` (see the capability

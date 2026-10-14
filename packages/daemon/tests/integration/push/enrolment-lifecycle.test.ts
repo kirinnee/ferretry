@@ -239,7 +239,7 @@ describe('push enrolment over the real route surface', () => {
     should(Buffer.from(publicKey, 'base64url')).have.length(65);
 
     // ── enrolment ───────────────────────────────────────────────────────────────────────────────
-    const subscription = await subscribed('https://push.example.test/send/pixel');
+    const subscription = await subscribed('https://fcm.googleapis.com/send/pixel');
     const enrolled = await world.surface.dispatch(
       request({
         method: 'POST',
@@ -266,8 +266,8 @@ describe('push enrolment over the real route surface', () => {
       view.id,
     ]);
     // Nothing on this wire can be replayed to wake the device: the triple lives only in the document.
-    should(listed.body).not.match(/push\.example\.test/u);
-    should(await world.files.readText(world.document)).match(/push\.example\.test/u);
+    should(listed.body).not.match(/fcm\.googleapis\.com/u);
+    should(await world.files.readText(world.document)).match(/fcm\.googleapis\.com/u);
 
     // ── revoking the DEVICE takes the notifications with it ─────────────────────────────────────
     const revoked = await world.surface.dispatch(
@@ -288,7 +288,7 @@ describe('push enrolment over the real route surface', () => {
     should(PushDeviceListResponseSchema.parse(JSON.parse(remaining.body)).devices).be.empty();
     // Gone from the DOCUMENT, not merely filtered out of an answer: a row that survived would be a
     // capability to wake a phone whose owner revoked it.
-    should(await world.files.readText(world.document)).not.match(/push\.example\.test/u);
+    should(await world.files.readText(world.document)).not.match(/fcm\.googleapis\.com/u);
   });
 
   it('should leave one device’s enrolment alone when another is revoked', async () => {
@@ -319,8 +319,8 @@ describe('push enrolment over the real route surface', () => {
       should(response.status).equal(201);
       return PushDeviceViewSchema.parse(JSON.parse(response.body));
     };
-    const phoneEnrolment = await enrol(phone, 'Pixel 8', 'https://push.example.test/send/pixel');
-    const tabletEnrolment = await enrol(tablet, 'iPad', 'https://push.example.test/send/ipad');
+    const phoneEnrolment = await enrol(phone, 'Pixel 8', 'https://fcm.googleapis.com/send/pixel');
+    const tabletEnrolment = await enrol(tablet, 'iPad', 'https://fcm.googleapis.com/send/ipad');
 
     await world.surface.dispatch(
       request({ method: 'DELETE', path: `/v1/pair/devices/${phone.deviceId}`, headers: admin, loopback: true }),
@@ -335,7 +335,8 @@ describe('push enrolment over the real route surface', () => {
     should(phoneEnrolment.id).not.equal(tabletEnrolment.id);
   });
 
-  it('should refuse an enrolment the push service has already discarded, and store nothing', async () => {
+  it('should forget an enrolment the push service has already discarded, answering as for a live one', async () => {
+    // The answer is never the confirmation's fate, or it would be a reachability oracle (review M2).
     const world = await daemon('push-gone');
     const browser = await pair(world, 'Pixel 8');
     world.pushService.status = 410;
@@ -347,33 +348,36 @@ describe('push enrolment over the real route surface', () => {
         device: browser.device,
         body: JSON.stringify({
           deviceName: 'Pixel 8',
-          subscription: await subscribed('https://push.example.test/send/dead'),
+          subscription: await subscribed('https://fcm.googleapis.com/send/dead'),
           prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );
 
-    should(response.status).equal(400);
-    should(JSON.parse(response.body).code).equal('push_invalid');
+    should(response.status).equal(201);
     const listed = await world.surface.dispatch(
       request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
     should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).be.empty();
   });
 
-  it('should let a DEFAULT paired browser enrol ITSELF with no passkey confirmation (B5)', async () => {
-    // Self-enrolment grants nothing — it lets this daemon reach the device that asked — so it needs no
-    // `pairing.use` and no step-up. The device here holds the default, `fleet.use` only, and has NOT
-    // confirmed with its passkey: it still gets alerts. This used to be the declared B3 GAP.
+  it('should let a DEFAULT paired browser enrol ITSELF once it has confirmed, and not before', async () => {
+    // Self-enrolment grants nothing, so it needs no `pairing.use`: a default device still gets alerts.
+    // But it makes this host send requests to the endpoint, so a governed device confirms with its
+    // passkey first (review M2).
     const world = await daemon('push-unconfirmed');
     const browser = await pair(world, 'Pixel 8');
     world.stepUp.confirmed = false;
     const body = JSON.stringify({
       deviceName: 'Pixel 8',
-      subscription: await subscribed('https://push.example.test/send/unconfirmed'),
+      subscription: await subscribed('https://fcm.googleapis.com/send/unconfirmed'),
       prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
     });
 
+    const unconfirmed = await world.surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser.device, body }),
+    );
+    world.stepUp.confirmed = true;
     const enrolled = await world.surface.dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', device: browser.device, body }),
     );
@@ -381,6 +385,8 @@ describe('push enrolment over the real route surface', () => {
       request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
 
+    should(unconfirmed.status).equal(403);
+    should(JSON.parse(unconfirmed.body).code).equal('grant_step_up_required');
     should(enrolled.status).equal(201);
     should(world.pushService.received).have.length(1);
     should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).have.length(1);
@@ -397,7 +403,7 @@ describe('push enrolment over the real route surface', () => {
         loopback: true,
         body: JSON.stringify({
           deviceName: 'The machine',
-          subscription: await subscribed('https://push.example.test/send/host'),
+          subscription: await subscribed('https://fcm.googleapis.com/send/host'),
           prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
