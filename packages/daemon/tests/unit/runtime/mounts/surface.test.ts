@@ -69,7 +69,13 @@ const pairingSubsystem = (): PairingSubsystem => ({
 // A REAL step-up service over in-memory fakes, so the inventory mounts the very type production does.
 const stepUpSubsystem = (): StepUpService =>
   new StepUpService({
-    store: { list: async () => [], holder: async () => undefined, add: async () => {}, updateSignCount: async () => {}, forgetDevice: async () => {} },
+    store: {
+      list: async () => [],
+      holder: async () => undefined,
+      add: async () => {},
+      updateSignCount: async () => {},
+      forgetDevice: async () => {},
+    },
     verifier: {
       verifyRegistration: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
       verifyAssertion: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),

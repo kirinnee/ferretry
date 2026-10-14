@@ -72,7 +72,10 @@ export class StatePasskeyStore implements PasskeyStore {
       const held = current.find(existing => existing.credentialId === passkey.credentialId);
       if (held !== undefined && held.deviceId !== passkey.deviceId)
         throw new PasskeyStoreDamaged('that credential already belongs to another device');
-      return [...current.filter(existing => existing.credentialId !== passkey.credentialId), RecordSchema.parse(passkey)];
+      return [
+        ...current.filter(existing => existing.credentialId !== passkey.credentialId),
+        RecordSchema.parse(passkey),
+      ];
     });
   }
 
