@@ -22,7 +22,7 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { E2eEnvironment } from '../fixture.ts';
-import { chromeExecutable, type HarnessTeardown, resolvePlaywright } from './relay-harness.ts';
+import { chromeExecutable, type HarnessTeardown, launchChromiumWithRetry, resolvePlaywright } from './relay-harness.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 
@@ -201,11 +201,13 @@ export async function launchProductBrowser(
   options: { readonly viewport?: { width: number; height: number }; readonly userAgent?: string } = {},
 ): Promise<ProductBrowser> {
   const module = (await import(resolvePlaywright())) as { chromium: ProductBrowserLauncher };
-  const browser = await module.chromium.launch({
-    executablePath: chromeExecutable(),
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
+  const browser = await launchChromiumWithRetry(() =>
+    module.chromium.launch({
+      executablePath: chromeExecutable(),
+      headless: true,
+      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    }),
+  );
   teardown.add('product chrome', async () => {
     await browser.close();
   });

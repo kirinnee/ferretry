@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFile, cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { assertNoLiveStatePath } from '../fixture.ts';
-import { chromeExecutable, type HarnessTeardown } from './relay-harness.ts';
+import { chromeExecutable, type HarnessTeardown, launchChromiumWithRetry } from './relay-harness.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 const PWA_ROOT = join(REPOSITORY_ROOT, 'packages', 'pwa');
@@ -275,7 +275,9 @@ export async function launchReleaseBrowser(
       `--unsafely-treat-insecure-origin-as-secure=http://${options.host.name}:${String(options.host.port)}`,
     );
   }
-  const browser = await module.chromium.launch({ executablePath: chromeExecutable(), headless: true, args });
+  const browser = await launchChromiumWithRetry(() =>
+    module.chromium.launch({ executablePath: chromeExecutable(), headless: true, args }),
+  );
   const context = await browser.newContext({ viewport: { width: 1_280, height: 900 }, colorScheme: 'light' });
   await context.grantPermissions(['local-network-access']).catch(() => undefined);
   const page = await context.newPage();

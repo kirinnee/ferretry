@@ -679,6 +679,17 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
       evidence: 'this build has no /v1/audit — the audit log (#461) is not merged',
     });
   } else {
+    {
+      // fyd's own words about its audit log, so a missing record can be told apart from a refused write.
+      const log = product.environment.daemonOutput();
+      const said = `${log.out}\n${log.err}`
+        .split('\n')
+        .filter(line => /audit/iu.test(line))
+        .slice(-6)
+        .join(' | ');
+      if (said !== '')
+        await recordStep({ journey, step: 'audit:daemon-says', status: 'FLAG', evidence: said.slice(0, 1_400) });
+    }
     const events = new Set(
       ((audit.body as { records?: { event: string }[] }).records ?? []).map(record => record.event),
     );
@@ -708,18 +719,18 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
         timeout: 30_000,
       });
       await unlockIfAsked(page, 3_000);
-      // The tab id depends on how #461 and #464 resolve their shared `security` id; take whichever offers the log.
-      for (const id of ['security-log', 'security']) {
-        if (await page.evaluate<boolean>(`document.querySelector('[data-security-log]') !== null`)) break;
+      // The log is its own tab, `security-log`, beside the passkey tab `security` (#461 next to #464).
+      for (const id of ['security-log']) {
+        if (await page.evaluate<boolean>(`document.querySelector('[data-security-log-panel]') !== null`)) break;
         if (await page.evaluate<boolean>(`document.querySelector('[data-daemon-panel="${id}"]') !== null`))
           await page.click(`[data-daemon-panel="${id}"]`);
         await Bun.sleep(1_000);
       }
-      await expectScreen(page, '[data-security-log] [data-security-event="device.paired"]', 20_000);
+      await expectScreen(page, '[data-security-log-panel] [data-security-log-event="terminal.opened"]', 20_000);
       await captureScreens(page, journey, '18-security-log');
       return {
         value: undefined,
-        evidence: `Settings shows the security log with ${String(await page.evaluate<number>(`document.querySelectorAll('[data-security-event]').length`))} event(s)`,
+        evidence: `Settings shows the security log with ${String(await page.evaluate<number>(`document.querySelectorAll('[data-security-log-event]').length`))} event(s)`,
       };
     });
   }
@@ -795,6 +806,7 @@ describe('the product, from a fresh machine to a working session', () => {
             evidence: `${String(frames.length)} relay frames searched (utf-8 and base64): no prompt, reply, secret, password, token or device id`,
           };
         });
+        assertNoSoftFailures(journey);
       },
       { relay: true },
     );
@@ -1388,8 +1400,30 @@ describe('one browser, two machines', () => {
             await page.click('[data-step-up-dialog] button:has-text("Cancel")');
             await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
             await Bun.sleep(1_500);
-            if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))
-              throw new Error('machine A asked to unlock again after visiting B');
+            if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`)) {
+              // Say WHICH machine is asking: A losing its unlock and B's prompt surfacing over A's page are
+              // different defects.
+              const asking = String(await textNow(page, '[data-step-up-dialog] [data-step-up-machine]'));
+              await captureScreens(page, journey, '43-prompt-over-machine-a');
+              // Both machines run on this host, so the name cannot say which one asks. The passkey can: only
+              // A holds one, so B's prompt answers "no passkey" and A's would unlock.
+              // A first-passkey offer can only be B's: A already holds a passkey and is never offered one.
+              const firstPasskeyOffer = await page.evaluate<boolean>(
+                `document.querySelector('[data-step-up-first-passkey]') !== null`,
+              );
+              if (firstPasskeyOffer)
+                throw new Error(
+                  `on A's session page machine B's "set up a passkey" offer appeared (named "${asking}", the host both share); a locked second machine's prompt surfaces over the first machine's pages`,
+                );
+              await page.click('[data-step-up-dialog] [data-step-up-confirm]');
+              await Bun.sleep(3_000);
+              const outcome = (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') === null`))
+                ? "it unlocked with A's passkey, so A had lost its unlock"
+                : `it answered "${String(await textNow(page, '[data-step-up-failure]')).slice(0, 120)}", so it is B's prompt shown over A's page`;
+              throw new Error(
+                `on A's session page an unlock prompt appeared naming "${asking}" (both machines share that host name); answering it: ${outcome}`,
+              );
+            }
             return {
               value: undefined,
               evidence: `unlocked at A, B still asks: "${said.slice(0, 100)}"; A stays unlocked`,

@@ -636,14 +636,16 @@ export interface ChromeOptions {
 
 export async function launchChrome(teardown: HarnessTeardown, options: ChromeOptions = {}): Promise<BrowserSession> {
   const module = (await import(resolvePlaywright())) as { chromium: ChromiumLauncher };
-  const browser = await module.chromium.launch({
-    executablePath: chromeExecutable(),
-    headless: true,
-    // `--no-sandbox` because this host's Chrome refuses to start otherwise under the test runner,
-    // and `--disable-dev-shm-usage` because a small `/dev/shm` in a container crashes the renderer
-    // mid-journey, which looks exactly like an app defect.
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
+  const browser = await launchChromiumWithRetry(() =>
+    module.chromium.launch({
+      executablePath: chromeExecutable(),
+      headless: true,
+      // `--no-sandbox` because this host's Chrome refuses to start otherwise under the test runner,
+      // and `--disable-dev-shm-usage` because a small `/dev/shm` in a container crashes the renderer
+      // mid-journey, which looks exactly like an app defect.
+      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    }),
+  );
   const context = await browser.newContext({
     viewport: { width: 1_280, height: 900 },
     ...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
@@ -939,4 +941,27 @@ export async function renderedDataAttributes(page: BrowserPage): Promise<string>
          .map(attribute => attribute.value === '' ? attribute.name : attribute.name + '="' + attribute.value.slice(0, 40) + '"')
      ))].sort().join(', ')`,
   );
+}
+
+/**
+ * Launch Chrome, retrying ONLY the launch failures Bun produces while it wires Playwright's pipes.
+ *
+ * Seen in full-tier runs, never in isolation: Bun's `child_process.spawn` fails to create the
+ * `--remote-debugging-pipe` stdio with `Failed to connect` (ENOENT) or loses an epoll registration
+ * (`EBADF`) while a previous Chrome is still releasing its pipes. No browser exists when this throws,
+ * so a second attempt is safe. Anything else — a missing Chrome, a bad flag — fails the first time.
+ */
+export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await launch();
+    } catch (error) {
+      const text = String((error as Error).message ?? error);
+      if (!/Failed to connect|EBADF|epoll_ctl/u.test(text)) throw error;
+      lastError = error;
+      await Bun.sleep(250 * attempt);
+    }
+  }
+  throw lastError;
 }
