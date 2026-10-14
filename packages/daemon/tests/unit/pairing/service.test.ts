@@ -14,6 +14,7 @@ import {
 } from '@ferretry/protocol';
 import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
+import type { GrantAuditEntry } from '../../../src/lib/grants/types.ts';
 import {
   type DeviceConnectionRevoker,
   LiveDeviceConnections,
@@ -32,6 +33,21 @@ const DEVICE_KEY = toBase64Url(
 const SECOND_DEVICE_KEY = toBase64Url(
   new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...new Array(32).fill(6)]),
 );
+
+class RecordingAudit {
+  readonly entries: GrantAuditEntry[] = [];
+
+  constructor(
+    private readonly onRecord?: () => void,
+    private readonly failure?: Error,
+  ) {}
+
+  async record(entry: GrantAuditEntry): Promise<void> {
+    this.onRecord?.();
+    if (this.failure !== undefined) throw this.failure;
+    this.entries.push(entry);
+  }
+}
 
 interface AttemptShape {
   readonly code?: string;
@@ -215,6 +231,7 @@ function fixture(
     readonly advertisement?: Advertisement;
     readonly deviceState?: readonly RecordingDeviceState[];
     readonly connections?: DeviceConnectionRevoker;
+    readonly audit?: RecordingAudit;
     /** What this daemon resolved at boot, for a case about what a redemption hands out. */
     readonly carriers?: readonly DaemonCarrier[];
     /** The rendezvous the composition root proved a fresh device could discover, if any. */
@@ -246,6 +263,7 @@ function fixture(
     deviceState: options.deviceState,
     ...(options.connections === undefined ? {} : { connections: options.connections }),
     ...(options.idleExpiryDays === undefined ? {} : { idleExpiryDays: options.idleExpiryDays }),
+    ...(options.audit === undefined ? {} : { audit: options.audit }),
   });
   const mint = () => service.mint();
   return { clock, cryptography, devices, credentials, service, mint };
@@ -899,6 +917,116 @@ describe('PairingService revocation', () => {
     // Assert
     should(attempt).equal('disk unavailable');
     should(credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
+  });
+});
+
+describe('PairingService revocation audit', () => {
+  it('should record the actor and the device id once the revocation has happened', async () => {
+    // Arrange
+    const audit = new RecordingAudit();
+    const { service, mint } = fixture({ audit });
+    mint();
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    const removed = await service.revokeDevice(FIRST_DEVICE_ID, 'admin-cli');
+
+    // Assert
+    should(removed).be.true();
+    should(audit.entries).deepEqual([
+      { actor: 'admin-cli', changes: [`device.revoked=${FIRST_DEVICE_ID}`], at: '2026-08-03T12:00:00.000Z' },
+    ]);
+  });
+
+  it('should record a revocation a governed device asked for under that device', async () => {
+    // Arrange
+    const audit = new RecordingAudit();
+    const { service, mint } = fixture({ audit });
+    mint();
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    await service.revokeDevice(FIRST_DEVICE_ID, `device:${SECOND_DEVICE_ID}`);
+
+    // Assert
+    should(audit.entries.map(entry => entry.actor)).deepEqual([`device:${SECOND_DEVICE_ID}`]);
+  });
+
+  it('should record nothing for a device that was not there', async () => {
+    // Arrange
+    const audit = new RecordingAudit();
+    const { service } = fixture({ audit });
+
+    // Act
+    const removed = await service.revokeDevice(FIRST_DEVICE_ID, 'admin-cli');
+
+    // Assert
+    should(removed).be.false();
+    should(audit.entries).be.empty();
+  });
+
+  it('should record nothing when the revocation itself failed', async () => {
+    // Arrange
+    const audit = new RecordingAudit();
+    const { devices, service, mint } = fixture({ audit });
+    mint();
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    devices.failure = new Error('disk unavailable');
+
+    // Act
+    await service.revokeDevice(FIRST_DEVICE_ID, 'admin-cli').catch(() => undefined);
+
+    // Assert
+    should(audit.entries).be.empty();
+  });
+
+  it('should record nothing for a revocation nobody asked for, such as idle expiry', async () => {
+    // Arrange
+    const audit = new RecordingAudit();
+    const { service, mint } = fixture({ audit });
+    mint();
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    await service.revokeDevice(FIRST_DEVICE_ID);
+
+    // Assert
+    should(audit.entries).be.empty();
+  });
+
+  it('should write the record only after the grant is gone and its connections are closed', async () => {
+    // Arrange
+    const order: string[] = [];
+    const audit = new RecordingAudit(() => order.push('audit'));
+    const connections: DeviceConnectionRevoker = { endDevice: () => order.push('connections') };
+    const { credentials, service, mint } = fixture({ audit, connections });
+    mint();
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    await service.revokeDevice(FIRST_DEVICE_ID, 'admin-cli');
+
+    // Assert
+    should(order).deepEqual(['connections', 'audit']);
+    should(credentials.get(FIRST_DEVICE_ID)).be.undefined();
+  });
+
+  it('should leave the device revoked and surface the failure when the journal cannot be written', async () => {
+    // Arrange
+    const audit = new RecordingAudit(undefined, new Error('journal unavailable'));
+    const { credentials, service, mint } = fixture({ audit });
+    mint();
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    const attempt = await service.revokeDevice(FIRST_DEVICE_ID, 'admin-cli').then(
+      () => 'resolved',
+      (reason: unknown) => (reason as Error).message,
+    );
+
+    // Assert — the stolen phone is gone either way; the missing record is reported, not hidden.
+    should(attempt).equal('journal unavailable');
+    should(credentials.get(FIRST_DEVICE_ID)).be.undefined();
   });
 });
 

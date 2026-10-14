@@ -85,8 +85,12 @@ export interface PairingSubsystem {
   revoke(pairingId: PairingId): PairingCodeStatusResponse | undefined;
   /** Who may reach this daemon. Never carries key material — see `PairedDeviceSchema`. */
   devices(): Promise<readonly PairedDevice[]>;
-  /** Takes one device's access away. False when there was no such grant. */
-  revokeDevice(id: string): Promise<boolean>;
+  /**
+   * Takes one device's access away. False when there was no such grant.
+   *
+   * `actor` is who asked, server-derived, so the revocation can be audited as theirs.
+   */
+  revokeDevice(id: string, actor: string): Promise<boolean>;
 }
 
 /**
@@ -254,7 +258,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       handle: async context => {
         const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
         if (!deviceId.success) return errorResponse(404, 'device not found', 'pairing_device_not_found');
-        const removed = await subsystem.revokeDevice(deviceId.data);
+        const removed = await subsystem.revokeDevice(deviceId.data, context.actor ?? 'unknown');
         return removed
           ? jsonResponse(await devicesView(subsystem, grants, context))
           : errorResponse(404, 'device not found', 'pairing_device_not_found');

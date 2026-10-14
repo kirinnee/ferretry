@@ -322,6 +322,23 @@ Two different things are revocable and they are not the same act:
   redemption response's `idleExpiryDays` reports the value in force. Change it at the machine with
   `fy daemon security set idleExpiryDays <days>`, or shorten it from a paired device in Settings.
 
+**At the machine: `fy device revoke <device>`.** This is THE way to remove a stolen phone without a
+browser. `<device>` is a paired device's id, or its name when exactly one device has that name (the same
+resolver as `fy passkey window`); it calls `DELETE /v1/pair/devices/:deviceId` with the host's admin token
+over loopback, which is ungoverned, so no step-up is asked. Revoking is the one change here that cannot be
+undone — the device must pair again — so it asks you to type `revoke` unless `--yes` waived it, and off a
+terminal it refuses without `--yes` rather than skip the question. It ends in one sentence: the device can
+no longer reach this machine, its open sessions were closed and its passkeys forgotten. An unknown name, two
+devices with one name, a daemon that is not running and a device already gone are each one plain sentence
+naming what to do, with exit code 1.
+
+**Every revocation somebody asked for is recorded.** The act is written to the owner's grant journal
+(`state/grant-audit.jsonl`, the one the grant changes and re-opened passkey windows already use) as
+`device.revoked=<deviceId>` beside the resolved actor — `admin-cli` for this command line, `device:<id>` for a
+governed device that asked — never a credential. The record is the LAST step, written only after the grant
+is gone and its sessions are closed, so a refused or unknown revocation leaves none; a journal that cannot be
+written does not undo the revocation, it surfaces as an error after the device is already gone.
+
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses
 the revoke — and turning it back on is a local act. See [grants.md](grants.md).
@@ -348,9 +365,12 @@ row states what its revoke will do before the press.
 - **A device cannot be renamed.** The name is whatever the device called itself when it redeemed, and it
   is attacker-influenced text bounded by `PairingDeviceNameSchema`. Two phones that both say "Chrome" are
   told apart only by when they were added.
-- **There is no pairing audit record.** A revoked device leaves no trace beyond its absence from
-  `devices.json`, so "when did this credential go away, and who ended it" is not answerable. The grant
-  layer has an audit journal; this does not.
+- **The pairing audit record is only the revocations somebody asked for.** `device.revoked=<deviceId>` is
+  recorded with its actor (above). Still NOT recorded: a pairing (a device redeeming a code), a minted or
+  revoked code, and **idle expiry** — a device removed because nobody used it for 30 days leaves no trace
+  beyond its absence from `devices.json`, since no actor asked for it. So "when did this credential go
+  away" is answerable for a revocation and not for an expiry, and "when did this device first join" is not
+  answerable at all.
 - **Code running in the paired page can USE the device key while the tab is open.** The key cannot be
   exported, so a cross-site script or a malicious deploy cannot carry it away, but it can sign sessions
   for as long as it runs. Signed PWA releases ([design/zero-trust.md](design/zero-trust.md) D) narrow

@@ -30,6 +30,7 @@ import {
 } from '@ferretry/protocol';
 import { DeviceKeySchema } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
+import type { GrantAuditPort } from '../grants/types.ts';
 import type { DeviceConnectionRevoker } from './live-connections.ts';
 
 const FERRETRY_PAIRING_APP_URL = 'https://ferretry.pages.dev/pair';
@@ -320,6 +321,14 @@ interface PairingServiceOptions {
    * than with the purge above.
    */
   readonly connections?: DeviceConnectionRevoker;
+  /**
+   * Where a revocation somebody ASKED for is written down, in the owner's grant journal.
+   *
+   * OPTIONAL for the reason `deviceState` is: a daemon built without it still revokes correctly and
+   * merely leaves no trace. It records only when the caller names an actor, so the daemon's own idle
+   * expiry — which nobody asked for — is not written as though somebody had.
+   */
+  readonly audit?: Pick<GrantAuditPort, 'record'>;
   readonly rateLimiter?: PairingRateLimiter;
   /**
    * The machine's idle period in days, read at every check so a shortened one applies at the next
@@ -657,8 +666,15 @@ export class PairingService {
    * half-done — whereas revoking first would leave a phone that is unpaired and still receiving this
    * machine's notifications, which is the outcome the purge exists to prevent. The cost of this order is
    * a moment in which a still-paired device has lost its notifications; it is strictly the safer half.
+   *
+   * WHEN `actor` IS GIVEN, the revocation is written to the audit journal as `device.revoked=<id>` —
+   * and only once it has actually happened, as the LAST step. A refused or unknown revocation leaves no
+   * record, because nothing was revoked; and a journal that cannot be written must not leave a stolen
+   * phone's sockets open, so the connections end first. A failed audit write therefore surfaces as an
+   * error AFTER the device is already gone: the caller is told the record is missing, never that the
+   * revocation failed.
    */
-  async revokeDevice(id: string): Promise<boolean> {
+  async revokeDevice(id: string, actor?: string): Promise<boolean> {
     for (const owner of this.options.deviceState ?? []) await owner.forgetDevice(id);
     const removed = await this.options.devices.remove(id);
     if (!removed) return false;
@@ -667,6 +683,13 @@ export class PairingService {
     // Only now, with nothing left that verifies: a socket ended any earlier could be reopened on the
     // key this revocation is about to remove.
     this.options.connections?.endDevice(id);
+    if (actor !== undefined) {
+      await this.options.audit?.record({
+        actor,
+        changes: [`device.revoked=${id}`],
+        at: instant(this.options.clock.now()),
+      });
+    }
     return true;
   }
 

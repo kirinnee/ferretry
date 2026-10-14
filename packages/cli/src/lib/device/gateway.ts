@@ -32,4 +32,14 @@ export class ProtocolDeviceGateway implements IDeviceGateway {
       },
     );
   }
+
+  async revoke(deviceId: string): Promise<PairedDevicesView> {
+    return await this.client.request(
+      `${PAIRED_DEVICES_PATH}/${encodeURIComponent(deviceId)}`,
+      PairedDevicesViewSchema,
+      {
+        method: 'DELETE',
+      },
+    );
+  }
 }

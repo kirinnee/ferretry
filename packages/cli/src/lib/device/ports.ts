@@ -12,6 +12,13 @@ export interface IDeviceGateway {
   list(): Promise<PairedDevicesView>;
   /** Answers the whole list after the change. */
   changeGrants(deviceId: string, patch: DeviceGrantsPatch): Promise<PairedDevicesView>;
+  /** Takes the device's access away; answers the list that remains. A 404 arrives as the client's typed error. */
+  revoke(deviceId: string): Promise<PairedDevicesView>;
+}
+
+/** Typed-confirmation input, injected so a test never blocks on a terminal. */
+export interface IDevicePrompt {
+  ask(message: string): Promise<string>;
 }
 
 /** The only client capability the device gateway consumes. */

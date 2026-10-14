@@ -695,6 +695,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new DeviceController({
           gateway: new ProtocolDeviceGateway(client),
           out: world.io,
+          prompt: world.prompt,
+          interactive: world.interactive,
           clientName: BINARY_NAME,
         }),
     ),

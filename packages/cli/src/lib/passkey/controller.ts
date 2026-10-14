@@ -1,15 +1,9 @@
 import { stepUpRefusalCode } from '@ferretry/protocol';
 import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
 import type { IPasskeyGateway, IPasskeyLocalTime, IPasskeyOutput } from './ports.ts';
-import {
-  renderAmbiguous,
-  renderDaemonUnreachable,
-  renderDeviceGone,
-  renderNoSuchDevice,
-  renderNotAtMachine,
-  renderOpened,
-} from './render.ts';
-import { resolveDevice } from './resolve.ts';
+import { renderDaemonUnreachable, renderDeviceGone, renderNotAtMachine, renderOpened } from './render.ts';
+import { renderAmbiguous, renderNoSuchDevice } from '../device/render.ts';
+import { resolveDevice } from '../device/resolve.ts';
 
 export interface PasskeyControllerDeps {
   readonly gateway: IPasskeyGateway;
