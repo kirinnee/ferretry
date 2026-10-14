@@ -384,7 +384,7 @@ describe('audit folding and bounds', () => {
     should(auditFoldKey(attach('a'))).not.equal(auditFoldKey({ ...attach('a'), actor: { kind: 'host' } }));
   });
 
-  it('should ration every caller but the host to one shared daily allowance of kept records', async () => {
+  it('should ration every caller but a person at the machine to one shared daily allowance per kept event', async () => {
     // Arrange
     const { failures, journal, log, tick } = auditLog();
     const grantChange = (deviceId: string): AuditEntry => ({
@@ -392,11 +392,18 @@ describe('audit folding and bounds', () => {
       actor: { kind: 'device', deviceId },
       outcome: 'succeeded',
     });
+    const paired = (index: number): AuditEntry => ({
+      event: 'device.paired',
+      actor: { kind: 'device', deviceId: `d-${String(index)}` },
+      subject: `d-${String(index)}`,
+      outcome: 'succeeded',
+    });
 
-    // Act: two devices together spend the allowance and keep going; the host is never rationed.
+    // Act: two devices together spend the grant allowance and keep going — which must not touch the
+    // pairing allowance; then pairings past their own allowance; the owner is never rationed.
     for (let index = 0; index < AUDIT_KEPT_DAILY_ALLOWANCE + 30; index += 1)
       await log.record(grantChange(index % 2 === 0 ? DEVICE_ID : OTHER_DEVICE_ID));
-    await log.record({ event: 'device.revoked', actor: { kind: 'device', deviceId: DEVICE_ID }, outcome: 'succeeded' });
+    for (let index = 0; index < AUDIT_KEPT_DAILY_ALLOWANCE + 3; index += 1) await log.record(paired(index));
     await log.record({ event: 'grants.changed', actor: { kind: 'host' }, outcome: 'succeeded' });
     await log.flush();
     const sameDay = journal.stores.filter(store => store === 'kept').length;
@@ -406,24 +413,55 @@ describe('audit folding and bounds', () => {
 
     // Assert
     const kept = records(journal).filter((_, index) => journal.stores[index] === 'kept');
-    // The allowance, one marked overspend per event, and the host's: a fixed number whoever floods.
-    should(sameDay).equal(AUDIT_KEPT_DAILY_ALLOWANCE + 3);
+    // Each allowance, one marked overspend per event, and the owner's: a fixed number whoever floods.
+    should(sameDay).equal(2 * AUDIT_KEPT_DAILY_ALLOWANCE + 3);
+    // Grant churn did not spend the pairing allowance: the fiftieth pairing is still kept in full.
+    should(kept.filter(record => record.event === 'device.paired' && record.detail === undefined)).have.length(
+      AUDIT_KEPT_DAILY_ALLOWANCE,
+    );
     should(
       kept.filter(record => record.detail?.keptAllowanceSpent === true).map(record => [record.event, record.detail]),
     ).deepEqual([
       ['grants.changed', { keptAllowanceSpent: true }],
-      ['device.revoked', { keptAllowanceSpent: true }],
+      ['device.paired', { keptAllowanceSpent: true }],
       ['grants.changed', { keptAllowanceSpent: true, repeats: 29 }],
+      // The pairings past the allowance are still NAMED in the kept store.
+      ['device.paired', { keptAllowanceSpent: true, repeats: 2, subjects: 'd-51,d-52' }],
     ]);
-    should(kept.at(-2)?.actor).deepEqual({ kind: 'device' });
     // A new day, a new allowance.
     should(kept.at(-1)?.detail).be.undefined();
     // Every overspent record is still in the ordinary history, in full.
-    should(journal.stores.filter(store => store === 'general')).have.length(31);
+    should(journal.stores.filter(store => store === 'general')).have.length(33);
     should(
       journal.rotations.filter((rotation, index) => journal.stores[index] === 'kept' && rotation === 'rotate'),
     ).have.length(1);
     should(failures).deepEqual([]);
+  });
+
+  it('should ration a record the DAEMON caused, though the machine is its actor, and never let it rotate', async () => {
+    // Arrange: a paired device can decide how many idle expiries happen, so they are rationed.
+    const { journal, log } = auditLog();
+    const expiry = (index: number): AuditEntry => ({
+      event: 'device.expired',
+      actor: { kind: 'host' },
+      cause: 'daemon',
+      subject: `fy_device_id_${String(index).padStart(22, '0')}`,
+      outcome: 'succeeded',
+    });
+
+    // Act
+    for (let index = 0; index < AUDIT_KEPT_DAILY_ALLOWANCE + 40; index += 1) await log.record(expiry(index));
+    await log.flush(Number.POSITIVE_INFINITY);
+
+    // Assert
+    const keptIndexes = journal.stores.flatMap((store, index) => (store === 'kept' ? [index] : []));
+    should(keptIndexes).have.length(AUDIT_KEPT_DAILY_ALLOWANCE + 2);
+    should(keptIndexes.every(index => journal.rotations[index] === 'never')).be.true();
+    const summary = records(journal).at(-1);
+    should(summary?.detail?.repeats).equal(39);
+    // Named until the field is full, then counted: the record still fits the contract.
+    should(String(summary?.detail?.subjects)).match(/^fy_device_id_0+51,.*,\+\d+$/u);
+    should(String(summary?.detail?.subjects).length <= 160).be.true();
   });
 
   it('should write a device’s kept record to the ordinary history, and say so, when the kept store is full', async () => {
@@ -750,6 +788,29 @@ describe('auditedRoutes', () => {
       ['secrets.changed', 'API_KEY', { action: 'delete', status: 200 }],
     ]);
     should(journal.lines.join('\n')).not.containEql('hunter2');
+  });
+
+  it('should say what the security settings are after a change, in numbers and booleans only', async () => {
+    // Arrange
+    let body: unknown = {
+      view: {
+        settings: { idleExpiryDays: 1, unlockOnOpen: true, note: 'typed text', 'Bad-Key': 3, nested: { a: 1 } },
+      },
+      devicesExpiring: 4,
+    };
+    const { journal, routes } = decorated({ 'PATCH /v1/security': async () => jsonResponse(body) });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(request({ method: 'PATCH', path: '/v1/security', device: DEVICE, body: '{}' }));
+    body = { view: { settings: 'not an object' } };
+    await api.dispatch(request({ method: 'PATCH', path: '/v1/security', headers: ADMIN, loopback: true, body: '{}' }));
+
+    // Assert
+    should(records(journal).map(record => record.detail)).deepEqual([
+      { idleExpiryDays: 1, unlockOnOpen: true, status: 200 },
+      { status: 200 },
+    ]);
   });
 
   it('should record a refused step-up or unlock as a failed step-up, and a passed one as passed', async () => {

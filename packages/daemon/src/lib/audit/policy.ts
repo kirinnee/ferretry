@@ -104,18 +104,30 @@ export function isKeptAuditEntry(entry: AuditEntry): boolean {
 }
 
 /**
- * How many kept records every caller who is NOT this machine may write, together, per UTC day.
+ * How many kept records of ONE event every caller who is not a person at this machine may write,
+ * together, per UTC day.
  *
- * ONE ALLOWANCE FOR ALL OF THEM, not one per device: a device can mint codes and pair new devices,
- * and every one it pairs would bring an allowance of its own. Fifty a day is far more pairings, grant
- * changes and secret edits than a person makes from their phones, and at about 300 bytes a line it is
- * months of the owner's own history before the kept store could rotate. The host — somebody at the
- * machine, who already owns the files — has no allowance.
+ * ONE ALLOWANCE PER EVENT, SHARED BY ALL OF THEM. Shared, because a device can mint codes and pair new
+ * devices, and every one it pairs would bring an allowance of its own. Per event, so churn of a cheap
+ * kept event — fifty secret puts — cannot spend the allowance a pairing or a revocation needs. Fifty a
+ * day of any one event is far more than a person makes from their phones; with nine kept events at
+ * about 300 bytes a line, the kept store holds weeks of a flood at the cap before it is full, and a
+ * full store refuses a rationed line rather than rotating (see `AuditLog`). Somebody at the machine
+ * has no allowance: they already own the files.
  *
- * The first record past the allowance is still kept, marked `detail.keptAllowanceSpent`, so the
- * reader is TOLD the allowance ran out and that later records that day are among the activity.
+ * WHAT IS RATIONED IS DECIDED BY THE CAUSE, NOT THE ACTOR. An idle expiry is the machine acting, but a
+ * paired device decides how many happen, so it is rationed too (`AuditEntry.cause`).
+ *
+ * The first record of an event past the allowance is still kept, marked `detail.keptAllowanceSpent`,
+ * so the reader is TOLD the allowance ran out; the rest that day are counted into one kept line, which
+ * names their subjects as far as the detail bound allows.
  */
 export const AUDIT_KEPT_DAILY_ALLOWANCE = 50;
+
+/** Whether a kept record is exempt from the allowance and may rotate the kept store: a person at the machine. */
+export function isOwnersOwnRecord(entry: AuditEntry): boolean {
+  return entry.actor.kind === 'host' && entry.cause !== 'daemon';
+}
 
 /** What stands in for a text field the contract would refuse — never the text itself. */
 export const AUDIT_INVALID_TEXT = '<invalid>';

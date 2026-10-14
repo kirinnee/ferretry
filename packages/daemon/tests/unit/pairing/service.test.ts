@@ -22,6 +22,8 @@ import {
   type PairingDeviceRecord,
   PairingDeviceRegistry,
   type PairingDeviceStore,
+  PAIRING_GRANTS_PER_HOUR,
+  PAIRING_MAX_DEVICES,
   PairingRateLimiter,
   PairingService,
 } from '../../../src/lib/pairing/index.ts';
@@ -642,6 +644,60 @@ describe('PairingService redemption', () => {
     const results = await Promise.all([first, second]);
 
     should(results.map(result => result.kind).sort()).deepEqual(['paired', 'refused']);
+  });
+
+  it('should grant at most ten redemptions an hour on each carrier, and leave the code live when refused', async () => {
+    const { clock, service } = fixture();
+    const pair = async (index: number, carrier: 'direct' | 'relay') => {
+      const code = service.mint().code;
+      const attempt = { code, deviceName: `device ${String(index)}` };
+      // A fresh peer every time, so the per-peer guess window is never what refuses.
+      return (
+        carrier === 'direct'
+          ? await redeemDirect(service, attempt, `peer-${String(index)}`)
+          : await redeemRelayed(service, attempt)
+      ).kind;
+    };
+
+    const relayed = [];
+    for (let index = 0; index < PAIRING_GRANTS_PER_HOUR + 1; index += 1) relayed.push(await pair(index, 'relay'));
+    // The relay budget is its own: the bound address still pairs.
+    const direct = await pair(100, 'direct');
+    const code = service.mint().code;
+    const refused = await redeemRelayed(service, { code, deviceName: 'later' });
+    clock.nowMs += 60 * 60 * 1_000;
+    const afterAnHour = await redeemRelayed(service, { code, deviceName: 'later' });
+
+    should(relayed.filter(kind => kind === 'paired')).have.length(PAIRING_GRANTS_PER_HOUR);
+    should(relayed.at(-1)).equal('refused');
+    should([direct, refused.kind]).deepEqual(['paired', 'refused']);
+    // The code a full hour refused was not consumed: it pairs once there is room. (It expired meanwhile,
+    // so a fresh one is minted the way a person would.)
+    should(afterAnHour.kind).equal('refused');
+    const fresh = service.mint().code;
+    should((await redeemRelayed(service, { code: fresh, deviceName: 'later' })).kind).equal('paired');
+  });
+
+  it('should pair at most thirty-two devices, and pair again once one is removed', async () => {
+    const { clock, service } = fixture();
+    for (let index = 0; index < PAIRING_MAX_DEVICES; index += 1) {
+      if (index % PAIRING_GRANTS_PER_HOUR === 0) clock.nowMs += 60 * 60 * 1_000;
+      const code = service.mint().code;
+      should((await redeemDirect(service, { code, deviceName: `d${String(index)}` }, `p${String(index)}`)).kind).equal(
+        'paired',
+      );
+    }
+    clock.nowMs += 60 * 60 * 1_000;
+    const code = service.mint().code;
+
+    const full = await redeemDirect(service, { code, deviceName: 'one too many' }, 'p-full');
+    const first = (await service.devices())[0];
+    if (first === undefined) throw new Error('no device');
+    await service.revokeDevice(first.id, 'admin-cli');
+    const roomAgain = await redeemDirect(service, { code, deviceName: 'one too many' }, 'p-full');
+
+    should([full.kind, roomAgain.kind]).deepEqual(['refused', 'paired']);
+    should(await service.devices()).have.length(PAIRING_MAX_DEVICES);
   });
 
   it('should keep endpoint rate limiting independent from the active code attempt budget', async () => {

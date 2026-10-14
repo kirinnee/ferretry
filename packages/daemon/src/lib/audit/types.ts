@@ -19,6 +19,14 @@ import type { AuditActor, AuditDetail, AuditEvent, AuditOutcome, AuditRecord } f
 export interface AuditEntry {
   readonly event: AuditEvent;
   readonly actor: AuditActor;
+  /**
+   * `daemon` when the DAEMON did this on its own — an idle expiry — rather than somebody at the machine.
+   *
+   * The actor is still `host`, because it is the machine acting; but how OFTEN it happens is not the
+   * owner's choice, since a paired device can shorten the idle period and pair devices to expire. So a
+   * daemon-caused kept record is rationed like a remote one and can never rotate the kept store.
+   */
+  readonly cause?: 'daemon';
   readonly subject?: string;
   readonly outcome: AuditOutcome;
   readonly detail?: AuditDetail;

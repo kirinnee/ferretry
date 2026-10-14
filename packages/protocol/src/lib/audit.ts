@@ -18,15 +18,12 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * have it fit. What a field may NAME is the emitter's job, and the daemon's tests grep every written
  * record for each fixture secret to prove the emitters keep it.
  *
- * ## THE EVENT LIST IS CLOSED, AND INCLUDES KINDS NOTHING EMITS YET
+ * ## THE EVENT LIST IS CLOSED
  *
- * `device.expired`, `session.opened`, `step-up.succeeded`, `step-up.failed` and
- * `passkey.registered` belong to the zero-trust work that lands after this log. They are declared now
- * so the units that add them emit into a schema that already accepts them, rather than each widening
- * the contract on its own branch and colliding at the merge. `device.key-rotated` (subject: the device
- * id) is the same kind of declaration. `security.changed` is emitted today — the operator password set
- * or unlocked — and its subject is the setting's name while its detail holds only numbers or booleans
- * (an old and a new value, never text a person typed).
+ * Every kind here is emitted by the daemon; a new kind is a change to this list, so a reader's word
+ * table fails typecheck until it says what the new kind means. `security.changed` names the setting as
+ * its subject, and its detail holds only numbers and booleans — the settings as they stand after the
+ * change — never text a person typed. `device.expired` is the daemon's own idle expiry.
  *
  * `terminal.input` is keystrokes reaching a terminal, FOLDED: one record per terminal per window
  * carrying how many frames arrived, never what they said. The rest name the act on the route that

@@ -1,6 +1,13 @@
 import { auditShortId, type PushDeliveryResult, type PushDeviceView } from '@ferretry/protocol';
 import type { PushDispatch } from '../push/types.ts';
-import { AUDIT_KEPT_DAILY_ALLOWANCE, auditFoldKey, auditRecord, newDeviceAlert, withinAuditBounds } from './policy.ts';
+import {
+  AUDIT_KEPT_DAILY_ALLOWANCE,
+  auditFoldKey,
+  auditRecord,
+  isOwnersOwnRecord,
+  newDeviceAlert,
+  withinAuditBounds,
+} from './policy.ts';
 import type {
   AuditClock,
   AuditEntry,
@@ -35,9 +42,9 @@ interface AuditFold {
 
 const DAY_MS = 86_400_000;
 
-/** The kept records written today by callers who are not this machine — see `AUDIT_KEPT_DAILY_ALLOWANCE`. */
+/** One event's kept records written today by rationed callers — see `AUDIT_KEPT_DAILY_ALLOWANCE`. */
 interface KeptAllowance {
-  day: number;
+  readonly day: number;
   spent: number;
 }
 
@@ -46,7 +53,14 @@ interface Overspent {
   readonly day: number;
   repeats: number;
   readonly entry: AuditEntry;
+  /** The subjects of the counted repeats, as many as fit one detail field. */
+  readonly subjects: string[];
+  /** How many repeats had a subject that did not fit. */
+  unnamed: number;
 }
+
+/** The longest text one detail field holds — `AuditRecordSchema`'s own bound. */
+const DETAIL_TEXT_MAX = 160;
 
 export interface AuditLogOptions {
   readonly journal: AuditJournalPort;
@@ -71,7 +85,8 @@ export interface AuditLogOptions {
  */
 export class AuditLog implements AuditSink {
   readonly #folds = new Map<string, AuditFold>();
-  readonly #allowance: KeptAllowance = { day: Number.NaN, spent: 0 };
+  /** Keyed by event: one allowance per kept event, shared by every rationed caller. */
+  readonly #allowances = new Map<string, KeptAllowance>();
   /** Keyed by event and actor kind, so it holds at most one entry per kept event per kind. */
   readonly #overspent = new Map<string, Overspent>();
 
@@ -89,10 +104,11 @@ export class AuditLog implements AuditSink {
    * "this phone kept attaching" survive as facts with a number on them, and neither can write its way
    * through the file's bound.
    *
-   * ## A KEPT EVENT IS NEVER FOLDED, AND IS RATIONED FOR EVERYBODY BUT THE HOST
+   * ## A KEPT EVENT IS NEVER FOLDED, AND IS RATIONED FOR EVERYBODY BUT A PERSON AT THE MACHINE
    *
    * Each pairing, revocation or grant change is its own fact and goes to the kept store — within
-   * `AUDIT_KEPT_DAILY_ALLOWANCE` for callers who are not this machine. Past it, see `#overspend`.
+   * `AUDIT_KEPT_DAILY_ALLOWANCE` of that event for every caller but a person at the machine, the
+   * daemon's own idle expiries included. Past it, see `#overspend`.
    */
   async record(entry: AuditEntry): Promise<void> {
     const at = this.options.clock.now();
@@ -114,23 +130,22 @@ export class AuditLog implements AuditSink {
   }
 
   /**
-   * A kept event: to the kept store, unless a caller who is not this machine has spent today's allowance.
+   * A kept event: to the kept store, unless today's allowance for this event is spent.
    *
-   * The allowance is ONE count for every such caller, because a device can pair new devices and each
-   * would bring an allowance of its own.
+   * The allowance is ONE count per event for every rationed caller, because a device can pair new
+   * devices and each would bring an allowance of its own.
    */
   async #keep(entry: AuditEntry, at: string): Promise<void> {
-    if (entry.actor.kind === 'host') {
+    if (isOwnersOwnRecord(entry)) {
       await this.#write(entry, at, 'kept');
       return;
     }
     const day = Math.floor(Date.parse(at) / DAY_MS);
-    if (this.#allowance.day !== day) {
-      this.#allowance.day = day;
-      this.#allowance.spent = 0;
-    }
-    this.#allowance.spent += 1;
-    if (this.#allowance.spent <= AUDIT_KEPT_DAILY_ALLOWANCE) {
+    const current = this.#allowances.get(entry.event);
+    const allowance = current !== undefined && current.day === day ? current : { day, spent: 0 };
+    this.#allowances.set(entry.event, allowance);
+    allowance.spent += 1;
+    if (allowance.spent <= AUDIT_KEPT_DAILY_ALLOWANCE) {
       await this.#write(entry, at, 'kept');
       return;
     }
@@ -142,9 +157,10 @@ export class AuditLog implements AuditSink {
    *
    * IT STILL LEAVES A MARK THE FLOOD CANNOT REACH. The first of each event and actor kind past the
    * allowance is written to the kept store with `detail.keptAllowanceSpent`, and how many more of it
-   * followed that day is written there as one counted record when the day ends. There are only so many
-   * kept events and actor kinds, so this is a fixed number of lines a day whoever is flooding. Every
-   * overspent record is ALSO written in full to the general store, where it is ordinary history.
+   * followed that day is written there as one counted record when the day ends, naming as many of their
+   * subjects as one detail field holds. There are only so many kept events and actor kinds, so this is
+   * a fixed number of lines a day whoever is flooding. Every overspent record is ALSO written in full
+   * to the general store, where it is ordinary history.
    */
   async #overspend(entry: AuditEntry, at: string, day: number): Promise<void> {
     const key = `${entry.event}|${entry.actor.kind}`;
@@ -152,23 +168,34 @@ export class AuditLog implements AuditSink {
     await this.#write(entry, at, 'general');
     if (open !== undefined && open.day === day) {
       open.repeats += 1;
+      const named = [...open.subjects, entry.subject ?? ''].join(',');
+      if (entry.subject !== undefined && named.length <= DETAIL_TEXT_MAX - 8) open.subjects.push(entry.subject);
+      else open.unnamed += 1;
       return;
     }
     if (open !== undefined) await this.#closeOverspent(key, open, at);
-    this.#overspent.set(key, { day, repeats: 0, entry });
+    this.#overspent.set(key, { day, repeats: 0, entry, subjects: [], unnamed: 0 });
     await this.#write({ ...entry, detail: { ...entry.detail, keptAllowanceSpent: true } }, at, 'kept');
   }
 
   async #closeOverspent(key: string, open: Overspent, at: string): Promise<void> {
     this.#overspent.delete(key);
     if (open.repeats === 0) return;
-    // The repeats were made by different callers to different subjects, so the count names neither.
+    // The repeats were made by different callers, so the count names none of them — but it names what
+    // they were done TO, as far as one field holds: a pairing past the allowance is still identifiable.
+    const subjects =
+      open.subjects.length === 0
+        ? undefined
+        : open.unnamed === 0
+          ? open.subjects.join(',')
+          : `${open.subjects.join(',')},+${String(open.unnamed)}`;
     await this.#write(
       {
         event: open.entry.event,
         actor: { kind: open.entry.actor.kind },
         outcome: open.entry.outcome,
-        detail: { keptAllowanceSpent: true, repeats: open.repeats },
+        ...(open.entry.cause === undefined ? {} : { cause: open.entry.cause }),
+        detail: { keptAllowanceSpent: true, repeats: open.repeats, ...(subjects === undefined ? {} : { subjects }) },
       },
       at,
       'kept',
@@ -231,7 +258,7 @@ export class AuditLog implements AuditSink {
   async #write(entry: AuditEntry, at: string, store: AuditStore): Promise<void> {
     try {
       const line = JSON.stringify(auditRecord(withinAuditBounds(entry), at));
-      const fromHere = entry.actor.kind === 'host' || store === 'general';
+      const fromHere = isOwnersOwnRecord(entry) || store === 'general';
       if (await this.options.journal.append(line, store, fromHere ? 'rotate' : 'never')) return;
       this.options.failures.auditWriteFailed(
         `the security log's kept store is full, so a ${entry.event} event from somebody who is not this machine was written to the ordinary history instead, where newer activity can rotate it away; this machine's own next kept record makes room`,

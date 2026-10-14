@@ -395,6 +395,60 @@ describe('a flood by a paired device', () => {
     should(attaches).equal(15_000);
     should(reading.records.length).be.below(40);
   }, 60_000);
+
+  it('should leave device.paired and the security change on a kept page after a flood of idle expiries', async () => {
+    // Arrange: the round-3 probe — a device pairs, shortens the idle period, and pairs devices to expire.
+    // About 14,000 expiries rotated a 1 MiB kept store; at a 64 KiB bound, 2,000 fill it several times over.
+    const world = await flooded(64 * 1024);
+    await world.log.record({
+      event: 'device.paired',
+      actor: { kind: 'device', deviceId: thief },
+      subject: thief,
+      outcome: 'succeeded',
+    });
+    await world.log.record({
+      event: 'security.changed',
+      actor: { kind: 'device', deviceId: thief },
+      subject: 'security-settings',
+      outcome: 'succeeded',
+      detail: { idleExpiryDays: 1 },
+    });
+
+    // Act: the daemon's own sweeps — a host actor, a daemon cause — over a week.
+    for (let index = 0; index < 2_000; index += 1) {
+      await world.log.record({
+        event: 'device.expired',
+        actor: { kind: 'host' },
+        cause: 'daemon',
+        subject: `fy_device_id_${String(index).padStart(22, '0')}`,
+        outcome: 'succeeded',
+      });
+      if (index % 250 === 249) world.tick(86_400_000);
+    }
+    await world.log.flush(Number.POSITIVE_INFINITY);
+    const paths = auditJournalPaths(world.state);
+    const first = await world.log.recent(200, 0);
+    const pages = [first.kept];
+    while (pages.flat().length < first.keptTotal) pages.push((await world.log.recent(200, pages.flat().length)).kept);
+
+    // Assert
+    const kept = await readFile(paths.kept.live, 'utf8');
+    should(kept).containEql('"event":"device.paired"');
+    should(kept).containEql('"idleExpiryDays":1');
+    should(await readFile(paths.kept.rotated, 'utf8').catch(() => '')).equal('');
+    const events = pages.flat().map(record => record.event);
+    should(events).containEql('device.paired');
+    should(events).containEql('security.changed');
+    // The flood filled the kept store, and from then on it was REFUSED there — never rotated — and the
+    // operator was told. Until then every expiry was counted on a kept page, in full or in a count.
+    should(world.failures.length).be.above(0);
+    for (const failure of world.failures) should(failure).containEql('kept store is full');
+    const counted = pages
+      .flat()
+      .filter(record => record.event === 'device.expired')
+      .reduce((total, record) => total + (typeof record.detail?.repeats === 'number' ? record.detail.repeats : 1), 0);
+    should(counted).be.above(1_000);
+  }, 60_000);
 });
 
 /**

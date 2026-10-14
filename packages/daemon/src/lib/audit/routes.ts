@@ -40,6 +40,12 @@ export interface AuditedRouteRule {
    * `detail` under the same key.
    */
   readonly responseNames?: string;
+  /**
+   * A top-level OBJECT of a successful JSON response whose number and boolean fields are copied into
+   * `detail` — the settings a `security.changed` left in place, so a reader sees `idleExpiryDays: 1`.
+   * Only scalars that are not text are taken, so nothing typed by a person can come along.
+   */
+  readonly responseSettings?: readonly string[];
 }
 
 export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
@@ -69,7 +75,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subjectIsDevice: true,
     detail: { scope: 'device' },
   },
-  { method: 'PATCH', path: '/v1/security', event: 'security.changed', fixedSubject: 'security-settings' },
+  {
+    method: 'PATCH',
+    path: '/v1/security',
+    event: 'security.changed',
+    fixedSubject: 'security-settings',
+    responseSettings: ['view', 'settings'],
+  },
   { method: 'POST', path: '/v1/passkeys', event: 'passkey.registered' },
   {
     method: 'POST',
@@ -243,8 +255,13 @@ async function record(
   const outcome = auditOutcomeOf(answer.status);
   const names =
     outcome === 'succeeded' && rule.responseNames !== undefined ? namesIn(answer.body, rule.responseNames) : undefined;
+  const settings =
+    outcome === 'succeeded' && rule.responseSettings !== undefined
+      ? settingsIn(answer.body, rule.responseSettings)
+      : undefined;
   const detail: AuditDetail = {
     ...rule.detail,
+    ...settings,
     ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
     ...(names === undefined ? {} : { [rule.responseNames ?? 'names']: names }),
     ...(answer.status === undefined ? {} : { status: answer.status }),
@@ -276,6 +293,29 @@ function namesIn(body: string | undefined, field: string): string | undefined {
     const value = typeof parsed === 'string' ? [parsed] : parsed;
     if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) return undefined;
     return value.length === 0 ? undefined : joinedWithin(value, AUDIT_TEXT_MAX);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The number and boolean fields of one object inside a JSON body — or nothing when there is none.
+ *
+ * Text is never taken, and the keys must already read as detail keys, so the result always fits the
+ * record's contract and cannot carry anything a person typed.
+ */
+function settingsIn(body: string | undefined, path: readonly string[]): AuditDetail | undefined {
+  try {
+    let value: unknown = JSON.parse(body ?? '');
+    for (const key of path) value = (value as Record<string, unknown> | null)?.[key];
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        ([key, field]) =>
+          /^[a-z][A-Za-z0-9]{0,31}$/u.test(key) &&
+          (typeof field === 'boolean' || (typeof field === 'number' && Number.isFinite(field))),
+      ),
+    ) as AuditDetail;
   } catch {
     return undefined;
   }

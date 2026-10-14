@@ -78,6 +78,8 @@ export class AuditedPairingService extends PairingService {
       await this.#audit.log.record({
         event: 'device.expired',
         actor: { kind: 'host' },
+        // The machine acted, but a paired device can decide how often: rationed, never rotating.
+        cause: 'daemon',
         subject: id,
         outcome: 'succeeded',
       });

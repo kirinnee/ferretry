@@ -285,6 +285,16 @@ not who will **redeem**; the normal phone journey is minted locally and redeemed
 - the comparison is constant-time and runs even when there is no active code, so timing says nothing
   about whether one exists.
 
+### What bounds how many devices
+
+A paired device may mint a code and redeem it itself, so guesses are not the only thing to bound. A
+daemon holds at most **32** paired devices (`PAIRING_MAX_DEVICES`), and grants at most **10** redemptions
+an hour on **each** carrier (`PAIRING_GRANTS_PER_HOUR`) — a count, not a per-peer window, because a
+relayed redemption has no peer address to key on. Both are checked after the code is judged and before
+it is consumed, with the same refusal as a wrong code, so a full daemon leaves the code live for when a
+device is removed. They bound the new-device alerts and the idle expiries the security log records
+([audit.md](audit.md)).
+
 ## The QR code is a live credential
 
 Whatever draws a QR of a pairing link is handling a credential for somebody's machine, so:
