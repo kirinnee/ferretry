@@ -667,6 +667,11 @@ export async function waitUntil(
 /** Soft failures per journey: recorded and reported, and the journey goes on to its later steps. */
 const softFailures = new Map<string, string[]>();
 
+/** Forget a journey's soft failures, for a retry that starts it again from nothing. */
+export function resetSoftFailures(journey: string): void {
+  softFailures.delete(journey);
+}
+
 /**
  * {@link step}, but a failure is RECORDED rather than thrown, so one product bug does not hide every
  * step after it. The journey must call {@link assertNoSoftFailures} last, so the test still fails.

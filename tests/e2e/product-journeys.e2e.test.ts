@@ -26,6 +26,7 @@ import {
   type ProductPage,
   reapLeftovers,
   recordStep,
+  resetSoftFailures,
   softStep,
   assertNoSoftFailures,
   step,
@@ -89,7 +90,42 @@ interface ProductOptions {
 }
 
 /** Boot one machine and one browser, unpaired. Every journey starts here. */
+/** What Playwright says when the browser connection vanished under a journey, not a product answer. */
+const LOST_BROWSER =
+  /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/u;
+
+/**
+ * Run one journey, and run it ONCE more if the only thing that went wrong is that its browser vanished.
+ *
+ * On hosted runners Bun 1.3 occasionally drops the DevTools pipe Playwright holds to Chrome: Chrome keeps
+ * running, nothing logs an exit or an error, and every later call answers "Target page, context or
+ * browser has been closed". That is the harness's transport failing, not the product, and it is not
+ * reproducible on demand. So a journey whose error is exactly that is started again from nothing, in a
+ * fresh environment and browser, and the retry is recorded as a FLAG on the journey log so the rate
+ * stays visible. Any other failure, including a second lost browser, fails the test.
+ */
 async function withProduct(
+  journey: string,
+  body: (product: Product) => Promise<void>,
+  options: ProductOptions = {},
+): Promise<void> {
+  try {
+    await withProductOnce(journey, body, options);
+  } catch (error) {
+    const text = String((error as Error).message ?? error);
+    if (!LOST_BROWSER.test(text)) throw error;
+    await recordStep({
+      journey,
+      step: 'harness:journey-retried',
+      status: 'FLAG',
+      evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing`,
+    });
+    resetSoftFailures(journey);
+    await withProductOnce(journey, body, options);
+  }
+}
+
+async function withProductOnce(
   journey: string,
   body: (product: Product) => Promise<void>,
   options: ProductOptions = {},
