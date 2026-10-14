@@ -305,6 +305,28 @@ export const resetOnboardingProgress = (
   }
 };
 
+/**
+ * Puts the next visit on the PAIR step of "Pair this browser", where a new link is scanned or pasted.
+ *
+ * What "Pair again" needs: the person has just been told this machine no longer accepts this browser,
+ * and the one thing they can do about it is pair it again — not answer which of three people they are.
+ * A refused write is not a failure: the guide opens on its question, one tap further away.
+ */
+export const startOnboardingPairing = (
+  device: DeviceKind,
+  storage: OnboardingProgressStorage | undefined = browserOnboardingStorage(),
+): void => {
+  if (!storage) return;
+  try {
+    storage.setItem(
+      ONBOARDING_PROGRESS_KEY,
+      JSON.stringify(resumeOnboardingRoute({ route: 'add-client', step: 'scan' }, device)),
+    );
+  } catch {
+    /* storage denial is an ordinary browser condition, not a setup failure */
+  }
+};
+
 export interface OnboardingProgressStoreOptions {
   readonly storage?: OnboardingProgressStorage | undefined;
   /**
@@ -497,8 +519,13 @@ export class OnboardingProgressStore {
     if (handoff !== undefined) return resumeOnboardingRoute(handoff, this.#device);
     const entry = this.#entry;
     if (entry === undefined) return stored;
-    /* Already walking the journey the arrival proves? Keep the place; do not restart it. */
-    if (stored.stage === 'walk' && stored.route === entry.route) return stored;
+    /*
+     * Already walking the journey the arrival proves, and not finished with it? Keep the place; do
+     * not restart it. A FINISHED walk is not a place to keep: a link arriving at a browser whose last
+     * pairing is "done" is a NEW pairing — a second machine, or this one again after a revoke — and
+     * keeping "done" landed it on "You are set up" with the link silently ignored.
+     */
+    if (stored.stage === 'walk' && stored.route === entry.route && stored.current !== 'done') return stored;
     return resumeOnboardingRoute(entry, this.#device);
   }
 

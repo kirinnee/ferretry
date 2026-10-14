@@ -1,7 +1,12 @@
 import { describe, it } from 'bun:test';
 import { PASSKEY_CHALLENGE_TTL_SECONDS, STEP_UP_TTL_SECONDS } from '@ferretry/protocol';
 import should from 'should';
-import { ChallengeLedger, StepUpRegistry, type StepUpSubject } from '../../../src/lib/step-up/index.ts';
+import {
+  APP_SESSION_GRACE_MS,
+  ChallengeLedger,
+  StepUpRegistry,
+  type StepUpSubject,
+} from '../../../src/lib/step-up/index.ts';
 import { deviceId } from '../push/support.ts';
 
 const NOW = 1_700_000_000_000;
@@ -60,6 +65,58 @@ describe('StepUpRegistry', () => {
     should(registry.held(phone, NOW)).be.false();
     should(registry.held(phoneOtherTab, NOW)).be.false();
     should(registry.held(laptop, NOW)).be.true();
+  });
+});
+
+describe('StepUpRegistry fresh proof (acts that add access)', () => {
+  it('should count a passkey as FRESH for one challenge lifetime, inside a step-up that lasts longer', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW);
+    const lifetime = PASSKEY_CHALLENGE_TTL_SECONDS * 1_000;
+
+    // Act + Assert — the step-up still covers ordinary acts; adding a device wants a passkey just now.
+    should(registry.freshlyHeld(phone, NOW + lifetime - 1)).be.true();
+    should(registry.freshlyHeld(phone, NOW + lifetime)).be.false();
+    should(registry.held(phone, NOW + lifetime)).be.true();
+    // Never without a step-up of its own: another tab of the same device proved nothing.
+    should(registry.freshlyHeld(phoneOtherTab, NOW)).be.false();
+  });
+
+  it('should spend the fresh proof on one act and keep the step-up, until the next passkey', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW);
+
+    // Act
+    registry.spendFresh(phone);
+
+    // Assert
+    should(registry.freshlyHeld(phone, NOW)).be.false();
+    should(registry.held(phone, NOW)).be.true();
+    registry.grant(phone, NOW + 1);
+    should(registry.freshlyHeld(phone, NOW + 1)).be.true();
+  });
+
+  it('should forget the fresh proof with the device, and when its page closes', () => {
+    // Arrange
+    const clock = { now: NOW };
+    const registry = new StepUpRegistry({ nowMs: () => clock.now });
+    const closePhone = registry.open(phone);
+    registry.open(laptop);
+    registry.grant(phone, NOW);
+    registry.grant(laptop, NOW);
+
+    // Act
+    registry.forgetDevice(laptop.deviceId);
+    closePhone();
+    clock.now = NOW + APP_SESSION_GRACE_MS;
+    // The same page id coming back begins a new life that proved nothing.
+    registry.open(phone);
+
+    // Assert
+    should(registry.freshlyHeld(laptop, NOW)).be.false();
+    should(registry.freshlyHeld(phone, clock.now)).be.false();
   });
 });
 

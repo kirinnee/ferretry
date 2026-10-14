@@ -34,7 +34,7 @@ import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
-import { DaemonOutdatedError } from '../../lib/relay-carrier.ts';
+import { AppOutdatedError, DaemonOutdatedError } from '../../lib/relay-carrier.ts';
 import { RelayPairingRefusedError } from '../../lib/relay-session.ts';
 import { BrandMark } from '../../shell/brand-mark.tsx';
 import { PairScanner } from './pair-scanner.tsx';
@@ -118,7 +118,12 @@ export type PairingFailureCause = 'refusal' | 'transport' | 'stated';
 
 const failureCause = (reason: unknown): PairingFailureCause => {
   if (reason instanceof RelayPairingRefusedError) return 'refusal';
-  if (reason instanceof DaemonOutdatedError || reason instanceof DeviceKeyUnsupportedError) return 'stated';
+  if (
+    reason instanceof DaemonOutdatedError ||
+    reason instanceof AppOutdatedError ||
+    reason instanceof DeviceKeyUnsupportedError
+  )
+    return 'stated';
   return 'transport';
 };
 

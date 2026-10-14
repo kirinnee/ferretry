@@ -30,6 +30,7 @@ import {
   parseOnboardingProgress,
   reconcileOnboardingProgress,
   resetOnboardingProgress,
+  startOnboardingPairing,
   resumeOnboardingRoute,
   targetQuestion,
   walk,
@@ -517,8 +518,24 @@ describe('OnboardingProgressStore', () => {
   });
 
   it('does not restart a journey the arrival is already inside', () => {
-    // Second visit from the same link, already past the scan: the arrival must
+    // Back on the scan step of the pairing it is still walking: the arrival must
     // not throw them back to the start of the journey they are walking.
+    const storage = new MemoryStorage(
+      stored({ v: 4, stage: 'walk', route: 'add-client', current: 'scan', furthest: 'done' }),
+    );
+    const store = onDevice('desktop', { storage, entry: { route: 'add-client', step: 'scan' }, paired: true });
+    expect(store.snapshot()).toEqual({
+      v: 4,
+      stage: 'walk',
+      route: 'add-client',
+      current: 'scan',
+      furthest: 'done',
+    });
+  });
+
+  it('starts a NEW pairing when a link arrives at a browser whose last pairing is done', () => {
+    // An already-paired browser opening a second machine's link, or this machine's
+    // again after a revoke: "You are set up" would ignore the link it holds.
     const storage = new MemoryStorage(
       stored({ v: 4, stage: 'walk', route: 'add-client', current: 'done', furthest: 'done' }),
     );
@@ -527,9 +544,11 @@ describe('OnboardingProgressStore', () => {
       v: 4,
       stage: 'walk',
       route: 'add-client',
-      current: 'done',
-      furthest: 'done',
+      current: 'scan',
+      furthest: 'scan',
     });
+    // Opening the link still writes nothing until the reader acts.
+    expect(storage.writes).toEqual([]);
   });
 
   it('lets a hand-off outrank both storage and an arrival', () => {
@@ -614,6 +633,28 @@ describe('resetOnboardingProgress', () => {
   it('is a no-op when there is nowhere to write, and never throws', () => {
     resetOnboardingProgress(undefined);
     resetOnboardingProgress(new HostileStorage());
+  });
+});
+
+describe('startOnboardingPairing', () => {
+  it('sends the next visit to the pairing step, past the question, for a browser told to pair again', () => {
+    // A finished pairing, then the machine stopped accepting this browser.
+    const storage = new MemoryStorage(
+      stored({ v: 4, stage: 'walk', route: 'add-client', current: 'done', furthest: 'done' }),
+    );
+    startOnboardingPairing('mobile', storage);
+    expect(onDevice('mobile', { storage, paired: true }).snapshot()).toEqual({
+      v: 4,
+      stage: 'walk',
+      route: 'add-client',
+      current: 'scan',
+      furthest: 'scan',
+    });
+  });
+
+  it('is a no-op when there is nowhere to write, and never throws', () => {
+    startOnboardingPairing('desktop', undefined);
+    startOnboardingPairing('desktop', new HostileStorage());
   });
 });
 

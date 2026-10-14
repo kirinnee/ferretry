@@ -48,9 +48,10 @@ import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import {
   DaemonCarrierRouter,
-  DaemonOutdatedError,
-  daemonIsOutdated,
-  isOutdatedDaemonRefusal,
+  type OutdatedSide,
+  outdatedError,
+  outdatedRefusal,
+  outdatedSide,
   type RelayDial,
 } from './relay-carrier.ts';
 import { KeyRotation } from './key-rotation.ts';
@@ -260,7 +261,7 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
   const key = crypto.deviceKeyHandle(minted.privateKey);
   let first: Error | undefined;
   let spentUnheard = false;
-  let outdated = false;
+  let outdated: OutdatedSide | undefined;
   for (const method of pairingCandidates(seed, options.hostedRelayUrl)) {
     let response: PairingResponse;
     try {
@@ -281,11 +282,11 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
       // AN OLD MACHINE IS A SIGNAL, NOT A VERDICT. Both signs of one are unauthenticated — a plaintext
       // liveness read, a refusal sent before any key was checked — so they never stop the walk short of
       // a carrier that works. They only decide the sentence when every carrier has failed.
-      outdated ||=
-        isOutdatedDaemonRefusal(reason) ||
-        (method.kind === 'direct' &&
-          options.network !== undefined &&
-          (await daemonIsOutdated(options.network, method.daemonUrl)));
+      outdated ??=
+        outdatedRefusal(reason) ??
+        (method.kind === 'direct' && options.network !== undefined
+          ? await outdatedSide(options.network, method.daemonUrl)
+          : undefined);
       if (reason instanceof PairingOutcomeUnknownError) spentUnheard = true;
       first ??= reason instanceof Error ? reason : new Error(String(reason));
       continue;
@@ -302,7 +303,7 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
     await options.deviceKeys.save(connection.daemonId, minted.privateKey);
     return connection;
   }
-  if (outdated) throw new DaemonOutdatedError();
+  if (outdated !== undefined) throw outdatedError(outdated);
   throw first ?? new Error('no carrier could reach this daemon to pair with it');
 }
 

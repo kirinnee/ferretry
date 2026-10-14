@@ -133,6 +133,14 @@ export interface DaemonHarnessLoginOptions {
   readonly locate: (harness: HarnessKind) => string | undefined;
 }
 
+/**
+ * How long a daemon that is stopping waits for a sign-in it ended to exit before killing it outright.
+ *
+ * The wait is RACED, never awaited on its own: a child's exit settles only once its pipes are read to
+ * the end, and anything it started that still holds a pipe would keep that from ever happening.
+ */
+export const HARNESS_LOGIN_SHUTDOWN_GRACE_MS = 2_000;
+
 /** The default login window. Long enough to find a phone, short enough that a stray child is not forever. */
 export const HARNESS_LOGIN_WINDOW_MINUTES = 10;
 
@@ -180,6 +188,8 @@ const argvFor = (stage: FlowStage): readonly string[] => {
 
 export class HarnessLoginService {
   readonly #flows = new Map<string, FlowRecord>();
+  /** Set by {@link shutdown}: a daemon that is stopping starts no sign-in it could not then end. */
+  #stopped = false;
 
   constructor(private readonly options: DaemonHarnessLoginOptions) {}
 
@@ -304,6 +314,34 @@ export class HarnessLoginService {
     return this.#projection(record);
   }
 
+  /**
+   * End every sign-in, and do not return until each child has exited or been killed outright.
+   *
+   * A pending `codex login` holds this machine's `localhost:1455` callback port for as long as it runs.
+   * Left behind by a daemon that stopped, it outlived its flow — nobody could see it, cancel it or send
+   * it a code — and the next Codex sign-in failed because the port was taken.
+   */
+  async shutdown(): Promise<void> {
+    this.#stopped = true;
+    const children: HarnessLoginChild[] = [];
+    for (const record of this.#flows.values()) {
+      if (record.child !== undefined) children.push(record.child);
+      // Killed here as well as by the ending: a flow whose stage already settled is not ended again,
+      // and its child must still go. `kill` is idempotent.
+      record.child?.kill();
+      this.#end(record, 'the daemon stopped, so this sign-in ended with it');
+    }
+    if (children.length === 0) return;
+    let disarm: () => void = () => undefined;
+    const exited = Promise.all(children.map(async child => await child.exited.catch(() => 0))).then(() => true);
+    const expired = new Promise<boolean>(resolve => {
+      disarm = this.options.timer.after(HARNESS_LOGIN_SHUTDOWN_GRACE_MS, () => resolve(false));
+    });
+    const settledInTime = await Promise.race([exited, expired]);
+    disarm();
+    if (!settledInTime) for (const child of children) child.kill('SIGKILL');
+  }
+
   // ─── refusals ───────────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -325,6 +363,8 @@ export class HarnessLoginService {
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────
 
   #launch(target: Extract<CredentialSignInTarget, { kind: 'store' }>, link: boolean): HarnessLoginFlow {
+    if (this.#stopped)
+      throw new HarnessLoginRefusal('fleet_login_unavailable', 'this daemon is stopping, so it starts no sign-in');
     // Nothing between here and the record landing in `#flows` awaits, so of two starts for one
     // credential the later is refused here.
     this.#assertKeyFree(target.credentialId);

@@ -52,9 +52,13 @@ async function pump(stream: ReadableStream<Uint8Array> | undefined, onLine: (lin
 
 /** Launch one harness login child. */
 export const spawnHarnessLoginChild: HarnessLoginSpawn = (spec: HarnessLoginChildSpec): HarnessLoginChild => {
+  // ITS OWN PROCESS GROUP (`detached`), so a kill can reach the whole sign-in. A harness launcher that
+  // spawns the real binary — npm's `codex` is one — is a parent the binary outlives, and the binary is
+  // what holds Codex's `localhost:1455` callback port.
   const child = Bun.spawn({
     cmd: [...spec.command],
     env: spec.environment,
+    detached: true,
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -88,13 +92,18 @@ export const spawnHarnessLoginChild: HarnessLoginSpawn = (spec: HarnessLoginChil
         return false;
       }
     },
-    kill: () => {
-      // Idempotent by contract, and `kill` on an exited child is not an error worth propagating: a cancel
-      // that raced the child's own exit has still achieved what it was asked to.
+    kill: (signal = 'SIGTERM') => {
+      // The GROUP first, so nothing the harness started is left holding its port; the child alone if the
+      // group is already gone. Idempotent by contract, and a kill of an exited child is not an error worth
+      // propagating: a cancel that raced the child's own exit has still achieved what it was asked to.
       try {
-        child.kill();
+        process.kill(-child.pid, signal);
       } catch {
-        // already gone
+        try {
+          child.kill(signal);
+        } catch {
+          // already gone
+        }
       }
     },
     // Settled only once BOTH pipes have been read to the end. The exit can be reported before the last

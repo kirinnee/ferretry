@@ -126,6 +126,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     start: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    shutdown: async () => undefined,
     status: async () => {
       throw new Error('not exercised by the surface inventory');
     },

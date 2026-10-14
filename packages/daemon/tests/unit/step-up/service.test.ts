@@ -1155,6 +1155,28 @@ describe('StepUpService unlock on opening (B6)', () => {
     should(service.held(phone)).be.true();
   });
 
+  it('should never count the unlock as a FRESH proof: adding a device wants a passkey for it', async () => {
+    // Arrange — unlocked, `stepUpOnActions` off: every ordinary act is allowed with no prompt.
+    const { service, authenticator, registry } = await enrolled({
+      settings: { unlockOnOpen: true, stepUpOnActions: false },
+    });
+    await service.unlockOptions(remote(), ORIGIN);
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
+    registry.forgetDevice(phone.deviceId);
+
+    // Act / Assert — held for ordinary acts, never fresh for one that adds access.
+    should(service.held(phone)).be.true();
+    should(service.freshlyHeld(phone)).be.false();
+
+    // A passkey proved now is fresh, and one act that adds access spends it.
+    await service.stepUpOptions(remote(), ORIGIN);
+    should((await service.stepUp(remote(), await nextAssertion(authenticator, 2))).ok).be.true();
+    should(service.freshlyHeld(phone)).be.true();
+    service.spendFresh(phone);
+    should(service.freshlyHeld(phone)).be.false();
+    should(service.held(phone)).be.true();
+  });
+
   it('should stop holding the step-up at the instant the unlock lapses', async () => {
     // Arrange
     const { clock, service, authenticator, registry } = await enrolled({

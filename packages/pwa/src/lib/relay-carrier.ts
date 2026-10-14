@@ -39,6 +39,7 @@
  */
 
 import {
+  OLDER_APP_SENTENCE,
   OLDER_DAEMON_SENTENCE,
   UNLOCK_REQUIRED_CODE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
@@ -472,37 +473,102 @@ export class DaemonOutdatedError extends Error {
 }
 
 /**
- * A session that ended because the daemon speaks the previous dialect: its hello named `/1`, or it
- * refused this one's in the words a `/1` daemon uses (`relay-session.ts` turns both into this).
+ * The mirror image: the daemon speaks a NEWER dialect than this copy of the app.
+ *
+ * Telling that person to update their machine sends them to fix the one side that is already current,
+ * so this is its own class with its own sentence — the app is what needs reloading.
  */
-export const isOutdatedDaemonRefusal = (reason: unknown): boolean =>
-  reason instanceof RelaySessionError &&
-  reason.code === RELAY_CLOSE_CODES.versionUnsupported &&
-  reason.message === OLDER_DAEMON_SENTENCE;
+export class AppOutdatedError extends Error {
+  constructor() {
+    super(OLDER_APP_SENTENCE);
+    this.name = 'AppOutdatedError';
+  }
+}
 
 /**
- * After a direct socket failed: is that an OLD daemon rather than an absent one?
- *
- * A browser cannot read why a WebSocket was refused, and an old daemon refuses the session path the
- * way any unknown route is refused. Its public liveness route still answers, though, and a daemon
- * that answers it without naming the dialect this app speaks is one that needs updating — which is a
- * sentence a person can act on, where "could not connect" is not. Anything else — no answer, a body
- * that does not parse — is `false`, because that daemon is not provably old.
+ * Said when this machine no longer accepts this browser's device: it was revoked, or it went unused for
+ * longer than the machine allows. One sentence a person can act on, on either carrier — never "could not
+ * reach", because the machine answered and said no.
  */
-export const daemonIsOutdated = async (network: DaemonFetch, daemonUrl: string): Promise<boolean> => {
+export const DEVICE_NOT_ACCEPTED_SENTENCE =
+  'This machine no longer accepts this browser — it was removed, or went unused for too long. Pair it again to keep using it.';
+
+/**
+ * The daemon refused this device (`4403`), on every carrier that answered.
+ *
+ * Final for this pairing: no carrier and no retry changes a refusal of the key itself, and re-pairing
+ * is the only repair. The router remembers it, so the panels of an open page stop dialling a daemon
+ * that will only refuse them again (see {@link DaemonCarrierRouter.deviceRefused}).
+ */
+export class DeviceNotAcceptedError extends Error {
+  constructor() {
+    super(DEVICE_NOT_ACCEPTED_SENTENCE);
+    this.name = 'DeviceNotAcceptedError';
+  }
+}
+
+/** A session the daemon closed with `4403`: this device is not accepted. */
+const deviceRefusal = (reason: unknown): boolean =>
+  reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.authRejected;
+
+/** Which end of a conversation is the older one. */
+export type OutdatedSide = 'daemon' | 'app';
+
+/** The error that tells a person to update the side that is actually old. */
+export const outdatedError = (side: OutdatedSide): DaemonOutdatedError | AppOutdatedError =>
+  side === 'app' ? new AppOutdatedError() : new DaemonOutdatedError();
+
+/**
+ * A session that ended because the two ends speak different dialects, and which end is old.
+ *
+ * The daemon's hello named `/1`, or it refused this one's in the words a `/1` daemon uses: the daemon is
+ * old. It refused this hello in `OLDER_APP_SENTENCE`: the app is (`relay-session.ts` turns each into its
+ * sentence). Anything else is `undefined`.
+ */
+export const outdatedRefusal = (reason: unknown): OutdatedSide | undefined => {
+  if (!(reason instanceof RelaySessionError) || reason.code !== RELAY_CLOSE_CODES.versionUnsupported) return undefined;
+  if (reason.message === OLDER_DAEMON_SENTENCE) return 'daemon';
+  return reason.message === OLDER_APP_SENTENCE ? 'app' : undefined;
+};
+
+/** The dialect number in `ferretry-relay/<n>`, or `undefined` for anything else. */
+const dialectNumber = (protocol: unknown): number | undefined => {
+  if (typeof protocol !== 'string') return undefined;
+  const match = /^ferretry-relay\/(\d+)$/u.exec(protocol);
+  return match === null ? undefined : Number(match[1]);
+};
+
+/**
+ * After a direct socket failed: is that a daemon on ANOTHER dialect rather than an absent one — and
+ * which side is older?
+ *
+ * A browser cannot read why a WebSocket was refused, and a daemon on another dialect refuses the session
+ * path the way any unknown route is refused. Its public liveness route still answers, though, and names
+ * the dialect it speaks — which is a sentence a person can act on, where "could not connect" is not.
+ *
+ * THE DIRECTION IS READ, NEVER ASSUMED. A daemon naming a HIGHER dialect than this app is a machine
+ * that was updated before the app was, and telling its owner to update the machine is the one advice
+ * that cannot help. A lower number — or none at all, which is how a daemon from before the field
+ * answers — is an old daemon. Anything else — no answer, a body that does not parse, the same dialect —
+ * is `undefined`, because neither side is provably old.
+ */
+export const outdatedSide = async (network: DaemonFetch, daemonUrl: string): Promise<OutdatedSide | undefined> => {
   let body: unknown;
   try {
     const response = await network(new URL('/healthz', `${daemonUrl}/`).toString(), {
       cache: 'no-store',
       credentials: 'omit',
     });
-    if (!response.ok) return false;
+    if (!response.ok) return undefined;
     body = await response.json();
   } catch {
-    return false;
+    return undefined;
   }
   const answer = body as { readonly status?: unknown; readonly sessionProtocol?: unknown } | null;
-  return answer?.status === 'ok' && answer.sessionProtocol !== SESSION_PROTOCOL_ID;
+  if (answer?.status !== 'ok' || answer.sessionProtocol === SESSION_PROTOCOL_ID) return undefined;
+  const theirs = dialectNumber(answer.sessionProtocol);
+  const ours = dialectNumber(SESSION_PROTOCOL_ID) ?? 0;
+  return theirs !== undefined && theirs > ours ? 'app' : 'daemon';
 };
 
 export interface DaemonCarrierRouterOptions {
@@ -582,6 +648,11 @@ const carrierAddress = (method: ConnectionMethod): string =>
 interface CarrierEntry {
   readonly connection: DaemonConnection;
   choice: ConnectionChoice | undefined;
+  /**
+   * The daemon refused this device (`4403`). Sticky for this pairing: a re-pair or an unpair replaces
+   * the entry, which is the only thing that clears it, and a reload asks the daemon again.
+   */
+  refused: boolean;
   /**
    * EVERY SESSION THIS ROUTER HOLDS FOR THIS DAEMON — request, stream, all of them.
    *
@@ -794,6 +865,14 @@ export class DaemonCarrierRouter {
   }
 
   /**
+   * Whether this daemon refused this browser's device. A screen reads it to say "pair again" once,
+   * instead of every panel saying it could not reach a machine that answered.
+   */
+  deviceRefused(daemonId: DaemonId): boolean {
+    return this.#entries.get(daemonId)?.refused === true;
+  }
+
+  /**
    * The carrier a request has been MEASURED on, or nothing.
    *
    * `undefined` covers both "no walk has finished yet" and "the last walk found nothing", and the
@@ -835,10 +914,18 @@ export class DaemonCarrierRouter {
    */
   async openStream(daemon: DaemonConnection, request: RelayStreamRequest): Promise<RelayClientSession> {
     const entry = this.#entry(daemon);
+    if (entry.refused) throw new DeviceNotAcceptedError();
     const chosen = entry.choice;
-    if (chosen?.ok === true) return await this.#streamOn(entry, chosen.method, request);
+    if (chosen?.ok === true) {
+      try {
+        return await this.#streamOn(entry, chosen.method, request);
+      } catch (reason) {
+        throw deviceRefusal(reason) ? this.#refuse(entry) : reason;
+      }
+    }
     const probes: ConnectionProbe[] = [];
-    let outdated = false;
+    let outdated: OutdatedSide | undefined;
+    let refused = false;
     for await (const method of this.#candidates(daemon)) {
       this.#assertCurrent(entry);
       try {
@@ -855,11 +942,13 @@ export class DaemonCarrierRouter {
         )
           throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
-        outdated ||= await this.#looksOutdated(method, reason);
+        refused ||= deviceRefusal(reason);
+        outdated ??= await this.#looksOutdated(method, reason);
       }
     }
     this.#decide(entry, probes);
-    if (outdated) throw new DaemonOutdatedError();
+    if (refused) throw this.#refuse(entry);
+    if (outdated !== undefined) throw outdatedError(outdated);
     throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
   }
 
@@ -959,6 +1048,11 @@ export class DaemonCarrierRouter {
 
   async #sendOnce(daemon: DaemonConnection, url: string, init: RequestInit): Promise<Response> {
     const entry = this.#entry(daemon);
+    // A REFUSED DEVICE DIALS NOTHING. Every panel of an open page retries its own reads, and each try
+    // was a fresh socket the daemon admitted and refused — enough of them spent the per-address upgrade
+    // budget, so the person's own attempt to pair again failed at the upgrade. Nothing a socket could
+    // carry would change the answer; re-pairing replaces this entry and is the way out.
+    if (entry.refused) throw new DeviceNotAcceptedError();
     const chosen = entry.choice;
     if (chosen?.ok === true) {
       try {
@@ -969,6 +1063,7 @@ export class DaemonCarrierRouter {
         // The remembered carrier stopped carrying. Forget it — the next request walks
         // the set again — and report this failure rather than re-sending a request
         // whose fate on the daemon is unknown.
+        if (deviceRefusal(reason)) throw this.#refuse(entry);
         entry.choice = undefined;
         this.#announce();
         throw reason;
@@ -976,7 +1071,8 @@ export class DaemonCarrierRouter {
     }
 
     const probes: ConnectionProbe[] = [];
-    let outdated = false;
+    let outdated: OutdatedSide | undefined;
+    let refused = false;
     for await (const method of this.#candidates(daemon)) {
       // ASKED BEFORE EVERY ATTEMPT, not once at the top: a walk takes as long as its failures do, and
       // an unpair, a re-pair or a republish can land between any two of them. Every address below
@@ -1003,7 +1099,8 @@ export class DaemonCarrierRouter {
         if (reason instanceof RelayStaleEntryError) throw reason;
         if (reason instanceof DeviceKeyMissingError || reason instanceof DeviceKeyUnreadableError) throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
-        outdated ||= await this.#looksOutdated(method, reason);
+        refused ||= deviceRefusal(reason);
+        outdated ??= await this.#looksOutdated(method, reason);
         // A session that died AFTER the request left can follow receipt of a POST/PUT/etc. Record
         // its failed probe for the same disclosure a completed walk produces, but do not send that
         // possibly-applied request to the next carrier. One whose session never opened was never
@@ -1015,7 +1112,8 @@ export class DaemonCarrierRouter {
       }
     }
     this.#decide(entry, probes);
-    if (outdated) throw new DaemonOutdatedError();
+    if (refused) throw this.#refuse(entry);
+    if (outdated !== undefined) throw outdatedError(outdated);
     throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
   }
 
@@ -1055,7 +1153,7 @@ export class DaemonCarrierRouter {
     if (current !== undefined && carrierRefreshOnly(current.connection, daemon))
       return this.#refreshed(current, daemon);
     if (current !== undefined) this.clearDaemon(daemon.daemonId);
-    const entry: CarrierEntry = { connection: daemon, choice: undefined, sessions: new Map() };
+    const entry: CarrierEntry = { connection: daemon, choice: undefined, refused: false, sessions: new Map() };
     this.#entries.set(daemon.daemonId, entry);
     return entry;
   }
@@ -1119,7 +1217,7 @@ export class DaemonCarrierRouter {
       (carriers.some(method => sameDaemonCarrier(method, chosen.method)) || chosen.method.kind === 'direct')
         ? chosen
         : undefined;
-    const entry: CarrierEntry = { connection: daemon, choice: kept, sessions };
+    const entry: CarrierEntry = { connection: daemon, choice: kept, refused: current.refused, sessions };
     this.#entries.set(daemon.daemonId, entry);
     this.#announce();
     return entry;
@@ -1270,21 +1368,19 @@ export class DaemonCarrierRouter {
         mode: mode(claim),
         ...(onData === undefined ? {} : { onData }),
       });
-    const refusedDevice = (reason: unknown): boolean =>
-      reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.authRejected;
     try {
       return await open(device);
     } catch (refused) {
       const rotation = this.#rotation;
       const daemonId = entry.connection.daemonId;
-      const pending = refusedDevice(refused) ? await rotation?.pending(daemonId).catch(() => undefined) : undefined;
+      const pending = deviceRefusal(refused) ? await rotation?.pending(daemonId).catch(() => undefined) : undefined;
       if (rotation === undefined || pending === undefined) throw refused;
       try {
         const session = await open({ ...device, key: pending });
         await rotation.promote(daemonId);
         return session;
       } catch (again) {
-        if (refusedDevice(again)) await rotation.discard(daemonId);
+        if (deviceRefusal(again)) await rotation.discard(daemonId);
         throw refused;
       }
     }
@@ -1305,7 +1401,7 @@ export class DaemonCarrierRouter {
   }
 
   /**
-   * Whether a failed carrier LOOKS like an older daemon — a SIGNAL for the end of the walk, never a
+   * Whether a failed carrier LOOKS like a daemon on another dialect, and which side is old — a SIGNAL for the end of the walk, never a
    * verdict that stops it.
    *
    * Both signals are unauthenticated: the liveness route is read over plaintext, and the refusal an
@@ -1314,9 +1410,10 @@ export class DaemonCarrierRouter {
    * Read as final, that let them stop the walk short of a rendezvous that works and tell the owner to
    * re-pair. Read as a signal, it only chooses the sentence when NOTHING worked.
    */
-  async #looksOutdated(method: ConnectionMethod, reason: unknown): Promise<boolean> {
-    if (isOutdatedDaemonRefusal(reason)) return true;
-    return method.kind === 'direct' && (await daemonIsOutdated(this.#network, method.daemonUrl));
+  async #looksOutdated(method: ConnectionMethod, reason: unknown): Promise<OutdatedSide | undefined> {
+    const refused = outdatedRefusal(reason);
+    if (refused !== undefined || method.kind !== 'direct') return refused;
+    return await outdatedSide(this.#network, method.daemonUrl);
   }
 
   /**
@@ -1359,6 +1456,22 @@ export class DaemonCarrierRouter {
     // work and dialling the next one with the same replaced pairing. It carries the session sentence
     // rather than the walk's, because here a session really was opening and really has been ended.
     throw new RelayStaleEntryError(STALE_SESSION_REASON);
+  }
+
+  /**
+   * Remembers that this daemon refused this device, and hands back the error that says so.
+   *
+   * A REFUSAL IS A SIGNAL UNTIL THE WALK IS OVER, like an outdated dialect: the close travels unsealed,
+   * so a carrier could forge one. It decides the outcome only when no carrier carried the request — and a
+   * carrier able to forge it on the only path that works could as well have dropped the traffic.
+   */
+  #refuse(entry: CarrierEntry): DeviceNotAcceptedError {
+    if (!entry.refused) {
+      entry.refused = true;
+      entry.choice = undefined;
+      this.#announce();
+    }
+    return new DeviceNotAcceptedError();
   }
 
   #announce(): void {
