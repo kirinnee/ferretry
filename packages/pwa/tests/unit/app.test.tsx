@@ -2940,13 +2940,18 @@ describe('one push worker per paired machine', () => {
     { ...beta, pairedAt: 2, lastSelectedAt: 2 },
   ];
 
-  it('titles a machine’s worker with the reader’s label, its address, or its id when unpaired', () => {
+  it('titles a machine’s worker with the reader’s label, else its id — never the address it chose itself', () => {
+    const betaName = `Machine ${String(beta.daemonId).slice(0, 12)}`;
     expect(pushMachineLabel(records, alpha.daemonId)).toBe('Work laptop');
-    expect(pushMachineLabel(records, beta.daemonId)).toBe(beta.baseUrl);
-    expect(pushMachineLabel(records, daemonId('gone'))).toBe('gone');
+    expect(pushMachineLabel(records, beta.daemonId)).toBe(betaName);
+    expect(pushMachineLabel(records, beta.daemonId)).not.toContain(beta.baseUrl);
+    expect(pushMachineLabel([{ ...records[0], label: '   ' } as never], alpha.daemonId)).toBe(
+      `Machine ${String(alpha.daemonId).slice(0, 12)}`,
+    );
+    expect(pushMachineLabel(records, daemonId('gone'))).toBe('Machine gone');
     expect(pairedPushMachines(records)).toEqual([
       { daemonId: alpha.daemonId, label: 'Work laptop' },
-      { daemonId: beta.daemonId, label: beta.baseUrl },
+      { daemonId: beta.daemonId, label: betaName },
     ]);
   });
 

@@ -92,9 +92,24 @@ export const machineNotification = (
   url: notificationUrl(payload.url, origin, machine),
 });
 
+/** What a push that reached the app-wide registration says it is: from no machine this browser can name. */
+const UNVERIFIED = 'Unverified';
+
 /** What a push nobody composed is shown as, so a subscription is never punished for a silent push. */
 export const unreadablePushTitle = (machine: PushMachine | null): string =>
-  machine === null ? 'Ferretry' : `${machine.label} · Ferretry`;
+  machine === null ? `${UNVERIFIED} · Ferretry` : `${machine.label} · Ferretry`;
+
+/**
+ * A push that reached the APP-WIDE registration: the old shared subscription, before it was dropped
+ * (docs/cross-daemon.md §4b). Nothing says which machine sent it, so it is titled "Unverified", kept out
+ * of every machine's tag namespace, and opens only the app itself — never one machine's pages.
+ */
+export const unverifiedNotification = (payload: PushNotificationPayload, origin: string): PushNotificationPayload => ({
+  ...payload,
+  title: `${UNVERIFIED} · ${payload.title}`,
+  tag: `fy-push-unverified:${payload.tag}`,
+  url: new URL('/app/', origin).href,
+});
 
 /**
  * Where a notification click may go (docs/cross-daemon.md §4a, §4c): only this site, and — for a

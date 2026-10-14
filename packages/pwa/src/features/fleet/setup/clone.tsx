@@ -342,7 +342,12 @@ export function CloneMachine(props: CloneMachineProps) {
               ))}
             </SetupNote>
           )}
-          {hasSetup ? (
+          {preview.problem !== null ? (
+            // Never offered: a bundle the review could misread is one the target refuses anyway.
+            <SetupNote live tone="err" name="bundle-refused" title={`${bundle.machine}’s setup can’t be copied`}>
+              <span>{preview.problem}</span>
+            </SetupNote>
+          ) : hasSetup ? (
             <Foot>
               <Button type="button" variant="primary" data-step-next="" onClick={next}>
                 Next
@@ -424,12 +429,13 @@ function RunsHere({
       <SetupNote
         tone="warn"
         name="runs-warning"
-        title={`${countWords(runnables.length, 'component')} would run commands here`}
+        title={`${countWords(runnables.length, 'component')} can make ${machineName} run something`}
       >
         <span>
-          They start the next time an agent launches on <span className="font-mono">{machineName}</span>. Read each one
-          and untick any you don’t trust: if <span className="font-mono">{source}</span> was ever broken into, this is
-          where it would plant a command.
+          MCP servers, hooks and settings start programs the next time an agent launches on{' '}
+          <span className="font-mono">{machineName}</span>. Instructions and skills are text an agent follows, and one
+          running unattended will act on it. Read each one and untick any you don’t trust: if{' '}
+          <span className="font-mono">{source}</span> was ever broken into, this is where it would plant a command.
         </span>
       </SetupNote>
       {runnables.map(runnable => {

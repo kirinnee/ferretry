@@ -120,6 +120,7 @@ import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope }
 import {
   type ContainerPushEnrolment,
   containerPushEnrolment,
+  moveOffSharedPush,
   type PairedPushMachine,
   type PushContainerLike,
   supportsWebPush,
@@ -239,14 +240,23 @@ export const browserNotificationSurface = (
 });
 
 /** The reader's label for a paired daemon, which its push worker titles every notification with. */
-export const pushMachineLabel = (records: readonly DaemonConnectionRecord[], daemon: DaemonId): string => {
-  const record = records.find(candidate => candidate.daemonId === daemon);
-  return record === undefined ? String(daemon) : daemonDisplayName(record);
-};
+/**
+ * The name a machine's push worker titles its notifications with: the reader's OWN label, or else the
+ * start of its verified daemon id. Never its address, which the machine chose itself in its pairing QR —
+ * an unlabelled machine could otherwise pair as `https://work-mac.example` and title its alerts so.
+ */
+const pushLabelOf = (record: DaemonConnectionRecord | undefined, daemon: DaemonId): string =>
+  record?.label?.trim() || `Machine ${String(daemon).slice(0, 12)}`;
+
+export const pushMachineLabel = (records: readonly DaemonConnectionRecord[], daemon: DaemonId): string =>
+  pushLabelOf(
+    records.find(candidate => candidate.daemonId === daemon),
+    daemon,
+  );
 
 /** Every paired daemon by its label, for the push reconcile. */
 export const pairedPushMachines = (records: readonly DaemonConnectionRecord[]): readonly PairedPushMachine[] =>
-  records.map(record => ({ daemonId: record.daemonId, label: daemonDisplayName(record) }));
+  records.map(record => ({ daemonId: record.daemonId, label: pushLabelOf(record, record.daemonId) }));
 
 /**
  * Web Push through ONE registration per paired daemon (`lib/push-scope.ts`): each of the signed worker
@@ -1398,8 +1408,25 @@ export function AppShell() {
   const pairedKey = pairedMachines.map(machine => `${machine.daemonId}\u0000${machine.label}`).join('\u0001');
   // biome-ignore lint/correctness/useExhaustiveDependencies: the joined ids and labels are the deliberate trigger
   useEffect(() => {
-    if (pushEnrolment !== null) void pushEnrolment.reconcile(pairedPushMachines(store.connections.list()));
-  }, [pushEnrolment, pairedKey, store.connections]);
+    if (pushEnrolment === null) return;
+    // Then off the old shared subscription, for every paired machine at once: at app start, not when
+    // somebody happens to open each machine's notification settings (docs/cross-daemon.md §4b).
+    const contexts = store.connections.list().map(connection => ({
+      connection,
+      service: store.pushService,
+      devices: store.pushDevices,
+      preferences: store.notificationPreferences,
+      enrolment: pushEnrolment,
+    }));
+    void pushEnrolment.reconcile(pairedPushMachines(store.connections.list())).then(() => moveOffSharedPush(contexts));
+  }, [
+    pushEnrolment,
+    pairedKey,
+    store.connections,
+    store.notificationPreferences,
+    store.pushDevices,
+    store.pushService,
+  ]);
   const notificationControlsHost = useMemo<NotificationControlsHost>(
     () => ({
       preferences: store.notificationPreferences,

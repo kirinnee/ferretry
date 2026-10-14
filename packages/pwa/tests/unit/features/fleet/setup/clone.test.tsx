@@ -613,7 +613,9 @@ describe('CloneMachine · what a copy runs here (cross-machine §3a, §3c, §3d)
     const screen = await render({ createClient });
     try {
       await toPreview(screen);
-      expect(screen.text('[data-setup-note="runs-warning"]')).toContain('2 components would run commands here');
+      expect(screen.text('[data-setup-note="runs-warning"]')).toContain(
+        '3 components can make studio-mac run something',
+      );
       const guard = screen.text('[data-clone-runnable="hooks/guard"]');
       expect(guard).toContain('Hooks · guard');
       expect(guard).toContain('Runs on Stop.0.hooks.0');
@@ -636,6 +638,23 @@ describe('CloneMachine · what a copy runs here (cross-machine §3a, §3c, §3d)
         skip: ['hooks/guard'],
         source: { daemonId: 'work' },
       });
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('shows the refusal and offers no Copy for a bundle that would write a file it does not list', async () => {
+    const orphan = bundle({ files: [...bundle().files, { path: 'components/hooks/mine.json', content: '{}' }] });
+    const { calls, createClient } = daemons({ work: { '/v1/fleet/export': orphan } });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      expect(screen.text('[data-setup-note="bundle-refused"]')).toContain(
+        'carries components/hooks/mine.json, which none of its components uses',
+      );
+      expect(screen.q('[data-change-submit]')).toBeNull();
+      expect(screen.q('[data-clone-step="preview"] [data-step-next]')).toBeNull();
+      expect(changeBodies(calls.target)).toEqual([]);
     } finally {
       await screen.view.unmount();
     }

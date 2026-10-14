@@ -14,6 +14,7 @@ import {
   pushScopePath,
   pushWorkerUrl,
   unreadablePushTitle,
+  unverifiedNotification,
 } from '../../src/lib/push-scope.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
@@ -93,7 +94,7 @@ describe('machineNotification', () => {
 
   it('titles a push nobody composed by the machine it came through', () => {
     expect(unreadablePushTitle(WORK)).toBe('Work laptop · Ferretry');
-    expect(unreadablePushTitle(null)).toBe('Ferretry');
+    expect(unreadablePushTitle(null)).toBe('Unverified · Ferretry');
   });
 });
 
@@ -120,5 +121,18 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
     ]) {
       expect(notificationUrl(elsewhere, ORIGIN, WORK)).toBe(home);
     }
+  });
+});
+
+describe('unverifiedNotification (review M3)', () => {
+  it('titles a push to the app-wide registration Unverified, keeps it out of every machine’s tags, opens the app', () => {
+    const shown = unverifiedNotification({ ...payload, url: '/d/sha256%3Ahome/settings' }, ORIGIN);
+    expect(shown).toEqual({
+      ...payload,
+      title: 'Unverified · A new device was paired',
+      tag: 'fy-push-unverified:pairing',
+      url: `${ORIGIN}/app/`,
+    });
+    expect(shown.tag.startsWith('fy-push:')).toBe(false);
   });
 });

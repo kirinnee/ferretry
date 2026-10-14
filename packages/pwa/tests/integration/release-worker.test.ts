@@ -627,6 +627,22 @@ describe('per-machine push workers', () => {
     await context.close();
   }, 120_000);
 
+  test('a push that reaches the app-wide registration is Unverified and opens only the app', async () => {
+    const { context, page } = await installed(first);
+    const { push, shown } = await machines(context, page);
+
+    await push('/', { title: 'A new device was paired with Home', tag: 'pairing', url: '/d/home/settings' });
+
+    expect(await shown('/')).toEqual([
+      {
+        title: 'Unverified · A new device was paired with Home',
+        tag: 'fy-push-unverified:pairing',
+        url: `${origin()}/app/`,
+      },
+    ]);
+    await context.close();
+  }, 120_000);
+
   test('a machine’s worker still answers navigations under its scope from the verified release', async () => {
     const { context, page } = await installed(first);
     await machines(context, page);

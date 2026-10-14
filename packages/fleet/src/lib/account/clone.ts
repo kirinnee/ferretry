@@ -31,6 +31,8 @@
  */
 import {
   type CloneRunnable,
+  cloneBundleProblem,
+  cloneFileOwned,
   cloneRunnables,
   FLEET_CLONE_BUNDLE_FORMAT,
   type FleetCloneBundle,
@@ -39,6 +41,7 @@ import {
   secretReferencesIn,
 } from '@ferretry/protocol';
 import type { HarnessKind } from '../manifest.ts';
+import { canonicalAssetReference } from '../paths.ts';
 import { skillSourceReference } from './adapt.ts';
 import { freeName } from './import.ts';
 import { HARNESS_DISPLAY_NAMES } from './layering.ts';
@@ -110,6 +113,19 @@ export interface CloneBundleInput {
   readonly notCopied: readonly { readonly path: string; readonly reason: string }[];
 }
 
+/** An asset-relative path in its one plain spelling (`./a//b/` → `a/b`); anything else as it is. */
+const plainAsset = (path: string): string =>
+  isAssetRelative(path) ? canonicalAssetReference(path).replace(/\/+$/u, '') : path;
+
+/** A component with its `file` and `directory` in their plain spelling. */
+const plainReferences = (component: Record<string, unknown>): Record<string, unknown> => {
+  const plain = { ...component };
+  for (const field of ['file', 'directory'] as const) {
+    if (typeof plain[field] === 'string') plain[field] = plainAsset(plain[field] as string);
+  }
+  return plain;
+};
+
 /** The bundle `GET /v1/fleet/export` answers: no credential, no history (L1–L3, §7). */
 export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
   const { model } = input;
@@ -125,16 +141,35 @@ export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
         ...(email === undefined ? {} : { email }),
       };
     });
+  // ONE SPELLING ON THE WIRE. A target refuses a bundle whose paths could be read two ways
+  // (`cloneBundleProblem`), and the starter configuration itself writes `./CLAUDE.md`, so every asset
+  // reference and every carried path leaves here in its canonical form, each document once.
+  const components = Object.fromEntries(
+    Object.entries(model.components).map(([kind, entries]) => [
+      kind,
+      Object.fromEntries(
+        Object.entries(entries as Record<string, Record<string, unknown>>).map(([name, component]) => [
+          name,
+          plainReferences(component),
+        ]),
+      ),
+    ]),
+  );
+  const files = new Map<string, FleetCloneFile>();
+  for (const file of input.files) {
+    const plain = plainAsset(file.path);
+    if (!files.has(plain)) files.set(plain, { path: plain, content: file.content });
+  }
   return FleetCloneBundleSchema.parse({
     format: FLEET_CLONE_BUNDLE_FORMAT,
     version: 1,
     machine: input.machine,
     exportedAt: input.exportedAt,
     credentials,
-    components: model.components,
+    components,
     profiles: model.profiles,
     runtimes: model.runtimes,
-    files: input.files,
+    files: [...files.values()],
     notCopied: input.notCopied.map(entry => ({ path: entry.path, reason: entry.reason })),
   });
 }
@@ -215,9 +250,10 @@ const countComponents = (components: AccountModel['components'], kinds: readonly
 const NON_MODEL_KINDS = COMPONENT_KINDS.filter(kind => kind !== 'modelSets');
 
 /**
- * The bundle, refused with a sentence when it is not one — or when a document it carries names a path
- * outside the asset tree. The provisioner would refuse that write too; refusing here says why, before
- * anything is planned.
+ * The bundle, refused with a sentence when it is not one — or when the review could misread it
+ * (`cloneBundleProblem`): a carried path outside the asset tree or spelled two ways, the same path twice,
+ * a component reference spelled two ways, or a file no carried component owns. What is planned from an
+ * accepted bundle is exactly what the review listed.
  */
 export function parseCloneBundle(input: unknown): FleetCloneBundle {
   const parsed = FleetCloneBundleSchema.safeParse(input);
@@ -226,19 +262,10 @@ export function parseCloneBundle(input: unknown): FleetCloneBundle {
       'That is not a setup exported by Ferretry, or it was exported by a version this machine cannot read.',
     );
   }
-  const outside = parsed.data.files.find(file => !isAssetRelative(file.path) || file.path.includes('\\'));
-  if (outside !== undefined) {
-    throw new CloneRefusal(
-      `The setup from ${parsed.data.machine} carries a file at ${outside.path}, outside its own setup folder, so none of it can be copied.`,
-    );
-  }
+  const problem = cloneBundleProblem(parsed.data);
+  if (problem !== null) throw new CloneRefusal(problem);
   return parsed.data;
 }
-
-/** Whether a carried document belongs to a component: its file, or inside its folder. */
-const belongsTo = (component: Readonly<Record<string, unknown>>, path: string): boolean =>
-  component.file === path ||
-  (typeof component.directory === 'string' && path.startsWith(`${component.directory.replace(/\/$/u, '')}/`));
 
 /**
  * The bundle without the components the person left out: each one, every layer that names it, and
@@ -275,8 +302,8 @@ function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[]): Flee
   const kept = Object.values(components).flatMap(entries => Object.values(entries)) as Record<string, unknown>[];
   const files = bundle.files.filter(
     file =>
-      !leftOut.some(component => belongsTo(component, file.path)) ||
-      kept.some(component => belongsTo(component, file.path)),
+      !leftOut.some(component => cloneFileOwned(component, file.path)) ||
+      kept.some(component => cloneFileOwned(component, file.path)),
   );
   return { ...bundle, components, profiles, files };
 }
@@ -534,7 +561,7 @@ export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine
   for (const reference of plan.skipped) lines.push(`Leaves out ${reference}: you chose not to copy it.`);
   if (plan.runnables.length > 0) {
     lines.push(
-      `${plural(plan.runnables.length, 'component')} from ${bundle.machine} ${plan.runnables.length === 1 ? 'runs' : 'run'} on ${machine} the next time an agent starts there. Everything each one runs is listed here; leave out any you don’t trust.`,
+      `${plural(plan.runnables.length, 'component')} from ${bundle.machine} can make ${machine} run something: MCP servers, hooks and settings start programs when an agent launches, and instructions and skills are text an agent follows. Everything each one carries is listed here; leave out any you don’t trust.`,
     );
   }
   for (const runnable of plan.runnables) {

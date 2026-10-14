@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
 import should from 'should';
 
@@ -11,6 +11,7 @@ import {
   disablePushDelivery,
   enablePushDelivery,
   enrolDaemonPushDevice,
+  moveOffSharedPush,
   PUSH_CREATE_FAILED_MESSAGE,
   PUSH_DEVICE_STORAGE_KEY,
   PUSH_INACTIVE_MESSAGE,
@@ -831,5 +832,69 @@ describe('containerPushEnrolment', () => {
       throw new Error('denied');
     };
     await containerFor([broken]).enrolment.reconcile([]);
+  });
+});
+
+describe('moveOffSharedPush: every machine off the shared subscription at start (review M3)', () => {
+  it('enrols a machine whose delivery is on, revokes one whose delivery is off, and drops the shared one', async () => {
+    const sharedGone: string[] = [];
+    const shared = subscriptionHandle(sharedGone);
+    const subscribed: PushSubscriptionHandle[] = [];
+    const a = service();
+    const b = service();
+    const preferences = new DaemonNotificationPreferences();
+    preferences.set(daemonA.daemonId, { enabled: true });
+    const devices = new DaemonPushDevices();
+    devices.remember(daemonB.daemonId, DEVICE_B.id);
+    const browser = enrolment(null, { unregistered: true, shared, subscribed });
+
+    await moveOffSharedPush([
+      { connection: daemonA, service: a.service, devices, preferences, enrolment: browser },
+      { connection: daemonB, service: b.service, devices, preferences, enrolment: browser },
+    ]);
+
+    expect(subscribed).toHaveLength(1);
+    expect(a.log.registered.map(entry => entry.daemonId)).toEqual(['daemon-a']);
+    expect(b.log.registered).toEqual([]);
+    expect(b.log.revoked).toEqual([{ daemonId: 'daemon-b', deviceId: DEVICE_B.id }]);
+    expect(devices.get(daemonB.daemonId)).toBeNull();
+    expect(sharedGone.length).toBeGreaterThan(0);
+  });
+
+  it('FAILS CLOSED: drops the shared subscription even when the move-over throws', async () => {
+    const sharedGone: string[] = [];
+    const preferences = new DaemonNotificationPreferences();
+    preferences.set(daemonA.daemonId, { enabled: true });
+    const failing = service({
+      register: async () => {
+        throw new Error('the daemon refused');
+      },
+    });
+    const browser = enrolment(null, { unregistered: true, shared: subscriptionHandle(sharedGone) });
+
+    await moveOffSharedPush([
+      {
+        connection: daemonA,
+        service: failing.service,
+        devices: new DaemonPushDevices(),
+        preferences,
+        enrolment: browser,
+      },
+    ]);
+
+    expect(sharedGone.length).toBeGreaterThan(0);
+  });
+
+  it('does nothing without Web Push, without a shared subscription, or for a machine it never enrolled', async () => {
+    await moveOffSharedPush([context({ enrolment: null })]);
+    const quiet = service();
+    await moveOffSharedPush([context({ service: quiet.service })]);
+    const sharedGone: string[] = [];
+    await moveOffSharedPush([
+      context({ service: quiet.service, enrolment: enrolment(null, { shared: subscriptionHandle(sharedGone) }) }),
+    ]);
+    expect(quiet.log.registered).toEqual([]);
+    expect(quiet.log.revoked).toEqual([]);
+    expect(sharedGone).toHaveLength(1);
   });
 });

@@ -42,7 +42,8 @@ and what to do when something goes wrong.
   registration of `sw.verified.js` at `/push/<daemonId>/` for its own push subscription
   ([cross-daemon.md](cross-daemon.md) §4b). Those copies run the same release check over the same
   storage, so a page under a push scope is still answered from the verified release, and the page
-  audits each copy's script exactly as it audits the app-wide one.
+  audits each copy's script the way it audits the app-wide one. The audit fetches the file without the
+  copy's `?machine=` query, so it proves the signed file, not what a host might serve for that query.
 - **A replaced checker is sometimes reported.** If the browser starts installing a new worker script
   while a verified tab is open, that tab asks the running worker to compare the script with the signed
   list, and warns the reader if it is not the signed worker. This only **sometimes** works. See

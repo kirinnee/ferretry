@@ -68,6 +68,8 @@ describe('isWorkerScriptUrl', () => {
     expect(isWorkerScriptUrl('/app/sw.verified.js')).toBe(true);
     expect(isWorkerScriptUrl('/sw.verified.js?machine=Work%20laptop')).toBe(true);
     for (const url of [
+      '/assets/sw.evil.js',
+      '/sw.r1.js',
       'https://evil.test/sw.verified.js',
       '//evil.test/sw.verified.js',
       '/evil.js',

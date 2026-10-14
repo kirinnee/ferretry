@@ -19,6 +19,7 @@
 
 import {
   type CloneRunnable,
+  cloneBundleProblem,
   cloneRunnables,
   type FleetCloneBundle,
   type FleetCredentialView,
@@ -90,6 +91,11 @@ export interface ClonePreview {
   readonly notCopied: readonly { readonly path: string; readonly reason: string }[];
   /** Every component that would run something on the target, chosen or not. */
   readonly runnables: readonly CloneRunnable[];
+  /**
+   * Why the target will refuse this bundle (`cloneBundleProblem`), or `null`. A refused bundle is never
+   * offered for copying: its review could not be trusted to list everything it would write.
+   */
+  readonly problem: string | null;
   /** The components the person chose not to copy. */
   readonly skipped: number;
 }
@@ -153,6 +159,7 @@ export const clonePreview = (
     missingTools: SETUP_HARNESSES.filter(harness => neededTools.has(harness) && !installed.has(harness)),
     notCopied: bundle.notCopied,
     runnables: cloneRunnables(bundle),
+    problem: cloneBundleProblem(bundle),
     skipped,
   };
 };

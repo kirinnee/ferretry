@@ -242,6 +242,7 @@ const subscribeForPush = async (
 export const enrolDaemonPushDevice = async (
   context: PushEnrolmentContext,
   create: boolean,
+  moving = false,
 ): Promise<PushDeviceView> => {
   const { enrolment } = context;
   if (enrolment === null) throw new Error('this browser cannot register for Web Push');
@@ -249,27 +250,59 @@ export const enrolDaemonPushDevice = async (
   // A subscription every daemon shared, from before each had its own: moving THIS daemon over is the
   // reader's earlier "on", so it may mint a subscription even on a refresh, and the shared one goes.
   const shared = await sharedSubscription(enrolment);
-  const found = await enrolment.existing(daemon);
-  const mayCreate = create || shared !== null;
-  if (found === null && !mayCreate) throw new Error('this browser has no push subscription for this daemon');
-  const registration = await enrolment.register(daemon);
-  const existing = await registration.pushManager.getSubscription();
-  if (existing === null && !mayCreate) throw new Error('this browser has no push subscription for this daemon');
-  const subscription = existing ?? (await subscribeForPush(registration, context));
-  const previous = context.devices.get(daemon);
-  const device = await context.service.register(
-    context.connection,
-    subscription,
-    enrolment.deviceName(),
-    context.preferences.get(daemon),
-  );
-  context.devices.remember(daemon, device.id);
-  // The daemon still lists the device it issued for the shared endpoint; it is this browser's old
-  // self, so it is revoked rather than left to deliver into a subscription that is about to vanish.
-  if (previous !== null && previous !== device.id)
+  try {
+    const found = await enrolment.existing(daemon);
+    const mayCreate = create || moving || shared !== null;
+    if (found === null && !mayCreate) throw new Error('this browser has no push subscription for this daemon');
+    const registration = await enrolment.register(daemon);
+    const existing = await registration.pushManager.getSubscription();
+    if (existing === null && !mayCreate) throw new Error('this browser has no push subscription for this daemon');
+    const subscription = existing ?? (await subscribeForPush(registration, context));
+    const previous = context.devices.get(daemon);
+    const device = await context.service.register(
+      context.connection,
+      subscription,
+      enrolment.deviceName(),
+      context.preferences.get(daemon),
+    );
+    context.devices.remember(daemon, device.id);
+    // The daemon still lists the device it issued for the shared endpoint; it is this browser's old
+    // self, so it is revoked rather than left to deliver into a subscription that is about to vanish.
+    if (previous !== null && previous !== device.id)
+      await context.service.revoke(context.connection, previous).catch(() => null);
+    return device;
+  } finally {
+    // FAIL CLOSED: the shared subscription is the one voice a broken-into daemon could keep for every
+    // machine, so it goes even when this move-over failed. The reader's "on" is still stored, and the
+    // next refresh enrols this daemon on its own registration.
+    if (shared !== null) await shared.unsubscribe().catch(() => false);
+  }
+};
+
+/**
+ * Moves EVERY paired daemon off the shared subscription, at app start (docs/cross-daemon.md §4b). Waiting
+ * for each machine's notification settings to be opened left the first-enrolled machine the voice of
+ * every other machine's alerts until somebody did. A daemon whose delivery is on is enrolled on its own
+ * registration; one whose delivery is off only has the device it issued for the shared endpoint revoked.
+ * The shared subscription is dropped whatever happens, and nothing here throws.
+ */
+export const moveOffSharedPush = async (contexts: readonly PushEnrolmentContext[]): Promise<void> => {
+  const enrolment = contexts.find(context => context.enrolment !== null)?.enrolment ?? null;
+  if (enrolment === null) return;
+  const shared = await sharedSubscription(enrolment);
+  if (shared === null) return;
+  for (const context of contexts) {
+    const daemon = context.connection.daemonId;
+    if (context.preferences.get(daemon).enabled) {
+      await enrolDaemonPushDevice(context, false, true).catch(() => null);
+      continue;
+    }
+    const previous = context.devices.get(daemon);
+    if (previous === null) continue;
+    context.devices.remember(daemon, null);
     await context.service.revoke(context.connection, previous).catch(() => null);
-  if (shared !== null) await shared.unsubscribe().catch(() => false);
-  return device;
+  }
+  await shared.unsubscribe().catch(() => false);
 };
 
 /** The app-wide registration's subscription, if one survives from before per-daemon registrations. */

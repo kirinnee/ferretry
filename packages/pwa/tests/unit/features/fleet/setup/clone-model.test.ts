@@ -183,6 +183,7 @@ describe('copiesRows', () => {
       missingTools: [],
       notCopied: [],
       runnables: [],
+      problem: null,
       skipped: 0,
     });
     expect(rows.map(row => row.title)).toEqual(['3 components', '1 model set', '0 profiles', '2 runtimes']);
@@ -231,10 +232,10 @@ describe('cloneSlots', () => {
 });
 
 describe('the review of what a copy runs (cross-machine §3a)', () => {
-  it('lists every MCP server, hook and setting that would run on the target, from the bundle itself', () => {
+  it('lists every component that could make the target run something, instructions included', () => {
     const preview = clonePreview(bundle(), machineView());
-    expect(preview.runnables.map(runnable => runnable.reference)).toEqual(['mcp/notes']);
-    expect(preview.runnables[0]?.entries[0]).toEqual({
+    expect(preview.runnables.map(runnable => runnable.reference)).toEqual(['instructions/default', 'mcp/notes']);
+    expect(preview.runnables[1]?.entries[0]).toEqual({
       label: 'Starts',
       text: '/home/me/bin/notes-server',
       document: false,
@@ -247,7 +248,7 @@ describe('the review of what a copy runs (cross-machine §3a)', () => {
     expect(preview.skipped).toBe(1);
     expect(preview.checkPaths).not.toContainEqual({ title: 'MCP server · notes', path: '/home/me/bin/notes-server' });
     // Still listed, so the person can tick it back.
-    expect(preview.runnables.map(runnable => runnable.reference)).toEqual(['mcp/notes']);
+    expect(preview.runnables.map(runnable => runnable.reference)).toEqual(['instructions/default', 'mcp/notes']);
   });
 
   it('titles a runnable by its kind and name, and sizes a document by its lines', () => {
@@ -281,5 +282,15 @@ describe('cloneOriginName', () => {
 
   it('is undefined for something that was not copied', () => {
     expect(cloneOriginName({}, names)).toBeUndefined();
+  });
+});
+
+describe('a bundle the review could misread (review H1)', () => {
+  it('carries the target’s refusal, so the screen never offers to copy it', () => {
+    const orphan = bundle({ files: [...bundle().files, { path: 'components/hooks/mine.json', content: '{}' }] });
+    expect(clonePreview(orphan, machineView()).problem).toBe(
+      'The setup from work-linux carries components/hooks/mine.json, which none of its components uses, so none of it can be copied.',
+    );
+    expect(clonePreview(bundle(), machineView()).problem).toBeNull();
   });
 });

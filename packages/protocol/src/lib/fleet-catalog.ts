@@ -216,7 +216,7 @@ export const FleetComponentViewSchema = z.strictObject({
   checkPath: NonEmptyStringSchema.optional(),
   /** Set by Clone: the machine it was copied from, by the name that machine gave itself. */
   clonedFrom: NonEmptyStringSchema.optional(),
-  /** The copying browser's verified id for that machine, so a surface can name it by its own label. */
+  /** That machine's daemon id as the copying browser reported it, so a surface can name it by its own label. */
   clonedFromDaemon: NonEmptyStringSchema.optional(),
 });
 export type FleetComponentView = z.infer<typeof FleetComponentViewSchema>;
@@ -524,8 +524,8 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
      */
     skip: z.array(NonEmptyStringSchema).max(512).optional(),
     /**
-     * The source as THIS browser knows it: the daemon id it paired with, which is its verified
-     * fingerprint. The bundle's own `machine` is only the name the source gave itself.
+     * The source as THIS browser knows it: the daemon id it paired with, as the browser reports it
+     * (the target cannot check it). The bundle's own `machine` is only the name the source gave itself.
      */
     source: z.strictObject({ daemonId: NonEmptyStringSchema }).optional(),
   }),

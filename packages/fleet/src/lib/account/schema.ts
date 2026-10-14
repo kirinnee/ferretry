@@ -107,8 +107,10 @@ export type CredentialStore = z.infer<typeof CredentialStoreSchema>;
  * Set by Clone (C8, L2) on everything it copies: where it came from. Display only.
  *
  * - `clonedFrom` — the source machine by the name it gave ITSELF, so never proof of anything.
- * - `clonedFromDaemon` — the source's daemon id as the copying browser paired with it: its verified
- *   fingerprint, which a surface turns into the reader's own label for that machine.
+ * - `clonedFromDaemon` — the source's daemon id AS THE COPYING BROWSER REPORTED IT: the fingerprint it
+ *   paired with, which a surface turns into the reader's own label for that machine. The target cannot
+ *   check it, so it is exactly as true as the browser that staged the copy, which already holds this
+ *   machine's `fleet.configure`.
  */
 const CLONE_ORIGIN_SHAPE = {
   clonedFrom: NonEmptyString.optional(),

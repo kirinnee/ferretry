@@ -269,7 +269,7 @@ describe('startWorkerLifecycle', () => {
     const stop = startWorkerLifecycle({
       container: harness.container,
       doc: visibilityTarget().doc,
-      release: 'r1',
+      release: 'verified',
       basePath: '/app',
       onUpdateReady: reason => raised.push(reason),
       onError: () => raised.push('error'),
@@ -277,7 +277,7 @@ describe('startWorkerLifecycle', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(harness.registered()).toEqual([{ url: '/app/sw.r1.js', scope: '/app/' }]);
+    expect(harness.registered()).toEqual([{ url: '/app/sw.verified.js', scope: '/app/' }]);
     expect(raised).toEqual(['update']);
     stop();
   });
@@ -291,7 +291,7 @@ describe('startWorkerLifecycle', () => {
     const stop = startWorkerLifecycle({
       container: withoutController.container,
       doc: visibilityTarget().doc,
-      release: 'r1',
+      release: 'verified',
       onUpdateReady: reason => raised.push(reason),
       onError: () => undefined,
     });
@@ -308,7 +308,7 @@ describe('startWorkerLifecycle', () => {
     const stopSecond = startWorkerLifecycle({
       container: withController.container,
       doc: visibilityTarget().doc,
-      release: 'r2',
+      release: 'verified',
       onUpdateReady: reason => offers.push(reason),
       onError: () => undefined,
     });
@@ -330,7 +330,7 @@ describe('startWorkerLifecycle', () => {
     const stop = startWorkerLifecycle({
       container: harness.container,
       doc: visibilityTarget().doc,
-      release: 'r1',
+      release: 'verified',
       onUpdateReady: reason => raised.push(reason),
       onError: () => undefined,
     });
@@ -353,7 +353,7 @@ describe('startWorkerLifecycle', () => {
     const stop = startWorkerLifecycle({
       container: harness.container,
       doc: visibilityTarget().doc,
-      release: 'r1',
+      release: 'verified',
       onUpdateReady: () => undefined,
       onError: error => errors.push(error),
     });
@@ -372,7 +372,7 @@ describe('startWorkerLifecycle', () => {
     const stop = startWorkerLifecycle({
       container: harness.container,
       doc: visibilityTarget().doc,
-      release: 'r1',
+      release: 'verified',
       onUpdateReady: reason => raised.push(reason),
       onError: () => undefined,
     });
@@ -393,7 +393,7 @@ describe('startWorkerLifecycle', () => {
     const stopHidden = startWorkerLifecycle({
       container: container({ registration: workerRegistration().registration }).container,
       doc: hidden.doc,
-      release: 'r1',
+      release: 'verified',
       onUpdateReady: () => undefined,
       onError: () => undefined,
     });
@@ -403,7 +403,7 @@ describe('startWorkerLifecycle', () => {
     const stop = startWorkerLifecycle({
       container: harness.container,
       doc: visible.doc,
-      release: 'r1',
+      release: 'verified',
       onUpdateReady: () => undefined,
       onError: () => undefined,
     });
@@ -517,7 +517,7 @@ describe('useServiceWorkerUpdate', () => {
     const harness = container({ controller: {}, registration: registration.registration });
     const win = listenerTarget();
     const probe = mount({
-      release: 'r1',
+      release: 'verified',
       container: harness.container,
       doc: visibilityTarget().doc,
       win: win.target,
@@ -540,7 +540,7 @@ describe('useServiceWorkerUpdate', () => {
   it('still offers recovery where no worker can be registered', async () => {
     const win = listenerTarget();
     const probe = mount({
-      release: 'r1',
+      release: 'verified',
       container: null,
       doc: visibilityTarget().doc,
       win: win.target,
@@ -557,7 +557,7 @@ describe('useServiceWorkerUpdate', () => {
 
   it('raises the update chip for a release the checker installed, and never over recovery', async () => {
     const probe = mount({
-      release: 'r1',
+      release: 'verified',
       container: null,
       doc: visibilityTarget().doc,
       win: listenerTarget().target,
@@ -578,7 +578,7 @@ describe('useServiceWorkerUpdate', () => {
     const harness = container({ waiting: { waiting: null } });
     let reloads = 0;
     const probe = mount({
-      release: 'r1',
+      release: 'verified',
       container: harness.container,
       doc: visibilityTarget().doc,
       win: listenerTarget().target,

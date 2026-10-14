@@ -24,6 +24,7 @@
  */
 
 import { escapeHtml } from './highlight.ts';
+import { RELEASE_WORKER_FILE } from './release-manifest.ts';
 
 /** The policy names `public/_headers` allows, and nothing else may create one. */
 export const TRUSTED_TYPE_POLICIES = ['fy-highlight', 'fy-worker'] as const;
@@ -47,8 +48,11 @@ const HIGHLIGHT_TAG = /<span class="[A-Za-z0-9_ -]*">|<\/span>/gu;
 /** Whether a string is markup highlight.js could have written: its spans and escaped text, nothing else. */
 export const isHighlightMarkup = (html: string): boolean => !/[<>]/u.test(html.replace(HIGHLIGHT_TAG, ''));
 
-/** The app's own signed worker under the app's base path, optionally labelled for one machine's push scope. */
-const WORKER_SCRIPT = /^(?:\/[A-Za-z0-9._-]+)*\/sw\.[A-Za-z0-9._-]+\.js(?:\?machine=[^&#]*)?$/u;
+/** The app's one signed worker file (`sw.verified.js`) under the app's base path, optionally labelled for one machine's push scope. */
+const WORKER_SCRIPT = new RegExp(
+  `^(?:/[A-Za-z0-9._-]+)*/${RELEASE_WORKER_FILE.replaceAll('.', '\\.')}(?:\\?machine=[^&#]*)?$`,
+  'u',
+);
 
 /** Whether a URL is one the app may register a service worker from. */
 export const isWorkerScriptUrl = (url: string): boolean => WORKER_SCRIPT.test(url);
