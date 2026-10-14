@@ -29,6 +29,8 @@ import {
   type HarnessTeardown,
   launchChromiumWithRetry,
   resolvePlaywright,
+  evidenceScreenshot,
+  stdioPipeFailures,
 } from './relay-harness.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
@@ -156,7 +158,7 @@ export interface ProductPage {
   press(selector: string, key: string, options?: { timeout?: number }): Promise<void>;
   textContent(selector: string): Promise<string | null>;
   evaluate<T>(expression: string): Promise<T>;
-  screenshot(options: { path: string; fullPage?: boolean }): Promise<unknown>;
+  screenshot(options: { path: string; fullPage?: boolean; timeout?: number }): Promise<unknown>;
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   emulateMedia(options: { colorScheme?: 'light' | 'dark' | null }): Promise<void>;
   reload(options?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
@@ -180,7 +182,7 @@ interface ProductContext {
 }
 
 interface ProductBrowserLauncher {
-  launch(options: { executablePath: string; headless: boolean; args: string[] }): Promise<{
+  launch(options: { executablePath: string; headless: boolean; args: string[]; timeout?: number }): Promise<{
     newContext(options?: Record<string, unknown>): Promise<ProductContext>;
     close(): Promise<void>;
   }>;
@@ -215,6 +217,8 @@ export async function launchProductBrowser(
     module.chromium.launch({
       executablePath: chromeExecutable(),
       headless: true,
+      // Chrome starts in about two seconds; a launch that has not finished in twenty never will (see launchChromiumWithRetry).
+      timeout: 20_000,
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     }),
   );
@@ -230,6 +234,24 @@ export async function launchProductBrowser(
   const pageErrors: string[] = [];
   page.on('console', payload => consoleLines.push(String((payload as { text(): string }).text())));
   page.on('pageerror', payload => pageErrors.push(String(payload)));
+  // How a browser dies is evidence: a renderer crash, a lost connection, or a pipe the stdio guard saw
+  // fail are three different defects, and "Target page, context or browser has been closed" names none.
+  page.on('crash', () => {
+    void recordStep({
+      journey: 'harness',
+      step: 'chrome:page-crashed',
+      status: 'FLAG',
+      evidence: `the renderer crashed at ${new Date().toISOString()}`,
+    });
+  });
+  (browser as unknown as { on?: (event: string, handler: () => void) => void }).on?.('disconnected', () => {
+    void recordStep({
+      journey: 'harness',
+      step: 'chrome:disconnected',
+      status: 'FLAG',
+      evidence: `the browser connection closed at ${new Date().toISOString()}; stdio guard caught: ${stdioPipeFailures().join(' | ') || 'nothing'}`,
+    });
+  });
   let session: Promise<CdpSession> | undefined;
   return {
     context,
@@ -367,7 +389,14 @@ export async function captureScreens(
         await page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
       }
       const path = join(directory, `${screen}-${label}-${scheme}.png`);
-      await page.screenshot({ path });
+      const missed = await evidenceScreenshot(page, path);
+      if (missed !== null)
+        await recordStep({
+          journey,
+          step: `capture:${screen}`,
+          status: 'FLAG',
+          evidence: `no screenshot at ${label} ${scheme}: ${missed}`,
+        });
       paths.push(path);
       if (scheme === 'light') {
         for (const problem of await page.evaluate<string[]>(LAYOUT_PROBE)) findings.push({ shot: path, problem });

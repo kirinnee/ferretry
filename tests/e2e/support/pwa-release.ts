@@ -22,6 +22,7 @@ import {
   chromeExecutable,
   type HarnessTeardown,
   closeChromeBounded,
+  evidenceScreenshot,
   launchChromiumWithRetry,
 } from './relay-harness.ts';
 
@@ -241,7 +242,7 @@ interface PlaywrightContext {
 }
 
 interface PlaywrightChromium {
-  launch(options: { executablePath: string; headless: boolean; args: string[] }): Promise<{
+  launch(options: { executablePath: string; headless: boolean; args: string[]; timeout?: number }): Promise<{
     newContext(options?: Record<string, unknown>): Promise<PlaywrightContext>;
     close(): Promise<void>;
   }>;
@@ -281,7 +282,7 @@ export async function launchReleaseBrowser(
     );
   }
   const browser = await launchChromiumWithRetry(() =>
-    module.chromium.launch({ executablePath: chromeExecutable(), headless: true, args }),
+    module.chromium.launch({ executablePath: chromeExecutable(), headless: true, args, timeout: 20_000 }),
   );
   const context = await browser.newContext({ viewport: { width: 1_280, height: 900 }, colorScheme: 'light' });
   await context.grantPermissions(['local-network-access']).catch(() => undefined);
@@ -385,7 +386,8 @@ export async function screenshotWidths(
     await page.setViewportSize({ width, height });
     await Bun.sleep(200);
     const path = join(directory, `${name}-${label}-${scheme}.png`);
-    await page.screenshot({ path });
+    const missed = await evidenceScreenshot(page, path);
+    if (missed !== null) console.warn(`e2e evidence: no screenshot ${path}: ${missed}`);
     paths.push(path);
   }
   await page.setViewportSize({ width: 1_280, height: 900 });
