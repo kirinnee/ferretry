@@ -143,6 +143,7 @@ const recordFrom = (value: unknown): DaemonConnectionRecord | undefined => {
       daemonId: raw.daemonId,
       baseUrl: raw.baseUrl,
       deviceId: raw.deviceId,
+      daemonName: label(raw.daemonName),
       ...(storedCarriers === undefined
         ? legacyRelay === undefined
           ? {}
@@ -308,8 +309,11 @@ export class DaemonConnectionStore {
     input: DaemonConnectionInput | DaemonConnection,
     options: AddDaemonConnectionOptions = {},
   ): DaemonConnectionRecord {
-    const connection = daemonConnection(input);
-    const existing = this.get(connection.daemonId);
+    const paired = daemonConnection(input);
+    const existing = this.get(paired.daemonId);
+    // A re-pair keeps the name it already learned when this pairing did not carry one.
+    const daemonName = paired.daemonName ?? existing?.daemonName;
+    const connection = daemonName === undefined ? paired : { ...paired, daemonName };
     const displayLabel = label(options.label) ?? existing?.label;
     const pairedAt = timestamp(options.pairedAt) ?? existing?.pairedAt ?? this.#now();
     const record: DaemonConnectionRecord = {
@@ -322,6 +326,7 @@ export class DaemonConnectionStore {
       existing !== undefined &&
       sameConnection(existing, record) &&
       existing.label === record.label &&
+      existing.daemonName === record.daemonName &&
       this.#snapshot.selectedDaemonId === record.daemonId
     )
       return existing;
@@ -368,6 +373,24 @@ export class DaemonConnectionStore {
     const connections = this.#snapshot.connections.map(record => (record.daemonId === id ? renamed : record));
     this.#publish({ connections, selectedDaemonId: this.#snapshot.selectedDaemonId });
     return renamed;
+  }
+
+  /**
+   * Records what a machine said it is called, from an answer it gave this pairing.
+   *
+   * It exists for pairings made before the pairing response's name was kept: those records have no
+   * name but the address, and a machine view read through this very pairing carries the same host
+   * name the pairing response does. The daemon is authoritative over its own name, so a newer answer
+   * replaces an older one; the owner's `label` is a separate field and is never touched here.
+   */
+  learnDaemonName(id: DaemonId, name: string): DaemonConnectionRecord | undefined {
+    const existing = this.get(id);
+    const learned = label(name);
+    if (existing === undefined || learned === undefined || existing.daemonName === learned) return existing;
+    const named: DaemonConnectionRecord = { ...existing, daemonName: learned };
+    const connections = this.#snapshot.connections.map(record => (record.daemonId === id ? named : record));
+    this.#publish({ connections, selectedDaemonId: this.#snapshot.selectedDaemonId });
+    return named;
   }
 
   /**

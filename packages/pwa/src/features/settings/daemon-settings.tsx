@@ -36,9 +36,17 @@ export interface DaemonSettingsProps {
   readonly onAddDaemon: () => void;
 }
 
-/** A fingerprint proves identity, but it is not a useful label for choosing a machine. */
-export const daemonDisplayName = (connection: DaemonConnectionRecord): string =>
-  connection.label?.trim() || connection.baseUrl;
+/**
+ * What every screen calls a paired machine: the owner's label, else the name the machine gave itself.
+ *
+ * A fingerprint proves identity, but it is not a useful label for choosing a machine, and neither is an
+ * address. This used to fall straight back to `baseUrl`, so with no label typed the app said "Set up
+ * http://127.0.0.1:40245" while the daemon had already reported its host name at pairing. The address
+ * is now the last resort only for a pairing made before that name was kept, until the machine answers
+ * and the name is learned (`DaemonConnectionStore.learnDaemonName`).
+ */
+export const daemonDisplayName = (connection: DaemonConnection & { readonly label?: string }): string =>
+  connection.label?.trim() || connection.daemonName || connection.baseUrl;
 
 type Reachability = 'checking' | 'reachable' | 'unreachable';
 

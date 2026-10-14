@@ -48,9 +48,10 @@ import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import {
   DaemonCarrierRouter,
-  DaemonOutdatedError,
-  daemonIsOutdated,
-  isOutdatedDaemonRefusal,
+  type OutdatedSide,
+  outdatedError,
+  outdatedRefusal,
+  outdatedSide,
   type RelayDial,
 } from './relay-carrier.ts';
 import { KeyRotation } from './key-rotation.ts';
@@ -58,7 +59,13 @@ import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession }
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
-import { browserCredentials, describeStepUpFailure, unlockCeremony, stepUpCeremony } from './step-up-ceremony.ts';
+import {
+  browserCredentials,
+  describeStepUpFailure,
+  firstPasskeyOffer,
+  stepUpCeremony,
+  unlockCeremony,
+} from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
@@ -184,7 +191,10 @@ export class DaemonApiPool {
   }
 }
 
-/** How this browser names itself to a daemon it is asking to trust it. */
+/**
+ * How this browser names itself when the caller named nothing. The confirm screen always names it
+ * (`device-name.ts`), so only a caller with no person in front of it lands here.
+ */
 const PAIRING_DEVICE_NAME = 'Ferretry PWA';
 
 /**
@@ -198,6 +208,8 @@ const PAIRING_DEVICE_NAME = 'Ferretry PWA';
 const DIRECT_PAIRING_TIMEOUT_MS = 4_000;
 
 export interface ExchangePairingOptions {
+  /** What this device is called at the machine — `fy device ls`, revoke, the device list. */
+  readonly deviceName?: string;
   /** Where this browser keeps device keys. The new key is saved here only once the daemon accepted it. */
   readonly deviceKeys: DeviceKeyStore;
   readonly hostedRelayUrl?: string;
@@ -260,14 +272,14 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
   const key = crypto.deviceKeyHandle(minted.privateKey);
   let first: Error | undefined;
   let spentUnheard = false;
-  let outdated = false;
+  let outdated: OutdatedSide | undefined;
   for (const method of pairingCandidates(seed, options.hostedRelayUrl)) {
     let response: PairingResponse;
     try {
       response = await redeemPairingInSession({
         crypto,
         seed,
-        deviceName: PAIRING_DEVICE_NAME,
+        deviceName: options.deviceName ?? PAIRING_DEVICE_NAME,
         method,
         publicKey: minted.publicKey,
         key,
@@ -281,11 +293,11 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
       // AN OLD MACHINE IS A SIGNAL, NOT A VERDICT. Both signs of one are unauthenticated — a plaintext
       // liveness read, a refusal sent before any key was checked — so they never stop the walk short of
       // a carrier that works. They only decide the sentence when every carrier has failed.
-      outdated ||=
-        isOutdatedDaemonRefusal(reason) ||
-        (method.kind === 'direct' &&
-          options.network !== undefined &&
-          (await daemonIsOutdated(options.network, method.daemonUrl)));
+      outdated ??=
+        outdatedRefusal(reason) ??
+        (method.kind === 'direct' && options.network !== undefined
+          ? await outdatedSide(options.network, method.daemonUrl)
+          : undefined);
       if (reason instanceof PairingOutcomeUnknownError) spentUnheard = true;
       first ??= reason instanceof Error ? reason : new Error(String(reason));
       continue;
@@ -302,7 +314,7 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
     await options.deviceKeys.save(connection.daemonId, minted.privateKey);
     return connection;
   }
-  if (outdated) throw new DaemonOutdatedError();
+  if (outdated !== undefined) throw outdatedError(outdated);
   throw first ?? new Error('no carrier could reach this daemon to pair with it');
 }
 
@@ -346,7 +358,7 @@ export interface AppStore {
    * gate, its own two routes. Rendered by a second `StepUpDialog` with the presence copy.
    */
   readonly unlockGate: StepUpGate;
-  readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
+  readonly pair: (seed: PairingSeed, deviceName?: string) => Promise<DaemonConnection>;
   /**
    * Whether Ferretry's default relay is advertising itself right now.
    *
@@ -443,6 +455,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       origin: appOrigin,
     }),
     describe: describeStepUpFailure(appOrigin),
+    // A device with no passkey, inside its window, is offered to set one up rather than sent elsewhere.
+    firstPasskey: firstPasskeyOffer(async daemon => await clients.client(daemon)),
     // The machine's own number, read once as the prompt opens (an exempt route, so it answers before an unlock).
     scope: async daemon => {
       try {
@@ -607,8 +621,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pushDevices,
     pushService,
     readDefaultRelay,
-    pair: async seed => {
+    pair: async (seed, deviceName) => {
       const connection = await exchangePairing(seed, {
+        ...(deviceName === undefined ? {} : { deviceName }),
         deviceKeys,
         relayCrypto,
         ...(options.relayDial === undefined ? {} : { relayDial: options.relayDial }),

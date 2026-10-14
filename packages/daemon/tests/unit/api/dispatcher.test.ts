@@ -619,7 +619,9 @@ describe('the operator grant layer', () => {
     );
 
     // Assert — exactly four fields, and a bearer caller with no device has not stepped up.
-    should(seen).deepEqual([{ loopback: true, adminToken: true, actor: 'admin-ui', stepUp: false }]);
+    should(seen).deepEqual([
+      { loopback: true, adminToken: true, actor: 'admin-ui', stepUp: false, freshStepUp: false },
+    ]);
   });
 
   it('should present stepUp true for a device the witness holds and false for one it does not', async () => {

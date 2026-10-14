@@ -2,6 +2,7 @@ import type { StartSessionRequest } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { machineHash } from '../features/fleet/shell/machine-route.ts';
+import { daemonDisplayName } from '../features/settings/daemon-settings.tsx';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { useUsage } from '../hooks/use-usage.ts';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
@@ -22,12 +23,20 @@ import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model
 import { projectPickerOptions } from './daemon-picker-model.ts';
 import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
 
+/**
+ * The agent runtime a first run makes for Claude Code — the example a person can actually type.
+ *
+ * Spelled here rather than imported: `importedRuntimeName` lives in the fleet package's root, which
+ * pulls Node modules into a browser bundle. `new-session-page.test.tsx` holds this to that function.
+ */
+const FIRST_RUN_RUNTIME = 'claude-default';
+
 export interface NewSessionPageProps {
   /** The concrete daemon selected by pairing and matched by the current route. */
   readonly connection: DaemonConnection;
   /**
    * The name this browser shows for the machine, so "Open Settings" lands on its Runtimes tab
-   * (`#machines/<machine>/runtimes`). Defaults to the daemon address, as the switcher does.
+   * (`#machines/<machine>/runtimes`). Defaults to the name the switcher shows.
    */
   readonly machineName?: string;
   /**
@@ -220,7 +229,7 @@ const quotaAdvisory = (slice: DaemonUsageSlice): string | null =>
  */
 export function NewSessionPage({
   connection,
-  machineName = connection.baseUrl,
+  machineName = daemonDisplayName(connection),
   startSession,
   onNavigate,
   accounts,
@@ -288,7 +297,7 @@ export function NewSessionPage({
                 className="kt-input w-full font-mono"
                 id={fieldId('agent')}
                 onChange={event => update('agent', event.target.value)}
-                placeholder="e.g. claude-auto-default"
+                placeholder={`e.g. ${FIRST_RUN_RUNTIME}`}
                 value={draft.agent}
               />
             ) : usage === undefined ? (
@@ -514,7 +523,7 @@ function AccountRosterField({ store, usage, usageError, ...field }: AccountRoste
       noAccounts={field.noAccounts}
       onAccountChosen={field.onAccountChosen}
       onValueChange={field.onValueChange}
-      placeholder="e.g. claude-auto-default"
+      placeholder={`e.g. ${FIRST_RUN_RUNTIME}`}
       preselect={true}
       {...(field.preferred === undefined ? {} : { preferred: field.preferred })}
       sessionCapableOnly={true}

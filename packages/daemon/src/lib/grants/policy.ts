@@ -265,6 +265,8 @@ export interface DeviceGrantJudgement {
   readonly hostLocal: boolean;
   /** Whether the caller's device holds a live passkey step-up. */
   readonly stepUp: boolean;
+  /** Whether it proved a passkey for THIS act — what a widen needs, never merely the unlock. */
+  readonly freshStepUp: boolean;
   /**
    * What the CALLER may do itself, effective (daemon-wide ∧ its own device), or `undefined` for a
    * governed caller that is not a paired device and therefore holds nothing it could pass on.
@@ -276,6 +278,8 @@ export interface DeviceGrantJudgement {
 export type DeviceGrantVerdict =
   | { readonly kind: 'allowed' }
   | { readonly kind: 'step-up-required' }
+  /** A legal widen, without a passkey proved for it alone. */
+  | { readonly kind: 'widen-step-up-required' }
   | { readonly kind: 'forbidden'; readonly widened: readonly string[] };
 
 /**
@@ -312,6 +316,8 @@ const ALL_OFF_GRANTS: CapabilityGrants = Object.fromEntries(
  *   included — and nothing else for a narrowing. Revoking is never harder than granting.
  * - A governed widen is allowed only for axes {@link widenableBy} lists. One illegal widen refuses the
  *   whole patch, so a mixed patch never half-applies.
+ * - A legal governed widen needs a passkey proved FOR IT (owner decision 2026-10-14): an unlock, or a
+ *   step-up merely inside its window, is not enough to give another device more access.
  *
  * The forbidden verdict is checked before the step-up one: a widen no step-up could buy must not ask
  * for a passkey first and then refuse anyway.
@@ -324,6 +330,8 @@ export function judgeDeviceGrantChange(judgement: DeviceGrantJudgement): DeviceG
     return !allowed[capability][which];
   });
   if (illegal.length > 0) return { kind: 'forbidden', widened: illegal };
+  if (!judgement.freshStepUp && widenedBy(judgement.current, judgement.next).length > 0)
+    return { kind: 'widen-step-up-required' };
   if (!judgement.stepUp) return { kind: 'step-up-required' };
   return { kind: 'allowed' };
 }

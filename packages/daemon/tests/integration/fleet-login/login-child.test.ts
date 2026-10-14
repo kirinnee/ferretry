@@ -226,6 +226,39 @@ describe('spawnHarnessLoginChild', () => {
     should(actual).not.equal(0);
   });
 
+  it('should end what the harness started too, so nothing is left holding its port or its pipes', async () => {
+    // A launcher that spawns the real binary — npm's `codex` is one — and waits on it. The binary is
+    // what holds Codex's `localhost:1455`, so killing the launcher alone left the next sign-in without it.
+    // Arrange
+    const path = await script('sleep 30 &\necho "binary $!"\nwait\n');
+    const lines: string[] = [];
+    const child = spawnHarnessLoginChild({
+      command: [path],
+      environment: { PATH: '/usr/bin:/bin' },
+      onLine: line => lines.push(line),
+    });
+    for (let turn = 0; turn < 100 && lines.length === 0; turn += 1) await new Promise(r => setTimeout(r, 20));
+    const binary = Number(/^binary (\d+)$/u.exec(lines[0] ?? '')?.[1]);
+    should(Number.isInteger(binary)).be.true();
+
+    // Act
+    child.kill();
+    // Settles at all only because the binary died too: it shares the launcher's pipes.
+    await child.exited;
+
+    // Assert — polled, because a killed orphan stays signalable until whoever adopted it reaps it.
+    const alive = (): boolean => {
+      try {
+        process.kill(binary, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let turn = 0; turn < 100 && alive(); turn += 1) await new Promise(r => setTimeout(r, 20));
+    should(alive()).be.false();
+  });
+
   it('should treat a second kill as nothing to raise', async () => {
     // Cancelling twice is not an error, and a cancel that raced the child's own exit has still achieved
     // what it was asked to.

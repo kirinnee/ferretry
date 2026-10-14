@@ -13,6 +13,15 @@ describe('where the client looks for the daemon', () => {
     should(resolveDaemonUrl('', recorded)).equal('http://127.0.0.1:7432');
   });
 
+  it('should find a daemon whose port lives in its bind carrier', () => {
+    // Arrange — the e2e repro: `{"carriers":[{"kind":"bind",…}]}` and no `FY_URL`. The daemon listens
+    // on the carrier's port; this used to probe the default one and report it still initializing.
+    const carriers = JSON.stringify({ port: 7_431, carriers: [{ kind: 'bind', host: '127.0.0.1', port: 40_245 }] });
+
+    // Act + Assert
+    should(resolveDaemonUrl('', carriers)).equal('http://127.0.0.1:40245');
+  });
+
   it('should follow the bind and never the advertisement, so the remedy stays followable', () => {
     // THE BLOCKER THIS FIXES. The pairing screen tells an operator to advertise the address other
     // devices reach this machine at. Reading that value here made the next `pair` dial a routed

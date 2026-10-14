@@ -15,10 +15,18 @@ const alpha = daemonConnection({
   baseUrl: 'https://alpha.example.test',
   deviceId: 'alpha-secret',
 });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'beta-secret' });
+const beta = daemonConnection({
+  daemonId: 'beta',
+  baseUrl: 'https://beta.example.test',
+  deviceId: 'beta-secret',
+  daemonName: 'beta-host',
+});
+/** Paired before the daemon's own name was kept: its address is all this browser has. */
+const gamma = daemonConnection({ daemonId: 'gamma', baseUrl: 'https://gamma.example.test', deviceId: 'gamma-secret' });
 const records = [
   { ...alpha, label: 'Studio daemon', pairedAt: 1, lastSelectedAt: 2 },
   { ...beta, pairedAt: 1, lastSelectedAt: 1 },
+  { ...gamma, pairedAt: 1, lastSelectedAt: 0 },
 ] as const;
 
 const LINK =
@@ -116,13 +124,18 @@ describe('PairingScreen with daemons already paired', () => {
 
     expect(screen.container.textContent).toContain('Your daemons');
     expect(screen.container.textContent).toContain('Studio daemon');
+    // An unlabelled machine is named by what it calls itself, with its address beneath — never by its
+    // fingerprint, and never by its address alone when it has said its name.
+    expect(screen.container.textContent).toContain('beta-host');
     expect(screen.container.textContent).toContain('https://beta.example.test');
+    // A pairing with nothing but its address shows that address once, not twice.
+    expect(screen.container.textContent?.split('https://gamma.example.test')).toHaveLength(2);
     expect(screen.container.textContent).not.toContain('alpha-secret');
     expect(screen.container.textContent).not.toContain('beta-secret');
     expect(buttonNamed(screen.container, 'Pair another daemon')).toBeDefined();
 
     const chosen = must(screen.container.querySelector('button[aria-current="true"]'), 'the selected daemon');
-    const forget = must(screen.container.querySelector('button[aria-label="Forget beta"]'), 'the forget control');
+    const forget = must(screen.container.querySelector('button[aria-label="Forget beta-host"]'), 'the forget control');
     await interact(() => (chosen as HTMLButtonElement).click());
     await interact(() => (forget as HTMLButtonElement).click());
     expect(selected).toEqual(['alpha']);
@@ -422,6 +435,64 @@ describe('the embedded presentation', () => {
     expect(link.className).toContain('min-h-[44px]');
     await interact(() => link.click());
     expect(opened).toBe(1);
+    await screen.unmount();
+  });
+});
+
+describe('PairingScreen naming this device', () => {
+  const setField = async (container: HTMLElement, value: string): Promise<void> => {
+    if (container.querySelector('input[data-pair-device-name]') === null)
+      await interact(() => buttonNamed(container, 'Rename').click());
+    const input = must(container.querySelector('input[data-pair-device-name]'), 'the name field') as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+    await interact(() => input.dispatchEvent(new Event('input', { bubbles: true })));
+  };
+
+  it('offers a distinct default name and sends whatever the person changed it to', async () => {
+    // Arrange — every browser used to pair as "Ferretry PWA", so two made every name ambiguous.
+    const sent: [PairingSeed, string][] = [];
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      defaultName: () => 'Chrome on macOS · K7Q2',
+      onPair: async (seed, name) => {
+        sent.push([seed, name]);
+      },
+    });
+    // Said, not asked: the screen is still one decision until the person chooses to rename.
+    expect(screen.container.querySelector('[data-pair-device-label]')?.textContent).toContain('Chrome on macOS · K7Q2');
+    expect(screen.container.querySelector('input')).toBeNull();
+
+    // Act
+    await setField(screen.container, '  Kitchen iPad  ');
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+
+    // Assert — trimmed, and the code goes with it.
+    expect(sent).toEqual([[SEED, 'Kitchen iPad']]);
+    await screen.unmount();
+  });
+
+  it('will not pair a device with no name', async () => {
+    const sent: string[] = [];
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      defaultName: () => 'Firefox on Linux · 2345',
+      onPair: async (_seed, name) => {
+        sent.push(name);
+      },
+    });
+
+    await setField(screen.container, '   ');
+    const confirm = buttonNamed(screen.container, 'Pair this device');
+    await interact(() => confirm.click());
+
+    expect(confirm.disabled).toBe(true);
+    expect(sent).toEqual([]);
+    await screen.unmount();
+  });
+
+  it('names a browser by itself when nobody passes a name', async () => {
+    const screen = await screenWith({ arrival: PREFILLED });
+    expect(screen.container.querySelector('[data-pair-device-label]')?.textContent).toMatch(/ · [2-9A-Z]{4}\./u);
     await screen.unmount();
   });
 });

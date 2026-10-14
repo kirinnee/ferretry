@@ -230,7 +230,9 @@ governed device is answered `401 unlock_required` on everything but the routes i
 unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default) for that device.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
-with the unlock turned off always asks per act.
+with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code and
+widening another device want a passkey proved for that one act, from any device, unlocked or not
+([design/zero-trust.md](design/zero-trust.md) B6). At the machine, nothing is asked.
 
 There is no operator password. The passkey step-up replaced it for every purpose it had — the local
 browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for

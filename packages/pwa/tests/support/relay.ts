@@ -12,7 +12,11 @@
  * refusal proved against a fake signature is a refusal proved against nothing.
  */
 
-import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/protocol';
+import {
+  OLDER_APP_SENTENCE,
+  RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+  RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+} from '@ferretry/protocol';
 import {
   answerClientHandshake,
   type ChannelState,
@@ -579,10 +583,22 @@ export const fetcherDaemons = (
 };
 
 /**
+ * A daemon NEWER than this app, reached through a rendezvous: it refuses this app's hello in the sentence
+ * every surface shares for an app that needs updating.
+ */
+export const newerDaemonDial = (): { readonly dial: () => ScriptedSocket; readonly sockets: ScriptedSocket[] } =>
+  olderDaemonDial({ code: RELAY_CLOSE_CODES.versionUnsupported, reason: OLDER_APP_SENTENCE });
+
+/**
  * A daemon from before device keys, reached through a rendezvous: it reads this app's `/2` hello as
  * garbage and ends the session in the exact words a `/1` daemon uses. Every dial is one such session.
  */
-export const olderDaemonDial = (): { readonly dial: () => ScriptedSocket; readonly sockets: ScriptedSocket[] } => {
+export const olderDaemonDial = (
+  closed: { readonly code: number; readonly reason: string } = {
+    code: RELAY_CLOSE_CODES.protocolError,
+    reason: 'unparseable client hello',
+  },
+): { readonly dial: () => ScriptedSocket; readonly sockets: ScriptedSocket[] } => {
   const sockets: ScriptedSocket[] = [];
   const dial = (): ScriptedSocket => {
     const sessionId = testSessionId(sockets.length + 1);
@@ -592,15 +608,7 @@ export const olderDaemonDial = (): { readonly dial: () => ScriptedSocket; readon
       original(bytes);
       const decoded = decodeFrame(bytes);
       if (!decoded.ok || decoded.frame.kind !== FRAME_KINDS.handshake) return;
-      queueMicrotask(() =>
-        socket.onBinary?.(
-          controlFrame(sessionId, {
-            t: 'closed',
-            code: RELAY_CLOSE_CODES.protocolError,
-            reason: 'unparseable client hello',
-          }),
-        ),
-      );
+      queueMicrotask(() => socket.onBinary?.(controlFrame(sessionId, { t: 'closed', ...closed })));
     };
     sockets.push(socket);
     queueMicrotask(() => {

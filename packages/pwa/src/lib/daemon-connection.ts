@@ -29,6 +29,7 @@ export interface DaemonConnectionInput {
   daemonId: string;
   baseUrl: string;
   deviceId: string;
+  daemonName?: string | undefined;
   carriers?: readonly ConnectionMethod[] | undefined;
 }
 
@@ -43,6 +44,15 @@ export interface DaemonConnection {
    * the daemon keeps only the public half; this id merely says which key to check.
    */
   readonly deviceId: string;
+  /**
+   * WHAT THE DAEMON CALLS ITS MACHINE — its host name, from the pairing response.
+   *
+   * The machine's NAME, which is not its address. Every screen used to fall back to `baseUrl` when the
+   * owner had not typed a label, so a fresh pairing read "Set up http://127.0.0.1:40245" everywhere
+   * while the daemon had already said what it was called. Absent only on a pairing made before this
+   * was kept, and filled in the first time that machine answers (`learnDaemonName`).
+   */
+  readonly daemonName?: string;
   /**
    * The daemon's published carrier set, cached in the order the protocol tries it.
    *
@@ -119,12 +129,14 @@ const daemonCarrier = (value: ConnectionMethod): ConnectionMethod => {
  */
 export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection => {
   const baseUrl = daemonBaseUrl(input.baseUrl);
+  const name = input.daemonName?.trim() || undefined;
   const direct: ConnectionMethod = { kind: 'direct', daemonUrl: baseUrl };
   const carriers = connectionPreferenceOrder((input.carriers ?? [direct]).map(daemonCarrier));
   return {
     daemonId: daemonId(input.daemonId),
     baseUrl,
     deviceId: requireNonEmpty(input.deviceId, 'deviceId'),
+    ...(name === undefined ? {} : { daemonName: name }),
     carriers: carriers.length === 0 ? [direct] : carriers,
   };
 };

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   daemonAddress,
+  declaredBind,
   FY_DEFAULT_DAEMON_PORT,
   FY_DEFAULT_DAEMON_URL,
   isLoopbackHost,
@@ -54,6 +55,31 @@ describe('the well-known daemon address', () => {
     for (const host of ['0.0.0.0', '::', '[::]']) {
       should(recordedBindAddress({ host, port: 9_000 })).equal('http://127.0.0.1:9000');
     }
+  });
+
+  it('should follow a bind carrier the way the daemon does, superseding the legacy keys', () => {
+    // Arrange — THE E2E DEFECT: a daemon listening where its `carriers` entry says, while a client
+    // that read only the top-level keys probed the default port for ninety seconds.
+    const carriersOnly = { carriers: [{ kind: 'bind', host: '127.0.0.1', port: 40_245 }] };
+    const superseding = {
+      host: '127.0.0.1',
+      port: 7_431,
+      carriers: [
+        { kind: 'relay', source: 'discovery' },
+        { kind: 'bind', host: '::1', port: 40_246 },
+      ],
+    };
+
+    // Act + Assert
+    should(recordedBindAddress(carriersOnly)).equal('http://127.0.0.1:40245');
+    should(recordedBindAddress(superseding)).equal('http://[::1]:40246');
+    // A relay-only list says nothing about the listener, so the legacy keys still are the bind.
+    should(recordedBindAddress({ port: 7_432, carriers: [{ kind: 'relay', source: 'discovery' }] })).equal(
+      'http://127.0.0.1:7432',
+    );
+    // A bind carrier that names no port has not said where its daemon went — and a legacy `port` it
+    // supersedes is not a claim on anything, so it is not read as one.
+    should(recordedBindAddress({ port: 7_432, carriers: [{ kind: 'bind', host: '127.0.0.1' }] })).be.undefined();
   });
 
   it('should record nothing from a document that records nothing usable', () => {
@@ -169,5 +195,21 @@ describe('what an operator’s host spelling means', () => {
     should(isLoopbackHost('::ffff:127.0.0.1')).be.false();
     should(isLoopbackPeer('localhost')).be.false();
     should(isLoopbackPeer('10.0.0.4')).be.false();
+  });
+});
+
+describe('which part of a daemon document names its listener', () => {
+  it('should answer the first bind carrier, and the document itself when there is none', () => {
+    // Arrange
+    const bind = { kind: 'bind', host: 'box.lan', port: 9_100 };
+    const withBind = { port: 7_431, carriers: [{ kind: 'relay', source: 'discovery' }, bind] };
+    const relayOnly = { port: 7_431, carriers: [{ kind: 'relay', source: 'discovery' }] };
+    const damaged = { port: 7_431, carriers: 'nonsense' };
+
+    // Act + Assert — identity, not equality: both ends read host and port off the answer.
+    should(declaredBind(withBind)).equal(bind);
+    should(declaredBind(relayOnly)).equal(relayOnly);
+    should(declaredBind(damaged)).equal(damaged);
+    should(declaredBind({ carriers: [null, 'bind', { kind: 'bind' }] })).deepEqual({ kind: 'bind' });
   });
 });

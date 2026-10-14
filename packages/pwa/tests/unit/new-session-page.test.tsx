@@ -1,3 +1,4 @@
+import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { SessionView, StartSessionRequest, UsageFeedView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -53,7 +54,10 @@ describe('NewSessionPage', () => {
     const { view } = page();
 
     expect(view.root.findByProps({ id: 'new-session-heading' }).children.join('')).toBe('New session');
-    expect(input(view, 'fy-new-session-agent').props.placeholder).toBe('e.g. claude-auto-default');
+    // The example is a runtime a first run really makes — the import's own naming, not a guess.
+    expect(input(view, 'fy-new-session-agent').props.placeholder).toBe(
+      `e.g. ${importedRuntimeName('claude', IMPORT_NAMES.defaultProfile)}`,
+    );
     expect(input(view, 'fy-new-session-cwd').props.placeholder).toBe('Full path, e.g. /home/you/my-project');
     expect(input(view, 'fy-new-session-prompt').props.placeholder).toBe('Describe what you want the agent to do…');
     expect(button(view, 'Create session').props.disabled).toBeTrue();

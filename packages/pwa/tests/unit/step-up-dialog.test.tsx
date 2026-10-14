@@ -4,7 +4,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { UNLOCK_COPY, STEP_UP_SCOPE_NOTE, StepUpDialog } from '../../src/features/step-up/step-up-dialog.tsx';
+import {
+  FIRST_PASSKEY_TITLE,
+  STEP_UP_SCOPE_NOTE,
+  StepUpDialog,
+  UNLOCK_COPY,
+} from '../../src/features/step-up/step-up-dialog.tsx';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { StepUpGate, type StepUpGateDependencies } from '../../src/lib/step-up-gate.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -289,6 +294,32 @@ describe('the unlock prompt', () => {
 
       expect(mounted.container.querySelector('[data-step-up-scope]')).toBeNull();
       expect(confirmButton(mounted.container).disabled).toBe(false);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('leads with setting up a passkey for a device that may add its first one now', async () => {
+    // A freshly paired device inside its first-passkey window: the way in is to set one up here, not to
+    // be sent to another device or to the machine.
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'unknown',
+      firstPasskey: async () => true,
+    });
+    const mounted = await mountUnlock(gate);
+    try {
+      await interact(() => void gate.require(studio));
+      await interact(async () => await Promise.resolve());
+
+      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
+      expect(must(dialog.querySelector('h2'), 'the title').textContent).toBe(FIRST_PASSKEY_TITLE);
+      expect(must(dialog.querySelector('[id$="-purpose"]'), 'the sentence').textContent).toContain(
+        'no passkey for Name of daemon-studio yet, and it can add one now',
+      );
+      expect(dialog.textContent).not.toContain('fy passkey window');
+      expect(confirmButton(mounted.container).textContent).toContain('Set up passkey');
+      expect(confirmButton(mounted.container).hasAttribute('data-step-up-first-passkey')).toBe(true);
     } finally {
       await mounted.unmount();
     }

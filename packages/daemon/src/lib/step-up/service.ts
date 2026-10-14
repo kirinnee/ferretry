@@ -176,6 +176,21 @@ export class StepUpService {
   }
 
   /**
+   * Whether this copy may do an act that ADDS ACCESS — mint a pairing code, widen a device — which needs
+   * a passkey proved for it (owner decision 2026-10-14, `docs/design/zero-trust.md` row 66). NOT the
+   * unlock, and not a step-up merely inside its window, whatever `stepUpOnActions` says: the unlock
+   * alone must never be enough to put another device on this machine.
+   */
+  freshlyHeld(subject: StepUpSubject): boolean {
+    return this.deps.registry.freshlyHeld(subject, this.deps.clock.nowMs());
+  }
+
+  /** Spends the fresh proof an act that adds access was admitted on. */
+  spendFresh(subject: StepUpSubject): void {
+    this.deps.registry.spendFresh(subject);
+  }
+
+  /**
    * One act this copy's step-up admitted. Spends a single-use per-act step-up; an unlock is never
    * spent by an act — it is good for its whole validity.
    */

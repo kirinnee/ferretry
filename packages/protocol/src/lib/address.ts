@@ -179,12 +179,41 @@ export function daemonAddress(host: string, port: number): string {
 }
 
 /**
+ * WHICH PART OF A DAEMON DOCUMENT SAYS WHERE THE DAEMON LISTENS: its bind carrier when it declares
+ * one, and the legacy top-level `host` and `port` otherwise.
+ *
+ * ONE RULE, READ BY BOTH ENDS, which is why it lives here. The daemon reads a declared bind carrier
+ * as the listener and supersedes the top-level keys; the command-line client used to read only the
+ * top-level keys. So a document written in the `carriers` spelling put the daemon on its declared
+ * port while every `fy` verb without `FY_URL` probed the default one — reporting a healthy daemon as
+ * still initializing for ninety seconds, or, if anything else held the default port, talking to a
+ * stranger. Two readers of one fact disagreed, and each passed its own tests. The daemon's carrier
+ * resolution, its port recorder and this client all ask this function now.
+ *
+ * It answers with the OBJECT to read `host` and `port` from rather than with an address, because the
+ * daemon parses the same object strictly and this client reads it tolerantly. The first bind entry
+ * is the one: a document that declares two is one the daemon refuses to boot on, so which of them a
+ * client follows only decides which wrong port it reports unreachable.
+ */
+export function declaredBind(document: object): object {
+  const carriers = (document as { readonly carriers?: unknown }).carriers;
+  if (!Array.isArray(carriers)) return document;
+  const bind: unknown = carriers.find(
+    entry => typeof entry === 'object' && entry !== null && (entry as { readonly kind?: unknown }).kind === 'bind',
+  );
+  return (bind as object | undefined) ?? document;
+}
+
+/**
  * WHERE A CLIENT ON THIS MACHINE DIALS THE DAEMON, read from what the daemon wrote down.
  *
  * WHY A CLIENT READS THIS AT ALL: the daemon may choose its own port. A first boot whose preferred
  * port is taken binds the next free one and writes the choice down, so a client that assumed the
  * default would be looking at an address its daemon deliberately moved off. The recorded value is
  * the daemon's answer to "where am I", and following it is what makes the fallback safe.
+ *
+ * IT READS THE BIND THE DAEMON READS. A document in the `carriers` spelling is followed to its bind
+ * carrier exactly as the daemon follows it, through the one rule `declaredBind` owns.
  *
  * IT READS THE BIND AND NEVER THE ADVERTISEMENT, which is the whole reason it is a separate function
  * from `decideAdvertisement`. `publicUrl` answers a DIFFERENT question — where somebody ELSE reaches
@@ -206,7 +235,8 @@ export function daemonAddress(host: string, port: number): string {
  */
 export function recordedBindAddress(document: unknown): string | undefined {
   if (typeof document !== 'object' || document === null) return undefined;
-  const recorded = document as { readonly host?: unknown; readonly port?: unknown };
+  // The bind carrier when there is one, because that is where the daemon listens: see `declaredBind`.
+  const recorded = declaredBind(document) as { readonly host?: unknown; readonly port?: unknown };
   // The port is the one field with no safe assumption: a recorded document that names none has not
   // said where its daemon went, and guessing would send a client to somebody else's socket.
   if (typeof recorded.port !== 'number' || !Number.isInteger(recorded.port)) return undefined;

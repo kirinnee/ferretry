@@ -9,16 +9,24 @@
  */
 
 import { describe, it } from 'bun:test';
-import { MAX_TUNNEL_BODY_BYTES, OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE } from '@ferretry/protocol';
+import {
+  MAX_TUNNEL_BODY_BYTES,
+  OLDER_APP_SENTENCE,
+  OLDER_DAEMON_SENTENCE,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+} from '@ferretry/protocol';
 import { HEARTBEAT_GRACE_SECONDS, HEARTBEAT_SECONDS, RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '@ferretry/relay';
 import should from 'should';
 import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from '../../src/lib/device-keys.ts';
 import {
+  AppOutdatedError,
   browserRelayDial,
   DaemonCarrierRouter,
   type DaemonCarrierRouterOptions,
   DaemonOutdatedError,
+  DEVICE_NOT_ACCEPTED_SENTENCE,
+  DeviceNotAcceptedError,
   openRelaySession,
   relayResponse,
   relayTunnelRequest,
@@ -27,6 +35,7 @@ import { RelaySessionError, RelayStreamRefusedError } from '../../src/lib/relay-
 import {
   autoDial,
   newDaemonIdentity,
+  newerDaemonDial,
   olderDaemonDial,
   relayCrypto,
   ScriptedSocket,
@@ -1194,6 +1203,244 @@ describe('the carrier router meeting a daemon from before device keys', () => {
       should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example']);
     }
     await settle(5);
+  });
+});
+
+describe('the carrier router meeting a daemon NEWER than this app', () => {
+  const newer = async (healthz: () => Promise<Response>) => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const carriers = carriersFor(identity, () => 'refuse');
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: carriers.dial,
+      heartbeat: () => () => undefined,
+      network: healthz,
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    return { router, daemon };
+  };
+
+  it('should tell the person to update the APP when the daemon names a higher dialect', async () => {
+    // Arrange — a machine updated before this copy of the app was.
+    const { router, daemon } = await newer(
+      async () => new Response(JSON.stringify({ status: 'ok', sessionProtocol: 'ferretry-relay/3' }), { status: 200 }),
+    );
+
+    // Act
+    const request = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    // Assert — never "update the machine", which is the side already current.
+    should(request).be.instanceof(AppOutdatedError);
+    should((request as Error).message).equal(OLDER_APP_SENTENCE);
+    await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
+      AppOutdatedError,
+    );
+  });
+
+  it('should still name the daemon as old for a lower dialect, or a dialect it cannot parse', async () => {
+    for (const sessionProtocol of ['ferretry-relay/1', 'something-else', 7]) {
+      const { router, daemon } = await newer(
+        async () => new Response(JSON.stringify({ status: 'ok', sessionProtocol }), { status: 200 }),
+      );
+      await should(router.send(daemon, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(DaemonOutdatedError);
+    }
+  });
+
+  it('should name the app as old when a rendezvous carries the newer daemon refusing this hello', async () => {
+    // Arrange — direct does not answer and its liveness read says nothing, so only the refusal can tell.
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const newerDaemon = newerDaemonDial();
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      heartbeat: () => () => undefined,
+      network: unreachable,
+      dial: url => {
+        if (new URL(url).hostname !== DIRECT_HOST) return newerDaemon.dial();
+        const refused = new ScriptedSocket();
+        queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
+        return refused;
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    // Act
+    const request = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    // Assert
+    should(request).be.instanceof(AppOutdatedError);
+    should((request as Error).message).equal(OLDER_APP_SENTENCE);
+  });
+});
+
+describe('the carrier router meeting a daemon that no longer accepts this device', () => {
+  /** A daemon that holds a DIFFERENT key for this grant: what a revoked or idle-expired device meets. */
+  const refusing = async (reach: Reach, carriers: readonly ('direct' | 'relay')[] = ['direct']) => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: carriers.map(kind => (kind === 'direct' ? { kind: 'direct' as const, daemonUrl: DAEMON_URL } : RELAY)),
+    });
+    const network = carriersFor(identity, reach, { devicePublicKey: (await testDevice()).publicKey });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: network.dial,
+      heartbeat: () => () => undefined,
+      network: unreachable,
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    return { router, daemon, network };
+  };
+
+  it('should say ONE plain sentence on a direct-only daemon, and remember it', async () => {
+    // Arrange
+    const { router, daemon } = await refusing(directOnly);
+    let announced = 0;
+    router.subscribe(() => {
+      announced += 1;
+    });
+
+    // Act
+    const refusal = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    // Assert — not "could not reach", not "the rendezvous ended this session": the machine said no.
+    should(refusal).be.instanceof(DeviceNotAcceptedError);
+    should((refusal as Error).message).equal(DEVICE_NOT_ACCEPTED_SENTENCE);
+    should((refusal as Error).message).not.match(/rendezvous|reach|4403/u);
+    should(router.deviceRefused(daemon.daemonId)).be.true();
+    should(announced).be.above(0);
+  });
+
+  it('should dial nothing more for a refused device, so a page full of panels cannot spend the upgrade budget', async () => {
+    // Arrange
+    const { router, daemon, network } = await refusing(directOnly);
+    await should(router.send(daemon, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(DeviceNotAcceptedError);
+    const dialled = network.dialled.length;
+
+    // Act — every panel of the open page retries its own read, and a stream reconnects.
+    for (let index = 0; index < 10; index += 1)
+      await should(router.send(daemon, `${DAEMON_URL}/v1/usage`)).be.rejectedWith(DeviceNotAcceptedError);
+    await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
+      DeviceNotAcceptedError,
+    );
+
+    // Assert
+    should(network.dialled).have.length(dialled);
+  });
+
+  it('should say the same on the relay, after trying every carrier', async () => {
+    const { router, daemon, network } = await refusing(() => 'live', ['direct', 'relay']);
+    await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
+      DeviceNotAcceptedError,
+    );
+    should(network.hosts()).eql([DIRECT_HOST, 'relay.example']);
+    should(router.deviceRefused(daemon.daemonId)).be.true();
+  });
+
+  it('should forget the refusal when the pairing is replaced, and keep it across a carrier refresh', async () => {
+    // Arrange
+    const { router, daemon } = await refusing(directOnly);
+    await should(router.send(daemon, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(DeviceNotAcceptedError);
+
+    // Act — the daemon republished its carriers: the same pairing, still refused.
+    const republished = { ...daemon, carriers: [{ kind: 'direct' as const, daemonUrl: DAEMON_URL }, RELAY] };
+    await should(router.send(republished, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(DeviceNotAcceptedError);
+    should(router.deviceRefused(daemon.daemonId)).be.true();
+
+    // Act — re-paired or unpaired: the entry goes, and the refusal with it.
+    router.clearDaemon(daemon.daemonId);
+
+    // Assert
+    should(router.deviceRefused(daemon.daemonId)).be.false();
+  });
+
+  it('should learn the refusal on a carrier that was already carrying, for a request and for a stream', async () => {
+    // Arrange — a working pairing, then the device is revoked: the daemon stops accepting its key.
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
+    let accepted = device.publicKey;
+    const live = autoDial(identity, {
+      get devicePublicKey() {
+        return accepted;
+      },
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: () => live.dial(),
+      heartbeat: () => () => undefined,
+      network: unreachable,
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
+    accepted = (await testDevice()).publicKey;
+
+    // Act — a stream opens a NEW session on the remembered carrier, and is refused.
+    await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
+      DeviceNotAcceptedError,
+    );
+
+    // Assert
+    should(router.deviceRefused(daemon.daemonId)).be.true();
+  });
+
+  it('should learn it when a remembered carrier’s next request session is refused', async () => {
+    // Arrange
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
+    let accepted = device.publicKey;
+    const live = autoDial(identity, {
+      get devicePublicKey() {
+        return accepted;
+      },
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: () => live.dial(),
+      heartbeat: () => () => undefined,
+      network: unreachable,
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
+    accepted = (await testDevice()).publicKey;
+    // The request session ends (a lease, a network change), so the next request opens a new one.
+    live.sockets[0]?.onClose?.(RELAY_CLOSE_CODES.heartbeatTimeout, 'gone');
+
+    // Act
+    const refusal = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    // Assert
+    should(refusal).be.instanceof(DeviceNotAcceptedError);
+    should(router.deviceRefused(daemon.daemonId)).be.true();
   });
 });
 

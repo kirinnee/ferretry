@@ -23,6 +23,7 @@ import type {
   HarnessLoginChildSpec,
 } from '../../../src/lib/fleet-login/ports.ts';
 import {
+  HARNESS_LOGIN_SHUTDOWN_GRACE_MS,
   HARNESS_LOGIN_WINDOW_MINUTES,
   HarnessLoginRefusal,
   HarnessLoginService,
@@ -113,9 +114,15 @@ class FakeChild implements HarnessLoginChild {
     return true;
   };
 
-  kill(): void {
+  /** Every signal sent, in order. */
+  readonly signals: string[] = [];
+  /** Set to true to model a child that ignores SIGTERM — or whose grandchild holds its pipes. */
+  stubborn = false;
+
+  kill(signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): void {
     this.killed = true;
-    this.#settle?.(143);
+    this.signals.push(signal);
+    if (!this.stubborn || signal === 'SIGKILL') this.#settle?.(143);
   }
 
   exit(code: number): void {
@@ -1761,5 +1768,61 @@ describe('the Codex link sign-in', () => {
     // Assert
     should(switched).match({ outcome: 'conflict', reason: /already using a link/u });
     should(early).match({ outcome: 'refused', reason: /has not shown its link yet/u });
+  });
+});
+
+describe('a daemon that stops', () => {
+  it('should end every running sign-in and wait for its child, without escalating one that exits', async () => {
+    // Arrange — a pending Codex sign-in, the one that holds localhost:1455.
+    const subject = fixture();
+    const flow = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const child = await subject.child();
+
+    // Act
+    await subject.service.shutdown();
+
+    // Assert
+    should(child.killed).be.true();
+    should(child.signals).not.containEql('SIGKILL');
+    should(await subject.service.status(flow.flowId)).have.property('state', 'failed');
+    should((await subject.service.status(flow.flowId)) as { reason?: string }).have.property(
+      'reason',
+      'the daemon stopped, so this sign-in ended with it',
+    );
+    // The grace timer was disarmed, so nothing fires after the daemon is gone.
+    should(subject.timers.at(-1)).have.property('disarmed', true);
+  });
+
+  it('should kill a child outright when it has not exited by the end of the grace', async () => {
+    // Arrange — a child whose exit never settles on SIGTERM: a launcher whose binary keeps the pipes.
+    const subject = fixture();
+    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const child = await subject.child();
+    child.stubborn = true;
+
+    // Act
+    const stopping = subject.service.shutdown();
+    await subject.settle();
+    const grace = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_SHUTDOWN_GRACE_MS);
+    if (grace === undefined) throw new Error('no grace timer was armed');
+    grace.run();
+    await stopping;
+
+    // Assert
+    should(child.signals[0]).equal('SIGTERM');
+    should(child.signals.at(-1)).equal('SIGKILL');
+  });
+
+  it('should start no sign-in once it is stopping, and return at once with nothing running', async () => {
+    // Arrange
+    const subject = fixture();
+
+    // Act
+    await subject.service.shutdown();
+    const refusal = await refusalOf(() => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST));
+
+    // Assert
+    should(refusal.code).equal('fleet_login_unavailable');
+    should(subject.children).be.empty();
   });
 });
