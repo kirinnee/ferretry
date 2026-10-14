@@ -1362,10 +1362,10 @@ pending key once — so a dropped response never strands the device.
 
 #### Presence on opening
 
-When the machine asks for a passkey on opening (`presenceOnOpen`), a session still opens — the device key
-is proved as always — but every request answers `401 { "code": "presence_required" }` until the device
-confirms with a passkey through `POST /v1/presence/options` and `POST /v1/presence`, which are served, as
-are `GET /v1/passkeys` and `GET /v1/security`. One confirmation lasts `presenceValidityHours` for that
+When the machine asks for a passkey on opening (`unlockOnOpen`), a session still opens — the device key
+is proved as always — but every request answers `401 { "code": "unlock_required" }` until the device
+confirms with a passkey through `POST /v1/unlock/options` and `POST /v1/unlock`, which are served, as
+are `GET /v1/passkeys` and `GET /v1/security`. One confirmation lasts `unlockValidityHours` for that
 device, across page loads; it is never a step-up. This is a daemon response, not a session record: nothing
 on the wire beside it changes.
 

@@ -588,8 +588,8 @@ bounds; a value outside the bounds is refused, never clamped.
 | ----------------------- | ---------- | ------------------------ | -------------- |
 | `stepUpWindowMinutes`   | 15         | 0–60 (0 = every time)    | smaller        |
 | `deviceKeyRotationDays` | 30         | 7–90                     | smaller        |
-| `presenceOnOpen`        | off        | on / off                 | on             |
-| `presenceValidityHours` | 8          | 1–24                     | smaller        |
+| `unlockOnOpen`        | off        | on / off                 | on             |
+| `unlockValidityHours` | 8          | 1–24                     | smaller        |
 | `idleExpiryDays`        | 30         | 1–90                     | smaller        |
 | access lease            | 15 minutes | **fixed, not a setting** | —              |
 
@@ -606,8 +606,8 @@ bounds; a value outside the bounds is refused, never clamped.
   Lost answer: the browser stores the new key as _pending_ before sending and, if the old key is
   refused, tries the pending one once — so a dropped response never strands the device.
 - **Presence on open.** Off by default. When on, a session still opens (the device key is proved as
-  always), but every request answers `401 presence_required` until the device completes a passkey
-  assertion; one assertion is good for `presenceValidityHours` for that device, across page loads.
+  always), but every request answers `401 unlock_required` until the device completes a passkey
+  assertion; one assertion is good for `unlockValidityHours` for that device, across page loads.
   Dangerous actions still need their own step-up window — presence never counts as a step-up.
 - **Idle expiry.** A6's 30 days, now a setting. Shortening it applies at the next check (boot, auth,
   device list), so it can expire devices immediately; the confirmation says how many.
@@ -618,9 +618,9 @@ bounds; a value outside the bounds is refused, never clamped.
 **Who may change them — the grants.md asymmetry, again.** Changing any setting is a _configure_
 action on the `pairing` capability.
 
-- **Narrowing** (a smaller window or period, `presenceOnOpen` → on) is allowed remotely by a device
+- **Narrowing** (a smaller window or period, `unlockOnOpen` → on) is allowed remotely by a device
   holding `pairing.configure` **with a current step-up**.
-- **Widening** (a larger window or period, `presenceOnOpen` → off) is allowed **only at the machine**
+- **Widening** (a larger window or period, `unlockOnOpen` → off) is allowed **only at the machine**
   — the owner's admin token over loopback, i.e. the CLI (B4); a browser on the host is a device like any
   other. A remote widen is `403` with a sentence naming the command to run at the machine.
 - A request that changes several fields is judged field by field and refused whole if any field
@@ -665,9 +665,9 @@ small PR E immediately after it.
   at the next boot, session proof or device list; the pairing response reports the current value.
   `devicesExpiring` counts the devices the new period will end, and only when it shortened.
 - **Presence on open.** When on, the request boundary answers every device request
-  `401 presence_required` until that device confirms with a passkey. Exempt: `GET /v1/passkeys`,
-  `GET /v1/security`, `POST /v1/presence/options` and `POST /v1/presence`. A confirmation is held in the
-  daemon's memory per **device** for `presenceValidityHours`, so it survives page loads and ends on a
+  `401 unlock_required` until that device confirms with a passkey. Exempt: `GET /v1/passkeys`,
+  `GET /v1/security`, `POST /v1/unlock/options` and `POST /v1/unlock`. A confirmation is held in the
+  daemon's memory per **device** for `unlockValidityHours`, so it survives page loads and ends on a
   restart or a revoke. Registering a first passkey counts as a confirmation, so a device on a machine
   with presence on can still get in. It is never a step-up. Every browser is asked, on the host too: only the owner's admin token is at the machine (B4). The
   app shows "Confirm it's you" with the same dialog component as the step-up prompt and re-sends once.
