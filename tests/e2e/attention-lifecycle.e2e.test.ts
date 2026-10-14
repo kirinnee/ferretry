@@ -68,7 +68,7 @@ interface RealSession {
 /** A Claude runtime imported into a real `fyd` on the leased port, and one real session on it. */
 async function bootRealSession(environment: E2eEnvironment): Promise<RealSession> {
   // The person's own Claude Code, as `daemon import` reads it — invented, in the temp HOME.
-  await environment.installFakeHarness('claude');
+  const fakeClaude = await environment.installFakeHarness('claude');
   await environment.setFakeHarnessScenario({ version: 1, steps: [{ type: 'exit', code: 0 }] });
   await mkdir(join(environment.paths.home, '.claude'), { recursive: true });
   await writeFile(join(environment.paths.home, '.claude', 'CLAUDE.md'), '# e2e\n', 'utf8');
@@ -80,8 +80,10 @@ async function bootRealSession(environment: E2eEnvironment): Promise<RealSession
     timeoutMs: 15_000,
     // The daemon drives tmux on its own private socket; the fixture's PATH router refuses that.
     useDaemonPrivateTmux: true,
-    // Relay discovery pointed at a closed loopback port: nothing here needs a carrier.
-    env: { FY_RELAY_DIRECTORY_ORIGIN: 'http://127.0.0.1:9' },
+    // Relay discovery pointed at a closed loopback port: nothing here needs a carrier. Claude is located
+    // through FY_CLAUDE_BIN because `useDaemonPrivateTmux` drops the fixture's bin from PATH: without it
+    // a CI runner has no Claude at all, and a developer machine quietly imported its REAL `claude`.
+    env: { FY_RELAY_DIRECTORY_ORIGIN: 'http://127.0.0.1:9', FY_CLAUDE_BIN: fakeClaude },
   });
   const token = await waitForFile(join(environment.paths.fyHome, 'api-token'), 10_000);
   const connection = { FY_URL: environment.httpUrl(), FY_TOKEN: token };

@@ -1,0 +1,69 @@
+name: E2E
+
+# The e2e tier: compiled binaries, the real PWA bundle, a real Chrome and a local rendezvous, driven
+# through the product journeys in tests/e2e/. A separate workflow rather than a CI job because GitHub
+# filters by path per WORKFLOW, and this tier only has something to prove when a package it drives —
+# or the tier itself — changed.
+#
+# ADVISORY, NOT REQUIRED (docs/standards/ci-cd/index.md, "E2E tier"): it is not a branch-protection
+# check yet. After two weeks of runs have measured its flake rate it becomes one.
+on:
+  pull_request:
+    paths:
+      - 'packages/pwa/**'
+      - 'packages/daemon/**'
+      - 'packages/relay/**'
+      - 'packages/protocol/**'
+      - 'packages/cli/**'
+      - 'tests/e2e/**'
+      - 'scripts/test/**'
+      - 'scripts/ci/e2e.sh'
+      - '.github/workflows/e2e.yaml'
+  workflow_dispatch:
+
+# Copied from CI, as the standard asks of every pull_request workflow: a new push to a PR cancels the
+# run for its old SHA; a manual dispatch gets a group of its own run id and is never cancelled.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') && github.ref
+      || github.run_id
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
+
+jobs:
+  e2e:
+    name: E2E Journeys
+    permissions:
+      contents: read
+    # `ubuntu-latest` ships the Google Chrome the journeys launch and the tmux their agent sessions
+    # live in, exactly as the int tier and the Settings geometry gate already rely on. Measured at
+    # about five minutes of journeys plus the compile; the timeout leaves room for one slow runner
+    # and stops a wedged browser from holding the runner for the default six hours.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      # ADVISORY: `continue-on-error` on this STEP, not the job. On a job it still paints the job's check
+      # red; on the step the check stays green while the step's own result, the job summary line
+      # "E2E: N pass / M fail" and a warning annotation record every failure. Removed when the job
+      # becomes required (docs/standards/ci-cd/index.md, "E2E tier").
+      - name: Run the e2e journeys
+        continue-on-error: true
+        run: nix develop .#ci -c ./scripts/ci/e2e.sh
+      # `always()` because a red run is the run whose evidence matters most: every screen the journeys
+      # reached at phone and desktop width in both colour schemes, the per-step journey log naming the
+      # step that broke, and the relay journey's ledger.
+      - name: Upload the e2e evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # One artifact per attempt: v4 artifacts are immutable within a run, so a re-run reusing the name
+          # failed its upload after the journeys had passed.
+          name: e2e-evidence-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-evidence/
+          if-no-files-found: warn

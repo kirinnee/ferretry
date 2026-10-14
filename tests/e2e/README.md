@@ -58,11 +58,11 @@ on success or failure; the suite runner also handles interrupts. Never bypass
 these helpers or reuse their resources across journeys.
 
 Run the tier with `task test:e2e`. It typechecks the harness and runs without a
-coverage ledger. This compiled-browser tier remains local and is not itself run
-in CI. The focused PWA build-contract unit guard covers the Vite directory
-override in CI, while existing unit and integration tiers guard the protocol
-behaviour; a regression that exists only in this full journey is not yet a CI
-guard.
+coverage ledger. CI runs it as the `E2E` workflow (`scripts/ci/e2e.sh`) on pull
+requests that touch the packages it drives, and uploads every journey's screens
+and step log as the `e2e-evidence-<attempt>` artifact. It is advisory until two weeks of
+runs have measured its flake rate, then a required check — see
+[CI/CD](../../docs/standards/ci-cd/index.md#e2e-tier).
 
 ## Browser journeys
 

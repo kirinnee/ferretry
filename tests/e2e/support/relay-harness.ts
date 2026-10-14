@@ -29,7 +29,8 @@
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server, type Socket } from 'node:net';
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import * as childProcessModule from 'node:child_process';
+import { type ChildProcess, spawn, type ChildProcessByStdio } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Readable } from 'node:stream';
@@ -464,17 +465,19 @@ export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
       ['bun', 'run', 'scripts/build-release.ts', outDir],
     ];
     for (const command of steps) {
-      const build = Bun.spawn([...command], {
+      // SYNCHRONOUS: Bun 1.3's async spawn lost its epoll registration on a hosted runner
+      // (`EBADF … epoll_ctl`), and because this build is memoised, the one failure failed every journey
+      // after it in ~90ms. Nothing in-process has to answer while the bundle builds, so blocking costs
+      // nothing, and `spawnSync` never touches epoll.
+      const build = Bun.spawnSync([...command], {
         cwd: join(REPOSITORY_ROOT, 'packages', 'pwa'),
         env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin, NO_COLOR: '1' },
         stdout: 'pipe',
         stderr: 'pipe',
       });
-      const [code, out, err] = await Promise.all([
-        build.exited,
-        new Response(build.stdout).text(),
-        new Response(build.stderr).text(),
-      ]);
+      const code = build.exitCode;
+      const out = build.stdout.toString();
+      const err = build.stderr.toString();
       if (code !== 0)
         throw new Error(
           `the PWA bundle failed to build at \`${command.join(' ')}\` (code ${String(code)})\n${out}\n${err}`,
@@ -483,6 +486,10 @@ export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
     await stat(join(outDir, 'app', 'index.html'));
     return outDir;
   })();
+  // A failed build is not memoised: the next journey builds again instead of inheriting the failure.
+  bundlePromise.catch(() => {
+    bundlePromise = undefined;
+  });
   return bundlePromise;
 }
 
@@ -608,7 +615,7 @@ interface BrowserContextLike {
 }
 
 interface ChromiumLauncher {
-  launch(options: { executablePath: string; headless: boolean; args: string[] }): Promise<{
+  launch(options: { executablePath: string; headless: boolean; args: string[]; timeout?: number }): Promise<{
     newContext(options?: Record<string, unknown>): Promise<BrowserContextLike>;
     close(): Promise<void>;
   }>;
@@ -651,6 +658,8 @@ export async function launchChrome(teardown: HarnessTeardown, options: ChromeOpt
     module.chromium.launch({
       executablePath: chromeExecutable(),
       headless: true,
+      // Chrome starts in about two seconds; a launch that has not finished in twenty never will (see launchChromiumWithRetry).
+      timeout: 20_000,
       // `--no-sandbox` because this host's Chrome refuses to start otherwise under the test runner,
       // and `--disable-dev-shm-usage` because a small `/dev/shm` in a container crashes the renderer
       // mid-journey, which looks exactly like an app defect.
@@ -696,7 +705,7 @@ export async function launchChrome(teardown: HarnessTeardown, options: ChromeOpt
   page.on('pageerror', payload => pageErrors.push(String(payload)));
 
   const stop = async (): Promise<void> => {
-    await closeChromeBounded(() => browser.close());
+    await closeChromeBounded(browser);
   };
   teardown.add('chrome', stop);
   return { page, console: consoleLines, pageErrors, stop };
@@ -955,47 +964,169 @@ export async function renderedDataAttributes(page: BrowserPage): Promise<string>
 }
 
 /**
- * Launch Chrome, retrying ONLY the launch failures Bun produces while it wires Playwright's pipes.
+ * Every `Failed to connect` / EBADF Bun raised while wiring a child's EXTRA stdio pipes, newest last.
  *
- * Seen in full-tier runs, never in isolation: Bun's `child_process.spawn` fails to create the
- * `--remote-debugging-pipe` stdio with `Failed to connect` (ENOENT) or loses an epoll registration
- * (`EBADF`) while a previous Chrome is still releasing its pipes. No browser exists when this throws,
- * so a second attempt is safe. Anything else — a missing Chrome, a bad flag — fails the first time.
+ * Playwright launches Chrome with its DevTools channel on fds 3 and 4 (`--remote-debugging-pipe`).
+ * Bun 1.3 builds each extra pipe lazily, as a socket it CONNECTS, and on loaded hosts (seen on GitHub's
+ * runners, and twice in ~60 local journeys) that connect fails with ENOENT *asynchronously*. The
+ * socket has no 'error' listener, so the error is UNCAUGHT, and Bun fails whichever test is running —
+ * usually a different one from the test that launched the browser. No retry around `launch()` can
+ * catch an error that never reaches it.
+ */
+const pipeFailures: Error[] = [];
+
+/** What the stdio guard has caught so far, for a journey's evidence when a browser dies. */
+export function stdioPipeFailures(): readonly string[] {
+  return pipeFailures.map(error => error.message);
+}
+
+const browserExits: string[] = [];
+
+/** Every Playwright-launched browser that has exited, with its code or signal. */
+export function browserExitLog(): readonly string[] {
+  return [...browserExits];
+}
+let spawnGuarded = false;
+/** Launches in flight, and the children spawned by them — the only ones a pipe failure may end. */
+let launching = 0;
+const launchingChildren = new Set<ChildProcess>();
+/** The processes each launched browser owns, so a forced close ends THAT browser and no other. */
+const browserProcesses = new WeakMap<object, readonly ChildProcess[]>();
+
+/**
+ * Give every extra stdio socket an 'error' listener the moment its child exists.
+ *
+ * The failure then becomes a CHROME that never got its DevTools pipe — which is killed here, so
+ * Playwright's `launch()` rejects at once instead of waiting out its timeout — and
+ * {@link launchChromiumWithRetry} retries it. The wrapper touches only children spawned with more
+ * than three stdio entries, which in this tier means Playwright's browser and nothing else.
+ */
+function guardExtraStdioPipes(): void {
+  if (spawnGuarded) return;
+  spawnGuarded = true;
+  const module = childProcessModule as unknown as { default?: typeof childProcessModule } & typeof childProcessModule;
+  const target = (module.default ?? module) as { spawn: (...args: unknown[]) => ChildProcess };
+  const original = target.spawn;
+  target.spawn = function guardedSpawn(this: unknown, ...args: unknown[]): ChildProcess {
+    const child = original.apply(this, args);
+    if (launching > 0) launchingChildren.add(child);
+    const options = args.find(arg => typeof arg === 'object' && arg !== null && !Array.isArray(arg)) as
+      | { readonly stdio?: unknown }
+      | undefined;
+    if (Array.isArray(options?.stdio) && options.stdio.length > 3) {
+      // Who ended a browser is the first question when a journey loses one: record every exit.
+      const startedAt = new Date().toISOString();
+      child.once('exit', (code: number | null, signal: string | null) => {
+        browserExits.push(
+          `chrome pid ${String(child.pid)} started ${startedAt} exited ${new Date().toISOString()} code=${String(code)} signal=${String(signal)}`,
+        );
+      });
+      for (let fd = 3; fd < options.stdio.length; fd += 1) {
+        const onFailure = (error: Error): void => {
+          pipeFailures.push(error);
+          // Only a browser that never finished launching is ended. An error on the pipe of a browser a
+          // journey is already driving (a reset at close, say) must not end that journey's browser.
+          if (launchingChildren.has(child)) child.kill('SIGKILL');
+        };
+        try {
+          (child.stdio[fd] as { on?: (event: string, listener: (error: Error) => void) => void } | null)?.on?.(
+            'error',
+            onFailure,
+          );
+        } catch (error) {
+          onFailure(error as Error);
+        }
+      }
+    }
+    return child;
+  };
+}
+
+/**
+ * Launch Chrome, retrying ONLY a launch Bun broke while wiring Playwright's pipes.
+ *
+ * Retried when the stdio guard above caught a pipe failure during this attempt, or when the launch
+ * itself failed with Bun's own words for it (`Failed to connect`, `EBADF`/`epoll_ctl`). No usable
+ * browser exists after either, so another attempt is safe. Anything else — a missing Chrome, a bad
+ * flag — fails the first time.
  */
 export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attempts = 3): Promise<T> {
+  guardExtraStdioPipes();
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const failuresBefore = pipeFailures.length;
+    const childrenBefore = new Set(launchingChildren);
+    launching += 1;
     try {
-      return await launch();
+      const browser = await launch();
+      if (typeof browser === 'object' && browser !== null)
+        browserProcesses.set(
+          browser,
+          [...launchingChildren].filter(child => !childrenBefore.has(child)),
+        );
+      return browser;
     } catch (error) {
       const text = String((error as Error).message ?? error);
-      if (!/Failed to connect|EBADF|epoll_ctl/u.test(text)) throw error;
-      lastError = error;
+      const pipeBroke = pipeFailures.length > failuresBefore;
+      // A launch TIMEOUT is the silent form of the same loss: the pipe was never wired, so no browser exists.
+      if (!pipeBroke && !/Failed to connect|EBADF|epoll_ctl|launch: Timeout \d+ms exceeded/u.test(text)) throw error;
+      lastError = pipeBroke
+        ? new Error(`${text} (Bun lost Chrome's DevTools pipe: ${String(pipeFailures.at(-1)?.message)})`)
+        : error;
       await Bun.sleep(250 * attempt);
+    } finally {
+      launching -= 1;
+      if (launching === 0) launchingChildren.clear();
     }
   }
   throw lastError;
 }
 
 /**
- * Close Chrome, and if Playwright's `close()` never settles, end the Chrome this process started.
+ * Close one browser, and if Playwright's `close()` never settles, end that browser's own processes.
  *
- * Seen in full-tier runs after a journey had already failed: `browser.close()` hung, and the teardown
- * behind it never ran. Only Chrome processes whose PARENT is this test process are signalled, so a
- * browser belonging to any other run on the host is never touched.
+ * Seen in full-tier runs: `browser.close()` hung, and the teardown behind it never ran. The processes
+ * ended are exactly the ones `launchChromiumWithRetry` recorded for this browser, so no other browser,
+ * in this journey, a later one or another run on the host, is ever touched.
  */
-export async function closeChromeBounded(close: () => Promise<void>): Promise<void> {
-  const closed = await Promise.race([close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(() => false);
+export async function closeChromeBounded(browser: { close(): Promise<void> }): Promise<void> {
+  const closed = await Promise.race([browser.close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(
+    () => false,
+  );
   if (closed) return;
-  const children = Bun.spawn(['pgrep', '-P', String(process.pid), '-f', 'chrom'], { stdout: 'pipe', stderr: 'ignore' });
-  for (const pid of (await new Response(children.stdout).text())
-    .split('\n')
-    .map(Number)
-    .filter(n => Number.isInteger(n) && n > 1)) {
+  // ONLY this browser's processes. Ending every Chrome this process had started killed the NEXT
+  // journey's live browser (SIGKILL, seen on a hosted runner) when an earlier close never settled.
+  for (const child of browserProcesses.get(browser) ?? []) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
     try {
-      process.kill(pid, 'SIGKILL');
+      child.kill('SIGKILL');
     } catch {
       // Already gone.
     }
   }
+}
+
+/**
+ * Take an EVIDENCE screenshot, and never let one fail a journey.
+ *
+ * Seen under load: Chrome's `screenshot` occasionally hangs for its full 30 seconds while the page is
+ * otherwise healthy. A screenshot asserts nothing — the journeys' assertions and the margin probe are
+ * DOM reads — so it gets a short timeout and one retry, and a capture that still fails is reported to
+ * the caller rather than thrown. A page that has really closed is not hidden by this: the journey's
+ * next real step fails on it.
+ */
+export async function evidenceScreenshot(
+  page: { screenshot(options: { path: string; timeout?: number }): Promise<unknown> },
+  path: string,
+): Promise<string | null> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await page.screenshot({ path, timeout: 10_000 });
+      return null;
+    } catch (error) {
+      if (attempt === 2) return String((error as Error).message ?? error).split('\n')[0] ?? 'screenshot failed';
+      await Bun.sleep(500);
+    }
+  }
+  return null;
 }

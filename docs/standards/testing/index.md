@@ -392,10 +392,12 @@ behaviour — exit codes, stdout/stderr content, and journeys completing — not
 
 ## What Ferretry Does Not Test (Yet)
 
-**No E2E tier.** E2E means driving a real browser against a real frontend (Playwright, Cypress).
-`packages/pwa` is a placeholder, so there is nothing to drive. When the PWA lands it gets an E2E
-tier of its own — kept deliberately minimal, because browser tests are the most brittle and
-expensive tests there are: cover the critical happy path and leave edge cases to the tiers below.
+**No required E2E gate yet.** The E2E tier exists (`tests/e2e/`, [its README](../../../tests/e2e/README.md)):
+it drives the compiled binaries, the real PWA bundle and a real Chrome through the product journeys,
+and CI runs it as the advisory `E2E` workflow. It is not a required check until two weeks of runs
+have measured its flake rate ([CI/CD](../ci-cd/index.md#e2e-tier)). Browser tests are the most
+brittle and expensive tests there are, so its journeys cover what only a whole product can show and
+leave edge cases to the tiers below.
 
 **No load or performance tier.** Throughput and latency testing belongs with the daemon
 (`fyd`), which is also a placeholder today.

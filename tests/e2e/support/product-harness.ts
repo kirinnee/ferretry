@@ -20,6 +20,7 @@
  */
 
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { E2eEnvironment } from '../fixture.ts';
 import {
@@ -28,14 +29,20 @@ import {
   type HarnessTeardown,
   launchChromiumWithRetry,
   resolvePlaywright,
+  evidenceScreenshot,
+  browserExitLog,
+  stdioPipeFailures,
 } from './relay-harness.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 
-/** Where the full-product journeys put their evidence. Outside the repo; never committed. */
-export const EVIDENCE_ROOT = process.env.FY_E2E_EVIDENCE_ROOT ?? '/tmp/claude-1000/e2e-shots';
-/** One JSON object per line; `scripts`-free so the report can be rebuilt from it at any time. */
-const JOURNEY_LOG = process.env.FY_E2E_JOURNEY_LOG ?? '/tmp/claude-1000/e2e-runs/journeys.jsonl';
+/**
+ * Where the full-product journeys put their evidence: outside the repository, never committed.
+ * `scripts/ci/e2e.sh` points both at the directory CI uploads; a local run defaults to the temp dir.
+ */
+export const EVIDENCE_ROOT = process.env.FY_E2E_EVIDENCE_ROOT ?? join(tmpdir(), 'fy-e2e-evidence');
+/** One JSON object per line, so the journey report can be rebuilt from it at any time. */
+const JOURNEY_LOG = process.env.FY_E2E_JOURNEY_LOG ?? join(tmpdir(), 'fy-e2e-evidence', 'journeys.jsonl');
 
 // ─── compiled artifacts ──────────────────────────────────────────────────────────────────────
 
@@ -122,7 +129,9 @@ export async function asOwner(
   path: string,
   body?: unknown,
 ): Promise<DaemonCall> {
+  // Bounded and named: an unbounded owner call on a slow runner surfaced only as "The operation timed out."
   const response = await fetch(environment.httpUrl(path), {
+    signal: AbortSignal.timeout(20_000),
     method,
     headers: {
       Authorization: `Bearer ${await adminToken(environment)}`,
@@ -152,7 +161,7 @@ export interface ProductPage {
   press(selector: string, key: string, options?: { timeout?: number }): Promise<void>;
   textContent(selector: string): Promise<string | null>;
   evaluate<T>(expression: string): Promise<T>;
-  screenshot(options: { path: string; fullPage?: boolean }): Promise<unknown>;
+  screenshot(options: { path: string; fullPage?: boolean; timeout?: number }): Promise<unknown>;
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   emulateMedia(options: { colorScheme?: 'light' | 'dark' | null }): Promise<void>;
   reload(options?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
@@ -176,7 +185,7 @@ interface ProductContext {
 }
 
 interface ProductBrowserLauncher {
-  launch(options: { executablePath: string; headless: boolean; args: string[] }): Promise<{
+  launch(options: { executablePath: string; headless: boolean; args: string[]; timeout?: number }): Promise<{
     newContext(options?: Record<string, unknown>): Promise<ProductContext>;
     close(): Promise<void>;
   }>;
@@ -211,10 +220,16 @@ export async function launchProductBrowser(
     module.chromium.launch({
       executablePath: chromeExecutable(),
       headless: true,
+      // Chrome starts in about two seconds; a launch that has not finished in twenty never will (see launchChromiumWithRetry).
+      timeout: 20_000,
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     }),
   );
-  const close = (): Promise<void> => closeChromeBounded(() => browser.close());
+  let closing = false;
+  const close = (): Promise<void> => {
+    closing = true;
+    return closeChromeBounded(browser);
+  };
   teardown.add('product chrome', close);
   const context = await browser.newContext({
     viewport: options.viewport ?? DESKTOP,
@@ -226,6 +241,26 @@ export async function launchProductBrowser(
   const pageErrors: string[] = [];
   page.on('console', payload => consoleLines.push(String((payload as { text(): string }).text())));
   page.on('pageerror', payload => pageErrors.push(String(payload)));
+  // How a browser dies is evidence: a renderer crash, a lost connection, or a pipe the stdio guard saw
+  // fail are three different defects, and "Target page, context or browser has been closed" names none.
+  page.on('crash', () => {
+    void recordStep({
+      journey: 'harness',
+      step: 'chrome:page-crashed',
+      status: 'FLAG',
+      evidence: `the renderer crashed at ${new Date().toISOString()}`,
+    });
+  });
+  (browser as unknown as { on?: (event: string, handler: () => void) => void }).on?.('disconnected', () => {
+    // A close the harness asked for is not news; a browser that went away on its own is.
+    if (closing) return;
+    void recordStep({
+      journey: 'harness',
+      step: 'chrome:disconnected',
+      status: 'FLAG',
+      evidence: `the browser went away on its own at ${new Date().toISOString()}; stdio guard caught: ${stdioPipeFailures().join(' | ') || 'nothing'}; exits: ${browserExitLog().slice(-3).join(' | ') || 'none recorded'}`,
+    });
+  });
   let session: Promise<CdpSession> | undefined;
   return {
     context,
@@ -362,8 +397,16 @@ export async function captureScreens(
         );
         await page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
       }
-      const path = join(directory, `${screen}-${label}-${scheme}.png`);
-      await page.screenshot({ path });
+      // Artifact paths may not contain `:` and friends: a step suffix like `:re-pair` failed the upload.
+      const path = join(directory, `${screen.replace(/[^A-Za-z0-9._-]/gu, '-')}-${label}-${scheme}.png`);
+      const missed = await evidenceScreenshot(page, path);
+      if (missed !== null)
+        await recordStep({
+          journey,
+          step: `capture:${screen}`,
+          status: 'FLAG',
+          evidence: `no screenshot at ${label} ${scheme}: ${missed}`,
+        });
       paths.push(path);
       if (scheme === 'light') {
         for (const problem of await page.evaluate<string[]>(LAYOUT_PROBE)) findings.push({ shot: path, problem });
@@ -395,7 +438,7 @@ export async function captureScreens(
 export interface JourneyStep {
   readonly journey: string;
   readonly step: string;
-  readonly status: 'PASS' | 'FAIL' | 'FLAG' | 'SKIP';
+  readonly status: 'PASS' | 'FAIL' | 'FLAG' | 'SKIP' | 'KNOWN';
   readonly evidence: string;
   /** Present on FAIL/FLAG when the cause is the product: file:line, repro, severity. */
   readonly bug?: string;
@@ -543,7 +586,7 @@ export async function mintPairingLink(
  * a standalone `paired`, or the embedded frame unmounting as the setup guide moves on.
  */
 export async function confirmPairing(page: ProductPage, url: string): Promise<'paired' | 'unmounted'> {
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 });
+  await page.goto(url, { waitUntil: 'load', timeout: 30_000 });
   await page.waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 }).catch(async () => {
     const shot = join(EVIDENCE_ROOT, 'pairing-never-confirmed-' + String(Date.now()) + '.png');
     await mkdir(EVIDENCE_ROOT, { recursive: true });
@@ -624,6 +667,11 @@ export async function waitUntil(
 /** Soft failures per journey: recorded and reported, and the journey goes on to its later steps. */
 const softFailures = new Map<string, string[]>();
 
+/** Forget a journey's soft failures, for a retry that starts it again from nothing. */
+export function resetSoftFailures(journey: string): void {
+  softFailures.delete(journey);
+}
+
 /**
  * {@link step}, but a failure is RECORDED rather than thrown, so one product bug does not hide every
  * step after it. The journey must call {@link assertNoSoftFailures} last, so the test still fails.
@@ -633,13 +681,36 @@ export async function softStep(
   name: string,
   body: () => Promise<{ value: unknown; evidence: string }>,
   bug?: string,
+  /**
+   * A KNOWN, open product bug, matched by its own failure message: while it reproduces the step is
+   * recorded `KNOWN` (with `bug`) and does not fail the run, so an advisory CI job can stay green on
+   * the main line while the bug is still on the report. The moment the step PASSES, it fails the run
+   * with "remove the marker" — a known-bug marker can never outlive its bug. Any OTHER failure of the
+   * same step is an ordinary failure.
+   */
+  knownWhen?: RegExp,
 ): Promise<boolean> {
   try {
     const { evidence } = await body();
     await recordStep({ journey, step: name, status: 'PASS', evidence });
+    if (knownWhen !== undefined)
+      softFailures.set(journey, [
+        ...(softFailures.get(journey) ?? []),
+        `${name}: the known bug no longer reproduces — remove its knownWhen marker (${bug ?? 'no bug named'})`,
+      ]);
     return true;
   } catch (error) {
     const message = String((error as Error).message ?? error).slice(0, 1_500);
+    if (knownWhen?.test(message) === true) {
+      await recordStep({
+        journey,
+        step: name,
+        status: 'KNOWN',
+        evidence: message,
+        ...(bug === undefined ? {} : { bug }),
+      });
+      return false;
+    }
     await recordStep({ journey, step: name, status: 'FAIL', evidence: message, ...(bug === undefined ? {} : { bug }) });
     softFailures.set(journey, [...(softFailures.get(journey) ?? []), `${name}: ${message}`]);
     return false;
@@ -664,15 +735,16 @@ export function assertNoSoftFailures(journey: string): void {
 export async function reapLeftovers(environment: E2eEnvironment, journey: string): Promise<readonly string[]> {
   const tmux = Bun.which('tmux');
   if (tmux !== null) {
-    const ended = Bun.spawn([tmux, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], {
+    Bun.spawnSync([tmux, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], {
       stdout: 'ignore',
       stderr: 'ignore',
     });
-    await ended.exited;
   }
   await Bun.sleep(300);
-  const listed = Bun.spawn(['pgrep', '-af', environment.paths.root], { stdout: 'pipe', stderr: 'ignore' });
-  const lines = (await new Response(listed.stdout).text())
+  // Synchronous: see `closeChromeBounded` — an async spawn can lose its epoll registration under load.
+  const listed = Bun.spawnSync(['pgrep', '-af', environment.paths.root], { stdout: 'pipe', stderr: 'ignore' });
+  const lines = listed.stdout
+    .toString()
     .split('\n')
     .map(line => line.trim())
     .filter(line => line !== '' && !line.includes('pgrep') && !/\btmux\b/u.test(line))

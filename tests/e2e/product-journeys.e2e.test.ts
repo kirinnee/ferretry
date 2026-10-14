@@ -26,6 +26,7 @@ import {
   type ProductPage,
   reapLeftovers,
   recordStep,
+  resetSoftFailures,
   softStep,
   assertNoSoftFailures,
   step,
@@ -89,7 +90,42 @@ interface ProductOptions {
 }
 
 /** Boot one machine and one browser, unpaired. Every journey starts here. */
+/** What Playwright says when the browser connection vanished under a journey, not a product answer. */
+const LOST_BROWSER =
+  /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/u;
+
+/**
+ * Run one journey, and run it ONCE more if the only thing that went wrong is that its browser vanished.
+ *
+ * On hosted runners Bun 1.3 occasionally drops the DevTools pipe Playwright holds to Chrome: Chrome keeps
+ * running, nothing logs an exit or an error, and every later call answers "Target page, context or
+ * browser has been closed". That is the harness's transport failing, not the product, and it is not
+ * reproducible on demand. So a journey whose error is exactly that is started again from nothing, in a
+ * fresh environment and browser, and the retry is recorded as a FLAG on the journey log so the rate
+ * stays visible. Any other failure, including a second lost browser, fails the test.
+ */
 async function withProduct(
+  journey: string,
+  body: (product: Product) => Promise<void>,
+  options: ProductOptions = {},
+): Promise<void> {
+  try {
+    await withProductOnce(journey, body, options);
+  } catch (error) {
+    const text = String((error as Error).message ?? error);
+    if (!LOST_BROWSER.test(text)) throw error;
+    await recordStep({
+      journey,
+      step: 'harness:journey-retried',
+      status: 'FLAG',
+      evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing`,
+    });
+    resetSoftFailures(journey);
+    await withProductOnce(journey, body, options);
+  }
+}
+
+async function withProductOnce(
   journey: string,
   body: (product: Product) => Promise<void>,
   options: ProductOptions = {},
@@ -193,7 +229,7 @@ async function pair(product: Product, journey: string): Promise<string> {
       evidence: `fy pair --no-wait printed a ${minted.fragment.slice(0, 3)} link (password model: ${model})`,
     };
   });
-  await browser.page.goto(link.url, { waitUntil: 'networkidle', timeout: 30_000 });
+  await browser.page.goto(link.url, { waitUntil: 'load', timeout: 30_000 });
   await browser.page.waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 });
   await captureScreens(browser.page, journey, '01-pair-confirm');
   await step(journey, 'pair', async () => {
@@ -329,7 +365,7 @@ async function registerPasskeyAndUnlock(product: Product, daemonId: string, jour
     // What a person does next: the setup guide's last screen offers "Open my fleet".
     if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
       await page.click('[data-onboarding-open-fleet]');
-    else await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    else await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'load', timeout: 30_000 });
     await expectScreen(page, '[data-step-up-dialog]', 20_000);
     await captureScreens(page, journey, '12-locked-unlock-prompt');
     return {
@@ -360,7 +396,7 @@ async function setUpPasskeyAndUnlock(
   const authenticator = await authenticatorFor(browser);
   const before = await authenticator.credentials();
   if (!(await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))) {
-    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'load', timeout: 30_000 });
     await expectScreen(page, '[data-step-up-dialog]', 20_000);
   }
   if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-first-passkey]') !== null`)) {
@@ -392,7 +428,7 @@ async function setUpPasskeyAndUnlock(
     return { value: undefined, evidence: `with no passkey: "${failure.slice(0, 160)}"` };
   });
   await step(journey, `register-passkey${suffix}`, async () => {
-    await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, { waitUntil: 'load', timeout: 30_000 });
     // The settings page reads non-exempt panels too, so the prompt may come up first; with no passkey
     // it cannot succeed, so dismiss it and use the card that registers one.
     if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))
@@ -411,7 +447,7 @@ async function setUpPasskeyAndUnlock(
     };
   });
   await step(journey, `unlock${suffix}`, async () => {
-    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'load', timeout: 30_000 });
     const asked = await unlockIfAsked(page, 20_000);
     if (!asked) throw new Error('the app never asked to unlock a locked machine');
     await Bun.sleep(1_000);
@@ -495,7 +531,7 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
     // Settings › Machines on a machine that is not set up.
     else
       await page.goto(`${product.origin.origin}/d/${daemonId}/settings#machines`, {
-        waitUntil: 'networkidle',
+        waitUntil: 'load',
         timeout: 30_000,
       });
     await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
@@ -546,7 +582,7 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   // Journey 5: start a session from the app, chat, see the transcript.
   const marker = `e2e-hello-${Math.trunc(Math.random() * 1e9).toString(36)}`;
   const sessionUrl = await step(journey, 'start-session', async () => {
-    await page.goto(`${product.origin.origin}/d/${daemonId}/new`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(`${product.origin.origin}/d/${daemonId}/new`, { waitUntil: 'load', timeout: 30_000 });
     await expectScreen(page, '#fy-new-session-prompt');
     await captureScreens(page, journey, '07-new-session');
     await page.fill('#fy-new-session-prompt', marker);
@@ -582,15 +618,37 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   await step(journey, 'chat-follow-up', async () => {
     const follow = `${marker}-again`;
     await page.fill('form.fy-composer textarea', follow);
+    const label = String(await textNow(page, 'form.fy-composer button[type="submit"]'));
+    const sentAt = Date.now();
     await page.click('form.fy-composer button[type="submit"]');
+    /**
+     * Up to two minutes, and a slow delivery is REPORTED rather than hidden.
+     *
+     * Locally the reply lands in about a second. On a loaded CI runner it once took over 45 seconds:
+     * the composer queues a message while the session still reads as busy, and it is delivered when the
+     * turn is seen to end. A delivery that slow is a latency finding (FLAG); one that never comes is a
+     * failure, and says what the composer and the session showed.
+     */
     await waitUntil(
       page,
       `(document.querySelector('section[aria-label="Transcript"]')?.textContent ?? '').includes('FAKE-REPLY 2')`,
-      45_000,
-    );
+      120_000,
+    ).catch(async (error: unknown) => {
+      throw new Error(
+        `${String((error as Error).message)}. The button read "${label}" when pressed; the session reads ${String(await page.evaluate<string | null>(`document.querySelector('[data-session-state]')?.getAttribute('data-session-state') ?? null`))}, live ${String(await page.evaluate<string | null>(`document.querySelector('[data-live-stream]')?.getAttribute('data-live-stream') ?? null`))}`,
+      );
+    });
+    const tookMs = Date.now() - sentAt;
+    if (tookMs > 45_000)
+      await recordStep({
+        journey,
+        step: 'chat-follow-up:latency',
+        status: 'FLAG',
+        evidence: `the follow-up took ${String(tookMs)}ms to be answered (button read "${label}")`,
+      });
     return {
       value: undefined,
-      evidence: 'a second message from the composer reached the harness and its reply rendered',
+      evidence: `a second message from the composer ("${label}") reached the harness and its reply rendered in ${String(tookMs)}ms`,
     };
   });
 
@@ -613,7 +671,7 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   const secretName = 'E2E_SECRET';
   await step(journey, 'add-secret', async () => {
     await page.goto(`${product.origin.origin}/d/${daemonId}/settings#daemons`, {
-      waitUntil: 'networkidle',
+      waitUntil: 'load',
       timeout: 30_000,
     });
     await expectScreen(page, '[data-daemon-panel="secrets"], [data-daemon-panel-trigger]');
@@ -639,7 +697,7 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
 
   await step(journey, 'change-setting', async () => {
     await page.goto(`${product.origin.origin}/d/${daemonId}/settings#text-size`, {
-      waitUntil: 'networkidle',
+      waitUntil: 'load',
       timeout: 30_000,
     });
     await expectScreen(page, 'input[name="text-scale"][value="large"]');
@@ -716,7 +774,7 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
     );
     await softStep(journey, 'settings-shows-security-log', async () => {
       await page.goto(`${product.origin.origin}/d/${daemonId}/settings#daemons`, {
-        waitUntil: 'networkidle',
+        waitUntil: 'load',
         timeout: 30_000,
       });
       await unlockIfAsked(page, 3_000);
@@ -769,8 +827,11 @@ describe('the product, from a fresh machine to a working session', () => {
           );
           if (arrivals.length < 2)
             throw new Error(`only ${String(arrivals.length)} client arrival(s) at the rendezvous`);
-          if (relay.sinkhole.attempts() <= directBefore) throw new Error('the browser never tried the direct address');
-          await product.browser.page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          if (relay.sinkhole.attempts() <= directBefore)
+            throw new Error(
+              `the browser never tried the direct address ${relay.sinkhole.origin}: ${String(relay.sinkhole.attempts())} attempt(s) in total, ${String(directBefore)} before the journey; ${String(arrivals.length)} client arrival(s) crossed the rendezvous`,
+            );
+          await product.browser.page.goto(outcome.sessionUrl, { waitUntil: 'load', timeout: 30_000 });
           await expectScreen(product.browser.page, '[data-carrier-kind]');
           // `none` means not measured YET (App.tsx: no ok measurement); the measurement lands shortly after.
           await waitUntil(
@@ -885,7 +946,7 @@ describe('signing a harness in from the first run', () => {
         await page.click('[data-onboarding-open-fleet]');
       else
         await page.goto(`${product.origin.origin}/d/${daemonId}/settings#machines`, {
-          waitUntil: 'networkidle',
+          waitUntil: 'load',
           timeout: 30_000,
         });
       await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
@@ -1010,7 +1071,7 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
       await softStep(journey, 'relock-on-restart', async () => {
         await environment.stopDaemon();
         await bootDaemon(environment, product.boot);
-        await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+        await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'load', timeout: 30_000 });
         if (!(await unlockIfAsked(page, 20_000)))
           throw new Error('a restarted machine did not ask to be unlocked again');
         return {
@@ -1022,7 +1083,7 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
       // Tighten from the device: shorter unlock validity.
       await softStep(journey, 'tighten-from-device', async () => {
         await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, {
-          waitUntil: 'networkidle',
+          waitUntil: 'load',
           timeout: 30_000,
         });
         await unlockIfAsked(page, 3_000);
@@ -1121,7 +1182,7 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
         };
         const before = await authenticator.credentials();
         await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, {
-          waitUntil: 'networkidle',
+          waitUntil: 'load',
           timeout: 30_000,
         });
         await unlockIfAsked(page, 3_000);
@@ -1172,7 +1233,7 @@ describe('access ends when it should, and the person is told', () => {
       const { environment, browser } = product;
       const page = browser.page;
       const outcome = await pairedWithSession(product, journey);
-      await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+      await page.goto(outcome.sessionUrl, { waitUntil: 'load', timeout: 30_000 });
       await waitUntil(
         page,
         `document.querySelector('[data-live-stream="live"]') !== null`,
@@ -1226,7 +1287,7 @@ describe('access ends when it should, and the person is told', () => {
         async () => {
           const said = await whatTheScreenSays(page);
           if (!REPAIR_WORDS.test(said)) {
-            await page.reload({ waitUntil: 'networkidle', timeout: 30_000 });
+            await page.reload({ waitUntil: 'load', timeout: 30_000 });
             await Bun.sleep(3_000);
             await captureScreens(page, journey, '21-after-revoke-reload');
             const reloaded = await whatTheScreenSays(page);
@@ -1252,7 +1313,7 @@ describe('access ends when it should, and the person is told', () => {
           // A revoke forgets the device's passkeys, so the new pairing is locked until it sets one up again.
           if (await hasUnlockModel(environment))
             await setUpPasskeyAndUnlock(product, outcome.daemonId, journey, ':re-pair');
-          await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          await page.goto(outcome.sessionUrl, { waitUntil: 'load', timeout: 30_000 });
           await waitUntil(
             page,
             `document.querySelector('[data-live-stream="live"]') !== null`,
@@ -1304,7 +1365,7 @@ describe('access ends when it should, and the person is told', () => {
 
       // Act
       await bootDaemon(environment, product.boot);
-      await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+      await page.goto(outcome.sessionUrl, { waitUntil: 'load', timeout: 30_000 });
       await Bun.sleep(5_000);
       await captureScreens(page, journey, '30-idle-expired');
 
@@ -1380,11 +1441,11 @@ describe('one browser, two machines', () => {
             evidence: `paired with B (${settled}); the browser holds two connections, A ${a.daemonId.slice(0, 18)}… and B ${bId.slice(0, 18)}…`,
           };
         });
-        await page.goto(`${product.origin.origin}/`, { waitUntil: 'networkidle', timeout: 30_000 });
+        await page.goto(`${product.origin.origin}/`, { waitUntil: 'load', timeout: 30_000 });
         await Bun.sleep(1_500);
         await captureScreens(page, journey, '40-two-machines-home');
         await page.goto(`${product.origin.origin}/d/${bId}/settings#machines`, {
-          waitUntil: 'networkidle',
+          waitUntil: 'load',
           timeout: 30_000,
         });
         await Bun.sleep(1_500);
@@ -1394,42 +1455,51 @@ describe('one browser, two machines', () => {
         // An unlock is per machine: A is unlocked, and that buys nothing at B.
         if (await hasUnlockModel(second))
           await softStep(journey, 'unlock-is-per-machine', async () => {
-            await page.goto(`${product.origin.origin}/d/${bId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+            await page.goto(`${product.origin.origin}/d/${bId}`, { waitUntil: 'load', timeout: 30_000 });
             await expectScreen(page, '[data-step-up-dialog]', 20_000);
             const said = String(await textNow(page, '[data-step-up-dialog]'));
             await captureScreens(page, journey, '42-machine-b-locked');
             await page.click('[data-step-up-dialog] button:has-text("Cancel")');
-            await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
-            await Bun.sleep(1_500);
-            if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`)) {
-              // Say WHICH machine is asking: A losing its unlock and B's prompt surfacing over A's page are
-              // different defects.
-              const asking = String(await textNow(page, '[data-step-up-dialog] [data-step-up-machine]'));
-              await captureScreens(page, journey, '43-prompt-over-machine-a');
-              // Both machines run on this host, so the name cannot say which one asks. The passkey can: only
-              // A holds one, so B's prompt answers "no passkey" and A's would unlock.
-              // A first-passkey offer can only be B's: A already holds a passkey and is never offered one.
-              const firstPasskeyOffer = await page.evaluate<boolean>(
-                `document.querySelector('[data-step-up-first-passkey]') !== null`,
-              );
-              if (firstPasskeyOffer)
-                throw new Error(
-                  `on A's session page machine B's "set up a passkey" offer appeared (named "${asking}", the host both share); a locked second machine's prompt surfaces over the first machine's pages`,
-                );
-              await page.click('[data-step-up-dialog] [data-step-up-confirm]');
-              await Bun.sleep(3_000);
-              const outcome = (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') === null`))
-                ? "it unlocked with A's passkey, so A had lost its unlock"
-                : `it answered "${String(await textNow(page, '[data-step-up-failure]')).slice(0, 120)}", so it is B's prompt shown over A's page`;
-              throw new Error(
-                `on A's session page an unlock prompt appeared naming "${asking}" (both machines share that host name); answering it: ${outcome}`,
-              );
-            }
-            return {
-              value: undefined,
-              evidence: `unlocked at A, B still asks: "${said.slice(0, 100)}"; A stays unlocked`,
-            };
+            return { value: undefined, evidence: `unlocked at A, B still asks: "${said.slice(0, 100)}"` };
           });
+        if (await hasUnlockModel(second))
+          await softStep(
+            journey,
+            'other-machine-prompt-stays-off',
+            async () => {
+              await page.goto(a.sessionUrl, { waitUntil: 'load', timeout: 30_000 });
+              // Long enough for a prompt to appear: the page is waited for to 'load', not to network idle.
+              await Bun.sleep(3_000);
+              if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`)) {
+                // Say WHICH machine is asking: A losing its unlock and B's prompt surfacing over A's page are
+                // different defects.
+                const asking = String(await textNow(page, '[data-step-up-dialog] [data-step-up-machine]'));
+                await captureScreens(page, journey, '43-prompt-over-machine-a');
+                // Both machines run on this host, so the name cannot say which one asks. The passkey can: only
+                // A holds one, so B's prompt answers "no passkey" and A's would unlock.
+                // A first-passkey offer can only be B's: A already holds a passkey and is never offered one.
+                const firstPasskeyOffer = await page.evaluate<boolean>(
+                  `document.querySelector('[data-step-up-first-passkey]') !== null`,
+                );
+                if (firstPasskeyOffer)
+                  throw new Error(
+                    `on A's session page machine B's "set up a passkey" offer appeared (named "${asking}", the host both share); a locked second machine's prompt surfaces over the first machine's pages`,
+                  );
+                await page.click('[data-step-up-dialog] [data-step-up-confirm]');
+                await Bun.sleep(3_000);
+                const outcome = (await page.evaluate<boolean>(
+                  `document.querySelector('[data-step-up-dialog]') === null`,
+                ))
+                  ? "it unlocked with A's passkey, so A had lost its unlock"
+                  : `it answered "${String(await textNow(page, '[data-step-up-failure]')).slice(0, 120)}", so it is B's prompt shown over A's page`;
+                throw new Error(
+                  `on A's session page an unlock prompt appeared naming "${asking}" (both machines share that host name); answering it: ${outcome}`,
+                );
+              }
+              return { value: undefined, evidence: "A's session page shows no prompt, and A stays unlocked" };
+            },
+            'B19: a locked second machine raised its passkey prompt over the page open on another machine (fixed in #475)',
+          );
         else
           await recordStep({
             journey,
@@ -1441,7 +1511,7 @@ describe('one browser, two machines', () => {
           const bSessions = await asOwner(second, 'GET', '/v1/sessions');
           if (JSON.stringify(bSessions.body).includes(a.sessionUrl.split('/session/')[1] ?? '@@'))
             throw new Error("machine B lists machine A's session");
-          await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          await page.goto(a.sessionUrl, { waitUntil: 'load', timeout: 30_000 });
           await waitUntil(
             page,
             `document.querySelector('[data-live-stream="live"]') !== null`,
@@ -1457,7 +1527,7 @@ describe('one browser, two machines', () => {
           const removed = await asOwner(second, 'DELETE', `/v1/pair/devices/${encodeURIComponent(id)}`);
           if (removed.status !== 200) throw new Error(`revoking at B answered ${String(removed.status)}`);
           await Bun.sleep(2_000);
-          await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+          await page.goto(a.sessionUrl, { waitUntil: 'load', timeout: 30_000 });
           await waitUntil(
             page,
             `document.querySelector('[data-live-stream="live"]') !== null`,
