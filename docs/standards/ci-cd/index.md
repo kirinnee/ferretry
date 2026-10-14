@@ -62,6 +62,21 @@ Notable details:
   the binary name from the CLI package's `bin` key so the matrix stays rename-proof
   ([Architecture](../architecture/index.md)).
 
+## Superseded runs
+
+A new push makes the run for the old SHA worthless, so `CI` cancels it rather than letting it hold a
+runner. Its top-level `concurrency` block keys the group on the PR number for `pull_request`
+events and on the ref for pushes to a branch other than `main`, with `cancel-in-progress` true for
+exactly those two cases.
+
+Every other run — a push to `main`, a tag, a manual dispatch — falls into a group of its own
+`run_id`, so nothing can cancel it. Setting `cancel-in-progress: false` on a shared group would not
+be enough: GitHub still cancels a _pending_ run in a group when a newer one queues, and `Release`
+needs every `main` CI run to complete. The deploying workflows (`CD`, `Release`, `PWA Pages`,
+`Hosted Relay`) never cancel an in-progress run: they have no group, or a fixed one without
+`cancel-in-progress`. A new `pull_request` workflow copies the `CI` block; a deploy never
+does.
+
 ## Release and CD
 
 ```yaml
