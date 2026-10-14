@@ -39,5 +39,8 @@ export FY_E2E_SHOTS_ROOT="${evidence}/shots"
 export FY_E2E_JOURNEY_LOG="${evidence}/journeys.jsonl"
 export FY_E2E_RELAY_REPORT="${evidence}/relay-journey.md"
 
+# Chrome's own stderr, through Playwright, so a browser that dies mid-journey says why in the log.
+export DEBUG="${DEBUG:-pw:browser}"
+
 echo "🧪 e2e tier — Chrome: $("${chrome}" --version), tmux: $(tmux -V), evidence: ${evidence}"
 ./scripts/test/run-e2e.sh
