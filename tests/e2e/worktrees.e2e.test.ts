@@ -31,22 +31,25 @@ const GIT_ENVIRONMENT: Readonly<Record<string, string>> = {
   LC_ALL: 'C',
 };
 
-/** Git for fixture setup only — never the daemon's own runner, so a setup failure is loud. */
+/**
+ * Git for fixture setup only — never the daemon's own runner, so a setup failure is loud.
+ *
+ * SYNCHRONOUS on purpose: Bun 1.3's async spawn occasionally loses its epoll registration on a loaded
+ * runner (`EBADF … epoll_ctl` from `child.exited`), which failed this journey in CI before it had
+ * done anything. A setup command this short gains nothing from being async, and `spawnSync` never
+ * registers with epoll at all.
+ */
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const child = Bun.spawn(['git', ...args], {
+  const result = Bun.spawnSync(['git', ...args], {
     cwd,
     env: { PATH: process.env.PATH ?? '', HOME: cwd, ...GIT_ENVIRONMENT },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const [code, out, err] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  if (code !== 0) throw new Error(`fixture git ${args.join(' ')} failed: ${err.trim()}`);
-  return out;
+  if (result.exitCode !== 0)
+    throw new Error(`fixture git ${args.join(' ')} failed: ${result.stderr.toString().trim()}`);
+  return result.stdout.toString();
 }
 
 /**

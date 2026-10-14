@@ -582,15 +582,37 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   await step(journey, 'chat-follow-up', async () => {
     const follow = `${marker}-again`;
     await page.fill('form.fy-composer textarea', follow);
+    const label = String(await textNow(page, 'form.fy-composer button[type="submit"]'));
+    const sentAt = Date.now();
     await page.click('form.fy-composer button[type="submit"]');
+    /**
+     * Up to two minutes, and a slow delivery is REPORTED rather than hidden.
+     *
+     * Locally the reply lands in about a second. On a loaded CI runner it once took over 45 seconds:
+     * the composer queues a message while the session still reads as busy, and it is delivered when the
+     * turn is seen to end. A delivery that slow is a latency finding (FLAG); one that never comes is a
+     * failure, and says what the composer and the session showed.
+     */
     await waitUntil(
       page,
       `(document.querySelector('section[aria-label="Transcript"]')?.textContent ?? '').includes('FAKE-REPLY 2')`,
-      45_000,
-    );
+      120_000,
+    ).catch(async (error: unknown) => {
+      throw new Error(
+        `${String((error as Error).message)}. The button read "${label}" when pressed; the session reads ${String(await page.evaluate<string | null>(`document.querySelector('[data-session-state]')?.getAttribute('data-session-state') ?? null`))}, live ${String(await page.evaluate<string | null>(`document.querySelector('[data-live-stream]')?.getAttribute('data-live-stream') ?? null`))}`,
+      );
+    });
+    const tookMs = Date.now() - sentAt;
+    if (tookMs > 45_000)
+      await recordStep({
+        journey,
+        step: 'chat-follow-up:latency',
+        status: 'FLAG',
+        evidence: `the follow-up took ${String(tookMs)}ms to be answered (button read "${label}")`,
+      });
     return {
       value: undefined,
-      evidence: 'a second message from the composer reached the harness and its reply rendered',
+      evidence: `a second message from the composer ("${label}") reached the harness and its reply rendered in ${String(tookMs)}ms`,
     };
   });
 

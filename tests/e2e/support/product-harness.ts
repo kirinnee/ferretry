@@ -720,15 +720,16 @@ export function assertNoSoftFailures(journey: string): void {
 export async function reapLeftovers(environment: E2eEnvironment, journey: string): Promise<readonly string[]> {
   const tmux = Bun.which('tmux');
   if (tmux !== null) {
-    const ended = Bun.spawn([tmux, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], {
+    Bun.spawnSync([tmux, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], {
       stdout: 'ignore',
       stderr: 'ignore',
     });
-    await ended.exited;
   }
   await Bun.sleep(300);
-  const listed = Bun.spawn(['pgrep', '-af', environment.paths.root], { stdout: 'pipe', stderr: 'ignore' });
-  const lines = (await new Response(listed.stdout).text())
+  // Synchronous: see `closeChromeBounded` — an async spawn can lose its epoll registration under load.
+  const listed = Bun.spawnSync(['pgrep', '-af', environment.paths.root], { stdout: 'pipe', stderr: 'ignore' });
+  const lines = listed.stdout
+    .toString()
     .split('\n')
     .map(line => line.trim())
     .filter(line => line !== '' && !line.includes('pgrep') && !/\btmux\b/u.test(line))

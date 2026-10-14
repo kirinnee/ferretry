@@ -1063,8 +1063,12 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
 export async function closeChromeBounded(close: () => Promise<void>): Promise<void> {
   const closed = await Promise.race([close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(() => false);
   if (closed) return;
-  const children = Bun.spawn(['pgrep', '-P', String(process.pid), '-f', 'chrom'], { stdout: 'pipe', stderr: 'ignore' });
-  for (const pid of (await new Response(children.stdout).text())
+  const children = Bun.spawnSync(['pgrep', '-P', String(process.pid), '-f', 'chrom'], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+  for (const pid of children.stdout
+    .toString()
     .split('\n')
     .map(Number)
     .filter(n => Number.isInteger(n) && n > 1)) {
