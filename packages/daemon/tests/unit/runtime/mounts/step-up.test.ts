@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { MAX_PASSKEYS_PER_DEVICE, STEP_UP_TTL_SECONDS, stepUpRefusalCode } from '@ferretry/protocol';
+import {
+  MAX_PASSKEYS_PER_DEVICE,
+  PASSKEY_CHALLENGE_TTL_SECONDS,
+  STEP_UP_TTL_SECONDS,
+  stepUpRefusalCode,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
@@ -56,10 +61,11 @@ class MemoryStore implements PasskeyStore {
     this.held = [...this.held.filter(existing => existing.credentialId !== passkey.credentialId), passkey];
   }
 
-  async updateSignCount(id: string, credentialId: string, signCount: number): Promise<void> {
+  async updateSignCount(id: string, credentialId: string, signCount: number): Promise<boolean> {
     this.held = this.held.map(passkey =>
       passkey.deviceId === id && passkey.credentialId === credentialId ? { ...passkey, signCount } : passkey,
     );
+    return true;
   }
 
   async forgetDevice(id: string): Promise<void> {
@@ -208,9 +214,10 @@ describe('step-up routes', () => {
       createdAt: new Date(NOW).toISOString(),
     });
     should(store.held.map(passkey => passkey.credentialId)).deepEqual([CREDENTIAL_ID]);
-    should(jsonBody(during)).containEql({
-      registration: 'stepped-up',
-      stepUpUntil: new Date(NOW + STEP_UP_TTL_SECONDS * 1_000).toISOString(),
+    // A registration grants no step-up, and a second passkey now needs a confirmation by this one.
+    should(jsonBody(during)).deepEqual({
+      passkeys: [{ id: CREDENTIAL_ID, origin: ORIGIN, createdAt: new Date(NOW).toISOString() }],
+      registration: 'confirm-existing',
     });
     should(stepOptions.status).equal(200);
     should(jsonBody(stepOptions)).containEql({ rpId: 'app.example.test' });
@@ -422,12 +429,16 @@ describe('step-up routes', () => {
         }),
       );
 
-    // Act — a browser on a host-proven carrier, on a loopback peer, behind a spoofed header; then the owner
+    // Act — a browser on a host-proven carrier, on a loopback peer, behind a spoofed header; the admin
+    // token arriving from off the host; then the owner
     const refused = [
       await asBrowser({ loopback: true, privilegedLoopback: true }),
       await asBrowser({ loopback: true }),
       await asBrowser({ headers: lookalike }),
     ];
+    const remoteAdmin = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/passkeys/registration-window', body: windowBody, headers: admin }),
+    );
     const before = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
     const opened = await reopenAsOwner(dispatcher);
     const after = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
@@ -440,9 +451,10 @@ describe('step-up routes', () => {
       }),
     );
 
-    // Assert
-    for (const response of refused)
-      should([response.status, jsonBody(response).code]).deepEqual([403, stepUpRefusalCode('not-at-machine')]);
+    // Assert — two layers: the boundary refuses every browser before the handler runs (the route is
+    // admin-token only), and the service still refuses the admin token that did not arrive on the host.
+    for (const response of refused) should([response.status, jsonBody(response).code]).deepEqual([403, 'forbidden']);
+    should([remoteAdmin.status, jsonBody(remoteAdmin).code]).deepEqual([403, stepUpRefusalCode('not-at-machine')]);
     should(jsonBody(before)).containEql({ registration: 'closed' });
     should(opened.status).equal(200);
     should(jsonBody(opened)).containEql({ deviceId, deviceName: 'Pixel 8' });
@@ -462,14 +474,70 @@ describe('step-up routes', () => {
     const registered = await dispatcher.dispatch(
       request({ method: 'POST', path: '/v1/passkeys', body: registrationBody, ...asDevice }),
     );
-    // Another copy of the app on the same device holds no step-up: the window, not the step-up, is asked.
+    // Spent: from any copy of the app, a further passkey now needs a confirmation by this one.
     const otherTab = await dispatcher.dispatch(
       request({ path: '/v1/passkeys', device: { deviceId, appSession: 'app-two' } }),
     );
 
     // Assert
     should(registered.status).equal(201);
-    should(jsonBody(otherTab)).containEql({ registration: 'closed' });
+    should(jsonBody(otherTab)).containEql({ registration: 'confirm-existing' });
+  });
+
+  it('should refuse a second passkey with no confirmation, step-up or not: 401 step_up_not_verified', async () => {
+    // Arrange — the device holds a passkey and a live step-up from it
+    const { surface, store } = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), pairedAgoMs: 3_600_000 });
+    const dispatcher = await surface;
+    await dispatcher.dispatch(request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asDevice }));
+    await dispatcher.dispatch(request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }));
+
+    // Act
+    const options = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, ...asDevice }),
+    );
+    const unconfirmed = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/passkeys', body: registrationBody, ...asDevice }),
+    );
+
+    // Assert
+    should(options.status).equal(200);
+    should(jsonBody(options)).containEql({
+      confirm: {
+        challenge: b64(new Array(32).fill(7)),
+        rpId: 'app.example.test',
+        allowCredentials: [{ type: 'public-key', id: CREDENTIAL_ID }],
+        timeout: PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
+      },
+    });
+    should([unconfirmed.status, jsonBody(unconfirmed).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
+    should(store.held).have.length(1);
+  });
+
+  it('should add a second passkey confirmed by the first, in one ceremony', async () => {
+    // Arrange
+    const { surface, store } = mount({
+      store: new MemoryStore([stored(b64([5, 5, 5, 5]))]),
+      pairedAgoMs: 3_600_000,
+    });
+    const dispatcher = await surface;
+
+    // Act
+    await dispatcher.dispatch(request({ method: 'POST', path: '/v1/passkeys/options', body: originBody, ...asDevice }));
+    const confirmed = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/passkeys',
+        body: json({
+          ...JSON.parse(registrationBody),
+          confirmation: { ...JSON.parse(assertionBody), credentialId: b64([5, 5, 5, 5]) },
+        }),
+        ...asDevice,
+      }),
+    );
+
+    // Assert
+    should(confirmed.status).equal(201);
+    should(store.held.map(passkey => passkey.credentialId)).deepEqual([b64([5, 5, 5, 5]), CREDENTIAL_ID]);
   });
 
   it('should keep one copy of the app’s step-up from covering another’s', async () => {
@@ -486,8 +554,8 @@ describe('step-up routes', () => {
     );
 
     // Assert
-    should(jsonBody(same)).containEql({ registration: 'stepped-up' });
-    should(jsonBody(otherTab)).containEql({ registration: 'closed' });
+    should(jsonBody(same)).containEql({ stepUpUntil: new Date(NOW + STEP_UP_TTL_SECONDS * 1_000).toISOString() });
+    should(jsonBody(otherTab)).not.have.property('stepUpUntil');
     should(store.held).have.length(1);
   });
 });

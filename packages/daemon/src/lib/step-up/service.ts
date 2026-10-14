@@ -8,6 +8,8 @@ import {
   type PasskeysView,
   type PasskeyView,
   type PasskeyWindowOpened,
+  type PushNotificationPayload,
+  PushNotificationPayloadSchema,
   type StepUpAssertion,
   type StepUpGranted,
   type StepUpOptions,
@@ -45,8 +47,16 @@ export interface StepUpServiceDeps {
   readonly allowedOrigins: () => readonly string[];
   /** What the authenticator shows as the relying party's name. */
   readonly relyingPartyName: string;
-  /** Where the owner re-opening a registration window is written down. */
+  /**
+   * Where the owner re-opening a registration window, an added passkey and a refused counter are written
+   * down — the grant journal, until the audit log lands.
+   */
   readonly audit: Pick<GrantAuditPort, 'record'>;
+  /**
+   * Tells the owner's other devices a passkey was added. Best effort: a notice that cannot be delivered
+   * never undoes the registration, which the journal has already recorded.
+   */
+  readonly announce?: (notice: PushNotificationPayload) => Promise<unknown>;
 }
 
 const CHALLENGE_BYTES = 32;
@@ -70,11 +80,18 @@ export const relyingPartyIdFor = (origin: string): string => new URL(origin).hos
  * finer reason is deliberately collapsed into `not-verified`, because "which check failed" helps an
  * attacker tune a forgery and helps nobody else.
  *
- * WHO MAY ADD A PASSKEY is the rule that keeps a thief holding an unlocked app from adding their own:
- * a copy of the app holding a current step-up, a device with none yet inside the ten minutes after it
- * was paired — the moment its owner is holding it — or a device whose window the OWNER re-opened at the
- * machine. A browser is never the owner, wherever it runs (B4), so that last path is the recovery: a
- * device that missed its first window or lost its authenticator is not locked out.
+ * WHO MAY ADD A PASSKEY is the rule that keeps a thief holding an unlocked app — or code in the page —
+ * from adding their own: a device with none yet inside the ten minutes after it was paired (the moment
+ * its owner is holding it); a device whose window the OWNER re-opened at the machine; or a device that
+ * proves, in the same ceremony, a passkey it already holds. A browser is never the owner, wherever it
+ * runs (B4), so the re-opened window is the recovery for a device that missed its first window or lost
+ * its authenticator.
+ *
+ * HOLDING A STEP-UP ADDS NOTHING, and a registration GRANTS nothing. With attestation `none` nothing in
+ * a registration proves an authenticator exists — page code can build one with WebCrypto, flags and all —
+ * so a registration authorized by a held step-up let page code mint a passkey and step up with it later
+ * without the owner. What page code cannot build is a signature by a passkey this daemon already holds,
+ * over a challenge issued for THIS registration; that is the binding.
  */
 export class StepUpService {
   /** Registration windows the owner re-opened, by device: when each closes. Spent by one passkey. */
@@ -136,8 +153,15 @@ export class StepUpService {
     if (passkeys.length >= MAX_PASSKEYS_PER_DEVICE) return refuse('too-many-passkeys');
     const record = await this.deps.devices.device(device.deviceId);
     if (record === undefined) return refuse('not-a-device');
+    // The passkeys that can answer here: a passkey asserts only at the origin it was made at.
+    const usable = passkeys.filter(passkey => passkey.origin === origin);
+    if (registration.kind === 'confirm-existing' && usable.length === 0) return refuse('no-passkey');
     const challenge = this.deps.random.bytes(CHALLENGE_BYTES);
     this.deps.challenges.issue(device, 'register', challenge, now);
+    const confirm =
+      registration.kind === 'confirm-existing'
+        ? this.#confirmOptions(device, origin, usable, challenge, now)
+        : undefined;
     return {
       ok: true,
       value: {
@@ -153,6 +177,7 @@ export class StepUpService {
         pubKeyCredParams: PASSKEY_ALGORITHMS.map(alg => ({ type: 'public-key' as const, alg })),
         timeout: PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
         excludeCredentials: passkeys.map(passkey => ({ type: 'public-key' as const, id: passkey.credentialId })),
+        ...(confirm === undefined ? {} : { confirm }),
       },
     };
   }
@@ -163,12 +188,22 @@ export class StepUpService {
     const now = this.deps.clock.nowMs();
     // Spent FIRST, whatever happens next: a challenge is answered once, so a refused attempt cannot be
     // retried against the same one.
+    // Both are spent, and the confirmation only pairs with the registration challenge it was issued with.
     const challenge = this.deps.challenges.take(device, 'register', now);
+    const confirmChallenge = this.deps.challenges.takeConfirmation(device, challenge ?? new Uint8Array(0), now);
     const passkeys = await this.deps.store.list(device.deviceId);
     // Asked again rather than trusted from the options call: the window can close in between.
-    if ((await this.#registration(device, passkeys, now)).kind === 'closed') return refuse('registration-closed');
+    const kind = (await this.#registration(device, passkeys, now)).kind;
+    if (kind === 'closed') return refuse('registration-closed');
     if (passkeys.length >= MAX_PASSKEYS_PER_DEVICE) return refuse('too-many-passkeys');
     if (challenge === undefined) return refuse('not-verified');
+    // A device that already holds a passkey proves it first. Nothing else this caller holds — a session,
+    // a step-up, a live tab — stands in for it.
+    if (kind === 'confirm-existing') {
+      if (registration.confirmation === undefined || confirmChallenge === undefined) return refuse('not-verified');
+      const confirmed = await this.#verifyAssertion(device, passkeys, registration.confirmation, confirmChallenge, now);
+      if (!confirmed) return refuse('not-verified');
+    }
     const clientDataJSON = fromBase64Url(registration.clientDataJSON);
     const attestationObject = fromBase64Url(registration.attestationObject);
     if (clientDataJSON === null || attestationObject === null) return refuse('not-verified');
@@ -198,9 +233,16 @@ export class StepUpService {
     await this.deps.store.add(stored);
     // A re-opened window admits ONE passkey: the owner opened it for a recovery, not for a session.
     this.#reopened.delete(device.deviceId);
-    // The authenticator just verified the person against a fresh challenge from this daemon, which is
-    // exactly what a step-up is — so asking again for the act they registered for would be theatre.
-    this.deps.registry.grant(device, now);
+    // NO STEP-UP IS GRANTED. A registration proves nothing about the person (see the class comment), so
+    // an act straight after one asks for a step-up like any other act.
+    await this.deps.audit.record({
+      actor: caller.actor ?? `device:${device.deviceId}`,
+      changes: [`passkey.added=${device.deviceId}`],
+      at: instant(now),
+    });
+    const record = await this.deps.devices.device(device.deviceId);
+    if (this.deps.announce !== undefined && record !== undefined)
+      await this.deps.announce(passkeyAddedNotice(record.name)).catch(() => undefined);
     return { ok: true, value: passkeyView(stored) };
   }
 
@@ -233,26 +275,7 @@ export class StepUpService {
     const challenge = this.deps.challenges.take(device, 'step-up', now);
     if (challenge === undefined) return refuse('not-verified');
     const passkeys = await this.deps.store.list(device.deviceId);
-    const credential = passkeys.find(passkey => secretsMatch(passkey.credentialId, assertion.credentialId));
-    if (credential === undefined) return refuse('not-verified');
-    const clientDataJSON = fromBase64Url(assertion.clientDataJSON);
-    const authenticatorData = fromBase64Url(assertion.authenticatorData);
-    const signature = fromBase64Url(assertion.signature);
-    const publicKeySpki = fromBase64Url(credential.publicKeySpki);
-    if (clientDataJSON === null || authenticatorData === null || signature === null || publicKeySpki === null)
-      return refuse('not-verified');
-    const verdict = await this.deps.verifier.verifyAssertion({
-      clientDataJSON,
-      authenticatorData,
-      signature,
-      expectedChallenge: challenge,
-      // Only the origin this passkey was made at: an assertion relayed through another allowed copy of
-      // the app is a different relying party and is refused by the rpId check anyway.
-      allowedOrigins: this.deps.allowedOrigins().filter(origin => origin === credential.origin),
-      credential: { algorithm: credential.algorithm, publicKeySpki, signCount: credential.signCount },
-    });
-    if (!verdict.ok) return refuse('not-verified');
-    await this.deps.store.updateSignCount(device.deviceId, credential.credentialId, verdict.signCount);
+    if (!(await this.#verifyAssertion(device, passkeys, assertion, challenge, now))) return refuse('not-verified');
     return { ok: true, value: { expiresAt: instant(this.deps.registry.grant(device, now)) } };
   }
 
@@ -264,21 +287,99 @@ export class StepUpService {
     await this.deps.store.forgetDevice(deviceId);
   }
 
+  /** The `register-confirm` challenge, issued bound to this registration's, and the options it travels in. */
+  #confirmOptions(
+    device: StepUpSubject,
+    origin: string,
+    usable: readonly StoredPasskey[],
+    registration: Uint8Array,
+    nowMs: number,
+  ): StepUpOptions {
+    const challenge = this.deps.random.bytes(CHALLENGE_BYTES);
+    this.deps.challenges.issue(device, 'register-confirm', challenge, nowMs, registration);
+    return {
+      challenge: toBase64Url(challenge),
+      rpId: relyingPartyIdFor(origin),
+      allowCredentials: usable.map(passkey => ({ type: 'public-key' as const, id: passkey.credentialId })),
+      timeout: PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
+    };
+  }
+
+  /**
+   * One assertion by a passkey THIS device holds, against `challenge`, its counter moved by the store's
+   * compare-and-set. A counter that did not move — stalled, rewound, or beaten by a concurrent assertion
+   * from another copy of the app — refuses, and is written down, because it is the one sign a cloned
+   * authenticator leaves.
+   */
+  async #verifyAssertion(
+    device: StepUpSubject,
+    passkeys: readonly StoredPasskey[],
+    assertion: StepUpAssertion,
+    challenge: Uint8Array,
+    nowMs: number,
+  ): Promise<boolean> {
+    const credential = passkeys.find(passkey => secretsMatch(passkey.credentialId, assertion.credentialId));
+    if (credential === undefined) return false;
+    const clientDataJSON = fromBase64Url(assertion.clientDataJSON);
+    const authenticatorData = fromBase64Url(assertion.authenticatorData);
+    const signature = fromBase64Url(assertion.signature);
+    const publicKeySpki = fromBase64Url(credential.publicKeySpki);
+    if (clientDataJSON === null || authenticatorData === null || signature === null || publicKeySpki === null)
+      return false;
+    const verdict = await this.deps.verifier.verifyAssertion({
+      clientDataJSON,
+      authenticatorData,
+      signature,
+      expectedChallenge: challenge,
+      // Only the origin this passkey was made at: an assertion relayed through another allowed copy of
+      // the app is a different relying party and is refused by the rpId check anyway.
+      allowedOrigins: this.deps.allowedOrigins().filter(origin => origin === credential.origin),
+      credential: { algorithm: credential.algorithm, publicKeySpki, signCount: credential.signCount },
+    });
+    const moved =
+      verdict.ok &&
+      (await this.deps.store.updateSignCount(device.deviceId, credential.credentialId, verdict.signCount));
+    if (moved) return true;
+    if (verdict.ok || verdict.reason === 'counter-not-increased')
+      await this.deps.audit.record({
+        actor: `device:${device.deviceId}`,
+        changes: [`passkey.counter-refused=${device.deviceId}`],
+        at: instant(nowMs),
+      });
+    return false;
+  }
+
   async #registration(
     device: StepUpSubject,
     passkeys: readonly StoredPasskey[],
     nowMs: number,
   ): Promise<{ readonly kind: PasskeysView['registration']; readonly closesAtMs?: number }> {
-    if (this.deps.registry.held(device, nowMs)) return { kind: 'stepped-up' };
     const reopened = this.#reopened.get(device.deviceId);
     if (reopened !== undefined && reopened > nowMs) return { kind: 'reopened', closesAtMs: reopened };
     if (reopened !== undefined) this.#reopened.delete(device.deviceId);
-    if (passkeys.length > 0) return { kind: 'closed' };
+    if (passkeys.length > 0) return { kind: 'confirm-existing' };
     const record = await this.deps.devices.device(device.deviceId);
     if (record === undefined) return { kind: 'closed' };
     const closesAtMs = Date.parse(record.createdAt) + PASSKEY_REGISTRATION_WINDOW_SECONDS * 1_000;
     return closesAtMs > nowMs ? { kind: 'first-window', closesAtMs } : { kind: 'closed' };
   }
+}
+
+/**
+ * What the owner's devices are told when a passkey is added, naming the device it was added to. Never
+ * an id, a key or an origin: the person needs "was that me?", and a stranger reading a lock screen
+ * needs nothing more.
+ */
+export function passkeyAddedNotice(deviceName: string): PushNotificationPayload {
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: 'passkey-added',
+    title: 'A passkey was added',
+    body: `${deviceName} has a new passkey for this machine. If that was not you, revoke the device at the machine.`,
+    tag: 'passkey-added',
+    url: '/',
+    count: 1,
+  });
 }
 
 const passkeyView = (passkey: StoredPasskey): PasskeyView => ({

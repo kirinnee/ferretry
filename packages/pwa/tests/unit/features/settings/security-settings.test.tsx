@@ -24,6 +24,12 @@ const view = (over: Partial<PasskeysView> = {}): PasskeysView => ({
   ...over,
 });
 
+const CONFIRM = {
+  challenge: 'BBBB',
+  rpId: 'ferretry.example.test',
+  allowCredentials: [{ type: 'public-key' as const, id: 'QUJD' }],
+  timeout: 60_000,
+};
 const OPTIONS = {
   challenge: 'AAAA',
   rp: { id: 'ferretry.example.test', name: 'Ferretry' },
@@ -47,13 +53,14 @@ const machine = (
   lists: readonly (PasskeysView | Error)[],
   ledger: Ledger = { paths: [], bodies: [] },
   registerFailure?: Error,
+  options: object = OPTIONS,
 ): (() => Promise<StepUpClient>) => {
   let reads = 0;
   const client = {
     request: async (path: string, _schema: unknown, init?: RequestInit) => {
       ledger.paths.push(`${init?.method ?? 'GET'} ${path}`);
       if (init?.body !== undefined) ledger.bodies.push(JSON.parse(String(init.body)));
-      if (path === '/v1/passkeys/options') return OPTIONS;
+      if (path === '/v1/passkeys/options') return options;
       if (path === '/v1/passkeys' && init?.method === 'POST') {
         if (registerFailure !== undefined) throw registerFailure;
         return PASSKEY;
@@ -67,13 +74,27 @@ const machine = (
   return async () => client;
 };
 
-const credentials = (result: Credential | null | Error): (() => CredentialsPort) => {
+const assertion = {
+  rawId: buffer(9, 8),
+  response: { clientDataJSON: buffer(6), authenticatorData: buffer(7), signature: buffer(8) },
+} as unknown as Credential;
+
+const credentials = (
+  result: Credential | null | Error,
+  held: Credential | null | Error = assertion,
+  order: string[] = [],
+): (() => CredentialsPort) => {
   return () => ({
     create: async () => {
+      order.push('create');
       if (result instanceof Error) throw result;
       return result;
     },
-    get: async () => null,
+    get: async () => {
+      order.push('get');
+      if (held instanceof Error) throw held;
+      return held;
+    },
   });
 };
 
@@ -114,7 +135,7 @@ const press = async (surface: ReactTestRenderer, marker: string): Promise<void> 
 describe('SecuritySurface', () => {
   it('lists this device’s passkeys from the origin and date, and says what a passkey costs', async () => {
     // Arrange / Act
-    const surface = await mountSurface(machine([view({ passkeys: [PASSKEY], registration: 'stepped-up' })]));
+    const surface = await mountSurface(machine([view({ passkeys: [PASSKEY], registration: 'confirm-existing' })]));
 
     // Assert
     should(marked(surface, 'data-security-passkey')).have.length(1);
@@ -153,7 +174,7 @@ describe('SecuritySurface', () => {
     // Arrange
     const ledger: Ledger = { paths: [], bodies: [] };
     const surface = await mountSurface(
-      machine([view(), view({ passkeys: [PASSKEY], registration: 'stepped-up' })], ledger),
+      machine([view(), view({ passkeys: [PASSKEY], registration: 'confirm-existing' })], ledger),
     );
 
     // Act
@@ -179,7 +200,7 @@ describe('SecuritySurface', () => {
 
     // Assert
     should(marked(surface, 'data-security-add')).be.empty();
-    expect(text(surface)).toContain('needs a recent passkey confirmation');
+    expect(text(surface)).toContain('ask the owner to run `fy passkey window <this device>` at the machine');
     run(() => surface.unmount());
   });
 
@@ -205,12 +226,85 @@ describe('SecuritySurface', () => {
     run(() => surface.unmount());
   });
 
-  it('says nothing about a closing time once a step-up is what allows the registration', async () => {
+  it('says nothing about a closing time when a held passkey is what allows the registration', async () => {
     // Arrange / Act
-    const surface = await mountSurface(machine([view({ registration: 'stepped-up' })]));
+    const surface = await mountSurface(machine([view({ registration: 'confirm-existing' })]));
 
     // Assert
     should(marked(surface, 'data-security-closes')).be.empty();
+    run(() => surface.unmount());
+  });
+
+  it('names the machine beside the button when adding starts with a confirmation', async () => {
+    // Arrange / Act
+    const surface = await mountSurface(machine([view({ passkeys: [PASSKEY], registration: 'confirm-existing' })]), {
+      machineName: 'Kirin box',
+    });
+
+    // Assert
+    should(marked(surface, 'data-security-add')).have.length(1);
+    expect(text(surface)).toContain(
+      'Adding a passkey for Kirin box asks you to confirm with a passkey this device already holds first.',
+    );
+    run(() => surface.unmount());
+  });
+
+  it('names the machine by its address when no name is given', async () => {
+    // Arrange / Act
+    const surface = await mountSurface(machine([view({ passkeys: [PASSKEY], registration: 'confirm-existing' })]));
+
+    // Assert
+    expect(text(surface)).toContain(`Adding a passkey for ${connection.baseUrl} asks you`);
+    run(() => surface.unmount());
+  });
+
+  it('confirms with a held passkey before creating, and registers with the confirmation', async () => {
+    // Arrange
+    const ledger: Ledger = { paths: [], bodies: [] };
+    const order: string[] = [];
+    const surface = await mountSurface(
+      machine(
+        [
+          view({ passkeys: [PASSKEY], registration: 'confirm-existing' }),
+          view({ passkeys: [PASSKEY, { ...PASSKEY, id: 'REVG' }] }),
+        ],
+        ledger,
+        undefined,
+        { ...OPTIONS, confirm: CONFIRM },
+      ),
+      { credentials: credentials(credential, assertion, order) },
+    );
+
+    // Act
+    await press(surface, 'data-security-add');
+
+    // Assert
+    should(order).eql(['get', 'create']);
+    should(ledger.bodies[1]).have.property('confirmation');
+    should(marked(surface, 'data-security-failure')).be.empty();
+    run(() => surface.unmount());
+  });
+
+  it('says one sentence and creates nothing when the confirmation is dismissed', async () => {
+    // Arrange
+    const order: string[] = [];
+    const ledger: Ledger = { paths: [], bodies: [] };
+    const surface = await mountSurface(
+      machine([view({ passkeys: [PASSKEY], registration: 'confirm-existing' })], ledger, undefined, {
+        ...OPTIONS,
+        confirm: CONFIRM,
+      }),
+      { credentials: credentials(credential, named('NotAllowedError'), order) },
+    );
+
+    // Act
+    await press(surface, 'data-security-add');
+
+    // Assert
+    should(order).eql(['get']);
+    should(ledger.paths).not.containEql('POST /v1/passkeys');
+    expect(text(surface)).toContain('did not finish');
+    should(marked(surface, 'data-security-failure')).have.length(1);
     run(() => surface.unmount());
   });
 

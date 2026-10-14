@@ -73,7 +73,7 @@ const stepUpSubsystem = (): StepUpService =>
       list: async () => [],
       holder: async () => undefined,
       add: async () => {},
-      updateSignCount: async () => {},
+      updateSignCount: async () => false,
       forgetDevice: async () => {},
     },
     verifier: {
@@ -468,11 +468,9 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // NOTE WHAT IS ABSENT: `admin-token`, which no route declares any more. The one that did was
-    // `POST /v1/fleet/proposals/:proposalId/authorize`, and it minted the fleet's own approval code.
-    // The class stays in `CredentialMinimum` because the ladder is the daemon's contract rather than
-    // a census of today's table — but a table that used it exactly once, for a mechanism the
-    // capability model already answered, is worth reading as evidence rather than as trivia.
+    // `admin-token` is declared by exactly ONE route: the owner's re-opened passkey window (review L3),
+    // so a paired device is refused at the boundary before the service's own at-the-machine check. The
+    // fleet's old approval-code route used it once too, and is gone.
     // Written as a LABELLED sum, one term per line, and that is the anti-merge device rather than
     // style: a bare `129 + 5 + 1 + 1` invited two changes to each append `+ 1` and produce the same
     // total, which git merges without a conflict — exactly how a route goes missing with this test
@@ -484,10 +482,10 @@ describe('the mounted daemon surface', () => {
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
-      6 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options, and the owner's re-opened window
+      5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
       1; // one device's own grants, changed (B5)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
-    should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes });
+    should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['GET /v1/sessions/:sessionId/attach']);

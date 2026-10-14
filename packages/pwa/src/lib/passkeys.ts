@@ -31,6 +31,8 @@ export interface RegistrationOptionsWire {
   pubKeyCredParams: { type: 'public-key'; alg: number }[];
   timeout?: number;
   excludeCredentials?: { type: 'public-key'; id: string }[];
+  /** Present when this device already holds a passkey: it must answer this assertion first. */
+  confirm?: AssertionOptionsWire;
 }
 
 /** What goes back to the daemon after a registration. */
@@ -38,6 +40,8 @@ export interface RegistrationWire {
   credentialId: string;
   clientDataJSON: string;
   attestationObject: string;
+  /** The assertion that answered the options' `confirm`, when they carried one. */
+  confirmation?: AssertionWire;
 }
 
 /** The daemon's step-up options, as JSON (base64url strings). */

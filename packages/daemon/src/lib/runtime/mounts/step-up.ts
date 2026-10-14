@@ -1,16 +1,16 @@
 /**
  * THE PASSKEY STEP-UP SURFACE (`docs/design/zero-trust.md` B2).
  *
- * Five routes, all for a paired DEVICE and all inside a session its key opened: what this device holds,
- * the two ceremonies (register a passkey, prove one), and their options. The browser runs WebAuthn; the
- * daemon issues the challenge and verifies the answer, so a relay carrying these records can neither
- * forge an assertion nor replay one.
+ * Six routes. Five are for a paired DEVICE, inside a session its key opened: what this device holds, the
+ * two ceremonies (register a passkey, prove one), and their options. The sixth is the owner's re-opened
+ * window. The browser runs WebAuthn; the daemon issues the challenge and verifies the answer, so a relay
+ * carrying these records can neither forge an assertion nor replay one.
  *
  * NO CAPABILITY DEMAND, deliberately. These routes are how a device PROVES itself, and gating the proof
  * behind a grant would let a switched-off capability lock the owner out of the very ceremony that
  * re-opens it. What they hand out is bounded instead: a step-up is fifteen minutes for one running copy
- * of the app, it widens nothing a grant refused, and adding a passkey has its own rule (see
- * `StepUpService`).
+ * of the app, it widens nothing a grant refused, and adding a passkey has its own ceremony — never a
+ * step-up, and never authorized by one (see `StepUpService`).
  *
  * WHO the caller is comes from the session — `request.device`, set by the tunnel that verified the
  * device key — and WHERE it arrived from the boundary's own proof. Neither is ever read from a body.
@@ -51,7 +51,7 @@ const REFUSALS: Readonly<Record<StepUpRefusal, { readonly status: number; readon
   'registration-closed': {
     status: 403,
     message:
-      'a new passkey can only be added within ten minutes of pairing, from a device that has just confirmed with a passkey, or at the machine itself',
+      'a new passkey can only be added within ten minutes of pairing, by confirming with a passkey this device already holds, or after the owner runs `fy passkey window <device>` at the machine',
   },
   'too-many-passkeys': { status: 409, message: 'this device already holds as many passkeys as it may' },
   'no-passkey': { status: 404, message: 'this copy of the app has no passkey for this machine' },
@@ -132,11 +132,12 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
     },
     {
       // The owner's recovery path (B4): a browser is never at the machine, so a device that missed its
-      // first window or lost its authenticator would otherwise never step up again. The service refuses
-      // anybody but the owner, whatever the route's minimum lets through.
+      // first window or lost its authenticator would otherwise never step up again. Two layers: the
+      // boundary admits only the admin token, and the service still refuses anything but the owner on
+      // loopback.
       method: 'POST',
       path: '/v1/passkeys/registration-window',
-      minimum: 'operator',
+      minimum: 'admin-token',
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyWindowRequestSchema);

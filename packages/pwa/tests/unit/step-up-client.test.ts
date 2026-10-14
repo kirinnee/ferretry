@@ -42,7 +42,7 @@ describe('the passkey routes', () => {
   it('should read what this device holds with a GET', async () => {
     // Arrange
     const passkey = { id: 'AQID', origin: ORIGIN, createdAt: INSTANT };
-    const client = clientAnswering({ passkeys: [passkey], registration: 'stepped-up', stepUpUntil: INSTANT });
+    const client = clientAnswering({ passkeys: [passkey], registration: 'confirm-existing', stepUpUntil: INSTANT });
 
     // Act
     const view = await fetchPasskeys(client);
@@ -51,7 +51,7 @@ describe('the passkey routes', () => {
     should(client.calls).have.length(1);
     should(client.calls[0]?.path).equal('/v1/passkeys');
     should(client.calls[0]?.init).eql({ method: 'GET' });
-    should(view).eql({ passkeys: [passkey], registration: 'stepped-up', stepUpUntil: INSTANT });
+    should(view).eql({ passkeys: [passkey], registration: 'confirm-existing', stepUpUntil: INSTANT });
   });
 
   it('should ask for registration options with the app origin as a JSON POST', async () => {
@@ -76,6 +76,47 @@ describe('the passkey routes', () => {
     should(call?.init?.headers).eql({ 'content-type': 'application/json' });
     should(bodyOf(call)).eql({ origin: ORIGIN });
     should(answer.rp.id).equal('ferretry.pages.dev');
+  });
+
+  it('should read the confirm assertion options a device that holds a passkey is given', async () => {
+    // Arrange
+    const client = clientAnswering({
+      challenge: 'AQIDBA',
+      rp: { id: 'ferretry.pages.dev', name: 'Ferretry' },
+      user: { id: 'CQk', name: 'phone', displayName: 'Phone' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      excludeCredentials: [],
+      timeout: 60_000,
+      confirm: {
+        challenge: 'BQYH',
+        rpId: 'ferretry.pages.dev',
+        allowCredentials: [{ type: 'public-key', id: 'qrs' }],
+        timeout: 60_000,
+      },
+    });
+
+    // Act
+    const answer = await passkeyRegistrationOptions(client, ORIGIN);
+
+    // Assert
+    should(answer.confirm?.rpId).equal('ferretry.pages.dev');
+  });
+
+  it('should send a registration with its confirmation assertion as the body', async () => {
+    // Arrange
+    const registration: PasskeyRegistration = {
+      credentialId: 'qrs',
+      clientDataJSON: 'e30',
+      attestationObject: 'oA',
+      confirmation: { credentialId: 'abc', clientDataJSON: 'e30', authenticatorData: 'AQID', signature: 'BAU' },
+    };
+    const client = clientAnswering({ id: 'qrs', origin: ORIGIN, createdAt: INSTANT });
+
+    // Act
+    await registerPasskey(client, registration);
+
+    // Assert
+    should(bodyOf(client.calls[0])).eql(registration);
   });
 
   it('should send a new credential as the body and read back the passkey it became', async () => {

@@ -24,7 +24,8 @@ export const PASSKEY_CHALLENGE_TTL_SECONDS = 120 as const;
  * How long after pairing a device with no passkey yet may register its first one without a step-up.
  *
  * The moment the owner is holding the device. After it, a thief holding an unlocked app cannot add an
- * authenticator of their own: a second passkey needs a current step-up, or the machine itself.
+ * authenticator of their own: a second passkey needs a fresh assertion by one this device already holds
+ * ({@link PasskeyRegistrationOptionsSchema}'s `confirm`), or the owner at the machine.
  */
 export const PASSKEY_REGISTRATION_WINDOW_SECONDS = 600 as const;
 
@@ -59,33 +60,6 @@ export const AppOriginSchema = z
 export const PasskeyOptionsRequestSchema = z.strictObject({ origin: AppOriginSchema });
 export type PasskeyOptionsRequest = z.infer<typeof PasskeyOptionsRequestSchema>;
 
-export const PasskeyRegistrationOptionsSchema = z.strictObject({
-  challenge: Base64UrlSchema(128),
-  rp: z.strictObject({ id: z.string().min(1).max(253), name: z.string().min(1).max(64) }),
-  user: z.strictObject({
-    id: Base64UrlSchema(128),
-    name: z.string().min(1).max(128),
-    displayName: z.string().min(1).max(128),
-  }),
-  pubKeyCredParams: z
-    .array(z.strictObject({ type: z.literal('public-key'), alg: z.number().int() }))
-    .min(1)
-    .max(8),
-  timeout: z.number().int().positive(),
-  excludeCredentials: z
-    .array(z.strictObject({ type: z.literal('public-key'), id: Base64UrlSchema(1_366) }))
-    .max(MAX_PASSKEYS_PER_DEVICE),
-});
-export type PasskeyRegistrationOptions = z.infer<typeof PasskeyRegistrationOptionsSchema>;
-
-/** A new credential, as `navigator.credentials.create` produced it. */
-export const PasskeyRegistrationSchema = z.strictObject({
-  credentialId: Base64UrlSchema(1_366),
-  clientDataJSON: Base64UrlSchema(5_462),
-  attestationObject: Base64UrlSchema(21_846),
-});
-export type PasskeyRegistration = z.infer<typeof PasskeyRegistrationSchema>;
-
 export const StepUpOptionsSchema = z.strictObject({
   challenge: Base64UrlSchema(128),
   rpId: z.string().min(1).max(253),
@@ -106,6 +80,49 @@ export const StepUpAssertionSchema = z.strictObject({
 });
 export type StepUpAssertion = z.infer<typeof StepUpAssertionSchema>;
 
+/**
+ * Options for a new passkey, and — when this device already holds one — the assertion that must come
+ * first (`confirm`).
+ *
+ * ADDING A PASSKEY IS ITS OWN CEREMONY, never a step-up and never authorized by one (zero-trust.md B2).
+ * Code in the page can build an attestation with WebCrypto, so nothing in a registration proves an
+ * authenticator exists; what it cannot build is a signature by a passkey the daemon already trusts. So
+ * a device that holds one must prove it again, against `confirm.challenge`: issued with THIS
+ * registration's challenge, bound to it, and spent with it. The first passkey (the window after
+ * pairing) and the owner's re-opened window carry no `confirm` — there is nothing yet to bind to.
+ */
+export const PasskeyRegistrationOptionsSchema = z.strictObject({
+  challenge: Base64UrlSchema(128),
+  rp: z.strictObject({ id: z.string().min(1).max(253), name: z.string().min(1).max(64) }),
+  user: z.strictObject({
+    id: Base64UrlSchema(128),
+    name: z.string().min(1).max(128),
+    displayName: z.string().min(1).max(128),
+  }),
+  pubKeyCredParams: z
+    .array(z.strictObject({ type: z.literal('public-key'), alg: z.number().int() }))
+    .min(1)
+    .max(8),
+  timeout: z.number().int().positive(),
+  excludeCredentials: z
+    .array(z.strictObject({ type: z.literal('public-key'), id: Base64UrlSchema(1_366) }))
+    .max(MAX_PASSKEYS_PER_DEVICE),
+  confirm: StepUpOptionsSchema.optional(),
+});
+export type PasskeyRegistrationOptions = z.infer<typeof PasskeyRegistrationOptionsSchema>;
+
+/**
+ * A new credential, as `navigator.credentials.create` produced it, with the existing passkey's answer to
+ * the options' `confirm` when they carried one.
+ */
+export const PasskeyRegistrationSchema = z.strictObject({
+  credentialId: Base64UrlSchema(1_366),
+  clientDataJSON: Base64UrlSchema(5_462),
+  attestationObject: Base64UrlSchema(21_846),
+  confirmation: StepUpAssertionSchema.optional(),
+});
+export type PasskeyRegistration = z.infer<typeof PasskeyRegistrationSchema>;
+
 /** A verified step-up: when it lapses. Never a value the browser could present — the daemon holds it. */
 export const StepUpGrantedSchema = z.strictObject({ expiresAt: InstantSchema });
 export type StepUpGranted = z.infer<typeof StepUpGrantedSchema>;
@@ -121,13 +138,14 @@ export type PasskeyView = z.infer<typeof PasskeyViewSchema>;
 /**
  * What this device may do about passkeys right now, so a surface offers only what will work.
  *
- * `registration` says why a new passkey may be added — `first-window` (just paired), `stepped-up` (a
- * current step-up), `reopened` (the owner re-opened a window for this device at the machine) — or that
- * it may not (`closed`); `stepUpUntil` is the current step-up's end, when there is one.
+ * `registration` says how a new passkey may be added — `first-window` (just paired), `confirm-existing`
+ * (by confirming with a passkey this device already holds), `reopened` (the owner re-opened a window for
+ * this device at the machine) — or that it may not (`closed`); `stepUpUntil` is the current step-up's
+ * end, when there is one. A step-up is never one of the ways: holding one adds nothing.
  */
 export const PasskeysViewSchema = z.strictObject({
   passkeys: z.array(PasskeyViewSchema).max(MAX_PASSKEYS_PER_DEVICE),
-  registration: z.enum(['first-window', 'stepped-up', 'reopened', 'closed']),
+  registration: z.enum(['first-window', 'confirm-existing', 'reopened', 'closed']),
   registrationClosesAt: InstantSchema.optional(),
   stepUpUntil: InstantSchema.optional(),
 });
@@ -136,8 +154,8 @@ export type PasskeysView = z.infer<typeof PasskeysViewSchema>;
 /**
  * Why a ceremony was refused, as one closed set a client branches on.
  *
- * Each is a different next step for the person: `registration-closed` means "add it from a device that
- * already has access, or pair again at the machine"; `no-passkey` means this app origin has none;
+ * Each is a different next step for the person: `registration-closed` means "ask the owner to re-open
+ * a window at the machine, or pair again"; `no-passkey` means this app origin has none;
  * `origin-not-allowed` means this copy of the app is not one the machine serves; `not-verified` means
  * the passkey answer did not check out (a stale challenge, a different authenticator, a rewound
  * counter) — never which of those, because the detail helps an attacker and nobody else.

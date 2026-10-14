@@ -402,7 +402,13 @@ challenge is single-use and bound to one device and `appSession`).
   `webauthn.get`; `clientData.origin` is one of the daemon's `corsOrigins`; `rpIdHash` equals
   SHA-256 of that origin's host; flags **UP and UV** are set; the credential belongs to this device;
   the signature verifies over `authenticatorData ‖ SHA-256(clientDataJSON)`; and, when either
-  counter is non-zero, `signCount` increased (a stuck or rewound counter refuses and is audited).
+  counter is non-zero, `signCount` increased. The counter is written by ONE compare-and-set inside the
+  passkey store's serialized write, so two copies of the app that verified against the same stored count
+  cannot both land and the later one cannot rewind it. A stuck, rewound or out-raced counter refuses
+  (`not-verified`) and is written to the grant journal as `passkey.counter-refused=<deviceId>` until the
+  audit log (C) lands.
+- Issued challenges are swept on every issue: an unanswered one lives at most its two minutes, so a
+  device that opens a session per fresh `appSession` and asks once cannot grow the ledger without bound.
 - A verified step-up is held **in the daemon's memory** for `(deviceId, appSession)` for **15
   minutes**. It ends early on revoke, on a daemon restart and when the page closes (a new
   `appSession`). It is never a value the browser holds.
@@ -431,11 +437,46 @@ device that already has access, or ask the owner to run `fy passkey window <this
 machine." Never a raw
 `NotAllowedError`.
 
-**Who may register a passkey**, because a thief holding an unlocked, open app must not be able to add
-their own: (a) a device with **no passkey yet, within 10 minutes of pairing** — the moment the owner
-is holding it; (b) any device **with a current step-up** (adds a second authenticator); (c) a device
-whose window **the owner re-opened at the machine** with `fy passkey window <device>` — ten minutes, one
-passkey, audited (B4). Lost every passkey? That last path recovers it without pairing again.
+**Who may register a passkey**, because a thief holding an unlocked, open app — or code running in the
+page — must not be able to add their own: (a) a device with **no passkey yet, within 10 minutes of
+pairing** — the moment the owner is holding it; (b) a device that **already holds a passkey, by
+confirming with it in the same ceremony**; (c) a device whose window **the owner re-opened at the
+machine** with `fy passkey window <device>` — ten minutes, one passkey, audited (B4). Lost every passkey?
+That last path recovers it without pairing again. `PasskeysView.registration` reports which applies:
+`first-window`, `confirm-existing`, `reopened` or `closed`.
+
+**Adding a second passkey is its own ceremony** (review M3). With attestation `none` nothing in a
+registration proves an authenticator exists: page code (XSS, a malicious deploy) can make a key pair with
+WebCrypto and build `clientDataJSON` and the attestation itself, UP and UV flags included. What it cannot
+build is a signature by a passkey this daemon already holds. So for rule (b):
+
+- `POST /v1/passkeys/options` answers the registration options **and** `confirm` — step-up-shaped options
+  whose challenge is issued for this registration only: purpose `register-confirm`, single-use, two
+  minutes, bound to `(deviceId, appSession)` and to this registration's own challenge. Asking again
+  replaces both, so a confirmation from an earlier options call is refused.
+- The app runs the assertion, then the creation, in one press of **Add a passkey**, and sends
+  `POST /v1/passkeys` with the new credential plus `confirmation` (the assertion). The daemon spends both
+  challenges first, then verifies the confirmation exactly as a step-up (this device's credential, its
+  origin, UP and UV, the counter's compare-and-set), and only then the new credential.
+- A missing, stale, wrong-purpose (a step-up's challenge) or other-device confirmation answers
+  `not-verified`. **Holding a step-up opens nothing**: it is not one of the rules.
+
+**A registration is never a step-up.** It used to grant one, on the reasoning that the authenticator had
+just verified the person; but a registration proves nothing about the person (above), so a first-window
+registration from page code was a step-up with no real user verification. Now an act straight after
+registering asks for a step-up like any other act.
+
+**Declared: the two windows have nothing to bind to.** Rules (a) and (c) carry no `confirm`, because the
+device holds no usable passkey yet. Page code present in the page during the ten minutes after pairing, or
+during a window the owner re-opened, can still register a software passkey and step up with it later
+without the owner. The windows are short and the owner opened each one.
+
+**An added passkey is announced.** Every registration is written to the grant journal as
+`passkey.added=<deviceId>`, and the daemon sends one notification ("A passkey was added — ‹device› has a
+new passkey for this machine. If that was not you, revoke the device at the machine.") to every enrolled
+browser through the existing push path. It is best effort: a notice that cannot be delivered never undoes
+the registration. A device that never enrolled for notifications is not told; the audit-log alert path
+(C) is where a durable alert belongs.
 
 **A credential belongs to exactly one device.** A step-up only accepts a credential stored for the device
 whose session presents it, and a registration refuses a credential id ANY device already holds. So a
@@ -451,8 +492,9 @@ passkey over.
   which runs the registration ceremony above against the app's own origin and re-reads the list.
 - **The button is offered only when it would work**: the machine reports `registration` other than
   `closed`, and the browser can run WebAuthn at all (the API exists and the page is a secure context).
-  Otherwise one sentence says why — the ten-minute first-passkey rule, "confirm a change first" for a
-  second one, or that this address cannot hold passkeys. Every refusal and ceremony failure is one
+  For `confirm-existing`, one sentence beside it names the machine and says the add starts with a
+  confirmation by a passkey this device already holds. Otherwise one sentence says why — the ten-minute
+  first-passkey rule and `fy passkey window`, or that this address cannot hold passkeys. Every refusal and ceremony failure is one
   plain sentence; no status or error name reaches the screen.
 - **After pairing**, a device with no passkey for a machine sees one dismissible line pointing at that
   panel. It is read once per machine, never polled, hidden on Settings itself, and not shown when

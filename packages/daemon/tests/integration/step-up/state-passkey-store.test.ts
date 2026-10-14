@@ -95,8 +95,8 @@ describe('StatePasskeyStore', () => {
     await store.add(passkey('cred-other', deviceTwo));
 
     // Act
-    await store.updateSignCount(deviceOne, 'cred-one', 42);
-    await store.updateSignCount(deviceTwo, 'cred-two', 99);
+    const moved = await store.updateSignCount(deviceOne, 'cred-one', 42);
+    const misnamed = await store.updateSignCount(deviceTwo, 'cred-two', 99);
 
     // Assert — the pair names one row: another device's counter is untouched, and a credential id
     // that belongs to a different device than the one named is not updated
@@ -105,6 +105,44 @@ describe('StatePasskeyStore', () => {
       ['cred-two', 0],
     ]);
     should((await store.list(deviceTwo)).map(entry => entry.signCount)).deepEqual([0]);
+    should([moved, misnamed]).deepEqual([true, false]);
+  });
+
+  it('should compare-and-set the counter: never rewind or stall it, but let a counterless authenticator stay at zero', async () => {
+    // Arrange
+    const { store } = await fixture('passkeys-sign-count-cas');
+    await store.add(passkey('cred-one'));
+    await store.add(passkey('cred-zero'));
+
+    // Act
+    const forward = await store.updateSignCount(deviceOne, 'cred-one', 7);
+    const stuck = await store.updateSignCount(deviceOne, 'cred-one', 7);
+    const rewound = await store.updateSignCount(deviceOne, 'cred-one', 6);
+    const counterless = await store.updateSignCount(deviceOne, 'cred-zero', 0);
+
+    // Assert
+    should([forward, stuck, rewound, counterless]).deepEqual([true, false, false, true]);
+    should((await store.list(deviceOne)).map(entry => [entry.credentialId, entry.signCount])).deepEqual([
+      ['cred-one', 7],
+      ['cred-zero', 0],
+    ]);
+  });
+
+  it('should let only one of two concurrent assertions verified against the same count land, and never rewind', async () => {
+    // Two tabs of one device verified against stored 0; one reports 7, the other 6 (review L2).
+    // Arrange
+    const { store } = await fixture('passkeys-sign-count-race');
+    await store.add(passkey('cred-one'));
+
+    // Act — both in flight at once, the higher one first
+    const [seven, six] = await Promise.all([
+      store.updateSignCount(deviceOne, 'cred-one', 7),
+      store.updateSignCount(deviceOne, 'cred-one', 6),
+    ]);
+
+    // Assert
+    should([seven, six]).deepEqual([true, false]);
+    should((await store.list(deviceOne)).map(entry => entry.signCount)).deepEqual([7]);
   });
 
   it('should bind a credential id to the device that registered it, and never re-point it to another', async () => {
@@ -134,9 +172,10 @@ describe('StatePasskeyStore', () => {
     await store.add(passkey('cred-one'));
 
     // Act
-    await store.updateSignCount(deviceOne, 'vanished', 7);
+    const moved = await store.updateSignCount(deviceOne, 'vanished', 7);
 
     // Assert
+    should(moved).be.false();
     should(await store.list(deviceOne)).deepEqual([passkey('cred-one')]);
   });
 

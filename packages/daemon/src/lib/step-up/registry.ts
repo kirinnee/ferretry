@@ -1,4 +1,5 @@
 import { PASSKEY_CHALLENGE_TTL_SECONDS, STEP_UP_TTL_SECONDS } from '@ferretry/protocol';
+import { bytesEqual } from '@ferretry/relay';
 
 /** One running copy of the app on one device: what a step-up and a challenge are bound to. */
 export interface StepUpSubject {
@@ -111,12 +112,18 @@ export class StepUpRegistry {
   }
 }
 
-/** What a challenge was issued for. A registration challenge answers no assertion, and back. */
-export type ChallengePurpose = 'register' | 'step-up';
+/**
+ * What a challenge was issued for. A registration challenge answers no assertion, and back; and a
+ * `register-confirm` challenge — the existing passkey's answer that a later registration needs — is
+ * bound to the one registration challenge it was issued with, so neither can be spent on its own.
+ */
+export type ChallengePurpose = 'register' | 'register-confirm' | 'step-up';
 
 interface IssuedChallenge {
   readonly bytes: Uint8Array;
   readonly expiresAtMs: number;
+  /** The registration challenge a `register-confirm` was issued with. */
+  readonly boundTo?: Uint8Array;
 }
 
 /**
@@ -124,16 +131,25 @@ interface IssuedChallenge {
  * purpose, two minutes each, spent by the first answer whether it verifies or not.
  *
  * ONE AT A TIME, deliberately. Asking again replaces the outstanding challenge, so a page that opened
- * the prompt twice cannot hold two live ones, and the ledger is bounded by the number of live sessions
- * rather than by how often somebody asks.
+ * the prompt twice cannot hold two live ones. That alone bounds nothing — a device can open a session
+ * per fresh `appSession`, ask once and leave — so every issue also SWEEPS the lapsed ones: what the
+ * ledger holds is bounded by the challenges issued in the last two minutes.
  */
 export class ChallengeLedger {
   readonly #issued = new Map<string, IssuedChallenge>();
 
-  issue(subject: StepUpSubject, purpose: ChallengePurpose, bytes: Uint8Array, nowMs: number): void {
+  issue(
+    subject: StepUpSubject,
+    purpose: ChallengePurpose,
+    bytes: Uint8Array,
+    nowMs: number,
+    boundTo?: Uint8Array,
+  ): void {
+    for (const [id, issued] of this.#issued) if (issued.expiresAtMs <= nowMs) this.#issued.delete(id);
     this.#issued.set(`${purpose}\u0000${key(subject)}`, {
       bytes,
       expiresAtMs: nowMs + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
+      ...(boundTo === undefined ? {} : { boundTo }),
     });
   }
 
@@ -142,14 +158,34 @@ export class ChallengeLedger {
    * judged against it exactly once — or nothing when there is none or it lapsed.
    */
   take(subject: StepUpSubject, purpose: ChallengePurpose, nowMs: number): Uint8Array | undefined {
-    const id = `${purpose}\u0000${key(subject)}`;
-    const issued = this.#issued.get(id);
-    this.#issued.delete(id);
-    if (issued === undefined || issued.expiresAtMs <= nowMs) return undefined;
+    return this.#take(subject, purpose, nowMs)?.bytes;
+  }
+
+  /**
+   * The outstanding `register-confirm` challenge, removed in the same call, and only when it was issued
+   * with THIS registration challenge: a confirmation left over from an earlier options call is spent
+   * and refused, never paired with a newer registration.
+   */
+  takeConfirmation(subject: StepUpSubject, registration: Uint8Array, nowMs: number): Uint8Array | undefined {
+    const issued = this.#take(subject, 'register-confirm', nowMs);
+    if (issued?.boundTo === undefined || !bytesEqual(issued.boundTo, registration)) return undefined;
     return issued.bytes;
+  }
+
+  /** How many challenges are outstanding, lapsed ones included until the next issue sweeps them. */
+  get size(): number {
+    return this.#issued.size;
   }
 
   forgetDevice(deviceId: string): void {
     for (const id of [...this.#issued.keys()]) if (id.split('\u0000')[1] === deviceId) this.#issued.delete(id);
+  }
+
+  #take(subject: StepUpSubject, purpose: ChallengePurpose, nowMs: number): IssuedChallenge | undefined {
+    const id = `${purpose}\u0000${key(subject)}`;
+    const issued = this.#issued.get(id);
+    this.#issued.delete(id);
+    if (issued === undefined || issued.expiresAtMs <= nowMs) return undefined;
+    return issued;
   }
 }

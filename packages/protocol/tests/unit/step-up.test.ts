@@ -26,9 +26,32 @@ const stepUpCases: SchemaCase[] = [
     },
   },
   {
+    name: 'registration options that ask an existing passkey to confirm first',
+    schema: stepUp.PasskeyRegistrationOptionsSchema,
+    value: {
+      challenge: CHALLENGE,
+      rp: { id: 'app.ferretry.test', name: 'Ferretry' },
+      user: { id: 'dXNlcg', name: 'phone', displayName: 'Phone' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      timeout: 120_000,
+      excludeCredentials: allow,
+      confirm: { challenge: CHALLENGE, rpId: 'app.ferretry.test', allowCredentials: allow, timeout: 120_000 },
+    },
+  },
+  {
     name: 'registration',
     schema: stepUp.PasskeyRegistrationSchema,
     value: { credentialId: CREDENTIAL, clientDataJSON: 'e30', attestationObject: 'o2Nm' },
+  },
+  {
+    name: 'registration confirmed by an existing passkey',
+    schema: stepUp.PasskeyRegistrationSchema,
+    value: {
+      credentialId: CREDENTIAL,
+      clientDataJSON: 'e30',
+      attestationObject: 'o2Nm',
+      confirmation: { credentialId: CREDENTIAL, clientDataJSON: 'e30', authenticatorData: 'YQ', signature: 'c2ln' },
+    },
   },
   {
     name: 'step-up options',
@@ -61,7 +84,7 @@ const stepUpCases: SchemaCase[] = [
     schema: stepUp.PasskeysViewSchema,
     value: {
       passkeys: [{ id: CREDENTIAL, origin: ORIGIN, createdAt: INSTANT }],
-      registration: 'stepped-up',
+      registration: 'confirm-existing',
       stepUpUntil: LATER_INSTANT,
     },
   },
@@ -100,6 +123,12 @@ describe('the passkey step-up wire', () => {
         name: 'an unknown registration posture',
         schema: stepUp.PasskeysViewSchema,
         value: { passkeys: [], registration: 'open' },
+      },
+      // A held step-up no longer opens registration (review M3), so its posture is gone for good.
+      {
+        name: 'the retired stepped-up posture',
+        schema: stepUp.PasskeysViewSchema,
+        value: { passkeys: [], registration: 'stepped-up' },
       },
       // A browser is never the owner (B4), so the posture that said "you are the host" is gone for good.
       {

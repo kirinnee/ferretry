@@ -1319,7 +1319,7 @@ const HARNESS_PASSKEYS: PasskeysView = {
     { id: 'Ab'.repeat(16), origin: 'https://ferretry.example.test', createdAt: '2025-12-20T18:22:00.000Z' },
     { id: 'Cd'.repeat(16), origin: 'https://ferretry.example.test', createdAt: '2025-12-28T09:05:00.000Z' },
   ],
-  registration: 'stepped-up',
+  registration: 'confirm-existing',
   stepUpUntil: '2026-01-01T00:15:00.000Z',
 };
 

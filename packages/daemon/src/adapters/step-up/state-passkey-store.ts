@@ -79,12 +79,21 @@ export class StatePasskeyStore implements PasskeyStore {
     });
   }
 
-  async updateSignCount(deviceId: string, credentialId: string, signCount: number): Promise<void> {
+  /**
+   * The counter's compare-and-set, inside the serialized write: the comparison and the write see the
+   * same document, so two assertions verified against one stored count cannot both land.
+   */
+  async updateSignCount(deviceId: string, credentialId: string, signCount: number): Promise<boolean> {
+    let moved = false;
     await this.mutate(current =>
-      current.map(passkey =>
-        passkey.deviceId === deviceId && passkey.credentialId === credentialId ? { ...passkey, signCount } : passkey,
-      ),
+      current.map(passkey => {
+        if (passkey.deviceId !== deviceId || passkey.credentialId !== credentialId) return passkey;
+        if (passkey.signCount >= signCount && (passkey.signCount !== 0 || signCount !== 0)) return passkey;
+        moved = true;
+        return { ...passkey, signCount };
+      }),
     );
+    return moved;
   }
 
   async forgetDevice(deviceId: string): Promise<void> {
