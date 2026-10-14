@@ -54,6 +54,7 @@ import {
 } from '../../src/App.tsx';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
+import { themePreferences } from '../../src/hooks/use-theme.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -878,6 +879,9 @@ describe('AppShell', () => {
     // layout and a session page kept the old scheme until a reload.
     const listeners = new Set<(event: MediaQueryListEvent) => void>();
     const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    // The tab-wide store outlives each file: an earlier one may have left it on Dark.
+    const mode = themePreferences.snapshot().mode;
+    themePreferences.setMode('system');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -904,6 +908,7 @@ describe('AppShell', () => {
     } finally {
       if (original) Object.defineProperty(window, 'matchMedia', original);
       else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'matchMedia');
+      themePreferences.setMode(mode);
     }
   });
 
