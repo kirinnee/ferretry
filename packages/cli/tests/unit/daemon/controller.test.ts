@@ -1741,3 +1741,37 @@ describe('daemon remedies name the client that was typed', () => {
     should(subject.out.text).containEql('run zz daemon restart to use the installed daemon');
   });
 });
+
+describe('DaemonController with no daemon executable', () => {
+  it.each([
+    { verb: 'start', run: (controller: DaemonController) => controller.start() },
+    { verb: 'install', run: (controller: DaemonController) => controller.install() },
+    { verb: 'restart', run: (controller: DaemonController) => controller.restart() },
+  ])('should refuse $verb before taking any lifecycle claim', async ({ run }) => {
+    // Arrange — the claim is host-wide, so waiting for it behind another invocation could cost the
+    // whole 140-second budget only to end in "cannot find fyd", which was knowable at the start.
+    const { controller, lifecycle } = harness({
+      probes: [undefined],
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act + Assert
+    await should(run(controller)).be.rejectedWith(/cannot find fyd on PATH/u);
+    should(lifecycle.requests).be.empty();
+  });
+
+  it('should still let start report a daemon that is already serving', async () => {
+    // Arrange — a serving daemon needs no executable, so the early check must not refuse it.
+    const { controller, lifecycle, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert
+    should(out.text).equal('ok: fyd is already serving (pid 4242)');
+    should(lifecycle.requests).not.be.empty();
+  });
+});

@@ -208,9 +208,12 @@ describe('registerSessionCommands · start', () => {
 
     // Assert
     should(failure).be.instanceof(CommanderError);
-    should(help).containEql('an agent runtime (`foo runtimes`), such as claude-auto-default');
+    // The example is the runtime a first run actually creates. It used to name claude-auto-default, which
+    // no import makes, and call claude-default — the one it does make, as an agent — "not an agent".
+    should(help).containEql('an agent runtime (`foo runtimes`), such as claude-default.');
+    should(help).not.containEql('claude-auto-default');
     should(help).containEql(
-      '(such as claude-default) is for using the tool yourself in a terminal and cannot run sessions, in either --mode',
+      'A runtime that is not an agent is for using the tool yourself in a terminal and cannot run sessions, in either --mode',
     );
     should(subject.api.calls).be.empty();
   });

@@ -23,6 +23,14 @@ import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model
 import { projectPickerOptions } from './daemon-picker-model.ts';
 import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
 
+/**
+ * The agent runtime a first run makes for Claude Code — the example a person can actually type.
+ *
+ * Spelled here rather than imported: `importedRuntimeName` lives in the fleet package's root, which
+ * pulls Node modules into a browser bundle. `new-session-page.test.tsx` holds this to that function.
+ */
+const FIRST_RUN_RUNTIME = 'claude-default';
+
 export interface NewSessionPageProps {
   /** The concrete daemon selected by pairing and matched by the current route. */
   readonly connection: DaemonConnection;
@@ -289,7 +297,7 @@ export function NewSessionPage({
                 className="kt-input w-full font-mono"
                 id={fieldId('agent')}
                 onChange={event => update('agent', event.target.value)}
-                placeholder="e.g. claude-auto-default"
+                placeholder={`e.g. ${FIRST_RUN_RUNTIME}`}
                 value={draft.agent}
               />
             ) : usage === undefined ? (
@@ -515,7 +523,7 @@ function AccountRosterField({ store, usage, usageError, ...field }: AccountRoste
       noAccounts={field.noAccounts}
       onAccountChosen={field.onAccountChosen}
       onValueChange={field.onValueChange}
-      placeholder="e.g. claude-auto-default"
+      placeholder={`e.g. ${FIRST_RUN_RUNTIME}`}
       preselect={true}
       {...(field.preferred === undefined ? {} : { preferred: field.preferred })}
       sessionCapableOnly={true}
