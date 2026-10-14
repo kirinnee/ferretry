@@ -79,9 +79,11 @@ import {
   type ServiceWorkerUpdateEnvironment,
   canRegister,
   useServiceWorkerUpdate,
+  workerUrl,
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
+import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
@@ -113,7 +115,13 @@ import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from './lib/pin-bridge.ts';
-import { type PushEnrolment, type PushRegistrationLike, supportsWebPush } from './lib/push-enrolment.ts';
+import {
+  type ContainerPushEnrolment,
+  containerPushEnrolment,
+  type PairedPushMachine,
+  type PushContainerLike,
+  supportsWebPush,
+} from './lib/push-enrolment.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { StoreProvider, useAppStore, useConnectionSnapshot } from './lib/store.tsx';
 import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
@@ -228,7 +236,21 @@ export const browserNotificationSurface = (
   navigate,
 });
 
-export const browserPushEnrolment = (): PushEnrolment | null => {
+/** The reader's label for a paired daemon, which its push worker titles every notification with. */
+export const pushMachineLabel = (records: readonly DaemonConnectionRecord[], daemon: DaemonId): string => {
+  const record = records.find(candidate => candidate.daemonId === daemon);
+  return record === undefined ? String(daemon) : daemonDisplayName(record);
+};
+
+/** Every paired daemon by its label, for the push reconcile. */
+export const pairedPushMachines = (records: readonly DaemonConnectionRecord[]): readonly PairedPushMachine[] =>
+  records.map(record => ({ daemonId: record.daemonId, label: daemonDisplayName(record) }));
+
+/**
+ * Web Push through ONE registration per paired daemon (`lib/push-scope.ts`): each of the signed worker
+ * file, at that daemon's own scope, titled with the reader's label for it.
+ */
+export const browserPushEnrolment = (label: (daemon: DaemonId) => string): ContainerPushEnrolment | null => {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
   if (
     !supportsWebPush({
@@ -238,16 +260,13 @@ export const browserPushEnrolment = (): PushEnrolment | null => {
     })
   )
     return null;
-  return {
-    registration: async () => {
-      const registration = await navigator.serviceWorker.getRegistration();
-      if (registration === undefined || !('pushManager' in registration)) {
-        throw new Error('this build has no active service worker registration');
-      }
-      return registration as unknown as PushRegistrationLike;
-    },
-    deviceName: () => 'Ferretry PWA',
-  };
+  return containerPushEnrolment({
+    container: navigator.serviceWorker as unknown as PushContainerLike,
+    origin: window.location.origin,
+    workerUrl: workerUrl(RELEASE_WORKER_RELEASE),
+    label,
+    deviceName: 'Ferretry PWA',
+  });
 };
 
 const NotificationControlsContext = createContext<NotificationControlsHost | null>(null);
@@ -1366,15 +1385,28 @@ export function AppShell() {
   const release = useReleaseIntegrity(releaseEnvironment);
 
   const notificationSurface = useMemo(() => browserNotificationSurface(navigate, setPermission), [navigate]);
+  // The label is read at enrolment time, so a push worker is always titled with the reader's CURRENT
+  // name for its machine; the reconcile below re-labels the ones already registered and drops the
+  // workers of machines this browser no longer pairs with.
+  const pushEnrolment = useMemo(
+    () => browserPushEnrolment(daemon => pushMachineLabel(store.connections.list(), daemon)),
+    [store.connections],
+  );
+  const pairedMachines = pairedPushMachines(connectionSnapshot.connections);
+  const pairedKey = pairedMachines.map(machine => `${machine.daemonId}\u0000${machine.label}`).join('\u0001');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the joined ids and labels are the deliberate trigger
+  useEffect(() => {
+    if (pushEnrolment !== null) void pushEnrolment.reconcile(pairedPushMachines(store.connections.list()));
+  }, [pushEnrolment, pairedKey, store.connections]);
   const notificationControlsHost = useMemo<NotificationControlsHost>(
     () => ({
       preferences: store.notificationPreferences,
       surface: notificationSurface,
       service: store.pushService,
       devices: store.pushDevices,
-      enrolment: browserPushEnrolment(),
+      enrolment: pushEnrolment,
     }),
-    [notificationSurface, store.notificationPreferences, store.pushDevices, store.pushService],
+    [notificationSurface, pushEnrolment, store.notificationPreferences, store.pushDevices, store.pushService],
   );
   const notificationWatchHost = useMemo(
     () => ({

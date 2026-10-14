@@ -18,6 +18,14 @@
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
  *   - push / notificationclick: show a daemon's Web Push notification and open what it names.
  *
+ * ONE FILE, TWO KINDS OF REGISTRATION. The app registers this worker at `/`, and once per machine at
+ * `/push/<daemonId>/` for that machine's own push subscription (`lib/push-scope.ts`). Every copy runs
+ * the same release check over the same storage, so no page escapes it whichever copy controls it. A
+ * per-machine copy knows its machine from its own registration scope — which the page chose, never a
+ * push — and shows only that machine's notifications: titled with the reader's label for it, tagged in
+ * its namespace, and opening only its pages. The app-wide copy shows what reaches it as before, which
+ * after the move to per-machine registrations is nothing a daemon still holds a subscription for.
+ *
  * Three values are compiled in by the build and nothing else: the release public key from
  * `packages/pwa/release-signing-key.pub`, the app's rewrites from `public/_redirects`, and its
  * header rules from `public/_headers`. The key is the ONE anchor: nothing this worker stores is
@@ -26,6 +34,7 @@
 
 import { PushNotificationPayloadSchema, isLoopbackHost } from '@ferretry/protocol';
 import { showGroupedNotification } from '../lib/notify.ts';
+import { machineNotification, notificationUrl, pushMachineOf, unreadablePushTitle } from '../lib/push-scope.ts';
 import { ReleaseKeeper, answerReleaseRequest, parseReleaseRequest } from '../lib/release-keeper.ts';
 import type { ReleaseHeaderRule } from '../lib/release-headers.ts';
 import type { ReleaseRewrite } from '../lib/release-manifest.ts';
@@ -59,8 +68,8 @@ interface WindowClientLike {
   navigate(url: string): Promise<unknown>;
 }
 interface WorkerScope {
-  readonly location: { readonly origin: string; readonly hostname: string };
-  readonly registration: Parameters<typeof showGroupedNotification>[0];
+  readonly location: { readonly origin: string; readonly hostname: string; readonly href: string };
+  readonly registration: Parameters<typeof showGroupedNotification>[0] & { readonly scope: string };
   readonly clients: {
     claim(): Promise<void>;
     matchAll(options: { type: 'window' }): Promise<readonly WindowClientLike[]>;
@@ -76,6 +85,8 @@ interface WorkerScope {
 
 const worker = globalThis as unknown as WorkerScope;
 const origin = worker.location.origin;
+/** The machine this copy serves, or `null` for the app-wide registration. Fixed for the worker's life. */
+const machine = pushMachineOf(worker.registration.scope, worker.location.href);
 
 const network = new FetchReleaseNetwork((input, init) => globalThis.fetch(input, init), origin);
 const keeper = new ReleaseKeeper({
@@ -155,17 +166,20 @@ worker.addEventListener('push', event => {
   // A push the daemon did not compose is still shown, plainly: a subscription that receives a push
   // and shows nothing is penalised by the browser and eventually revoked.
   const shown = parsed.success
-    ? showGroupedNotification(worker.registration, parsed.data)
-    : worker.registration.showNotification('Ferretry', { body: 'Something needs your attention.' });
+    ? showGroupedNotification(
+        worker.registration,
+        machine === null ? parsed.data : machineNotification(parsed.data, machine, origin),
+      )
+    : worker.registration.showNotification(unreadablePushTitle(machine), { body: 'Something needs your attention.' });
   event.waitUntil(Promise.resolve(shown).catch(() => undefined));
 });
 
 worker.addEventListener('notificationclick', event => {
   event.notification.close();
   const data = event.notification.data as { readonly url?: unknown } | undefined;
-  const target = new URL(typeof data?.url === 'string' ? data.url : '/app/', origin);
-  // Only this site's own pages: a notification can never open another origin.
-  const url = target.origin === origin ? target.href : new URL('/app/', origin).href;
+  // Only this site's own pages, and only this machine's: a notification can never open another origin,
+  // and one machine's notification can never open another machine's pages.
+  const url = notificationUrl(data?.url, origin, machine);
   event.waitUntil(
     worker.clients.matchAll({ type: 'window' }).then(async windows => {
       const open = windows[0];

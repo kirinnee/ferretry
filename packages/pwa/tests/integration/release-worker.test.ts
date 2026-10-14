@@ -499,3 +499,121 @@ describe('the signed-release service worker', () => {
     await context.close();
   }, 120_000);
 });
+
+/**
+ * ONE PUSH WORKER PER MACHINE (docs/cross-daemon.md §4b, §4c), through the same built worker.
+ *
+ * Each machine is a registration of the SIGNED `sw.verified.js` at its own scope, labelled in the
+ * script's query — exactly what `containerPushEnrolment` registers. A push is delivered straight to
+ * one registration over the DevTools protocol (`ServiceWorker.deliverPushMessage`), which is the event
+ * a push service would raise, so no real push service is needed. A real subscription per VAPID key
+ * needs one, and is the part this cannot show.
+ */
+describe('per-machine push workers', () => {
+  interface RegistrationSeen {
+    readonly registrationId: string;
+    readonly scopeURL: string;
+    readonly isDeleted?: boolean;
+  }
+
+  const machines = async (context: BrowserContext, page: Page) => {
+    await context.grantPermissions(['notifications'], { origin: origin() });
+    const cdp = await context.newCDPSession(page);
+    const seen = new Map<string, string>();
+    cdp.on('ServiceWorker.workerRegistrationUpdated', (event: { registrations: RegistrationSeen[] }) => {
+      for (const registration of event.registrations) {
+        if (registration.isDeleted === true) seen.delete(registration.scopeURL);
+        else seen.set(registration.scopeURL, registration.registrationId);
+      }
+    });
+    await cdp.send('ServiceWorker.enable');
+    await page.evaluate(async () => {
+      const activate = async (script: string, scope: string): Promise<void> => {
+        const registration = await navigator.serviceWorker.register(script, { scope });
+        const worker = registration.installing ?? registration.waiting ?? registration.active;
+        if (worker === null || worker.state === 'activated') return;
+        await new Promise<void>(resolveActive => {
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'activated') resolveActive();
+          });
+        });
+      };
+      await activate('/sw.verified.js?machine=Work%20laptop', '/push/work/');
+      await activate('/sw.verified.js?machine=Home', '/push/home/');
+    });
+    const idOf = async (path: string): Promise<string> => {
+      for (let attempt = 0; attempt < 100 && !seen.has(`${origin()}${path}`); attempt += 1) {
+        await new Promise(resolveTick => setTimeout(resolveTick, 20));
+      }
+      return seen.get(`${origin()}${path}`) ?? '';
+    };
+    const push = async (path: string, payload: Record<string, unknown>): Promise<void> => {
+      await cdp.send('ServiceWorker.deliverPushMessage', {
+        origin: origin(),
+        registrationId: await idOf(path),
+        data: JSON.stringify({ version: 1, eventKey: `e-${Math.random()}`, body: 'b', count: 1, ...payload }),
+      });
+    };
+    const shown = async (path: string) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const list = await page.evaluate(async scope => {
+          const registration = await navigator.serviceWorker.getRegistration(scope);
+          return (await registration?.getNotifications())?.map(notification => ({
+            title: notification.title,
+            tag: notification.tag,
+            url: (notification.data as { url?: string } | null)?.url,
+          }));
+        }, path);
+        if (list !== undefined && list.length > 0) return list;
+        await new Promise(resolveTick => setTimeout(resolveTick, 20));
+      }
+      return [];
+    };
+    return { push, shown };
+  };
+
+  test('titles each machine’s push with the reader’s label, in its own namespace, opening only its pages', async () => {
+    const { context, page } = await installed(first);
+    const { push, shown } = await machines(context, page);
+
+    await push('/push/work/', { title: 'A new device was paired', tag: 'pairing', url: 'https://evil.test/' });
+    await push('/push/home/', { title: 'Needs you', tag: 'pairing', url: '/d/work/settings' });
+
+    expect(await shown('/push/work/')).toEqual([
+      { title: 'Work laptop · A new device was paired', tag: 'fy-push:work:pairing', url: `${origin()}/d/work` },
+    ]);
+    // Home reused Work's tag and pointed at Work's settings: it replaced nothing and opens only Home.
+    expect(await shown('/push/home/')).toEqual([
+      { title: 'Home · Needs you', tag: 'fy-push:home:pairing', url: `${origin()}/d/home` },
+    ]);
+    await context.close();
+  }, 120_000);
+
+  test('turning one machine off leaves the others delivering', async () => {
+    const { context, page } = await installed(first);
+    const { push, shown } = await machines(context, page);
+
+    const removed = await page.evaluate(
+      async () => (await navigator.serviceWorker.getRegistration('/push/work/'))?.unregister() ?? false,
+    );
+    await push('/push/home/', { title: 'Still here', tag: 't', url: '/' });
+
+    expect(removed).toBe(true);
+    expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length)).toBe(2);
+    expect((await shown('/push/home/')).map(notification => notification.title)).toEqual(['Home · Still here']);
+    await context.close();
+  }, 120_000);
+
+  test('a machine’s worker still answers navigations under its scope from the verified release', async () => {
+    const { context, page } = await installed(first);
+    await machines(context, page);
+    served.set('push/work/x.html', encoded(HOSTILE_PAGE));
+    requests.length = 0;
+
+    await page.goto(`${origin()}/push/work/x.html`);
+
+    expect(await label(page)).toBe('first');
+    expect(requests).not.toContain('navigate /push/work/x.html');
+    await context.close();
+  }, 120_000);
+});

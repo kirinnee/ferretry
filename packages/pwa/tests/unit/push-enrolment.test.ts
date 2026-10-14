@@ -18,6 +18,9 @@ import {
   PUSH_SYNC_FAILED_MESSAGE,
   PUSH_UNREACHABLE_MESSAGE,
   PUSH_UNSUPPORTED_MESSAGE,
+  type ContainerPushEnrolmentDeps,
+  containerPushEnrolment,
+  type MachinePushRegistrationLike,
   type PushEnrolment,
   type PushEnrolmentContext,
   type PushRegistrationLike,
@@ -114,11 +117,22 @@ const service = (
   return { service: { ...base, ...over }, log };
 };
 
-const enrolment = (
-  subscription: PushSubscriptionHandle | null,
-  over: { rejectRegistration?: boolean; subscribed?: PushSubscriptionHandle[] } = {},
-): PushEnrolment => {
-  const registration: PushRegistrationLike = {
+interface EnrolmentOver {
+  readonly rejectRegistration?: boolean;
+  readonly subscribed?: PushSubscriptionHandle[];
+  /** This daemon has no registration of its own yet. */
+  readonly unregistered?: boolean;
+  /** The app-wide registration's subscription, from before per-daemon registrations. */
+  readonly shared?: PushSubscriptionHandle | null;
+  readonly rejectShared?: boolean;
+  /** Every daemon id `register` was called for, and every unregister. */
+  readonly log?: { registered: string[]; unregistered: string[] };
+}
+
+/** A browser with one push registration per daemon; only ONE daemon's subscription is modelled. */
+const enrolment = (subscription: PushSubscriptionHandle | null, over: EnrolmentOver = {}): PushEnrolment => {
+  let exists = over.unregistered !== true;
+  const registration: MachinePushRegistrationLike = {
     pushManager: {
       getSubscription: async () => subscription,
       subscribe: async options => {
@@ -129,12 +143,35 @@ const enrolment = (
         return created;
       },
     },
+    unregister: async () => {
+      over.log?.unregistered.push('unregistered');
+      exists = false;
+      return true;
+    },
+  };
+  const shared: PushRegistrationLike = {
+    pushManager: {
+      getSubscription: async () => {
+        if (over.rejectShared === true) throw new Error('the app-wide worker is gone');
+        return over.shared ?? null;
+      },
+      subscribe: async () => {
+        throw new Error('the app-wide registration never subscribes any more');
+      },
+    },
   };
   return {
-    registration: async () => {
+    register: async daemon => {
       if (over.rejectRegistration === true) throw new Error('no service worker is ready');
+      over.log?.registered.push(daemon);
+      exists = true;
       return registration;
     },
+    existing: async () => {
+      if (over.rejectRegistration === true) throw new Error('no service worker is ready');
+      return exists ? registration : null;
+    },
+    shared: async () => shared,
     deviceName: () => 'this browser',
   };
 };
@@ -284,15 +321,26 @@ describe('enrolDaemonPushDevice', () => {
 });
 
 describe('unsubscribeLocalPush', () => {
-  it('drops the endpoint this browser holds', async () => {
+  it('drops the endpoint this browser holds for THIS daemon, and its registration with it', async () => {
     const unsubscribed: string[] = [];
-    should(await unsubscribeLocalPush(enrolment(subscriptionHandle(unsubscribed)))).be.true();
+    const log = { registered: [], unregistered: [] as string[] };
+    should(
+      await unsubscribeLocalPush(enrolment(subscriptionHandle(unsubscribed), { log }), daemonA.daemonId),
+    ).be.true();
     should(unsubscribed).have.length(1);
+    should(log.unregistered).have.length(1);
   });
 
-  it('is silent about an absent subscription or an unavailable registration', async () => {
-    should(await unsubscribeLocalPush(enrolment(null))).be.false();
-    should(await unsubscribeLocalPush(enrolment(subscriptionHandle(), { rejectRegistration: true }))).be.false();
+  it('is silent about an absent subscription, an absent registration or an unavailable one', async () => {
+    const log = { registered: [], unregistered: [] as string[] };
+    should(await unsubscribeLocalPush(enrolment(null, { log }), daemonA.daemonId)).be.false();
+    should(log.unregistered).have.length(1);
+    should(
+      await unsubscribeLocalPush(enrolment(subscriptionHandle(), { unregistered: true }), daemonA.daemonId),
+    ).be.false();
+    should(
+      await unsubscribeLocalPush(enrolment(subscriptionHandle(), { rejectRegistration: true }), daemonA.daemonId),
+    ).be.false();
   });
 });
 
@@ -538,5 +586,250 @@ describe('revokePushDevice', () => {
     });
 
     should((await revokePushDevice(ctx, DEVICE_A.id)).message).equal(PUSH_REVOKE_FAILED_MESSAGE);
+  });
+});
+
+describe('one subscription per daemon (cross-machine §4b)', () => {
+  it('refuses a refresh for a daemon with no registration of its own, and registers nothing', async () => {
+    const log = { registered: [] as string[], unregistered: [] };
+    await enrolDaemonPushDevice(
+      context({ enrolment: enrolment(null, { unregistered: true, log }) }),
+      false,
+    ).should.be.rejectedWith(/no push subscription/u);
+    should(log.registered).be.empty();
+  });
+
+  it('registers THIS daemon’s own worker when it enrols', async () => {
+    const log = { registered: [] as string[], unregistered: [] };
+    await enrolDaemonPushDevice(context({ enrolment: enrolment(null, { unregistered: true, log }) }), true);
+    should(log.registered).deepEqual(['daemon-a']);
+  });
+
+  it('moves a daemon off the shared subscription on a refresh, dropping it and the device it issued for it', async () => {
+    const sharedGone: string[] = [];
+    const subscribed: PushSubscriptionHandle[] = [];
+    const { service: push, log } = service();
+    const ctx = context({
+      service: push,
+      enrolment: enrolment(null, { unregistered: true, shared: subscriptionHandle(sharedGone), subscribed }),
+    });
+    ctx.devices.remember(daemonA.daemonId, DEVICE_B.id);
+
+    should(await enrolDaemonPushDevice(ctx, false)).deepEqual(DEVICE_A);
+    should(subscribed).have.length(1);
+    should(sharedGone).have.length(1);
+    should(log.revoked).deepEqual([{ daemonId: 'daemon-a', deviceId: DEVICE_B.id }]);
+    should(ctx.devices.get(daemonA.daemonId)).equal(DEVICE_A.id);
+  });
+
+  it('keeps going when the old device cannot be revoked or the shared subscription is unreadable', async () => {
+    const ctx = context({
+      service: service({
+        revoke: async () => {
+          throw new Error('offline');
+        },
+      }).service,
+      enrolment: enrolment(subscriptionHandle(), { rejectShared: true }),
+    });
+    ctx.devices.remember(daemonA.daemonId, DEVICE_B.id);
+
+    should(await enrolDaemonPushDevice(ctx, false)).deepEqual(DEVICE_A);
+  });
+
+  it('revokes nothing when the daemon answers with the device it already issued', async () => {
+    const { service: push, log } = service();
+    const ctx = context({ service: push });
+    ctx.devices.remember(daemonA.daemonId, DEVICE_A.id);
+
+    await enrolDaemonPushDevice(ctx, false);
+    should(log.revoked).be.empty();
+  });
+
+  it('turns ONE daemon off without touching the shared or any other subscription', async () => {
+    const sharedGone: string[] = [];
+    const log = { registered: [], unregistered: [] as string[] };
+    const ctx = context({
+      enrolment: enrolment(subscriptionHandle(), { shared: subscriptionHandle(sharedGone), log }),
+    });
+    ctx.devices.remember(daemonA.daemonId, DEVICE_A.id);
+
+    await disablePushDelivery(ctx);
+    should(log.unregistered).have.length(1);
+    should(sharedGone).be.empty();
+  });
+});
+
+/* ---------- the container binding ------------------------------------------ */
+
+interface FakeWorker {
+  state: string;
+  scriptURL: string;
+  listeners: (() => void)[];
+  addEventListener(type: 'statechange', listener: () => void): void;
+  removeEventListener(type: 'statechange', listener: () => void): void;
+}
+
+const fakeWorker = (scriptURL: string, state = 'activated'): FakeWorker => {
+  const worker: FakeWorker = {
+    state,
+    scriptURL,
+    listeners: [],
+    addEventListener: (_type, listener) => worker.listeners.push(listener),
+    removeEventListener: (_type, listener) => {
+      worker.listeners = worker.listeners.filter(candidate => candidate !== listener);
+    },
+  };
+  return worker;
+};
+
+const advance = (worker: FakeWorker, state: string): void => {
+  worker.state = state;
+  for (const listener of [...worker.listeners]) listener();
+};
+
+interface FakeRegistration {
+  scope: string;
+  active: FakeWorker | null;
+  installing: FakeWorker | null;
+  waiting: FakeWorker | null;
+  unsubscribed: number;
+  unregistered: number;
+  hasSubscription: boolean;
+  pushManager: PushRegistrationLike['pushManager'];
+  unregister(): Promise<boolean>;
+}
+
+const ORIGIN = 'https://app.example.test';
+
+const fakeRegistration = (scope: string, active: FakeWorker | null, hasSubscription = true): FakeRegistration => {
+  const registration: FakeRegistration = {
+    scope: new URL(scope, ORIGIN).href,
+    active,
+    installing: null,
+    waiting: null,
+    unsubscribed: 0,
+    unregistered: 0,
+    hasSubscription,
+    pushManager: {
+      getSubscription: async () =>
+        registration.hasSubscription
+          ? {
+              ...subscriptionHandle(),
+              unsubscribe: async () => {
+                registration.unsubscribed += 1;
+                return true;
+              },
+            }
+          : null,
+      subscribe: async () => subscriptionHandle(),
+    },
+    unregister: async () => {
+      registration.unregistered += 1;
+      return true;
+    },
+  };
+  return registration;
+};
+
+const containerFor = (
+  existing: FakeRegistration[],
+  onRegister: (url: string, scope: string) => unknown = (url, scope) =>
+    fakeRegistration(scope, fakeWorker(new URL(url, ORIGIN).href)),
+) => {
+  const registered: { url: string; scope: string }[] = [];
+  const deps: ContainerPushEnrolmentDeps = {
+    container: {
+      register: async (url, options) => {
+        registered.push({ url, scope: options.scope });
+        return onRegister(url, options.scope);
+      },
+      getRegistrations: async () => [...existing, { scope: 'not a registration' }],
+    },
+    origin: ORIGIN,
+    workerUrl: '/sw.verified.js',
+    label: daemon => (daemon === daemonA.daemonId ? 'Work laptop' : 'Studio'),
+    deviceName: 'Ferretry PWA',
+  };
+  return { enrolment: containerPushEnrolment(deps), registered };
+};
+
+describe('containerPushEnrolment', () => {
+  it('registers the signed worker at the daemon’s own scope, labelled with the reader’s name for it', async () => {
+    const { enrolment: browser, registered } = containerFor([]);
+
+    const registration = await browser.register(daemonA.daemonId);
+
+    should(registered).deepEqual([{ url: '/sw.verified.js?machine=Work%20laptop', scope: '/push/daemon-a/' }]);
+    should((registration as unknown as FakeRegistration).scope).equal(`${ORIGIN}/push/daemon-a/`);
+    should(browser.deviceName()).equal('Ferretry PWA');
+  });
+
+  it('waits for a freshly installed worker to activate before it can subscribe', async () => {
+    const installing = fakeWorker(`${ORIGIN}/sw.verified.js`, 'installing');
+    const { enrolment: browser } = containerFor([], (_url, scope) => ({
+      ...fakeRegistration(scope, null),
+      installing,
+    }));
+
+    const pending = browser.register(daemonA.daemonId);
+    advance(installing, 'installed');
+    advance(installing, 'activated');
+
+    should(await pending).be.ok();
+    should(installing.listeners).be.empty();
+  });
+
+  it('refuses a worker that never starts, and a registration that cannot hold a subscription', async () => {
+    const dying = fakeWorker(`${ORIGIN}/sw.verified.js`, 'installing');
+    const redundant = containerFor([], (_url, scope) => ({ ...fakeRegistration(scope, null), waiting: dying }));
+    const pending = redundant.enrolment.register(daemonA.daemonId);
+    advance(dying, 'redundant');
+    await pending.should.be.rejectedWith(/did not start/u);
+
+    const none = containerFor([], (_url, scope) => fakeRegistration(scope, null));
+    await none.enrolment.register(daemonA.daemonId).should.be.rejectedWith(/did not start/u);
+
+    const bare = containerFor([], () => ({}));
+    await bare.enrolment.register(daemonA.daemonId).should.be.rejectedWith(/cannot hold a push subscription/u);
+  });
+
+  it('finds a daemon’s own registration and the app-wide one by their exact scopes', async () => {
+    const own = fakeRegistration('/push/daemon-a/', fakeWorker(`${ORIGIN}/sw.verified.js?machine=Work%20laptop`));
+    const app = fakeRegistration('/', fakeWorker(`${ORIGIN}/sw.verified.js`));
+    const { enrolment: browser } = containerFor([app, own]);
+
+    should(await browser.existing(daemonA.daemonId)).equal(own);
+    should(await browser.existing(daemonB.daemonId)).be.null();
+    should(await browser.shared()).equal(app);
+    should(await containerFor([own]).enrolment.shared()).be.null();
+  });
+
+  it('reconciles: drops an unpaired daemon’s worker, re-labels a renamed one, leaves the rest', async () => {
+    const app = fakeRegistration('/', fakeWorker(`${ORIGIN}/sw.verified.js`));
+    const kept = fakeRegistration('/push/daemon-a/', fakeWorker(`${ORIGIN}/sw.verified.js?machine=Work%20laptop`));
+    const renamed = fakeRegistration('/push/daemon-b/', null);
+    renamed.waiting = fakeWorker(`${ORIGIN}/sw.verified.js?machine=Old%20name`);
+    const gone = fakeRegistration('/push/daemon-c/', null);
+    gone.installing = fakeWorker(`${ORIGIN}/sw.verified.js`);
+    const silent = fakeRegistration('/push/daemon-d/', fakeWorker(`${ORIGIN}/sw.verified.js`), false);
+    const { enrolment: browser, registered } = containerFor([app, kept, renamed, gone, silent]);
+
+    await browser.reconcile([
+      { daemonId: daemonA.daemonId, label: 'Work laptop' },
+      { daemonId: daemonB.daemonId, label: 'Studio' },
+    ]);
+
+    should(registered).deepEqual([{ url: '/sw.verified.js?machine=Studio', scope: '/push/daemon-b/' }]);
+    should([gone.unsubscribed, gone.unregistered]).deepEqual([1, 1]);
+    should([silent.unsubscribed, silent.unregistered]).deepEqual([0, 1]);
+    should([kept.unregistered, app.unregistered]).deepEqual([0, 0]);
+  });
+
+  it('swallows a reconcile the browser refuses', async () => {
+    const broken = fakeRegistration('/push/daemon-c/', fakeWorker(`${ORIGIN}/sw.verified.js`));
+    broken.unregister = async () => {
+      throw new Error('denied');
+    };
+    await containerFor([broken]).enrolment.reconcile([]);
   });
 });

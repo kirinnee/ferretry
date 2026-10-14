@@ -48,6 +48,8 @@ import {
   browserQrScan,
   installOnce,
   isTextEntryTarget,
+  pairedPushMachines,
+  pushMachineLabel,
   routeAnnouncement,
 } from '../../src/App.tsx';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
@@ -56,7 +58,6 @@ import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
-import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
 import type { DaemonCarrierRouter } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
@@ -2797,47 +2798,105 @@ describe('browserPushEnrolment', () => {
     while (undo.length > 0) undo.pop()?.();
   });
 
-  const supportPush = (getRegistration: () => Promise<unknown>): void => {
+  const supportPush = (container: Record<string, unknown>): void => {
     undo.push(patchGlobal(globalThis, 'isSecureContext', true));
-    undo.push(patchGlobal(navigator, 'serviceWorker', { getRegistration }));
+    undo.push(patchGlobal(navigator, 'serviceWorker', container));
     undo.push(patchGlobal(window, 'PushManager', class {}));
   };
 
   it('declines where this browser cannot do Web Push at all', () => {
     // No secure context, no container, no PushManager: the ordinary state of
     // this suite's document, and of any plain-HTTP page.
-    expect(browserPushEnrolment()).toBeNull();
+    expect(browserPushEnrolment(String)).toBeNull();
   });
 
   it('declines in a secure context that still has no push manager', () => {
     undo.push(patchGlobal(globalThis, 'isSecureContext', true));
-    undo.push(patchGlobal(navigator, 'serviceWorker', { getRegistration: async () => undefined }));
+    undo.push(patchGlobal(navigator, 'serviceWorker', { getRegistrations: async () => [] }));
 
-    expect(browserPushEnrolment()).toBeNull();
+    expect(browserPushEnrolment(String)).toBeNull();
   });
 
-  it('resolves the registration that can hold a subscription', async () => {
+  it('registers the signed worker once per daemon, at that daemon’s scope, under the reader’s label', async () => {
+    const registered: { url: string; scope: string }[] = [];
     const registration = {
+      scope: `${window.location.origin}/push/alpha/`,
+      active: { state: 'activated', scriptURL: '' },
+      installing: null,
+      waiting: null,
       pushManager: { getSubscription: async () => null, subscribe: async () => ({}) },
-    } as unknown as PushRegistrationLike;
-    supportPush(async () => registration);
+      unregister: async () => true,
+    };
+    supportPush({
+      register: async (url: string, options: { scope: string }) => {
+        registered.push({ url, scope: options.scope });
+        return registration;
+      },
+      getRegistrations: async () => [registration],
+    });
 
-    const enrolment = must(browserPushEnrolment(), 'the push enrolment');
+    const enrolment = must(
+      browserPushEnrolment(daemon => `label for ${daemon}`),
+      'the push enrolment',
+    );
 
-    expect(await enrolment.registration()).toBe(registration);
+    expect(await enrolment.register(daemonId('alpha'))).toBe(registration as never);
+    expect(registered).toEqual([{ url: '/sw.verified.js?machine=label%20for%20alpha', scope: '/push/alpha/' }]);
+    expect(await enrolment.existing(daemonId('alpha'))).toBe(registration as never);
     // The name is what a reader revokes by, on the daemon's device list.
     expect(enrolment.deviceName()).toBe('Ferretry PWA');
   });
+});
 
-  it('refuses a build whose registration cannot carry a subscription', async () => {
-    supportPush(async () => undefined);
-    const missing = must(browserPushEnrolment(), 'the push enrolment');
-    await expect(missing.registration()).rejects.toThrow('no active service worker registration');
-
+describe('one push worker per paired machine', () => {
+  const undo: (() => void)[] = [];
+  afterEach(() => {
     while (undo.length > 0) undo.pop()?.();
-    supportPush(async () => ({}));
-    const unusable = must(browserPushEnrolment(), 'the push enrolment');
-    await expect(unusable.registration()).rejects.toThrow('no active service worker registration');
+  });
+
+  const records = [
+    { ...alpha, label: 'Work laptop', pairedAt: 1, lastSelectedAt: 1 },
+    { ...beta, pairedAt: 2, lastSelectedAt: 2 },
+  ];
+
+  it('titles a machine’s worker with the reader’s label, its address, or its id when unpaired', () => {
+    expect(pushMachineLabel(records, alpha.daemonId)).toBe('Work laptop');
+    expect(pushMachineLabel(records, beta.daemonId)).toBe(beta.baseUrl);
+    expect(pushMachineLabel(records, daemonId('gone'))).toBe('gone');
+    expect(pairedPushMachines(records)).toEqual([
+      { daemonId: alpha.daemonId, label: 'Work laptop' },
+      { daemonId: beta.daemonId, label: beta.baseUrl },
+    ]);
+  });
+
+  it('reconciles the push workers against what this browser pairs with, on open', async () => {
+    const listed: string[] = [];
+    undo.push(patchGlobal(globalThis, 'isSecureContext', true));
+    undo.push(
+      patchGlobal(navigator, 'serviceWorker', {
+        // The release checker and the update chip share this container; neither gets a worker here.
+        controller: null,
+        ready: new Promise(() => undefined),
+        getRegistration: async () => undefined,
+        addEventListener: () => undefined,
+        register: async () => {
+          throw new Error('no worker in this suite');
+        },
+        getRegistrations: async () => {
+          listed.push('listed');
+          return [];
+        },
+      }),
+    );
+    undo.push(patchGlobal(window, 'PushManager', class {}));
+
+    const { view } = await renderShell('/', [alpha.daemonId]);
+    try {
+      await settle();
+      expect(listed.length).toBeGreaterThan(0);
+    } finally {
+      await view.unmount();
+    }
   });
 });
 

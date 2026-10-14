@@ -1,0 +1,110 @@
+/**
+ * ONE PUSH WORKER PER MACHINE (docs/cross-daemon.md §4).
+ *
+ * A browser holds ONE push subscription per service-worker registration, and a subscription is bound
+ * to the VAPID key of the daemon that made it: the push service refuses a push signed by any other
+ * key. With one registration for the whole app, the first machine enrolled became the only one that
+ * could deliver — the others' pushes were refused — and if that machine was broken into, it was the
+ * only voice for every machine's alerts: it could fake "a new device was paired with B" and nothing
+ * real from B would arrive. Turning notifications off for one machine also dropped the shared
+ * subscription for all of them.
+ *
+ * So each machine gets its OWN registration, at the scope `/push/<daemonId>/`, of the SAME signed
+ * worker file (`sw.verified.js`, the one the signed release list names — docs/pwa-release-signing.md).
+ * Its subscription carries that machine's key and nobody else's, and the worker learns which machine
+ * it serves from its own registration scope, which this browser chose — never from a push. It then:
+ *
+ * - prefixes every title with the reader's own label for that machine (carried in the worker script's
+ *   query, so a rename re-registers rather than trusting anything a daemon said);
+ * - keeps every tag inside that machine's namespace, so one machine cannot replace another's
+ *   notification by reusing its tag;
+ * - opens only that machine's own pages (`/d/<daemonId>`), whatever URL the push named.
+ *
+ * Pure: the page and the worker both call these, and neither reads a global here.
+ */
+
+import type { PushNotificationPayload } from '@ferretry/protocol';
+import type { DaemonId } from './daemon-connection.ts';
+import { daemonSessionsPath } from './pages/routes.ts';
+
+/** The path every per-machine push registration lives under. Never a page the app serves. */
+export const PUSH_SCOPE_ROOT = '/push/';
+
+/** The query parameter the worker reads its machine's label from. */
+const LABEL_PARAMETER = 'machine';
+
+/** The registration scope for one machine's push worker, as a path on this origin. */
+export const pushScopePath = (daemon: DaemonId): string => `${PUSH_SCOPE_ROOT}${encodeURIComponent(daemon)}/`;
+
+/** The worker script for one machine's registration: the signed worker, with the reader's label. */
+export const pushWorkerUrl = (workerUrl: string, label: string): string =>
+  `${workerUrl}?${LABEL_PARAMETER}=${encodeURIComponent(label)}`;
+
+/** The machine one push registration serves, as this browser registered it. */
+export interface PushMachine {
+  readonly daemonId: string;
+  /** The reader's label for it; the daemon id when the script named none. */
+  readonly label: string;
+}
+
+/**
+ * Which machine a registration serves, from its scope URL and its script URL — or `null` for the
+ * app's own registration (scope `/`) and anything else that is not a per-machine push scope.
+ */
+export const pushMachineOf = (scope: string, scriptUrl: string): PushMachine | null => {
+  const path = URL.parse(scope)?.pathname ?? '';
+  if (!path.startsWith(PUSH_SCOPE_ROOT)) return null;
+  const segment = path.slice(PUSH_SCOPE_ROOT.length).replace(/\/$/u, '');
+  if (segment === '' || segment.includes('/')) return null;
+  let daemonId: string;
+  try {
+    daemonId = decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+  const label = URL.parse(scriptUrl)?.searchParams.get(LABEL_PARAMETER)?.trim() ?? '';
+  return { daemonId, label: label === '' ? daemonId : label };
+};
+
+/** Whether a registration scope URL is a per-machine push scope. */
+export const isPushScope = (scope: string): boolean => pushMachineOf(scope, scope) !== null;
+
+/** The pages one machine may open: its own sessions page and everything under it. */
+const machinePath = (machine: PushMachine): string => daemonSessionsPath(machine.daemonId as DaemonId);
+
+const withinMachine = (pathname: string, machine: PushMachine): boolean => {
+  const root = machinePath(machine);
+  return pathname === root || pathname.startsWith(`${root}/`);
+};
+
+/**
+ * A push as THIS machine's worker shows it: titled with the reader's label for the machine, tagged
+ * inside its namespace, and pointing only at its own pages. The daemon's own words stay in the body.
+ */
+export const machineNotification = (
+  payload: PushNotificationPayload,
+  machine: PushMachine,
+  origin: string,
+): PushNotificationPayload => ({
+  ...payload,
+  title: `${machine.label} · ${payload.title}`,
+  tag: `fy-push:${encodeURIComponent(machine.daemonId)}:${payload.tag}`,
+  url: notificationUrl(payload.url, origin, machine),
+});
+
+/** What a push nobody composed is shown as, so a subscription is never punished for a silent push. */
+export const unreadablePushTitle = (machine: PushMachine | null): string =>
+  machine === null ? 'Ferretry' : `${machine.label} · Ferretry`;
+
+/**
+ * Where a notification click may go (docs/cross-daemon.md §4a, §4c): only this site, and — for a
+ * machine's own worker — only that machine's pages. Anything else opens that machine's sessions, or
+ * the app itself when the notification belongs to no machine.
+ */
+export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
+  const fallback = new URL(machine === null ? '/app/' : machinePath(machine), origin);
+  const target = typeof raw === 'string' ? URL.parse(raw, origin) : null;
+  if (target === null || target.origin !== origin) return fallback.href;
+  if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
+  return target.href;
+};
