@@ -161,13 +161,15 @@ out**. It is discovery only: a start still launches the absolute wrapper the man
 `packages/daemon` also decides **what every caller but the owner may do**, per capability
 (`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`, `secrets`) and per axis (_use_ /
 _configure_), and **per device**: a governed device gets the daemon-wide grant AND its own record's, and a
-newly paired device holds `fleet.use` only unless its code was minted `fy pair --full` by the owner. **Only
+newly paired device holds every capability unless its code was minted `fy pair --limited` (`fleet.use` only). **Only
 the host's admin token over loopback is ungoverned** (`arrivedOnHost`): a browser on the host is an ordinary
 governed device, because a tunnel or proxy to `127.0.0.1` is indistinguishable from it. "Loopback" means
 how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves, so any check
 reading a peer address, a `Host` header or a URL would hand a remote phone full control. Every "at the
-machine" decision calls `arrivedOnHost`. The daemon-wide defaults are permissive and a **passkey step-up**
-from the paired device guards configure and the terminal/browser/pairing/secrets uses; a grant can only
+machine" decision calls `arrivedOnHost`. **A governed device does nothing until it UNLOCKS the machine with a
+passkey** (owner decision 2026-10-14; on by default, 8 h per device), and while unlocked it may do anything
+its grants allow with no further prompt — the unlock is the step-up that guards configure and the
+terminal/browser/pairing/secrets uses, unless the owner turns on a per-act step-up. A grant can only
 ever narrow what a credential could already do, a device can only pass on what it holds, and an
 undetermined document fails closed. The contract, the widen/narrow asymmetry and the declared GAPs are
 [docs/grants.md](docs/grants.md).
