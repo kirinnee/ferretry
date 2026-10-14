@@ -23,6 +23,7 @@ import {
   mintPairingLink,
   type ProductBrowser,
   type ProductPage,
+  reapLeftovers,
   recordStep,
   softStep,
   assertNoSoftFailures,
@@ -114,9 +115,6 @@ async function withProduct(journey: string, body: (product: Product) => Promise<
       }
       await bootDaemon(environment, boot);
       if (rendezvous !== undefined) await waitForDaemonAtRendezvous(rendezvous);
-      teardown.add('daemon', async () => {
-        await environment.stopDaemon();
-      });
       const browser = await launchProductBrowser(teardown);
       await recordStep({
         journey,
@@ -124,17 +122,23 @@ async function withProduct(journey: string, body: (product: Product) => Promise<
         status: 'PASS',
         evidence: `fyd on ${environment.httpUrl()}, app ${origin.origin}${rendezvous === undefined ? '' : `, direct advertised as the sinkhole ${sinkhole?.origin ?? ''}, rendezvous ${rendezvous.relayUrl}`}`,
       });
-      await body({
-        environment,
-        teardown,
-        origin,
-        tools,
-        browser,
-        boot,
-        ...(rendezvous === undefined || sinkhole === undefined ? {} : { relay: { rendezvous, sinkhole, fingerprint } }),
-      });
-      should(browser.pageErrors).be.empty();
-      should(origin.missingAssets()).be.empty();
+      try {
+        await body({
+          environment,
+          teardown,
+          origin,
+          tools,
+          browser,
+          boot,
+          ...(rendezvous === undefined || sinkhole === undefined ? {} : { relay: { rendezvous, sinkhole, fingerprint } }),
+        });
+        should(browser.pageErrors).be.empty();
+        should(origin.missingAssets()).be.empty();
+      } finally {
+        // Before the fixture removes the root: its tmux socket and its paths are how leftovers are found.
+        await environment.stopDaemon();
+        await reapLeftovers(environment, journey);
+      }
     });
   } finally {
     await teardown.closeAll();
@@ -171,6 +175,34 @@ async function expectScreen(page: ProductPage, selector: string, timeout = 20_00
         `Alerts: ${String(await textNow(page, '[role="alert"]'))}. Rendered: ${(await renderedDataAttributes(page as never)).slice(0, 1_200)}`,
     );
   }
+}
+
+/**
+ * From the first run's opening to the Claude question, through whatever stands between.
+ *
+ * The scan gate (main's operator password) and the tools step each render only after a read, so
+ * checking for either at one instant raced them. This waits for SOME known screen and answers it
+ * until the Claude question is on the glass.
+ */
+async function reachClaudeQuestion(page: ProductPage, journey: string): Promise<void> {
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    const at = await page.evaluate<string>(`(() => {
+      if (document.querySelector('[data-machine-stepper][data-step="claude"] [data-harness-import]')) return 'claude';
+      if (document.querySelector('[data-first-run-locked] [data-change-submit]')) return 'locked';
+      if (document.querySelector('[data-machine-stepper][data-step="tools"] [data-step-next]')) return 'tools';
+      return 'waiting';
+    })()`);
+    if (at === 'claude') return;
+    if (at === 'locked') {
+      await answerPasswordIfAsked(page);
+      await page.click('[data-first-run-locked] [data-change-submit]');
+      await page.waitForSelector('[data-first-run-locked]', { state: 'detached', timeout: 20_000 });
+      await recordStep({ journey, step: 'first-run-scan-gate', status: 'PASS', evidence: 'the scan asked for the operator password and read the machine once given it' });
+    } else if (at === 'tools') await page.click('[data-machine-stepper][data-step="tools"] [data-step-next]');
+    else await Bun.sleep(200);
+  }
+  throw new Error(`the first run never reached the Claude question: ${(await renderedDataAttributes(page as never)).slice(0, 800)}`);
 }
 
 interface CoreOutcome {
@@ -219,18 +251,8 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
         return { value: undefined, evidence: `the first-run stepper opened at ${page.url()} (${open ? 'via Open my fleet' : 'directly'})` };
       });
       await captureScreens(page, journey, '02-first-run-start');
-      // On main the scan itself is a governed read: a device has to give the operator password first.
-      if (await page.evaluate<boolean>(`document.querySelector('[data-first-run-locked]') !== null`)) {
-        await answerPasswordIfAsked(page);
-        await page.click('[data-first-run-locked] [data-change-submit]');
-        await page.waitForSelector('[data-first-run-locked]', { state: 'detached', timeout: 20_000 });
-        await recordStep({ journey, step: 'first-run-scan-gate', status: 'PASS', evidence: 'the scan asked for the operator password and read the machine once given it' });
-      }
-      // The tools step comes first when a tool is missing; both are "installed" here, so it may not.
-      if (await page.evaluate<boolean>(`document.querySelector('[data-machine-stepper][data-step="tools"]') !== null`))
-        await page.click('[data-step-next]');
+      await reachClaudeQuestion(page, journey);
       await step(journey, 'first-run-claude-import', async () => {
-        await expectScreen(page, '[data-machine-stepper][data-step="claude"] [data-harness-import]');
         await captureScreens(page, journey, '03-first-run-claude');
         await page.click('[data-harness-import]');
         return { value: undefined, evidence: 'Claude: Import' };
@@ -445,6 +467,89 @@ async function whatTheScreenSays(page: ProductPage): Promise<string> {
 /** The words a person needs after losing access: that this device must be paired again. */
 const REPAIR_WORDS = /pair(ed)? (this device|it )?again|no longer paired|not paired|pair this (device|browser)/iu;
 
+describe('signing a harness in from the first run', () => {
+  it('should sign Codex in from the first run with the paste-a-link flow', async () => {
+    const journey = 'j04-codex-sign-in';
+    await withProduct(journey, async product => {
+      // Arrange — paired, on the first run, Claude imported.
+      const { environment, browser } = product;
+      const page = browser.page;
+      await pair(product, journey);
+      if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`)) await page.click('[data-onboarding-open-fleet]');
+      await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
+      await reachClaudeQuestion(page, journey);
+      await page.click('[data-harness-import]');
+
+      // Act — Codex: Sign in now → device code → switch to a link → paste the callback address.
+      await softStep(journey, 'codex-sign-in-now', async () => {
+        await expectScreen(page, '[data-machine-stepper][data-step="codex"] [data-harness-sign-in]');
+        await page.click('[data-harness-sign-in]');
+        await expectScreen(page, '[data-first-run-sign-in="codex"]');
+        await captureScreens(page, journey, '50-codex-sign-in-start');
+        await answerPasswordIfAsked(page);
+        await page.click('[data-first-run-sign-in="codex"] [data-change-submit]');
+        await expectScreen(page, '[data-codex-login-user-code]', 30_000);
+        const code = await textNow(page, '[data-codex-login-user-code]');
+        if (code === null || !code.includes('FYE2-E2E01')) throw new Error(`the device code shown is ${String(code)}`);
+        return { value: undefined, evidence: `the panel shows the fake Codex device code ${code}` };
+      });
+      await captureScreens(page, journey, '51-codex-device-code');
+      await softStep(journey, 'codex-paste-link', async () => {
+        await page.click('[data-codex-login-use-link] button');
+        await expectScreen(page, 'textarea[name="codex-login-address"]', 30_000);
+        await captureScreens(page, journey, '52-codex-link');
+        const authorize = await page.evaluate<string | null>(
+          `[...document.querySelectorAll('[data-codex-login] code')].map(node => (node.textContent ?? '').trim()).find(text => text.startsWith('https://auth.openai.com/')) ?? null`,
+        );
+        const state = authorize === null ? null : new URL(authorize).searchParams.get('state');
+        if (state === null) throw new Error(`no authorize link with a state on the panel: ${String(await textNow(page, '[data-codex-login]'))}`);
+        await page.fill('textarea[name="codex-login-address"]', `http://localhost:1455/auth/callback?code=fake-e2e-code&state=${state}`);
+        await page.click('[data-codex-login] button:has-text("Finish sign-in")');
+        // On success the panel says complete and the step re-reads the scan at once, so the panel can be
+        // gone before a poll sees it. The re-read is the durable signal: Codex now reads Signed in.
+        await waitUntil(
+          page,
+          `document.querySelector('[data-codex-login="complete"]') !== null || (document.querySelector('[data-first-run-sign-in="codex"]') === null && /Signed in/.test(document.querySelector('[data-machine-stepper][data-step="codex"]')?.textContent ?? ''))`,
+          45_000,
+          'the Codex sign-in to complete',
+        ).catch(async (error: unknown) => {
+          await page.screenshot({ path: join(EVIDENCE_ROOT, journey, 'fail-codex-paste.png') });
+          throw new Error(`${String((error as Error).message)}. Panel: ${String(await textNow(page, '[data-credential-sign-in]'))}. States: ${await page.evaluate<string>(`[...document.querySelectorAll('[data-codex-login],[data-credential-sign-in]')].map(n => n.getAttribute('data-codex-login') ?? n.getAttribute('data-credential-sign-in')).join(',')`)}`);
+        });
+        return { value: undefined, evidence: `pasted the callback for state ${state.slice(0, 14)}…; the sign-in completed` };
+      });
+      await captureScreens(page, journey, '53-codex-signed-in');
+
+      // Assert — the daemon ran THIS fake, never the host's codex, and the login is now a credential.
+      await softStep(journey, 'codex-credential-recorded', async () => {
+        const invocations = await readFile(product.tools.codexLog, 'utf8').catch(() => '');
+        if (!invocations.includes('login')) throw new Error(`the fake codex never saw a login: ${invocations.slice(0, 300)}`);
+        const credentials = await asOwner(environment, 'GET', '/v1/fleet/credentials');
+        const text = JSON.stringify(credentials.body);
+        if (!/codex/iu.test(text)) throw new Error(`no Codex credential after signing in: ${text.slice(0, 400)}`);
+        if (text.includes('fake-e2e-access') || text.includes('fake-e2e-refresh')) throw new Error('the credentials route returned a token value');
+        return { value: undefined, evidence: `fake codex ran (${String(invocations.trim().split('\\n').length)} invocation(s)); /v1/fleet/credentials lists a Codex login and no token value` };
+      });
+      // A sign-in left pending when the daemon stops must not outlive it.
+      await softStep(
+        journey,
+        'pending-sign-in-ends-with-daemon',
+        async () => {
+          const started = await asOwner(environment, 'POST', '/v1/fleet/login', { credentialId: 'codex-you', method: 'link', operatorPassword: OPERATOR_PASSWORD });
+          if (started.status >= 300) throw new Error(`starting a second sign-in answered ${String(started.status)}: ${JSON.stringify(started.body).slice(0, 200)}`);
+          await Bun.sleep(1_500);
+          await environment.stopDaemon();
+          const left = await reapLeftovers(environment, journey);
+          if (left.length > 0) throw new Error(`still running after fyd stopped: ${left.join(' | ').slice(0, 400)}`);
+          return { value: undefined, evidence: 'a pending Codex sign-in ended with its daemon' };
+        },
+        'fyd shutdown (SIGTERM) does not end a pending harness login child (HarnessLoginService, packages/daemon/src/lib/fleet-login/service.ts, has no shutdown/cancel-all and packages/daemon/bin/fyd.ts:4698 never ends its flows on stop): it is re-parented to init and keeps localhost:1455, so the next Codex sign-in on the machine cannot listen. MAJOR',
+      );
+      assertNoSoftFailures(journey);
+    });
+  }, 600_000);
+});
+
 describe('access ends when it should, and the person is told', () => {
   it('should cut a revoked device off at once, say so, and pair again', async () => {
     const journey = 'j08-revoke';
@@ -635,6 +740,7 @@ describe('one browser, two machines', () => {
         await recordStep({ journey, step: 'clone-shows-commands', status: 'SKIP', evidence: 'clone A→B with every hook/MCP command shown needs #468' });
         await recordStep({ journey, step: 'per-machine-notifications', status: 'SKIP', evidence: 'Web Push delivery needs a push service; headless Chrome has none on loopback (see memory: CDP push delivery drops)' });
         await second.stopDaemon();
+        await reapLeftovers(second, journey);
       });
       assertNoSoftFailures(journey);
     });

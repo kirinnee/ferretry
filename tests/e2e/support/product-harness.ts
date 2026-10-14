@@ -610,3 +610,46 @@ export function assertNoSoftFailures(journey: string): void {
   const failures = softFailures.get(journey) ?? [];
   if (failures.length > 0) throw new Error(`${journey} — ${String(failures.length)} step(s) failed:\n${failures.join('\n')}`);
 }
+
+/**
+ * After the daemon has stopped: end its private tmux server, then find anything else still running
+ * from this journey's root — and say so, because a child that outlives its daemon is a product
+ * finding (the first one found was a `codex login` holding localhost:1455 after fyd's SIGTERM).
+ *
+ * The private tmux server is EXPECTED to outlive fyd: sessions survive a daemon restart by design, so
+ * it is ended here without being reported. Only this run's root is ever matched, so nothing belonging
+ * to another journey, teammate or the owner can be touched.
+ */
+export async function reapLeftovers(environment: E2eEnvironment, journey: string): Promise<readonly string[]> {
+  const tmux = Bun.which('tmux');
+  if (tmux !== null) {
+    const ended = Bun.spawn([tmux, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], { stdout: 'ignore', stderr: 'ignore' });
+    await ended.exited;
+  }
+  await Bun.sleep(300);
+  const listed = Bun.spawn(['pgrep', '-af', environment.paths.root], { stdout: 'pipe', stderr: 'ignore' });
+  const lines = (await new Response(listed.stdout).text())
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '' && !line.includes('pgrep') && !/\btmux\b/u.test(line));
+  if (lines.length > 0) {
+    await recordStep({
+      journey,
+      step: 'no-orphans-after-daemon-stop',
+      status: 'FLAG',
+      evidence: lines.map(line => line.slice(0, 200)).join(' | '),
+      bug: 'a child of fyd keeps running after fyd stops (SIGTERM): it is re-parented to init and keeps whatever it holds. Seen: a codex login child still bound to localhost:1455, which makes the next Codex sign-in on that machine fail. MAJOR',
+    });
+    for (const line of lines) {
+      const pid = Number(line.split(' ')[0]);
+      if (Number.isInteger(pid) && pid > 1) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Already gone.
+        }
+      }
+    }
+  }
+  return lines;
+}

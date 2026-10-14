@@ -69,9 +69,15 @@ const server = Bun.serve({
     const home = process.env.CODEX_HOME;
     if (home === undefined || home === '') return new Response('no CODEX_HOME', { status: 500 });
     mkdirSync(home, { recursive: true });
+    // A JWT-shaped token with an `exp`, because the credential status decodes the expiry; the
+    // signature is junk — nothing ever verifies a fake.
+    const part = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const exp = Math.trunc(Date.now() / 1000) + 3_600;
+    const accessToken = `${part({ alg: 'none', typ: 'JWT' })}.${part({ exp, sub: 'fake-e2e' })}.fake`;
+    const idToken = `${part({ alg: 'none', typ: 'JWT' })}.${part({ exp, 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' } })}.fake`;
     writeFileSync(
       join(home, 'auth.json'),
-      `${JSON.stringify({ OPENAI_API_KEY: null, tokens: { access_token: 'fake-e2e-access', refresh_token: 'fake-e2e-refresh', id_token: 'fake-e2e-id', account_id: 'fake-e2e' }, last_refresh: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ OPENAI_API_KEY: null, tokens: { access_token: accessToken, refresh_token: 'fake-e2e-refresh', id_token: idToken, account_id: 'fake-e2e' }, last_refresh: new Date().toISOString() }, null, 2)}\n`,
     );
     setTimeout(() => finish(0), 50);
     return new Response('Signed in. You can close this window.');
