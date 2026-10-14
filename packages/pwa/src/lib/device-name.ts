@@ -22,7 +22,8 @@ const BROWSERS: readonly (readonly [RegExp, string])[] = [
   [/\bEdgA?\//u, 'Edge'],
   [/\b(?:OPR|Opera)\//u, 'Opera'],
   [/\bFirefox\/|\bFxiOS\//u, 'Firefox'],
-  [/\bCriOS\/|\bChrome\//u, 'Chrome'],
+  // Headless Chrome says `HeadlessChrome/`, which has no word boundary before `Chrome`.
+  [/\bCriOS\/|(?:\b|Headless)Chrome\//u, 'Chrome'],
   [/\bSafari\//u, 'Safari'],
 ];
 

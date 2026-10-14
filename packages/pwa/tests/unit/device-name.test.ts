@@ -28,6 +28,13 @@ describe('defaultDeviceName', () => {
     expect(defaultDeviceName(UA.edgeWindows, 'K7Q2')).toBe('Edge on Windows · K7Q2');
     expect(defaultDeviceName(UA.operaChromeOs, 'K7Q2')).toBe('Opera on ChromeOS · K7Q2');
     expect(defaultDeviceName(UA.chromeAndroid, 'K7Q2')).toBe('Chrome on Android · K7Q2');
+    // Headless Chrome is Chrome, though its token has no word boundary before "Chrome".
+    expect(
+      defaultDeviceName(
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36',
+        'K7Q2',
+      ),
+    ).toBe('Chrome on Linux · K7Q2');
   });
 
   it('says as much as the user-agent does, and no more', () => {
