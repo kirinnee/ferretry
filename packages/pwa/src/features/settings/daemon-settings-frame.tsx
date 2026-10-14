@@ -99,6 +99,9 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
  */
 const FALLBACK_PANEL_ICON: ReactNode = <SlidersHorizontal size={16} aria-hidden="true" />;
 
+/** One empty list for every render, so a frame given no extra panels does not rebuild (and remount) its own. */
+const NO_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [];
+
 const unavailableWardenStatus: WardenStatusReader = async () => {
   throw new Error('No Warden status reader was supplied.');
 };
@@ -209,7 +212,7 @@ export function DaemonSettingsFrame({
   panel,
   onOpenPanel,
   backLabel = 'Machine',
-  additionalTabs = [],
+  additionalTabs = NO_ADDITIONAL_TABS,
   carrier,
   relayAdvertised = false,
   probeDaemon,
