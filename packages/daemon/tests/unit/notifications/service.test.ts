@@ -166,7 +166,7 @@ describe('NotificationService direct delivery', () => {
       attribution: `peer:${SESSION}`,
       sessionId: SESSION,
       request: { body: REQUEST.body, title: null, kind: null },
-      sent: { kind: 'question', interactive: true, title: 'Release agent', body: REQUEST.body },
+      sent: { kind: 'question', interactive: true, title: 'Agent “Release agent”', body: REQUEST.body },
       enrolled: 2,
     });
     should(world.ledger.records[1]).containDeep({ phase: 'outcome', delivered: 1, failed: 1 });

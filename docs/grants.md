@@ -509,9 +509,10 @@ command says so at the moment somebody might be tempted to do that instead.
 - **A remote warden can never step up.** A step-up is a passkey held by a paired device, and a warden has
   no device, so `warden.configure` and every other step-up demand is unreachable to it from off the host.
   It is named here so nobody reads the refusal as a fault.
-- **`configure` has no route of its own for `terminal`, `browser` or `pairing`.** Those three
-  subsystems have no host settings the API can change today, so their configure axis governs exactly
-  one thing: whether a remote caller may re-grant that capability. It is not decoration — it is the
+- **`configure` has no route of its own for `terminal` or `browser`, and one READ for `pairing`.**
+  Those subsystems have no host settings the API can change today, so their configure axis governs
+  whether a remote caller may re-grant that capability — and, for `pairing`, whether it may read the
+  security log (`GET /v1/audit`, see [audit.md](audit.md)). It is not decoration — it is the
   coarse switch's own lock. `filesystem.configure` also gates `POST /v1/projects`, because registering
   a project may create a directory, initialise Git or clone a repository at an arbitrary absolute host
   path. Like the real host-changing routes governed by `fleet.configure` and `warden.configure`, this

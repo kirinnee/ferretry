@@ -28,6 +28,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
@@ -63,6 +64,7 @@ import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
+import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { UNLOCK_COPY, StepUpDialog } from './features/step-up/step-up-dialog.tsx';
@@ -1052,6 +1054,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       pricingSettingsTab(createDaemonClient),
+      securityLogSettingsTab(createDaemonClient),
     ],
     [createDaemonClient, store.clients],
   );
@@ -1625,6 +1628,7 @@ export function AppShell() {
             themeToggle={<ThemeToggle />}
             {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
           />
+          <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
           {pageRoute.kind === 'settings' ? null : (
             <PasskeyNudge
               key={String(connection.daemonId)}

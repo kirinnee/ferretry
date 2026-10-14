@@ -4,13 +4,13 @@ This page explains Ferretry's security model in plain words: what protects you, 
 stops, what to do when something goes wrong, and what is **not** protected.
 
 **Status labels.** Most of this is on `main`. A few parts are still in open pull requests. Those are
-marked **(landing in #464)** (passkeys and least privilege) or **(landing in #461)** (audit log and
-alerts). Items marked **(planned)** are designed but not built yet.
+marked **(landing in #464)** (passkeys and least privilege). Items marked **(planned)** are designed
+but not built yet.
 
 The detailed contracts live elsewhere. This page links to them and does not replace them:
 [zero-trust design](design/zero-trust.md) · [pairing](pairing.md) · [grants](grants.md) ·
 [relay protocol](relay-protocol.md) · [signed releases](pwa-release-signing.md) ·
-[secrets](secrets.md) · audit log (`docs/audit.md`, landing in #461).
+[secrets](secrets.md) · [audit log](audit.md).
 
 ## The short version
 
@@ -54,7 +54,7 @@ Each row is one protection. Read across to see what it stops.
 | **Passkey step-up** (landing in #464)              | Dangerous actions need a passkey confirmation. One confirmation covers **15 minutes**, in this open copy of the app. Closing the page ends it. The **machine** checks the passkey, not the app.                            | A thief with your unlocked phone opening a terminal, using a secret, or changing settings.                   |
 | **Least privilege per device** (landing in #464)   | A new device gets **read and chat only**. Terminal, files, browser, secrets and settings start switched off. You turn them on at the machine (`fy device grant`), or from a device that already has them.                  | A newly paired device, or a stranger's device, doing anything dangerous by default.                          |
 | **"At the machine" = only `fy`** (landing in #464) | Only the `fy` command on the machine itself skips the rules. It proves itself with a token file that only someone on the machine can read. A browser on the machine is treated like any other device.                      | A tunnel or proxy to the machine (`ssh -L`, `cloudflared`, `tailscale serve`) being mistaken for you.        |
-| **Audit log + alerts** (landing in #461)           | The machine keeps a log of pairings, removals, settings changes, terminals and secrets used. It records names and ids, never codes, keys or secret values. When a device is paired, your other devices get a notification. | A new device sneaking in unnoticed. Not knowing what happened after the fact.                                |
+| **Audit log + alerts**                             | The machine keeps a log of pairings, removals, settings changes, terminals and secrets used. It records names and ids, never codes, keys or secret values. When a device is paired, your other devices get a notification. | A new device sneaking in unnoticed. Not knowing what happened after the fact.                                |
 | **Signed app releases**                            | Every app release is signed. The installed app checks the signature before it updates.                                                                                                                                     | A hacked web deploy silently replacing an app you already installed.                                         |
 | **Relay sees nothing inside**                      | The relay only passes sealed messages. It sees addresses, timing and sizes — not content.                                                                                                                                  | The relay operator reading chats, keystrokes, codes or keys.                                                 |
 | **Secrets are used, never read**                   | An agent names a secret. Ferretry runs a command with the value in that command only. No screen or API ever shows the value.                                                                                               | An agent or a device ever holding your credentials. See [secrets](secrets.md) for its limits.                |
@@ -145,14 +145,14 @@ minutes. It still can't copy the keys, and it loses everything when the page clo
    `fy device grant <device> <capability>` (landing in #464). There is no `fy` command to remove a
    device yet. Instead, pair a new device with `fy pair --full`, add its passkey, and revoke the old
    one from it.
-3. Check **Settings › Security** (the audit log) for what it did (landing in #461), or run
+3. Check **Settings › Security** (the audit log) for what it did, or run
    `fy daemon audit` at the machine.
 4. If the thief could have chatted with an agent that runs tools, check that machine's sessions.
 
 ### A device you don't recognise was paired
 
-1. Tap **Remove it** on the in-app notice, or revoke it from the machine's device list (landing in #461).
-2. Look at the audit log for when and over which carrier it was paired (landing in #461).
+1. Tap **Remove it** on the in-app notice, or revoke it from the machine's device list.
+2. Look at the audit log for when and over which carrier it was paired.
 3. Ask who had access to the machine: pairing needs `fy pair` at the machine, or a device allowed
    to pair others.
 
@@ -215,5 +215,5 @@ How one hacked machine could reach the others, path by path, is [cross-daemon.md
 | The passkey prompt names the machine but not the action                                  | fix proposed     |
 | No `fy` command removes a device at the machine                                          | fix proposed     |
 | Per-machine security settings (passkey window, key rotation, idle days)                  | (planned)        |
-| A refusal before a route runs (no credential, switched-off grant) isn't in the audit log | declared in #461 |
+| A refusal before a route runs (no credential, switched-off grant) isn't in the audit log | declared         |
 | A real authenticator's passkey ceremony is tested only with software authenticators      | declared in #464 |

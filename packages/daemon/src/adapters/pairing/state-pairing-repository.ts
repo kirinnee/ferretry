@@ -29,6 +29,7 @@ const DeviceRecordSchema = z.strictObject({
   platform: z.literal('browser'),
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
+  pairedOver: z.enum(['direct', 'relay']).optional(),
   publicKey: DeviceKeySchema,
   // A record written before per-device grants reads as LIMITED (fleet.use only), a narrowing and
   // therefore safe — so the document stays at schema 2. Every write carries the field.

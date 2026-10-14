@@ -146,6 +146,7 @@ import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
+import { NewDeviceNotices, type NewDeviceNoticeClients } from '../src/features/device-notice/new-device-notice.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -155,6 +156,8 @@ import {
 import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
+import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
+import { SecurityLogSurface } from '../src/features/settings/security-log-settings.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
@@ -746,7 +749,100 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
       />
     ),
   },
+  {
+    id: 'security-log',
+    label: 'Security log',
+    description: 'Recent pairings, removals, refused attempts and other security events on this machine.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <SecurityLogSurface connection={connection} createClient={harnessSecurityClient} />
+    ),
+  },
 ];
+
+/** Minutes before this page loaded, so the relative times in a capture read as a real recent history. */
+const harnessMinutesAgo = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
+
+/**
+ * The security log the harness daemon answers with: every actor kind, a refusal, a failure, and one
+ * unreadable line, so the gap warning and both badges are on screen in the same frame.
+ */
+const HARNESS_AUDIT_VIEW = {
+  kept: [
+    {
+      at: harnessMinutesAgo(12),
+      event: 'device.paired',
+      actor: { kind: 'device', deviceId: `fy_device_id_${'Ff'.repeat(11)}`, deviceName: 'Ernest’s iPad' },
+      subject: `fy_device_id_${'Ff'.repeat(11)}`,
+      outcome: 'succeeded',
+      detail: { carrier: 'relay' },
+    },
+  ],
+  // One more than the page shows, so "Show older" is on screen and measured.
+  keptTotal: 2,
+  records: [
+    {
+      at: harnessMinutesAgo(4),
+      event: 'pairing.refused',
+      actor: { kind: 'anonymous' },
+      outcome: 'refused',
+    },
+    {
+      at: harnessMinutesAgo(13),
+      event: 'pairing.code-minted',
+      actor: { kind: 'host' },
+      outcome: 'succeeded',
+    },
+    {
+      at: harnessMinutesAgo(95),
+      event: 'step-up.failed',
+      actor: { kind: 'device', deviceId: `fy_device_id_${'Dd'.repeat(11)}`, deviceName: 'Ernest’s Pixel 8' },
+      outcome: 'failed',
+    },
+    {
+      at: harnessMinutesAgo(180),
+      event: 'secrets.used',
+      actor: { kind: 'warden' },
+      subject: 'GITHUB_TOKEN',
+      outcome: 'succeeded',
+    },
+    {
+      at: harnessMinutesAgo(26 * 60),
+      event: 'grants.changed',
+      actor: { kind: 'host' },
+      outcome: 'succeeded',
+    },
+  ],
+  unreadable: 1,
+} as const;
+
+/** The security log client: the healthy daemon answers the fixture, the unreachable one fails. */
+const harnessSecurityClient = async (connection: DaemonConnection): Promise<SecurityLogClient> => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  return { request: (async () => HARNESS_AUDIT_VIEW) as SecurityLogClient['request'] };
+};
+
+/**
+ * The new-device notice's pool for `?device-notice`: one device paired five minutes ago that this
+ * browser has not seen. Revoking it answers with the list without it, so "Remove it" is walkable.
+ */
+const HARNESS_NOTICE_CLIENTS: NewDeviceNoticeClients = {
+  client: async connection => {
+    if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+    return await HARNESS_PAIRING_CLIENT(connection);
+  },
+};
+const HARNESS_NOTICE_DEVICE = {
+  id: `fy_device_id_${'Ff'.repeat(11)}`,
+  name: 'Unknown iPad',
+  platform: 'browser',
+  createdAt: harnessMinutesAgo(5),
+  lastSeenAt: harnessMinutesAgo(5),
+} as const;
+/** Nothing seen yet, in memory only, so the device above is news on every load. */
+const HARNESS_NOTICE_STORAGE = {
+  getItem: () => '[]',
+  setItem: () => undefined,
+};
 
 /**
  * The settings fixture is also mounted on a page of its own by
@@ -866,7 +962,31 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       className="kt-shell h-dvh overflow-hidden bg-surface"
       data-settings-daemon-scenario={connections.length === 1 ? 'one' : 'many'}
     >
-      {page}
+      {new URLSearchParams(window.location.search).has('device-notice') ? (
+        // The notice as App.tsx mounts it — above the page, inside the shell — for review captures only.
+        <div className="flex h-full min-h-0 flex-col gap-2 pt-2">
+          <NewDeviceNotices
+            connections={connections}
+            clients={{
+              client: async connection => {
+                const client = await HARNESS_NOTICE_CLIENTS.client(connection);
+                return {
+                  request: (async (path: string, schema: unknown, init?: RequestInit) => {
+                    const answer = (await client.request(path, schema as never, init)) as PairedDevicesView;
+                    return init?.method === 'DELETE'
+                      ? answer
+                      : { ...answer, devices: [...answer.devices, HARNESS_NOTICE_DEVICE] };
+                  }) as PairingClient['request'],
+                };
+              },
+            }}
+            storage={HARNESS_NOTICE_STORAGE}
+          />
+          <div className="min-h-0 flex-1">{page}</div>
+        </div>
+      ) : (
+        page
+      )}
     </section>
   ) : (
     <Card

@@ -26,6 +26,7 @@ import {
   type PairingResponse,
   PairingResponseSchema,
   PublishedCarriersSchema,
+  isReservedActorPhrase,
   pairingLinkUrl,
 } from '@ferretry/protocol';
 import { DeviceKeySchema } from '@ferretry/relay';
@@ -37,6 +38,26 @@ const FERRETRY_PAIRING_APP_URL = 'https://ferretry.pages.dev/pair';
 const PAIRING_RATE_LIMIT_ATTEMPTS = 10;
 const PAIRING_RATE_LIMIT_WINDOW_MS = 60_000;
 const PAIRING_RATE_LIMIT_MAX_KEYS = 4_096;
+
+/**
+ * At most this many devices are paired with one daemon at once.
+ *
+ * A BOUND ON SOMETHING A DEVICE CAN DO. A paired device can mint a code and redeem it itself, so without
+ * a ceiling it could pair devices without end — every one a push alert to the owner and, a day later,
+ * an idle expiry in the security log. Thirty-two is more phones, tablets and browsers than one person
+ * keeps; the thirty-third is refused until one is removed.
+ */
+export const PAIRING_MAX_DEVICES = 32;
+
+/**
+ * At most this many redemptions are GRANTED per hour on each carrier.
+ *
+ * The per-peer window above bounds GUESSES on the direct carrier; it cannot bound the relay, whose
+ * sessions have no peer to key on, and it cannot bound a device that redeems right codes it minted
+ * itself. This bounds both: ten new devices an hour over the relay, and ten over the bound address.
+ */
+export const PAIRING_GRANTS_PER_HOUR = 10;
+const HOUR_MS = 60 * 60 * 1_000;
 
 const DUMMY_PAIRING_CODE = '2222-2222';
 const OBSERVATION_LIMIT = 128;
@@ -62,6 +83,8 @@ export interface PairingDeviceRecord {
   readonly platform: 'browser';
   readonly createdAt: string;
   readonly lastSeenAt: string;
+  /** How the redemption arrived; absent on a grant persisted before this was kept. */
+  readonly pairedOver?: PairingCarrierKind;
   /**
    * The device's Ed25519 public key, as SPKI base64url — the ONLY thing this daemon keeps about it.
    *
@@ -232,6 +255,30 @@ export interface SessionPairingAttempt {
   readonly prove: () => Promise<boolean>;
 }
 
+/** Which way a redemption arrived: at the bound address, or over a rendezvous. */
+export type PairingCarrierKind = PairingCarrier['kind'];
+
+/**
+ * A device that was just granted access, as an observer may learn it.
+ *
+ * NO TOKEN AND NO DIGEST, by construction: this is its own shape rather than the record, so an
+ * observer cannot be handed what it must never hold. `createdAt` is this daemon's instant.
+ */
+export interface PairingGrant {
+  readonly deviceId: string;
+  readonly deviceName: string;
+  readonly carrier: PairingCarrierKind;
+  readonly createdAt: string;
+}
+
+/**
+ * Told once, after a grant is PERSISTED — the security log and the new-device alert hang off it.
+ *
+ * It may not decide the redemption: whatever it throws or rejects with is swallowed by the caller, so
+ * a full disk cannot turn a pairing that happened into a refusal the device retries.
+ */
+export type PairingGrantObserver = (grant: PairingGrant) => Promise<void>;
+
 /**
  * Which carrier an attempt arrived on, because the two have separate budgets.
  *
@@ -322,6 +369,8 @@ interface PairingServiceOptions {
    * than with the purge above.
    */
   readonly connections?: DeviceConnectionRevoker;
+  /** See {@link PairingGrantObserver}. */
+  readonly onGranted?: PairingGrantObserver;
   /**
    * Where a revocation somebody ASKED for is written down, in the owner's grant journal.
    *
@@ -363,6 +412,8 @@ export class PairingService {
   private readonly pairingAppUrl: string;
   private readonly capabilities: readonly string[];
   private readonly rateLimiter: PairingRateLimiter;
+  /** When each recent grant was made, per carrier: see {@link PAIRING_GRANTS_PER_HOUR}. */
+  readonly #grantedAt: Record<PairingCarrierKind, number[]> = { direct: [], relay: [] };
   private readonly compare: (left: string, right: string) => boolean;
   private active: ActivePairing | undefined;
   private readonly observations = new Map<PairingId, PairingCodeStatusResponse>();
@@ -525,6 +576,7 @@ export class PairingService {
         lastSeenAt: instant(lastSeenMs),
         idleExpiresAt: instant(lastSeenMs + this.#idleExpiryMs()),
         grants: record.grants,
+        ...(record.pairedOver === undefined ? {} : { pairedOver: record.pairedOver }),
       });
     });
   }
@@ -756,7 +808,17 @@ export class PairingService {
       }
       return REFUSED;
     }
-    return await this.grant(active, parsed.data.deviceName, attempt.deviceKey, now);
+    // A name that would read as one of the log's fixed actors is refused AFTER the guess is judged,
+    // so a wrong code still spends the budget whatever name it carries. The code survives.
+    if (isReservedActorPhrase(parsed.data.deviceName)) return REFUSED;
+    // Bounds on how many devices exist and how fast they arrive, checked after the guess is judged and
+    // before the code is consumed: a refusal here leaves the code live for when there is room.
+    if (this.options.credentials.all().length >= PAIRING_MAX_DEVICES) return REFUSED;
+    const recentGrants = this.#grantedAt[carrier.kind].filter(at => at > now - HOUR_MS);
+    this.#grantedAt[carrier.kind] = recentGrants;
+    if (recentGrants.length >= PAIRING_GRANTS_PER_HOUR) return REFUSED;
+    recentGrants.push(now);
+    return await this.grant(active, parsed.data.deviceName, attempt.deviceKey, now, carrier.kind);
   }
 
   /**
@@ -771,6 +833,7 @@ export class PairingService {
     deviceName: string,
     publicKey: string,
     now: number,
+    carrier: PairingCarrierKind,
   ): Promise<PairingRedemption> {
     // The consume is the synchronous state change immediately before any persistence await. A
     // concurrent call therefore sees no active code and cannot enter the successful branch.
@@ -783,6 +846,7 @@ export class PairingService {
       platform: 'browser',
       createdAt,
       lastSeenAt: createdAt,
+      pairedOver: carrier,
       publicKey,
       // Full access behind the unlock, by default (owner decision 2026-10-14): the device can do nothing
       // until it unlocks, and then anything its grants allow. A `--limited` code narrows it to the fleet.
@@ -804,6 +868,12 @@ export class PairingService {
       redeemedAt: createdAt,
       deviceName,
     });
+    // After the grant is persisted, and unable to undo it: see {@link PairingGrantObserver}.
+    try {
+      await this.options.onGranted?.({ deviceId: record.id, deviceName, carrier, createdAt });
+    } catch {
+      // The observer reports its own failures; the device is paired either way.
+    }
     return {
       kind: 'paired',
       response: PairingResponseSchema.parse({

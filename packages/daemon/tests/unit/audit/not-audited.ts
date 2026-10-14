@@ -1,0 +1,66 @@
+/**
+ * EVERY MUTATING ROUTE THE SECURITY LOG DELIBERATELY DOES NOT RECORD, AND WHY.
+ *
+ * The contract in `tests/unit/runtime/mounts/surface.test.ts` reads the whole mounted table: a route
+ * that is not GET must be on `AUDITED_ROUTES` or here, and every line here must still name a mounted
+ * route. So a new route cannot slip past the log unreviewed, and a route that is deleted or starts
+ * being audited cannot leave a stale excuse behind. THIS LIST ONLY SHRINKS: adding a line is a
+ * review decision — say what the route does to WHO may reach this machine, and why that is nothing.
+ *
+ * The log's question is "who reached this machine and what did they do with the access". Routes that
+ * only drive an agent the caller is already allowed to drive are the session's own history — its
+ * transcript and its journal — not the machine's security history.
+ */
+export const NOT_AUDITED: Readonly<Record<string, string>> = {
+  'POST /v1/fleet/credentials/:credentialId/check': 'a read with a side effect of refreshing a status; changes nothing',
+  'POST /v1/fleet/profiles/preview': 'a read with a body: previews a draft and writes nothing',
+  'POST /v1/passkeys/options': 'mints a one-time challenge; the registration that spends it is audited',
+  'POST /v1/step-up/options': 'mints a one-time challenge; the step-up that spends it is audited',
+  'POST /v1/unlock/options': 'mints a one-time challenge; the unlock that spends it is audited',
+  'PATCH /v1/cgroups/config': 'resource limits on the host’s own sessions; not who may reach the machine',
+  'POST /v1/gc': 'scratch cleanup of state the daemon owns; reaches nobody',
+  'POST /v1/projects':
+    'registers a working directory; governed by filesystem.configure and listed in the project table',
+  'POST /v1/worktrees':
+    'creates a worktree inside a registered project; removal is the destructive half and is audited',
+  'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',
+  'POST /v1/sessions/:sessionId/resume': 'drives an existing session; its journal records it',
+  'POST /v1/sessions/:sessionId/migrate': 'drives an existing session; its journal records it',
+  'POST /v1/sessions/:sessionId/handover': 'drives an existing session; its journal records it',
+  'POST /v1/sessions/:sessionId/handover/cancel': 'drives an existing session; its journal records it',
+  'POST /v1/sessions/:sessionId/runtime': 'drives an existing session; its journal records it',
+  'POST /v1/sessions/:sessionId/signal': 'an agent reporting its own status',
+  'POST /v1/sessions/:sessionId/interrupt': 'drives an existing session; its journal records it',
+  'POST /v1/sessions/:sessionId/attachments': 'a file handed to an agent; the transcript is that history',
+  'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'opens an attachment to its own session only',
+  'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'closes an attachment again',
+  'POST /v1/sessions/:sessionId/attention': 'an agent raising attention; the attention list is that history',
+  'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
+  'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
+  'POST /v1/sessions/:sessionId/tasks': 'a task record on a session',
+  'POST /v1/sessions/:sessionId/tasks/:taskId': 'a task record on a session',
+  'POST /v1/task-boards/create': 'coordination between sessions; the board is its own ledger',
+  'POST /v1/task-boards/child-grants/request': 'coordination between sessions; the board is its own ledger',
+  'POST /v1/task-boards/child-grants/approve': 'coordination between sessions; the board is its own ledger',
+  'POST /v1/task-boards/invitations/request': 'coordination between sessions; the board is its own ledger',
+  'POST /v1/task-boards/invitations/approve': 'coordination between sessions; the board is its own ledger',
+  'POST /v1/task-boards/invitations/accept': 'coordination between sessions; the board is its own ledger',
+  'POST /v1/task-boards/invitations/verify': 'a read with a body: verifies an invitation and writes nothing',
+  'POST /v1/task-boards/membership/relinquish': 'coordination between sessions; the board is its own ledger',
+  'POST /v1/task-boards/coordinator/replace': 'coordination between sessions; the board is its own ledger',
+  'PATCH /v1/analytics/pricing': 'the cost table for usage reports; reaches nobody',
+  'POST /v1/analytics/pricing/sync/preview': 'a read with a body: previews a price sync',
+  'POST /v1/analytics/pricing/sync/apply': 'the cost table for usage reports; reaches nobody',
+  'POST /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
+  'DELETE /v1/sessions/:sessionId/terminals/:terminalId':
+    'closes a terminal, which removes access rather than adding it',
+  'POST /v1/learning/proposals/:id': 'accepts or declines a learning suggestion for a skill file; reaches nobody',
+  'POST /v1/learning/run': 'starts a learning pass over transcripts the daemon already holds',
+  'POST /v1/recommend': 'a read with a body: recommends a model for a task',
+  'POST /v1/stt/enhance': 'a read with a body: tidies dictated text',
+};
+
+/** Protocol-switching routes the log does not record. */
+export const NOT_AUDITED_SOCKETS: Readonly<Record<string, string>> = {
+  'GET /v1/events': 'the fleet event feed is a read: it shows what the caller could already list',
+};

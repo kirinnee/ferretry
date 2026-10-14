@@ -1,0 +1,442 @@
+import type { AuditDetail, AuditEvent, AuditOutcome } from '@ferretry/protocol';
+import { decodeParameter } from '../api/http.ts';
+import type { ApiRoute, RouteContext } from '../api/route.ts';
+import type { SocketAttachment, SocketRoute } from '../api/socket.ts';
+import { auditActorOf, auditOutcomeOf } from './policy.ts';
+import type { AuditFailureReporter, AuditSink } from './types.ts';
+
+/**
+ * WHICH ROUTES ARE AUDITED, AND WHY THE TABLE IS DECORATED RATHER THAN EACH HANDLER EDITED.
+ *
+ * Every site this log covers is a route somebody else owns. Wrapping the finished route table is one
+ * line in the mount index instead of a change in seven files, and it audits relayed requests for free:
+ * a relayed request is dispatched through this very table, so there is no second path to forget.
+ *
+ * WHAT A RULE MAY READ IS THE GUARANTEE. A rule names a path parameter to use as the subject and, at
+ * most, a list of NAMES out of the response — never the request body, never anything else from the
+ * response. That is what makes "no code, token, key or command line" structural here: the pairing
+ * redemption (whose response IS a token) is not on this table at all — see `AuditedPairingService` —
+ * and the secret-use response is read for its `used` names and nothing else, never its output.
+ *
+ * WHAT IT CANNOT SEE — DECLARED. A request the authorization boundary refuses before the handler runs
+ * (a switched-off grant, a missing credential) never reaches a handler and is not recorded here.
+ */
+export interface AuditedRouteRule {
+  readonly method: string;
+  readonly path: string;
+  readonly event: AuditEvent;
+  /** The event a refused or failed request is recorded as, when it is not `event` — a failed step-up. */
+  readonly refusedEvent?: AuditEvent;
+  /** The path parameter that names what the request acted on. */
+  readonly subject?: string;
+  /** A subject that is the same for every request — the name of the setting a `security.changed` changed. */
+  readonly fixedSubject?: string;
+  /** When the subject is a device id: resolve its name BEFORE the handler runs, while it still exists. */
+  readonly subjectIsDevice?: true;
+  /** Fixed facts about this rule, such as which fleet action it was. */
+  readonly detail?: AuditDetail;
+  /**
+   * A top-level field of a successful JSON response holding a NAME or an array of names, joined into
+   * `detail` under the same key.
+   */
+  readonly responseNames?: string;
+  /**
+   * A top-level OBJECT of a successful JSON response whose number and boolean fields are copied into
+   * `detail` — the settings a `security.changed` left in place, so a reader sees `idleExpiryDays: 1`.
+   * Only scalars that are not text are taken, so nothing typed by a person can come along.
+   */
+  readonly responseSettings?: readonly string[];
+}
+
+export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
+  { method: 'POST', path: '/v1/pair/code', event: 'pairing.code-minted' },
+  { method: 'DELETE', path: '/v1/pair/code/:pairingId', event: 'pairing.code-revoked', subject: 'pairingId' },
+  {
+    method: 'DELETE',
+    path: '/v1/pair/devices/:deviceId',
+    event: 'device.revoked',
+    subject: 'deviceId',
+    subjectIsDevice: true,
+  },
+  { method: 'POST', path: '/v1/push/subscriptions', event: 'push.changed', detail: { action: 'enrol' } },
+  {
+    method: 'DELETE',
+    path: '/v1/push/subscriptions/:pushId',
+    event: 'push.changed',
+    subject: 'pushId',
+    detail: { action: 'remove' },
+  },
+  { method: 'PATCH', path: '/v1/grants', event: 'grants.changed' },
+  {
+    method: 'PATCH',
+    path: '/v1/pair/devices/:deviceId/grants',
+    event: 'grants.changed',
+    subject: 'deviceId',
+    subjectIsDevice: true,
+    detail: { scope: 'device' },
+  },
+  {
+    method: 'PATCH',
+    path: '/v1/security',
+    event: 'security.changed',
+    fixedSubject: 'security-settings',
+    responseSettings: ['view', 'settings'],
+  },
+  { method: 'POST', path: '/v1/passkeys', event: 'passkey.registered' },
+  {
+    method: 'POST',
+    path: '/v1/passkeys/registration-window',
+    event: 'security.changed',
+    fixedSubject: 'passkey-registration-window',
+  },
+  // A confirmation and an unlock are ACTIVITY, not changes: each is a person proving it is them, and a
+  // device can repeat them, so they fold. A refused one is a failed guess and folds like every refusal.
+  {
+    method: 'POST',
+    path: '/v1/step-up',
+    event: 'step-up.succeeded',
+    refusedEvent: 'step-up.failed',
+    detail: { action: 'step-up' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/unlock',
+    event: 'step-up.succeeded',
+    refusedEvent: 'step-up.failed',
+    detail: { action: 'unlock' },
+  },
+  { method: 'POST', path: '/v1/fleet/proposals', event: 'fleet.configured', detail: { action: 'propose' } },
+  {
+    method: 'POST',
+    path: '/v1/fleet/proposals/:proposalId/apply',
+    event: 'fleet.configured',
+    subject: 'proposalId',
+    detail: { action: 'apply' },
+  },
+  { method: 'POST', path: '/v1/fleet/login', event: 'fleet.configured', detail: { action: 'sign-in' } },
+  {
+    method: 'POST',
+    path: '/v1/fleet/login/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    detail: { action: 'sign-in-answer' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/fleet/login/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    detail: { action: 'sign-in-cancel' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/fleet/machine/tools/install',
+    event: 'fleet.configured',
+    detail: { action: 'install-tool' },
+  },
+  { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
+  { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
+  {
+    method: 'POST',
+    path: '/v1/secrets',
+    event: 'secrets.changed',
+    responseNames: 'name',
+    detail: { action: 'put' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/secrets/:name',
+    event: 'secrets.changed',
+    subject: 'name',
+    detail: { action: 'delete' },
+  },
+  { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
+  { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/browser',
+    event: 'browser.opened',
+    subject: 'sessionId',
+    detail: { action: 'control' },
+  },
+  { method: 'POST', path: '/v1/sessions', event: 'session.opened', detail: { action: 'start' } },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/fork',
+    event: 'session.opened',
+    subject: 'sessionId',
+    detail: { action: 'fork' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/send',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'send' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/answer',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'answer' },
+  },
+  { method: 'POST', path: '/v1/warden/run', event: 'warden.ran' },
+  { method: 'PATCH', path: '/v1/warden/config', event: 'warden.configured' },
+];
+
+/** What the decorator needs: where to write, and how to name a device id. */
+export interface AuditedRoutesSubsystem {
+  readonly log: AuditSink;
+  /** Where a record that could not be made is said out loud, since it may not fail the request. */
+  readonly failures: AuditFailureReporter;
+  deviceName(deviceId: string): Promise<string | undefined>;
+}
+
+/** The route table, with every route a rule names recorded after it answers. */
+export function auditedRoutes(
+  subsystem: AuditedRoutesSubsystem,
+  routes: readonly ApiRoute[],
+  rules: readonly AuditedRouteRule[] = AUDITED_ROUTES,
+): readonly ApiRoute[] {
+  return routes.map(route => {
+    const rule = rules.find(candidate => candidate.method === route.method && candidate.path === route.path);
+    return rule === undefined ? route : audited(subsystem, route, rule);
+  });
+}
+
+function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: AuditedRouteRule): ApiRoute {
+  return {
+    ...route,
+    handle: async context => {
+      const subject =
+        rule.subject === undefined ? rule.fixedSubject : decodeParameter(context.params.get(rule.subject) ?? '');
+      const subjectName =
+        rule.subjectIsDevice === true && subject !== undefined
+          ? await subsystem.deviceName(subject).catch(() => undefined)
+          : undefined;
+      let status: number | undefined;
+      let body: string | undefined;
+      try {
+        const response = await route.handle(context);
+        status = response.status;
+        body = response.body;
+        return response;
+      } catch (error) {
+        status = statusOf(error);
+        throw error;
+      } finally {
+        // A record that throws would turn a request that already WORKED into a 500 from here, and the
+        // person would retry something that happened. `AuditLog` already reports its own failures; this
+        // catches what is left — a device-name lookup, a sink that is not an `AuditLog`.
+        await record(subsystem, context, rule, { status, body, subject, subjectName }).catch((error: unknown) =>
+          subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
+        );
+      }
+    },
+  };
+}
+
+interface Answer {
+  readonly status: number | undefined;
+  readonly body: string | undefined;
+  readonly subject: string | undefined;
+  readonly subjectName: string | undefined;
+}
+
+async function record(
+  subsystem: AuditedRoutesSubsystem,
+  context: RouteContext,
+  rule: AuditedRouteRule,
+  answer: Answer,
+): Promise<void> {
+  const credential = context.credential;
+  const actorName = credential?.tokenClass === 'device' ? await subsystem.deviceName(credential.deviceId) : undefined;
+  const outcome = auditOutcomeOf(answer.status);
+  const names =
+    outcome === 'succeeded' && rule.responseNames !== undefined ? namesIn(answer.body, rule.responseNames) : undefined;
+  const settings =
+    outcome === 'succeeded' && rule.responseSettings !== undefined
+      ? settingsIn(answer.body, rule.responseSettings)
+      : undefined;
+  const detail: AuditDetail = {
+    ...rule.detail,
+    ...settings,
+    ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
+    ...(names === undefined ? {} : { [rule.responseNames ?? 'names']: names }),
+    ...(answer.status === undefined ? {} : { status: answer.status }),
+  };
+  await subsystem.log.record({
+    event: outcome === 'succeeded' ? rule.event : (rule.refusedEvent ?? rule.event),
+    actor: auditActorOf(credential, actorName),
+    ...(answer.subject === undefined || answer.subject === '' ? {} : { subject: answer.subject }),
+    outcome,
+    ...(Object.keys(detail).length === 0 ? {} : { detail }),
+  });
+}
+
+/** The status an error would be answered with: an `ApiError` says, anything else is a failure. */
+function statusOf(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null || !('status' in error)) return undefined;
+  return typeof error.status === 'number' ? error.status : undefined;
+}
+
+/**
+ * One string-array field of a JSON body, joined — or nothing when the body does not have one.
+ *
+ * Only an array of strings is taken, so a field that turned out to hold anything richer is dropped
+ * rather than flattened into the log.
+ */
+function namesIn(body: string | undefined, field: string): string | undefined {
+  try {
+    const parsed = (JSON.parse(body ?? '') as Record<string, unknown>)[field];
+    const value = typeof parsed === 'string' ? [parsed] : parsed;
+    if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) return undefined;
+    return value.length === 0 ? undefined : joinedWithin(value, AUDIT_TEXT_MAX);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The number and boolean fields of one object inside a JSON body — or nothing when there is none.
+ *
+ * Text is never taken, and the keys must already read as detail keys, so the result always fits the
+ * record's contract and cannot carry anything a person typed.
+ */
+function settingsIn(body: string | undefined, path: readonly string[]): AuditDetail | undefined {
+  try {
+    let value: unknown = JSON.parse(body ?? '');
+    for (const key of path) value = (value as Record<string, unknown> | null)?.[key];
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        ([key, field]) =>
+          /^[a-z][A-Za-z0-9]{0,31}$/u.test(key) &&
+          (typeof field === 'boolean' || (typeof field === 'number' && Number.isFinite(field))),
+      ),
+    ) as AuditDetail;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The longest text one audit field holds — `AuditRecordSchema`'s own bound. */
+const AUDIT_TEXT_MAX = 160;
+
+/**
+ * Names joined with commas, within one field's bound.
+ *
+ * A list too long to fit keeps the names that do and ends `+N` for the rest, so the record still says
+ * how many there were rather than failing the contract and leaving a gap instead.
+ */
+function joinedWithin(names: readonly string[], limit: number): string {
+  const all = names.join(',');
+  if (all.length <= limit) return all;
+  const kept: string[] = [];
+  for (const name of names) {
+    const rest = names.length - kept.length - 1;
+    if ([...kept, name, `+${String(rest)}`].join(',').length > limit) break;
+    kept.push(name);
+  }
+  return [...kept, `+${String(names.length - kept.length)}`].join(',');
+}
+
+function describeFailure(rule: { readonly event: AuditEvent }, error: unknown): string {
+  return `the security log could not record a ${rule.event} event, so it has a gap: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+/** One protocol-switching route the log records: opening it, and — for a terminal — typing into it. */
+export interface AuditedSocketRule {
+  readonly path: string;
+  readonly event: AuditEvent;
+  /** The path parameter that names what was attached to. */
+  readonly subject: string;
+  /** Recorded for every BINARY client frame — keystrokes — and folded per subject per window. */
+  readonly inputEvent?: AuditEvent;
+}
+
+/**
+ * The sockets that hand a caller something live. The fleet feed is a read, so it is not here — the
+ * contract in `tests/unit/runtime/mounts/surface.test.ts` holds it to the reviewed list in
+ * `tests/unit/audit/not-audited.ts`.
+ */
+export const AUDITED_SOCKET_ROUTES: readonly AuditedSocketRule[] = [
+  {
+    path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
+    event: 'terminal.opened',
+    subject: 'terminalId',
+    inputEvent: 'terminal.input',
+  },
+  { path: '/v1/sessions/:sessionId/browser/stream', event: 'browser.opened', subject: 'sessionId' },
+];
+
+/**
+ * The socket table, with every attach a rule names recorded as `detail.mode: 'attach'`.
+ *
+ * WHY ATTACH IS ITS OWN RECORD. Opening a terminal is one act; reaching an EXISTING shell somebody
+ * else opened is another, and it is the one a stolen phone would do. A refused upgrade is recorded as
+ * refused, exactly like an HTTP route.
+ *
+ * INPUT IS COUNTED, NEVER CAPTURED. Each binary frame is one `terminal.input` record naming the
+ * terminal and nothing about the bytes; `AuditLog` folds them per terminal per window, so a session of
+ * typing is a handful of lines that say how many frames arrived. Attaches fold the same way, per
+ * device and terminal, so re-attaching in a loop is one counted line a minute and never reaches the
+ * kept store. The record is not awaited: a keystroke must never wait on a disk.
+ */
+export function auditedSocketRoutes(
+  subsystem: AuditedRoutesSubsystem,
+  routes: readonly SocketRoute[],
+  rules: readonly AuditedSocketRule[] = AUDITED_SOCKET_ROUTES,
+): readonly SocketRoute[] {
+  return routes.map(route => {
+    const rule = rules.find(candidate => route.method === 'GET' && candidate.path === route.path);
+    return rule === undefined ? route : auditedSocket(subsystem, route, rule);
+  });
+}
+
+function auditedSocket(subsystem: AuditedRoutesSubsystem, route: SocketRoute, rule: AuditedSocketRule): SocketRoute {
+  return {
+    ...route,
+    accept: async context => {
+      const subject = decodeParameter(context.params.get(rule.subject) ?? '');
+      const entry = async (event: AuditEvent, outcome: AuditOutcome, detail?: AuditDetail): Promise<void> => {
+        const credential = context.credential;
+        const actorName =
+          credential?.tokenClass === 'device' ? await subsystem.deviceName(credential.deviceId) : undefined;
+        await subsystem.log.record({
+          event,
+          actor: auditActorOf(credential, actorName),
+          ...(subject === '' ? {} : { subject }),
+          outcome,
+          ...(detail === undefined ? {} : { detail }),
+        });
+      };
+      const said = (event: AuditEvent, outcome: AuditOutcome, detail?: AuditDetail): Promise<void> =>
+        entry(event, outcome, detail).catch((error: unknown) =>
+          subsystem.failures.auditWriteFailed(describeFailure({ event }, error)),
+        );
+      let attach: SocketAttachment;
+      try {
+        attach = await route.accept(context);
+      } catch (error) {
+        await said(rule.event, auditOutcomeOf(statusOf(error)), { mode: 'attach' });
+        throw error;
+      }
+      await said(rule.event, 'succeeded', { mode: 'attach' });
+      const inputEvent = rule.inputEvent;
+      if (inputEvent === undefined) return attach;
+      return async downstream => {
+        const handler = await attach(downstream);
+        return {
+          open: async () => await handler.open(),
+          close: () => handler.close(),
+          fromClient: frame => {
+            if (typeof frame !== 'string') void said(inputEvent, 'succeeded');
+            handler.fromClient(frame);
+          },
+        };
+      };
+    },
+  };
+}

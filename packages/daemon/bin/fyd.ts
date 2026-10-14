@@ -127,6 +127,7 @@ import {
   HttpUsageSource,
   hostCgroupFacts,
   JournalGrantAudit,
+  FileAuditJournal,
   KeyedSerialExecutor,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
@@ -339,6 +340,9 @@ import {
   type AssigneeObservation,
   type AttentionActor,
   AttentionService,
+  AuditedPairingService,
+  AUDIT_FOLD_WINDOW_MS,
+  AuditLog,
   advertisesForeignAddress,
   answerArguments,
   attachmentDirectory,
@@ -453,6 +457,7 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
+  PushNewDeviceAlert,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -4657,6 +4662,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * started. Nothing else about it moved.
    */
   const bootNotices = bootJournal(overrides.logLevel);
+  // The security log (docs/design/zero-trust.md §C): one writer, built before pairing and the route table
+  // that both record into. A write it cannot make is said in this boot's journal, never thrown into a request.
+  const auditFailures = { auditWriteFailed: (message: string) => bootNotices.state(message) };
+  const auditLog = new AuditLog({ journal: new FileAuditJournal(paths.state), clock, failures: auditFailures });
   /**
    * The account's own chance to renew before an agent is started on it.
    *
@@ -5356,31 +5365,39 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
       });
-      pairingService = new PairingService({
-        daemonId: state.daemonId,
-        daemonName: state.daemonName,
-        // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
-        // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
-        // reading its QR names the phone.
-        advertisement: config.advertisement,
-        carriers,
-        // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
-        // rendezvous from an operator's own one, and only the first is something the phone reading
-        // the QR can find for itself.
-        ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
-        clock: pairingClock,
-        cryptography,
-        devices: repository,
-        credentials,
-        // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
-        // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
-        deviceState: [push, stepUp],
-        // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
-        connections: deviceConnections,
-        // A revocation somebody asked for lands in the owner's journal beside the grant changes.
-        audit: grantAudit,
-        idleExpiryDays: () => security.current().idleExpiryDays,
-      });
+      // Every redemption, direct or relayed, recorded; a new device announced to the others.
+      pairingService = new AuditedPairingService(
+        {
+          daemonId: state.daemonId,
+          daemonName: state.daemonName,
+          // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
+          // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
+          // reading its QR names the phone.
+          advertisement: config.advertisement,
+          carriers,
+          // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
+          // rendezvous from an operator's own one, and only the first is something the phone reading
+          // the QR can find for itself.
+          ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
+          clock: pairingClock,
+          cryptography,
+          devices: repository,
+          credentials,
+          // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
+          // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
+          deviceState: [push, stepUp],
+          // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
+          connections: deviceConnections,
+          // A revocation somebody asked for lands in the owner's journal beside the grant changes.
+          audit: grantAudit,
+          idleExpiryDays: () => security.current().idleExpiryDays,
+        },
+        {
+          log: auditLog,
+          alert: new PushNewDeviceAlert(push, state.daemonName, auditFailures),
+          failures: auditFailures,
+        },
+      );
       return {
         credentials,
         push,
@@ -6057,6 +6074,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               directorySyscalls,
             });
           },
+        },
+        // The security log's read route, and the sink the audited route table records into. A device's
+        // name is read from the same grant store pairing keeps, so a record names what the list shows.
+        audit: {
+          log: auditLog,
+          recent: async (limit, keptOffset) => await auditLog.recent(limit, keptOffset),
+          flush: async () => await auditLog.flush(),
+          failures: auditFailures,
+          deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,
         },
         pairing,
         push,
@@ -6939,6 +6965,14 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     void terminalReaper.sweep().catch(() => undefined);
   }, 5_000);
   cleanups.push(() => clearInterval(terminalReapTicks));
+  // The security log's fold windows close on this tick too, not only on the next record like them: a
+  // burst that STOPS must still be written down with its count. Writes a line at most; spawns nothing.
+  const auditFlushTicks = setInterval(() => {
+    void subsystems.audit.flush().catch(() => undefined);
+  }, AUDIT_FOLD_WINDOW_MS);
+  cleanups.push(() => {
+    clearInterval(auditFlushTicks);
+  });
   // The warden sweep, armed only once the daemon is actually serving — like the self-check above, and
   // for the same reason: a sweep spawns sessions, and it must not race the bind it would report on.
   //

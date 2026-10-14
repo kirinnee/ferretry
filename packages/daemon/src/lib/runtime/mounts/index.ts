@@ -9,6 +9,8 @@ import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
+import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
+import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
@@ -21,6 +23,7 @@ import type { SessionRuntimeSubsystem } from '../../session/runtime-control/type
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { attentionRoutes, type DirectNotificationSubsystem } from './attention.ts';
+import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
@@ -285,6 +288,13 @@ export interface MountedSubsystems {
    * shape of bug this migration has already hit three times.
    */
   readonly grants: GrantSubsystem & CapabilityGuard;
+  /**
+   * The security log: its read route, and the sink every audited route above records into.
+   *
+   * The WHOLE table is decorated rather than each mount, so a relayed request — which is dispatched
+   * through this same table — is recorded exactly like a direct one. See `auditedRoutes`.
+   */
+  readonly audit: AuditSubsystem & AuditedRoutesSubsystem;
 }
 
 /**
@@ -294,7 +304,7 @@ export interface MountedSubsystems {
  * literal paths (`/healthz`, `/usage`, `/metrics`), so no subsystem pattern can shadow one.
  */
 export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
-  return [
+  return auditedRoutes(subsystems.audit, [
     ...daemonApiRoutes(base),
     // Pairing is public redemption plus the code and device operations that produce and end the
     // credentials it hands out. It sits beside the base surface because it establishes the credential
@@ -321,6 +331,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // restricted — a grant report a restricted caller could not fetch would be the greyed control
     // with no explanation this whole feature exists to remove.
     ...grantRoutes(subsystems.grants),
+    // The security log sits beside the grants and pairing it records. `/v1/audit` is used by nothing else.
+    ...auditRoutes(subsystems.audit),
     // The carrier refresh sits beside pairing because it is the SECOND half of one exchange: pairing
     // hands a device the set of ways to reach this daemon, and this is where that device asks again
     // when the set has changed. `/v1/carriers` is a fixed literal no other subsystem uses, so it can
@@ -450,7 +462,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
     // only the request/response table carries — the socket table's `/v1/events` matches GET on one
     // segment less — so the two cannot shadow each other and a POST here is never an upgrade.
-  ];
+  ]);
 }
 
 /** The dispatcher the transport adapter serves, over the full mounted surface. */
@@ -477,13 +489,15 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
  * sessions.
  */
 export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly SocketRoute[] {
-  return [
+  // Attaching to a live terminal or browser, and typing into a terminal, is recorded like the HTTP
+  // table above. See `auditedSocketRoutes`.
+  return auditedSocketRoutes(subsystems.audit, [
     // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
     // optional session filter one route rather than a second dispatcher.
     ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions),
     ...terminalSocketRoutes(subsystems.terminals),
     ...browserSocketRoutes(subsystems.browser),
-  ];
+  ]);
 }
 
 /**

@@ -117,8 +117,8 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and thirty-one: forty-five MACHINES frames at each viewport, plus twenty-two other frames
- * at `mobile` and nineteen at `desktop` (45 + 45 + 22 + 19). Of the extras at each viewport, one is the
+ * One hundred and thirty-three: forty-five MACHINES frames at each viewport, plus twenty-three other frames
+ * at `mobile` and twenty at `desktop` (45 + 45 + 23 + 20). Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
  * shows, and two are the Security settings block's loosening sentence and out-of-bounds sentence.
  *
@@ -130,8 +130,8 @@ const WALKS_SETTINGS = !(
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
- * The rest, fifteen at both viewports plus the open device-capabilities disclosure and the unlock screen at both: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its eight other panels (Security, the passkey panel, among them), the unreachable daemon's Warden and Carrier, and the
+ * The rest, sixteen at both viewports plus the open device-capabilities disclosure and the unlock screen at both: three Settings sections (Appearance, Behaviour, Daemons), the
+ * healthy daemon's Warden and its nine other panels (Security, the passkey panel, and Security log among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -151,7 +151,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 131;
+const SETTINGS_SIDEWAYS_CHECKS = 133;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -1849,7 +1849,9 @@ try {
             }
             await frame
               .locator('[data-daemon-settings-tabs="desktop"]')
-              .getByRole('tab', { name: new RegExp(`^${label}`) })
+              // A prefix, because the name runs on into the panel's description — but never into another
+              // label: "Security" must not also match "Security log".
+              .getByRole('tab', { name: new RegExp(`^${label}(?! log)`) })
               .click();
             // The rail's rows carry `transition-colors`, so a capture taken the
             // instant a panel opens catches the row it left mid-fade and reads as
@@ -1875,13 +1877,13 @@ try {
           // The fixture is only evidence about the real frame if it carries the
           // panels the composition root supplies. It once carried six of the
           // production eight, so the row that overflowed a desktop could not be
-          // seen here at all. Nine now: the app's ten less Model pricing, which
+          // seen here at all. Ten now: the app's eleven less Model pricing, which
           // this fixture has never mounted. Count the
           // rail's rows, which exist in the document at both widths, rather than
           // the sheet's, which are rendered only once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 9)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 9 it mounts`);
+          if (daemonPanels !== 10)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 10 it mounts`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -1896,9 +1898,9 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 9)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 9 it mounts`);
-            // Eight rows is the longest list any sheet in Settings presents. If one of these sheets is
+            if (openPanelChoices !== 10)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 10 it mounts`);
+            // Ten rows is the longest list any sheet in Settings presents. If one of these sheets is
             // going to be the one that widens a phone, it is this one.
             await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
             const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
@@ -1938,6 +1940,8 @@ try {
             ['Security', 'security', '[data-security-card]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
+            // The security log, with a gap warning, both badges and "Show older" on it: its widest rows.
+            ['Security log', 'security-log', '[data-security-log-panel]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {

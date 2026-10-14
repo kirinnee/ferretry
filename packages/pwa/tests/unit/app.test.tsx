@@ -3157,11 +3157,14 @@ describe('the settings route composition', () => {
       beta.daemonId,
     ]);
     await settle();
+    // The new-device notice reads every paired machine's device list in the background, by design;
+    // its own suite proves that is the ONLY thing it reads, so dropping it here hides nothing else.
+    const probes = () => healthReads.filter(read => read.path !== '/v1/pair/devices');
 
     // A daemon tab does not read another daemon merely by being visible. Opening
     // Host checks is the explicit request, and it travels through the same typed
     // client (and therefore carrier router) as every other daemon read.
-    expect(healthReads).toEqual([]);
+    expect(probes()).toEqual([]);
     await interact(() =>
       must(
         view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
@@ -3169,8 +3172,8 @@ describe('the settings route composition', () => {
       ).click(),
     );
     await settle();
-    expect(healthReads.map(read => String(read.daemonId))).toEqual([ALPHA]);
-    for (const read of healthReads) {
+    expect(probes().map(read => String(read.daemonId))).toEqual([ALPHA]);
+    for (const read of probes()) {
       expect(read.path).toBe('/v1/health');
       expect(read.schema).toBe(HealthViewSchema);
       expect(read.timeout).toBe(5_000);
@@ -3195,7 +3198,11 @@ describe('the settings route composition', () => {
       ).click(),
     );
     await settle();
-    expect(healthReads.map(read => String(read.daemonId)).sort()).toEqual([ALPHA, BETA].sort());
+    expect(
+      probes()
+        .map(read => String(read.daemonId))
+        .sort(),
+    ).toEqual([ALPHA, BETA].sort());
 
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),

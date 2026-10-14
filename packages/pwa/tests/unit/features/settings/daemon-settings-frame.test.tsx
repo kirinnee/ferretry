@@ -32,7 +32,7 @@ const alpha = daemonConnection({
 const unavailable = async () => Promise.reject(new Error('unavailable in this suite'));
 
 /**
- * The three panels `App.tsx` passes as `additionalTabs`, by the ids it passes them under.
+ * The four panels `App.tsx` passes as `additionalTabs`, by the ids it passes them under.
  *
  * Ids, not the real surfaces: this suite is about the rail, and mounting the production surfaces would
  * open their transports to assert a glyph. The ids are the whole contract — `PANEL_ICONS` is keyed by
@@ -42,6 +42,7 @@ const PRODUCTION_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [
   { id: 'resource-limits', label: 'Resource limits', description: 'CPU and RAM caps.', Surface: () => null },
   { id: 'doctor', label: 'Doctor', description: 'Programs this host needs.', Surface: () => null },
   { id: 'model-pricing', label: 'Model pricing', description: 'Model rates and provenance.', Surface: () => null },
+  { id: 'security-log', label: 'Security log', description: 'Recent security events.', Surface: () => null },
 ];
 
 /** The glyph a panel gets when the table does not name its id. Present here means an entry is missing. */
@@ -80,6 +81,7 @@ describe('daemon settings panel rail', () => {
       'resource-limits',
       'doctor',
       'model-pricing',
+      'security-log',
       'carrier',
       'host-checks',
     ]);
@@ -93,7 +95,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(10);
+    expect(glyphs).toHaveLength(11);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.
