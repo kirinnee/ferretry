@@ -37,7 +37,9 @@ import {
   postureCopy,
   REMOTE_ONE_WAY_NOTE,
   remoteRevokeWarning,
+  STEP_UP_FALLBACK_ACT,
   STEP_UP_NOTE,
+  stepUpAct,
   weightCopy,
   weightPips,
 } from '../../src/lib/grants.ts';
@@ -76,6 +78,23 @@ describe('grant vocabulary', () => {
     }
     // The drift that would matter: a capability added to the enum with no prose here.
     expect(new Set(DAEMON_CAPABILITIES.map(capabilityNoun)).size).toBe(DAEMON_CAPABILITIES.length);
+  });
+
+  it('words an act for every capability on each axis, and only the settings axis names the capability', () => {
+    for (const capability of DAEMON_CAPABILITIES) {
+      const use = stepUpAct({ capability, axis: 'use' });
+      const configure = stepUpAct({ capability, axis: 'configure' });
+      expect(use.length).toBeGreaterThan(0);
+      expect(configure).toBe(`change the settings for ${capabilityNoun(capability)}`);
+    }
+    expect(new Set(DAEMON_CAPABILITIES.map(capability => stepUpAct({ capability, axis: 'use' }))).size).toBe(
+      DAEMON_CAPABILITIES.length,
+    );
+    expect(stepUpAct({ capability: 'terminal', axis: 'use' })).toBe('open a terminal');
+    expect(stepUpAct({ capability: 'browser', axis: 'use' })).toBe('open the remote browser');
+    expect(stepUpAct({ capability: 'pairing', axis: 'use' })).toBe('add or manage a paired device');
+    expect(stepUpAct({ capability: 'secrets', axis: 'use' })).toBe('run a command with a stored secret');
+    expect(STEP_UP_FALLBACK_ACT).toBe('make this change');
   });
 
   it('asks both axes as questions rather than restating the wire spelling', () => {

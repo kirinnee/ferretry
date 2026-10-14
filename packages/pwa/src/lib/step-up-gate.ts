@@ -15,10 +15,13 @@
  */
 
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
+import { STEP_UP_FALLBACK_ACT } from './grants.ts';
 
-/** What the prompt shows: which machine is asking, and whether the last attempt failed and why. */
+/** What the prompt shows: which machine is asking, which acts, and whether the last attempt failed and why. */
 export interface StepUpPrompt {
   readonly daemon: DaemonConnection;
+  /** The acts waiting on this machine, distinct and in the order they asked; never empty. */
+  readonly acts: readonly string[];
   readonly busy: boolean;
   /** One plain sentence for the person, or nothing. */
   readonly failure?: string;
@@ -33,6 +36,7 @@ export interface StepUpGateDependencies {
 
 interface Waiting {
   readonly daemon: DaemonConnection;
+  readonly acts: string[];
   readonly resolvers: ((stepped: boolean) => void)[];
 }
 
@@ -57,16 +61,25 @@ export class StepUpGate {
   /**
    * Waits for a step-up on this machine. `true` when the person confirmed and the daemon accepted it;
    * `false` when they dismissed the prompt.
+   *
+   * `act` is the phrase for what is being approved ("open a terminal"). Absent, the prompt says
+   * {@link STEP_UP_FALLBACK_ACT} rather than leave a blank. Requests waiting on one machine share ONE
+   * prompt, which names every distinct act in it.
    */
-  require(daemon: DaemonConnection): Promise<boolean> {
+  require(daemon: DaemonConnection, act: string = STEP_UP_FALLBACK_ACT): Promise<boolean> {
     return new Promise(resolve => {
       const waiting = this.#waiting.get(daemon.daemonId);
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
+        if (!waiting.acts.includes(act)) {
+          waiting.acts.push(act);
+          this.#refreshActs(daemon.daemonId);
+        }
         return;
       }
-      this.#waiting.set(daemon.daemonId, { daemon, resolvers: [resolve] });
-      if (this.#prompt === null) this.#show(daemon);
+      const entry: Waiting = { daemon, acts: [act], resolvers: [resolve] };
+      this.#waiting.set(daemon.daemonId, entry);
+      if (this.#prompt === null) this.#show(entry);
     });
   }
 
@@ -74,11 +87,11 @@ export class StepUpGate {
   async confirm(): Promise<void> {
     const prompt = this.#prompt;
     if (prompt === null || prompt.busy) return;
-    this.#set({ daemon: prompt.daemon, busy: true });
+    this.#set({ daemon: prompt.daemon, acts: prompt.acts, busy: true });
     try {
       await this.deps.ceremony(prompt.daemon);
     } catch (reason) {
-      this.#set({ daemon: prompt.daemon, busy: false, failure: this.deps.describe(reason) });
+      this.#set({ daemon: prompt.daemon, acts: prompt.acts, busy: false, failure: this.deps.describe(reason) });
       return;
     }
     this.#settle(prompt.daemon.daemonId, true);
@@ -97,11 +110,18 @@ export class StepUpGate {
     for (const resolve of waiting?.resolvers ?? []) resolve(stepped);
     const next = this.#waiting.values().next();
     if (next.done === true) this.#set(null);
-    else this.#show(next.value.daemon);
+    else this.#show(next.value);
   }
 
-  #show(daemon: DaemonConnection): void {
-    this.#set({ daemon, busy: false });
+  #show(waiting: Waiting): void {
+    this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false });
+  }
+
+  /** A later request on the machine already on screen adds its act to the one prompt, keeping its state. */
+  #refreshActs(daemonId: DaemonId): void {
+    const prompt = this.#prompt;
+    if (prompt === null || prompt.daemon.daemonId !== daemonId) return;
+    this.#set({ ...prompt, acts: [...(this.#waiting.get(daemonId)?.acts ?? [])] });
   }
 
   #set(prompt: StepUpPrompt | null): void {

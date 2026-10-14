@@ -1,8 +1,9 @@
 /**
  * THE PASSKEY PROMPT: "confirm it's you", raised when an act on a machine needs it.
  *
- * It appears because the DAEMON refused a request for want of a recent step-up, and it says which
- * machine is asking. The ceremony starts on the button, never on its own — a passkey sheet nobody asked
+ * It appears because the DAEMON refused a request for want of a recent step-up, and it says in ONE
+ * sentence which machine is asking and which act is being approved — code in the page cannot be stopped
+ * from asking, but a person can refuse a prompt for an act they did not start. The ceremony starts on the button, never on its own — a passkey sheet nobody asked
  * for is exactly the prompt a person must learn to refuse, and Safari would refuse it anyway.
  *
  * What a confirmation buys is stated once, here: fifteen minutes on this machine, for this open copy of
@@ -21,6 +22,9 @@ import type { StepUpGate } from '../../lib/step-up-gate.ts';
 /** What one confirmation covers, said where the person decides. */
 export const STEP_UP_SCOPE_NOTE =
   'This covers changes on this machine for 15 minutes, in this open copy of the app. Closing the page ends it.';
+
+/** Several acts waiting on one machine are named together: "open a terminal and add or manage a paired device". */
+const ACT_LIST = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
 export interface StepUpDialogProps {
   readonly gate: StepUpGate;
@@ -41,6 +45,7 @@ export function StepUpDialog({ gate, machineName }: StepUpDialogProps) {
   const { onKeyDown } = useDialogFocus(open, dialogRef, dismiss);
   if (prompt === null) return null;
   const machine = machineName(prompt.daemon.daemonId);
+  const acts = ACT_LIST.format(prompt.acts);
 
   return (
     <div
@@ -70,7 +75,11 @@ export function StepUpDialog({ gate, machineName }: StepUpDialogProps) {
           Confirm it’s you
         </h2>
         <p id={`${uid}-purpose`} className="m-0 mt-2 text-ui leading-base text-muted">
-          <span className="font-semibold text-fg">{machine}</span> needs your passkey before it makes this change.
+          Confirm with your passkey to <span data-step-up-act="">{acts}</span> on{' '}
+          <span className="font-semibold text-fg" data-step-up-machine="">
+            {machine}
+          </span>
+          .
         </p>
         <p className="m-0 mt-2 text-meta leading-base text-muted" data-step-up-scope="">
           {STEP_UP_SCOPE_NOTE}

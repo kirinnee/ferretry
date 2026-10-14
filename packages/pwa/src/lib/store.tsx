@@ -432,7 +432,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
     presence: () => presence.present(),
-    stepUp: async daemon => await stepUp.require(daemon),
+    stepUp: async (daemon, act) => await stepUp.require(daemon, act),
     crypto: relayCrypto,
     // Read per session, never cached: a key the person removed by clearing site data must stop
     // opening sessions the moment it is gone.
@@ -810,10 +810,13 @@ export function DaemonClientProvider({
  * offers no step-up control rather than one that can never be answered. It is the same gate the carrier
  * asks on a refused request, so there is still exactly one prompt component.
  */
-export function useStepUpRequest(): ((daemon: DaemonConnection) => Promise<boolean>) | undefined {
+export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined {
   const store = useContext(StoreContext);
   return useMemo(
-    () => (store === null ? undefined : async (daemon: DaemonConnection) => await store.stepUp.require(daemon)),
+    () =>
+      store === null
+        ? undefined
+        : async (daemon: DaemonConnection, act?: string) => await store.stepUp.require(daemon, act),
     [store],
   );
 }

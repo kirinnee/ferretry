@@ -41,6 +41,16 @@ const stepUpCases: SchemaCase[] = [
     value: { credentialId: CREDENTIAL, clientDataJSON: 'e30', authenticatorData: 'AAAA', signature: 'MEUC' },
   },
   { name: 'granted', schema: stepUp.StepUpGrantedSchema, value: { expiresAt: LATER_INSTANT } },
+  { name: 'step-up demand', schema: stepUp.StepUpDemandSchema, value: { capability: 'terminal', axis: 'use' } },
+  {
+    name: 'step-up required body',
+    schema: stepUp.StepUpRequiredBodySchema,
+    value: {
+      error: 'Confirm with your passkey.',
+      code: stepUp.STEP_UP_REQUIRED_CODE,
+      demand: { capability: 'secrets', axis: 'configure' },
+    },
+  },
   {
     name: 'passkey view',
     schema: stepUp.PasskeyViewSchema,
@@ -101,6 +111,26 @@ describe('the passkey step-up wire', () => {
         name: 'a window for something that is not a device id',
         schema: stepUp.PasskeyWindowRequestSchema,
         value: { deviceId: 'phone' },
+      },
+      {
+        name: 'a demand naming a capability this protocol does not have',
+        schema: stepUp.StepUpDemandSchema,
+        value: { capability: 'root', axis: 'use' },
+      },
+      {
+        name: 'a demand carrying anything beyond the closed pair',
+        schema: stepUp.StepUpDemandSchema,
+        value: { capability: 'terminal', axis: 'use', path: '/etc/passwd' },
+      },
+      {
+        name: 'a step-up body with no demand',
+        schema: stepUp.StepUpRequiredBodySchema,
+        value: { error: 'Confirm.', code: stepUp.STEP_UP_REQUIRED_CODE },
+      },
+      {
+        name: 'a demand body under another code',
+        schema: stepUp.StepUpRequiredBodySchema,
+        value: { error: 'No.', code: 'grant_not_granted', demand: { capability: 'fleet', axis: 'use' } },
       },
       {
         name: 'a window answer with no name',

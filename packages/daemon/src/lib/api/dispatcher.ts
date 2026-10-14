@@ -1,4 +1,4 @@
-import { OLDER_APP_SENTENCE } from '@ferretry/protocol';
+import { OLDER_APP_SENTENCE, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import {
   type ApiCredentials,
@@ -25,7 +25,7 @@ import {
   queryValue,
   type RouteParameters,
 } from './http.ts';
-import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
+import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
   RouteContext,
@@ -244,16 +244,28 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   };
   if (demand !== undefined) {
     const decision = guard.decide(demand, presentation) ?? { allowed: false, refusal: 'undetermined' as const };
-    if (!decision.allowed)
+    if (!decision.allowed) {
+      const message =
+        guard.explain(demand, decision.refusal) ??
+        `this daemon cannot say whether the UI may use ${demand.capability}, so it is refusing`;
+      const code = grantRefusalCode(decision.refusal);
       return {
         kind: 'refused',
-        response: errorResponse(
-          403,
-          guard.explain(demand, decision.refusal) ??
-            `this daemon cannot say whether the UI may use ${demand.capability}, so it is refusing`,
-          grantRefusalCode(decision.refusal),
-        ),
+        // A step-up refusal ALSO names the demand, so the app can tell the person which act they are
+        // confirming. Only the closed pair: nothing taken from the request is ever echoed.
+        response:
+          decision.refusal === 'step-up-required'
+            ? jsonResponse(
+                {
+                  error: message,
+                  code: STEP_UP_REQUIRED_CODE,
+                  demand: { capability: demand.capability, axis: demand.axis },
+                } satisfies StepUpRequiredBody,
+                403,
+              )
+            : errorResponse(403, message, code),
       };
+    }
     // Derived AFTER the refusal, so it can only ever describe a request this daemon is about to
     // serve. A handler is given where the caller stands so it can ask for one more thing; it is
     // never given a way to conclude that a refused caller was allowed.

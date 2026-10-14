@@ -198,6 +198,11 @@ describe('ApiSocketDispatcher', () => {
     // Assert — a NEW stream with no live step-up is refused; the open one keeps going.
     should(fresh.outcome).equal('refused');
     should(standing).be.true();
+    // The refused upgrade names the act too, from the same boundary the request table uses.
+    should(fresh.outcome === 'refused' ? jsonBody(fresh.response) : null).containDeep({
+      code: 'grant_step_up_required',
+      demand: { capability: 'terminal', axis: 'use' },
+    });
     should(presented.map(presentation => presentation.stepUp)).eql([false, true]);
   });
 
