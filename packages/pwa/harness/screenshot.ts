@@ -1790,7 +1790,9 @@ try {
             }
             await frame
               .locator('[data-daemon-settings-tabs="desktop"]')
-              .getByRole('tab', { name: new RegExp(`^${label}`) })
+              // A prefix, because the name runs on into the panel's description — but never into another
+              // label: "Security" must not also match "Security log".
+              .getByRole('tab', { name: new RegExp(`^${label}(?! log)`) })
               .click();
             // The rail's rows carry `transition-colors`, so a capture taken the
             // instant a panel opens catches the row it left mid-fade and reads as
