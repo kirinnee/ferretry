@@ -57,6 +57,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-evidence
+          # One artifact per attempt: v4 artifacts are immutable within a run, so a re-run reusing the name
+          # failed its upload after the journeys had passed.
+          name: e2e-evidence-${{ github.run_attempt }}
           path: ${{ runner.temp }}/e2e-evidence/
           if-no-files-found: warn

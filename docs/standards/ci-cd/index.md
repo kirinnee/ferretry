@@ -71,7 +71,7 @@ compiled `fy`/`fyd`, the real built PWA, the runner's Google Chrome and a local 
 ([Testing](../testing/index.md)). It is its own workflow because GitHub filters by path per workflow. It runs on
 pull requests that touch `packages/{pwa,daemon,relay,protocol,cli}` or the tier itself, and on manual dispatch.
 
-- **Evidence is an artifact.** The `e2e-evidence` artifact uploads with `if: always()`. It holds every screen
+- **Evidence is an artifact.** The `e2e-evidence-<attempt>` artifact (one per run attempt) uploads with `if: always()`. It holds every screen
   the journeys reached at 390 px and 1280 px in both colour schemes, the per-step journey log, and the relay
   ledger.
 - **It is NOT a required check yet.** The tier drives a real browser through Bun, and Bun 1.3 occasionally

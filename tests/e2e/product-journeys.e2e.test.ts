@@ -791,7 +791,10 @@ describe('the product, from a fresh machine to a working session', () => {
           );
           if (arrivals.length < 2)
             throw new Error(`only ${String(arrivals.length)} client arrival(s) at the rendezvous`);
-          if (relay.sinkhole.attempts() <= directBefore) throw new Error('the browser never tried the direct address');
+          if (relay.sinkhole.attempts() <= directBefore)
+            throw new Error(
+              `the browser never tried the direct address ${relay.sinkhole.origin}: ${String(relay.sinkhole.attempts())} attempt(s) in total, ${String(directBefore)} before the journey; ${String(arrivals.length)} client arrival(s) crossed the rendezvous`,
+            );
           await product.browser.page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
           await expectScreen(product.browser.page, '[data-carrier-kind]');
           // `none` means not measured YET (App.tsx: no ok measurement); the measurement lands shortly after.
