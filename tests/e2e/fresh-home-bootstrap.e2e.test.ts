@@ -123,33 +123,31 @@ describe('first-run daemon bootstrap', () => {
     });
   });
 
-  it('should boot after the fleet was provisioned first, which is the order the reporter used', async () => {
+  it('should boot after setup was attempted first, which is the order the reporter used', async () => {
     await withE2eEnvironment(async environment => {
-      // Arrange — the reported P0, through the compiled binaries. `fy fleet init` wrote `fleet/**`
-      // and claimed nothing, so the daemon's next boot met a non-empty unmarked home and refused it
-      // FOREVER; the only move the shipped product left was `rm -rf` of the home just provisioned.
-      // Reverse the two commands and it worked, so a fresh install came up or did not depending on
-      // which one a person happened to type first.
-      //
-      // The integration test in `packages/cli/tests/integration/daemon/fleet-home-claim.test.ts`
-      // carries the actual guard, because no CI job runs this tier. This one proves the same journey
-      // through the shipped executables.
+      // Arrange — the reported P0, in today's vocabulary. The reporter set the machine up BEFORE the
+      // first start (`fy fleet init` then, which wrote `fleet/**` without claiming the home), and the
+      // daemon then refused that non-empty unmarked home forever. `fleet init`/`fleet apply` were
+      // retired with the old account system (#458); setting a machine up is now `daemon setup` or
+      // `daemon import <tool>`, which talk to a running daemon. The invariant is unchanged: typing the
+      // setup verb first must not poison a home that has never been booted.
       const daemonBinary = await installStandInDaemon(environment);
       const environmentVariables = connection(environment, daemonBinary);
       await rm(environment.paths.fyHome, { recursive: true, force: true });
 
       try {
         // Act
-        const initialized = await environment.runFy(['fleet', 'init', '--first-account=claude'], environmentVariables);
-        const applied = await environment.runFy(['fleet', 'apply'], environmentVariables);
+        const imported = await environment.runFy(['daemon', 'import', 'claude'], environmentVariables);
+        const homeAfterImport = await exists(environment.paths.fyHome);
         const started = await environment.runFy(['daemon', 'start'], environmentVariables);
 
-        // Assert — the marker exists because `fleet init` claimed the home, before any fleet file.
-        should(initialized.code).equal(0);
-        should(applied.code).equal(0);
-        should(await exists(join(environment.paths.fyHome, 'layout-version'))).be.true();
+        // Assert — the early setup is refused in words, writes nothing, and the start then boots.
+        should(imported.code).not.equal(0);
+        should(imported.err).containEql(`could not reach ${DAEMON_NAME}`);
+        should(homeAfterImport).be.false();
         should(started.out + started.err).containEql(`${DAEMON_NAME} ready (pid `);
         should(started.code).equal(0);
+        should(await exists(join(environment.paths.fyHome, 'layout-version'))).be.true();
         should(await readLog(environment)).not.containEql(REFUSAL);
       } finally {
         await environment.runFy(['daemon', 'stop'], environmentVariables);
@@ -187,8 +185,9 @@ describe('first-run daemon bootstrap', () => {
 
   it('should refuse a directory that is somebody else s, from both commands', async () => {
     await withE2eEnvironment(async environment => {
-      // Arrange — the guard must still bite through the shipped binaries: before this change
-      // `fy fleet init` would provision a fleet straight into a person's documents folder.
+      // Arrange — the guard must still bite through the shipped binaries. The two commands that claim
+      // a home are `daemon start` and `daemon adopt`; `fy fleet init` was the other claimant until it
+      // was retired (#458), and before the guard it provisioned straight into a documents folder.
       const daemonBinary = await installStandInDaemon(environment);
       const environmentVariables = connection(environment, daemonBinary);
       await rm(environment.paths.fyHome, { recursive: true, force: true });
@@ -196,12 +195,13 @@ describe('first-run daemon bootstrap', () => {
       await writeFile(join(environment.paths.fyHome, 'notes.txt'), 'not a state home\n', 'utf8');
 
       // Act
-      const initialized = await environment.runFy(['fleet', 'init', '--first-account=claude'], environmentVariables);
+      const started = await environment.runFy(['daemon', 'start'], environmentVariables);
       const adopted = await environment.runFy(['daemon', 'adopt'], environmentVariables);
 
       // Assert — both refuse, both name what they found, and neither writes a marker into it.
-      should(initialized.code).not.equal(0);
-      should(initialized.err).containEql('notes.txt');
+      should(started.code).not.equal(0);
+      should(started.out + started.err).containEql('notes.txt');
+      should(await exists(join(environment.paths.fyHome, 'logs'))).be.false();
       should(adopted.code).not.equal(0);
       should(adopted.err).containEql('Documents');
       should(await exists(join(environment.paths.fyHome, 'layout-version'))).be.false();

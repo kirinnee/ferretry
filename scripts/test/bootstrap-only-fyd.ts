@@ -19,7 +19,7 @@
  * first `PATH` directory; the latter lets this relocated script import the real daemon adapters by
  * absolute URL without inheriting a repository-specific environment variable.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -61,7 +61,11 @@ const portText = sidecar(binDirectory, 'fyd.port');
 const repositoryRoot = sidecar(binDirectory, 'fyd.repository-root');
 if (!isAbsolute(repositoryRoot)) fail('the repository-root sidecar must hold an absolute path');
 
-type DaemonPackage = { readonly bin?: Readonly<Record<string, string>>; readonly name?: string };
+type DaemonPackage = {
+  readonly bin?: Readonly<Record<string, string>>;
+  readonly name?: string;
+  readonly version?: string;
+};
 let daemonPackage: DaemonPackage;
 try {
   daemonPackage = JSON.parse(
@@ -71,6 +75,15 @@ try {
   fail(`cannot read the daemon package: ${error instanceof Error ? error.message : String(error)}`);
 }
 daemonName = Object.keys(daemonPackage.bin ?? {})[0] ?? daemonPackage.name ?? daemonName;
+
+// `fy daemon start` asks the executable it is about to launch for its version (`<fyd> --version`, to
+// warn when a running daemon is older than the installed one) and waits for that child to exit. The
+// real daemon prints its version and exits; a stand-in that treated the flag as "serve" never
+// exited, so every start hung — while holding the host's lifecycle claim.
+if (process.argv.slice(2).includes('--version')) {
+  process.stdout.write(`${daemonPackage.version ?? '0.0.0'}\n`);
+  process.exit(0);
+}
 
 if (!/^[0-9]+$/.test(portText)) fail(`${portFile} must hold an integer port`);
 const port = Number.parseInt(portText, 10);
@@ -94,6 +107,22 @@ const opened = await factory.open().catch((error: unknown) => {
 });
 
 process.stdout.write(`${daemonName}: state home ready (created ${String(opened.layout.created)})\n`);
+
+/**
+ * Record the address, as the real daemon's first boot does — AFTER the home is claimed.
+ *
+ * The CLI's lifecycle verbs find this state home's daemon from `<FY_HOME>/config/daemon.json`, never
+ * from `FY_URL` (#224), so a stand-in that only listened would leave `start` waiting on the fixed
+ * default port. A document seeded BEFORE bootstrap is the foreign state bootstrap refuses; written
+ * here, once the home is ours, it is exactly the "chose once and recorded the answer" the real
+ * daemon writes, and an existing document is left alone the way the real daemon leaves one.
+ */
+const configFile = join(process.env.FY_HOME ?? '', 'config', 'daemon.json');
+if ((process.env.FY_HOME ?? '') === '' || !isAbsolute(configFile)) fail('FY_HOME must name the state home');
+if (!existsSync(configFile)) {
+  mkdirSync(join(configFile, '..'), { recursive: true });
+  writeFileSync(configFile, `${JSON.stringify({ host: '127.0.0.1', port }, null, 2)}\n`, 'utf8');
+}
 
 const health = {
   ok: true,
