@@ -12,7 +12,6 @@
  */
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
-import { OperatorPasswordSchema } from './grants.ts';
 
 /**
  * A non-secret handle for one staged change. Safe in a path and in a log.
@@ -27,29 +26,10 @@ export const FleetProposalIdSchema = z.string().regex(/^fy_fprop_[A-Za-z0-9_-]{2
 export type FleetProposalId = z.infer<typeof FleetProposalIdSchema>;
 
 /**
- * What a governed caller must produce before one staged change is applied.
- *
- * TWO VALUES, AND THE SECOND IS NOT A SECOND CREDENTIAL SYSTEM. `none` is the answer for a caller the
- * operator's grants do not govern at all — the host's own command line, and a browser on this machine
- * that has already unlocked — and for a machine with no operator password, where there is no secret to
- * bind a change to and a prompt would be a control that cannot refuse. `operator-password` is the
- * per-change confirmation: the SAME password the unlock is made of, proved again against this exact
- * staged change, so a borrowed five-minute unlock is not by itself enough to provision a host.
+ * The body of an apply. EMPTY, and kept as a schema so an old client's field is refused rather than
+ * ignored: a governed caller's confirmation is the passkey step-up `fleet.configure` already demanded.
  */
-export const FleetChangeConfirmationSchema = z.enum(['none', 'operator-password']);
-export type FleetChangeConfirmation = z.infer<typeof FleetChangeConfirmationSchema>;
-export const FleetProposalApplyRequestSchema = z.strictObject({
-  /**
-   * The per-change confirmation, present only when the machine view's `authority.confirmation`
-   * said it would be asked for.
-   *
-   * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE — the same value the unlock is made of, held to the
-   * same rule by the same schema, so this cannot become a second, laxer description of one secret. It
-   * travels in a BODY: a query parameter reaches every proxy's access log, and this one is worth more
-   * than the five minutes an unlock is.
-   */
-  operatorPassword: OperatorPasswordSchema.optional(),
-});
+export const FleetProposalApplyRequestSchema = z.strictObject({});
 export type FleetProposalApplyRequest = z.infer<typeof FleetProposalApplyRequestSchema>;
 
 /** A write that is not a plan operation: the configuration itself, and each edited asset. */

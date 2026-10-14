@@ -59,7 +59,7 @@ const schemaCases: SchemaCase[] = [
   {
     name: 'start request',
     schema: harnessLogin.HarnessLoginStartRequestSchema,
-    value: { credentialId: 'claude-kirin', operatorPassword: 'the operator password' },
+    value: { credentialId: 'claude-kirin' },
   },
   { name: 'submit request', schema: harnessLogin.HarnessLoginSubmitRequestSchema, value: { code: 'pasted-code' } },
   { name: 'submission', schema: harnessLogin.HarnessLoginSubmissionSchema, value: accepted },
@@ -326,15 +326,14 @@ describe('harness-login schemas', () => {
 
   it('should start a sign-in from a credential', () => {
     // Arrange / Act
-    const byCredential = harnessLogin.HarnessLoginStartRequestSchema.parse({
-      credentialId: 'claude-work',
-      operatorPassword: 'the operator password',
-    });
+    const byCredential = harnessLogin.HarnessLoginStartRequestSchema.parse({ credentialId: 'claude-work' });
 
     // Assert
-    should(byCredential).deepEqual({ credentialId: 'claude-work', operatorPassword: 'the operator password' });
+    should(byCredential).deepEqual({ credentialId: 'claude-work' });
     assertRejects([
-      rejects('no credential', harnessLogin.HarnessLoginStartRequestSchema, {
+      rejects('no credential', harnessLogin.HarnessLoginStartRequestSchema, {}),
+      rejects('a credential with a confirmation riding along', harnessLogin.HarnessLoginStartRequestSchema, {
+        credentialId: 'claude-work',
         operatorPassword: 'the operator password',
       }),
       rejects('a credential id that is not a slug', harnessLogin.HarnessLoginStartRequestSchema, {

@@ -1,6 +1,6 @@
 import type { ApiActor } from './actor.ts';
 import type { AuthenticatedCredential } from './authentication.ts';
-import type { CallerGovernance, CapabilityDemand } from './capability.ts';
+import type { CallerGovernance, CapabilityDemand, CapabilityPresentation } from './capability.ts';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
 
 /**
@@ -83,8 +83,8 @@ export interface RouteContext {
    * that does not, because a route the operator was never asked about has no answer here to give.
    *
    * A HANDLER CANNOT MINT ONE, and that is why it travels here rather than being re-derived. Both
-   * facts it carries — whether the grants govern this caller, and whether this machine has an
-   * operator password — are the boundary's, made from the transport's own account of where the socket
+   * facts it carries — whether the grants govern this caller, and whether its device holds a live
+   * passkey step-up — are the boundary's, made from the transport's own account of where the socket
    * came from. A handler that recomputed either from `request.loopback` or from a token class would
    * be writing a second, quieter definition of locality, which is the failure this whole layer is
    * built to prevent. The fleet mount did exactly that in four places before this existed.
@@ -93,6 +93,18 @@ export interface RouteContext {
    * already allowed, so nothing read from it can serve a caller the boundary refused.
    */
   readonly governance?: CallerGovernance;
+  /**
+   * The facts the grant layer reads about this caller — carrier-proved locality, the step-up and the
+   * proven device's own grants — exactly as the boundary assembled them. Present on every request the
+   * dispatcher authenticated, so a handler asking a further grant question never rebuilds them.
+   */
+  readonly presentation?: CapabilityPresentation;
+  /**
+   * Spends this caller's step-up when the machine asks for one every time (`stepUpWindowMinutes: 0`).
+   * For a handler that checks its own step-up rather than declaring it, so one confirmation still buys
+   * one act. A no-op for a caller with no proven device, and under any other window.
+   */
+  readonly spendStepUp?: () => void;
 }
 
 /**
@@ -115,6 +127,12 @@ export interface ScopedRoute extends RoutePattern {
   readonly minimum: CredentialMinimum;
   /** Whether the request must have arrived through a privileged carrier. */
   readonly privilegedOnly?: true;
+  /**
+   * Served to a device that has not confirmed its presence yet, on a machine that asks for it on
+   * opening (`unlockOnOpen`, `docs/design/zero-trust.md` B6). Only the routes a device needs to GIVE
+   * that confirmation, and the read that says the machine wants one, carry it.
+   */
+  readonly unlockExempt?: true;
   /**
    * What the OPERATOR must additionally have agreed to, when this route is one of the five things
    * they are asked about.
@@ -197,9 +215,7 @@ export type WardenRemedyName = string;
  *
  * EVERY FIELD A POLICY *CAN* READ IS A FIELD IT *MIGHT* DECIDE FROM, so this carries only what the
  * question consumes. It deliberately does NOT carry the request: the header map is the whole header
- * map, which would hand a policy object the caller's live bearer token and the operator's
- * five-minute unlock — a value whose own comment says it must never reach anywhere it can outlive
- * those five minutes — and would leave nothing stopping a `decide` from reading
+ * map, which would hand a policy object the caller's live bearer token, and would leave nothing stopping a `decide` from reading
  * `x-ferretry-session-id` and deciding from it, which is the header-movable authority this whole axis
  * exists to close. `method`, `path` and `loopback` are absent for a quieter reason: no conjunct needs
  * them. The route's identity already arrives as `remedy` — one remedy per route — and `loopback` is

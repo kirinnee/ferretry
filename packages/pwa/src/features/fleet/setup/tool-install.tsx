@@ -1,14 +1,13 @@
 /**
  * Install what's missing (docs/design/account-model.md §4.3 step 1, §4.8, §8.6, E1, E2).
  *
- * One checkbox per missing tool, each showing the EXACT command the machine will run; the operator
- * password when this browser is off the machine ("used once and not stored"); then **Install n
+ * One checkbox per missing tool, each showing the EXACT command the machine will run; then **Install n
  * tools**. The install is one request that answers when it is done, so while it runs the panel says
  * "this can take a minute" instead of freezing a button. A failure says why and gives the command to
  * run by hand, with **Retry** (E2).
  *
- * The gate is the shared one: `SetupAccess.act`, which spends the password through
- * `useAccountChanges().authorize`.
+ * The gate is the shared one: `SetupAccess.act`; a caller off the machine is asked for its passkey by the
+ * carrier when the daemon wants one.
  */
 
 import type { FleetToolInstallResult } from '@ferretry/protocol';
@@ -60,22 +59,12 @@ export function ToolInstall({
   const [picked, setPicked] = useState<readonly SetupHarness[]>(() => runnable.map(tool => tool.harness));
   const { changes } = access;
 
-  const install = (harnesses: readonly SetupHarness[], password: string | undefined): void => {
+  const install = (harnesses: readonly SetupHarness[]): void => {
     onPhase({ kind: 'running', harnesses });
     void access
       .act(
-        async (client, authorization): Promise<FleetToolInstallResult> =>
-          await installFleetTools(
-            client,
-            {
-              harnesses: [...harnesses],
-              ...(authorization.operatorPassword === undefined
-                ? {}
-                : { operatorPassword: authorization.operatorPassword }),
-            },
-            authorization.unlock,
-          ),
-        password,
+        async (client): Promise<FleetToolInstallResult> =>
+          await installFleetTools(client, { harnesses: [...harnesses] }),
       )
       .then(result => {
         if (result.kind === 'refused') {
@@ -136,7 +125,7 @@ export function ToolInstall({
           busy={changes.busy}
           refusal={changes.refusal}
           submitLabel="Retry"
-          onSubmit={password => install(phase.harnesses, password)}
+          onSubmit={() => install(phase.harnesses)}
         >
           {onSkip === undefined ? null : (
             <Button type="button" data-install-skip="" onClick={onSkip}>
@@ -189,7 +178,7 @@ export function ToolInstall({
           refusal={changes.refusal}
           submitLabel={installLabel(picked.length)}
           disabled={picked.length === 0}
-          onSubmit={password => install(picked, password)}
+          onSubmit={() => install(picked)}
         />
       )}
     </div>

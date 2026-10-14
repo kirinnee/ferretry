@@ -60,17 +60,17 @@ when, from where).
 
 Adversaries, and what each must be denied:
 
-| adversary                                      | must NOT be able to                                                                             |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **stolen phone, locked**                       | anything: the app's key is usable only by code running in the unlocked browser                  |
-| **stolen phone, unlocked, app open**           | a dangerous act without the owner's biometric/PIN; outlast a revoke; register its own passkey   |
-| **copied storage** (backup, profile copy, IDB) | authenticate at all: the private key is non-extractable and never serialised as bytes           |
-| **malicious relay / Cloudflare**               | read, alter, inject, replay or impersonate either end; learn the device id or any credential    |
-| **LAN attacker** (same Wi-Fi as the daemon)    | read or alter direct traffic, learn a credential, impersonate the daemon to a pairing device    |
-| **compromised Pages deploy**                   | silently replace an installed app (detected and refused by D, within the TOFU limits below)     |
-| **XSS in the app**                             | carry the key away; act after the tab closes; perform a dangerous act without the owner's UV    |
-| **replay** of any captured frame or assertion  | have it accepted in any other session, or twice in the same one                                 |
-| **downgrade** to an older protocol or path     | reach any path that is weaker: none exists — the bearer path, `POST /v1/pair` and `/1` are gone |
+| adversary                                      | must NOT be able to                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **stolen phone, locked**                       | anything: the app's key is usable only by code running in the unlocked browser                                                                                                                                                                                                                                                                                  |
+| **stolen phone, unlocked, app open**           | anything before the device unlocks the machine; register its own passkey on THIS device. INSIDE an unlock period it can do what the owner could (B1), including pair a device of its own, which then outlasts revoking the phone (R2-M2) — the period, `stepUpOnActions`, the `passkey-added` push and revoking EVERY device it may have added are the controls |
+| **copied storage** (backup, profile copy, IDB) | authenticate at all: the private key is non-extractable and never serialised as bytes                                                                                                                                                                                                                                                                           |
+| **malicious relay / Cloudflare**               | read, alter, inject, replay or impersonate either end; learn the device id or any credential                                                                                                                                                                                                                                                                    |
+| **LAN attacker** (same Wi-Fi as the daemon)    | read or alter direct traffic, learn a credential, impersonate the daemon to a pairing device                                                                                                                                                                                                                                                                    |
+| **compromised Pages deploy**                   | silently replace an installed app (detected and refused by D, within the TOFU limits below)                                                                                                                                                                                                                                                                     |
+| **XSS in the app**                             | carry the key away; act before the owner unlocks. Inside an unlock it can act as the owner (B1) — on ANY page load of that device for the unlock's validity, not only the tab that unlocked (the unlock is the device's, by decision; R2-M1)                                                                                                                    |
+| **replay** of any captured frame or assertion  | have it accepted in any other session, or twice in the same one                                                                                                                                                                                                                                                                                                 |
+| **downgrade** to an older protocol or path     | reach any path that is weaker: none exists — the bearer path, `POST /v1/pair` and `/1` are gone                                                                                                                                                                                                                                                                 |
 
 Out of scope by decision, not oversight: device posture (needs a native client), an attacker with the
 owner's user account on the host, a malicious agent the owner chats with (see the end), and Cloudflare
@@ -174,7 +174,7 @@ GET ws(s)://<daemon address>/v1/rendezvous/<daemonId>/client      (WebSocket upg
   first: at most **30 admitted upgrades a minute from one peer address** (a refusal spends none), at
   most **2 unproven sockets per remote address** (the host's loopback is exempt: every tab on it shares
   one), and at most **16 unproven and 64 direct sessions** in all — a full cap closes the OLDEST
-  unproven socket for the newcomer, so a squatter must out-race honest arrivals. The slot is taken when the upgrade is
+  unproven socket for the newcomer, so a squatter must out-race honest arrivals. The per-address exemption for the host's own tabs applies only on a host-proven carrier (a loopback-only bind): behind a proxy on a wildcard bind, every remote caller arrives from `127.0.0.1` and shares one bounded address. Declared: a proxy in front of a loopback-only bind still shares the exemption, so that deployment is exposed to a cheap denial of direct sessions (the relay is unaffected). The slot is taken when the upgrade is
   admitted, not when the socket attaches, so a burst of concurrent upgrades cannot all pass the check
   before any is counted; a reserved slot whose socket never attaches is handed back after ten seconds.
   An upgrade from an origin the daemon does not serve is refused with the same `403` an HTTP request
@@ -220,9 +220,16 @@ proof = Ed25519-Sign(device key,
 - `appSession` is 16 random bytes the page generates once per page load and holds only in memory. It
   names "this running copy of the app" so a step-up (B) belongs to one tab's life and ends when the
   page closes. It is signed, so a relay cannot move it.
-- Declared limit, closed in B: `appSession` is any 16 bytes the client picks. Code running in the page
-  (an XSS, a malicious deploy) can read it and present it again from a later session of the same
-  device, so before a step-up is bound to it, B makes it a value the DAEMON issues.
+- **The daemon, not the page, decides when a copy of the app has closed.** `appSession` is any 16
+  bytes the client picks, so code running in the page (an XSS, a malicious deploy) could keep it and
+  present it again from a later page of the same device. What it cannot keep is a live session. A
+  step-up therefore belongs to one **span**: the unbroken stretch in which that `(deviceId,
+appSession)` holds at least one session, with 60 seconds of slack for a reconnect. When the span
+  ends the step-up is dropped, and the same id presented afterwards begins a new span that holds
+  nothing (`StepUpRegistry`, told by the connection registry when each session opens and closes).
+- Declared limit: while the real page is still open, other code of the same origin on the same device
+  (a second tab of a malicious deploy) can open a session with the same id and share its step-up. It
+  could already drive the open tab itself, so the span does not widen what that code can do.
 - The admin token is still not resolvable through a session, deliberately — it is a host-local secret.
 
 ### A5. The access lease and silent renewal
@@ -258,8 +265,12 @@ proof = Ed25519-Sign(device key, "ferretry-device-renew-v2" ‖ 0x00 ‖ TH ‖ 
 - Declared limit: a write still running when a session ends (lease, cap, revocation) completes on the
   daemon, but its answer is lost with the session. The client correctly never replays a write, so the
   person can be told a change failed that in fact happened. A correctness gap, not a security one.
-- Declared limit, closed in B: renewal re-checks pairing and idle expiry, not capability grants. A
-  terminal or browser stream opened under a grant survives a later narrowing until it closes.
+- **An open stream is asked again.** A stream session keeps the request it was accepted for, and the
+  daemon re-runs the socket table's own authorization for it (`ApiSocketDispatcher.reauthorize`) on
+  every renewal and whenever the grant service's answer moves — a change, a refresh, a failed
+  refresh. A stream that is no longer allowed ends with a sealed `1008 this stream is no longer
+allowed`, never `4403`, which would tell the device it is unpaired. The re-check counts the step-up
+  that opened the stream as spent: a step-up authorizes the OPEN, and only a narrowed grant ends it.
 
 ### A6. Idle expiry and revocation
 
@@ -350,9 +361,30 @@ forged signal on the direct path therefore cannot stop the app from reaching a w
 
 ## B. Passkey step-up and least privilege
 
-### B1. Which acts need a step-up
+### B1. The unlock: everything needs it, and it lasts N hours
 
-A **governed** caller (any device not on a host-proven carrier) must hold a current step-up for:
+**Owner decision (2026-10-14), which replaces the per-act step-up as the default:** "once we unlock the
+app with a passkey, feel free to do anything (including start sessions)". It trades a prompt per
+dangerous act for one prompt per machine per unlock period, and it is chosen for friendliness, with the
+cost stated below.
+
+- **Before an unlock, a device can do nothing.** A governed caller (every caller but the host's admin
+  token — a browser on the host included, B4) whose device has not unlocked this machine within
+  `unlockValidityHours` is answered `401 { code: "unlock_required" }` on EVERY request and every stream
+  open, by the shared authorization boundary. The only routes served are the ones a device needs to get
+  in: `POST /v1/unlock/options`, `POST /v1/unlock`, `GET /v1/passkeys`, `GET /v1/security`, and passkey
+  registration within its own rules (B2). Pairing redemption is not a session route and is unaffected.
+- **An unlock is one passkey assertion**, verified by the daemon exactly like a step-up (B2), held in the
+  daemon's memory for the **device** — every page and tab of it — for `unlockValidityHours` (default 8,
+  1–24). A restart, a revoke or the period ending locks the device again.
+- **While unlocked, the device may do anything its grants allow, with no further prompt** — terminals,
+  files, secrets, settings, starting sessions with any flags, mode or directory, pairing devices. The
+  unlock IS the step-up for its whole validity: every demand below that needs a step-up is satisfied.
+- **The per-act step-up remains as an option** (`stepUpOnActions`, off by default). When the owner turns
+  it on, the acts below ask for a passkey again inside an unlock, for `stepUpWindowMinutes`. A machine
+  with the unlock turned off always asks per act.
+
+The acts a per-act step-up covers, when it is asked for:
 
 | act                                                        | route demand                      |
 | ---------------------------------------------------------- | --------------------------------- |
@@ -366,10 +398,25 @@ A **governed** caller (any device not on a host-proven carrier) must hold a curr
 
 The rule is one line in the dispatcher: **a route whose capability demand is `*.configure`, or is
 `terminal.use`, `secrets.use`, `browser.use` or `pairing.use`, requires a step-up from a governed
-caller.** Reads (`fleet.use`, `filesystem.use`, `warden.use`) and everything in the daemon's own
-state home (sessions, chat, tasks, attention, pins) do not. A refusal is
-`403 { code: "step_up_required" }`, which the app answers by raising the passkey prompt and retrying
+caller** — and a current unlock is one unless `stepUpOnActions` is on. A refusal is
+`403 { code: "grant_step_up_required" }`, which the app answers by raising the passkey prompt and retrying
 once.
+
+Starting an agent with your own flags, mode or directory is covered by the unlock (owner decision
+2026-10-14).
+
+**What this costs, said plainly.** A stolen phone that is **unlocked and inside its unlock period** can do
+everything the owner could do from that phone until the period ends — open a terminal on the host, use a
+secret, start agents, pair another device. The per-act model stopped such a phone at its next dangerous
+act; this one does not. The controls are: the unlock period (shorten it), `stepUpOnActions` (turn the
+per-act prompt back on), and **revocation** — revoking the device ends every session it holds and every
+unlock at once, from the machine or from any other device.
+
+- **A start that is a terminal in disguise is decided as one** (review R2-H1). `POST /v1/sessions` with
+  harness flags of its own, or with a working directory outside every registered project and the
+  managed-worktree root, is a `terminal.use` act: covered by the unlock under the defaults, and asked
+  per act when `stepUpOnActions` is on or the unlock is off — exactly as opening a terminal is. A plain
+  start in a known project asks for nothing more. The prompt names it ("open a terminal").
 
 ### B2. The ceremony, and who verifies it
 
@@ -381,17 +428,29 @@ challenge is single-use and bound to one device and `appSession`).
   then `POST /v1/passkeys` with the attestation (`clientDataJSON`, `attestationObject`). Attestation
   format `none`; ES256, EdDSA and RS256 credentials are accepted. The daemon stores the credential
   id, its public key (as SPKI) and `signCount` on the device's record.
-- Step-up — `POST /v1/step-up/options` → `{ challenge, rpId, allowCredentials }`, then
-  `POST /v1/step-up` with `credentialId`, `clientDataJSON`, `authenticatorData`, `signature`.
+- Unlock — `POST /v1/unlock/options` → `{ challenge, rpId, allowCredentials }`, then `POST /v1/unlock`
+  with `credentialId`, `clientDataJSON`, `authenticatorData`, `signature` (B1). The ceremony a device
+  meets first, so an overdue device key is replaced here too (B6).
+- Step-up — `POST /v1/step-up/options` and `POST /v1/step-up`, the same shapes on their own challenge,
+  asked only when the machine wants a per-act confirmation inside an unlock (`stepUpOnActions`) or has no
+  unlock at all.
 - The daemon checks, in order: the challenge is one it issued to this device and `appSession`,
   unexpired (2 minutes) and unspent, and it is spent now; `clientData.type` is `webauthn.create` /
   `webauthn.get`; `clientData.origin` is one of the daemon's `corsOrigins`; `rpIdHash` equals
   SHA-256 of that origin's host; flags **UP and UV** are set; the credential belongs to this device;
   the signature verifies over `authenticatorData ‖ SHA-256(clientDataJSON)`; and, when either
-  counter is non-zero, `signCount` increased (a stuck or rewound counter refuses and is audited).
-- A verified step-up is held **in the daemon's memory** for `(deviceId, appSession)` for **15
-  minutes**. It ends early on revoke, on a daemon restart and when the page closes (a new
-  `appSession`). It is never a value the browser holds.
+  counter is non-zero, `signCount` increased. The counter is written by ONE compare-and-set inside the
+  passkey store's serialized write, so two copies of the app that verified against the same stored count
+  cannot both land and the later one cannot rewind it. A stuck, rewound or out-raced counter refuses
+  (`not-verified`) and is written to the grant journal as `passkey.counter-refused=<deviceId>` until the
+  audit log (C) lands.
+- Issued challenges are swept on every issue: an unanswered one lives at most its two minutes, so a
+  device that opens a session per fresh `appSession` and asks once cannot grow the ledger without bound.
+- A verified **unlock** is held **in the daemon's memory** for the `deviceId` — every page of it — for
+  `unlockValidityHours` (8 by default). A verified per-act **step-up** is held for `(deviceId,
+appSession)` for `stepUpWindowMinutes` (15 by default). Both end early on revoke and on a daemon
+  restart; a step-up also ends when the page closes (a new `appSession`). Neither is a value the browser
+  holds.
 - Verification is WebCrypto only: a minimal CBOR reader (attestation object, COSE key) and DER →
   raw conversion for ES256 are written here rather than imported, because the verifier is ~300 lines
   with a fixed input shape and every dependency on this path is attack surface.
@@ -413,34 +472,136 @@ cannot be used by a self-hosted copy (`ferretry.example.com`), a local developme
 
 When the browser has no passkey for this origin — or the origin cannot hold one — the step-up prompt
 says it plainly: "This copy of the app at ‹origin› has no passkey for this machine. Add one from a
-device that already has access, or pair this device again at the machine." Never a raw
+device that already has access, or ask the owner to run `fy passkey window <this device>` at the
+machine." Never a raw
 `NotAllowedError`.
 
-**Who may register a passkey**, because a thief holding an unlocked, open app must not be able to add
-their own: (a) a device with **no passkey yet, within 10 minutes of pairing** — the moment the owner
-is holding it; (b) any device **with a current step-up** (adds a second authenticator); (c) the
-**host** (a browser on a host-proven carrier). Lost every passkey? Revoke the device and pair again at
-the machine.
+**Who may register a passkey**, because a thief holding an unlocked, open app — or code running in the
+page — must not be able to add their own: (a) a device with **no passkey yet, within 10 minutes of
+pairing** — the moment the owner is holding it; (b) a device that **already holds a passkey, by
+confirming with it in the same ceremony**; (c) a device whose window **the owner re-opened at the
+machine** with `fy passkey window <device>` — ten minutes, one passkey, audited (B4). Lost every passkey?
+That last path recovers it without pairing again. `PasskeysView.registration` reports which applies:
+`first-window`, `confirm-existing`, `reopened` or `closed`.
+
+**Adding a second passkey is its own ceremony** (review M3). With attestation `none` nothing in a
+registration proves an authenticator exists: page code (XSS, a malicious deploy) can make a key pair with
+WebCrypto and build `clientDataJSON` and the attestation itself, UP and UV flags included. What it cannot
+build is a signature by a passkey this daemon already holds. So for rule (b):
+
+- `POST /v1/passkeys/options` answers the registration options **and** `confirm` — step-up-shaped options
+  whose challenge is issued for this registration only: purpose `register-confirm`, single-use, two
+  minutes, bound to `(deviceId, appSession)` and to this registration's own challenge. Asking again
+  replaces both, so a confirmation from an earlier options call is refused.
+- The app runs the assertion, then the creation, in one press of **Add a passkey**, and sends
+  `POST /v1/passkeys` with the new credential plus `confirmation` (the assertion). The daemon spends both
+  challenges first, then verifies the confirmation exactly as a step-up (this device's credential, its
+  origin, UP and UV, the counter's compare-and-set), and only then the new credential.
+- A missing, stale, wrong-purpose (a step-up's challenge) or other-device confirmation answers
+  `not-verified`. **Holding a step-up opens nothing**: it is not one of the rules.
+
+**A registration is never a step-up.** It used to grant one, on the reasoning that the authenticator had
+just verified the person; but a registration proves nothing about the person (above), so a first-window
+registration from page code was a step-up with no real user verification. Now an act straight after
+registering asks for a step-up like any other act.
+
+**Declared: the two windows have nothing to bind to.** Rules (a) and (c) carry no `confirm`, because the
+device holds no usable passkey yet. Page code present in the page during the ten minutes after pairing, or
+during a window the owner re-opened, can still register a software passkey and step up with it later
+without the owner. The windows are short and the owner opened each one.
+
+**An added passkey is announced.** Every registration is written to the grant journal as
+`passkey.added=<deviceId>`, and the daemon sends one notification ("A passkey was added — ‹device› has a
+new passkey for this machine. If that was not you, revoke the device at the machine.") to every enrolled
+browser through the existing push path. It is best effort: a notice that cannot be delivered never undoes
+the registration. A device that never enrolled for notifications is not told; the audit-log alert path
+(C) is where a durable alert belongs.
+
+**A credential belongs to exactly one device.** A step-up only accepts a credential stored for the device
+whose session presents it, and a registration refuses a credential id ANY device already holds. So a
+synced passkey (iCloud Keychain, Google Password Manager) that lands on a second phone cannot step up
+that phone, and a device that learned another device's credential id cannot re-register it and take the
+passkey over.
+
+**As built** (`feat/zt-passkey-ui`), the app's side of registration:
+
+- **Settings → Daemons → Security** is one panel per machine (`#security` deep-links to it, and the
+  palette lists it). It shows the passkeys this device holds for that machine as "Passkey for
+  ‹origin›, added ‹date›", says what a step-up is for in one sentence, and offers **Add a passkey**,
+  which runs the registration ceremony above against the app's own origin and re-reads the list.
+- **The button is offered only when it would work**: the machine reports `registration` other than
+  `closed`, and the browser can run WebAuthn at all (the API exists and the page is a secure context).
+  For `confirm-existing`, one sentence beside it names the machine and says the add starts with a
+  confirmation by a passkey this device already holds. Otherwise one sentence says why — the ten-minute
+  first-passkey rule and `fy passkey window`, or that this address cannot hold passkeys. Every refusal and ceremony failure is one
+  plain sentence; no status or error name reaches the screen.
+- **After pairing**, a device with no passkey for a machine sees one dismissible line pointing at that
+  panel. It is read once per machine, never polled, hidden on Settings itself, and not shown when
+  registration is `closed`, because a line pointing at a dead end is worse than none. Dismissal is
+  remembered per machine in `localStorage`; storage that throws means the line may return next load.
+- **The prompt names the machine and the act.** A `403 grant_step_up_required` (and a socket upgrade
+  refused for a step-up) also carries `demand: { capability, axis }` — the closed pair, never a path or
+  a session name — and the app turns it into one sentence: "Confirm with your passkey to open a terminal
+  on ‹machine›." A missing or unparseable demand says "make this change" instead, never a blank.
+  It names the act; it does not prove the person started it — code in the open page can still ask.
+- **Not built, because the daemon has no route or field for it**: a passkey's name, its last use, and
+  removing one passkey. `PasskeyView` is id, origin and created-at. Revoking the device still forgets
+  all of its passkeys.
+- **Not exercised end to end**: the prompt answers `403 grant_step_up_required`, and no governed route
+  on this branch issues that refusal yet (B3's grant work does). The app's reaction is unit-tested; a
+  real authenticator ceremony is not — the tests use a software authenticator on the daemon side and a
+  fake credential container in the app.
 
 ### B3. The operator password is deleted
 
-The step-up replaces it for every purpose it had: the local-browser unlock, the remote `configure`
-lock and the per-change confirmation on fleet apply and sign-in. No compatibility is kept:
-`state/operator-password.json`, `PUT /v1/grants/password`, `POST /v1/grants/unlock`, the
-`x-ferretry-operator-unlock` header, `fy daemon password` and the unlock dialog are removed, and
-`POST /v1/pair/code` no longer requires a password (pairing is now safe without one: a new device
-gets read + chat only). The per-change confirmation's "bound to one diff" property becomes "bound to
-a biometric check in the last 15 minutes", which is weaker against a replayed request and stronger
-against a known password — and replay is no longer possible inside a sealed session anyway.
+**Done.** The step-up replaced the operator password for every purpose it had: the local-browser unlock,
+the remote `configure` lock and the per-change confirmation on fleet apply and sign-in. No compatibility
+was kept.
 
-### B4. Loopback is ungoverned, and it is the recovery path
+- **Removed:** `state/operator-password.json`, `PUT /v1/grants/password`, `POST /v1/grants/unlock`, the
+  `x-ferretry-operator-unlock` header, `fy daemon password`, the unlock dialog, and the password prompt at
+  `fy daemon start`. A stale `state/operator-password.json` is deleted at boot with one notice line.
+- **Pairing:** `POST /v1/pair/code` no longer requires a password. It is governed by `pairing.use`, so a
+  governed caller needs a step-up to mint, and a caller on the host mints freely.
+- **The decision:** a caller is governed exactly when its request did not arrive on the host. A governed
+  caller needs a step-up for every `configure` demand and for `use` of `terminal`, `browser` and
+  `pairing`; every other `use` is granted. The refusals are `granted`, `not-granted`,
+  `step-up-required` and `undetermined` — `locked`, `rate-limited` and `ungated` no longer exist.
+- **Widening is host-only.** A governed caller may only narrow, and a narrowing needs a step-up. A remote
+  warden is governed and can never step up, because it has no device.
+- **The cost, stated:** the per-change confirmation's "bound to one diff" property becomes "bound to a
+  biometric check in the last 15 minutes", which is weaker against a replayed request and stronger against
+  a known password — and replay is no longer possible inside a sealed session anyway.
+- ~~**A declared GAP:** `pairing.use` also guarded the four `/v1/push/*` enrolment routes.~~ **Closed by B5:**
+  a device enrolling itself needs no capability. It does need a step-up (review M2, below).
 
-A caller that **arrived on the host** — the CLI with the admin token, or a browser on a host-proven
-direct carrier (`privilegedLoopback`) — is ungoverned: no step-up, no per-device narrowing. Somebody
-at the machine already has the machine. This is also the only recovery: lost phone, lost passkey or a
-device narrowed to nothing is repaired at the machine, with `fy` or a local browser. The cost is
-stated: a browser tab left open on the host is not protected by any of this. A remote caller arriving
-through a local proxy (`tailscale serve`, `cloudflared`) is NOT host-proven, exactly as today.
+### B4. Only the owner's admin token is ungoverned, and it is the recovery path
+
+**Owner decision (2026-10-13): "at the machine" means ONLY a caller presenting the owner-only local
+credential** — the CLI with the admin token, over loopback. That caller is ungoverned: no step-up, no
+per-device narrowing. Reading the token needs this machine's disk, so somebody presenting it already has
+the machine.
+
+**A browser on the host is an ordinary governed device**, even on a loopback-only bind. `ssh -L`, `socat`,
+`cloudflared`, `tailscale serve` or any reverse proxy to `127.0.0.1` is indistinguishable from it, so
+treating it as the owner would hand the machine to anybody who can open a tunnel. It pairs like any device
+and confirms the dangerous acts (B1) with a passkey; it can never widen a grant or a setting.
+
+The recovery is at the machine, with `fy`: a lost phone or a device narrowed to nothing is repaired with
+`fy` commands, and a device that missed its first-passkey window or lost its authenticator gets
+**`fy passkey window <device>`**, which re-opens that one device's registration window for ten minutes
+and one passkey (`POST /v1/passkeys/registration-window`, admin token only, audited in the grant
+journal). Without it a local browser past its first window would be locked out of every dangerous act.
+
+As built:
+
+- `arrivedOnHost(request, adminToken) = adminToken && request.loopback` (`packages/daemon/src/lib/api/http.ts`).
+  Every owner rule reads it: governance, widening a grant or a security setting, and the passkey recovery.
+- `privilegedLoopback` survives only for the PLACE: `privilegedOnly` routes (a local terminal attach) read
+  `arrivedPrivileged` = `privilegedLoopback || arrivedOnHost`, and nothing it admits grants authority.
+- `PasskeysView.registration` lost `host` and gained `reopened`.
+- The device list's `hostLocal` reads `arrivedOnHost` too; it used to read the bare loopback flag, which
+  told a caller behind a local proxy it was at the machine.
 
 ### B5. Least-privilege defaults
 
@@ -450,15 +611,18 @@ Grants become **per device**, on top of the daemon-wide document:
 effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.grants[capability][axis]
 ```
 
-- A newly paired device gets **`fleet.use` only**: it can read the fleet and chat with sessions.
-  Terminal, filesystem, browser, secrets, warden, pairing and every `configure` axis start off.
+- **A newly paired device gets FULL grants, behind the unlock** (owner decision 2026-10-14, which
+  replaces the `fleet.use`-only default this section first specified). It can do nothing until it
+  unlocks the machine (B1), and then anything the daemon-wide document allows. Narrowing one device is
+  still available: `fy pair --limited` mints a code whose device holds `fleet.use` only, and any device
+  can be narrowed afterwards.
 - A **seventh capability, `secrets`**, is added: `secrets.use` governs `POST /v1/secrets/use` (it
   runs a command — code execution) and the list; `secrets.configure` governs set and delete. Today
   those routes carry no capability demand at all, so any paired device can run a command through
   them; that is closed. The "before you add capability seven" questions in grants.md are answered in
   the same PR.
-- **Widening a device** is done at the machine (`fy device grant <device> <capability> --use`, or the
-  local browser), or remotely by a device that holds `pairing.configure` **and** the capability being
+- **Widening a device** is done at the machine (`fy device grant <device> <capability> --use`; a browser
+  on the host is a device like any other, B4), or remotely by a device that holds `pairing.configure` **and** the capability being
   granted **and** a current step-up. No device can grant what it does not hold, so nothing escalates.
 - **Narrowing** a device (including oneself) needs a step-up and nothing else — never harder than
   widening.
@@ -467,37 +631,88 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
 - Web Push self-enrolment moves off `pairing.use`: a device enrolling **itself** for notifications is
   allowed for every paired device (it grants nothing), so a default device still gets alerts.
 
+**As built.**
+
+- **`secrets` is the seventh capability** (`DAEMON_CAPABILITIES`). `GET /v1/secrets` and `POST /v1/secrets/use`
+  demand `secrets.use`, which also needs a step-up from a governed caller (it runs a command); `POST
+/v1/secrets` and `DELETE /v1/secrets/:name` demand `secrets.configure`. grants.md answers the
+  capability-seven questions.
+- **Per-device grants** live in each `devices.json` record as `grants`. The document stays at
+  `schemaVersion: 2`: a record written before B5 reads as the default, which is a narrowing and therefore
+  safe. A device's grants reach the boundary through the live registry (`PairedDeviceDirectory.grants`),
+  keyed by the session's proven device; the dispatcher puts them on the `CapabilityPresentation`, which now
+  rides on every authenticated `RouteContext`, so no mount re-derives a caller. A device whose record is
+  gone is refused `undetermined`. The device half refuses with `device-not-granted`
+  (`grant_device_not_granted`), asked after the daemon-wide half.
+- **The default device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), gated
+  by the unlock. **`fy pair --limited`** mints a code whose redemption grants `LIMITED_DEVICE_GRANTS`
+  (`fleet.use` only); the mint request is `{ grants: "limited" }`, and the default is `full`.
+  `fy pair --full` (owner decision 2026-10-13) is removed: it is the default now. A remote mint of a
+  `full` code is refused `403 grant_forbidden` unless the minting device holds every capability itself
+  (the same `mayWiden` rule a device widen reads), so no device can pass on more than it holds; at the
+  machine anything goes. The pairing service keeps the choice with the live code — the link carries
+  nothing extra. A `devices.json` record written before B5 still reads as `limited`.
+- **Changing one device** is `PATCH /v1/pair/devices/:deviceId/grants` (demand `pairing.use`), judged by
+  `judgeDeviceGrantChange` in `src/lib/grants/policy.ts` and applied by `DeviceGrantService`: host —
+  anything; any device (a browser on the host included) — a widen only of an axis the caller holds effectively (daemon-wide ∧ its own) and only
+  with `pairing.configure`; every remote change needs a step-up; a patch with one illegal widen is refused
+  whole before any step-up is asked. `configure ⇒ use` is kept true of the result. A change is written to
+  `devices.json` before the live registry, calls `recheckAll` so open streams are re-asked, and is audited
+  in `state/grant-audit.jsonl` as `<deviceId>/capability.axis=on|off`. At the host: `fy device ls` and
+  `fy device grant`. In the app: a per-device Capabilities disclosure with a toggle per axis, disabled with
+  its reason where `PairedDevicesView.mayWiden` says the caller may not widen.
+- **Web Push self-enrolment** needs no capability: a device reads the key, lists and un-enrols its OWN
+  enrolments freely, and enrols itself with a step-up — which the unlock is, unless the owner asked per act. Another device's enrolments are behind `pairing.use`,
+  decided by the same guard.
+- **Enrolling is a request the HOST makes** (review M2): the daemon POSTs to the endpoint at once and on
+  every alert, from its own network position. So:
+  - the endpoint must be a browser push service on its default port (`PUSH_SERVICE_HOSTS`: FCM, Mozilla
+    autopush, `*.push.apple.com`, `*.notify.windows.com`), never an IP literal, a private range or a
+    metadata address;
+  - an endpoint another device holds is refused, never re-filed under the caller;
+  - the answer never reports whether the confirmation push was accepted — that would be a reachability
+    oracle — and a subscription the push service has discarded is dropped by the ordinary delivery path;
+  - a governed device confirms with its passkey before it enrols.
+    Declared cost: a browser whose push service is not on the list cannot enrol.
+- **A race closed on the way:** a sighting's `lastSeenAt` refresh and a grant change each used to
+  re-insert the record they read before their write, so the second to land could undo the first in memory;
+  both now refresh the latest record.
+- **Not built:** naming a device by its untrusted display name inside a refusal (the remedy names
+  `<device>`), and a grant set other than `full` and `limited` for a code.
+
 ### B6. Per-daemon security settings
 
-Owner decision (2026-10-13). One **Security** section per machine — in the app's Settings for that
-machine, and `fy daemon security` at the host — holds the knobs below. Each has a default and hard
-bounds; a value outside the bounds is refused, never clamped.
+Owner decisions (2026-10-13, and 2026-10-14 for the unlock). One **Security** section per machine — in the
+app's Settings for that machine, and `fy daemon security` at the host — holds the knobs below. Each has a
+default and hard bounds; a value outside the bounds is refused, never clamped.
 
 | Setting                 | Default    | Bounds                   | Narrower means |
 | ----------------------- | ---------- | ------------------------ | -------------- |
+| `unlockOnOpen`          | **on**     | on / off                 | on             |
+| `unlockValidityHours`   | 8          | 1–24                     | smaller        |
+| `stepUpOnActions`       | off        | on / off                 | on             |
 | `stepUpWindowMinutes`   | 15         | 0–60 (0 = every time)    | smaller        |
 | `deviceKeyRotationDays` | 30         | 7–90                     | smaller        |
-| `presenceOnOpen`        | off        | on / off                 | on             |
-| `presenceValidityHours` | 8          | 1–24                     | smaller        |
 | `idleExpiryDays`        | 30         | 1–90                     | smaller        |
 | access lease            | 15 minutes | **fixed, not a setting** | —              |
 
-- **Step-up window.** How long one passkey assertion covers dangerous actions (B1) for one
-  `appSession`. `0` asks every time.
+- **Unlock on open** (B1). On by default: a device does nothing until it unlocks this machine with a
+  passkey, and then may do anything its grants allow for `unlockValidityHours`, across page loads. **The
+  unlock IS the step-up** for its whole validity — a deliberate reversal of the first version of this
+  section, which said a confirmation on opening never counted as one.
+- **Ask again for each change** (`stepUpOnActions`). Off by default, so the unlock covers every act.
+  When on, the acts B1 lists ask for a passkey again inside an unlock, and each confirmation lasts
+  `stepUpWindowMinutes` for one `appSession` (`0` asks every time). A machine with the unlock turned
+  off always asks per act, whatever this says.
 - **Device-key rotation.** The `authenticated` and `stream-opened` records carry `rotateBy`. Once it
-  has passed, the next step-up ceremony also rotates the key: the browser mints a new non-extractable
-  key, the daemon receives `{ deviceKey, proof }` where `proof` is the NEW key's signature over
-  `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey)`, inside a session the OLD
-  key opened, together with the assertion. The daemon swaps the SPKI, closes the device's other
-  sessions with `4441` (so they reopen with the new key), and audits `device.key-rotated`. The old key
-  then opens nothing. No extra prompt exists for this: a device that is overdue cannot complete a
-  step-up-gated action without rotating in the same ceremony, while plain `fleet.use` keeps working.
-  Lost answer: the browser stores the new key as _pending_ before sending and, if the old key is
-  refused, tries the pending one once — so a dropped response never strands the device.
-- **Presence on open.** Off by default. When on, a session still opens (the device key is proved as
-  always), but every request answers `401 presence_required` until the device completes a passkey
-  assertion; one assertion is good for `presenceValidityHours` for that device, across page loads.
-  Dangerous actions still need their own step-up window — presence never counts as a step-up.
+  has passed, the next passkey ceremony — the unlock, or a step-up — also rotates the key: the browser
+  mints a new non-extractable key, the daemon receives `{ deviceKey, proof }` where `proof` is the NEW
+  key's signature over `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey)`, inside a
+  session the OLD key opened, together with the assertion. The daemon swaps the SPKI, closes the device's
+  other sessions with `4441` (so they reopen with the new key), and audits `device.key-rotated`. The old
+  key then opens nothing. No extra prompt exists for this: an overdue device cannot finish the ceremony
+  without rotating in it. Lost answer: the browser stores the new key as _pending_ before sending and, if
+  the old key is refused, tries the pending one once — so a dropped response never strands the device.
 - **Idle expiry.** A6's 30 days, now a setting. Shortening it applies at the next check (boot, auth,
   device list), so it can expire devices immediately; the confirmation says how many.
 - **The access lease stays fixed at 15 minutes**, deliberately. Renewal is silent, so a longer lease
@@ -507,26 +722,86 @@ bounds; a value outside the bounds is refused, never clamped.
 **Who may change them — the grants.md asymmetry, again.** Changing any setting is a _configure_
 action on the `pairing` capability.
 
-- **Narrowing** (a smaller window or period, `presenceOnOpen` → on) is allowed remotely by a device
-  holding `pairing.configure` **with a current step-up**.
-- **Widening** (a larger window or period, `presenceOnOpen` → off) is allowed **only at the machine**
-  — a loopback caller, the CLI, or the local browser. A remote widen is `403` with a sentence naming
-  the command to run at the machine.
+- **Narrowing** (a smaller window or period, a switch turned ON) is allowed remotely by a device
+  holding `pairing.configure` **with a current step-up** — which the unlock is, unless the owner asked per
+  act.
+- **Widening** (a larger window or period, a switch turned OFF) is allowed **only at the machine** —
+  the owner's admin token over loopback, i.e. the CLI (B4); a browser on the host is a device like any
+  other. A remote widen is `403` with a sentence naming the command to run at the machine.
 - A request that changes several fields is judged field by field and refused whole if any field
   widens remotely.
 - Where it lives: `<FY_HOME>/state/security.json` (`schemaVersion: 1`, written atomically, mode
-  `0600`). An unreadable or invalid document **fails closed to the defaults' narrowest reading**
-  (presence on, window 0) with a notice naming the file, never to "off".
+  `0600`). An unreadable or invalid document **fails closed to the narrowest reading** with a notice
+  naming the file, never to "off".
 - Every change is audited as `security.changed` with the field, old value, new value and actor.
 
 Tests: each bound accepted at its edges and refused one past them; each field's widen refused
 remotely and accepted at loopback; narrow refused without a step-up and accepted with one; a mixed
-request refused whole; rotation end to end (old key refused afterwards, other sessions closed, the
-pending-key recovery); presence gating on and off; the corrupt-document fail-closed path; and the
-audit record for every change.
+request refused whole; before an unlock nothing but the exempt routes, after it everything with no
+further step-up; the unlock lapsing at its validity; a per-act window that is turned on asking again;
+rotation end to end; a stream ending at its renewal once the unlock lapsed; the corrupt-document
+fail-closed path; and the audit record for every change.
 
-Delivery: built after B (it needs the step-up ceremony), as part of B if it fits, otherwise as a
-small PR E immediately after it.
+**As built** (`feat/zt-security-settings`, PR E):
+
+- **Contract.** `@ferretry/protocol` `security.ts` owns the fields, bounds, defaults, the patch and view
+  schemas, `widensSecurity`, `isSecuritySwitch` and `asksStepUpPerAction`, so the daemon, `fy` and the
+  app agree on what "narrower" means and on when a per-act step-up is asked. `GET /v1/security` answers
+  `{ settings, source, mayWiden, widenCommand, updatedAt? }` to any paired caller, before an unlock too;
+  `PATCH /v1/security` demands `pairing.configure` and answers `{ view, devicesExpiring }`. A remote widen
+  is `403 security_widen_at_machine` naming `fy daemon security set <setting> <value>`; an out-of-bounds
+  value is `400`. "At the machine" is `arrivedOnHost`, the one host-locality rule (B4).
+- **Store.** `state/security.json`, `schemaVersion: 1`, atomic write, mode `0600`. Read once at boot; the
+  service is then synchronous, so no enforcement waits on a file. A missing file is the defaults.
+- **Damaged document — one deliberate departure from the spec text.** It fails closed to the unlock on
+  for 1 hour, a per-act confirmation every time on top (`stepUpOnActions` on, window `0`) and rotation 7
+  days, with a boot notice naming the file. Idle expiry is **kept at the default**, not shortened to 1
+  day: the narrowest reading would unpair every device a day after a corrupted file, and an unpairing
+  cannot be undone. A remote caller cannot patch a damaged document (`503 security_unavailable`); the
+  host replaces it.
+- **Audit.** `state/security-audit.jsonl`, one `security.changed` record per change with
+  `security.<field>=<old>-><new>` and the actor, an empty change included, and one `device.key-rotated`
+  record per rotation. Its own file, so the grant history reader is unchanged.
+- **The unlock.** The shared request boundary answers every request of a governed device
+  `401 unlock_required` until that device unlocks. Exempt (`unlockExempt` on the route): `GET /v1/passkeys`,
+  `GET /v1/security`, `POST /v1/unlock/options`, `POST /v1/unlock`, and passkey registration
+  (`POST /v1/passkeys/options`, `POST /v1/passkeys`), which keeps its own rules (B2) — a freshly paired
+  device holds no passkey, so registering one is how it gets in. A stream open is refused the same way, because both route tables share the boundary. An unlock is
+  held in the daemon's memory per **device** for `unlockValidityHours`, so it survives page loads and ends
+  on a restart or a revoke. Registering a passkey grants no unlock and no step-up (review M3: code in the
+  page can forge an attestation): a new device registers its first passkey, then unlocks with it. Every
+  browser is asked, on the host too (B4).
+- **The unlock is the step-up.** `StepUpService.held` — the witness the boundary asks — answers yes for a
+  device inside its unlock unless `asksStepUpPerAction` (the owner turned `stepUpOnActions` on, or the
+  unlock off), so every step-up-gated act is served with no further prompt. `spend` never spends an
+  unlock. An unlock also records a per-act step-up for its `appSession`, so a machine that asks per act
+  does not ask again for the act that follows the unlock at once.
+- **Per-act window.** `StepUpRegistry` reads the window at every question, so a shortened window applies
+  to step-ups already held. `0` makes a per-act step-up single-use: the boundary spends it when it admits a
+  step-up-gated act (`GrantDecision.steppedUp`), and `PATCH /v1/grants`, which checks its own step-up,
+  spends it through `RouteContext.spendStepUp`. An unspent single-use step-up lives two minutes, enough
+  for the app's one re-send.
+- **Streams lapse at their renewal.** `ApiSocketDispatcher.reauthorize` — asked at every lease renewal
+  and grant change — keeps the step-up that admitted the stream standing but re-asks the unlock, so a
+  stream whose device's unlock lapsed ends with the sealed `1008` at its next renewal (at most 15 minutes
+  later), and the device reopens it after unlocking again.
+- **Idle expiry.** `PairingService` reads `idleExpiryDays` at every check, so a shortened period applies
+  at the next boot, session proof or device list; the pairing response reports the current value.
+  `devicesExpiring` counts the devices the new period will end, and only when it shortened.
+- **Rotation.** `authenticated` and `stream-opened` carry `rotateBy` (key age counted from the last
+  `keyRotatedAt` on the device record, or from pairing). Past it, `POST /v1/unlock` or `POST /v1/step-up`
+  without a `rotation` is `403 step_up_rotation_required` **without spending the challenge**, so the
+  browser can answer the same challenge again with a new key. One shared ceremony checks the new key's
+  proof over the carrying session's transcript before the assertion is verified; after it verifies, the
+  daemon rewrites the device's key, ends the device's other sessions with `4441`, keeps the carrying
+  session, audits `device.key-rotated`, and answers `keyRotated: true`. The label and message builder are
+  `deviceRotateMessage` in `@ferretry/relay`.
+- **Not exercised end to end:** a real authenticator; a real browser rotating its key against a real
+  daemon; an unlock on a machine reached only through the hosted relay. Each half is unit-tested against
+  the other half's contract.
+- **Declared gap:** the app raises the unlock screen only for a refused **request**; a refused stream open
+  is reported as a refusal, and the screen appears with the page's next request, which every page makes
+  first.
 
 ## C. Audit log and alerts
 
@@ -601,7 +876,17 @@ Said plainly, because the useful property is narrower than "zero trust" sounds:
   daemon's state, the admin token and the secrets key.
 - **Code running in the open app.** XSS or a malicious deploy can _use_ the device key while the tab
   is open (it cannot copy it) and can raise a passkey prompt — the owner's biometric is the last
-  line, so a prompt nobody asked for must be refused. Its authority ends when the tab closes.
+  line, so a prompt nobody asked for must be refused. Its authority does NOT end when the tab closes: the
+  unlock is held per device across page loads (owner decision), so a malicious deploy or XSS on any
+  later load within `unlockValidityHours` acts with full access and no new biometric. This is the cost
+  of "unlock once": shorten the validity, turn `stepUpOnActions` on, or revoke the device (R2-M1).
+- **A first passkey is unattested.** In a new device's ten-minute first window, page code could register
+  a software credential (`fmt: none`, user verification claimed by software) and unlock with it from
+  then on, with no real biometric. This is inherent to an unattested web passkey; the `passkey-added`
+  push tells the owner's other devices (R2-L1).
+- **A dispatcher built without the step-up service is open on the unlock** (`NO_STEP_UP_WITNESS`). It
+  is for surfaces that serve no device; the mounted dispatchers are given the real service, by type
+  (R2-L2).
 - **A compromised Pages deploy, on first install or via a new service worker** — see D. A deploy is
   trusted the way any website is, once.
 - **A host that answers the browser’s own worker-install request differently from a plain fetch.**
@@ -615,8 +900,9 @@ Said plainly, because the useful property is narrower than "zero trust" sounds:
   when asked. Revoke the device first.
 - **The 30-day idle window.** A device used at least once a month never expires; revocation is the
   control for a lost device, and the new-device alert is the control for an added one.
-- **Somebody at the machine.** Loopback is ungoverned by design (B4); an SSH tunnel to the port is
-  loopback.
+- **Somebody at the machine.** The host's admin token is ungoverned by design (B4), so anybody who can
+  read it — anybody at an unlocked keyboard — has the machine. A browser or an SSH tunnel is not: both are
+  governed devices.
 - **Relay metadata.** A relay still sees fingerprint, IPs, timing and frame sizes
   (`relay-protocol.md` §10); this design hides the device id from it, nothing more.
 - **Denial of service.** A relay can drop traffic; a guesser can spend a pairing code's relay budget.

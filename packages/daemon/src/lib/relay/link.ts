@@ -157,17 +157,28 @@ export interface RelayDeviceDirectory {
   deviceKey(deviceId: string): Promise<string | undefined>;
   /** The device just proved its key: at a session's open, or at a lease renewal. */
   seen(deviceId: string): void;
+  /**
+   * When this device's key is due for replacement (`docs/design/zero-trust.md` B6), told to it in the
+   * record that accepts each session. Absent, or nothing, means no rotation is asked for.
+   */
+  rotateBy?(deviceId: string): number | undefined;
 }
 
 /**
- * The daemon's own SOCKET route table, as the one function a relayed stream needs from it.
+ * The daemon's own SOCKET route table, as the two questions a session stream needs from it.
  *
  * It is the dispatcher the bound address already serves, handed over rather than rebuilt: the same
  * routes, the same authorization boundary, the same per-capability guard. A second table here would
  * be a second privilege model, and the one thing worse than a stream a relay cannot carry is a stream
  * it carries past a check the direct surface makes.
+ *
+ * `reauthorize` is the same boundary asked again about a stream already open: a socket is authorized
+ * once and can then run for hours, so a narrowed grant reaches it only if somebody asks again.
  */
-export type RelayStreamDispatch = (request: ApiRequest) => Promise<SocketUpgradeDecision>;
+export interface RelayStreamDispatch {
+  upgrade(request: ApiRequest): Promise<SocketUpgradeDecision>;
+  reauthorize(request: ApiRequest): boolean;
+}
 
 /**
  * Redeeming a pairing code, and nothing else.
@@ -299,6 +310,8 @@ const RELAY_STREAM_CLOSES = {
   oversize: { code: 1009, reason: 'a stream frame exceeds one relay record' },
   /** The viewer stopped keeping up and the stream may not lose what it would have to drop. */
   slowReader: { code: 1013, reason: 'stream reader fell behind' },
+  /** The grant this stream was opened under no longer allows it. */
+  notAllowed: { code: 1008, reason: 'this stream is no longer allowed' },
 } as const;
 
 export interface RelayLinkDependencies {
@@ -438,6 +451,8 @@ interface LinkSession {
   sealing: PendingRecord | undefined;
   /** The one live stream this session carries, once it carries one. */
   stream: SocketHandler | undefined;
+  /** The request that stream was accepted for, asked about again on renewal and on a grant change. */
+  streamRequest: ApiRequest | undefined;
   /** Stops the device registry tracking this session. Set once a credential identified it. */
   release: (() => void) | undefined;
   /** Armed when the session opens, cancelled by the credential record that beats it. */
@@ -652,6 +667,7 @@ export class RelayLink {
       waiting: [],
       sealing: undefined,
       stream: undefined,
+      streamRequest: undefined,
       release: undefined,
       credentialDeadline: undefined,
       owesConclusion: false,
@@ -855,6 +871,7 @@ export class RelayLink {
       t: 'authenticated',
       protocol: SESSION_PROTOCOL_ID,
       accessExpiresAt: instant(session.leaseExpiresAtMs),
+      ...this.#rotateBy(session),
     });
   }
 
@@ -890,11 +907,25 @@ export class RelayLink {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
       return false;
     }
-    session.release = this.deps.connections.track(claim.deviceId, () => {
-      if (!this.#live(session)) return;
-      // Said exactly as an unknown device is, so the carrier cannot tell a revocation apart.
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
-    });
+    session.release = this.deps.connections.track(
+      claim.deviceId,
+      () => {
+        if (!this.#live(session)) return;
+        // Said exactly as an unknown device is, so the carrier cannot tell a revocation apart.
+        this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+      },
+      claim.appSession,
+      () => this.#recheckStream(session),
+      // After the device replaces its key, every OTHER session it holds ends as a lapsed lease and
+      // reopens with the new one; the session that carried the replacement is named so it is spared.
+      {
+        key: transcriptKey(transcript),
+        end: () => {
+          if (!this.#live(session)) return;
+          this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
+        },
+      },
+    );
     // A device unpaired a moment ago is ended by the registry before `track` returns.
     if (!this.#live(session)) return false;
     session.device = { deviceId: claim.deviceId, appSession: claim.appSession };
@@ -930,6 +961,13 @@ export class RelayLink {
       if (!this.#live(session)) return;
       this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
     });
+  }
+
+  /** The record field that tells a device when its key is due, or nothing. */
+  #rotateBy(session: LinkSession): { readonly rotateBy?: string } {
+    const device = session.device;
+    const at = device === undefined ? undefined : this.deps.devices.rotateBy?.(device.deviceId);
+    return at === undefined ? {} : { rotateBy: instant(at) };
   }
 
   #askRenewal(session: LinkSession): void {
@@ -972,6 +1010,18 @@ export class RelayLink {
     // A renewal is the tab answering by itself, not a person: it extends THIS session and never the
     // device's idle clock.
     this.#armLease(session);
+    this.#recheckStream(session);
+  }
+
+  /**
+   * Whether the stream this session carries is still allowed, asked on every renewal and on every
+   * grant change. A stream whose grant was narrowed away ends with a sealed `1008` — never `4403`,
+   * which would tell the device it is no longer paired.
+   */
+  #recheckStream(session: LinkSession): void {
+    if (session.phase !== 'streaming' || session.streamRequest === undefined) return;
+    if (this.deps.sockets.reauthorize(session.streamRequest)) return;
+    this.#closeStream(session, RELAY_STREAM_CLOSES.notAllowed.code, RELAY_STREAM_CLOSES.notAllowed.reason);
   }
 
   async #serve(session: LinkSession, request: RelayTunnelRequest): Promise<void> {
@@ -1044,7 +1094,7 @@ export class RelayLink {
     const device = session.device;
     if (device === undefined) return;
     const response = await this.deps.dispatch(
-      tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival),
+      tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival, session.transcript),
     );
     this.#answer(session, request.id, response);
   }
@@ -1120,8 +1170,9 @@ export class RelayLink {
   async #openStream(session: LinkSession, request: RelayTunnelStream): Promise<void> {
     if (!(await this.#prove(session, 'stream', request))) return;
     session.phase = 'concluding';
-    const decision = await this.deps
-      .sockets(tunnelStreamRequest(request, session.sessionId.text, this.deps.arrival))
+    const streamRequest = tunnelStreamRequest(request, session.sessionId.text, this.deps.arrival);
+    const decision = await this.deps.sockets
+      .upgrade(streamRequest)
       .catch((): SocketUpgradeDecision => ({ outcome: 'unclaimed' }));
     // Ended while the route table was deciding — the device unpaired, the rendezvous closed it, the
     // deadline fired. Nothing has been attached yet, so there is nothing to release.
@@ -1159,11 +1210,13 @@ export class RelayLink {
       return;
     }
     session.stream = handler;
+    session.streamRequest = streamRequest;
     session.phase = 'streaming';
     this.#queue(session, {
       t: 'stream-opened',
       protocol: SESSION_PROTOCOL_ID,
       accessExpiresAt: instant(session.leaseExpiresAtMs),
+      ...this.#rotateBy(session),
     });
     // Queued before `open` runs, so the acceptance is ahead of the first frame the handler produces
     // however eagerly it produces one.
@@ -1622,4 +1675,13 @@ export class RelayLink {
 
 function instant(milliseconds: number): string {
   return new Date(milliseconds).toISOString();
+}
+
+/**
+ * A session's name among one device's sessions: its transcript hash, hex. The hash is unique per
+ * session and public to both of its ends, so it can name one without being a secret. Empty before the
+ * handshake keyed the channel, which no tracked session ever is.
+ */
+export function transcriptKey(transcript: Uint8Array | undefined): string {
+  return transcript === undefined ? '' : [...transcript].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }

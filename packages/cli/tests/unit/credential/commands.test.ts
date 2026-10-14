@@ -70,13 +70,17 @@ describe('renderCredentialList', () => {
 });
 
 describe('registerCredentialCommands', () => {
-  it('should ask a caller off this machine for the operator password once, for the add and the sign-in', async () => {
+  it('should refuse the add and the sign-in for a caller that needs a passkey confirmation', async () => {
     const world = fakeWorld({
-      gateway: { machine: () => machine({ authority: authorityOf({ confirmation: 'operator-password' }) }) },
+      gateway: {
+        machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'step-up-required' }) }),
+      },
     });
-    await runCommand(registerCredentialCommands, world, ['credential', 'add', 'claude']);
-    should(world.prompt.secrets).have.length(1);
-    should(world.gateway.called('startSignIn')[0]?.args[1]).eql({ password: 'operator-password-1' });
+    await should(runCommand(registerCredentialCommands, world, ['credential', 'add', 'claude'])).be.rejectedWith(
+      /passkey confirmation/,
+    );
+    should(world.gateway.called('stage')).be.empty();
+    should(world.gateway.called('startSignIn')).be.empty();
   });
 
   it('should list the logins, or print them as JSON', async () => {

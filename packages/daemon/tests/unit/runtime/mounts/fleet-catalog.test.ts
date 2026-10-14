@@ -13,7 +13,6 @@ import type {
   FleetMachineView,
   FleetProfileDraftRequest,
   FleetProfileDraftView,
-  FleetProposalApplyRequest,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
@@ -42,7 +41,7 @@ const MACHINE: FleetMachineView = {
   tools: [],
   runtimeCount: 1,
   runningSessions: 0,
-  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+  authority: { mayApply: true, applyRefusal: 'granted' },
 };
 
 const VIEW: FleetAccountChangeView = {
@@ -75,7 +74,7 @@ interface Calls {
   previewed: FleetProfileDraftRequest[];
   read: string[];
   machines: (CallerGovernance | undefined)[];
-  applied: { id: string; request: FleetProposalApplyRequest; governance: CallerGovernance | undefined }[];
+  applied: { id: string; governance: CallerGovernance | undefined }[];
 }
 
 function stub(overrides: Partial<FleetCatalogSubsystem> = {}): { subsystem: FleetCatalogSubsystem; calls: Calls } {
@@ -102,8 +101,8 @@ function stub(overrides: Partial<FleetCatalogSubsystem> = {}): { subsystem: Flee
         calls.read.push(id);
         return VIEW;
       },
-      apply: async (id, body, governance) => {
-        calls.applied.push({ id, request: body, governance });
+      apply: async (id, governance) => {
+        calls.applied.push({ id, governance });
         return { outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' };
       },
       ...overrides,
@@ -154,7 +153,7 @@ describe('the fleet catalogue mount', () => {
     should(response.status).equal(200);
     should(calls.machines).have.length(1);
     should(calls.machines[0]).not.be.undefined();
-    should(calls.machines[0]).containDeep({ confirmChange: false });
+    should(calls.machines[0]).containDeep({ governed: false });
   });
 
   it('should no longer serve the paths the old account surface staged changes at', async () => {
@@ -211,21 +210,36 @@ describe('the fleet catalogue mount', () => {
     should(calls.read).deepEqual([ID]);
   });
 
-  it('should hand an apply its password and the caller governance, and an empty body as no password', async () => {
+  it('should hand an apply the caller governance, and take an empty body', async () => {
     // Arrange
     const { subsystem, calls } = stub();
 
     // Act
-    const confirmed = await dispatcher(subsystem).dispatch(
-      post(`/v1/fleet/proposals/${ID}/apply`, JSON.stringify({ operatorPassword: 'correct horse' })),
+    const applied = await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
+    const bare = await dispatcher(subsystem).dispatch(
+      request({ method: 'POST', path: `/v1/fleet/proposals/${ID}/apply`, headers: human }),
     );
-    await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
 
     // Assert
-    should(confirmed.status).equal(200);
-    should(jsonBody(confirmed)).deepEqual({ outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' });
-    should(calls.applied.map(call => call.request)).deepEqual([{ operatorPassword: 'correct horse' }, {}]);
-    should(calls.applied[0]?.governance).containDeep({ confirmChange: false });
+    should(applied.status).equal(200);
+    should(bare.status).equal(200);
+    should(jsonBody(applied)).deepEqual({ outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' });
+    should(calls.applied.map(call => call.id)).deepEqual([ID, ID]);
+    should(calls.applied[0]?.governance).containDeep({ governed: false });
+  });
+
+  it('should refuse an apply body that names a field, before the service runs', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(
+      post(`/v1/fleet/proposals/${ID}/apply`, JSON.stringify({ operatorPassword: 'correct horse' })),
+    );
+
+    // Assert
+    should(response.status).equal(400);
+    should(calls.applied).be.empty();
   });
 
   it('should answer 404 for a change it never staged and 409 for every other refusal', async () => {

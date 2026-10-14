@@ -1,319 +1,232 @@
 /**
- * SETTINGS › SECURITY: what has happened to who can reach this machine, in plain words.
+ * THE SECURITY PANEL: the passkeys THIS device holds for ONE machine, the one control that adds
+ * another, and the machine's security settings (`./security-settings-block.tsx`) (`docs/design/zero-trust.md` B2, B6).
  *
- * The daemon keeps an append-only log of every pairing, removal, refused attempt, permission change,
- * opened terminal and used secret. This panel reads the most recent of them for ONE machine — through
- * the connection it was handed, so switching machines never shows another machine's history — and
- * lists them newest first: when, what, who, and a quiet badge when something was refused or failed.
+ * ## WHAT THE MACHINE REPORTS IS ALL THIS SHOWS
  *
- * ## A DAMAGED LOG IS SAID TO BE DAMAGED
+ * `GET /v1/passkeys` answers id, origin and created-at, and nothing else. There is no name, no
+ * last-used time and no remove route, so none is drawn: a label is derived from origin and date, and
+ * there is no "Remove" button to press that would have nothing to call.
  *
- * The daemon counts the lines it could not read and sends the count with the records. A non-zero count
- * is a warning row above the list, never dropped: a history with holes in it that reads as complete is
- * the one thing a security log must not do.
+ * ## A CONTROL THAT WOULD BE REFUSED IS NOT OFFERED
  *
- * ## A REFUSAL IS EXPLAINED
+ * "Add a passkey" appears only when the machine says registration is open (`registration !== 'closed'`)
+ * and this browser can run a ceremony at all. Otherwise one sentence says why, in place of the button.
+ * When this device already holds a passkey (`confirm-existing`) the button is followed by the sentence
+ * that names the machine and says the add starts with a confirmation from a passkey already held.
  *
- * A machine whose owner switched pairing off for other devices refuses this read. That is said in
- * words, with the machine's own sentence and the one place the log is always readable — the machine
- * itself — rather than as an empty list, which would read as "nothing has happened".
+ * ## EVERY FAILURE IS ONE SENTENCE
  *
- * ## SECURITY CHANGES COME FIRST, AND NOTHING CAN PUSH THEM OFF THE PAGE
- *
- * The daemon returns pairings, removals and permission changes as a list of their own, apart from the
- * activity, and this panel shows that list first with a "Show older" button that pages back until every
- * one has been shown. A device that re-attaches to a terminal ten thousand times fills the activity
- * list, not this one.
- *
- * ## LOOKING HERE MARKS ONLY WHAT WAS SHOWN
- *
- * The new-device notice stops announcing a device once somebody has seen it. This panel counts as having
- * seen a device only when the device's pairing record is actually on screen — never on open, never on a
- * refused or failed read — so opening Security cannot make an attacker's pairing disappear unseen.
+ * A dismissed sheet, a refusal by origin and a daemon refusal code each become a plain sentence through
+ * `passkeyFailureSentence`; no status, error name or stack reaches the screen.
  */
 
-import type { AuditRecord, AuditView } from '@ferretry/protocol';
-import { CircleAlert, TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import type { PasskeysView } from '@ferretry/protocol';
+import { Fingerprint, Plus } from 'lucide-react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
-  AUDIT_EVENT_WORDS,
-  absoluteWords,
-  auditActorWords,
-  auditDetailWords,
-  auditOutcomeBadge,
-  pairedDevicesShown,
-  relativeWords,
-  SECURITY_LOG_EMPTY,
-  securityLogGapWarning,
-} from '../../lib/security-log.ts';
-import { announceDevicesLooked } from '../device-notice/devices-looked.ts';
-import { readSecurityLog, type SecurityLogClient } from './security-api.ts';
+  confirmExistingSentence,
+  PASSKEY_COST_SENTENCE,
+  passkeyFailureSentence,
+  passkeyLabel,
+  registrationClosedSentence,
+  registrationClosesSentence,
+  unsupportedSentence,
+  webAuthnSupported,
+} from '../../lib/passkey-panel.ts';
+import type { CredentialsPort } from '../../lib/passkeys.ts';
+import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
+import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
+import { SecuritySettingsBlock } from './security-settings-block.tsx';
 
-export type SecurityLogClientFactory = (connection: DaemonConnection) => Promise<SecurityLogClient>;
+export type PasskeyClientFactory = (connection: DaemonConnection) => Promise<StepUpClient>;
 
-type LoadState =
-  | { readonly status: 'loading' }
-  | { readonly status: 'loaded'; readonly view: AuditView; readonly older: OlderState }
-  | { readonly status: 'refused'; readonly reason: string }
-  | { readonly status: 'failed'; readonly reason: string };
+const LOAD_FAILURE = 'This machine did not answer the list of passkeys. Reload the page, or try again in a moment.';
+const REFRESH_FAILURE = 'The passkey was added, but the list could not be refreshed. Reload the page to see it.';
 
-/** The security changes paged in past the first page, and whether a page is being read. */
-interface OlderState {
-  readonly kept: readonly AuditRecord[];
-  readonly reading: boolean;
+interface SecurityCardProps {
+  readonly view: PasskeysView;
+  readonly supported: boolean;
+  readonly origin: string;
+  readonly machine: string;
+  readonly busy: boolean;
   readonly failure: string | null;
+  readonly onAdd: () => void;
 }
 
-const NO_OLDER: OlderState = { kept: [], reading: false, failure: null };
-
-const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause)).trim();
-
-export const SECURITY_REFUSED_INTRO =
-  'This machine does not let other devices read its security log, because its owner has switched pairing off for them.';
-export const SECURITY_REFUSED_REMEDY =
-  'The log is always readable on the machine itself: open Ferretry there, or run fy daemon audit in its terminal.';
-
-function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly nowMs: number }) {
-  const badge = auditOutcomeBadge(record.outcome);
-  const detail = auditDetailWords(record);
+/** The panel's content for a loaded list. Pure over its props so every state is one render. */
+function SecurityCard({ view, supported, origin, machine, busy, failure, onAdd }: SecurityCardProps) {
+  const headingId = useId();
+  const canAdd = supported && view.registration !== 'closed';
+  const closes =
+    view.registration === 'first-window' || view.registration === 'reopened'
+      ? registrationClosesSentence(view.registrationClosesAt)
+      : null;
   return (
-    <li
-      className="flex min-w-0 flex-col gap-0.5 border-t border-border py-2 first:border-t-0 first:pt-0 last:pb-0"
-      data-security-event={record.event}
-    >
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="min-w-0 text-ui font-semibold text-fg">{AUDIT_EVENT_WORDS[record.event]}</span>
-        {badge === null ? null : (
-          <span
-            className="rounded-control border border-border-strong bg-surface-2 px-1.5 py-px text-meta font-medium text-muted"
-            data-security-outcome={record.outcome}
-          >
-            {badge}
-          </span>
-        )}
-      </div>
-      <p className="m-0 min-w-0 text-meta leading-base text-muted">
-        <time dateTime={record.at} title={absoluteWords(record.at)}>
-          {relativeWords(record.at, nowMs)}
-        </time>
-        {' · by '}
-        <span className="break-words text-fg">{auditActorWords(record.actor)}</span>
-      </p>
-      {detail === '' ? null : (
-        <p className="m-0 min-w-0 break-words text-meta leading-base text-muted" data-security-detail="">
-          {detail}
-        </p>
-      )}
-    </li>
-  );
-}
-
-function SecurityList({ records, nowMs }: { readonly records: readonly AuditRecord[]; readonly nowMs: number }) {
-  return (
-    <ul className="m-0 mt-1 list-none p-0">
-      {records.map((record, index) => (
-        // Records have no id; a list only ever grows at its end while mounted, so position is stable.
-        <SecurityRow key={`${record.at}-${String(index)}`} record={record} nowMs={nowMs} />
-      ))}
-    </ul>
-  );
-}
-
-/** The loaded log, separated from the read so its every state can be rendered without a client. */
-export function SecurityLog({
-  view,
-  nowMs,
-  older = NO_OLDER,
-  onShowOlder,
-}: {
-  readonly view: AuditView;
-  readonly nowMs: number;
-  readonly older?: OlderState;
-  readonly onShowOlder?: () => void;
-}) {
-  const kept = [...view.kept, ...older.kept];
-  const remaining = view.keptTotal - kept.length;
-  return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby="security-log-heading"
-      data-security-log=""
-    >
-      <h3 id="security-log-heading" className="m-0 text-row font-semibold text-fg">
-        Security log
+    <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-labelledby={headingId} data-security-card="">
+      <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
+        <Fingerprint size={16} className="text-accent" aria-hidden="true" />
+        Passkeys on this device
       </h3>
-      <p className="m-0 text-cell leading-base text-muted">
-        Who was paired or removed and what changed about who may reach this machine, then the recent activity: refused
-        attempts, opened terminals, used secrets. Newest first.
+      <p className="m-0 text-cell leading-base text-muted" data-security-cost="">
+        {PASSKEY_COST_SENTENCE}
       </p>
-      {view.unreadable > 0 ? (
-        <p
-          role="alert"
-          data-security-gaps={String(view.unreadable)}
-          className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
-        >
-          <TriangleAlert size={14} aria-hidden="true" className="mt-1 shrink-0" />
-          <span className="min-w-0">{securityLogGapWarning(view.unreadable)}</span>
-        </p>
-      ) : null}
-      {view.records.length === 0 && view.keptTotal === 0 ? (
-        <p className="m-0 text-ui leading-base text-fg" data-security-empty="">
-          {SECURITY_LOG_EMPTY}
+      {view.passkeys.length === 0 ? (
+        <p className="m-0 text-cell leading-base text-muted" data-security-empty="">
+          This device has no passkey for this machine yet.
         </p>
       ) : (
-        <>
-          <h4 className="m-0 mt-1 text-ui font-semibold text-fg" data-security-section="kept">
-            Security changes
-          </h4>
-          {kept.length === 0 ? (
-            <p className="m-0 text-cell leading-base text-muted">None yet.</p>
-          ) : (
-            <SecurityList records={kept} nowMs={nowMs} />
+        <ul className="m-0 flex min-w-0 list-none flex-col p-0">
+          {view.passkeys.map(passkey => (
+            <li
+              key={passkey.id}
+              data-security-passkey={passkey.id}
+              className="min-w-0 break-words border-t border-border-soft py-2 text-ui text-fg first:border-t-0"
+            >
+              {passkeyLabel(passkey)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canAdd ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            data-security-add=""
+            onClick={onAdd}
+            className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Plus size={15} aria-hidden="true" />
+            Add a passkey
+          </button>
+          {closes === null ? null : (
+            <span className="text-meta leading-base text-faint" data-security-closes="">
+              {closes}
+            </span>
           )}
-          {remaining > 0 ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="kt-btn min-h-[44px]"
-                data-security-older=""
-                disabled={older.reading}
-                onClick={onShowOlder}
-              >
-                {older.reading ? 'Reading…' : `Show older (${String(remaining)} more)`}
-              </button>
-              {older.failure === null ? null : (
-                <span role="alert" className="min-w-0 text-cell leading-base text-err" data-security-older-failed="">
-                  {older.failure}
-                </span>
-              )}
-            </div>
+          {view.registration === 'confirm-existing' ? (
+            <span className="text-meta leading-base text-faint" data-security-confirm-existing="">
+              {confirmExistingSentence(machine)}
+            </span>
           ) : null}
-          <h4 className="m-0 mt-2 text-ui font-semibold text-fg" data-security-section="activity">
-            Recent activity
-          </h4>
-          {view.records.length === 0 ? (
-            <p className="m-0 text-cell leading-base text-muted">None yet.</p>
-          ) : (
-            <SecurityList records={view.records} nowMs={nowMs} />
-          )}
-        </>
+        </div>
+      ) : (
+        <p className="m-0 text-cell leading-base text-muted" data-security-unavailable="">
+          {supported ? registrationClosedSentence(view.passkeys.length > 0) : unsupportedSentence(origin)}
+        </p>
+      )}
+      {failure === null ? null : (
+        <p
+          role="alert"
+          data-security-failure=""
+          className="m-0 rounded-control border border-err-border bg-err-bg px-2 py-1 text-meta leading-base text-err"
+        >
+          {failure}
+        </p>
       )}
     </section>
   );
 }
 
+export interface SecuritySurfaceProps {
+  readonly connection: DaemonConnection;
+  /** The machine's name as the person knows it; its address when none is given. */
+  readonly machineName?: string;
+  readonly createClient?: PasskeyClientFactory;
+  /** Test seam; production uses the browser's own credential container. */
+  readonly credentials?: () => CredentialsPort;
+  /** Test seam; production reads the page's own origin at the moment of the press. */
+  readonly origin?: () => string;
+  /** Test seam; production asks the browser. */
+  readonly supported?: () => boolean;
+}
+
+type Loaded =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'failed' }
+  | { readonly kind: 'ready'; readonly client: StepUpClient; readonly view: PasskeysView };
+
+/** The live panel for one machine, keyed by the caller on its daemon id. */
 export function SecuritySurface({
   connection,
-  createClient,
-  now = Date.now,
-}: {
-  readonly connection: DaemonConnection;
-  readonly createClient: SecurityLogClientFactory;
-  readonly now?: () => number;
-}) {
-  const [state, setState] = useState<{ readonly daemonId: DaemonConnection['daemonId']; readonly load: LoadState }>({
-    daemonId: connection.daemonId,
-    load: { status: 'loading' },
-  });
+  machineName,
+  createClient: injectedClient,
+  credentials = browserCredentials,
+  origin = () => window.location.origin,
+  supported = webAuthnSupported,
+}: SecuritySurfaceProps) {
+  // The carrier-routed client unless a test or the harness hands one in: a plain-network client reaches
+  // no daemon at all, because a paired browser is answered only inside its own session.
+  const routedClient = useDaemonClient();
+  const createClient = injectedClient ?? routedClient;
+  const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     let current = true;
-    setState({ daemonId: connection.daemonId, load: { status: 'loading' } });
+    setLoaded({ kind: 'loading' });
+    setFailure(null);
     void createClient(connection)
-      .then(async client => await readSecurityLog(client))
-      .then(view => {
-        if (!current) return;
-        setState({ daemonId: connection.daemonId, load: { status: 'loaded', view, older: NO_OLDER } });
-        // Only now, and only the pairings this page puts on screen: see the module comment.
-        announceDevicesLooked(connection.daemonId, pairedDevicesShown(view.kept));
-      })
-      .catch((cause: unknown) => {
-        if (!current) return;
-        const status = (cause as { readonly status?: unknown } | null)?.status;
-        setState({
-          daemonId: connection.daemonId,
-          load:
-            status === 403
-              ? { status: 'refused', reason: reasonOf(cause) }
-              : { status: 'failed', reason: reasonOf(cause) },
-        });
-      });
+      .then(async client => ({ client, view: await fetchPasskeys(client) }))
+      .then(
+        ({ client, view }) => {
+          if (current) setLoaded({ kind: 'ready', client, view });
+        },
+        () => {
+          if (current) setLoaded({ kind: 'failed' });
+        },
+      );
     return () => {
       current = false;
     };
   }, [connection, createClient]);
 
-  const showOlder = useCallback(() => {
-    const daemonId = connection.daemonId;
-    const loaded = state.load;
-    if (state.daemonId !== daemonId || loaded.status !== 'loaded') return;
-    // Counted from the newest: a change recorded since the first read shifts the page by one, so a row
-    // can repeat at the boundary but never be skipped.
-    const offset = loaded.view.kept.length + loaded.older.kept.length;
-    const update = (older: OlderState): void =>
-      setState(previous =>
-        previous.daemonId === daemonId && previous.load.status === 'loaded'
-          ? { daemonId, load: { ...previous.load, older } }
-          : previous,
-      );
-    update({ ...loaded.older, reading: true, failure: null });
-    void createClient(connection)
-      .then(async client => await readSecurityLog(client, undefined, offset))
-      .then(page => {
-        update({ kept: [...loaded.older.kept, ...page.kept], reading: false, failure: null });
-        announceDevicesLooked(daemonId, pairedDevicesShown(page.kept));
-      })
-      .catch((cause: unknown) => {
-        update({ ...loaded.older, reading: false, failure: reasonOf(cause) || 'The older changes could not be read.' });
-      });
-  }, [connection, createClient, state]);
+  const add = useCallback(async () => {
+    if (loaded.kind !== 'ready') return;
+    const { client } = loaded;
+    const here = origin();
+    setBusy(true);
+    setFailure(null);
+    try {
+      await addPasskeyCeremony(credentials(), client, here, supported());
+    } catch (reason) {
+      setFailure(passkeyFailureSentence(reason, here));
+      setBusy(false);
+      return;
+    }
+    try {
+      setLoaded({ kind: 'ready', client, view: await fetchPasskeys(client) });
+    } catch {
+      setFailure(REFRESH_FAILURE);
+    }
+    setBusy(false);
+  }, [credentials, loaded, origin, supported]);
 
-  const load: LoadState = state.daemonId === connection.daemonId ? state.load : { status: 'loading' };
-  if (load.status === 'loaded')
-    return <SecurityLog view={load.view} nowMs={now()} older={load.older} onShowOlder={showOlder} />;
-  if (load.status === 'refused')
-    return (
-      <section
-        className="kt-panel p-panel"
-        role="status"
-        aria-label="Security log unavailable"
-        data-security-refused=""
-      >
-        <h3 className="m-0 text-row font-semibold text-fg">The security log is not shown on other devices</h3>
-        <p className="mb-0 mt-1 text-cell leading-base text-muted">{SECURITY_REFUSED_INTRO}</p>
-        {load.reason === '' ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{load.reason}</p>}
-        <p className="mb-0 mt-1 text-cell leading-base text-fg">{SECURITY_REFUSED_REMEDY}</p>
-      </section>
-    );
-  if (load.status === 'failed')
-    return (
-      <section className="kt-panel p-panel" role="alert" aria-label="Security log unavailable" data-security-failed="">
-        <h3 className="m-0 flex items-center gap-2 text-row font-semibold text-fg">
-          <CircleAlert size={16} aria-hidden="true" className="text-err" />
-          The security log could not be read
-        </h3>
-        <p className="mb-0 mt-1 text-cell leading-base text-muted">
-          {load.reason === '' ? 'This machine did not say why.' : load.reason} This is not an empty history — nothing
-          was read at all.
-        </p>
-      </section>
-    );
   return (
-    <section className="kt-panel p-panel" role="status" aria-label="Loading the security log">
-      <p className="m-0 text-cell leading-base text-muted">Reading this machine’s security log…</p>
-    </section>
+    <div className="flex min-w-0 flex-col gap-2">
+      {loaded.kind === 'ready' ? (
+        <SecurityCard
+          view={loaded.view}
+          supported={supported()}
+          origin={origin()}
+          machine={machineName ?? connection.baseUrl}
+          busy={busy}
+          failure={failure}
+          onAdd={() => void add()}
+        />
+      ) : (
+        <section className="kt-panel p-panel" role="status" aria-label="Passkeys" data-security-state={loaded.kind}>
+          <p className="m-0 text-cell leading-base text-muted">
+            {loaded.kind === 'loading' ? 'Reading the passkeys this device holds…' : LOAD_FAILURE}
+          </p>
+        </section>
+      )}
+      <SecuritySettingsBlock connection={connection} createClient={createClient} />
+    </div>
   );
 }
-
-/** The Settings panel, for the composition root's `daemonSettingsTabs`, bound to the app's client pool. */
-export const securitySettingsTab = (createClient: SecurityLogClientFactory) =>
-  ({
-    id: 'security',
-    label: 'Security',
-    description: 'Recent pairings, removals, refused attempts and other security events on this machine.',
-    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-      <SecuritySurface connection={connection} createClient={createClient} />
-    ),
-  }) as const;

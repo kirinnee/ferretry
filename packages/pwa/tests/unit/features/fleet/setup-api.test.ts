@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  type FleetCloneBundle,
-  type FleetSetupScan,
-  type FleetToolInstallResult,
-  OPERATOR_UNLOCK_HEADER,
-} from '@ferretry/protocol';
+import type { FleetCloneBundle, FleetSetupScan, FleetToolInstallResult } from '@ferretry/protocol';
 import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
@@ -21,8 +16,6 @@ interface Call {
   readonly path: string;
   readonly init: RequestInit | undefined;
 }
-
-const TOKEN = `fy_unlock_${'A'.repeat(22)}`;
 
 const SCAN = {
   machine: 'studio',
@@ -68,7 +61,7 @@ const headerOf = (call: Call | undefined, name: string): string | undefined =>
   (call?.init?.headers as Record<string, string> | undefined)?.[name];
 
 describe('the setup wire client', () => {
-  it('reads the scan and the export from their own paths, with no unlock by default', async () => {
+  it('reads the scan and the export from their own paths, from their own paths', async () => {
     // Arrange
     const scan = clientFor(SCAN);
     const bundle = clientFor(BUNDLE);
@@ -80,46 +73,21 @@ describe('the setup wire client', () => {
     expect(answers).toEqual([SCAN, BUNDLE]);
     expect([scan, bundle].map(read => read.calls[0]?.path)).toEqual([FLEET_SETUP_SCAN_PATH, FLEET_EXPORT_PATH]);
     expect([scan, bundle].map(read => read.calls[0]?.init?.method)).toEqual([undefined, undefined]);
-    expect([scan, bundle].map(read => headerOf(read.calls[0], OPERATOR_UNLOCK_HEADER))).toEqual([undefined, undefined]);
   });
 
-  it('carries the unlock on every read when there is one', async () => {
+  it('posts a tool install as JSON', async () => {
     // Arrange
-    const reads = [readFleetSetupScan, readFleetExport] as const;
-    const answers = [SCAN, BUNDLE];
+    const { client, calls } = clientFor(INSTALL);
 
     // Act
-    const headers = await Promise.all(
-      reads.map(async (read, index) => {
-        const { client, calls } = clientFor(answers[index]);
-        await read(client, TOKEN);
-        return headerOf(calls[0], OPERATOR_UNLOCK_HEADER);
-      }),
-    );
-
-    // Assert
-    expect(headers).toEqual([TOKEN, TOKEN]);
-  });
-
-  it('posts a tool install as JSON with the unlock when there is one, and without it when there is not', async () => {
-    // Arrange
-    const unlocked = clientFor(INSTALL);
-    const local = clientFor(INSTALL);
-    const request = { harnesses: ['claude', 'codex'] } as const;
-
-    // Act
-    const result = await installFleetTools(unlocked.client, { ...request, harnesses: [...request.harnesses] }, TOKEN);
-    await installFleetTools(local.client, { harnesses: ['claude'] });
+    const result = await installFleetTools(client, { harnesses: ['claude', 'codex'] });
 
     // Assert
     expect(result).toEqual(INSTALL);
-    expect(unlocked.calls[0]?.path).toBe(FLEET_TOOLS_INSTALL_PATH);
-    expect(unlocked.calls[0]?.init?.method).toBe('POST');
-    expect(headerOf(unlocked.calls[0], 'content-type')).toBe('application/json');
-    expect(headerOf(unlocked.calls[0], OPERATOR_UNLOCK_HEADER)).toBe(TOKEN);
-    expect(JSON.parse(unlocked.calls[0]?.init?.body as string)).toEqual({ harnesses: ['claude', 'codex'] });
-    expect(headerOf(local.calls[0], OPERATOR_UNLOCK_HEADER)).toBeUndefined();
-    expect(JSON.parse(local.calls[0]?.init?.body as string)).toEqual({ harnesses: ['claude'] });
+    expect(calls[0]?.path).toBe(FLEET_TOOLS_INSTALL_PATH);
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(headerOf(calls[0], 'content-type')).toBe('application/json');
+    expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({ harnesses: ['claude', 'codex'] });
   });
 
   it('refuses to send a tool install the shared schema does not describe', async () => {

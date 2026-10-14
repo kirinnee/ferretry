@@ -462,19 +462,16 @@ export function AddRuntime({
   } else if (top.at === 'name' && credential !== undefined && draft.profile !== null) {
     const problem = runtimeNameProblem(draft.name, runtimes, machineName);
     const profile = draft.profile;
-    const create = async (operatorPassword: string | undefined): Promise<void> => {
-      const result = await changes.apply(
-        {
-          kind: 'runtime.put',
-          name: draft.name,
-          credential: credential.id,
-          profile,
-          agent: draft.agent,
-          create: true,
-          ...(draft.addAnother ? { addAnother: true } : {}),
-        },
-        operatorPassword,
-      );
+    const create = async (): Promise<void> => {
+      const result = await changes.apply({
+        kind: 'runtime.put',
+        name: draft.name,
+        credential: credential.id,
+        profile,
+        agent: draft.agent,
+        create: true,
+        ...(draft.addAnother ? { addAnother: true } : {}),
+      });
       if (result.kind === 'refused') return;
       onDraft({ ...draft, made: draft.name });
       await reload();
@@ -547,7 +544,7 @@ export function AddRuntime({
           refusal={changes.refusal}
           submitLabel="Create runtime"
           disabled={problem !== null || !online}
-          onSubmit={password => void create(password)}
+          onSubmit={() => void create()}
         />
       </div>
     );

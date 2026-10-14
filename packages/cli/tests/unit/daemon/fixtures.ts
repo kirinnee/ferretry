@@ -106,25 +106,6 @@ export class CapturedOutput implements IDaemonOutput {
   }
 }
 
-/**
- * The first-password offer, recording whether it was made.
- *
- * It records rather than acts, because what the controller owes this collaborator is one call at one
- * moment: after a start has completed and never after any other verb. Whether the offer then ASKS
- * anybody anything is `FirstPasswordOffer`'s own decision and is proved in its own file.
- */
-export class RecordingFirstPassword {
-  offers = 0;
-
-  /** The lifecycle lock's own trail, so a test can prove WHERE in the transaction this happened. */
-  constructor(private readonly trail?: string[]) {}
-
-  async offer(): Promise<void> {
-    this.offers += 1;
-    this.trail?.push('offer:first-password');
-  }
-}
-
 /** The not-set-up line a start ends with, counted, and written into a trail when one is given. */
 export class RecordingSetupNotice {
   says = 0;

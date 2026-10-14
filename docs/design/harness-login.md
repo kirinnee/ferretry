@@ -393,7 +393,7 @@ ITSELF when Codex says it could not get a device code at all (the explicit "not 
 device request that failed with a status or a transport error before any code existed), and the wire
 says so (`deviceCode: "unavailable"`). The person can also choose it: "Device code didn't work? Sign in
 with a link instead" on the start screen, on the device-code screen (an in-flow switch, so the operator
-password the start proved is not asked again), and after a device code failed. `fy credential signin`
+step-up the start held is not asked again), and after a device code failed. `fy credential signin`
 asks for the address in the terminal the same way, and offers the link after a device code fails.
 
 **Governance is unchanged.** The submit — an address, or the switch — rides the existing
@@ -441,7 +441,7 @@ in that machine's own browser; finishing there completes the flow directly, with
 
 **Recommendation: the control, not the notification.** Ship the affordance where the dead end is
 today, and declare the push as a GAP (§6) — Web Push exists but is governed as device management
-(`docs/grants.md:483-495`) and would need a daemon-level subject that no schema has.
+([grants.md](../grants.md)) and would need a daemon-level subject that no schema has.
 
 ### 4.4 What does a remote device get?
 
@@ -455,31 +455,22 @@ not the risk people look for:
 That is a change to how the host behaves, so:
 
 - **Put both routes on `fleet.configure`, not `fleet.use`.** Both axes default to enabled for every
-  capability (`packages/daemon/src/lib/grants/policy.ts:42-49`, `docs/grants.md:95-104`), so this is
-  not a default change — it is which lock the operator's password reaches. A governed caller with
-  `use` alone is never asked for anything (`policy.ts:219`); on `configure`, a machine with a password
-  answers `locked` until an unlock is held (`policy.ts:226-229`). `configure` implies `use`
-  (`policy.ts:208-209`), so nothing needs a second declaration.
-- **Bind the operator password to the _start_, using the machinery that exists.**
-  `POST /v1/fleet/proposals/:proposalId/apply` already asks a governed caller to prove the password
-  against one exact staged change, spending one of the same five attempts, minting nothing
-  (`docs/grants.md:289-318`). A login start is the same shape of artifact: a discrete, named,
-  reviewable act ("log identity X in"). The machinery is not fleet-specific and is already three
-  pieces: the flag a route reads (`CallerGovernance.confirmChange`,
-  `packages/daemon/src/lib/api/capability.ts:110`, set at
-  `packages/daemon/src/lib/grants/service.ts:161`), the check
-  (`CapabilityGrantService.confirmChange`, `grants/service.ts:187`), and the `'operator-password'` /
-  `'none'` answer a panel reads before somebody clicks (`fleet.ts:519`). The fleet's proposal apply
-  wires all three today (`fleet.ts:236-239`, `792`), so this needs no new concept and no second
-  refusal vocabulary.
-- **Use the one prompt.** `features/settings/operator-unlock-dialog.tsx` is the only place a password
-  is asked for, and `grants.md:259-272` records what happened the last time a capability grew its own
-  inline field inside a staged-change card. The login panel raises that dialog or asks for nothing.
-- **A local browser is governed until it unlocks, and `fy` on the host never is** (`grants.md:42-55`).
-  So the operator standing at the machine sees no prompt, which is the behaviour `#358` established.
+  capability, so this is not a default change — it is which lock the passkey step-up reaches. A governed
+  caller with `use` of the fleet alone is never asked for anything; `configure` needs a step-up, and a
+  refusal without one is `step-up-required`. `configure` implies `use`, so nothing needs a second
+  declaration.
+- **The step-up is the only gate, and the start is not asked twice.** There is no per-change confirmation:
+  the route's `fleet.configure` demand is what a governed caller meets, and the request body carries
+  nothing to prove. One step-up covers the whole sign-in, which is why a switch from device code to a link
+  inside the flow asks nothing more. [grants.md](../grants.md) owns what the step-up does and costs.
+- **Use the one prompt.** The browser's single step-up requirement is the only place a person is asked,
+  and the login panel raises it or asks for nothing, so a capability never grows its own inline field.
+- **Only `fy` with the host's admin token is ungoverned** ([grants.md](../grants.md)). So the operator at
+  the machine's command line sees no prompt; a browser on the host is a governed device and is asked for a
+  passkey step-up like any other.
 - **Keep the credential minimum where the other fleet routes have it.** Every fleet route is
   `minimum: 'operator'` (`fleet.ts:1226-1230`); an `admin-token` minimum would 403 the browser, which
-  is always a paired device (`grants.md:117-121`), and the whole point is the browser.
+  is always a paired device ([grants.md](../grants.md)), and the whole point is the browser.
 
 ### 4.5 What breaks if the harness changes its login?
 
@@ -682,8 +673,7 @@ The engineering is tractable and mostly already written. The trade is one questi
 > verification URL and a device/user code, (c) the only value accepted back is one short-lived
 > authorization code written straight to that child's stdin and retained nowhere, (d) no route ever
 > accepts or returns a token — `--with-access-token` and `--with-api-key` stay host-only — and (e) the
-> two routes sit on `fleet.configure` with the existing per-change operator-password confirmation on
-> the start?**
+> two routes sit on `fleet.configure`, so a governed caller starts one with a passkey step-up?**
 
 **Yes** → the order was: the credential-state read (§4.1) so a surface can finally say who needs a
 sign-in; then both harness legs; then the surface that drives them and the control where the dead end was.
@@ -782,7 +772,7 @@ answer is now.
 | the roster already puts `home` and `wrapper` on the wire                                                             | `packages/protocol/src/lib/fleet-changes.ts:564-577`                                                                                                                                                                 |
 | ~~a login UI already exists and dials nothing~~ **NOW FALSE**: it is deleted, and the two that replace it dial       | `rg -n --fixed-strings "startHarnessLogin" packages/pwa/src` — a grep for `RemoteLoginSurface` now finds NOTHING, which is the answer inverting rather than confirming                                               |
 | both fleet axes default to enabled                                                                                   | `packages/daemon/src/lib/grants/policy.ts:42-49`                                                                                                                                                                     |
-| `use` is never password-gated; `configure` is                                                                        | `packages/daemon/src/lib/grants/policy.ts:211-229`                                                                                                                                                                   |
+| `use` is never step-up-gated for fleet; `configure` is                                                               | `packages/daemon/src/lib/grants/policy.ts:211-229`                                                                                                                                                                   |
 | every attention board is session-scoped                                                                              | `rg -n --fixed-strings "path: '/v1/sessions/:sessionId/attention'" packages/daemon/src`                                                                                                                              |
 | nothing raises a daemon-caused attention item                                                                        | `rg -n --fixed-strings "kind: 'daemon'" packages/daemon/src` (state-machine read-back only)                                                                                                                          |
 | ~~the browser meets a dead end today~~ **NOW FALSE**: the readout names where to go, and the Accounts panel is there | `rg -n --fixed-strings "Accounts panel, under Settings" packages/pwa/src` — the readout names the PATH now (`Settings › Daemons › Fleet › Accounts`) rather than a page, because the panel has no address to link to |

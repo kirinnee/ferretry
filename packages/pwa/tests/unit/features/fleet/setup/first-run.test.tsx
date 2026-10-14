@@ -14,22 +14,17 @@ import {
   machineAnswer,
   machineView,
   NOTHING_INSTALLED,
-  NOW,
-  PASSWORD,
   runtimes,
   runtimeView,
   STUDIO,
   scan,
   scriptedClient,
-  UNLOCK_TOKEN,
-  UNLOCKED,
 } from './setup-support.ts';
 
 const SCAN_PATH = '/v1/fleet/setup/scan';
 const RUNTIMES_PATH = '/v1/fleet/runtimes';
 const CHANGES_PATH = '/v1/fleet/proposals';
 const INSTALL_PATH = '/v1/fleet/machine/tools/install';
-const UNLOCK_HEADER = 'x-ferretry-operator-unlock';
 
 const STAGED_IMPORT = {
   id: 'fy_fprop_abcdefghijklmnopqrstuv',
@@ -101,7 +96,6 @@ const start = async (client: FleetClient, options: Partial<Options> = {}): Promi
       createClient={createClient}
       onDone={() => done.push(1)}
       onLeave={() => left.push(1)}
-      now={NOW}
       pollMs={5}
     />
   );
@@ -157,15 +151,11 @@ describe('MachineFirstRun: reading the scan', () => {
     }
   });
 
-  it('a locked browser looks at the machine with its password first', async () => {
+  it('a browser that will be asked for a passkey looks at the machine at once, with no password field', async () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/machine': (call: Call) =>
-          call.headers[UNLOCK_HEADER] === UNLOCK_TOKEN
-            ? machineAnswer()
-            : machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
-        '/v1/grants/unlock': UNLOCKED,
+        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
         [SCAN_PATH]: scan(),
         [RUNTIMES_PATH]: runtimes([]),
       },
@@ -173,19 +163,8 @@ describe('MachineFirstRun: reading the scan', () => {
     );
     const h = await start(client);
     try {
-      expect(calls.some(call => call.path === SCAN_PATH)).toBe(false);
-      expect(h.text('[data-first-run-locked]')).toContain(
-        'Ferretry needs to look at Claude Code and Codex on studio-mac first.',
-      );
-      expect(h.text('[data-change-submit]')).toBe('Look at studio-mac');
-      await typeInto(h.q('[data-change-password]'), PASSWORD, 'password');
-      await clickOn(h.q('[data-change-submit]'), 'look');
-      expect(calls.find(call => call.path === '/v1/grants/unlock')?.body).toEqual({ password: PASSWORD });
-      const scanCall = must(
-        calls.find(call => call.path === SCAN_PATH),
-        'scan call',
-      );
-      expect(scanCall.headers[UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
+      expect(calls.some(call => call.path === SCAN_PATH)).toBe(true);
+      expect(h.q('[data-change-password]')).toBeNull();
       expect(step(h)).toBe('tools');
     } finally {
       await h.view.unmount();
@@ -426,6 +405,18 @@ const wait = async (ms: number): Promise<void> => {
   await settle();
 };
 
+/**
+ * Waits until the screen shows what the test expects, one act per slice, for at most two seconds.
+ *
+ * A fixed count of microtask ticks is not enough here: the sign-in reads a daemon answer's body, which
+ * a loaded runner can resolve on a later macrotask, so the state arrived a tick after `settle` gave up.
+ */
+const until = async (shown: () => boolean, what: string): Promise<void> => {
+  for (let elapsed = 0; elapsed < 2_000 && !shown(); elapsed += 10)
+    await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
+  if (!shown()) throw new Error(`never shown: ${what}`);
+};
+
 describe('MachineFirstRun: Sign in now', () => {
   it('makes the own login in place, signs it in, and returns to the same step with it signed in', async () => {
     const calls: Call[] = [];
@@ -470,7 +461,7 @@ describe('MachineFirstRun: Sign in now', () => {
         { kind: 'credential.add', id: 'codex-you', harness: 'codex', store: 'host' },
       ]);
       expect(calls.find(call => call.path === LOGIN_PATH)?.body).toEqual({ credentialId: 'codex-you' });
-      expect(h.q('[data-codex-login="awaiting-approval"]')).not.toBeNull();
+      await until(() => h.q('[data-codex-login="awaiting-approval"]') !== null, 'the Codex login awaiting approval');
 
       await wait(60);
       // Back on the same step, now signed in, and the import is a plain Import.

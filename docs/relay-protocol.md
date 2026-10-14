@@ -1284,8 +1284,17 @@ is idle-expired, or a proof that does not verify against the stored key all end 
 same `4403`. The daemon accepts by answering, inside the channel:
 
 ```json
-{ "t": "authenticated", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>" }
+{
+  "t": "authenticated",
+  "protocol": "ferretry-relay/2",
+  "accessExpiresAt": "<ISO-8601 instant>",
+  "rotateBy": "<ISO-8601 instant>"
+}
 ```
+
+`rotateBy` is optional: present when the machine asks for device-key rotation, it is when this device's
+key is due for replacement (see "Replacing the device key" below). A daemon that sends none asks for no
+rotation, which is what an older one means.
 
 The proof and the acceptance travel inside the encrypted channel; the refusal is a close, and a close
 code is in the clear, so a relay sees `4403` (and later `4441`) and learns WHEN a session was refused
@@ -1328,6 +1337,39 @@ arrives after the lease ended is never served even when the lease timer fires la
 channel needs a device signature at least every fifteen minutes and never outlives twelve hours, and
 every renewal re-reads revocation and expiry from the daemon's own state. Neither an auth nor a
 renewal counts as USE of the device: see `presence` below.
+
+#### Replacing the device key
+
+A machine's owner sets how often a device's key is replaced (`deviceKeyRotationDays`,
+[design/zero-trust.md](design/zero-trust.md) B6). Once `rotateBy` has passed, the device replaces its key
+inside its next passkey ceremony — the unlock, or a step-up — with no separate record and no extra prompt. It mints a new
+non-extractable key, keeps it as **pending** before anything is sent, and adds to the `POST /v1/unlock` or
+`POST /v1/step-up` body, carried by a session the OLD key opened:
+
+```
+proof = Ed25519-Sign( NEW device key, "ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey) )
+"rotation": { "deviceKey": "<new SPKI, b64url>", "proof": "…" }
+```
+
+`TH` is the carrying session's transcript hash and `deviceKey` is the new key's base64url text, so the
+proof is good for one session and one device. An overdue unlock or step-up without a rotation is refused
+`403 step_up_rotation_required` without spending its challenge. The daemon checks the proof, then the
+passkey assertion, then rewrites the device's key, closes every OTHER session the device holds with
+`4441` (each reopens with the new key), keeps the carrying one, records `device.key-rotated`, and answers
+`keyRotated: true`; the browser then promotes the pending key. From then on the old key opens nothing
+(`4403`). If the answer is lost, the browser's next session is refused on the old key and it tries the
+pending key once — so a dropped response never strands the device.
+
+#### The unlock
+
+A machine unlocks on opening by default (`unlockOnOpen`, [design/zero-trust.md](design/zero-trust.md) B1).
+A session still opens — the device key is proved as always — but every request and every stream open
+answers `401 { "code": "unlock_required" }` until the device unlocks with a passkey through
+`POST /v1/unlock/options` and `POST /v1/unlock`, which are served, as are `GET /v1/passkeys`,
+`GET /v1/security` and passkey registration under its own rules. One unlock lasts `unlockValidityHours` for that device, across page loads, and is the
+step-up for every act inside it unless the owner asks per act. A stream already open when the unlock lapses
+ends with the sealed `1008` at its next lease renewal. This is a daemon response, not a session record:
+nothing on the wire beside it changes.
 
 Afterwards, any number of requests:
 
@@ -1449,7 +1491,7 @@ route at all. `ticket` or `token` in a stream's `query` is refused with `4400`, 
 The daemon answers with exactly one of, inside the channel:
 
 ```json
-{ "t": "stream-opened", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>" }
+{ "t": "stream-opened", "protocol": "ferretry-relay/2", "accessExpiresAt": "<ISO-8601 instant>", "rotateBy": "<ISO-8601 instant>" }
 { "t": "stream-refused", "protocol": "ferretry-relay/2", "status": 404, "body": "…" }
 ```
 
@@ -1532,7 +1574,8 @@ ending the session:
 { "t": "stream-close", "protocol": "ferretry-relay/2", "code": 1013, "reason": "event stream reader fell behind" }
 ```
 
-followed by `4440`. `1000 terminal viewer disconnected`, `1008 event stream is server-only`, `1009`
+followed by `4440`. `1000 terminal viewer disconnected`, `1008 event stream is server-only` (or `1008 this stream is no
+longer allowed`, when a renewal or a grant change re-asks the socket table and it now refuses), `1009`
 for an oversized frame, `1011` for evidence the daemon could not produce, `1013` for a reader that
 fell behind — a relayed viewer reads the same codes a direct one does, and the code travels inside
 the channel because it is content: a relay that could read close reasons could read why viewers

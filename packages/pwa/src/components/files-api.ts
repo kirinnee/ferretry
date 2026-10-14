@@ -262,7 +262,7 @@ export const isUnsupported = (error: unknown): boolean =>
  *
  * A GRANT REFUSAL IS WORDED AS ONE. The daemon's own 403 message already names the next step, and the
  * guidance sentence in front of it says which of the three refusals this is — the operator switched
- * `filesystem` off, the operator password is needed, or the daemon cannot read its own decision. A
+ * `filesystem` off, a passkey confirmation is needed, or the daemon cannot read its own decision. A
  * pane that showed only "HTTP 403" would send a person to look at the network for a limit somebody
  * chose on purpose.
  */

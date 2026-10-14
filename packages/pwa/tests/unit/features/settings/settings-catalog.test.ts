@@ -134,6 +134,16 @@ describe('shared settings catalog', () => {
     }
   });
 
+  test('finds the passkey panel by what a person types after a confirm prompt, on the daemon searched', () => {
+    const security = SETTINGS_LINKS.find(link => link.id === 'security');
+    expect(security?.href(beta)).toBe('/d/daemon-beta/settings#security');
+    for (const query of ['passkey', 'confirm', 'biometric', 'face id']) {
+      expect(settingsPaletteEntries(alpha, query).find(item => item.id === 'setting-link-security')?.href).toBe(
+        '/d/daemon-alpha/settings#security',
+      );
+    }
+  });
+
   test('keeps link-row destinations bound to the daemon being searched', () => {
     const warden = SETTINGS_LINKS.find(link => link.id === 'warden');
     expect(warden?.href(alpha)).toBe('/d/daemon-alpha/settings#daemons');

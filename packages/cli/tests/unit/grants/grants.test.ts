@@ -5,19 +5,18 @@ import {
   type GrantAuditView,
   type GrantsPatch,
   type GrantsView,
-  OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
 import { Command } from 'commander';
 import { registerGrantCommands } from '../../../src/lib/grants/commands';
 import { GrantController } from '../../../src/lib/grants/controller';
 import { GRANTS_PATH, ProtocolGrantGateway } from '../../../src/lib/grants/gateway';
-import type { IGrantGateway, IGrantOutput, IOperatorPasswordSource } from '../../../src/lib/grants/ports';
+import type { IGrantGateway, IGrantOutput } from '../../../src/lib/grants/ports';
 import {
   grantDifference,
-  NO_PASSWORD_NOTE,
   renderGrantChange,
   renderGrantHistory,
   renderGrants,
+  STEP_UP_NOTE,
 } from '../../../src/lib/grants/render';
 
 const capability = (
@@ -30,7 +29,7 @@ const capability = (
   configure: granted.configure,
   granted,
   useRefusal: granted.use ? 'granted' : 'not-granted',
-  configureRefusal: granted.configure ? 'ungated' : 'not-granted',
+  configureRefusal: granted.configure ? 'granted' : 'not-granted',
   // A remote caller never widens, so the CLI's fixtures speak for the caller the grants govern.
   mayGrant: false,
   origin: 'default',
@@ -41,11 +40,10 @@ const view = (overrides: Partial<GrantsView> = {}): GrantsView => ({
   capabilities: DAEMON_CAPABILITIES.map(name => capability(name, { use: true, configure: true })),
   // The CLI runs on the host and authenticates with the admin token, so the caller these fixtures stand
   // for is the one that is BOTH local and ungoverned — the two facts that came apart when a local browser
-  // started needing an unlock. The command line never does.
+  // started needing a step-up. The command line never does.
   governed: false,
   hostLocal: true,
-  passwordSet: false,
-  unlocked: false,
+  steppedUp: false,
   ...overrides,
 });
 
@@ -68,9 +66,7 @@ class RecordingOutput implements IGrantOutput {
 }
 
 class FakeGateway implements IGrantGateway {
-  changed: { patch: GrantsPatch; unlock: string | undefined } | undefined;
-  unlocked: string | undefined;
-  password: string | undefined;
+  changed: { patch: GrantsPatch } | undefined;
 
   constructor(
     private current: GrantsView = view(),
@@ -86,28 +82,16 @@ class FakeGateway implements IGrantGateway {
     return this.audit;
   }
 
-  async change(patch: GrantsPatch, unlock?: string): Promise<GrantsView> {
-    this.changed = { patch, unlock };
+  async change(patch: GrantsPatch): Promise<GrantsView> {
+    this.changed = { patch };
     this.current = this.next;
     return this.next;
   }
-
-  async unlock(password: string): Promise<string> {
-    this.unlocked = password;
-    return 'fy_unlock_aaaaaaaaaaaaaaaaaaaaaa';
-  }
-
-  async setPassword(password: string): Promise<boolean> {
-    this.password = password;
-    return true;
-  }
 }
-
-const passwords = (value = 'operator-secret'): IOperatorPasswordSource => ({ read: async () => value });
 
 const controller = (gateway: IGrantGateway, out = new RecordingOutput()) => ({
   out,
-  instance: new GrantController({ gateway, passwords: passwords(), out, clientName: 'fy' }),
+  instance: new GrantController({ gateway, out, clientName: 'fy' }),
 });
 
 describe('the grant report', () => {
@@ -115,18 +99,13 @@ describe('the grant report', () => {
     // The commonest wrong reading would be to see `configure off` and conclude your own command line
     // is blocked. THIS reader is the command line, which is ungoverned, and a report that left that
     // implicit would send somebody hunting a permission problem they do not have.
-    //
-    // IT NO LONGER SAYS "a loopback caller is ungoverned", because that stopped being true: a browser on
-    // this machine is a paired device and is governed until it enters the password once. The old sentence
-    // would now be a report that disagrees with the daemon enforcing it.
     // Act
     const rendered = renderGrants(view(), 'fy');
 
     // Assert
     expect(rendered.split('\n')[0]).toContain('NOT on this host');
     expect(rendered).toContain('This command line is ungoverned');
-    expect(rendered).toContain('governed until it enters the operator password once');
-    expect(rendered).not.toContain('loopback caller is ungoverned');
+    expect(rendered).not.toMatch(/password/iu);
   });
 
   it('should show where each value came from', () => {
@@ -148,44 +127,45 @@ describe('the grant report', () => {
     expect(rendered).toMatch(/warden.*\(default\)/u);
   });
 
-  it('should state the no-password fact once, plainly, and only when it is true', () => {
-    // One sentence, where the decision is visible. Not a modal, not repeated, and never a question
-    // somebody has to answer to use their own machine.
-    // Act
-    const without = renderGrants(view(), 'fy');
-    const with_ = renderGrants(view({ passwordSet: true }), 'fy');
-
-    // Assert
-    expect(without).toContain(NO_PASSWORD_NOTE);
-    expect(without.match(/any paired device/gu)).toHaveLength(1);
-    expect(with_).not.toContain(NO_PASSWORD_NOTE);
-    expect(with_).toContain('an operator password is set');
-  });
-
   it('should name the gap when the operator said yes and something else is still refusing', () => {
     // That gap is the interesting fact, and a report showing only the recorded answer would hide it.
     // Act
     const rendered = renderGrants(
       view({
-        passwordSet: true,
         capabilities: [
-          capability('fleet', { use: true, configure: true }, { configure: false, configureRefusal: 'locked' }),
+          capability(
+            'fleet',
+            { use: true, configure: true },
+            { configure: false, configureRefusal: 'step-up-required' },
+          ),
+        ],
+      }),
+      'fy',
+    );
+
+    // Assert — one plain sentence, not the wire word.
+    expect(rendered).toContain(`configure ${STEP_UP_NOTE} right now`);
+    expect(rendered).not.toContain('step-up-required');
+  });
+
+  it('should name any other refusal as the daemon words it', () => {
+    // Act
+    const rendered = renderGrants(
+      view({
+        capabilities: [
+          capability('fleet', { use: true, configure: true }, { configure: false, configureRefusal: 'undetermined' }),
         ],
       }),
       'fy',
     );
 
     // Assert
-    expect(rendered).toContain('configure locked right now');
+    expect(rendered).toContain('configure undetermined right now');
   });
 
-  it('should report when a rate-limited daemon resumes checking passwords', () => {
-    // A limiter a person cannot see looks like a broken daemon.
-    // Act
-    const rendered = renderGrants(view({ passwordSet: true, lockedUntil: '2026-08-05T11:00:00.000Z' }), 'fy');
-
-    // Assert
-    expect(rendered).toContain('resumes checking at 2026-08-05T11:00:00.000Z');
+  it('should say nothing about a refusal when nothing is refusing', () => {
+    // Act + Assert
+    expect(renderGrants(view(), 'fy')).not.toContain('right now');
   });
 });
 
@@ -244,13 +224,11 @@ describe('changing a grant from the command line', () => {
     expect(out.exitCode).toBe(1);
   });
 
-  it('should revoke without ever reading the operator password', async () => {
-    // Revoking must never be harder than granting: in an incident the fastest possible path to "the
-    // UI can no longer do that" matters more than the confirmation.
+  it('should revoke in one request', async () => {
     // Arrange
     const gateway = new FakeGateway(
-      view({ passwordSet: true, capabilities: [capability('fleet', { use: true, configure: true })] }),
-      view({ passwordSet: true, capabilities: [capability('fleet', { use: true, configure: false })] }),
+      view({ capabilities: [capability('fleet', { use: true, configure: true })] }),
+      view({ capabilities: [capability('fleet', { use: true, configure: false })] }),
     );
     const { instance, out } = controller(gateway);
 
@@ -258,40 +236,24 @@ describe('changing a grant from the command line', () => {
     await instance.set('fleet', { configure: false });
 
     // Assert
-    expect(gateway.unlocked).toBeUndefined();
-    expect(gateway.changed?.unlock).toBeUndefined();
+    expect(gateway.changed?.patch).toEqual({ fleet: { configure: false } });
     expect(out.messages[0]).toContain('fleet.configure=off');
   });
 
-  it('should trade the password for an unlock before widening anything', async () => {
-    // Arrange
-    const gateway = new FakeGateway(
-      view({ passwordSet: true, capabilities: [capability('fleet', { use: true, configure: false })] }),
-      view({ passwordSet: true, capabilities: [capability('fleet', { use: true, configure: true })] }),
-    );
-    const { instance } = controller(gateway);
-
-    // Act
-    await instance.set('fleet', { configure: true });
-
-    // Assert
-    expect(gateway.unlocked).toBe('operator-secret');
-    expect(gateway.changed?.unlock).toBe('fy_unlock_aaaaaaaaaaaaaaaaaaaaaa');
-  });
-
-  it('should not ask for a password a machine does not have', async () => {
+  it('should widen in one request too, because this command line is ungoverned', async () => {
     // Arrange
     const gateway = new FakeGateway(
       view({ capabilities: [capability('fleet', { use: false, configure: false })] }),
       view({ capabilities: [capability('fleet', { use: true, configure: false })] }),
     );
-    const { instance } = controller(gateway);
+    const { instance, out } = controller(gateway);
 
     // Act
     await instance.set('fleet', { use: true });
 
     // Assert
-    expect(gateway.unlocked).toBeUndefined();
+    expect(gateway.changed?.patch).toEqual({ fleet: { use: true } });
+    expect(out.messages[0]).toContain('fleet.use=on');
   });
 
   it('should print the protocol document when asked for it', async () => {
@@ -302,7 +264,7 @@ describe('changing a grant from the command line', () => {
     await instance.show({ json: true });
 
     // Assert
-    expect(JSON.parse(out.messages[0] ?? '{}')).toHaveProperty('passwordSet', false);
+    expect(JSON.parse(out.messages[0] ?? '{}')).toHaveProperty('steppedUp', false);
   });
 
   it('should print the human report by default', async () => {
@@ -317,42 +279,8 @@ describe('changing a grant from the command line', () => {
   });
 });
 
-describe('the operator password commands', () => {
-  it('should read the password from stdin and say what it now gates', async () => {
-    // Arrange
-    const gateway = new FakeGateway();
-    const { instance, out } = controller(gateway);
-
-    // Act
-    await instance.setPassword();
-
-    // Assert
-    expect(gateway.password).toBe('operator-secret');
-    expect(out.messages[0]).toContain('now needs it');
-  });
-
-  it('should replace an existing password without ever being told the old one', async () => {
-    // THE ESCAPE HATCH, and the only one there is: nothing removes a password, so a person who has
-    // forgotten theirs recovers by replacing it here or not at all. The controller reads ONE value —
-    // the new password — and there is no parameter, prompt or gateway call for a current one, which is
-    // what keeps a forgotten password a repair rather than a permanently bricked daemon.
-    // Arrange — a machine that already has a password nobody present knows.
-    const gateway = new FakeGateway(view({ passwordSet: true }));
-    const { instance, out } = controller(gateway);
-
-    // Act
-    await instance.setPassword();
-
-    // Assert
-    expect(gateway.password).toBe('operator-secret');
-    expect(gateway.unlocked).toBeUndefined();
-    expect(out.messages[0]).toContain('now needs it');
-  });
-});
-
 describe('the daemon grant routes as the client speaks them', () => {
-  it('should send the unlock in a header and never in a URL', async () => {
-    // A URL reaches every proxy's access log, and an unlock in a log outlives its five minutes.
+  it('should send a change as a JSON body carrying no credential header', async () => {
     // Arrange
     const seen: { path: string; init: RequestInit | undefined }[] = [];
     const client = {
@@ -363,55 +291,13 @@ describe('the daemon grant routes as the client speaks them', () => {
     };
 
     // Act
-    await new ProtocolGrantGateway(client as never).change({ fleet: { use: false } }, 'fy_unlock_token');
-
-    // Assert
-    expect(seen[0]?.path).toBe(GRANTS_PATH);
-    const headers = (seen[0]?.init?.headers ?? {}) as Record<string, string>;
-    expect(headers[OPERATOR_UNLOCK_HEADER]).toBe('fy_unlock_token');
-    expect(seen[0]?.path).not.toContain('unlock=');
-  });
-
-  it('should omit the header entirely when there is no unlock to send', async () => {
-    // Arrange
-    const seen: RequestInit[] = [];
-    const client = {
-      request: async (_path: string, _schema: unknown, init?: RequestInit) => {
-        if (init !== undefined) seen.push(init);
-        return view();
-      },
-    };
-
-    // Act
     await new ProtocolGrantGateway(client as never).change({ fleet: { use: false } });
 
     // Assert
-    expect(Object.keys(seen[0]?.headers as Record<string, string>)).toEqual(['content-type']);
-  });
-
-  it('should post the password to unlock and put it to set, never in a path', async () => {
-    // Arrange
-    const seen: { path: string; method: string | undefined; body: string }[] = [];
-    const client = {
-      request: async (path: string, _schema: unknown, init?: RequestInit) => {
-        seen.push({ path, method: init?.method, body: String(init?.body ?? '') });
-        return path.endsWith('/unlock')
-          ? { token: 'fy_unlock_aaaaaaaaaaaaaaaaaaaaaa', expiresAt: '2026-08-05T10:05:00.000Z', ttlSeconds: 300 }
-          : { passwordSet: true };
-      },
-    };
-    const gateway = new ProtocolGrantGateway(client as never);
-
-    // Act
-    await gateway.unlock('operator-secret');
-    await gateway.setPassword('operator-secret');
-
-    // Assert — the password is in a body every time, and never a path segment.
-    expect(seen.map(entry => `${String(entry.method)} ${entry.path}`)).toEqual([
-      'POST /v1/grants/unlock',
-      'PUT /v1/grants/password',
-    ]);
-    for (const entry of seen) expect(entry.path).not.toContain('operator-secret');
+    expect(seen[0]?.path).toBe(GRANTS_PATH);
+    expect(seen[0]?.init?.method).toBe('PATCH');
+    expect(Object.keys(seen[0]?.init?.headers as Record<string, string>)).toEqual(['content-type']);
+    expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({ fleet: { use: false } });
   });
 
   it('should read the report with no request options at all', async () => {
@@ -447,7 +333,7 @@ describe('the command surface', () => {
 
     // Assert
     expect(program.commands.filter(command => command.name() === 'daemon')).toHaveLength(1);
-    expect(daemon?.commands.map(command => command.name())).toEqual(['config', 'password']);
+    expect(daemon?.commands.map(command => command.name())).toEqual(['config']);
   });
 
   it('should name the binary it runs as in every example', async () => {
@@ -466,13 +352,12 @@ describe('the command surface', () => {
 
     // Act
     await expect(program.parseAsync(['node', 'foo', 'daemon', 'config', 'set', '--help'])).rejects.toThrow();
-    await expect(program.parseAsync(['node', 'foo', 'daemon', 'password', 'set', '--help'])).rejects.toThrow();
 
     // Assert
     expect(help).toContain('  foo daemon config set warden --no-configure');
     expect(help).toContain('  foo daemon config set browser --no-use --no-configure');
-    expect(help).toContain('printf %s "$FY_OPERATOR_PASSWORD" | foo daemon config set fleet --configure');
-    expect(help).toContain('printf %s "$FY_OPERATOR_PASSWORD" | foo daemon password set');
+    expect(help).toContain('  foo daemon config set fleet --configure');
+    expect(help).not.toMatch(/password/iu);
     expect(help).not.toMatch(/\bfy daemon/u);
   });
 
@@ -520,26 +405,6 @@ describe('the command surface', () => {
 
     // Assert
     expect(gateway.changed?.patch).toEqual({ warden: { configure: false } });
-  });
-
-  it('should drive setting the password from the command line, and offer no verb that removes one', async () => {
-    // Arrange
-    const program = new Command();
-    program.command('daemon').description('manage the daemon');
-    const gateway = new FakeGateway();
-    const { instance } = controller(gateway);
-    registerGrantCommands(program, () => instance);
-
-    // Act
-    await program.parseAsync(['daemon', 'password', 'set'], { from: 'user' });
-
-    // Assert — `set` is the only verb. A removal revokes no paired device, so a machine that had one
-    // would keep it and lose the gate; the CLI must not offer that under any spelling.
-    expect(gateway.password).toBe('operator-secret');
-    const password = program.commands
-      .find(command => command.name() === 'daemon')
-      ?.commands.find(command => command.name() === 'password');
-    expect(password?.commands.map(command => command.name())).toEqual(['set']);
   });
 
   it('should read the report through the default subcommand', async () => {
@@ -605,7 +470,7 @@ describe('reading who changed what', () => {
     expect(renderGrantHistory(audit({ entries: [] }))).toBe('no grant has been changed on this machine');
   });
 
-  it('should take no password and no unlock, because it is a read', () => {
+  it('should take nothing but the read itself', () => {
     // The caller who was refused a capability is exactly the caller asking when it was refused.
     // Arrange
     const gateway = new FakeGateway(view(), view(), audit());
@@ -614,7 +479,6 @@ describe('reading who changed what', () => {
     // Act
     return instance.history({}).then(() => {
       // Assert
-      expect(gateway.unlocked).toBeUndefined();
       expect(out.messages[0]).toContain('device:phone-1');
     });
   });

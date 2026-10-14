@@ -1,27 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-import { type HarnessLoginFlow, OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
+import type { HarnessLoginFlow } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { CredentialSignIn } from '../../../../../src/features/fleet/credentials/credential-sign-in.tsx';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { CredentialLoginFlow } from '../../../../../src/features/fleet/harness-login-api.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
-import {
-  type Call,
-  claudeFlow,
-  credential,
-  machineWith,
-  NOW,
-  PASSWORD,
-  READS,
-  STUDIO,
-  scripted,
-  UNLOCK_TOKEN,
-} from '../account-support.ts';
+import { type Call, claudeFlow, credential, machineWith, READS, STUDIO, scripted } from '../account-support.ts';
 
 const LOGIN = 'POST /v1/fleet/login';
 const FLOW = '/v1/fleet/login/flow-1';
-const UNLOCKED = { token: UNLOCK_TOKEN, expiresAt: '2026-10-13T09:00:00.000Z', ttlSeconds: 300 };
 
 const WORK = credential({ id: 'claude-work', label: 'work', usedBy: ['claude-work'] });
 const CODEX = credential({ id: 'codex', harness: 'codex', usedBy: ['codex-default'] });
@@ -87,12 +75,11 @@ interface HostProps {
   readonly onSignedIn: () => void;
   readonly createClient: (connection: unknown) => Promise<FleetClient>;
   readonly initialFlow?: CredentialLoginFlow;
-  readonly initialUnlock?: string;
   readonly pollMs?: number;
 }
 
-function Host({ credential: login, onSignedIn, createClient, initialFlow, initialUnlock, pollMs }: HostProps) {
-  const changes = useAccountChanges({ connection: STUDIO, createClient, now: () => NOW });
+function Host({ credential: login, onSignedIn, createClient, initialFlow, pollMs }: HostProps) {
+  const changes = useAccountChanges({ connection: STUDIO, createClient });
   return (
     <CredentialSignIn
       credential={login}
@@ -102,7 +89,6 @@ function Host({ credential: login, onSignedIn, createClient, initialFlow, initia
       changes={changes}
       onSignedIn={onSignedIn}
       {...(initialFlow === undefined ? {} : { initialFlow })}
-      {...(initialUnlock === undefined ? {} : { initialUnlock })}
       {...(pollMs === undefined ? {} : { pollMs })}
     />
   );
@@ -110,7 +96,7 @@ function Host({ credential: login, onSignedIn, createClient, initialFlow, initia
 
 const open = async (
   routes: Record<string, unknown>,
-  props: Partial<Pick<HostProps, 'credential' | 'initialFlow' | 'initialUnlock' | 'pollMs'>> = {},
+  props: Partial<Pick<HostProps, 'credential' | 'initialFlow' | 'pollMs'>> = {},
 ) => {
   const calls: Call[] = [];
   const signedIn: string[] = [];
@@ -122,7 +108,6 @@ const open = async (
       onSignedIn={() => signedIn.push('signed-in')}
       createClient={createClient}
       {...(props.initialFlow === undefined ? {} : { initialFlow: props.initialFlow })}
-      {...(props.initialUnlock === undefined ? {} : { initialUnlock: props.initialUnlock })}
       {...(props.pollMs === undefined ? {} : { pollMs: props.pollMs })}
     />,
   );
@@ -161,11 +146,10 @@ describe('CredentialSignIn', () => {
     expect(view.container.textContent).toContain(
       'The login is kept on studio-mac. Every runtime that uses it (1 runtime) can launch once it is done.',
     );
-    expect(view.container.querySelector('[data-change-password]')).toBeNull();
+    expect(view.container.querySelector('[data-change-step-up]')).toBeNull();
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     expect(only(calls, LOGIN)).toHaveLength(1);
     expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude-work' });
-    expect(only(calls, LOGIN)[0]?.headers[OPERATOR_UNLOCK_HEADER]).toBeUndefined();
 
     expect(state(view.container)).toBe('awaiting-code');
     expect(view.container.textContent).toContain('https://claude.ai/oauth/authorize?code=true');
@@ -306,76 +290,35 @@ describe('CredentialSignIn', () => {
     await silent.view.unmount();
   });
 
-  it('asks for the operator password when this browser owes it, and sends it with the start only', async () => {
-    const { view, calls } = await open({
-      'GET /v1/fleet/machine': machineWith({ confirmation: 'operator-password' }),
-      [LOGIN]: claudeFlow('awaiting-code'),
-    });
-    const field = must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field');
-    expect(view.container.textContent).toContain('studio-mac operator password');
-    const submit = must(view.container.querySelector<HTMLButtonElement>('[data-change-submit]'), 'the start button');
-    expect(submit.disabled).toBe(true);
-    await type(field, PASSWORD);
-    expect(submit.disabled).toBe(false);
-    await click(submit, 'the start button');
-    expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude-work', operatorPassword: PASSWORD });
-    expect(state(view.container)).toBe('awaiting-code');
-    expect(view.container.textContent).not.toContain(PASSWORD);
-    await view.unmount();
-  });
-
-  it('a password the daemon could never accept is refused before anything is started', async () => {
-    const { view, calls } = await open({
-      'GET /v1/fleet/machine': machineWith({ confirmation: 'operator-password' }),
-      [LOGIN]: claudeFlow('awaiting-code'),
-    });
-    const field = must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field');
-    await type(field, 'x');
-    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
-    expect(only(calls, LOGIN)).toHaveLength(0);
-    expect(state(view.container)).toBe('start');
-    expect(text(view.container, '[data-change-refusal]')?.length).toBeGreaterThan(0);
-    await view.unmount();
-  });
-
-  it('a locked browser unlocks with the password and carries the unlock on every later call', async () => {
+  it('says the passkey will be asked for, then starts the sign-in and carries it through to the end', async () => {
     const { view, calls, signedIn } = await open({
-      'GET /v1/fleet/machine': (call: Call) =>
-        call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN
-          ? machineWith({})
-          : machineWith({ mayApply: false, applyRefusal: 'locked' }),
-      'POST /v1/grants/unlock': UNLOCKED,
+      'GET /v1/fleet/machine': machineWith({ mayApply: false, applyRefusal: 'step-up-required' }),
       [LOGIN]: claudeFlow('awaiting-code'),
       [`POST ${FLOW}`]: { outcome: 'accepted', flow: claudeFlow('complete') },
     });
-    const field = must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'the password field');
-    await type(field, PASSWORD);
+    expect(text(view.container, '[data-change-step-up]')).toBe(
+      'studio-mac will ask you to confirm with your passkey when you save.',
+    );
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
-    expect(only(calls, 'POST /v1/grants/unlock')).toHaveLength(1);
-    expect(only(calls, LOGIN)[0]?.headers[OPERATOR_UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
     expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude-work' });
 
     const code = must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field');
     await type(code, 'a-code');
     await click(button(view.container, 'Finish sign-in'), 'Finish sign-in');
-    expect(only(calls, `POST ${FLOW}`)[0]?.headers[OPERATOR_UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
+    expect(only(calls, `POST ${FLOW}`)).toHaveLength(1);
     expect(signedIn).toEqual(['signed-in']);
     await view.unmount();
   });
 
-  it('picks up a sign-in the caller already started, reading it back with the unlock that started it', async () => {
+  it('picks up a sign-in the caller already started and reads it back', async () => {
     const { view, calls, signedIn } = await open(
-      {
-        [`GET ${FLOW}`]: (call: Call) =>
-          call.headers[OPERATOR_UNLOCK_HEADER] === UNLOCK_TOKEN ? claudeFlow('complete') : new Error('no unlock'),
-      },
-      { initialFlow: asCredentialFlow(claudeFlow('awaiting-code')), initialUnlock: UNLOCK_TOKEN, pollMs: 5 },
+      { [`GET ${FLOW}`]: claudeFlow('complete') },
+      { initialFlow: asCredentialFlow(claudeFlow('awaiting-code')), pollMs: 5 },
     );
     expect(state(view.container)).toBe('awaiting-code');
     expect(view.container.querySelector('[data-credential-sign-in="start"]')).toBeNull();
     await wait(60);
     expect(only(calls, `GET ${FLOW}`)).toHaveLength(1);
-    expect(only(calls, `GET ${FLOW}`)[0]?.headers[OPERATOR_UNLOCK_HEADER]).toBe(UNLOCK_TOKEN);
     expect(state(view.container)).toBe('complete');
     expect(signedIn).toEqual(['signed-in']);
     await view.unmount();

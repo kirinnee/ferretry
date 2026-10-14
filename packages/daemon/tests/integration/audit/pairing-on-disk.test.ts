@@ -47,8 +47,6 @@ describe('a real pairing, read back off the disk', () => {
         cryptography,
         devices: repository,
         credentials: new PairingDeviceRegistry(state.daemonId, state.devices),
-        operatorPassword: { isSet: async () => true },
-        clientName: 'fy',
       },
       { log, alert: { newDevicePaired: async () => undefined }, failures: { auditWriteFailed: m => failures.push(m) } },
     );
@@ -57,9 +55,7 @@ describe('a real pairing, read back off the disk', () => {
 
     // Act: each carrier gets a wrong code, then the right one.
     for (const carrier of ['direct', 'relay'] as const) {
-      const minted = await service.mint();
-      if (minted.kind !== 'minted') throw new Error('the fixture could not mint');
-      const code = minted.response.code;
+      const code = service.mint().code;
       needles.push(code);
       const wrong = `${code.slice(0, -1)}${code.endsWith('A') ? 'B' : 'A'}`;
       const name = carrier === 'direct' ? 'Pixel 8' : 'Tablet';

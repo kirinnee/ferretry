@@ -115,6 +115,27 @@ describe('the session tunnel envelope', () => {
     should(await tunnelApiRequest({ method: 'GET', path: '/v1/health' }, DEVICE, 's1').text()).equal('');
   });
 
+  it('should carry the session’s transcript hash on the request when it is given one, and none otherwise', () => {
+    const transcript = new Uint8Array(32).fill(7);
+
+    const carried = tunnelApiRequest({ method: 'GET', path: '/v1/health' }, DEVICE, 's1', undefined, transcript);
+    const bare = tunnelApiRequest({ method: 'GET', path: '/v1/health' }, DEVICE, 's1');
+
+    should(carried.transcriptHash).deepEqual(transcript);
+    should(carried.device).deepEqual(DEVICE);
+    should('transcriptHash' in bare).be.false();
+  });
+
+  it('should keep a transcript hash beside an arrival stamp, since a relayed hop supplies both', () => {
+    const transcript = new Uint8Array(32).fill(9);
+    const arrival = { loopback: false, privilegedLoopback: false, clientAddress: '203.0.113.5' };
+
+    const built = tunnelApiRequest({ method: 'GET', path: '/v1/health' }, DEVICE, 's1', arrival, transcript);
+
+    should(built.transcriptHash).deepEqual(transcript);
+    should(built.clientAddress).equal('203.0.113.5');
+  });
+
   it('should refuse to hand a route more of a tunnelled body than the route said it would read', async () => {
     // A route bounds its own body; a tunnelled body is already in memory, but answering the bound the same
     // way a socket body does keeps a route from parsing more than it ever accepts over HTTP.

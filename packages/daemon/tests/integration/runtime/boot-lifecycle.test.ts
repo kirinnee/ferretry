@@ -33,8 +33,10 @@ import {
   TerminalListViewSchema,
   TerminalViewSchema,
   TranscriptProvenanceSchema,
+  UNLOCK_REQUIRED_CODE,
   WILDCARD_BIND_HOST,
 } from '@ferretry/protocol';
+import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { z } from 'zod';
 import { buildWorld, checkConfiguration, type DaemonWorld, start, type WorldSeams } from '../../../bin/fyd.ts';
@@ -81,6 +83,14 @@ import {
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { healthViewFixture } from '../../fixtures/health-view.ts';
+import {
+  CREDENTIAL_ID as PASSKEY_CREDENTIAL_ID,
+  ORIGIN as PASSKEY_ORIGIN,
+  assertion as passkeyAssertion,
+  clientData as passkeyClientData,
+  es256Authenticator,
+  registration as passkeyRegistration,
+} from '../../support/passkey-authenticator.ts';
 import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
@@ -172,6 +182,52 @@ async function waitUntil(predicate: () => boolean, what: string): Promise<void> 
 }
 
 /** A `config/daemon.json` body. A boot imports nothing, so no case needs to opt out of an import. */
+/**
+ * Registers a first passkey and unlocks with it, over one device session — the two ceremonies a freshly
+ * paired browser performs, answered against the challenges THIS daemon issued.
+ */
+async function unlockThroughTheDaemon(
+  session: { request: TestSession['request'] },
+  passkey: Awaited<ReturnType<typeof es256Authenticator>>,
+): Promise<void> {
+  const body = (value: unknown) => ({ body: JSON.stringify(value), headers: { 'content-type': 'application/json' } });
+  const challengeOf = (answer: { readonly body: string }): string =>
+    z.object({ challenge: z.string() }).parse(JSON.parse(answer.body)).challenge;
+  const registrationChallenge = challengeOf(
+    await session.request('POST', '/v1/passkeys/options', body({ origin: PASSKEY_ORIGIN })),
+  );
+  const made = await passkeyRegistration(passkey, {
+    client: passkeyClientData('webauthn.create', { challenge: registrationChallenge }),
+  });
+  const registered = await session.request(
+    'POST',
+    '/v1/passkeys',
+    body({
+      credentialId: toBase64Url(PASSKEY_CREDENTIAL_ID),
+      clientDataJSON: toBase64Url(made.clientDataJSON),
+      attestationObject: toBase64Url(made.attestationObject),
+    }),
+  );
+  if (registered.status !== 201) throw new Error(`the first passkey was refused: ${registered.body}`);
+  const unlockChallenge = challengeOf(
+    await session.request('POST', '/v1/unlock/options', body({ origin: PASSKEY_ORIGIN })),
+  );
+  const proved = await passkeyAssertion(passkey, {
+    client: passkeyClientData('webauthn.get', { challenge: unlockChallenge }),
+  });
+  const unlocked = await session.request(
+    'POST',
+    '/v1/unlock',
+    body({
+      credentialId: toBase64Url(PASSKEY_CREDENTIAL_ID),
+      clientDataJSON: toBase64Url(proved.clientDataJSON),
+      authenticatorData: toBase64Url(proved.authenticatorData),
+      signature: toBase64Url(proved.signature),
+    }),
+  );
+  if (unlocked.status !== 200) throw new Error(`the unlock was refused: ${unlocked.body}`);
+}
+
 function daemonDocument(document: Record<string, unknown>): string {
   return JSON.stringify(document);
 }
@@ -934,27 +990,11 @@ describe('daemon boot lifecycle', () => {
       },
     });
     /*
-     * NO PASSWORD, NO PAIRING — PROVED THROUGH THE REAL COMPOSITION ROOT, on the state a fresh install
-     * actually starts in.
-     *
-     * This is the end-to-end half of the requirement: the daemon that just booted refuses to hand out a
-     * code because this machine has no operator password, and it refuses the HOST'S OWN admin token —
-     * which is the caller a rule living in the browser could never have reached. A unit test can prove
-     * the subsystem answers a refusal; only this can prove the wiring that gives the subsystem its
-     * verifier exists in production.
+     * THE HOST MINTS WITH NOTHING SET UP. A fresh install has no operator secret of any kind, and the
+     * host's own admin token is ungoverned, so the first code is one request away — the state a
+     * person on their own machine is actually in. A governed (remote) mint is held behind the passkey
+     * step-up at the boundary, which is proved where that boundary lives.
      */
-    const beforePassword = await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: admin });
-    const refusal = (await beforePassword.json()) as { readonly error?: string; readonly code?: string };
-    /*
-     * AND THE WAY THROUGH, at the point of decision: the sentence above names this command, and the
-     * admin token may always set a password — the escape hatch the whole design leans on. So the same
-     * journey that meets the requirement also satisfies it, rather than asserting a dead end.
-     */
-    const passwordResponse = await fetch(`${base}/v1/grants/password`, {
-      method: 'PUT',
-      headers: { ...admin, 'content-type': 'application/json' },
-      body: JSON.stringify({ password: 'correct horse battery' }),
-    });
     const mintedResponse = await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: admin });
     const minted = PairingCodeMintResponseSchema.parse(await mintedResponse.json());
     /*
@@ -988,6 +1028,15 @@ describe('daemon boot lifecycle', () => {
     // THE DEVICE KEY IS THE CREDENTIAL: a session it signs is served; the same id signed by another
     // key is refused; and an app still sending the old bearer token is told to update.
     const asDevice = await deviceSession(base, minted.daemonId, paired.deviceId, device, { origin });
+    /*
+     * THE UNLOCK, THROUGH THE PRODUCTION COMPOSITION ROOT (zero-trust.md B1). The machine unlocks on
+     * opening by default, so the freshly paired device is refused everything first; it registers its
+     * first passkey inside the window after pairing — served before an unlock — and unlocks with it.
+     * A software authenticator stands in for the person's; the daemon's verifier is the real one.
+     */
+    const locked = await asDevice.request('GET', '/v1/usage');
+    const passkey = await es256Authenticator();
+    await unlockThroughTheDaemon(asDevice, passkey);
     const usage = await asDevice.request('GET', '/v1/usage');
     const refreshed = DaemonCarriersViewSchema.parse(JSON.parse((await asDevice.request('GET', '/v1/carriers')).body));
     asDevice.close();
@@ -1020,12 +1069,6 @@ describe('daemon boot lifecycle', () => {
     should(code).equal(0);
     should(preflight.status).equal(204);
     should(preflight.headers.get('access-control-allow-origin')).equal(origin);
-    // The requirement, and its remedy, from the daemon that really booted.
-    should(beforePassword.status).equal(403);
-    should(refusal.code).equal('pairing_needs_operator_password');
-    should(refusal.error).match(/no operator password/u);
-    should(refusal.error).match(/fy daemon password set/u);
-    should(passwordResponse.status).equal(200);
     should(mintedResponse.status).equal(201);
     should(minted.ttlSeconds).equal(120);
     should(new URL(invitation.pairUrl).hash).containEql(minted.code);
@@ -1042,6 +1085,7 @@ describe('daemon boot lifecycle', () => {
     if (status.status !== 'redeemed') throw new Error('expected a redeemed pairing status');
     should(status.deviceName).equal('Browser phone');
     should(usage.status).equal(200);
+    should([locked.status, JSON.parse(locked.body).code]).deepEqual([401, UNLOCK_REQUIRED_CODE]);
     should(refreshed.carriers).deepEqual(paired.carriers);
     should(impostorClosed.code).equal(4403);
     should(outdatedApp.status).equal(426);
@@ -1055,6 +1099,71 @@ describe('daemon boot lifecycle', () => {
     // The daemon keeps the PUBLIC half and nothing a copy of this file could replay.
     should(deviceDocument).containEql(device.publicKey);
     should(deviceDocument).not.containEql('tokenHash');
+  });
+
+  it('should delete a stale operator-password verifier at boot and say so once', async () => {
+    // The passkey step-up replaced the operator password with no compatibility path, so a verifier an
+    // older daemon left behind gates nothing. Left in place it would read as a lock to anyone who found
+    // it, so a real boot removes it and tells the operator where the password went.
+    // Arrange — a state home with the retired file in it, and a second boot with none.
+    const home = await tempDirectory('fyd-retired-password');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const said = recordingNotices();
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      notices: said.port,
+    };
+    const stale = join(home, 'state', 'operator-password.json');
+    await writeFile(stale, '{"argon2id":"$argon2id$stale"}\n', { mode: 0o600 });
+
+    // Act
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const afterBoot = await readdir(join(home, 'state'));
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    const secondHome = await tempDirectory('fyd-no-retired-password');
+    const secondPort = await freeLoopbackPort();
+    const secondCleanups: Array<() => void | Promise<void>> = [];
+    const secondSaid = recordingNotices();
+    let secondRelease = (): void => {};
+    const secondWorld = {
+      ...(await worldAt(secondHome, secondPort, async () => {
+        await new Promise<void>(resolve => {
+          secondRelease = resolve;
+        });
+      })),
+      notices: secondSaid.port,
+    };
+    const secondExit = start(secondWorld, secondCleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${secondPort}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    secondRelease();
+    const secondCode = await secondExit;
+    await runCleanups(secondCleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(afterBoot).not.containEql('operator-password.json');
+    const retired = said.steps.filter(step => step.startsWith('operator password retired'));
+    should(retired).have.length(1);
+    should(retired[0]).match(/deleted state\/operator-password\.json/u);
+    // A machine that never had one is told nothing: the notice is true only when a file was there.
+    should(secondCode).equal(0);
+    should(secondSaid.steps.filter(step => step.startsWith('operator password retired'))).be.empty();
   });
 
   /**

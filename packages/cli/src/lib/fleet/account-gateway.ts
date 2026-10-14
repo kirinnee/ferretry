@@ -26,8 +26,6 @@ import {
   FleetToolInstallRequestSchema,
   type FleetToolInstallResult,
   FleetToolInstallResultSchema,
-  GrantUnlockRequestSchema,
-  GrantUnlockViewSchema,
   type HarnessLoginCodexMethod,
   type HarnessLoginFlow,
   HarnessLoginFlowSchema,
@@ -35,9 +33,8 @@ import {
   type HarnessLoginSubmission,
   HarnessLoginSubmissionSchema,
   HarnessLoginSubmitRequestSchema,
-  OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
-import type { AccountAuthority, AccountHarness, IAccountGateway } from './account-ports.ts';
+import type { AccountHarness, IAccountGateway } from './account-ports.ts';
 import type { FleetApiClient } from './ports.ts';
 
 const FLEET_MACHINE_PATH = '/v1/fleet/machine';
@@ -50,7 +47,6 @@ const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
 const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
 const FLEET_EXPORT_PATH = '/v1/fleet/export';
 const FLEET_LOGIN_PATH = '/v1/fleet/login';
-const GRANT_UNLOCK_PATH = '/v1/grants/unlock';
 
 /**
  * Installing a harness runs a package manager, and the route answers when it is done. A minute is
@@ -64,8 +60,8 @@ const segment = (value: string): string => encodeURIComponent(value);
  * Speaks the account-model routes through the protocol client, parsing every answer through the
  * shared schema, which has no field a credential could occupy.
  *
- * THE UNLOCK AND THE PASSWORD ARE NEVER RETAINED. Each is handed to one call and forgotten: this class
- * has no field for either.
+ * THIS CLASS HOLDS NO AUTHORITY. A write is not confirmed by anything the command line carries: the
+ * daemon governs a caller by how it arrived, and a caller on this machine is ungoverned.
  */
 export class ProtocolAccountGateway implements IAccountGateway {
   constructor(private readonly client: FleetApiClient) {}
@@ -90,102 +86,79 @@ export class ProtocolAccountGateway implements IAccountGateway {
     return await this.client.request(FLEET_CREDENTIALS_PATH, FleetCredentialListSchema);
   }
 
-  async unlock(password: string): Promise<string> {
-    const minted = await this.client.request(
-      GRANT_UNLOCK_PATH,
-      GrantUnlockViewSchema,
-      post(GrantUnlockRequestSchema.parse({ password }), {}),
-    );
-    return minted.token;
-  }
-
-  async check(credentialId: string, authority: AccountAuthority): Promise<FleetCredentialView> {
+  async check(credentialId: string): Promise<FleetCredentialView> {
     return await this.client.request(
       `${FLEET_CREDENTIALS_PATH}/${segment(credentialId)}/check`,
       FleetCredentialViewSchema,
-      post(FleetCredentialCheckRequestSchema.parse(withPassword({}, authority)), authority),
+      post(FleetCredentialCheckRequestSchema.parse({})),
     );
   }
 
-  async stage(change: FleetAccountChange, authority: AccountAuthority): Promise<FleetAccountChangeView> {
+  async stage(change: FleetAccountChange): Promise<FleetAccountChangeView> {
     return await this.client.request(
       FLEET_PROPOSALS_PATH,
       FleetAccountChangeViewSchema,
-      post(FleetAccountChangeRequestSchema.parse({ change }), authority),
+      post(FleetAccountChangeRequestSchema.parse({ change })),
     );
   }
 
-  async apply(changeId: string, authority: AccountAuthority): Promise<FleetAccountChangeOutcome> {
+  async apply(changeId: string): Promise<FleetAccountChangeOutcome> {
     return await this.client.request(
       `${FLEET_PROPOSALS_PATH}/${segment(changeId)}/apply`,
       FleetAccountChangeOutcomeSchema,
-      post(FleetProposalApplyRequestSchema.parse(withPassword({}, authority)), authority),
+      post(FleetProposalApplyRequestSchema.parse({})),
     );
   }
 
-  async scan(authority: AccountAuthority): Promise<FleetSetupScan> {
-    return await this.client.request(FLEET_SETUP_SCAN_PATH, FleetSetupScanSchema, get(authority));
+  async scan(): Promise<FleetSetupScan> {
+    return await this.client.request(FLEET_SETUP_SCAN_PATH, FleetSetupScanSchema, GET);
   }
 
-  async installTools(
-    harnesses: readonly AccountHarness[],
-    authority: AccountAuthority,
-  ): Promise<FleetToolInstallResult> {
+  async installTools(harnesses: readonly AccountHarness[]): Promise<FleetToolInstallResult> {
     return await this.client.request(
       FLEET_TOOLS_INSTALL_PATH,
       FleetToolInstallResultSchema,
-      post(FleetToolInstallRequestSchema.parse(withPassword({ harnesses: [...harnesses] }, authority)), authority),
+      post(FleetToolInstallRequestSchema.parse({ harnesses: [...harnesses] })),
       TOOL_INSTALL_TIMEOUT_MS,
     );
   }
 
-  async exportBundle(authority: AccountAuthority): Promise<FleetCloneBundle> {
-    return await this.client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, get(authority));
+  async exportBundle(): Promise<FleetCloneBundle> {
+    return await this.client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, GET);
   }
 
-  async startSignIn(
-    credentialId: string,
-    authority: AccountAuthority,
-    method?: HarnessLoginCodexMethod,
-  ): Promise<HarnessLoginFlow> {
+  async startSignIn(credentialId: string, method?: HarnessLoginCodexMethod): Promise<HarnessLoginFlow> {
     const request = { credentialId, ...(method === undefined ? {} : { method }) };
     return await this.client.request(
       FLEET_LOGIN_PATH,
       HarnessLoginFlowSchema,
-      post(HarnessLoginStartRequestSchema.parse(withPassword(request, authority)), authority),
+      post(HarnessLoginStartRequestSchema.parse(request)),
     );
   }
 
-  async signInStatus(flowId: string, authority: AccountAuthority): Promise<HarnessLoginFlow> {
-    return await this.client.request(`${FLEET_LOGIN_PATH}/${segment(flowId)}`, HarnessLoginFlowSchema, get(authority));
+  async signInStatus(flowId: string): Promise<HarnessLoginFlow> {
+    return await this.client.request(`${FLEET_LOGIN_PATH}/${segment(flowId)}`, HarnessLoginFlowSchema, GET);
   }
 
-  async submitSignInCode(flowId: string, code: string, authority: AccountAuthority): Promise<HarnessLoginSubmission> {
+  async submitSignInCode(flowId: string, code: string): Promise<HarnessLoginSubmission> {
     return await this.client.request(
       `${FLEET_LOGIN_PATH}/${segment(flowId)}`,
       HarnessLoginSubmissionSchema,
-      post(HarnessLoginSubmitRequestSchema.parse({ code }), authority),
+      post(HarnessLoginSubmitRequestSchema.parse({ code })),
     );
   }
 
-  async cancelSignIn(flowId: string, authority: AccountAuthority): Promise<HarnessLoginFlow> {
+  async cancelSignIn(flowId: string): Promise<HarnessLoginFlow> {
     return await this.client.request(`${FLEET_LOGIN_PATH}/${segment(flowId)}`, HarnessLoginFlowSchema, {
       method: 'DELETE',
-      headers: unlockHeaders(authority),
     });
   }
 }
 
-const unlockHeaders = (authority: AccountAuthority): Record<string, string> =>
-  authority.unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: authority.unlock };
+const GET: RequestInit = { method: 'GET' };
 
-const get = (authority: AccountAuthority): RequestInit => ({ method: 'GET', headers: unlockHeaders(authority) });
-
-const post = (body: unknown, authority: AccountAuthority): RequestInit => ({
+const post = (body: unknown): RequestInit => ({
   method: 'POST',
-  headers: { 'content-type': 'application/json', ...unlockHeaders(authority) },
+  headers: { 'content-type': 'application/json' },
   body: JSON.stringify(body),
 });
-
-const withPassword = <T extends object>(body: T, authority: AccountAuthority): T & { operatorPassword?: string } =>
-  authority.password === undefined ? body : { ...body, operatorPassword: authority.password };

@@ -854,6 +854,12 @@ class Devices implements PairingDeviceStore {
     return false;
   }
   async touch(): Promise<void> {}
+  async rotateKey(): Promise<boolean> {
+    return false;
+  }
+  async setGrants(): Promise<boolean> {
+    return false;
+  }
 }
 
 class Cryptography implements PairingCryptography {
@@ -892,8 +898,6 @@ function pairing(
       cryptography,
       devices,
       credentials: new PairingDeviceRegistry(DAEMON_ID),
-      operatorPassword: { isSet: async () => true },
-      clientName: 'fy',
     },
     {
       log,
@@ -931,7 +935,7 @@ describe('AuditedPairingService', () => {
   it('should record a direct pairing by id and name, and alert the others', async () => {
     // Arrange
     const { journal, alerts, service } = pairing();
-    await service.mint();
+    service.mint();
 
     // Act
     const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
@@ -957,7 +961,7 @@ describe('AuditedPairingService', () => {
   it('should record a relayed pairing as relayed', async () => {
     // Arrange
     const { journal, alerts, service } = pairing();
-    await service.mint();
+    service.mint();
 
     // Act
     await relayed(service, { code: CODE, deviceName: 'Phone' });
@@ -971,13 +975,13 @@ describe('AuditedPairingService', () => {
     // Arrange: the code is single-use, so two grants need two codes; what matters is that each record
     // names the device ITS redemption created, which a before/after list diff cannot promise.
     const { journal, service } = pairing();
-    await service.mint();
+    service.mint();
     const first = direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
     const losing = relayed(service, { code: CODE, deviceName: 'Tablet' });
 
     // Act
     const results = await Promise.all([first, losing]);
-    await service.mint();
+    service.mint();
     await relayed(service, { code: CODE, deviceName: 'Tablet' });
 
     // Assert
@@ -1015,7 +1019,7 @@ describe('AuditedPairingService', () => {
   it('should refuse a device name that would read as a fixed actor, without spending the code', async () => {
     // Arrange
     const { journal, alerts, service, devices } = pairing();
-    await service.mint();
+    service.mint();
 
     // Act
     const directResult = await direct(service, { code: CODE, deviceName: 'This  Computer' }, 'peer');
@@ -1036,7 +1040,7 @@ describe('AuditedPairingService', () => {
   it('should still spend a guess when a wrong code carries a reserved name', async () => {
     // Arrange
     const { service } = pairing();
-    await service.mint();
+    service.mint();
 
     // Act: five wrong guesses expire the code, whatever name they carry.
     for (let index = 0; index < 5; index += 1)
@@ -1062,7 +1066,7 @@ describe('AuditedPairingService', () => {
         throw new Error('push down');
       },
     });
-    await service.mint();
+    service.mint();
 
     // Act
     const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
@@ -1082,7 +1086,7 @@ describe('AuditedPairingService', () => {
         await new Promise<void>(() => undefined);
       },
     });
-    await service.mint();
+    service.mint();
 
     // Act
     const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
@@ -1099,7 +1103,7 @@ describe('AuditedPairingService', () => {
         throw 'push down';
       },
     });
-    await service.mint();
+    service.mint();
 
     // Act
     const result = await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
@@ -1113,7 +1117,7 @@ describe('AuditedPairingService', () => {
   it('should record a redemption the store refused as a refusal', async () => {
     // Arrange
     const { journal, alerts, service } = pairing({ addFails: true });
-    await service.mint();
+    service.mint();
 
     // Act
     await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');

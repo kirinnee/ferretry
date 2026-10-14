@@ -1,11 +1,14 @@
 import {
   type Advertisement,
+  type CapabilityGrants,
   type AdvertisementRefusal,
   type DaemonCarrier,
   type DaemonId,
   DaemonIdSchema,
   DaemonNameSchema,
   DEVICE_IDLE_EXPIRY_DAYS,
+  FULL_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   type PairedDevice,
@@ -15,6 +18,7 @@ import {
   PairingCodeMintResponseSchema,
   PairingCodeSchema,
   type PairingCodeStatusResponse,
+  type PairingGrantSet,
   type PairingId,
   PairingIdSchema,
   type PairingReach,
@@ -27,6 +31,7 @@ import {
 } from '@ferretry/protocol';
 import { DeviceKeySchema } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
+import type { GrantAuditPort } from '../grants/types.ts';
 import type { DeviceConnectionRevoker } from './live-connections.ts';
 
 const FERRETRY_PAIRING_APP_URL = 'https://ferretry.pages.dev/pair';
@@ -41,27 +46,6 @@ export interface PairingClock {
   now(): number;
 }
 
-/**
- * WHETHER THIS MACHINE HAS AN OPERATOR PASSWORD. Never the password itself.
- *
- * One method, and it answers a question rather than handing anything back — the same use-never-read
- * shape the verifier itself is built on, narrowed to the single fact pairing needs. A port that could
- * READ a password would put one inside the subsystem that hands out credentials, which is the last
- * place it belongs.
- *
- * IT IS ASYNCHRONOUS AND IT IS NOT CACHED HERE, deliberately. The verifier's own file is the owner of
- * this fact; a copy held in this service would answer from whenever it was last refreshed, and the
- * refresh it would be missing is precisely the one an operator performs in order to be allowed to
- * pair. Minting happens once per pairing, so the read costs nothing worth saving.
- *
- * A THROW IS NOT A `false`. The verifier raises rather than reporting absence when it cannot read
- * itself, and {@link PairingService.mint} keeps that distinction: a damaged file refuses to mint with
- * its own sentence instead of quietly being treated as a machine that has no password.
- */
-export interface OperatorPasswordPresence {
-  isSet(): Promise<boolean>;
-}
-
 export interface PairingCryptography {
   pairingCode(): string;
   pairingId(): string;
@@ -70,7 +54,7 @@ export interface PairingCryptography {
 
 /** An hour, in milliseconds: how often a busy device's `lastSeenAt` is written to disk at most. */
 const LAST_SEEN_PERSIST_INTERVAL_MS = 60 * 60 * 1_000;
-const IDLE_EXPIRY_MS = DEVICE_IDLE_EXPIRY_DAYS * 24 * 60 * 60 * 1_000;
+const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export interface PairingDeviceRecord {
   readonly id: string;
@@ -90,6 +74,17 @@ export interface PairingDeviceRecord {
    * which never left the browser that generated it.
    */
   readonly publicKey: string;
+  /**
+   * What THIS device may do when it is governed, before the daemon-wide document is applied
+   * (`docs/grants.md`, "Per-device grants"). A new device holds `FULL_DEVICE_GRANTS` behind the unlock,
+   * or `LIMITED_DEVICE_GRANTS` (`fleet.use` only) when its code was minted `--limited`.
+   */
+  readonly grants: CapabilityGrants;
+  /**
+   * When `publicKey` replaced an earlier key (`docs/design/zero-trust.md` B6). Absent until the first
+   * rotation, when the key's age is counted from `createdAt`.
+   */
+  readonly keyRotatedAt?: string;
 }
 
 export interface PairingDeviceStore {
@@ -106,6 +101,10 @@ export interface PairingDeviceStore {
   remove(id: string): Promise<boolean>;
   /** Records when a device was last seen. An id that is gone is not an error: it was revoked meanwhile. */
   touch(id: string, lastSeenAt: string): Promise<void>;
+  /** Replaces a device's key, reporting whether the device was still there to receive it. */
+  rotateKey(id: string, publicKey: string, keyRotatedAt: string): Promise<boolean>;
+  /** Replaces one device's grants, reporting whether the device was still there to change. */
+  setGrants(id: string, grants: CapabilityGrants): Promise<boolean>;
 }
 
 /**
@@ -192,6 +191,11 @@ interface ActivePairing {
   readonly pairingId: PairingId;
   readonly code: PairingCode;
   readonly expiresAtMs: number;
+  /**
+   * What the device that redeems this code will hold — chosen at the mint and kept HERE, with the code,
+   * so the link carries nothing extra and a redemption cannot ask for more than was minted.
+   */
+  readonly grants: PairingGrantSet;
   attempts: number;
   /**
    * WRONG GUESSES THAT ARRIVED OVER A RENDEZVOUS, counted apart from `attempts` on purpose.
@@ -332,21 +336,6 @@ interface PairingServiceOptions {
   readonly devices: PairingDeviceStore;
   readonly credentials: PairingDeviceRegistry;
   /**
-   * THE FIRST-PASSWORD REQUIREMENT'S ONE OWNER, and it is required rather than optional.
-   *
-   * An optional port would default to "no gate", which is the same as not shipping the requirement —
-   * and it would do so silently, on the machines that never wired it. A daemon that cannot say whether
-   * it has an operator password has no business handing out credentials for itself, so this is the
-   * shape that makes that unstatable. See {@link PairingService.mint}.
-   */
-  readonly operatorPassword: OperatorPasswordPresence;
-  /**
-   * What a person types to run the command line, so a refusal names the remedy in the words of the
-   * reader rather than inventing a binary. The composition root owns the value — see the two-name
-   * model — and nothing here spells it.
-   */
-  readonly clientName: string;
-  /**
    * Everything else that is keyed by a device, purged when its grant is revoked.
    *
    * OPTIONAL, and the reason it can safely be is worth stating: each owner ALSO refuses to act on a
@@ -362,7 +351,20 @@ interface PairingServiceOptions {
   readonly connections?: DeviceConnectionRevoker;
   /** See {@link PairingGrantObserver}. */
   readonly onGranted?: PairingGrantObserver;
+  /**
+   * Where a revocation somebody ASKED for is written down, in the owner's grant journal.
+   *
+   * OPTIONAL for the reason `deviceState` is: a daemon built without it still revokes correctly and
+   * merely leaves no trace. It records only when the caller names an actor, so the daemon's own idle
+   * expiry — which nobody asked for — is not written as though somebody had.
+   */
+  readonly audit?: Pick<GrantAuditPort, 'record'>;
   readonly rateLimiter?: PairingRateLimiter;
+  /**
+   * The machine's idle period in days, read at every check so a shortened one applies at the next
+   * (`idleExpiryDays`, `docs/design/zero-trust.md` B6). Absent means {@link DEVICE_IDLE_EXPIRY_DAYS}.
+   */
+  readonly idleExpiryDays?: () => number;
   readonly compare?: (left: string, right: string) => boolean;
   readonly pairingAppUrl?: string;
   readonly capabilities?: readonly string[];
@@ -380,11 +382,6 @@ export type PairingRedemption =
  * cannot be skipped by a route that forgot to ask first — and a refusal carries the sentence a person
  * needs rather than a status somebody else has to write prose for.
  */
-export type PairingMint =
-  | { readonly kind: 'minted'; readonly response: PairingCodeMintResponse }
-  /** Why this machine will not hand out a code, addressed to whoever asked for one. */
-  | { readonly kind: 'refused'; readonly reason: string };
-
 const REFUSED = { kind: 'refused' } as const;
 
 /** The complete pairing state machine. One instance belongs to one daemon runtime. */
@@ -429,51 +426,15 @@ export class PairingService {
   }
 
   /**
-   * A code, or the reason this machine will not hand one out.
+   * A live code, replacing any code still outstanding.
    *
-   * ## NO PASSWORD, NO PAIRING — AND THIS IS WHERE THAT LIVES
-   *
-   * Pairing is the moment something OUTSIDE this machine gets access, and a device paired to a machine
-   * with no operator password arrives with nothing to prove: `fleet.configure` is permissive by
-   * default, so it can write runnable wrappers into the operator's own accounts. Requiring the
-   * password here DELETES that state rather than warning about it.
-   *
-   * IT IS HERE RATHER THAN IN A CLIENT, and that is the whole point of the placement. The requirement
-   * used to live in the browser's pairing panel, which made the guarantee "the browser will not create
-   * a passwordless remote device" — true, and silent about `fy pair`, which mints through the same
-   * route. Below both doors there is one rule, so it does not matter which one somebody walks through.
-   *
-   * IT IS NOT A GATE ON LOCAL USE. Nothing else in this daemon consults it: a person on their own
-   * machine with no password starts the daemon, uses it and configures it exactly as before, right up
-   * until they ask for a credential for something that is not this machine.
-   *
-   * AN UNREADABLE VERIFIER REFUSES TOO, with its own sentence. Reading damage as "no password" would
-   * silently disarm the requirement on the one machine whose state is already known to be broken;
-   * reading it as "password present" would mint on an assumption. Neither is an answer, so both fail
-   * closed — and the refusal names the way through.
-   *
-   * THE CHECK RUNS BEFORE ANY STATE MOVES. A refusal leaves a live code untouched, so a mint that this
-   * machine cannot satisfy does not also destroy the code an operator is watching.
+   * IT ASKS NOTHING ABOUT THIS MACHINE. Who may mint is the `pairing` capability's question, answered
+   * at the boundary before this runs: the owner's admin token at the machine is ungoverned, and every
+   * other caller — a browser on the host included — needs the grant AND a live passkey step-up from the
+   * device already paired. The code itself is single-use and
+   * short-lived, so there is no machine-level precondition left for this method to check.
    */
-  async mint(): Promise<PairingMint> {
-    const refusal = await this.#firstPasswordRefusal();
-    if (refusal !== undefined) return { kind: 'refused', reason: refusal };
-    return { kind: 'minted', response: this.#mintCode() };
-  }
-
-  /** Why this machine may not hand out a code, or nothing when it may. */
-  async #firstPasswordRefusal(): Promise<string | undefined> {
-    let present: boolean;
-    try {
-      present = await this.options.operatorPassword.isSet();
-    } catch (error) {
-      return `this machine could not read whether it has an operator password, and it will not hand out a pairing code on the assumption that it has one: ${error instanceof Error ? error.message : String(error)}. Repair or replace it with \`${this.options.clientName} daemon password set\` on this machine, which never asks for the old one.`;
-    }
-    if (present) return undefined;
-    return `this machine has no operator password, so it will not hand out a pairing code. A device paired without one can change the settings of whatever is already switched on here — including the agent fleet, which writes runnable files into your accounts — and the password is what stands in front of that. Set one with \`${this.options.clientName} daemon password set\` on this machine, or from Ferretry in a browser on it, and pairing works again.`;
-  }
-
-  #mintCode(): PairingCodeMintResponse {
+  mint(grants: PairingGrantSet = 'full'): PairingCodeMintResponse {
     if (this.active !== undefined) this.expire(this.active);
     while (this.observations.size >= OBSERVATION_LIMIT) {
       const oldest = this.observations.keys().next().value;
@@ -484,7 +445,7 @@ export class PairingService {
     const code = PairingCodeSchema.parse(this.options.cryptography.pairingCode());
     const expiresAtMs = this.options.clock.now() + PAIRING_CODE_TTL_SECONDS * 1_000;
     const expiresAt = instant(expiresAtMs);
-    this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false };
+    this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false, grants };
     this.observations.set(pairingId, { pairingId, status: 'pending', expiresAt });
 
     return PairingCodeMintResponseSchema.parse({
@@ -495,6 +456,7 @@ export class PairingService {
       daemonId: this.daemonId,
       daemonName: this.daemonName,
       ...this.#link(code),
+      grants,
     });
   }
 
@@ -590,7 +552,8 @@ export class PairingService {
         platform: record.platform,
         createdAt: record.createdAt,
         lastSeenAt: instant(lastSeenMs),
-        idleExpiresAt: instant(lastSeenMs + IDLE_EXPIRY_MS),
+        idleExpiresAt: instant(lastSeenMs + this.#idleExpiryMs()),
+        grants: record.grants,
         ...(record.pairedOver === undefined ? {} : { pairedOver: record.pairedOver }),
       });
     });
@@ -607,7 +570,7 @@ export class PairingService {
   async deviceKey(id: string): Promise<string | undefined> {
     const record = this.options.credentials.get(id);
     if (record === undefined) return undefined;
-    if (this.options.clock.now() - this.#lastSeenMs(record) < IDLE_EXPIRY_MS) return record.publicKey;
+    if (this.options.clock.now() - this.#lastSeenMs(record) < this.#idleExpiryMs()) return record.publicKey;
     await this.revokeDevice(record.id).catch(() => false);
     return undefined;
   }
@@ -633,21 +596,58 @@ export class PairingService {
     void this.options.devices
       .touch(id, lastSeenAt)
       .then(
-        () => this.options.credentials.refresh({ ...record, lastSeenAt }),
+        () => {
+          // The LATEST record, not the one read before the write: a grant change made meanwhile must survive.
+          const latest = this.options.credentials.get(id);
+          if (latest !== undefined) this.options.credentials.refresh({ ...latest, lastSeenAt });
+        },
         () => undefined,
       )
       .finally(() => this.#touching.delete(id));
   }
 
-  /** Ends every grant nobody has used for {@link DEVICE_IDLE_EXPIRY_DAYS}. Called at boot and per list. */
+  /** Ends every grant nobody has used for the idle period. Called at boot and per list. */
   async expireIdleDevices(): Promise<number> {
     const now = this.options.clock.now();
     let expired = 0;
     for (const record of this.options.credentials.all()) {
-      if (now - this.#lastSeenMs(record) < IDLE_EXPIRY_MS) continue;
+      if (now - this.#lastSeenMs(record) < this.#idleExpiryMs()) continue;
       if (await this.revokeDevice(record.id).catch(() => false)) expired += 1;
     }
     return expired;
+  }
+
+  /**
+   * How many paired devices an idle period of `days` would end at the next check — what a person is
+   * told BEFORE nothing can be done about it. Ends nothing itself.
+   */
+  devicesIdleLongerThan(days: number): number {
+    const now = this.options.clock.now();
+    return this.options.credentials.all().filter(record => now - this.#lastSeenMs(record) >= days * DAY_MS).length;
+  }
+
+  /** When this device's current key was put in place: its last rotation, or its pairing. */
+  keyIssuedAt(id: string): number | undefined {
+    const record = this.options.credentials.get(id);
+    return record === undefined ? undefined : Date.parse(record.keyRotatedAt ?? record.createdAt);
+  }
+
+  /**
+   * Replaces a device's key with `publicKey` (`docs/design/zero-trust.md` B6), written first and adopted
+   * only once written, for the reason {@link revokeDevice} gives. The caller has verified the new key
+   * inside a session the old one opened; this only records it. `false` when the device is gone.
+   */
+  async rotateDeviceKey(id: string, publicKey: string): Promise<boolean> {
+    const record = this.options.credentials.get(id);
+    if (record === undefined) return false;
+    const keyRotatedAt = instant(this.options.clock.now());
+    if (!(await this.options.devices.rotateKey(id, publicKey, keyRotatedAt))) return false;
+    this.options.credentials.refresh({ ...record, publicKey, keyRotatedAt });
+    return true;
+  }
+
+  #idleExpiryMs(): number {
+    return (this.options.idleExpiryDays?.() ?? DEVICE_IDLE_EXPIRY_DAYS) * DAY_MS;
   }
 
   #lastSeenMs(record: PairingDeviceRecord): number {
@@ -655,7 +655,32 @@ export class PairingService {
   }
 
   /**
+   * One device's own grants, or nothing for a device that is unknown or revoked.
+   *
+   * Read from the LIVE registry, synchronously, because the authorization boundary asks it in front of
+   * every governed request — the same registry a revocation clears, so a revoked device has no grants.
+   */
+  deviceGrants(id: string): CapabilityGrants | undefined {
+    return this.options.credentials.get(id)?.grants;
+  }
+
+  /**
+   * Replaces one device's grants: the document first, then the live registry, so a failed write leaves
+   * nothing changed — the order `revokeDevice` keeps, for its reason. Who may make the change is decided
+   * by the caller (`DeviceGrantService`); this only records it.
+   */
+  async setDeviceGrants(id: string, grants: CapabilityGrants): Promise<boolean> {
+    if (this.options.credentials.get(id) === undefined) return false;
+    if (!(await this.options.devices.setGrants(id, grants))) return false;
+    // The LATEST record, re-read after the write: a sighting that landed meanwhile must survive too.
+    const latest = this.options.credentials.get(id);
+    if (latest !== undefined) this.options.credentials.refresh({ ...latest, grants });
+    return true;
+  }
+
+  /**
    * Takes one device's access away.
+
    *
    * THE ORDER IS DELIBERATE: the document is written first, and only a successful write removes the
    * live grant. The other order — kill it in memory, then persist — turns a failed write into a
@@ -666,22 +691,39 @@ export class PairingService {
    * There is no await between the write and the in-memory removal, so no session can be admitted
    * against a key this daemon has already promised to forget.
    *
-   * DEVICE-SCOPED STATE GOES FIRST, before the grant it belongs to. That is the opposite of the order
-   * above and for the same reason: whichever step fails, the world it leaves has to be coherent. Purging
-   * first means a failure leaves the device fully paired with its state intact — retryable, nothing
-   * half-done — whereas revoking first would leave a phone that is unpaired and still receiving this
-   * machine's notifications, which is the outcome the purge exists to prevent. The cost of this order is
-   * a moment in which a still-paired device has lost its notifications; it is strictly the safer half.
+   * THE GRANT GOES FIRST, then the device's live sessions, and only then its passkeys, step-ups and push
+   * enrolments. A stolen phone loses its access in the first step, so no request can be served between
+   * the purge and the revocation, and a purge that fails cannot leave the phone paired with its passkeys
+   * gone (review L5). What a failed purge leaves is harmless: notifications reach only devices that are
+   * still paired (`PushService` drops an orphaned enrolment at delivery), and a passkey bound to a
+   * device id that is never minted again can step nobody up.
+   *
+   * WHEN `actor` IS GIVEN, the revocation is written to the audit journal as `device.revoked=<id>` —
+   * and only once it has actually happened, as the LAST step. A refused or unknown revocation leaves no
+   * record, because nothing was revoked; and a journal that cannot be written must not leave a stolen
+   * phone's sockets open, so the connections end first. A failed audit write therefore surfaces as an
+   * error AFTER the device is already gone: the caller is told the record is missing, never that the
+   * revocation failed.
    */
-  async revokeDevice(id: string): Promise<boolean> {
-    for (const owner of this.options.deviceState ?? []) await owner.forgetDevice(id);
+  async revokeDevice(id: string, actor?: string): Promise<boolean> {
     const removed = await this.options.devices.remove(id);
+    if (removed) {
+      this.options.credentials.remove(id);
+      this.#seen.delete(id);
+      // Only now, with nothing left that verifies: a socket ended any earlier could be reopened on the
+      // key this revocation is about to remove.
+      this.options.connections?.endDevice(id);
+    }
+    // Even with no grant left to remove: revoking a lost phone twice is how its leftovers are cleaned up.
+    for (const owner of this.options.deviceState ?? []) await owner.forgetDevice(id);
     if (!removed) return false;
-    this.options.credentials.remove(id);
-    this.#seen.delete(id);
-    // Only now, with nothing left that verifies: a socket ended any earlier could be reopened on the
-    // key this revocation is about to remove.
-    this.options.connections?.endDevice(id);
+    if (actor !== undefined) {
+      await this.options.audit?.record({
+        actor,
+        changes: [`device.revoked=${id}`],
+        at: instant(this.options.clock.now()),
+      });
+    }
     return true;
   }
 
@@ -777,6 +819,9 @@ export class PairingService {
       lastSeenAt: createdAt,
       pairedOver: carrier,
       publicKey,
+      // Full access behind the unlock, by default (owner decision 2026-10-14): the device can do nothing
+      // until it unlocks, and then anything its grants allow. A `--limited` code narrows it to the fleet.
+      grants: active.grants === 'limited' ? LIMITED_DEVICE_GRANTS : FULL_DEVICE_GRANTS,
     };
 
     try {
@@ -812,7 +857,7 @@ export class PairingService {
         // fail this parse: the constructor already refused a set this schema would reject, which is
         // what keeps a bad carrier from being discovered after the code has been spent.
         carriers: this.options.carriers,
-        idleExpiryDays: DEVICE_IDLE_EXPIRY_DAYS,
+        idleExpiryDays: this.options.idleExpiryDays?.() ?? DEVICE_IDLE_EXPIRY_DAYS,
       }),
     };
   }

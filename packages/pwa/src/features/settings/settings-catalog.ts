@@ -309,7 +309,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     /**
      * The panel a refused control sends somebody to, reachable by the words they would actually type.
      *
-     * "Permission", "password" and "locked" are in the keyword list because that is what a person
+     * "Permission", "passkey" and "confirm" are in the keyword list because that is what a person
      * searches for after meeting a disabled control — not "grant", which is this project's own word
      * for it. A palette that only matched the internal noun would leave the explanation unfindable
      * by everybody who most needs it.
@@ -317,7 +317,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'grants',
     label: 'What devices may do',
     description:
-      'Per-capability limits for callers that are not on the machine, why a control is refused, and the operator password that gates turning one back on. Daemon-wide — opens this daemon’s settings.',
+      'Per-capability limits for paired devices, a browser on the machine included, why a control is refused, and the passkey confirmation a paired device gives before it changes one. Daemon-wide — opens this daemon’s settings.',
     href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
     keywords: [
       'grant',
@@ -326,10 +326,9 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'permissions',
       'capability',
       'capabilities',
-      'operator password',
-      'password',
-      'unlock',
-      'locked',
+      'passkey',
+      'step-up',
+      'confirm',
       'refused',
       'forbidden',
       'read only',
@@ -342,11 +341,11 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
   },
   {
     // "Who paired", "log" and "history" are what somebody types after a new-device notice they did not expect.
-    id: 'security',
-    label: 'Security',
+    id: 'security-log',
+    label: 'Security log',
     description:
       'The security log for this machine: devices paired or removed, refused attempts, permission changes, opened terminals and used secrets. Daemon-wide — opens this daemon’s settings.',
-    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
+    href: daemon => `${daemonSettingsPath(daemon)}#security-log`,
     keywords: [
       'security',
       'audit',
@@ -369,6 +368,26 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'Supervision, current checks, account failover, and policy for this daemon. Daemon-wide — opens this daemon’s settings.',
     href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
     keywords: ['warden', 'failover', 'round robin', 'fallback', 'account', 'quota', 'token', 'wrapper', 'supervision'],
+  },
+  {
+    // Words for the passkey panel: what a person types after a prompt asks them to "confirm it's you".
+    id: 'security',
+    label: 'Security',
+    description:
+      'The passkeys this device holds for this machine, and adding another. Daemon-wide — opens this daemon’s settings.',
+    href: daemon => `${daemonSettingsPath(daemon)}#security`,
+    keywords: [
+      'passkey',
+      'passkeys',
+      'confirm',
+      'confirmation',
+      'biometric',
+      'fingerprint',
+      'face id',
+      'webauthn',
+      'step-up',
+      'security',
+    ],
   },
   {
     /**

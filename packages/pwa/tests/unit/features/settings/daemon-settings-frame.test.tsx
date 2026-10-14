@@ -77,6 +77,7 @@ describe('daemon settings panel rail', () => {
       'secrets',
       'devices',
       'grants',
+      'security',
       'resource-limits',
       'doctor',
       'model-pricing',

@@ -55,6 +55,7 @@ import {
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
 // is the class of bug this removes.
+import { deviceRotateMessage, verifyDeviceProof } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
@@ -113,7 +114,6 @@ import {
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
-  FileOperatorPassword,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
@@ -141,7 +141,6 @@ import {
   ProcCgroupPlacements,
   ProcessSecretReader,
   quotaFailoverRoot,
-  RandomUnlockTokens,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
   SocketViewerDownstream,
@@ -154,6 +153,9 @@ import {
   StateHomeLockedError,
   StatePairingRepository,
   StatePushRepository,
+  StatePasskeyStore,
+  StateSecuritySettingsDocument,
+  WebCryptoPasskeyCrypto,
   StateVapidKeys,
   SystemClock,
   SystemFrameClock,
@@ -357,6 +359,7 @@ import {
   CgroupLaunchPlanner,
   CgroupService,
   type ChildGrantRequester,
+  DeviceGrantService,
   ClaudeTranscriptParser,
   type ClockPort,
   CodexPickerCleanup,
@@ -443,13 +446,11 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
-  NO_PASSWORD_DISCLOSURE,
   NotificationService,
   normalizeCallsign,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
   type OperatorMessageSource,
-  type OperatorPasswordPort,
   OperatorReadService,
   observedRuntimeStatePatch,
   overriddenBy,
@@ -461,6 +462,11 @@ import {
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   PushService,
+  ChallengeLedger,
+  passkeyVerifier,
+  SecuritySettingsService,
+  StepUpRegistry,
+  StepUpService,
   packageRole,
   paneShowsActiveWork,
   parseSessionId,
@@ -483,6 +489,7 @@ import {
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
   type RelayPairingRedeemer,
+  transcriptKey,
   type RelayStreamDispatch,
   type ResumeAnswerAttention,
   ResumeCancelled,
@@ -509,6 +516,7 @@ import {
   renderHarnessPreflight,
   renderInitialAttachmentSection,
   resolveStateHome,
+  retireOperatorPassword,
   runtimeQuarantineState,
   type ScratchReclamation,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
@@ -717,15 +725,6 @@ export interface DaemonWorld {
     readonly preferredPort: number;
   };
   readonly config: DaemonConfigStore;
-  /**
-   * Whether this machine has an operator password, for the queries that report it.
-   *
-   * THE SAME PORT THE GRANT SERVICE USES, deliberately: `--check` must not answer from a second copy
-   * of a fact the running daemon decides differently. It is exposed as the whole port rather than a
-   * boolean so it stays use-never-read — there is no getter to reach for, here or anywhere above it,
-   * so no query can grow into one that prints a password.
-   */
-  readonly operatorPassword: OperatorPasswordPort;
   /** What this invocation said on the command line, overriding the document for this run only. */
   readonly overrides: RunOverrides;
   /**
@@ -898,6 +897,15 @@ export interface DaemonWorld {
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
     readonly push: PushService;
+    /** Passkeys and the step-up they prove, opened with pairing because revoking a device forgets them. */
+    readonly stepUp: StepUpService;
+    /**
+     * The machine's security settings (`docs/design/zero-trust.md` B6), opened with pairing because
+     * the idle period and the key rotation it governs are pairing's, and READ before anything else here
+     * is asked a question. `notice` is its boot sentence when the document could not be read.
+     */
+    readonly security: SecuritySettingsService;
+    readonly securityNotice: string | undefined;
     /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
     readonly droppedBearerGrants: number;
   }>;
@@ -1058,6 +1066,10 @@ export interface DaemonWorld {
     pairing: PairingService,
     /** Opened WITH pairing, because an enrolment's lifetime is a device grant's — see `createPairing`. */
     push: PushService,
+    /** Opened with pairing for the same reason: a device's passkeys die with its grant. */
+    stepUp: StepUpService,
+    /** The machine's security settings, opened with pairing — see `createPairing`. */
+    security: SecuritySettingsService,
     /** The exact published set pairing redemption receives and authenticated refresh serves. */
     carriers: readonly DaemonCarrier[],
     /**
@@ -4376,39 +4388,36 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // that currently hold the shared profile rather than racing their lease.
   let closeAgentBrowsers: () => Promise<void> = async () => undefined;
   const daemonConfigMutations = new KeyedSerialExecutor();
-  /**
-   * THE OPERATOR PASSWORD'S VERIFIER, held once for this daemon, read by three collaborators.
-   *
-   * The grant subsystem asks it whether a candidate matches, the boot disclosure asks whether one
-   * exists, and PAIRING asks the same question before it hands out a code. Hoisted so all three ask
-   * ONE object about one file: the class is stateless and a second instance would answer identically
-   * today, but "how many places read this fact" is exactly the question that goes wrong later, and
-   * this is the fact that decides whether a new device may exist. Nothing here can read a password —
-   * see `FileOperatorPassword` for why that is structural rather than a convention.
-   */
-  const operatorPassword = new FileOperatorPassword(paths.operatorPassword, stateFiles);
   const stateHomeDaemonConfigStore = new FileDaemonConfig(paths, stateFiles);
   /**
    * What this machine has agreed a caller who is NOT on it may do.
    *
    * Built from the SAME configuration document `--print-config` reports, so the grants an operator
-   * reads and the grants the authorization boundary enforces are one value rather than two. The
-   * password verifier is deliberately NOT in that document — it lives in its own mode-0600 file under
-   * `state`, because the configuration document is the one that travels into backups and screen
-   * shares.
-   *
-   * HOISTED, because ONE service has to answer for two things: the boundary's per-request decision,
-   * and the fleet's per-change confirmation. A second instance would keep a second wrong-password
-   * ledger, so five wrong guesses at the fleet panel and five at the grants panel would be ten — the
-   * exact per-surface budget `UnlockAttemptState` is keyed per daemon to prevent.
+   * reads and the grants the authorization boundary enforces are one value rather than two.
    */
+  // Every live socket and relayed session a paired device holds, so revoking it closes them too.
+  // ONE registry, shared by the bound address, every relay carrier and the pairing service.
+  // One step-up registry per process, told by the connection registry when each running copy of the
+  // app opens and closes a session, so a step-up ends with the page that performed it.
+  // THE STEP-UP WINDOW IS THE OWNER'S SETTING (B6), read at every question. The settings service opens
+  // with pairing, later than this registry, so the window is read through a holder that answers the
+  // strictest reading — every time — until the settings have been read.
+  let securitySettings: SecuritySettingsService | undefined;
+  const stepUpRegistry = new StepUpRegistry(
+    { nowMs: () => Date.now() },
+    () => securitySettings?.current().stepUpWindowMinutes ?? 0,
+  );
+  const deviceConnections = new LiveDeviceConnections(stepUpRegistry);
+  // ONE journal for the owner's acts — grant changes and re-opened passkey windows — so two writers never
+  // interleave in the same file.
+  const grantAudit = new JournalGrantAudit(paths.grantAudit, stateFiles);
   const grants = new CapabilityGrantService({
     document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
-    passwords: operatorPassword,
-    tokens: new RandomUnlockTokens(),
     clock: new SystemGrantClock(),
-    audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+    audit: grantAudit,
     clientName: CLIENT_NAME,
+    // A narrowed grant reaches the streams already open, not only the next one.
+    changed: () => deviceConnections.recheckAll(),
   });
   // An operator's own document when they named one, and the state home's otherwise. The confined
   // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -4701,8 +4710,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * Driving a harness's own sign-in from a browser, holding no token: the harness's own login against
    * one credential's store. It is given THIS PROCESS'S ENVIRONMENT, which the service sanitizes before
    * any child sees it, so a sign-in started from inside an agent session cannot authenticate against
-   * that session's login. The confirmation is routed to the one grant service this daemon has, so the
-   * attempt a wrong password spends is one of the same five an unlock spends.
+   * that session's login. Who may start one is the route's `fleet.configure`, which holds a caller
+   * off this host behind the passkey step-up.
    */
   const harnessLogin = new HarnessLoginService({
     credentialTargets: {
@@ -4715,7 +4724,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     deliverCallback: deliverCodexCallback,
     environment: process.env,
     timer: harnessLoginTimer,
-    confirmChange: async password => await grants.confirmChange(password),
     clientName: CLIENT_NAME,
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
@@ -5085,9 +5093,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
       defaultSessionResumeSettings,
     );
-  // Every live socket and relayed session a paired device holds, so revoking it closes them too.
-  // ONE registry, shared by the bound address, every relay carrier and the pairing service.
-  const deviceConnections = new LiveDeviceConnections();
   const browserTransport: BrowserTransportWorld = {
     connectWorker: options => BrowserWorkerClient.connect(options),
     openViewerStream: (host, sessionId, socket) =>
@@ -5122,8 +5127,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
     // and wrong for a file a person named, so the two are different adapters.
     config: daemonConfigStore,
-    // The same verifier the grant service and the pairing mint ask. Reading it here creates nothing.
-    operatorPassword,
     overrides,
     stateHome: { path: paths.home, fromEnvironment: (environment.stateHomeInput().fyHome ?? '').trim() !== '' },
     // The SAME two collaborators a start resolves an account from, so the preflight cannot report
@@ -5286,6 +5289,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
       const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
+      // Read BEFORE pairing is built: the idle period and the step-up window are both asked of it.
+      let pairingService: PairingService | undefined;
+      const security = new SecuritySettingsService({
+        document: new StateSecuritySettingsDocument(paths, stateFiles),
+        audit: new JournalGrantAudit(paths.securityAudit, stateFiles, 'security.changed'),
+        clock: { nowMs: () => Date.now() },
+        widenCommand: `${CLIENT_NAME} daemon security set <setting> <value>`,
+        devicesIdleLongerThan: days => pairingService?.devicesIdleLongerThan(days) ?? 0,
+      });
+      const securityNotice = await security.refresh();
+      securitySettings = security;
+      const securityAudit = new JournalGrantAudit(paths.securityAudit, stateFiles, 'security.changed');
+      const relayCryptoForRotation = new WebCryptoRelayCrypto();
       // The application-server key pair, minted into the state home on first use and never returned by
       // anything: the transport below is the only holder of the signing half, and the domain above sees
       // the public point alone. See `src/adapters/push/webcrypto-vapid-keys.ts`.
@@ -5301,48 +5317,95 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A push enrolment id is a protocol UUID under a fixed prefix, minted the way a pin id is.
         ids: { next: () => crypto.randomUUID() },
       });
+      // Passkeys, verified here and never by the browser (`docs/design/zero-trust.md` B2). The device
+      // directory is the grant store itself, so a passkey can only ever be asked about a device that is
+      // still paired, and its window is measured from the grant's own `createdAt`.
+      const stepUp = new StepUpService({
+        store: new StatePasskeyStore(paths, stateFiles),
+        verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
+        registry: stepUpRegistry,
+        audit: grantAudit,
+        challenges: new ChallengeLedger(),
+        random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
+        clock: { nowMs: () => Date.now() },
+        devices: {
+          device: async deviceId => {
+            const record = (await repository.list()).find(candidate => candidate.id === deviceId);
+            return record === undefined ? undefined : { name: record.name, createdAt: record.createdAt };
+          },
+        },
+        allowedOrigins: () => browserOrigins(config),
+        relyingPartyName: 'Ferretry',
+        // An added passkey is told to every enrolled browser, so the owner learns of one they did not add.
+        announce: async notice => await push.notify({ payload: notice }),
+        settings: () => security.current(),
+        // A device's key, replaced inside a step-up (B6): the new key proves itself over the carrying
+        // session's transcript, the grant is rewritten, the device's other sessions end as lapsed
+        // leases so each reopens on the new key, and the swap is journalled.
+        rotation: {
+          keyIssuedAt: deviceId => pairingService?.keyIssuedAt(deviceId),
+          verify: async ({ transcriptHash, deviceId, deviceKey, proof }) =>
+            await verifyDeviceProof(
+              relayCryptoForRotation,
+              deviceKey,
+              proof,
+              deviceRotateMessage(transcriptHash, deviceId, deviceKey),
+            ),
+          rotate: async ({ deviceId, transcriptHash, deviceKey }) => {
+            if (pairingService === undefined || !(await pairingService.rotateDeviceKey(deviceId, deviceKey)))
+              return false;
+            deviceConnections.lapseDevice(deviceId, transcriptKey(transcriptHash));
+            await securityAudit.record({
+              kind: 'device.key-rotated',
+              actor: `device:${deviceId}`,
+              changes: [`device.key-rotated=${deviceId}`],
+              at: new Date().toISOString(),
+            });
+            return true;
+          },
+        },
+      });
+      // Every redemption, direct or relayed, recorded; a new device announced to the others.
+      pairingService = new AuditedPairingService(
+        {
+        daemonId: state.daemonId,
+        daemonName: state.daemonName,
+        // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
+        // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
+        // reading its QR names the phone.
+        advertisement: config.advertisement,
+        carriers,
+        // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
+        // rendezvous from an operator's own one, and only the first is something the phone reading
+        // the QR can find for itself.
+        ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
+        clock: pairingClock,
+        cryptography,
+        devices: repository,
+        credentials,
+        // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
+        // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
+        deviceState: [push, stepUp],
+        // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
+        connections: deviceConnections,
+        // A revocation somebody asked for lands in the owner's journal beside the grant changes.
+        audit: grantAudit,
+        idleExpiryDays: () => security.current().idleExpiryDays,
+        },
+        {
+          log: auditLog,
+          alert: new PushNewDeviceAlert(push, state.daemonName, auditFailures),
+          failures: auditFailures,
+        },
+      );
       return {
         credentials,
         push,
+        stepUp,
+        security,
+        securityNotice,
         droppedBearerGrants: state.droppedBearerGrants,
-        subsystem: new AuditedPairingService(
-          {
-            daemonId: state.daemonId,
-            daemonName: state.daemonName,
-            // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
-            // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
-            // reading its QR names the phone.
-            advertisement: config.advertisement,
-            carriers,
-            // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
-            // rendezvous from an operator's own one, and only the first is something the phone reading
-            // the QR can find for itself.
-            ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
-            clock: pairingClock,
-            cryptography,
-            devices: repository,
-            credentials,
-            // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
-            // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
-            deviceState: [push],
-            // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
-            connections: deviceConnections,
-            // WHY PAIRING HOLDS THE VERIFIER. A machine with no operator password will not hand out a
-            // pairing code, because pairing is the moment access leaves this host and a device paired
-            // without one arrives able to configure the fleet. It is the SAME object the grant subsystem
-            // verifies against, so the requirement and the gate cannot disagree about whether a password
-            // exists. Nothing about local use is gated by it — see `PairingService.mint`.
-            operatorPassword,
-            // So the refusal names the command a person actually types rather than inventing one.
-            clientName: CLIENT_NAME,
-          },
-          // Every redemption, direct or relayed, recorded; a new device announced to the others.
-          {
-            log: auditLog,
-            alert: new PushNewDeviceAlert(push, state.daemonName, auditFailures),
-            failures: auditFailures,
-          },
-        ),
+        subsystem: pairingService,
       };
     },
     sessions: planner,
@@ -5430,6 +5493,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       analyticsStore,
       pairing,
       push,
+      stepUp,
+      security,
       carriers,
       harnessDiscovery,
     ) => {
@@ -5950,9 +6015,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalog: fleetCredentialCatalog,
         status: credentialStatus,
         email: async source => await new CredentialEmailReader(harnessCredentials).email(source),
-        confirmChange: async password => await grants.confirmChange(password),
         machineName: () => hostname(),
-        clientName: CLIENT_NAME,
         locate: locateHarness,
         run: async spec => await runCredentialHarness(spec),
         baseEnvironment: () => sanitizeHarnessEnv(process.env),
@@ -5968,7 +6031,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
           ),
         credentials: fleetCredentials,
-        confirmChange: async password => await grants.confirmChange(password),
         locate: locateHarness,
         machineName: () => hostname(),
         clientName: CLIENT_NAME,
@@ -5990,8 +6052,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             locate: kind => locateHarnessCommand(kind, harnessDiscovery, executables),
             run: runPackageInstall,
             environment: process.env,
-            confirmChange: async password => await grants.confirmChange(password),
-            clientName: CLIENT_NAME,
           }),
           secrets: secrets.directory,
         }),
@@ -6026,6 +6086,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         pairing,
         push,
+        stepUp,
+        security,
         carriers,
         harnessLogin,
         fleetCredentials,
@@ -6350,6 +6412,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Built above, and the same instance the fleet mount confirms a change through. See its
         // definition for why one instance rather than two.
         grants,
+        // One device's own grants (B5): the pairing service holds them, the daemon-wide answer is the
+        // other half of `effective`, and a change reaches open streams and the grant journal.
+        deviceGrants: new DeviceGrantService({
+          devices: pairing,
+          daemonWide: () => grants.enforced(),
+          audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          clock: new SystemGrantClock(),
+          clientName: CLIENT_NAME,
+          changed: () => deviceConnections.recheckAll(),
+        }),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
@@ -6501,6 +6573,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const startedAtMs = world.clock.now();
   const pairing = await world.createPairing(config, world.clock, carriers, discoverableRelayUrl(relaySources));
   world.notices.step('pairing identity opened');
+  if (pairing.securityNotice !== undefined) world.notices.state(pairing.securityNotice);
   // NO COMPATIBILITY, SAID ONCE. A `devices.json` from before device keys held bearer-token grants
   // nothing can accept any more; the repository dropped them, and the operator is told how many
   // devices have to pair again rather than discovering it one phone at a time.
@@ -6511,17 +6584,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const idleExpired = await pairing.subsystem.expireIdleDevices();
   if (idleExpired > 0)
     world.notices.state(
-      `${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for 30 days ${idleExpired === 1 ? 'was' : 'were'} removed`,
+      `${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for ${pairing.security.current().idleExpiryDays} days ${idleExpired === 1 ? 'was' : 'were'} removed`,
     );
   /** Which key a session must prove, answered by the pairing state machine that owns the grants. */
   const sessionDevices: RelayDeviceDirectory = {
     deviceKey: async deviceId => await pairing.subsystem.deviceKey(deviceId),
     seen: deviceId => pairing.subsystem.seen(deviceId),
+    rotateBy: deviceId => pairing.stepUp.rotateBy(deviceId),
   };
   const base = {
     credentials: {
       ...(await world.credentials.load()),
-      devices: { has: (deviceId: string) => pairing.credentials.get(deviceId) !== undefined },
+      devices: {
+        has: (deviceId: string) => pairing.credentials.get(deviceId) !== undefined,
+        grants: (deviceId: string) => pairing.credentials.get(deviceId)?.grants,
+      },
     },
     usage,
     clock: world.clock,
@@ -6583,6 +6660,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     analyticsStore,
     pairing.subsystem,
     pairing.push,
+    pairing.stepUp,
+    pairing.security,
     carriers,
     harnessDiscovery,
   );
@@ -6609,13 +6688,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * to repair instead of discovering it as a UI that stopped working.
    */
   await subsystems.grants.refresh();
-  // Said ONCE, at boot, and only when it is true. Nobody is interrogated at install time — a person
-  // on this host is governed by none of this — but a machine that will accept a paired device with
-  // nothing standing behind its configure routes should have said so somewhere a human reads.
-  world.notices.step(
-    'capability grants read',
-    subsystems.grants.hasPassword() ? 'an operator password gates remote configuration' : NO_PASSWORD_DISCLOSURE,
-  );
+  world.notices.step('capability grants read');
+  // The operator password is gone; a passkey step-up from the paired device replaced it. A verifier an
+  // older daemon left behind gates nothing now, so it is deleted rather than left looking like a lock —
+  // and said ONCE, so an operator who remembers setting a password learns where it went.
+  if (await retireOperatorPassword(opened.paths.retiredOperatorPassword, opened.fileSystem))
+    world.notices.step(
+      'operator password retired',
+      'deleted state/operator-password.json — a passkey confirmation from the paired device replaced it',
+    );
   await health.selfCheck().catch(() => undefined);
   world.notices.step('first self-check done');
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
@@ -6641,7 +6722,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // which is said out loud rather than left to look like a network fault.
   const direct = await world.createDirectCarrier(
     async request => await dispatcher.dispatch(request),
-    async request => await socketDispatcher.upgrade(request),
+    {
+      upgrade: async request => await socketDispatcher.upgrade(request),
+      reauthorize: request => socketDispatcher.reauthorize(request),
+    },
     sessionDevices,
     pairing.subsystem,
   );
@@ -6700,7 +6784,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const relay = await world.createRelayCarriers(
     relaySources,
     request => dispatcher.dispatch(request),
-    async request => await socketDispatcher.upgrade(request),
+    {
+      upgrade: async request => await socketDispatcher.upgrade(request),
+      reauthorize: request => socketDispatcher.reauthorize(request),
+    },
     sessionDevices,
     // The pairing state machine itself, NOT the route table. A pre-credential session redeems
     // through this port and constructs no request at all, which is what keeps `POST /v1/pair` —
@@ -7076,8 +7163,8 @@ export async function checkConfiguration(
    * not change the exit code, exactly as the harness preflight does not: a daemon with any grant
    * posture starts perfectly, and this reports rather than judges.
    *
-   * IT READS, IT DOES NOT CREATE. `passwordSet` is one existence check through the same verifier
-   * port the grant service uses, so a query stays a query and there is no second source to drift.
+   * IT READS, IT DOES NOT CREATE: the posture is a function of the document already read, so a query
+   * stays a query and there is no second source to drift.
    */
   /**
    * THE CARRIER POSTURE, BEFORE THE ADDRESS AND BEFORE THE GRANTS.
@@ -7148,8 +7235,6 @@ export async function checkConfiguration(
   } else {
     for (const line of describeGrantPosture({
       config,
-      passwordSet: await world.operatorPassword.isSet().catch(() => false),
-      clientName: CLIENT_NAME,
       carrier: carrierForGrants,
     }))
       say(line);

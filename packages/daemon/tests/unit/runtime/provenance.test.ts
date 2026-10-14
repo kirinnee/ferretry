@@ -123,8 +123,8 @@ describe('effective configuration with provenance', () => {
 });
 
 describe('the grant posture a `--check` reports', () => {
-  const posture = (document: Record<string, unknown>, passwordSet = false) =>
-    describeGrantPosture({ config: parseDaemonConfig(document), passwordSet, clientName: 'fy' }).join('\n');
+  const posture = (document: Record<string, unknown>) =>
+    describeGrantPosture({ config: parseDaemonConfig(document) }).join('\n');
 
   it('should say nothing can reach it, rather than reciting grants that govern nobody', () => {
     // A daemon bound to loopback with no relay is reachable only by callers this layer does not
@@ -183,8 +183,8 @@ describe('the grant posture a `--check` reports', () => {
     // list and present in the configure list, so `not.match(/terminal/)` would fail on a correct
     // sentence and `match(/terminal/)` would pass on a broken one.
     const lists = /may use (.*), and change settings for (.*)$/u.exec(partial.split('\n')[0] ?? '');
-    should(lists?.[1]).equal('fleet, browser, filesystem, warden, pairing');
-    should(lists?.[2]).equal('fleet, terminal, browser, filesystem, pairing');
+    should(lists?.[1]).equal('fleet, browser, filesystem, warden, pairing, secrets');
+    should(lists?.[2]).equal('fleet, terminal, browser, filesystem, pairing, secrets');
     should(all).match(/may use everything, and change settings for everything/u);
   });
 
@@ -196,28 +196,29 @@ describe('the grant posture a `--check` reports', () => {
     should(said).match(/may use nothing, and change settings for nothing/u);
   });
 
-  it('should disclose an absent password once, with the command that sets one', () => {
-    // The owner's standing complaint is that this product knows something and does not say it. The
-    // cost of permissive defaults is real, so it is named — once, and with the next step attached.
+  it('should state the passkey step-up once, beneath the grant line, on a reachable machine', () => {
+    // The gate a remote caller meets is named — once, and only where it is load-bearing.
     // Act
-    const without = posture({ host: '0.0.0.0' });
-    const with_ = posture({ host: '0.0.0.0' }, true);
+    const said = posture({ host: '0.0.0.0' });
 
     // Assert
-    should(without.match(/any paired device/gu)).have.length(1);
-    should(without).match(/fy daemon password set/u);
-    should(with_).match(/an operator password gates every one of those changes/u);
-    should(with_).not.match(/any paired device/u);
+    should(said.split('\n')).deepEqual([
+      'grants       reachable off this host (host 0.0.0.0) — a remote caller may use everything, and change settings for everything',
+      '             every change, and any terminal, browser or pairing use, also needs a passkey confirmation from the paired device',
+    ]);
+    should(said.match(/passkey confirmation/gu)).have.length(1);
+    should(said).not.match(/password|unlock/iu);
   });
 
-  it('should not disclose a missing password on a machine nothing can reach', () => {
-    // There is nothing to disclose: no caller this layer governs can reach the daemon at all, and a
-    // warning that does not apply is how people learn to stop reading them.
+  it('should not state the step-up on a machine nothing can reach', () => {
+    // No caller this layer governs can reach the daemon at all, and a line that does not apply is how
+    // people learn to stop reading them.
     // Act
     const said = posture({});
 
     // Assert
-    should(said).not.match(/any paired device/u);
+    should(said.split('\n')).have.length(1);
+    should(said).not.match(/passkey/u);
   });
 
   it.each(['127.0.0.1', '::1', 'localhost', '[::1]'])('should read %s as this machine only', host => {
@@ -243,7 +244,7 @@ describe('the grant posture a `--check` reports', () => {
     // Assert — reading the document alone would tell somebody carried by the hosted relay that
     // nothing on earth could reach them, and would suppress every grant line on that basis.
     should(reach).deepEqual({ reachable: true, how: 'the relay at https://relay.example' });
-    should(describeGrantPosture({ config, passwordSet: true, clientName: 'fy', carrier: discovered }).join('\n')).match(
+    should(describeGrantPosture({ config, carrier: discovered }).join('\n')).match(
       /reachable off this host \(the relay at https:\/\/relay\.example\)/u,
     );
   });

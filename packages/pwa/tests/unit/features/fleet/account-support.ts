@@ -24,9 +24,7 @@ import type { MachineData } from '../../../../src/features/fleet/runtimes/machin
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 
 export const NOW = Date.parse('2026-10-13T08:00:00.000Z');
-export const PASSWORD = 'correct-horse-battery';
 export const CHANGE_ID = 'fy_fprop_abcdefghijklmnopqrstuv';
-export const UNLOCK_TOKEN = `fy_unlock_${'A'.repeat(22)}`;
 
 export const STUDIO = daemonConnection({
   daemonId: 'studio',
@@ -45,13 +43,13 @@ export const machine = (overrides: Partial<FleetMachineView> = {}): FleetMachine
   ],
   runtimeCount: 5,
   runningSessions: 0,
-  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+  authority: { mayApply: true, applyRefusal: 'granted' },
   ...overrides,
 });
 
 /** The machine view with this caller's authority: where every change reads what it may do. */
 export const machineWith = (authority: Partial<FleetMachineView['authority']>): FleetMachineView =>
-  machine({ authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none', ...authority } });
+  machine({ authority: { mayApply: true, applyRefusal: 'granted', ...authority } });
 
 const status = (word: FleetCredentialView['status']['word']): FleetCredentialView['status'] => {
   const table = {

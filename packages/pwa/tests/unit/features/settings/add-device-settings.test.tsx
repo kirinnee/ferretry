@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
+  type CapabilityGrant,
+  type CapabilityGrants,
   DAEMON_CAPABILITIES,
-  type GrantsView,
+  type DaemonCapability,
+  type DeviceGrantsPatch,
   type PairedDevice,
   type PairedDevicesView,
   type PairingCodeMintResponse,
   type PairingId,
   type PairingInvitationLink,
 } from '@ferretry/protocol';
+import type { FyApiClient } from '@ferretry/protocol/client';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import {
@@ -17,6 +21,7 @@ import {
 } from '../../../../src/features/settings/add-device-settings.tsx';
 import { DaemonSettingsFrame } from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run, runAsync } from '../../../support/react.ts';
 
@@ -87,6 +92,14 @@ const mintedRelayedLocalOnly = (): PairingCodeMintResponse =>
     discoveredRelayUrl: 'wss://relay.example',
   });
 
+const grantsOf = (held: Partial<Record<DaemonCapability, Partial<CapabilityGrant>>> = { fleet: { use: true } }) =>
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false, ...held[capability] }]),
+  ) as CapabilityGrants;
+
+/** What the caller below may turn ON: fleet both ways and a terminal's use, nothing else. */
+const MAY_WIDEN = grantsOf({ fleet: { use: true, configure: true }, terminal: { use: true } });
+
 const device = (overrides: Partial<PairedDevice> = {}): PairedDevice => ({
   id: DEVICE_ID,
   name: 'Pixel 8',
@@ -94,6 +107,7 @@ const device = (overrides: Partial<PairedDevice> = {}): PairedDevice => ({
   createdAt: '2026-08-01T09:00:00.000Z',
   lastSeenAt: '2026-08-03T11:00:00.000Z',
   idleExpiresAt: '2026-12-31T00:00:00.000Z',
+  grants: grantsOf(),
   ...overrides,
 });
 
@@ -101,30 +115,7 @@ const view = (overrides: Partial<PairedDevicesView> = {}): PairedDevicesView => 
   devices: [device()],
   hostLocal: true,
   thisDeviceId: DEVICE_ID,
-  ...overrides,
-});
-
-/**
- * The grant view this panel reads to learn whether a password exists.
- *
- * A password IS set by default here, so a test about codes and revokes never has to think about the
- * first-pairing requirement — the tests that are about it override this.
- */
-const grantsView = (overrides: Partial<GrantsView> = {}): GrantsView => ({
-  capabilities: DAEMON_CAPABILITIES.map(capability => ({
-    capability,
-    use: true,
-    configure: true,
-    granted: { use: true, configure: true },
-    useRefusal: 'granted',
-    configureRefusal: 'granted',
-    mayGrant: true,
-    origin: 'default',
-  })),
-  governed: false,
-  hostLocal: true,
-  passwordSet: true,
-  unlocked: false,
+  mayWiden: MAY_WIDEN,
   ...overrides,
 });
 
@@ -143,16 +134,13 @@ const card = (overrides: Partial<Parameters<typeof AddDeviceCard>[0]> = {}) =>
     <AddDeviceCard
       connection={connection()}
       view={view()}
-      // Open by default, so a test about codes and revokes says nothing about the password requirement.
-      // The tests that ARE about it pass their own gate.
-      gate={{ kind: 'open' }}
       invite={null}
       nowMs={NOW}
-      onSetPassword={() => {}}
       onMint={() => {}}
       onDiscardInvite={() => {}}
       onRevokeCode={() => {}}
       onRevokeDevice={() => {}}
+      onChangeDeviceGrants={() => {}}
       {...overrides}
     />,
   );
@@ -361,17 +349,18 @@ describe('AddDeviceCard', () => {
     expect(rendered).toContain('Adding a device is how that changes');
   });
 
-  it('says whether this browser is at the machine, from the daemon’s answer rather than the URL', () => {
-    // A page on 127.0.0.1 can be reaching the daemon through the relay, so the address this browser
-    // dialled says nothing. `hostLocal` is the carrier's answer and the only one worth rendering.
+  it('never says a browser is at the machine, whatever the daemon reports about the request', () => {
+    // A browser is a paired device wherever it runs; only the CLI is at the machine. So no badge
+    // claims either, and the view's `hostLocal` does not move any sentence.
     // Arrange, Act
-    const here = card();
-    const away = card({ view: view({ hostLocal: false }) });
+    const here = text(card());
+    const away = text(card({ view: view({ hostLocal: false }) }));
 
     // Assert
-    should(marked(here, 'data-pair-host-local', 'yes')).have.length(1);
-    should(marked(away, 'data-pair-host-local', 'no')).have.length(1);
-    expect(text(away)).toContain('away from this machine');
+    for (const rendered of [here, away]) {
+      expect(rendered).not.toContain('at this machine');
+      expect(rendered).not.toContain('away from this machine');
+    }
   });
 
   it('renders a daemon’s failure sentence whole', () => {
@@ -393,91 +382,224 @@ describe('AddDeviceCard', () => {
     should(marked(renderer, 'data-pair-url')).have.length(1);
   });
 
-  it('offers no code at all until an operator password exists, and the control that fixes it', () => {
-    // THE REQUIREMENT, RATHER THAN A NUDGE. `fleet.configure` is on by default for a governed caller, so a
-    // device paired to a machine with no password can provision the host — writing runnable wrappers into
-    // the operator's accounts — with nothing to prove. Requiring the password at the moment remote access
-    // is created deletes that state instead of warning about it.
+  it('offers the button beside a refused mint and renders the daemon’s sentence whole', () => {
+    // The step-up is the carrier's business: a refusal that still reaches this panel is shown verbatim,
+    // and the button stays so the person can try again.
     // Arrange, Act
-    const renderer = card({ gate: { kind: 'needs-password', local: true } });
-
-    // Assert — no button, the reason in its place, and the control that satisfies it in the same flow.
-    should(marked(renderer, 'data-pair-mint')).be.empty();
-    should(marked(renderer, 'data-pair-needs-password', 'local')).have.length(1);
-    should(marked(renderer, 'data-operator-password')).have.length(1);
-    expect(text(renderer)).toContain('runnable files into your accounts');
-  });
-
-  it('names the two places that can set one when the reader is not at the machine', () => {
-    // An install with devices already paired and no password reaches this: the requirement applies to the
-    // NEXT pairing, and a remote browser cannot set the password. So it says where it CAN be done rather
-    // than offering a control that would be refused.
-    // Arrange, Act
-    const renderer = card({ gate: { kind: 'needs-password', local: false } });
-
-    // Assert
-    should(marked(renderer, 'data-pair-mint')).be.empty();
-    should(marked(renderer, 'data-pair-needs-password', 'remote')).have.length(1);
-    // No form here: this browser could not succeed, and a control that fails on press teaches somebody the
-    // product is broken.
-    should(marked(renderer, 'data-password-field')).be.empty();
-    expect(text(renderer)).toContain('fy daemon password set');
-  });
-
-  it('offers the button when it cannot tell, and renders the daemon’s refusal whole', () => {
-    // WHERE THE RULE LIVES DECIDES THIS. While the browser was the enforcer, an unreadable grant view had
-    // to fail closed — the requirement would otherwise have lapsed on exactly that machine. The daemon
-    // enforces it now, so withholding the control would only hide a button from somebody whose machine is
-    // standing by to answer. It taps, the daemon refuses, and this panel prints that sentence verbatim —
-    // remedy included — rather than composing a second one of its own.
-    // Arrange, Act
-    const refusal =
-      'this machine has no operator password, so it will not hand out a pairing code. Set one with ' +
-      '`fy daemon password set` on this machine.';
-    const renderer = card({
-      gate: { kind: 'open' },
-      failure: { message: refusal, code: 'pairing_needs_operator_password' },
-    });
+    const refusal = 'the operator has not granted the UI the use of device pairing.';
+    const renderer = card({ failure: { message: refusal, code: 'grant_not_granted' } });
 
     // Assert
     should(marked(renderer, 'data-pair-mint')).have.length(1);
     should(marked(renderer, 'data-pair-failure')).have.length(1);
-    should(marked(renderer, 'data-pair-needs-password')).be.empty();
     expect(text(renderer)).toContain(refusal);
+  });
+
+  it('says nothing about a password or an unlock anywhere on the panel', () => {
+    // Arrange, Act
+    const idle = text(card());
+    const showing = text(card({ invite: minted() }));
+
+    // Assert
+    expect(idle).not.toMatch(/password|unlock/i);
+    expect(showing).not.toMatch(/password|unlock/i);
+  });
+});
+
+describe('AddDeviceCard capabilities', () => {
+  const IPAD = device({
+    id: OTHER_DEVICE_ID,
+    name: 'iPad',
+    grants: grantsOf({ fleet: { use: true, configure: true } }),
+  });
+  const switchFor = (renderer: ReactTestRenderer, id: string, capability: string, axis: string) =>
+    marked(renderer, 'data-device-grant', `${id}:${capability}.${axis}`)[0];
+
+  it('puts seven capabilities by two axes behind a disclosure on every device, closed by default', () => {
+    // Fourteen switches per device would bury the list at 390px, so the rows stay a summary line.
+    // Arrange, Act
+    const renderer = card({ view: view({ devices: [device(), IPAD] }) });
+
+    // Assert
+    should(marked(renderer, 'data-device-capabilities')).have.length(2);
+    should(marked(renderer, 'data-device-capabilities')[0]?.props.open).equal(false);
+    should(marked(renderer, 'data-device-capability')).have.length(14);
+    should(marked(renderer, 'data-device-grant')).have.length(28);
+    for (const capability of DAEMON_CAPABILITIES)
+      should(marked(renderer, 'data-device-capability', capability)).have.length(2);
+    // The summary says how much this device holds without opening anything.
+    expect(text(renderer)).toContain('1 of 7');
+    expect(text(renderer)).toContain('Secrets');
+  });
+
+  it('opens the disclosure a screenshot or deep link asks for, and says none for a device with nothing', () => {
+    // Arrange, Act
+    const renderer = card({
+      view: view({ devices: [device({ grants: grantsOf({}) }), IPAD] }),
+      capabilitiesOpenFor: OTHER_DEVICE_ID,
+    });
+
+    // Assert
+    should(marked(renderer, 'data-device-capabilities', OTHER_DEVICE_ID)[0]?.props.open).equal(true);
+    should(marked(renderer, 'data-device-capabilities', DEVICE_ID)[0]?.props.open).equal(false);
+    should(marked(renderer, 'data-device-capabilities-count')[0]?.children.join('')).equal('none');
+    // The disclosure is the browser's own: toggling it is reflected, never persisted.
+    run(() =>
+      marked(renderer, 'data-device-capabilities', DEVICE_ID)[0]?.props.onToggle({ currentTarget: { open: true } }),
+    );
+    should(marked(renderer, 'data-device-capabilities', DEVICE_ID)[0]?.props.open).equal(true);
+  });
+
+  it('shows each switch as the device’s own grant, so a device holding fleet.use reads on and nothing else', () => {
+    // Arrange, Act
+    const renderer = card();
+
+    // Assert
+    should(switchFor(renderer, DEVICE_ID, 'fleet', 'use')?.props['aria-checked']).equal(true);
+    should(switchFor(renderer, DEVICE_ID, 'fleet', 'configure')?.props['aria-checked']).equal(false);
+    should(switchFor(renderer, DEVICE_ID, 'terminal', 'use')?.props['aria-checked']).equal(false);
+    should(switchFor(renderer, DEVICE_ID, 'secrets', 'use')?.props['aria-checked']).equal(false);
+  });
+
+  it('disables a widen the caller may not make and puts the reason and the host command beside it', () => {
+    // A switch that fails on press teaches somebody the product is broken; the machine decided, and the
+    // sentence beside the switch says which command does it instead.
+    // Arrange, Act
+    const renderer = card({ clientName: 'ferret' });
+
+    // Assert
+    const refused = switchFor(renderer, DEVICE_ID, 'filesystem', 'use');
+    should(refused?.props.disabled).equal(true);
+    should(refused?.props['data-device-grant-blocked']).equal('yes');
+    const reason = marked(renderer, 'data-device-grant-reason', `${DEVICE_ID}:filesystem.use`);
+    should(reason).have.length(1);
+    expect(text(renderer)).toContain('ferret device grant <device> filesystem --use');
+    // A widen it MAY make is a live switch with nothing beside it.
+    should(switchFor(renderer, DEVICE_ID, 'terminal', 'use')?.props.disabled).equal(false);
+    should(marked(renderer, 'data-device-grant-reason', `${DEVICE_ID}:terminal.use`)).be.empty();
+  });
+
+  it('threads the app’s binary name by default and never leaves the caller without a remedy', () => {
+    // Arrange, Act
+    const renderer = card();
+
+    // Assert
+    expect(text(renderer)).toContain('fy device grant <device> secrets --use');
+  });
+
+  it('keeps narrowing live even when nothing at all may be widened', () => {
+    // Narrowing needs only a step-up, and the router raises that prompt; the browser never pre-empts it.
+    // Arrange, Act
+    const renderer = card({ view: view({ mayWiden: grantsOf({}), devices: [IPAD] }) });
+
+    // Assert
+    should(switchFor(renderer, OTHER_DEVICE_ID, 'fleet', 'use')?.props.disabled).equal(false);
+    should(switchFor(renderer, OTHER_DEVICE_ID, 'fleet', 'configure')?.props.disabled).equal(false);
+    should(switchFor(renderer, OTHER_DEVICE_ID, 'terminal', 'use')?.props.disabled).equal(true);
+  });
+
+  it('reports the partial patch a press means, including the configure-implies-use coupling', () => {
+    // Arrange
+    const asked: [string, DeviceGrantsPatch][] = [];
+    const renderer = card({
+      view: view({
+        devices: [device(), IPAD],
+        mayWiden: grantsOf({ fleet: { use: true, configure: true }, terminal: { use: true, configure: true } }),
+      }),
+      onChangeDeviceGrants: (id, patch) => asked.push([id, patch]),
+    });
+
+    // Act
+    run(() => switchFor(renderer, DEVICE_ID, 'terminal', 'use')?.props.onClick());
+    run(() => switchFor(renderer, DEVICE_ID, 'terminal', 'configure')?.props.onClick());
+    run(() => switchFor(renderer, OTHER_DEVICE_ID, 'fleet', 'use')?.props.onClick());
+    run(() => switchFor(renderer, OTHER_DEVICE_ID, 'fleet', 'configure')?.props.onClick());
+
+    // Assert
+    should(asked).deepEqual([
+      [DEVICE_ID, { terminal: { use: true } }],
+      [DEVICE_ID, { terminal: { use: true, configure: true } }],
+      [OTHER_DEVICE_ID, { fleet: { use: false, configure: false } }],
+      [OTHER_DEVICE_ID, { fleet: { configure: false } }],
+    ]);
+  });
+
+  it('marks the caller’s own row and warns that narrowing oneself is undone only elsewhere', () => {
+    // Arrange, Act
+    const renderer = card({ view: view({ devices: [device(), IPAD] }) });
+
+    // Assert — exactly one note, on the row that is this device, and none on the other.
+    should(marked(renderer, 'data-device-grant-self-note')).have.length(1);
+    should(marked(renderer, 'data-paired-device-self')).have.length(1);
+    expect(text(renderer)).toContain('only be switched back on at the machine');
+  });
+
+  it('shows a refusal on the device it was for, whole, and not on its neighbours', () => {
+    // Arrange, Act
+    const sentence =
+      'terminal.use can only be turned on at the machine: run `fy device grant <device> terminal --use`.';
+    const renderer = card({
+      view: view({ devices: [device(), IPAD] }),
+      grantFailure: { deviceId: OTHER_DEVICE_ID, failure: { message: sentence, code: 'grant_forbidden' } },
+    });
+
+    // Assert
+    should(marked(renderer, 'data-device-grant-failure')).have.length(1);
+    should(marked(renderer, 'data-device-grant-failure', OTHER_DEVICE_ID)).have.length(1);
+    expect(text(renderer)).toContain('can only be turned on at the machine');
+  });
+
+  it('names no password or unlock anywhere in the capabilities', () => {
+    // Arrange, Act
+    const rendered = text(card({ capabilitiesOpenFor: DEVICE_ID }));
+
+    // Assert
+    expect(rendered).not.toMatch(/password|unlock/i);
   });
 });
 
 /** A client that answers each route from the fixtures, and records what was asked. */
 function fakeClient(world: {
   readonly devices?: PairedDevicesView;
-  readonly grants?: GrantsView;
-  readonly grantsFailure?: unknown;
-  readonly passwordFailure?: unknown;
   readonly mintFailure?: unknown;
   readonly readFailure?: unknown;
   readonly revokeFailure?: unknown;
+  readonly grantFailure?: unknown;
+  readonly patches?: { readonly deviceId: string; readonly body: DeviceGrantsPatch }[];
   readonly calls?: string[];
-  readonly bodies?: string[];
 }): PairingClientFactory {
-  let passwordSet = world.grants?.passwordSet ?? true;
+  let current = world.devices ?? view();
   return async () => ({
     request: async (path, schema, init) => {
       const method = init?.method ?? 'GET';
       world.calls?.push(`${method} ${path}`);
-      // Recorded so a test can assert the password never reached a URL, and reached a BODY instead.
-      if (typeof init?.body === 'string') world.bodies?.push(init.body);
-      if (path === '/v1/grants' && method === 'GET') {
-        if (world.grantsFailure !== undefined) throw world.grantsFailure;
-        return schema.parse({ ...(world.grants ?? grantsView()), passwordSet });
-      }
-      if (path === '/v1/grants/password' && method === 'PUT') {
-        if (world.passwordFailure !== undefined) throw world.passwordFailure;
-        passwordSet = (JSON.parse(String(init?.body ?? '{}')) as { password?: string }).password !== undefined;
-        return schema.parse({ passwordSet });
-      }
       if (path === '/v1/pair/devices' && method === 'GET') {
         if (world.readFailure !== undefined) throw world.readFailure;
-        return schema.parse(world.devices ?? view());
+        return schema.parse(current);
+      }
+      if (path.endsWith('/grants') && method === 'PATCH') {
+        const deviceId = decodeURIComponent(path.slice('/v1/pair/devices/'.length, -'/grants'.length));
+        if (world.grantFailure !== undefined) throw world.grantFailure;
+        const body = JSON.parse(String(init?.body)) as DeviceGrantsPatch;
+        world.patches?.push({ deviceId, body });
+        // The daemon answers with the WHOLE view, which is what the panel must render — not its own guess.
+        current = {
+          ...current,
+          devices: current.devices.map(candidate =>
+            candidate.id === deviceId
+              ? {
+                  ...candidate,
+                  grants: Object.fromEntries(
+                    DAEMON_CAPABILITIES.map(capability => [
+                      capability,
+                      { ...candidate.grants[capability], ...body[capability] },
+                    ]),
+                  ) as CapabilityGrants,
+                }
+              : candidate,
+          ),
+        };
+        return schema.parse(current);
       }
       if (path === '/v1/pair/code' && method === 'POST') {
         if (world.mintFailure !== undefined) throw world.mintFailure;
@@ -489,7 +611,7 @@ function fakeClient(world: {
       }
       if (path.startsWith('/v1/pair/devices/') && method === 'DELETE') {
         if (world.revokeFailure !== undefined) throw world.revokeFailure;
-        return schema.parse({ devices: [], hostLocal: true });
+        return schema.parse({ devices: [], hostLocal: true, mayWiden: MAY_WIDEN });
       }
       throw new Error(`unexpected request ${method} ${path}`);
     },
@@ -508,125 +630,8 @@ describe('AddDeviceSurface', () => {
     });
 
     // Assert
-    should(calls).deepEqual(['GET /v1/pair/devices', 'GET /v1/grants']);
+    should(calls).deepEqual(['GET /v1/pair/devices']);
     should(marked(renderer as ReactTestRenderer, 'data-pair-mint')).have.length(1);
-  });
-
-  it('requires the first password, sets it in a BODY, and only then offers the button', async () => {
-    // THE WHOLE FIRST-PAIRING JOURNEY, in one test: no button while the machine has no password, the
-    // control in its place, and the button once the daemon says a password exists. The credential rule is
-    // asserted on the same path — the value reaches a body and never a URL.
-    // Arrange — a fresh machine with nothing paired and no password.
-    const calls: string[] = [];
-    const bodies: string[] = [];
-    let renderer: ReactTestRenderer | undefined;
-    await runAsync(async () => {
-      renderer = render(
-        <AddDeviceSurface
-          connection={connection()}
-          createClient={fakeClient({
-            calls,
-            bodies,
-            devices: view({ devices: [] }),
-            grants: grantsView({ passwordSet: false }),
-          })}
-          now={() => NOW}
-        />,
-      );
-    });
-    const surface = renderer as ReactTestRenderer;
-    const before = marked(surface, 'data-pair-mint').length;
-
-    // Act — type it twice and submit, which is the only path that can reach the daemon.
-    await runAsync(async () => {
-      marked(surface, 'data-password-field')[0]?.props.onChange({ target: { value: 'the-first-one' } });
-    });
-    await runAsync(async () => {
-      marked(surface, 'data-password-confirm-field')[0]?.props.onChange({ target: { value: 'the-first-one' } });
-    });
-    await runAsync(async () => {
-      surface.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
-    });
-
-    // Assert
-    should(before).equal(0);
-    should(calls).deepEqual([
-      'GET /v1/pair/devices',
-      'GET /v1/grants',
-      'PUT /v1/grants/password',
-      // Re-read, because `passwordSet` is what decides whether this panel may offer a code at all.
-      'GET /v1/grants',
-    ]);
-    should(marked(surface, 'data-pair-mint')).have.length(1);
-    should(marked(surface, 'data-pair-needs-password')).be.empty();
-    // In a BODY, and in no path or query anywhere.
-    should(bodies).deepEqual([JSON.stringify({ password: 'the-first-one' })]);
-    should(calls.some(call => call.includes('the-first-one'))).be.false();
-    // And nowhere on screen: no value, no masked form, no length.
-    expect(text(surface)).not.toContain('the-first-one');
-  });
-
-  it('reports a refused password without pretending the requirement is met', async () => {
-    // A gate this browser failed to set is a gate that does not exist, and showing the button anyway would
-    // hand out a code the requirement was supposed to stand in front of.
-    // Arrange
-    let renderer: ReactTestRenderer | undefined;
-    await runAsync(async () => {
-      renderer = render(
-        <AddDeviceSurface
-          connection={connection()}
-          createClient={fakeClient({
-            grants: grantsView({ passwordSet: false }),
-            passwordFailure: Object.assign(new Error('this daemon refused the password'), { code: 'grant_forbidden' }),
-          })}
-          now={() => NOW}
-        />,
-      );
-    });
-    const surface = renderer as ReactTestRenderer;
-
-    // Act
-    await runAsync(async () => {
-      marked(surface, 'data-password-field')[0]?.props.onChange({ target: { value: 'a-good-password' } });
-    });
-    await runAsync(async () => {
-      marked(surface, 'data-password-confirm-field')[0]?.props.onChange({ target: { value: 'a-good-password' } });
-    });
-    await runAsync(async () => {
-      surface.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
-    });
-
-    // Assert — the daemon's own sentence, and still no button.
-    should(marked(surface, 'data-password-failure')).have.length(1);
-    expect(text(surface)).toContain('this daemon refused the password');
-    should(marked(surface, 'data-pair-mint')).be.empty();
-  });
-
-  it('still offers the button when it could not read whether a password exists', async () => {
-    // The device list read fine; the grant read did not. That does not make the panel broken and it does not
-    // make this browser the authority: the daemon refuses a mint on a passwordless machine on its own
-    // account, with its own sentence. So the honest surface here offers the control and renders whatever
-    // comes back — the alternative hides a button from the one reader whose machine could still answer.
-    // Arrange, Act
-    let renderer: ReactTestRenderer | undefined;
-    await runAsync(async () => {
-      renderer = render(
-        <AddDeviceSurface
-          connection={connection()}
-          createClient={fakeClient({ grantsFailure: new Error('the daemon did not answer') })}
-          now={() => NOW}
-        />,
-      );
-    });
-    const surface = renderer as ReactTestRenderer;
-
-    // Assert — the list rendered, the button is there, and nothing pre-empts the daemon with a guess.
-    should(marked(surface, 'data-paired-device')).have.length(1);
-    should(marked(surface, 'data-pair-mint')).have.length(1);
-    should(marked(surface, 'data-pair-needs-password')).be.empty();
-    // The failed grant read is not reported as a pairing failure either: nothing has been asked of the
-    // daemon yet, and an alert about a read this panel recovered from would be noise.
-    should(marked(surface, 'data-pair-failure')).be.empty();
   });
 
   it('mints, shows the code, and revokes it against the id the mint answered with', async () => {
@@ -647,15 +652,7 @@ describe('AddDeviceSurface', () => {
 
     // Assert — and the code is gone from the screen once the machine has ended it.
     should(showed).equal(1);
-    should(calls).deepEqual([
-      'GET /v1/pair/devices',
-      // The grant read is what tells this panel whether a password exists, and therefore whether it may
-      // offer a code at all. It happens WITH the list rather than at the press, because the requirement
-      // has to be explained before somebody reaches for the button.
-      'GET /v1/grants',
-      'POST /v1/pair/code',
-      `DELETE /v1/pair/code/${PAIRING_ID}`,
-    ]);
+    should(calls).deepEqual(['GET /v1/pair/devices', 'POST /v1/pair/code', `DELETE /v1/pair/code/${PAIRING_ID}`]);
     should(marked(surface, 'data-pair-code')).be.empty();
   });
 
@@ -731,7 +728,7 @@ describe('AddDeviceSurface', () => {
     should(marked(surface, 'data-pair-refusal')).have.length(1);
     should(marked(surface, 'data-pair-mint')).be.empty();
     expect(text(surface)).toContain('has not granted the UI the use of device pairing');
-    expect(text(surface)).toContain('Pairing from the machine itself is never restricted');
+    expect(text(surface)).not.toContain('never restricted');
   });
 
   it('reports a failed mint without pretending a code exists', async () => {
@@ -816,6 +813,130 @@ describe('AddDeviceSurface', () => {
     // Assert
     should(view.container.querySelectorAll(`[data-add-device-surface="${DAEMON_ID}"]`)).have.length(1);
     await view.unmount();
+  });
+
+  it('sends the partial patch through the client, renders the view the daemon answered with, and not its own guess', async () => {
+    // Arrange
+    const calls: string[] = [];
+    const patches: { readonly deviceId: string; readonly body: DeviceGrantsPatch }[] = [];
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(<AddDeviceSurface connection={connection()} createClient={fakeClient({ calls, patches })} />);
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act — configure on also turns use on, in one request.
+    await runAsync(async () =>
+      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props.onClick(),
+    );
+
+    // Assert
+    should(calls).containEql(`PATCH /v1/pair/devices/${DEVICE_ID}/grants`);
+    should(patches).deepEqual([{ deviceId: DEVICE_ID, body: { terminal: { use: true, configure: true } } }]);
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(true);
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
+      true,
+    );
+  });
+
+  it('turns configure off with use, and re-reads nothing it was not told', async () => {
+    // Arrange
+    const patches: { readonly deviceId: string; readonly body: DeviceGrantsPatch }[] = [];
+    const wide = view({ devices: [device({ grants: grantsOf({ terminal: { use: true, configure: true } }) })] });
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface connection={connection()} createClient={fakeClient({ devices: wide, patches })} />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
+
+    // Assert
+    should(patches[0]?.body).deepEqual({ terminal: { use: false, configure: false } });
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
+      false,
+    );
+  });
+
+  it('shows a refused change inline on its device and leaves every switch as the daemon last said', async () => {
+    // Arrange
+    const refusal = Object.assign(
+      new Error(
+        'terminal.use can only be turned on from a device that holds it: run `fy device grant <device> terminal --use`.',
+      ),
+      { code: 'grant_forbidden' },
+    );
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface connection={connection()} createClient={fakeClient({ grantFailure: refusal })} />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
+
+    // Assert
+    should(marked(surface, 'data-device-grant-failure', DEVICE_ID)).have.length(1);
+    expect(text(surface)).toContain('can only be turned on from a device that holds it');
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(false);
+    // And the next attempt clears the old sentence before it asks again.
+    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:fleet.use`)[0]?.props.onClick());
+    should(marked(surface, 'data-device-grant-failure')).have.length(1);
+  });
+
+  it('does nothing before the list has loaded, because there is no view to change', async () => {
+    // Arrange — a client that never resolves leaves nothing on screen to press; the loading state has no switch.
+    const pending: PairingClientFactory = () => new Promise(() => {});
+    let renderer: ReactTestRenderer | undefined;
+
+    // Act
+    await runAsync(async () => {
+      renderer = render(<AddDeviceSurface connection={connection()} createClient={pending} />);
+    });
+
+    // Assert
+    should(marked(renderer as ReactTestRenderer, 'data-device-grant')).be.empty();
+  });
+
+  it('changes grants through the app’s routed client, which is where a step-up refusal is retried', async () => {
+    // THE STEP-UP IS THE CARRIER'S: it raises the passkey prompt on `grant_step_up_required` and sends the
+    // request again, once. What this panel owes is to make the call through THAT client and never a plain
+    // network one — so no createClient is injected, and the client the provider names is the only way out.
+    // Arrange
+    const seen: string[] = [];
+    let current = view();
+    const routed = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
+        seen.push(`${init?.method ?? 'GET'} ${path}`);
+        if (init?.method === 'PATCH')
+          current = {
+            ...current,
+            devices: [device({ grants: grantsOf({ fleet: { use: true }, terminal: { use: true } }) })],
+          };
+        return schema.parse(current);
+      },
+    } as unknown as FyApiClient;
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <DaemonClientProvider client={async () => routed}>
+          <AddDeviceSurface connection={connection()} />
+        </DaemonClientProvider>,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
+
+    // Assert
+    should(seen).deepEqual(['GET /v1/pair/devices', `PATCH /v1/pair/devices/${DEVICE_ID}/grants`]);
+    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(true);
   });
 
   it('says it is still reading rather than showing an empty machine', async () => {

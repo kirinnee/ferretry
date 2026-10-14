@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { InstallTool } from '../../../../../src/features/fleet/setup/install-flow.tsx';
 import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
@@ -9,12 +8,9 @@ import {
   machineAnswer,
   machineView,
   NOTHING_INSTALLED,
-  NOW,
-  PASSWORD,
   STUDIO,
   scan,
   scriptedClient,
-  UNLOCKED,
 } from './setup-support.ts';
 
 const settle = async (): Promise<void> => {
@@ -28,16 +24,6 @@ const click = async (element: Element | null, what: string): Promise<void> => {
   await interact(() => target.click());
   await settle();
 };
-
-const type = async (input: HTMLInputElement, value: string): Promise<void> => {
-  await interact(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
-const LOCKED = machineAnswer({ mayApply: false, applyRefusal: 'locked' });
 
 interface Harness {
   readonly harness?: SetupHarness;
@@ -60,7 +46,6 @@ const element = (
     checking={checking}
     onRetry={() => spies.retried.push(1)}
     onLeave={() => spies.left.push(1)}
-    now={NOW}
   />
 );
 
@@ -140,7 +125,6 @@ describe('InstallTool', () => {
         checking={false}
         onRetry={() => undefined}
         onLeave={() => watch.left.push(1)}
-        now={NOW}
       />,
     );
     try {
@@ -177,46 +161,25 @@ describe('InstallTool', () => {
     }
   });
 
-  it('asks a locked browser for the operator password, then looks and offers the install', async () => {
+  it('looks at once on a machine that wants a passkey, with nothing typed', async () => {
     const calls: Call[] = [];
     const client = scriptedClient(
-      { '/v1/fleet/machine': LOCKED, '/v1/grants/unlock': UNLOCKED, '/v1/fleet/setup/scan': NOTHING_INSTALLED },
+      {
+        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
+        '/v1/fleet/setup/scan': NOTHING_INSTALLED,
+      },
       calls,
     );
     const view = await mount(element(client, spies()));
     try {
       await settle();
-      // Nothing is read until the browser unlocks.
-      expect(calls.some(call => call.path === '/v1/fleet/setup/scan')).toBe(false);
-      const submit = must(view.container.querySelector<HTMLButtonElement>('[data-change-submit]'), 'submit');
-      expect(submit.textContent).toBe('Look at studio-mac');
-      await type(must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'password'), PASSWORD);
-      await click(submit, 'look');
-      expect(calls.some(call => call.path === '/v1/grants/unlock')).toBe(true);
       expect(calls.some(call => call.path === '/v1/fleet/setup/scan')).toBe(true);
+      expect(view.container.querySelector('[data-change-step-up]')?.textContent).toBe(
+        'studio-mac will ask you to confirm with your passkey when you save.',
+      );
       expect(view.container.textContent).toContain(
         'Claude Code isn’t installed on studio-mac. Ferretry can install it.',
       );
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('keeps the form and says so when the password is wrong, without a second failure note', async () => {
-    const client = scriptedClient({
-      '/v1/fleet/machine': LOCKED,
-      '/v1/grants/unlock': new FyHttpError('Wrong. 3 attempts remaining.', 403, 'grant_wrong_password'),
-    });
-    const view = await mount(element(client, spies()));
-    try {
-      await settle();
-      await type(
-        must(view.container.querySelector<HTMLInputElement>('[data-change-password]'), 'password'),
-        'nope-nope-nope',
-      );
-      await click(view.container.querySelector('[data-change-submit]'), 'look');
-      expect(view.container.querySelector('[data-change-refusal]')?.textContent).toContain('3 attempts remaining');
-      expect(view.container.querySelector('[data-setup-note="scan-failed"]')).toBeNull();
     } finally {
       await view.unmount();
     }

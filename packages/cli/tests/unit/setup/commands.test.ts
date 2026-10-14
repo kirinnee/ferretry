@@ -211,24 +211,15 @@ describe('runSetup', () => {
     should(world.out.text('report')).not.match(/fz runtimes/);
   });
 
-  it('should ask a caller off this machine for the operator password once, for the install and the import', async () => {
+  it('should refuse a caller that needs a passkey confirmation before it scans or stages anything', async () => {
     const world = fakeWorld({
-      answers: ['y', '', ''],
       gateway: {
-        machine: () =>
-          machine({
-            authority: authorityOf({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' }),
-          }),
-        installTools: () => ({ outcomes: [{ harness: 'codex', outcome: 'installed', command: 'x' }] }),
+        machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'step-up-required' }) }),
       },
     });
-    await runSetup(world.deps, {});
-    should(world.prompt.secrets).have.length(1);
-    should(world.gateway.called('installTools')[0]?.args[1]).eql({
-      unlock: 'unlock-token',
-      password: 'operator-password-1',
-    });
-    should(world.gateway.called('apply')[0]?.args[1]).eql({ unlock: 'unlock-token', password: 'operator-password-1' });
+    await should(runSetup(world.deps, {})).be.rejectedWith(/passkey confirmation/);
+    should(world.gateway.called('scan')).be.empty();
+    should(world.gateway.called('stage')).be.empty();
   });
 });
 

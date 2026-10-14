@@ -52,7 +52,6 @@ import {
 } from '@ferretry/fleet';
 import {
   type FleetCredentialAct,
-  type FleetCredentialCheckRequest,
   type FleetCredentialList,
   FleetCredentialListSchema,
   type FleetCredentialSignOut,
@@ -61,7 +60,7 @@ import {
   FleetCredentialViewSchema,
 } from '@ferretry/protocol';
 import { dirname, join } from 'node:path';
-import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts';
+import type { CallerGovernance } from '../api/capability.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -401,12 +400,8 @@ export interface FleetCredentialsServiceDeps {
   readonly status: CredentialStatusReader;
   /** The display email of one login, when the harness recorded one. */
   email(source: CredentialEmailSource): Promise<string | undefined>;
-  /** Proves the operator password for ONE change: the same closure every confirmed act takes. */
-  confirmChange(password: string): Promise<ChangeConfirmation>;
   /** This machine's name, as the sign-out sentence says it. */
   machineName(): string;
-  /** What a person types to run this binary, so a refusal names a command they have. */
-  readonly clientName: string;
   /** The harness command, located by this daemon's one rule. `undefined` when it is not installed. */
   locate(harness: HarnessKind): string | undefined;
   /** Runs one harness child to completion; the exit code. */
@@ -462,15 +457,10 @@ export class FleetCredentialsService {
    * A person's **Check now**: for Claude the free usage read, forced; for Codex one refresh under the
    * per-credential lock, then the free read. The only door to a Codex refresh in this daemon.
    *
-   * Confirmed against the operator password for a governed caller, exactly as a sign-in is, because
-   * a Codex refresh the provider refuses leaves the login needing a person — and every refusal that
-   * can be answered from the document is answered BEFORE a password attempt is spent.
+   * A governed caller reaches here only with a live passkey step-up, exactly as a sign-in does, because
+   * a Codex refresh the provider refuses leaves the login needing a person.
    */
-  async check(
-    id: string,
-    request: FleetCredentialCheckRequest,
-    governance: CallerGovernance | undefined,
-  ): Promise<FleetCredentialView> {
+  async check(id: string, governance: CallerGovernance | undefined): Promise<FleetCredentialView> {
     if (governance === undefined) {
       throw new FleetCredentialRefusal(
         'fleet_credential_unauthorized',
@@ -484,7 +474,6 @@ export class FleetCredentialsService {
     }
     const act = checkAct(entry);
     if (!act.available) throw new FleetCredentialRefusal('fleet_credential_unavailable', act.reason);
-    if (governance.confirmChange) await this.#confirm(id, request.operatorPassword, 'was not checked');
     const view = await this.deps.status.checkNow(subjectOf(entry));
     return this.#row(entry, view, await this.#emails(entries), entries);
   }
@@ -535,26 +524,6 @@ export class FleetCredentialsService {
           : `the harness could not sign out (it exited with code ${code})`,
       credential,
     };
-  }
-
-  async #confirm(id: string, password: string | undefined, undone: string): Promise<void> {
-    const refuse = (message: string): never => {
-      throw new FleetCredentialRefusal('fleet_credential_unauthorized', message);
-    };
-    if (password === undefined) {
-      return refuse(`checking "${id}" from off this machine needs its operator password, entered for this check`);
-    }
-    const outcome = await this.deps.confirmChange(password);
-    if (outcome.kind === 'confirmed') return;
-    if (outcome.reason === 'rate-limited') {
-      return refuse(
-        `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; "${id}" ${undone}. Wait for the lockout to pass, or clear it on the host with \`${this.deps.clientName} daemon password set\`.`,
-      );
-    }
-    if (outcome.reason === 'no-password') {
-      return refuse(`this machine has no operator password, so the confirmation for "${id}" could not be checked`);
-    }
-    return refuse(`that is not this machine's operator password, so "${id}" ${undone}`);
   }
 
   async #emails(entries: readonly CredentialEntry[]): Promise<ReadonlyMap<string, string>> {
