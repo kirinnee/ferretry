@@ -1,6 +1,6 @@
 import type { HarnessLoginCodexMethod, HarnessLoginFlow } from '@ferretry/protocol';
-import { WriteAuthority } from './account-authority.ts';
-import { type AccountAuthority, type AccountCommandDeps, AccountCommandError } from './account-ports.ts';
+import { requireMayApply } from './account-authority.ts';
+import { type AccountCommandDeps, AccountCommandError } from './account-ports.ts';
 
 /** How often a sign-in in progress is read back. */
 export const SIGN_IN_POLL_MS = 1_000;
@@ -27,17 +27,13 @@ type Attempt =
  *
  * Returns whether it ended signed in. A failure sets a non-zero exit with the reason and the way back.
  */
-export async function runSignIn(
-  deps: AccountCommandDeps,
-  credentialId: string,
-  opened?: WriteAuthority,
-): Promise<boolean> {
-  const authority = await (opened ?? (await WriteAuthority.open(deps))).forApply();
-  let attempt = await attemptSignIn(deps, credentialId, authority);
+export async function runSignIn(deps: AccountCommandDeps, credentialId: string): Promise<boolean> {
+  await requireMayApply(deps);
+  let attempt = await attemptSignIn(deps, credentialId);
   if (attempt.kind === 'failed' && attempt.device && deps.interactive) {
     deps.out.warn(`The device code did not work: ${attempt.flow.reason}`);
     const answer = (await deps.prompt.ask('Sign in with a link instead? [y/N]')).trim().toLowerCase();
-    if (answer === 'y' || answer === 'yes') attempt = await attemptSignIn(deps, credentialId, authority, 'link');
+    if (answer === 'y' || answer === 'yes') attempt = await attemptSignIn(deps, credentialId, 'link');
   }
   if (attempt.kind === 'signed-in') {
     deps.out.success(`Signed in. ${credentialId} is ready to use.`);
@@ -55,10 +51,9 @@ export async function runSignIn(
 async function attemptSignIn(
   deps: AccountCommandDeps,
   credentialId: string,
-  authority: AccountAuthority,
   method?: HarnessLoginCodexMethod,
 ): Promise<Attempt> {
-  let flow = await deps.gateway.startSignIn(credentialId, authority, method);
+  let flow = await deps.gateway.startSignIn(credentialId, method);
   let shownApproval = false;
   let shownUrl: string | undefined;
   let shownFinishing = false;
@@ -66,7 +61,7 @@ async function attemptSignIn(
   let linked = method === 'link';
   while (flow.state !== 'complete' && flow.state !== 'failed') {
     if (deps.now() >= Date.parse(flow.expiresAt)) {
-      await cancelQuietly(deps, flow.flowId, authority);
+      await cancelQuietly(deps, flow.flowId);
       deps.out.error('Sign-in took too long and was stopped. Run it again to get a fresh link.');
       deps.out.setExitCode(1);
       return { kind: 'stopped' };
@@ -79,7 +74,7 @@ async function attemptSignIn(
       if (!codeSent || flow.lastCode === 'rejected') {
         if (flow.lastCode === 'rejected')
           deps.out.warn('That code was not accepted. Copy the whole code and try again.');
-        const next = await submitCode(deps, flow, authority);
+        const next = await submitCode(deps, flow);
         if (next === undefined) return { kind: 'stopped' };
         codeSent = true;
         flow = next;
@@ -102,7 +97,7 @@ async function attemptSignIn(
         );
         shownUrl = flow.verificationUrl;
       }
-      const next = await submitAddress(deps, flow, authority);
+      const next = await submitAddress(deps, flow);
       if (next === undefined) return { kind: 'stopped' };
       flow = next;
       continue;
@@ -112,38 +107,34 @@ async function attemptSignIn(
       shownFinishing = true;
     }
     await deps.sleep(SIGN_IN_POLL_MS);
-    flow = await deps.gateway.signInStatus(flow.flowId, authority);
+    flow = await deps.gateway.signInStatus(flow.flowId);
   }
   if (flow.state === 'complete') return { kind: 'signed-in' };
   return { kind: 'failed', flow, device: flow.harness === 'codex' && !linked };
 }
 
 /** Ask for the code the provider's page shows, and hand it to the waiting harness. */
-async function submitCode(
-  deps: AccountCommandDeps,
-  flow: HarnessLoginFlow,
-  authority: AccountAuthority,
-): Promise<HarnessLoginFlow | undefined> {
+async function submitCode(deps: AccountCommandDeps, flow: HarnessLoginFlow): Promise<HarnessLoginFlow | undefined> {
   if (!deps.interactive) {
-    await cancelQuietly(deps, flow.flowId, authority);
+    await cancelQuietly(deps, flow.flowId);
     throw new AccountCommandError(
       'Claude Code sign-in needs a person to paste a code, so it cannot run without a terminal. Run it in a terminal, or sign in from the browser.',
     );
   }
   const code = (await deps.prompt.ask('Paste the code the page shows:')).trim();
   if (code === '') {
-    await cancelQuietly(deps, flow.flowId, authority);
+    await cancelQuietly(deps, flow.flowId);
     deps.out.error('No code was given, so the sign-in was stopped.');
     deps.out.setExitCode(1);
     return undefined;
   }
-  const submission = await deps.gateway.submitSignInCode(flow.flowId, code, authority);
+  const submission = await deps.gateway.submitSignInCode(flow.flowId, code);
   if (submission.outcome === 'accepted') return submission.flow;
   if (submission.outcome === 'unconfirmed') {
     deps.out.warn(submission.reason);
-    return await deps.gateway.signInStatus(flow.flowId, authority);
+    return await deps.gateway.signInStatus(flow.flowId);
   }
-  await cancelQuietly(deps, flow.flowId, authority);
+  await cancelQuietly(deps, flow.flowId);
   deps.out.error(`The code could not be used: ${submission.reason}`);
   deps.out.setExitCode(1);
   return undefined;
@@ -156,38 +147,34 @@ async function submitCode(
  * partial copy. One the daemon says it cannot take any more may still have finished — Codex can also
  * complete in a browser on the machine itself — so that is read back before it is called a failure.
  */
-async function submitAddress(
-  deps: AccountCommandDeps,
-  flow: HarnessLoginFlow,
-  authority: AccountAuthority,
-): Promise<HarnessLoginFlow | undefined> {
+async function submitAddress(deps: AccountCommandDeps, flow: HarnessLoginFlow): Promise<HarnessLoginFlow | undefined> {
   if (!deps.interactive) {
-    await cancelQuietly(deps, flow.flowId, authority);
+    await cancelQuietly(deps, flow.flowId);
     throw new AccountCommandError(
       'This Codex sign-in needs a person to paste an address, so it cannot run without a terminal. Run it in a terminal, or sign in from the browser.',
     );
   }
   const address = (await deps.prompt.ask('Paste the address of the page that did not load:')).trim();
   if (address === '') {
-    await cancelQuietly(deps, flow.flowId, authority);
+    await cancelQuietly(deps, flow.flowId);
     deps.out.error('No address was given, so the sign-in was stopped.');
     deps.out.setExitCode(1);
     return undefined;
   }
-  const submission = await deps.gateway.submitSignInCode(flow.flowId, address, authority);
+  const submission = await deps.gateway.submitSignInCode(flow.flowId, address);
   if (submission.outcome === 'accepted') return submission.flow;
   if (submission.outcome === 'refused') {
     deps.out.warn(submission.reason);
     return flow;
   }
   if (submission.outcome === 'unconfirmed') deps.out.warn(submission.reason);
-  return await deps.gateway.signInStatus(flow.flowId, authority);
+  return await deps.gateway.signInStatus(flow.flowId);
 }
 
 /** Stop a sign-in this terminal is giving up on. A failure to stop it changes nothing about the answer. */
-async function cancelQuietly(deps: AccountCommandDeps, flowId: string, authority: AccountAuthority): Promise<void> {
+async function cancelQuietly(deps: AccountCommandDeps, flowId: string): Promise<void> {
   try {
-    await deps.gateway.cancelSignIn(flowId, authority);
+    await deps.gateway.cancelSignIn(flowId);
   } catch {
     // The daemon bounds every sign-in in minutes, so one this could not stop still ends by itself.
   }

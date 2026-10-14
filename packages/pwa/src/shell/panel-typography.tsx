@@ -21,20 +21,11 @@
  *
  * **UPPERCASE IS A SPICE.** `kt-label` is the app's eyebrow role: display font, letter-spaced, and
  * uppercase under most themes. Used on every field label in a form it removes the hierarchy it exists to
- * create — HARNESS, PROVIDER ACCOUNT NAME, LANE, DISPLAY NAME, MODE and six more all shouting equally,
- * with nowhere for the eye to land. Field labels use {@link FIELD_LABEL} instead: sentence case, one step
- * down from a section heading, and darker than the prose beneath them. `kt-label` is kept for exactly one
- * role — a section eyebrow — which is what it was for.
+ * create, so it is kept for exactly one role — a section eyebrow — which is what it was for.
  *
  * Both are the SHARED system's own tokens. Nothing here invents a scale: the type sizes, weights and
  * colours are the same ones `grants-settings.tsx` reads for the same jobs.
  */
-
-/**
- * A form field's label. Sentence case, and the hierarchy is: panel title → section heading → THIS →
- * prose. Weight and colour carry it, not capitals.
- */
-export const FIELD_LABEL = 'mb-1 block text-cell font-medium text-fg';
 
 /**
  * ONE OPTICAL SIZE PER ICON ROLE, because six of them were in use with no rule behind which was which —

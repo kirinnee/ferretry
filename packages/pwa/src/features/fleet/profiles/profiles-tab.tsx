@@ -355,8 +355,8 @@ function DeletePanel(props: DetailProps & { onKeep: () => void }) {
         busyLabel="Deleting…"
         variant="danger"
         disabled={!online || (moving && target === undefined)}
-        onSubmit={operatorPassword =>
-          void changes.apply(change, operatorPassword).then(result => {
+        onSubmit={() =>
+          void changes.apply(change).then(result => {
             if (result.kind === 'applied') onDeleted(`Deleted profile ${profile.name}.`);
           })
         }

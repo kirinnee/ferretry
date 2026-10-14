@@ -829,8 +829,8 @@ rather than that it never existed.
 **Authority is separate from pairing, and it is the capability model rather than a system of the
 fleet's own.** Reads and composing a proposal are open to a paired device, because composing writes
 nothing. Changing the host is `fleet`/`configure`, decided by `decideCapability` and enforced at the
-authorization boundary before any handler runs; where the machine has an operator password, a governed
-caller proves that same password again against one exact staged change.
+authorization boundary before any handler runs; a governed caller needs a passkey step-up for it, and the
+apply body carries nothing to prove.
 
 **This paragraph used to describe a second authorization system**, and the correction is left visible
 rather than edited away: `POST /v1/fleet/proposals/:proposalId/authorize` minted a host-only single-use

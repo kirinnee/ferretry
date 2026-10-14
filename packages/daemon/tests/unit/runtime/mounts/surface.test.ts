@@ -12,8 +12,10 @@ import {
   type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
+import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
+import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
@@ -65,6 +67,30 @@ const pairingSubsystem = (): PairingSubsystem => ({
   revokeDevice: async () => false,
 });
 
+// A REAL step-up service over in-memory fakes, so the inventory mounts the very type production does.
+const stepUpSubsystem = (): StepUpService =>
+  new StepUpService({
+    store: {
+      list: async () => [],
+      holder: async () => undefined,
+      add: async () => {},
+      updateSignCount: async () => false,
+      forgetDevice: async () => {},
+    },
+    verifier: {
+      verifyRegistration: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
+      verifyAssertion: async () => ({ ok: false, reason: 'not exercised by the surface inventory' }),
+    },
+    registry: new StepUpRegistry({ nowMs: () => 1_700_000_000_000 }),
+    challenges: new ChallengeLedger(),
+    random: { bytes: length => new Uint8Array(length) },
+    clock: { nowMs: () => 1_700_000_000_000 },
+    devices: { device: async () => undefined },
+    allowedOrigins: () => [],
+    relyingPartyName: 'Ferretry',
+    audit: { record: async () => undefined },
+  });
+
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
   doctor: {
@@ -79,6 +105,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   push: {
     publicKey: async () => 'the-application-server-key',
     list: async () => [],
+    listFor: async () => [],
+    ownerOf: async () => undefined,
     register: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -86,6 +114,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  stepUp: stepUpSubsystem(),
   // A VALUE, not a subsystem, and the only field here that is one: the set is resolved once at boot and
   // the pairing service is handed the very same array. Non-empty on purpose — an empty one would let
   // `PairingResponseSchema`'s default stand in for a carried-through set.
@@ -428,6 +457,13 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   grants: grantSubsystem(),
+  security: new SecuritySettingsService({
+    document: { read: async () => undefined, write: async () => {} },
+    audit: { record: async () => {}, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+    clock: { nowMs: () => 1_700_000_000_000 },
+    widenCommand: 'fy daemon security set <field> <value>',
+  }),
+  deviceGrants: { mayWiden: () => DEFAULT_CAPABILITY_GRANTS, change: async () => 'not-found' as const },
 });
 
 describe('the mounted daemon surface', () => {
@@ -439,27 +475,29 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // NOTE WHAT IS ABSENT: `admin-token`, which no route declares any more. The one that did was
-    // `POST /v1/fleet/proposals/:proposalId/authorize`, and it minted the fleet's own approval code.
-    // The class stays in `CredentialMinimum` because the ladder is the daemon's contract rather than
-    // a census of today's table — but a table that used it exactly once, for a mechanism the
-    // capability model already answered, is worth reading as evidence rather than as trivia.
+    // `admin-token` is declared by exactly ONE route: the owner's re-opened passkey window (review L3),
+    // so a paired device is refused at the boundary before the service's own at-the-machine check. The
+    // fleet's old approval-code route used it once too, and is gone.
     // Written as a LABELLED sum, one term per line, and that is the anti-merge device rather than
     // style: a bare `129 + 5 + 1 + 1` invited two changes to each append `+ 1` and produce the same
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      110 + // the session table and everything that is not the account model (three socket-ticket counters gone: a device opens streams inside its session)
+      108 + // the session table and everything that is not the account model (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       2 + // the account model's credential list and its Check now
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
-      3; // the setup scan, tool install and the clone export
+      3 + // the setup scan, tool install and the clone export
+      5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
+      1 + // one device's own grants, changed (B5)
+      2 + // the machine's security settings: the read and the change (zero-trust B6)
+      2; // the unlock: its options and the verified unlock (zero-trust B6)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
-    should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes });
+    should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
-    ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
+    ).deepEqual(['GET /v1/sessions/:sessionId/attach']);
   });
 
   it('should serve the base feeds and every mounted subsystem from one table', () => {
@@ -479,6 +517,8 @@ describe('the mounted daemon surface', () => {
       // that returns a device token or its digest — the list is a projection with no field for one.
       'GET /v1/pair/devices',
       'DELETE /v1/pair/devices/:deviceId',
+      // One device's own grants (B5): widen at the machine, or from a device holding what it grants.
+      'PATCH /v1/pair/devices/:deviceId/grants',
       // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
       // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
       // list is a projection with no field for one.
@@ -486,13 +526,27 @@ describe('the mounted daemon surface', () => {
       'GET /v1/push/subscriptions',
       'POST /v1/push/subscriptions',
       'DELETE /v1/push/subscriptions/:pushId',
-      // The grant surface. NOTE WHAT IS ABSENT: no route returns the operator password, its hash or
-      // its length — `GET /v1/grants` answers with booleans and reasons, and this list is the proof.
+      // The passkey step-up. NOTE WHAT IS ABSENT: no route returns a challenge after it is issued, a
+      // public key or a held step-up — the daemon remembers the step-up, and the browser holds nothing.
+      'GET /v1/passkeys',
+      'POST /v1/passkeys/options',
+      'POST /v1/passkeys',
+      'POST /v1/step-up/options',
+      'POST /v1/step-up',
+      // A confirmation on opening (zero-trust B6).
+      'POST /v1/unlock/options',
+      'POST /v1/unlock',
+      // The owner's recovery path: a browser is never at the machine (B4), so only `fy passkey window`
+      // can re-open a device's passkey window. Without it a device past its first window is locked out.
+      'POST /v1/passkeys/registration-window',
+      // The machine's security settings the step-up and presence are tuned by (zero-trust B6).
+      'GET /v1/security',
+      'PATCH /v1/security',
+      // The grant surface. NOTE WHAT IS ABSENT: there is no password to set and nothing to unlock — a
+      // governed change is held behind the passkey step-up, so these three are the whole surface.
       'GET /v1/grants',
       'GET /v1/grants/audit',
-      'POST /v1/grants/unlock',
       'PATCH /v1/grants',
-      'PUT /v1/grants/password',
       // The carrier refresh, beside the pairing exchange whose second half it is. NOTE WHAT IS ABSENT:
       // there is no POST, PUT or DELETE here — a device may read where this daemon can be reached and
       // can never re-point it, because that is a change to the operator's own document.
@@ -698,11 +752,17 @@ describe('the mounted daemon surface', () => {
     const missingImportedConversation = await dispatcher.dispatch(
       request({ path: '/v1/imports/history/not-found', headers: human }),
     );
-    const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
+    // A terminal is a USE that a caller off this host may make only behind a live passkey step-up, so
+    // the listing is asked from the host and the remote form is asked as well, refused by the grant.
+    const terminals = await dispatcher.dispatch(
+      request({ path: '/v1/sessions/s1/terminals', headers: human, loopback: true }),
+    );
+    const remoteTerminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
     const learning = await dispatcher.dispatch(request({ path: '/v1/learning/status', headers: human }));
     // The login window, over the same dispatcher: the route `fy browser login` and the PWA's banner
-    // have both spoken since they were ported, against a daemon that answered `unknown_route`.
-    const login = await dispatcher.dispatch(request({ path: '/v1/browser/login', headers: human }));
+    // have both spoken since they were ported, against a daemon that answered `unknown_route`. It is a
+    // browser USE, so it is asked from the host.
+    const login = await dispatcher.dispatch(request({ path: '/v1/browser/login', headers: human, loopback: true }));
     // The write half of the session surface, over the same dispatcher: a stop of a session the
     // fixture holds, which an unmounted route would answer as `unknown_route`.
     const stopped = await dispatcher.dispatch(
@@ -767,6 +827,8 @@ describe('the mounted daemon surface', () => {
     should(importedConversationBody).containEql('record identifier');
     should(importedConversationBody).not.containEql('must not be exposed');
     should(terminals.status).equal(200);
+    should(remoteTerminals.status).equal(403);
+    should(remoteTerminals.body).containEql('grant_step_up_required');
     should(learning.status).equal(200);
     should(login.status).equal(200);
     should(stopped.status).equal(200);
@@ -843,7 +905,9 @@ describe('the mounted daemon surface', () => {
 
     // Act
     const anonymous = await dispatcher.upgrade(request({ path }));
-    const authorized = await dispatcher.upgrade(request({ path, headers: human }));
+    const authorized = await dispatcher.upgrade(request({ path, headers: human, loopback: true }));
+    // A terminal socket from off this host is a terminal USE: held until the device steps up.
+    const remote = await dispatcher.upgrade(request({ path, headers: human }));
     // The event feed, over the SAME socket dispatcher: an anonymous peer never holds it, and the
     // fleet form is accepted without naming a session at all.
     const anonymousEvents = await dispatcher.upgrade(request({ path: '/v1/events' }));
@@ -856,6 +920,7 @@ describe('the mounted daemon surface', () => {
     // The terminal does not exist in this fixture, which still proves the route is mounted, reached,
     // and that existence is decided BEFORE any protocol switch.
     should(authorized.outcome === 'refused' ? authorized.response.status : 0).equal(404);
+    should(remote.outcome === 'refused' ? remote.response.status : 0).equal(403);
   });
 
   it('should refuse a terminal SOCKET the operator has not granted', async () => {

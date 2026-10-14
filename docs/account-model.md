@@ -79,7 +79,7 @@ Settings. The link is `#machines/<name>/<tab>`.
 ## Routes
 
 All under `/v1/fleet`. Reads need `fleet.use`; every write is `fleet.configure`, and a caller that is
-not on the host also needs the per-change operator password ([grants.md](grants.md)).
+not on the host also needs a passkey step-up ([grants.md](grants.md)); nothing is typed.
 
 | Route                                                                                | Does                                                              |
 | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |

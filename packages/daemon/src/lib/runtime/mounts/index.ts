@@ -1,6 +1,8 @@
 import type { DaemonCarrier } from '@ferretry/protocol';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
+import type { StepUpService } from '../../step-up/index.ts';
+import type { SecuritySettingsService } from '../../security/index.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
@@ -34,16 +36,18 @@ import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
-import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
+import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
 import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
+import { securityRoutes } from './security.ts';
+import { stepUpRoutes } from './step-up.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
-import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
+import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
@@ -97,12 +101,18 @@ export interface MountedSubsystems {
   readonly doctor: DoctorSubsystem;
   /** Short-lived pairing codes, durable device grants and their host-local observation surface. */
   readonly pairing: PairingSubsystem;
+  /** Each paired device's own grants, changed — `docs/design/zero-trust.md` B5. */
+  readonly deviceGrants: DeviceGrantSubsystem;
   /** The other direction of that relationship: which browsers this daemon may WAKE. It serves the
    *  application-server key a browser subscribes with, the enrolments filed against paired devices,
    *  and the revocation of one. An enrolment cannot outlive the device grant that made it — see
    *  `src/lib/push` for the two independent reasons that holds. The browser still has no service
    *  worker to receive one. */
   readonly push: PushSubscriptionSubsystem;
+  /** Passkeys and the step-up they prove — `docs/design/zero-trust.md` B2. */
+  readonly stepUp: StepUpService;
+  /** The machine's security settings — `docs/design/zero-trust.md` B6. */
+  readonly security: SecuritySettingsService;
   /** Every way this daemon can be reached, as the daemon itself publishes it. NOT A SUBSYSTEM BUT A
    *  VALUE, and the only field here that is one: it is resolved once at boot and it is THE SAME ARRAY
    *  the pairing service hands out on redemption, so the set a device is given and the set it later
@@ -113,7 +123,7 @@ export interface MountedSubsystems {
    *  harness's own login against one credential's store with piped stdio, publishes a verification
    *  URL — and for Codex a device code — accepts one short-lived authorization code straight into that
    *  child's stdin, and lets the harness write its own credential into its own store. Every route here
-   *  is `configure`, with the operator password proved against the start. */
+   *  is `configure`, which a caller off this host passes only behind the passkey step-up. */
   readonly harnessLogin: HarnessLoginSubsystem;
   /** The account model's credentials: one login stored once, its status and usage, Check now, and
    *  sign-in targeting a credential id (docs/design/account-model.md §7). */
@@ -291,12 +301,19 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // every remote route later sees — and it is governed by the `pairing` capability rather than by the
     // `host` scope, because a browser is always a paired device and could otherwise never add a second
     // one. See the mount's header for why that is the correct layer.
-    ...pairingRoutes(subsystems.pairing),
+    ...pairingRoutes(subsystems.pairing, subsystems.deviceGrants),
     // Push enrolment registers beside pairing because it is the same subject: only a paired device may
     // enrol, and its enrolment dies with its grant. Every path is under `/v1/push`, which no other
     // subsystem uses, and its one pattern is registered after its two fixed literals — so it can
     // neither shadow nor be shadowed by anything here.
-    ...pushRoutes(subsystems.push),
+    ...pushRoutes(subsystems.push, subsystems.grants),
+    // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
+    // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
+    // there are no patterns among them, so it can neither shadow nor be shadowed.
+    ...stepUpRoutes(subsystems.stepUp),
+    // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
+    // literal no other subsystem uses, so it can neither shadow nor be shadowed.
+    ...securityRoutes(subsystems.security),
     // The grant surface sits beside pairing for the same reason pairing sits beside the base feeds:
     // it establishes what the credential pairing hands out is then ALLOWED to do. Every path is under
     // `/v1/grants`, which no other subsystem uses, so it can neither shadow nor be shadowed. It is
@@ -352,7 +369,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The write surface registers AFTER the read for the same reason the read comes first: `POST
     // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
     // other and both sit above every per-session subsystem that follows.
-    ...sessionControlRoutes(subsystems.sessionControl),
+    ...sessionControlRoutes(subsystems.sessionControl, {
+      guard: subsystems.grants,
+      knownRoots: knownLaunchRoots(subsystems.catalogs, subsystems.worktrees),
+    }),
     // The revive registers with the rest of the write surface, above every per-session subsystem, so
     // its one-segment pattern sits beside the stop it is the counterpart of rather than below the
     // deeper patterns. Neither can shadow the other: they differ in their final literal segment.
@@ -437,7 +457,15 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
 export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
   // The guard is the SUBSYSTEM itself, so the answer a route enforces and the answer the report shows
   // are one object rather than two that can drift.
-  return new ApiDispatcher(new ApiRouter(mountedDaemonRoutes(base, subsystems)), base.credentials, subsystems.grants);
+  // The step-up witness is the subsystem the step-up routes mint into, so a confirmation is visible to
+  // the very next request on the same session.
+  return new ApiDispatcher(
+    new ApiRouter(mountedDaemonRoutes(base, subsystems)),
+    base.credentials,
+    subsystems.grants,
+    undefined,
+    subsystems.stepUp,
+  );
 }
 
 /**
@@ -478,6 +506,8 @@ export function createMountedSocketDispatcher(
     // The SAME guard the request/response table uses. A terminal socket that skipped it would let a
     // browser drive a shell this machine had refused to let it open.
     subsystems.grants,
+    undefined,
+    subsystems.stepUp,
   );
 }
 

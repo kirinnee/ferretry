@@ -54,8 +54,8 @@ const factsOf = (overrides: Partial<CatalogFacts> = {}): CatalogFacts => ({
   ...overrides,
 });
 
-/** What an unlocked caller with no per-change confirmation may do. */
-const OPEN: FleetMachineAuthority = { mayApply: true, applyRefusal: 'granted', confirmation: 'none' };
+/** What a caller who may apply a change can do. */
+const OPEN: FleetMachineAuthority = { mayApply: true, applyRefusal: 'granted' };
 
 const SETTINGS_BODIES: Readonly<Record<string, SettingsObject>> = {
   'claude-a': { permissions: { defaultMode: 'plan' }, theme: 'dark', skipDangerousModePermissionPrompt: false },
@@ -414,7 +414,7 @@ describe('machineView', () => {
     FleetMachineViewSchema.parse(actual);
   });
 
-  it('should say a machine with no runtimes is not set up, a missing tool is not installed, and what a locked caller may not do', () => {
+  it('should say a machine with no runtimes is not set up, a missing tool is not installed, and what a caller without a step-up may not do', () => {
     // Arrange
     const model = modelOf({ profiles: {}, runtimes: {} });
     const facts = factsOf({
@@ -422,11 +422,7 @@ describe('machineView', () => {
       tools: { claude: undefined, codex: '/opt/codex' },
     });
 
-    const authority: FleetMachineAuthority = {
-      mayApply: false,
-      applyRefusal: 'locked',
-      confirmation: 'operator-password',
-    };
+    const authority: FleetMachineAuthority = { mayApply: false, applyRefusal: 'step-up-required' };
 
     // Act
     const actual = machineView(model, facts, authority);

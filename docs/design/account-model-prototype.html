@@ -1540,7 +1540,7 @@
       {
         type: 'fr',
         at: 'tools',
-        inst: { sel: { claude: true, codex: true }, pass: '', phase: null, tried: false },
+        inst: { sel: { claude: true, codex: true }, phase: null, tried: false },
         res: { claude: null, codex: null },
         si: {},
         names: {},
@@ -1610,7 +1610,7 @@
       type: 'install',
       at: 'install',
       harness: h,
-      inst: { sel: { [h]: true }, pass: '', phase: null, tried: false },
+      inst: { sel: { [h]: true }, phase: null, tried: false },
       created: [],
     };
   }
@@ -2022,10 +2022,9 @@
       )
       .join('');
     return `<div class="sec"><div class="list">${rows}</div>
-    <div class="field"><label for="${prefix}-pass">${esc(m.name)} operator password</label>
-      <input class="inp" type="password" id="${prefix}-pass" autocomplete="off" value="${esc(st.pass)}" data-in="inst-pass" data-x="${prefix}">
-      <span class="hint">You're on a phone, so ${esc(m.name)} needs its operator password before it installs anything. It is used once and not stored.</span></div>
-    <div class="btns">${btn(sel.length ? 'Install ' + plural(sel.length, 'tool') : 'Pick a tool to install', 'inst-go', `data-x="${prefix}"${sel.length && st.pass ? '' : ' disabled'}`, 'primary')}</div></div>`;
+    <div class="field">
+      <span class="hint">You're on a phone, so ${esc(m.name)} asks you to confirm with your passkey before it installs anything. Nothing is typed.</span></div>
+    <div class="btns">${btn(sel.length ? 'Install ' + plural(sel.length, 'tool') : 'Pick a tool to install', 'inst-go', `data-x="${prefix}"${sel.length ? '' : ' disabled'}`, 'primary')}</div></div>`;
   }
 
   /* =====================================================================
@@ -3567,9 +3566,6 @@
   IN['inst-sel'] = (v, d) => {
     instState(d.x).sel[d.h] = v;
   };
-  IN['inst-pass'] = (v, d) => {
-    instState(d.x).pass = v;
-  };
   A['inst-go'] = d => runInstall(curFlow());
   A['inst-retry'] = d => {
     const st = curFlow().inst;
@@ -3602,7 +3598,6 @@
       });
       st.did = hs;
       st.phase = 'done';
-      st.pass = '';
     });
   }
   A['start-install'] = d => {
@@ -4052,7 +4047,6 @@
           () => {
             const m = fresh({ installed: {}, pkg: 'npm', fr: { fails: true } });
             const f = frAt('tools');
-            f.inst.pass = 'sample-password';
             f.inst.phase = 'failed';
             S.spot = 'fail';
           },

@@ -38,6 +38,8 @@ import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
+import type { PasskeyClientFactory } from './security-settings.tsx';
+import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import {
   isSettingId,
   isSettingsSectionId,
@@ -59,6 +61,9 @@ export const TEXT_SCALE_OPTIONS = [
 
 const SETTINGS_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
 
+/** The daemon panel `#security` opens, inside the Daemons section. */
+const SECURITY_PANEL = 'security';
+
 const settingFromHash = (): SettingId | null => {
   if (typeof window === 'undefined') return null;
   const value = window.location.hash.replace(/^#/, '');
@@ -68,6 +73,7 @@ const settingFromHash = (): SettingId | null => {
 const sectionFromHash = (): SettingsSectionId | null => {
   if (typeof window === 'undefined') return null;
   const value = window.location.hash.replace(/^#/, '');
+  if (value === SECURITY_PANEL) return 'daemons';
   if (isSettingsSectionId(value)) return value;
   if (parseMachineHash(window.location.hash) !== null) return 'machines';
   return isSettingId(value) ? settingsSectionForSetting(value) : null;
@@ -271,6 +277,10 @@ export interface SettingsPageProps {
   readonly createGrantClient?: GrantClientFactory;
   /** And for pairing, so no harness capture can ever contain a real minted code. */
   readonly createPairingClient?: PairingClientFactory;
+  /** And for the passkey list, so no capture reads or registers a real credential. */
+  readonly createPasskeyClient?: PasskeyClientFactory;
+  /** And for the secret store, so a harness never reaches for the app store's client pool. */
+  readonly createSecretClient?: SecretClientFactory;
   /** Future daemon-owned tabs, appended after Warden in the shared frame. */
   readonly daemonSettingsTabs?: readonly DaemonSettingsTabDefinition[];
   /**
@@ -317,6 +327,8 @@ export function SettingsPage({
   createWardenClient,
   createGrantClient,
   createPairingClient,
+  createPasskeyClient,
+  createSecretClient,
   daemonSettingsTabs,
   createMachineClient,
   machineTabs,
@@ -340,6 +352,9 @@ export function SettingsPage({
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => sectionFromHash() ?? 'appearance');
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
+  const [requestedPanel, setRequestedPanel] = useState<string | undefined>(() =>
+    window.location.hash === `#${SECURITY_PANEL}` ? SECURITY_PANEL : undefined,
+  );
   const [machineRoute, setMachineRoute] = useState<MachineRoute>(
     () => parseMachineHash(window.location.hash) ?? { tab: DEFAULT_MACHINE_TAB },
   );
@@ -352,6 +367,7 @@ export function SettingsPage({
     const nextSection = sectionFromHash();
     const target = settingFromHash();
     const nextMachineRoute = parseMachineHash(window.location.hash);
+    setRequestedPanel(window.location.hash === `#${SECURITY_PANEL}` ? SECURITY_PANEL : undefined);
     if (nextMachineRoute !== null) setMachineRoute(nextMachineRoute);
     if (nextSection === null) return;
     setActiveSection(nextSection);
@@ -633,6 +649,9 @@ export function SettingsPage({
                         createWardenClient={createWardenClient}
                         {...(createGrantClient ? { createGrantClient } : {})}
                         {...(createPairingClient ? { createPairingClient } : {})}
+                        {...(createPasskeyClient ? { createPasskeyClient } : {})}
+                        {...(createSecretClient ? { createSecretClient } : {})}
+                        requestedPanel={requestedPanel}
                         additionalTabs={daemonSettingsTabs}
                         carrier={carrier}
                         relayAdvertised={relayAdvertised}

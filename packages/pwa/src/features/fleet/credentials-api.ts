@@ -17,35 +17,27 @@ import {
   FleetCredentialListSchema,
   type FleetCredentialView,
   FleetCredentialViewSchema,
-  OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
 import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_CREDENTIALS_PATH = '/v1/fleet/credentials';
 
-const unlockHeaders = (unlock: string | undefined): Record<string, string> =>
-  unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock };
-
 /** Every login on this machine, from what the daemon already knows. It calls no provider. */
-export const readFleetCredentials = async (client: FleetClient, unlock?: string): Promise<FleetCredentialList> =>
-  await client.request(FLEET_CREDENTIALS_PATH, FleetCredentialListSchema, { headers: unlockHeaders(unlock) });
+export const readFleetCredentials = async (client: FleetClient): Promise<FleetCredentialList> =>
+  await client.request(FLEET_CREDENTIALS_PATH, FleetCredentialListSchema);
 
-/**
- * A person's **Check now** on one login. For Codex it is a refresh, so from off the machine it needs
- * the unlock in the header and the operator password for this one check, as a sign-in does.
- */
+/** A person's **Check now** on one login. For Codex it is a refresh. */
 export const checkFleetCredential = async (
   client: FleetClient,
   credentialId: string,
   request: FleetCredentialCheckRequest = {},
-  unlock?: string,
 ): Promise<FleetCredentialView> =>
   await client.request(
     `${FLEET_CREDENTIALS_PATH}/${encodeURIComponent(credentialId)}/check`,
     FleetCredentialViewSchema,
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify(FleetCredentialCheckRequestSchema.parse(request)),
     },
   );

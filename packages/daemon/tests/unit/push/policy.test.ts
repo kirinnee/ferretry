@@ -18,12 +18,12 @@ describe('pushDeviceView', () => {
     // The endpoint and the key halves are the capability to wake somebody's phone. Their absence is
     // the whole point of projecting through the schema rather than spreading the record.
     should(Object.keys(view)).not.containEql('subscription');
-    should(JSON.stringify(view)).not.match(/push\.example\.test/u);
+    should(JSON.stringify(view)).not.match(/fcm\.googleapis\.com/u);
   });
 
   it('should carry an expiry the push service declared', () => {
     const expiring = record({
-      subscription: { ...subscription('https://push.example.test/send/two'), expirationTime: 1_800_000_000_000 },
+      subscription: { ...subscription('https://fcm.googleapis.com/send/two'), expirationTime: 1_800_000_000_000 },
     });
 
     should(pushDeviceView(expiring).expirationTime).equal(1_800_000_000_000);

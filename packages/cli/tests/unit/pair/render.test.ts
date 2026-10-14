@@ -1,5 +1,5 @@
-import { localOnlyNotice, refusalNotice } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import { localOnlyNotice, refusalNotice } from '@ferretry/protocol';
 import should from 'should';
 import {
   type PairingInvitation,
@@ -23,6 +23,7 @@ const invitation = (overrides: Partial<PairingInvitation> = {}): string =>
   renderInvitation({
     mint: MINT,
     offer: { kind: 'qr', link: LINK, qr: QR },
+    requestedGrants: 'full',
     columns: 100,
     remainingMs: 120_000,
     binaryName: 'fy',
@@ -227,5 +228,60 @@ describe('pairing screen', () => {
     should(unconfirmed).containEql('whether anything used it is unknown: fetch failed');
     should(unconfirmed).containEql('Treating it as unpaired');
     should(unconfirmed).not.containEql('expired unused');
+  });
+});
+
+describe('pairing screen, what the new device will hold', () => {
+  const before = (actual: string, marker: string): boolean =>
+    actual.indexOf('can do anything') < actual.indexOf(marker);
+
+  it('should say a default code gives full access behind the unlock, before the QR, and name the verb that limits it', () => {
+    // Act
+    const actual = invitation({ binaryName: 'foo' });
+
+    // Assert
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('can do anything on this machine once it unlocks it with its passkey');
+    should(flattened).containEql('`foo pair --limited`');
+    should(flattened).not.containEql('NOT applied');
+    should(actual).not.containEql('LIMITED:');
+    should(actual).not.containEql('fy ');
+    should(before(actual, 'Or scan this compact QR:')).be.true();
+    should(before(actual, LINK)).be.true();
+  });
+
+  it('should treat an echo of the full set the same as no echo', () => {
+    // Act
+    const actual = invitation({ mint: { ...MINT, grants: 'full' } });
+
+    // Assert
+    should(actual.replace(/\s+/gu, ' ')).containEql('can do anything on this machine');
+  });
+
+  it('should say a limited code gives read-and-chat only, before the QR, and name the verb that widens it', () => {
+    // Act
+    const actual = invitation({ mint: { ...MINT, grants: 'limited' }, requestedGrants: 'limited', binaryName: 'foo' });
+
+    // Assert
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql(
+      'LIMITED: a device paired with this code can only read the fleet and chat with sessions',
+    );
+    should(flattened).containEql('`foo device grant`');
+    should(flattened).not.containEql('can do anything');
+    should(actual.indexOf('LIMITED:')).be.below(actual.indexOf('Or scan this compact QR:'));
+    should(actual.indexOf('LIMITED:')).be.below(actual.indexOf(LINK));
+  });
+
+  it('should not claim a limited device when an older daemon echoes the full set to a --limited request', () => {
+    // Act
+    const actual = invitation({ mint: MINT, requestedGrants: 'limited', binaryName: 'foo' });
+
+    // Assert
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('--limited was NOT applied: this daemon is older');
+    should(flattened).containEql('can do anything on this machine');
+    should(flattened).containEql('`foo pair --limited`');
+    should(actual).not.containEql('LIMITED:');
   });
 });

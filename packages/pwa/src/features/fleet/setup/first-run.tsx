@@ -63,7 +63,7 @@ import {
 import { FirstRunSignIn } from './first-run-sign-in.tsx';
 import type { InstallPhase } from './install-model.ts';
 import { machineItemHash } from './settings-route.ts';
-import { type SetupAccess, useSetupAccess } from './setup-access.ts';
+import { useSetupAccess } from './setup-access.ts';
 import { CheckChoices, SetupBadges, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
 import { countWords, listWords, SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
 import { ToolInstall } from './tool-install.tsx';
@@ -76,7 +76,6 @@ export interface MachineFirstRunProps extends MachineTabProps {
   /** The person left the flow. */
   readonly onLeave: () => void;
   /** Supplied in tests. */
-  readonly now?: () => number;
   /** How often a waiting sign-in is re-read. Supplied in tests. */
   readonly pollMs?: number;
 }
@@ -116,36 +115,16 @@ function ContinueButton({ onClick, disabled = false }: { readonly onClick: () =>
   );
 }
 
-/** The scan is not in hand yet: reading it, the password it needs first, or why it could not be read. */
+/** The scan is not in hand yet: reading it, or why it could not be read. */
 function ScanGate({
-  access,
   machineName,
   issue,
   onRead,
 }: {
-  readonly access: SetupAccess;
   readonly machineName: string;
   readonly issue: string | null;
-  readonly onRead: (password?: string) => void;
+  readonly onRead: () => void;
 }) {
-  const { changes } = access;
-  if (access.locked)
-    return (
-      <div className="flex min-w-0 flex-col gap-3" data-first-run-locked="">
-        <p className="m-0 text-cell leading-base text-fg">
-          Ferretry needs to look at Claude Code and Codex on {machineName} first.
-        </p>
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel={`Look at ${machineName}`}
-          busyLabel="Looking…"
-          onSubmit={password => onRead(password)}
-        />
-      </div>
-    );
   if (issue !== null)
     return (
       <div className="flex min-w-0 flex-col gap-3">
@@ -167,9 +146,8 @@ function ScanGate({
 }
 
 export function MachineFirstRun(props: MachineFirstRunProps) {
-  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, now, pollMs } =
-    props;
-  const access = useSetupAccess({ connection, createClient, ...(now === undefined ? {} : { now }) });
+  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, pollMs } = props;
+  const access = useSetupAccess({ connection, createClient });
   const { changes } = access;
   const [scan, setScan] = useState<FleetSetupScan | null>(null);
   /** The tool whose own login is being signed in, in place, on its step. */
@@ -184,26 +162,24 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
 
   const latest = useRef(access);
   latest.current = access;
-  const read = useCallback(async (password?: string): Promise<void> => {
+  const read = useCallback(async (): Promise<void> => {
     setIssue(null);
-    const scanned = await latest.current.read((client, unlock) => readFleetSetupScan(client, unlock), password);
+    const scanned = await latest.current.read(client => readFleetSetupScan(client));
     if (scanned.kind === 'refused') {
-      if (!scanned.passwordRejected && !latest.current.locked) setIssue(scanned.sentence);
+      setIssue(scanned.sentence);
       return;
     }
     setScan(scanned.value);
-    const runtimes = await latest.current.read((client, unlock) => readFleetRuntimes(client, unlock));
+    const runtimes = await latest.current.read(client => readFleetRuntimes(client));
     if (runtimes.kind === 'done') setTaken(new Set(runtimes.value.runtimes.map(runtime => runtime.name)));
   }, []);
 
-  // Read once the machine has said what this browser may do; a locked browser waits for its password.
   const started = useRef(false);
-  const authorityKnown = changes.authority !== null;
   useEffect(() => {
-    if (!authorityKnown || access.locked || started.current) return;
+    if (started.current) return;
     started.current = true;
     void read();
-  }, [authorityKnown, access.locked, read]);
+  }, [read]);
 
   const steps = firstRunSteps(mode, scan, answers);
   const state = withSteps(stepper, steps);
@@ -213,17 +189,17 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
   const choose = (harness: SetupHarness, choice: 'import' | 'skip'): void =>
     setAnswers(current => ({ ...current, choices: { ...current.choices, [harness]: choice } }));
 
-  const send = (password: string | undefined): void => {
+  const send = (): void => {
     if (scan === null) return;
     const change = importChange(scan, answers);
     const include = includedHarnesses(scan, answers);
     const names = nameCards(scan, answers)
       .filter(card => cardMakes(card, answers))
       .map(card => cardName(card, answers));
-    void changes.apply(change, password).then(async applied => {
+    void changes.apply(change).then(async applied => {
       if (applied.kind === 'refused') return;
       const summary = applied.outcome.outcome === 'executed' ? applied.outcome.summary : applied.staged.summary;
-      const after = await access.read((client, unlock) => readFleetRuntimes(client, unlock));
+      const after = await access.read(client => readFleetRuntimes(client));
       setResult({
         summary,
         include,
@@ -264,7 +240,7 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
           onStartAgain={() => setStepper(goToStep(state, (steps[0] as StepperStep).id))}
         />
       );
-    if (scan === null) return <ScanGate access={access} machineName={machineName} issue={issue} onRead={read} />;
+    if (scan === null) return <ScanGate machineName={machineName} issue={issue} onRead={() => void read()} />;
 
     if (at === 'tools') {
       const missing = missingTools(scan.tools);

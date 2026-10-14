@@ -16,13 +16,9 @@ import {
   FRESH_MACHINE,
   machineAnswer,
   machineView,
-  NOW,
-  PASSWORD,
   STAGED,
   STUDIO,
   scriptedClient,
-  UNLOCK_TOKEN,
-  UNLOCKED,
   WORK,
 } from './setup-support.ts';
 
@@ -126,14 +122,6 @@ const click = async (element: Element | null, what: string): Promise<void> => {
   await settle();
 };
 
-const type = async (input: Element | null, value: string): Promise<void> => {
-  const field = must(input as HTMLInputElement | null, 'password field');
-  await interact(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
 interface Render {
   readonly sources?: readonly DaemonConnectionRecord[];
   readonly machine?: FleetMachineView | null;
@@ -163,7 +151,6 @@ const render = async ({
       createClient={createClient}
       onDone={onDone}
       onLeave={onLeave}
-      now={NOW}
     />,
   );
   await settle();
@@ -329,51 +316,18 @@ describe('CloneMachine · Source', () => {
     }
   });
 
-  it('asks for the SOURCE machine’s password when that machine is locked, and unlocks there', async () => {
+  it('reads a source that wants a passkey with no extra field: the carrier asks for it', async () => {
     const { calls, createClient } = daemons({
-      work: {
-        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
-        '/v1/grants/unlock': UNLOCKED,
-      },
+      work: { '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }) },
     });
     const screen = await render({ createClient });
     try {
       await screen.choose('work');
-      expect(screen.q('[data-step-next]')).toBeNull();
-      expect(screen.text('[data-clone-step="source"] form')).toContain('work-linux operator password');
-      const submit = must(screen.q('[data-change-submit]'), 'Next') as HTMLButtonElement;
-      expect(submit.textContent).toBe('Next');
-      expect(submit.disabled).toBe(true);
+      expect(screen.q('[data-change-password]')).toBeNull();
+      await click(screen.q('[data-step-next]'), 'Next');
 
-      await type(screen.q('[data-change-password]'), PASSWORD);
-      await click(screen.q('[data-change-submit]'), 'Next');
-
-      const unlock = calls.work.find(call => call.path === '/v1/grants/unlock');
-      expect(unlock?.body).toMatchObject({ password: PASSWORD });
-      expect(calls.target.some(call => call.path === '/v1/grants/unlock')).toBe(false);
-      const read = calls.work.find(call => call.path === '/v1/fleet/export');
-      expect(Object.values(read?.headers ?? {})).toContain(UNLOCK_TOKEN);
+      expect(calls.work.some(call => call.path === '/v1/fleet/export')).toBe(true);
       expect(screen.step()).toBe('preview');
-    } finally {
-      await screen.view.unmount();
-    }
-  });
-
-  it('stays on Source without a second sentence when the source rejects the password', async () => {
-    const { calls, createClient } = daemons({
-      work: {
-        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'locked' }),
-        '/v1/grants/unlock': new FyHttpError('Wrong password.', 401, 'operator_password_invalid'),
-      },
-    });
-    const screen = await render({ createClient });
-    try {
-      await screen.choose('work');
-      await type(screen.q('[data-change-password]'), 'wrong');
-      await click(screen.q('[data-change-submit]'), 'Next');
-      expect(screen.step()).toBe('source');
-      expect(calls.work.some(call => call.path === '/v1/fleet/export')).toBe(false);
-      expect(screen.text('[data-change-refusal]')).not.toBe('');
     } finally {
       await screen.view.unmount();
     }

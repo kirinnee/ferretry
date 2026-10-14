@@ -7,7 +7,7 @@
  * every credential is a placeholder, so no real harness setup, login or fleet is read or written.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseAccountModel } from '@ferretry/fleet';
@@ -77,7 +77,6 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
     userHome,
     sessionStates: async () => [],
     credentials,
-    confirmChange: async () => ({ kind: 'confirmed' }),
     locate: harness => (harness === 'claude' && options.claude ? '/bin/sh' : undefined),
     machineName: () => name,
     clientName: 'fy',
@@ -105,7 +104,7 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
 /** The import a person chooses, staged and applied through the catalogue the way the app and `fy daemon import` do it. */
 async function importHost(on: Awaited<ReturnType<typeof machine>>): Promise<unknown> {
   const staged = await on.catalog.propose({ kind: 'setup.import' });
-  return await on.catalog.apply(staged.id, {}, { governed: false, passwordSet: false, confirmChange: false } as never);
+  return await on.catalog.apply(staged.id, { governed: false } as never);
 }
 
 /** Every file under a directory, relative to it. */
@@ -160,11 +159,7 @@ describe('the first run and Clone over real files', () => {
 
     // Act: staged and applied through the catalogue, as the browser does it.
     const staged = await target.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle });
-    const outcome = await target.catalog.apply(staged.id, {}, {
-      governed: false,
-      passwordSet: false,
-      confirmChange: false,
-    } as never);
+    const outcome = await target.catalog.apply(staged.id, { governed: false } as never);
 
     // Assert
     should(staged.preview).match({ kind: 'executor', executor: 'clone' });

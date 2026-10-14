@@ -195,7 +195,6 @@ describe('the preflight a person reads before confirming', () => {
     should(text).containEql('3 secret(s) — the values, not just the names');
     should(text).containEql('2 paired device(s), each of which has to be paired again');
     should(text).containEql('7 session(s), with their transcripts');
-    should(text).containEql('the operator password, so this machine has none afterwards');
   });
 
   it('should say the counts are unavailable rather than guess when the daemon is down', () => {
@@ -258,7 +257,7 @@ describe('what a completed reset reports', () => {
     should(text).containEql('fyd reset: removed 2 path(s), 15 files, 3.0MB');
     should(text).containEql('  removed /a/state');
     should(text).containEql('Run `fy daemon start` to bring fyd up on a clean slate');
-    should(text).containEql('offer to set this');
+    should(text).not.containEql('password');
   });
 
   it('should mark an absent path as absent and leave it out of the total', () => {

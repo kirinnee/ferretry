@@ -125,19 +125,12 @@ function CredentialPage({
   const needsSignIn = credential.status.word === 'needs_sign_in';
   const runtimesUsing = data.runtimes.runtimes.filter(runtime => credential.usedBy.includes(runtime.name));
 
-  const check = async (operatorPassword: string | undefined): Promise<void> => {
+  const check = async (): Promise<void> => {
     setNotice(null);
-    const authorization = await changes.authorize(operatorPassword);
-    if (authorization.kind === 'refused') return;
     setChecking(true);
     try {
       const client = await createClient(connection);
-      const checked = await checkFleetCredential(
-        client,
-        credential.id,
-        authorization.operatorPassword === undefined ? {} : { operatorPassword: authorization.operatorPassword },
-        authorization.unlock,
-      );
+      const checked = await checkFleetCredential(client, credential.id);
       setNotice(
         checked.status.word === 'ready' ? 'Checked. The login works.' : `Checked. ${checked.status.explanation}`,
       );
@@ -149,8 +142,8 @@ function CredentialPage({
     }
   };
 
-  const signOut = async (operatorPassword: string | undefined): Promise<void> => {
-    const result = await changes.apply({ kind: 'credential.signout', id: credential.id }, operatorPassword);
+  const signOut = async (): Promise<void> => {
+    const result = await changes.apply({ kind: 'credential.signout', id: credential.id });
     if (result.kind === 'refused') return;
     setSigningOut(false);
     setSignedInFor(null);
@@ -162,12 +155,13 @@ function CredentialPage({
     await reload();
   };
 
-  const saveLabel = async (operatorPassword: string | undefined): Promise<void> => {
+  const saveLabel = async (): Promise<void> => {
     const trimmed = label.trim();
-    const result = await changes.apply(
-      { kind: 'credential.label', id: credential.id, label: trimmed === '' ? null : trimmed },
-      operatorPassword,
-    );
+    const result = await changes.apply({
+      kind: 'credential.label',
+      id: credential.id,
+      label: trimmed === '' ? null : trimmed,
+    });
     if (result.kind === 'applied') {
       setNotice('Label saved.');
       await reload();
@@ -275,7 +269,7 @@ function CredentialPage({
             refusal={changes.refusal}
             submitLabel="Save label"
             disabled={!online}
-            onSubmit={password => void saveLabel(password)}
+            onSubmit={() => void saveLabel()}
           />
         )}
       </div>
@@ -320,7 +314,7 @@ function CredentialPage({
                 submitLabel="Sign out"
                 variant="danger"
                 disabled={!online}
-                onSubmit={password => void signOut(password)}
+                onSubmit={() => void signOut()}
               >
                 <Button type="button" data-sign-out-keep="" onClick={() => setSigningOut(false)}>
                   Keep signed in
@@ -339,7 +333,7 @@ function CredentialPage({
                   submitLabel="Check now"
                   variant="primary"
                   disabled={!online}
-                  onSubmit={password => void check(password)}
+                  onSubmit={() => void check()}
                 />
               ) : (
                 <p className="m-0 text-cell text-muted">{credential.checkNow.reason}</p>

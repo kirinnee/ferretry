@@ -6,7 +6,7 @@ import {
   type FleetToolInstallOutcome,
 } from '@ferretry/protocol';
 import type { Command } from 'commander';
-import { WriteAuthority } from '../fleet/account-authority.ts';
+import { requireMayApply } from '../fleet/account-authority.ts';
 import { confirmStep, runChange } from '../fleet/account-change.ts';
 import {
   mergedOptions,
@@ -58,10 +58,9 @@ export async function installTools(
   deps: AccountCommandDeps,
   harnesses: readonly AccountHarness[],
   options: { yes?: boolean; dryRun?: boolean },
-  opened?: WriteAuthority,
 ): Promise<boolean> {
-  const authority = opened ?? (await WriteAuthority.open(deps));
-  const scan = await deps.gateway.scan(authority.current);
+  await requireMayApply(deps);
+  const scan = await deps.gateway.scan();
   const wanted = scan.tools.filter(tool => harnesses.includes(tool.harness));
   const missing = wanted.filter((tool): tool is Extract<FleetSetupTool, { installed: false }> => !tool.installed);
   for (const tool of wanted) if (tool.installed) deps.out.report(`${tool.label} is already installed.`);
@@ -79,10 +78,7 @@ export async function installTools(
   if (runnable.length === 0 || options.dryRun) return false;
   if (!(await confirmStep(deps, 'Install now?', options.yes))) return false;
   deps.out.report('Installing… this can take a few minutes.');
-  const result = await deps.gateway.installTools(
-    runnable.map(tool => tool.harness),
-    await authority.forApply(),
-  );
+  const result = await deps.gateway.installTools(runnable.map(tool => tool.harness));
   let ok = runnable.length === missing.length;
   for (const outcome of result.outcomes) {
     const text = renderInstallOutcome(outcome);
@@ -157,8 +153,8 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
     .command('export')
     .description(`print this machine's setup for \`${bin} machine clone\`: no login and no history`)
     .action(async () => {
-      const authority = await WriteAuthority.open(deps);
-      deps.out.report(JSON.stringify(await deps.gateway.exportBundle(authority.current), null, 2));
+      await requireMayApply(deps);
+      deps.out.report(JSON.stringify(await deps.gateway.exportBundle(), null, 2));
     });
 
   writeOptions(

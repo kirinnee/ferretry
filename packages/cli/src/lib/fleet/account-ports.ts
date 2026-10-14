@@ -29,17 +29,6 @@ import type {
 /** Which harness a credential, tool or runtime belongs to. */
 export type AccountHarness = 'claude' | 'codex';
 
-/**
- * What a caller off this machine must show for one write.
- *
- * `unlock` is the short-lived header a locked caller trades its operator password for; `password` is
- * the per-change confirmation the daemon asks for again. Both live for one command and are never kept.
- */
-export interface AccountAuthority {
-  readonly unlock?: string;
-  readonly password?: string;
-}
-
 /** The daemon routes the account model reads and writes through. Satisfied by the protocol client. */
 export interface IAccountGateway {
   machine(): Promise<FleetMachineView>;
@@ -47,23 +36,17 @@ export interface IAccountGateway {
   profiles(): Promise<FleetLayeredProfileCatalog>;
   runtimes(): Promise<FleetRuntimeCatalog>;
   credentials(): Promise<FleetCredentialList>;
-  /** Trade the operator password for a short-lived unlock. */
-  unlock(password: string): Promise<string>;
-  check(credentialId: string, authority: AccountAuthority): Promise<FleetCredentialView>;
-  stage(change: FleetAccountChange, authority: AccountAuthority): Promise<FleetAccountChangeView>;
-  apply(changeId: string, authority: AccountAuthority): Promise<FleetAccountChangeOutcome>;
-  scan(authority: AccountAuthority): Promise<FleetSetupScan>;
-  installTools(harnesses: readonly AccountHarness[], authority: AccountAuthority): Promise<FleetToolInstallResult>;
-  exportBundle(authority: AccountAuthority): Promise<FleetCloneBundle>;
+  check(credentialId: string): Promise<FleetCredentialView>;
+  stage(change: FleetAccountChange): Promise<FleetAccountChangeView>;
+  apply(changeId: string): Promise<FleetAccountChangeOutcome>;
+  scan(): Promise<FleetSetupScan>;
+  installTools(harnesses: readonly AccountHarness[]): Promise<FleetToolInstallResult>;
+  exportBundle(): Promise<FleetCloneBundle>;
   /** `method` is Codex's choice of sign-in; absent means its default, a device code. */
-  startSignIn(
-    credentialId: string,
-    authority: AccountAuthority,
-    method?: HarnessLoginCodexMethod,
-  ): Promise<HarnessLoginFlow>;
-  signInStatus(flowId: string, authority: AccountAuthority): Promise<HarnessLoginFlow>;
-  submitSignInCode(flowId: string, code: string, authority: AccountAuthority): Promise<HarnessLoginSubmission>;
-  cancelSignIn(flowId: string, authority: AccountAuthority): Promise<HarnessLoginFlow>;
+  startSignIn(credentialId: string, method?: HarnessLoginCodexMethod): Promise<HarnessLoginFlow>;
+  signInStatus(flowId: string): Promise<HarnessLoginFlow>;
+  submitSignInCode(flowId: string, code: string): Promise<HarnessLoginSubmission>;
+  cancelSignIn(flowId: string): Promise<HarnessLoginFlow>;
 }
 
 /** The slice of the terminal these commands print through. The shipped console adapter satisfies it. */
@@ -80,8 +63,6 @@ interface IAccountOutput {
 /** Asking a person something. Never used off a terminal. */
 interface IAccountPrompt {
   ask(message: string): Promise<string>;
-  /** A value the terminal must not echo: the operator password. */
-  askSecret(message: string): Promise<string>;
 }
 
 /** Everything an account-model command needs, built once in the composition root. */
@@ -93,8 +74,6 @@ export interface AccountCommandDeps {
   readonly interactive: boolean;
   /** The shipped command name, so every hint names a command that exists. */
   readonly binaryName: string;
-  /** The operator password from standard input, for a script off this machine. */
-  readonly readPasswordFromStdin: () => Promise<string>;
   /** Read a local file a person named (a component's text, a clone bundle). */
   readonly readText: (path: string) => Promise<string>;
   readonly sleep: (milliseconds: number) => Promise<void>;

@@ -151,11 +151,11 @@ describe('systemd unit rendering', () => {
   });
 
   it('should run the daemon EXECUTABLE, so a supervised start can never reach an interactive prompt', () => {
-    // WHY THIS IS ASSERTED AND NOT ASSUMED. `fy daemon start` offers to set the machine's first operator
-    // password when a person is there to answer. A unit whose `ExecStart` ran that command instead of the
-    // daemon would put that offer inside a systemd start — with no terminal, and nobody to answer — and
-    // the machine would silently stop running the daemon at login. Both service managers launch the
-    // executable and nothing else, which is what makes that structurally impossible rather than careful.
+    // WHY THIS IS ASSERTED AND NOT ASSUMED. `fy daemon start` can put a line in front of a person when
+    // one is there. A unit whose `ExecStart` ran that command instead of the daemon would put an
+    // interactive client inside a systemd start — with no terminal, and nobody to answer. Both service
+    // managers launch the executable and nothing else, which is what makes that structurally impossible
+    // rather than careful.
     // Act
     const unit = renderSystemdUnit(spec);
     const plist = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });

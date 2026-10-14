@@ -42,7 +42,6 @@
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema } from './common.ts';
 import { FleetCredentialIdSchema as CredentialIdSchema } from './fleet-credentials.ts';
-import { OperatorPasswordSchema } from './grants.ts';
 
 /**
  * A URL a person will be sent to open.
@@ -260,14 +259,6 @@ export const HarnessLoginStartRequestSchema = z.strictObject({
    * empty slot is signed in before anything uses it.
    */
   credentialId: CredentialIdSchema,
-  /**
-   * The per-change confirmation, for a governed caller that owes one.
-   *
-   * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE, held to the same rule by the same schema the fleet's
-   * proposal apply uses, and spent against this one start. It is not a second gate: `fleet.configure`
-   * decides whether this caller may reach the route at all, and this proves the change.
-   */
-  operatorPassword: OperatorPasswordSchema.optional(),
   /** Codex only: which of its two sign-ins to run. Absent means a device code. */
   method: HarnessLoginCodexMethodSchema.optional(),
 });
@@ -292,7 +283,7 @@ const HarnessLoginCodeSubmitSchema = z.strictObject({
 /**
  * What a person can send to a running sign-in: the value they brought back, or — for a Codex device
  * code that did not work — "use a link instead". The switch rides the same request because it is the
- * same consent: the password this sign-in proved at its start covers the credential, not the method.
+ * same consent: the step-up this sign-in was started under covers the credential, not the method.
  */
 export const HarnessLoginSubmitRequestSchema = z.union([
   HarnessLoginCodeSubmitSchema,

@@ -27,19 +27,11 @@
  * can now mint. That is the owner's stated principle for loopback, and the grant cannot narrow it — a
  * grant only ever governs a caller who is not on this host.
  *
- * ## THE OPERATOR PASSWORD IS A SEPARATE, LOWER RULE — AND IT IS NOT A GRANT
+ * ## A GOVERNED MINT NEEDS THE PASSKEY STEP-UP
  *
- * A grant decides what a caller who is NOT on this host may do. The first-password requirement decides
- * what this MACHINE may hand out at all, so it sits below the grant layer and applies to every caller
- * of the mint including the host's own command line: `POST /v1/pair/code` refuses while no operator
- * password exists, whether the request came from a phone, from a browser on the machine, or from
- * `fy pair`. The reason is that pairing is the moment access leaves this machine, and a device paired
- * to a passwordless host arrives with `fleet.configure` and nothing to prove.
- *
- * IT IS THE SUBSYSTEM'S RULE, NOT THIS MOUNT'S. `PairingService.mint` answers a union and this route
- * only renders it, so there is exactly one place the requirement is written down and exactly one
- * sentence a person can be told — see `docs/grants.md` and `docs/pairing.md`. Nothing else in the
- * daemon consults it: local use of a passwordless machine is untouched.
+ * `pairing.use` is one of the uses the policy holds behind a step-up, because handing out a credential
+ * is the moment access leaves this machine. A phone may add another device only after its owner has
+ * confirmed with the passkey on that phone; on the host itself nothing is asked.
  *
  * ## REDEMPTION IS NOT A ROUTE ANY MORE
  *
@@ -48,49 +40,74 @@
  * happens only inside a session — direct or relayed — whose daemon was proved against the QR's
  * fingerprint before the code left the device, and it registers the device's KEY rather than issuing a
  * token (`docs/pairing.md`). So nothing on this surface is public: every route here either mints a
- * code or lists and revokes devices.
+ * code, or lists, revokes and re-grants devices.
  */
 
 import {
+  type CapabilityGrants,
+  DAEMON_CAPABILITIES,
+  type DeviceGrantsPatch,
+  DeviceGrantsPatchSchema,
   type PairedDevice,
   PairedDeviceIdSchema,
   type PairedDevicesView,
   PairedDevicesViewSchema,
+  type PairingCodeMintResponse,
   PairingCodeMintRequestSchema,
   PairingCodeMintResponseSchema,
   type PairingCodeStatusResponse,
   PairingCodeStatusResponseSchema,
+  type PairingGrantSet,
   type PairingId,
   PairingIdSchema,
+  STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import {
-  type ApiRequest,
+  ApiError,
   type ApiRoute,
+  arrivedOnHost,
   type CapabilityDemand,
+  type CapabilityPresentation,
   DEVICE_ACTOR_PREFIX,
   decodeParameter,
   errorResponse,
   jsonResponse,
+  parseBody,
   parseOptionalBody,
+  type RouteContext,
 } from '../../api/index.ts';
-import type { PairingMint } from '../../pairing/index.ts';
+import { GrantError } from '../../grants/index.ts';
 
 export interface PairingSubsystem {
-  /**
-   * A live code, or the reason this machine will not hand one out.
-   *
-   * THE UNION IS WHY THIS ROUTE CANNOT FORGET THE FIRST-PASSWORD REQUIREMENT. The rule lives in the
-   * subsystem — see `PairingService.mint` — so both doors into minting meet it: this route serves the
-   * browser AND the host's own pairing command, and there is no third way to a code.
-   */
-  mint(): Promise<PairingMint>;
+  /** A live code, replacing any code still outstanding, for a device that will hold `grants`. */
+  mint(grants: PairingGrantSet): PairingCodeMintResponse;
   status(pairingId: PairingId): PairingCodeStatusResponse | undefined;
   /** Ends a minted code early. `undefined` when this daemon never minted that id. */
   revoke(pairingId: PairingId): PairingCodeStatusResponse | undefined;
   /** Who may reach this daemon. Never carries key material — see `PairedDeviceSchema`. */
   devices(): Promise<readonly PairedDevice[]>;
-  /** Takes one device's access away. False when there was no such grant. */
-  revokeDevice(id: string): Promise<boolean>;
+  /**
+   * Takes one device's access away. False when there was no such grant.
+   *
+   * `actor` is who asked, server-derived, so the revocation can be audited as theirs.
+   */
+  revokeDevice(id: string, actor: string): Promise<boolean>;
+}
+
+/**
+ * Changing one device's own grants (`docs/design/zero-trust.md` B5). `DeviceGrantService` satisfies it.
+ *
+ * The route demands only `pairing.use` at the boundary, because a NARROWING must stay reachable to every
+ * paired device with a step-up — never harder than granting. Who may WIDEN, and the step-up every change
+ * needs, are judged inside, field by field.
+ */
+export interface DeviceGrantSubsystem {
+  mayWiden(presentation: CapabilityPresentation): CapabilityGrants;
+  change(
+    deviceId: string,
+    patch: DeviceGrantsPatch,
+    presentation: CapabilityPresentation,
+  ): Promise<'changed' | 'not-found'>;
 }
 
 /**
@@ -121,22 +138,49 @@ function callerDeviceId(actor: string | undefined): string | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
+/**
+ * The caller as the boundary described it. Every pairing route names a demand, so the dispatcher always
+ * hands one over; its absence is a wiring mistake and refuses rather than guessing a caller.
+ */
+/** Whether a grant set holds every capability on both axes. */
+const holdsEverything = (grants: CapabilityGrants): boolean =>
+  DAEMON_CAPABILITIES.every(capability => grants[capability].use && grants[capability].configure);
+
+function presentationIn(context: RouteContext): CapabilityPresentation {
+  if (context.presentation === undefined)
+    throw new ApiError(500, 'this daemon cannot say who is asking, so it is refusing', 'internal_error');
+  return context.presentation;
+}
+
 async function devicesView(
   subsystem: PairingSubsystem,
-  request: ApiRequest,
-  actor: string | undefined,
+  grants: DeviceGrantSubsystem,
+  context: RouteContext,
 ): Promise<PairedDevicesView> {
-  const thisDeviceId = callerDeviceId(actor);
+  const thisDeviceId = callerDeviceId(context.actor);
   return PairedDevicesViewSchema.parse({
     devices: await subsystem.devices(),
-    // The TRANSPORT's answer and nothing else. A relayed hop terminates on this very host, so anything
-    // derived from an address, a `Host` header or the URL would tell a remote phone it is local.
-    hostLocal: request.loopback,
+    // The SAME answer every other host-locality rule uses, never a loopback peer on its own: a remote
+    // caller forwarded through a locally bound proxy (`tailscale serve`, `cloudflared`, `ssh -L`)
+    // arrives from a loopback peer too, and was told it was at this machine. Nothing derived from an
+    // address, a `Host` header or the URL is consulted either: a relayed hop terminates on this host.
+    hostLocal: arrivedOnHost(context.request, context.credential?.tokenClass === 'admin'),
     ...(thisDeviceId === undefined ? {} : { thisDeviceId }),
+    mayWiden: grants.mayWiden(presentationIn(context)),
   });
 }
 
-export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] {
+/** A device-grant refusal, as the status and code the grant surface already answers with. */
+function deviceGrantRefusal(error: unknown): never {
+  if (error instanceof GrantError) {
+    if (error.failure === 'step-up-required') throw new ApiError(403, error.message, STEP_UP_REQUIRED_CODE);
+    if (error.failure === 'unavailable') throw new ApiError(503, error.message, 'grants_undetermined');
+    throw new ApiError(403, error.message, 'grant_forbidden');
+  }
+  throw error;
+}
+
+export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSubsystem): readonly ApiRoute[] {
   return [
     {
       method: 'POST',
@@ -144,17 +188,19 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
-      handle: async ({ request }) => {
-        await parseOptionalBody(request, PairingCodeMintRequestSchema);
-        const outcome = await subsystem.mint();
-        // 403 WITH THE SUBSYSTEM'S OWN SENTENCE, and a code of its own. It is a refusal about this
-        // MACHINE's state rather than about this caller's credential, so it must not read as "your
-        // grant says no": the remedy is a password somebody sets, and it is the same remedy whether
-        // the request came from a browser or from the host's command line. Nothing here composes
-        // prose — a second author would be a second copy of the rule, drifting.
-        return outcome.kind === 'refused'
-          ? errorResponse(403, outcome.reason, 'pairing_needs_operator_password')
-          : jsonResponse(PairingCodeMintResponseSchema.parse(outcome.response), 201);
+      handle: async context => {
+        const body = await parseOptionalBody(context.request, PairingCodeMintRequestSchema);
+        const grantSet = body?.grants ?? 'full';
+        // A `full` code — the default — gives the next device every capability. A device may pass on only
+        // what it holds itself, by the same rule a device widen reads (`mayWiden`), so a remote device
+        // that does not hold everything mints a `limited` code or none. At the machine anything goes.
+        if (grantSet === 'full' && !holdsEverything(grants.mayWiden(presentationIn(context))))
+          return errorResponse(
+            403,
+            'this device does not hold every capability, so it cannot pair a device with full access; pair it with limited access, or run `pair` at the machine',
+            'grant_forbidden',
+          );
+        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint(grantSet)), 201);
       },
     },
     {
@@ -199,7 +245,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
-      handle: async ({ request, actor }) => jsonResponse(await devicesView(subsystem, request, actor)),
+      handle: async context => jsonResponse(await devicesView(subsystem, grants, context)),
     },
     {
       /**
@@ -215,12 +261,36 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
-      handle: async ({ request, params, actor }) => {
-        const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(params.get('deviceId') ?? ''));
+      handle: async context => {
+        const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
         if (!deviceId.success) return errorResponse(404, 'device not found', 'pairing_device_not_found');
-        const removed = await subsystem.revokeDevice(deviceId.data);
+        const removed = await subsystem.revokeDevice(deviceId.data, context.actor ?? 'unknown');
         return removed
-          ? jsonResponse(await devicesView(subsystem, request, actor))
+          ? jsonResponse(await devicesView(subsystem, grants, context))
+          : errorResponse(404, 'device not found', 'pairing_device_not_found');
+      },
+    },
+    {
+      /**
+       * One device's own grants, changed (`docs/design/zero-trust.md` B5).
+       *
+       * `pairing.use` at the boundary, so every paired device can NARROW — its own grant included —
+       * with a step-up and nothing else. Widening is judged inside, field by field: at the machine
+       * anything; remotely only what the caller holds itself, with `pairing.configure` and a step-up.
+       * A patch with any illegal widen is refused whole. Answers the whole list, as the revoke does.
+       */
+      method: 'PATCH',
+      path: '/v1/pair/devices/:deviceId/grants',
+      minimum: 'operator',
+      capability: PAIRING_DEMAND,
+      noStore: true,
+      handle: async context => {
+        const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
+        if (!deviceId.success) return errorResponse(404, 'device not found', 'pairing_device_not_found');
+        const patch = await parseBody(context.request, DeviceGrantsPatchSchema);
+        const outcome = await grants.change(deviceId.data, patch, presentationIn(context)).catch(deviceGrantRefusal);
+        return outcome === 'changed'
+          ? jsonResponse(await devicesView(subsystem, grants, context))
           : errorResponse(404, 'device not found', 'pairing_device_not_found');
       },
     },

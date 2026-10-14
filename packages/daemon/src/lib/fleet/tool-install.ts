@@ -14,17 +14,16 @@
  * - **`sudo` is never run.** A manager that needs admin rights fails, and the failure hands the person
  *   the exact command to run themselves ({@link manualCommand}). The same is true when the machine has
  *   no usable manager at all: the answer is a command for a human, never a guess.
- * - **A caller off this machine owes the operator password, once per request.** The same per-change
- *   confirmation the harness sign-in uses (`CallerGovernance.confirmChange`), with the same budget: one
- *   install request spends one attempt however many tools it names. The route that serves this declares
- *   `fleet.configure`; this service adds the confirmation and never removes a step.
+ * - **A caller off this machine needs a live passkey step-up.** The route that serves this declares
+ *   `fleet.configure`, and the boundary holds every configure demand from a governed caller behind the
+ *   step-up before this service runs.
  *
  * NOTHING HERE RUNS ON ITS OWN. There is no timer, no boot hook and no retry: a package manager starts
  * only inside {@link ToolInstallService.install}, which only a person's explicit request reaches.
  * Afterwards the result is checked with the daemon's one harness resolver (`locateHarnessCommand`), so
  * "installed" means this daemon can now find the tool, not merely that a manager exited zero.
  */
-import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts';
+import type { CallerGovernance } from '../api/capability.ts';
 import type { ExecutableResolverPort, HarnessLocation } from '../core/harness-readiness.ts';
 import type { HarnessKind } from '../core/inventory.ts';
 import { stripTerminalEscapes } from '../fleet-login/output.ts';
@@ -320,17 +319,12 @@ export interface ToolInstallServiceOptions {
   readonly run: PackageInstallPort;
   /** The daemon's environment, which a manager inherits with its own directory first on `PATH`. */
   readonly environment: Readonly<Record<string, string | undefined>>;
-  /** Proves the operator password for ONE request. The same closure the harness sign-in takes. */
-  readonly confirmChange: (password: string) => Promise<ChangeConfirmation>;
-  /** What a person types to run this binary, so a refusal names a command they have. */
-  readonly clientName: string;
   readonly timeoutMinutes?: number;
 }
 
-/** One request: which harnesses, and the operator password when this caller owes one. */
+/** One request: which harnesses. */
 export interface ToolInstallRequest {
   readonly harnesses: readonly HarnessKind[];
-  readonly operatorPassword?: string;
 }
 
 /** Each harness as it stands before an install: found, or the plan an install would follow. */
@@ -359,9 +353,6 @@ export class ToolInstallService {
 
   /**
    * Install the named harnesses, one after another, and say how each ended.
-   *
-   * Every refusal that facts can answer is answered BEFORE the password is spent, so a busy machine or
-   * a malformed request never costs an attempt out of the shared budget.
    */
   async install(
     request: ToolInstallRequest,
@@ -378,9 +369,6 @@ export class ToolInstallService {
     const harnesses = [...new Set(request.harnesses)];
     if (harnesses.length === 0)
       throw new ToolInstallRefusal('tool_install_invalid', 'name at least one tool to install');
-    this.#assertIdle();
-    if (governance.confirmChange) await this.#confirm(request.operatorPassword);
-    // Checked AGAIN: the confirmation is an await, so two requests can both pass the first check.
     this.#assertIdle();
     this.#running = true;
     try {
@@ -438,25 +426,5 @@ export class ToolInstallService {
         'tool_install_in_progress',
         'an install is already running on this machine; wait for it to finish',
       );
-  }
-
-  /** Prove the operator password for this one request, or refuse in words naming the next step. */
-  async #confirm(password: string | undefined): Promise<void> {
-    const refuse = (message: string): never => {
-      throw new ToolInstallRefusal('tool_install_unauthorized', message);
-    };
-    if (password === undefined)
-      return refuse(
-        "installing software from off this machine needs this machine's operator password, entered for this install",
-      );
-    const outcome = await this.options.confirmChange(password);
-    if (outcome.kind === 'confirmed') return;
-    if (outcome.reason === 'rate-limited')
-      return refuse(
-        `too many wrong operator passwords have been tried on this machine, so it is not checking any more for now; nothing was installed. Wait for the lockout to pass, or clear it on the machine with \`${this.options.clientName} daemon password set\`.`,
-      );
-    if (outcome.reason === 'no-password')
-      return refuse('this machine has no operator password, so this install could not be confirmed');
-    return refuse("that is not this machine's operator password, so nothing was installed");
   }
 }

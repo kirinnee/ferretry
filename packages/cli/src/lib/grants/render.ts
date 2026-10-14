@@ -1,14 +1,13 @@
 import { CAPABILITY_AXES, type GrantAuditView, type GrantsView } from '@ferretry/protocol';
 
 /**
- * What a person is told, once, when this machine has no operator password.
+ * The one sentence every step-up refusal is explained with, wherever it is shown.
  *
- * ONE SENTENCE, where the decision is actually visible. Not a modal, not repeated, and never a question
- * somebody has to answer to use their own command line — the admin token is governed by none of this.
- * It appears here because this report is where remote access is inspected.
+ * A dangerous demand from a device that is not at this machine is not refused for good; it is waiting
+ * for a passkey confirmation, and a report that said only "refused" would send somebody hunting a
+ * permission they already have.
  */
-export const NO_PASSWORD_NOTE =
-  'no operator password is set, so any paired device can change this machine’s fleet and settings without one';
+export const STEP_UP_NOTE = 'needs a passkey confirmation from a paired device';
 
 /**
  * The grant report, with the ORIGIN column that is the whole point of it.
@@ -18,30 +17,25 @@ export const NO_PASSWORD_NOTE =
  * for me" is the actual question. Values without origins answer the wrong one.
  *
  * IT SAYS WHO THE ROWS APPLY TO, once, at the top. The commonest wrong reading would be to see
- * `configure off` and conclude your own command line is blocked — loopback is ungoverned, and a
- * report that left that implicit would send somebody hunting a permission problem they do not have.
+ * `configure off` and conclude your own command line is blocked — a caller on this host is
+ * ungoverned, and a report that left that implicit would send somebody hunting a permission problem
+ * they do not have.
  */
 export function renderGrants(view: GrantsView, clientName: string): string {
   const nameWidth = Math.max(...view.capabilities.map(entry => entry.capability.length));
   const lines = [
-    'These apply to callers that are NOT on this host. This command line is ungoverned; a browser on this',
-    'machine is governed until it enters the operator password once.',
+    'These apply to callers that are NOT on this host. This command line is ungoverned.',
     '',
     ...view.capabilities.map(entry => {
       const axes = CAPABILITY_AXES.map(axis => `${axis}=${entry.granted[axis] ? 'on ' : 'off'}`).join('  ');
       // The EFFECTIVE answer is stated only where it differs from the recorded one, because that gap
       // is the interesting fact: the operator said yes and something else is still refusing.
       const effective =
-        entry.granted.configure && !entry.configure ? `  (configure ${entry.configureRefusal} right now)` : '';
+        entry.granted.configure && !entry.configure
+          ? `  (configure ${entry.configureRefusal === 'step-up-required' ? STEP_UP_NOTE : entry.configureRefusal} right now)`
+          : '';
       return `${entry.capability.padEnd(nameWidth)}  ${axes}  (${entry.origin})${effective}`;
     }),
-    '',
-    view.passwordSet
-      ? 'an operator password is set, so changing any of these from off this host needs it'
-      : NO_PASSWORD_NOTE,
-    ...(view.lockedUntil === undefined
-      ? []
-      : [`too many wrong passwords: this daemon resumes checking at ${view.lockedUntil}`]),
     '',
     `change one with \`${clientName} daemon config set <capability> --use|--no-use --configure|--no-configure\``,
   ];

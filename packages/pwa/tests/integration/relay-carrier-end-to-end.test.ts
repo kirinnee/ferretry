@@ -158,7 +158,10 @@ class RelayBridge {
     identity: Awaited<ReturnType<typeof newDaemonIdentity>>,
     dispatch: RelayApiDispatch,
     pairing: RelayPairingRedeemer = { redeemInSession: async () => ({ kind: 'refused' }) },
-    sockets: RelayLinkDependencies['sockets'] = async () => ({ outcome: 'unclaimed' }),
+    sockets: RelayLinkDependencies['sockets'] = {
+      upgrade: async () => ({ outcome: 'unclaimed' }),
+      reauthorize: () => true,
+    },
   ): Promise<void> {
     await this.rendezvous.fetch(
       new Request(`${RELAY_URL}/v1/rendezvous/${identity.daemonId}/daemon`, { headers: { Upgrade: 'websocket' } }),
@@ -769,28 +772,31 @@ const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
   let downstream: SocketDownstream | undefined;
   let attached = 0;
   let released = 0;
-  await bridge.admitDaemon(identity, answered('{}'), undefined, async request => {
-    upgrade = request;
-    if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
-    return {
-      outcome: 'accepted',
-      attach: async socket => {
-        downstream = socket;
-        return {
-          open: async () => {
-            attached += 1;
-            // Produced by the handler rather than by the case, so what crosses is what a mounted
-            // stream would have written: this bridge is `SocketDownstream` and nothing else.
-            socket.send(SHELL_OUTPUT);
-            await Promise.resolve();
-          },
-          fromClient: frame => fromClient.push(clientFrame(frame)),
-          close: () => {
-            released += 1;
-          },
-        };
-      },
-    } satisfies SocketUpgradeDecision;
+  await bridge.admitDaemon(identity, answered('{}'), undefined, {
+    reauthorize: () => true,
+    upgrade: async request => {
+      upgrade = request;
+      if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
+      return {
+        outcome: 'accepted',
+        attach: async socket => {
+          downstream = socket;
+          return {
+            open: async () => {
+              attached += 1;
+              // Produced by the handler rather than by the case, so what crosses is what a mounted
+              // stream would have written: this bridge is `SocketDownstream` and nothing else.
+              socket.send(SHELL_OUTPUT);
+              await Promise.resolve();
+            },
+            fromClient: frame => fromClient.push(clientFrame(frame)),
+            close: () => {
+              released += 1;
+            },
+          };
+        },
+      } satisfies SocketUpgradeDecision;
+    },
   });
 
   const overHttp: string[] = [];

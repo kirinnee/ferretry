@@ -4,7 +4,7 @@
  * The daemon already decides everything; this module decides nothing. Its whole job is to turn the
  * two things the daemon hands over — a `GrantRefusal` on the grant view, and a `grant_*` code on a
  * 403 from an ordinary route — into a sentence naming the NEXT STEP, plus the one bit of state a
- * control needs: whether an unlock would help.
+ * control needs: whether a passkey step-up would help.
  *
  * ## WHY THE COPY IS HERE AND NOT AT EACH CONTROL
  *
@@ -14,38 +14,38 @@
  * contract and this is its single browser-side rendering, so a refusal reads the same wherever it
  * lands and a new refusal reason cannot be added without a sentence being written for it.
  *
- * ## THE UNLOCK IS A VALUE, NOT A STORE
+ * ## THE STEP-UP IS THE DAEMON'S, NOT THIS MODULE'S
  *
- * There is deliberately no class here, no module-scope cache and no storage of any kind. An unlock is
- * held for its TTL by the ONE screen that earned it and dies with that screen — the protocol's own
- * words are that "a token that outlived the browser tab it was minted in is a standing configure
- * grant nobody re-consented to", and a document-lifetime store in the app's registry would be
- * exactly that. What lives here instead is the pure part: a held unlock is STAMPED with the daemon
- * that minted it, and `usableUnlock` refuses it for any other daemon and after its expiry, so one
- * machine's unlock can never be presented to another even inside a single screen.
+ * A governed caller doing something dangerous needs a recent passkey step-up (`docs/design/zero-trust.md`).
+ * The daemon remembers it, the carrier asks for it and retries once, and this module holds nothing: no
+ * token, no cache, no clock. What lives here is the sentence that says `step-up-required` in plain words.
  *
- * ## NARROWING IS NEVER GATED
+ * ## NARROWING IS NEVER PRE-EMPTED BY THE BROWSER
  *
- * `grantChangeNeedsUnlock` exists so an unlock prompt appears only where it is genuinely needed.
- * Turning an axis OFF is what somebody does during an incident and is gated by nothing but the
- * `configure` grant; turning one ON is the change that hands a remote browser more than it had. A UI
- * that prompted for a password before a revoke would be a liability, so the asymmetry is computed
- * once, here, from the view the daemon served.
+ * Turning an axis OFF is what somebody does during an incident. A governed caller's narrowing needs one
+ * passkey touch like any other configure act, but the browser never pre-empts it: the press is sent and
+ * the daemon's own answer decides.
  */
 
 import {
   type CapabilityAxis,
   type CapabilityGrantView,
   type DaemonCapability,
-  GRANT_UNLOCK_MAX_ATTEMPTS,
-  GRANT_UNLOCK_TTL_SECONDS,
   type GrantRefusal,
   type GrantsPatch,
   type GrantsView,
-  OPERATOR_PASSWORD_MIN_LENGTH,
-  OperatorPasswordSchema,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpDemand,
 } from '@ferretry/protocol';
-import type { DaemonId } from './daemon-connection.ts';
+
+/**
+ * What a passkey confirmation covers, in one plain sentence with no secret to type.
+ *
+ * Said once, beside the one button that asks for it, so the screen never teaches that a step-up is a
+ * secret to type: it is a touch on this device, it lasts a short while, and it never widens.
+ */
+export const STEP_UP_NOTE =
+  'Changing how a capability behaves, or opening a terminal, the browser, a pairing code or a stored secret, asks you to confirm with your passkey on this device. It covers this open copy of the app for a short while and never turns anything on that was switched off.';
 
 /**
  * The capability as an operator reads it, so a refusal names a thing rather than a key.
@@ -62,6 +62,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   filesystem: 'the project filesystem',
   warden: 'fleet supervision',
   pairing: 'device pairing',
+  secrets: 'the secret store',
 };
 
 export const capabilityNoun = (capability: DaemonCapability): string => CAPABILITY_NOUNS[capability];
@@ -74,9 +75,34 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
   filesystem: 'Project filesystem',
   warden: 'Fleet supervision',
   pairing: 'Device pairing',
+  secrets: 'Secrets',
 };
 
 export const capabilityLabel = (capability: DaemonCapability): string => CAPABILITY_LABELS[capability];
+
+/**
+ * What a person is confirming, as a verb phrase that finishes "Confirm with your passkey to …".
+ *
+ * ONE TABLE, written once, beside the labels it sits with. Every `use` is listed even though only four
+ * of them ever ask for a step-up, so the function is total and a capability added later cannot reach a
+ * prompt with a blank where its act should be (a test pins the table to `DAEMON_CAPABILITIES`).
+ */
+const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
+  fleet: 'use the agent fleet',
+  terminal: 'open a terminal',
+  browser: 'open the remote browser',
+  filesystem: 'use the project filesystem',
+  warden: 'use fleet supervision',
+  pairing: 'add or manage a paired device',
+  secrets: 'run a command with a stored secret',
+};
+
+/** The act a step-up demand stands for. A `configure` is always a change to that capability's settings. */
+export const stepUpAct = (demand: StepUpDemand): string =>
+  demand.axis === 'use' ? USE_ACTS[demand.capability] : `change the settings for ${capabilityNoun(demand.capability)}`;
+
+/** What a prompt says when the daemon named no act: the machine is still named, and the act is "this change". */
+export const STEP_UP_FALLBACK_ACT = 'make this change';
 
 /**
  * What each capability actually reaches, in one line.
@@ -93,7 +119,9 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
   filesystem: 'Reading project files, registering host folders, and running Git init or clone.',
   warden: 'Supervision status, sweeps, and how much quota the daemon may spend unattended.',
   pairing:
-    'Minting pairing codes that let another device reach this machine. A device that can mint credentials for more devices turns one stolen phone into standing access, so switching this off is the one decision a remote browser can never undo.',
+    'Minting pairing codes that let another device reach this machine. A device that can mint credentials for more devices turns one stolen phone into standing access, so switching this off is the one decision a browser can never undo.',
+  secrets:
+    'Runs a command with a stored secret in its environment — code on this machine; and sets or deletes stored secrets.',
 };
 
 export const capabilityReach = (capability: DaemonCapability): string => CAPABILITY_REACH[capability];
@@ -109,39 +137,21 @@ export const axisLabel = (axis: CapabilityAxis): string => AXIS_LABELS[axis];
 export const axisQuestion = (axis: CapabilityAxis): string => AXIS_QUESTIONS[axis];
 
 /**
- * What a person is told, once, when this machine has no operator password.
+ * THE ONE-WAY DOOR, stated wherever a browser can see a switch.
  *
- * ONE SENTENCE, BESIDE THE CONFIGURE CONTROLS. Not a modal, not a banner on every screen, and never
- * a question somebody has to answer to use their own machine — a loopback caller is governed by none
- * of this. It is a disclosure and it is owed exactly once: nagging teaches people to dismiss what
- * the product says, which costs more than the warning is worth.
- */
-export const NO_PASSWORD_DISCLOSURE =
-  'No operator password is set, so any paired device can change the settings of whatever is already turned on here — it still cannot turn anything on, which only this machine can do.';
-
-/** The counterpart, so a machine WITH the layer on says so rather than staying silent about it. */
-export const PASSWORD_SET_DISCLOSURE =
-  'An operator password is set, so a paired device needs it to change the settings of whatever is already turned on here. Turning something on is only ever done at the machine.';
-
-/**
- * THE ONE-WAY DOOR, stated wherever a remote browser can see a switch.
+ * ## ONLY THE MACHINE'S OWN COMMAND LINE WIDENS, AND NO CREDENTIAL CAN BUY IT
  *
- * ## LOCALITY GATES WIDENING NOW, NOT THE PASSWORD
+ * A browser can never turn a capability ON — not after a passkey step-up, and not when it runs on the
+ * machine itself: "at the machine" means the host's admin token over loopback, which a browser never
+ * holds. The step-up gates changing the settings of something already on. Any copy claiming a credential
+ * lets a paired device widen a grant would be false, and false in the dangerous direction.
  *
- * This supersedes the #289 design, and the difference is not cosmetic: a remote caller can never turn a
- * capability ON — **not even holding the operator password**. The password still gates changing the
- * settings of something already on. Any copy claiming the password lets a remote device widen a grant
- * is now false, and false in the dangerous direction, because it invites somebody to believe a
- * credential buys authority it does not buy.
- *
- * Turning something OFF from a remote browser is therefore a door that closes behind you: the only way
- * back is at the machine. That is worth saying BEFORE the click rather than in a document afterwards.
+ * Turning something OFF from a browser is therefore a door that closes behind you: the only way back is
+ * the command line at the machine. That is worth saying BEFORE the click rather than in a document
+ * afterwards.
  */
 export const REMOTE_ONE_WAY_NOTE =
-  'A device that is not on this machine can switch these off but never back on. Turning one on is done at the machine itself.';
-
-export const LOCAL_TWO_WAY_NOTE =
-  'This browser is on the machine, so it can switch these both ways. A paired device elsewhere could only switch them off.';
+  'This browser can switch these off but never back on, even on the machine itself; turning one on is done with `fy daemon config set` at the machine.';
 
 /**
  * What switching a capability off ALSO switches off, when that is the thing somebody came here to do.
@@ -162,7 +172,7 @@ const COARSE_SWITCH_ALSO_STOPS: Readonly<Partial<Record<DaemonCapability, string
 };
 
 /**
- * The sentence a remote reader is shown before they close a door only the machine can reopen.
+ * The sentence a reader is shown before they close a door only the machine’s command line can reopen.
  *
  * It carries the way back — the host command — and, where the switch also disables the remedy, the
  * ordering that avoids locking yourself out of it.
@@ -174,85 +184,43 @@ export function remoteRevokeWarning(capability: DaemonCapability, clientName = '
 
 /** What an off capability says to a caller that may not turn it on: a statement with a remedy. */
 export function grantOnlyAtMachine(capability: DaemonCapability, clientName = 'fy'): string {
-  return `${capabilityLabel(capability)} is switched off, and can only be switched on at the machine — an operator password does not let a paired device turn it on. Run \`${clientName} daemon config set ${capability} --use\` there.`;
+  return `${capabilityLabel(capability)} is switched off, and can only be switched on at the machine, with \`${clientName} daemon config set ${capability} --use\` — a passkey does not, even in a browser there.`;
 }
+
+/**
+ * The host command that widens ONE device, the only remedy for a widen this browser may not make.
+ *
+ * `<device>` is a placeholder on purpose: a device's name is untrusted text, and a command line is the
+ * one place it must not be spliced into unquoted.
+ */
+export const deviceGrantCommand = (capability: DaemonCapability, axis: CapabilityAxis, clientName = 'fy'): string =>
+  `${clientName} device grant <device> ${capability} --${axis}`;
 
 // ─── how this browser reached this daemon ───────────────────────────────────────────────────────
 
 /**
- * WHY a capability is open, which is a different question from WHETHER it is.
+ * HOW the limits apply to this browser, which is a different question from WHICH ones.
  *
- * ## THIS MUST COME FROM THE DAEMON, AND THAT IS THE WHOLE CORRECTNESS RULE
+ * ## EVERY BROWSER IS GOVERNED, AND THE DAEMON SAYS SO
  *
- * A browser sitting on `http://127.0.0.1` can be reaching the daemon **through the relay**, and a
- * relayed hop is never loopback — `tunnelApiRequest` sets `loopback: false` unconditionally, whatever
- * address the request appears to carry. So a mark derived from `location.hostname`, the daemon's
- * `baseUrl`, or anything else the page can see would tell a remote user they were local: the exact
- * inversion the grant layer exists to prevent, re-introduced in the UI where nobody would look for it.
- * Nothing in this module reads the page's address, and nothing may.
+ * A browser is a paired device wherever it runs. A page on `http://127.0.0.1` is governed exactly like
+ * a phone on the relay: only the host's admin token over loopback — the CLI, never a browser — is the
+ * owner at the machine. So the live answer is `governed`, taken from `GrantsView.governed` and never
+ * from the page's address, `location.hostname` or the daemon's `baseUrl`. Nothing in this module reads
+ * any of them, and nothing may.
  *
  * ## `unknown` IS A REAL STATE, NOT A MISSING ONE
  *
- * The daemon reports it as `GrantsView.governed`, so the live surface passes the answer through. Absence
- * still has to mean something, because an OLDER daemon may not send it — and the friendly assumption,
- * "no answer means loopback", is precisely the wrong one: it would paint a remote phone as standing at
- * the machine. So absence is its own posture and the screen says it cannot tell, in keeping with the rest
- * of this feature, where damaged state is never read as empty state.
- *
- * It also cannot be INFERRED from the refusals on the view. A loopback caller reads `granted` on every
- * axis — and so does a remote caller holding a valid unlock on a fully-granted machine. The two are
- * indistinguishable in those fields, so any inference from them would be a guess that is wrong for a
- * real configuration.
+ * No answer, or an answer that says "not governed" to a browser, is not something this app can explain,
+ * and the friendly reading is the wrong one: it would tell a person their limits do not apply. So the
+ * screen says it cannot tell and treats the limits as applying — the safe reading — in keeping with the
+ * rest of this feature, where damaged state is never read as empty state.
  */
-export type ConnectionPosture = 'direct-local' | 'local-locked' | 'governed-remote' | 'unknown';
+export type ConnectionPosture = 'governed' | 'unknown';
 
-/**
- * The posture, from the daemon's own account of the request — TWO facts, not one.
- *
- * `governed` used to be the exact inverse of "on this host", and `local-locked` is what happened when
- * it stopped being: a browser is a paired device wherever it runs, so a local one is governed until it
- * presents an unlock. Reading locality off `governed` would now paint somebody standing at the machine
- * as remote for as long as their unlock is missing or expired, which is the inversion this whole
- * module exists to avoid — in the flattering direction last time and in the confusing direction now.
- *
- * `hostLocal` absent is `unknown` for the same reason it always was: an OLDER daemon that does not send
- * it must not be read as loopback, because the friendly assumption is the dangerous one.
- */
-export function connectionPosture(governed: boolean | undefined, hostLocal?: boolean): ConnectionPosture {
-  if (governed === undefined) return 'unknown';
-  // A view that carries `governed` but not `hostLocal` is a daemon from before the two came apart, and
-  // there `!governed` WAS locality. Trusting it is not a guess: that daemon gates no local browser.
-  const local = hostLocal ?? !governed;
-  if (!local) return 'governed-remote';
-  return governed ? 'local-locked' : 'direct-local';
-}
-
-/**
- * The posture as the CAPABILITY VIEW reveals it — the FALLBACK, for a view that carries no `governed`.
- *
- * `GrantsView.governed` is the answer to prefer and the live surface passes it, so this path is what a
- * browser meeting an OLDER daemon degrades to rather than the ordinary route. It works because every
- * capability carries `mayGrant`, which the daemon computes as exactly `!governed`
- * (`grants/service.ts`) — the same fact, once per capability.
- *
- * It stays because the two questions are not the same one. `mayGrant` asks "may this caller widen THIS
- * capability"; `governed` asks "where did this caller come from". They agree today; a locally-immutable
- * capability would separate them, and this reads as "cannot tell" in that case rather than guessing.
- *
- * IT REQUIRES UNANIMITY. Every capability on one connection must agree, because they are all derived
- * from one request's carrier; a view where some say yes and some say no is not a posture this can name,
- * and it fails to `unknown` rather than picking a side. An empty list is `unknown` for the same reason —
- * there is no evidence, and absence is never read as loopback.
- */
-export function postureFromCapabilities(capabilities: readonly CapabilityGrantView[]): ConnectionPosture {
-  if (capabilities.length === 0) return 'unknown';
-  const first = capabilities[0]?.mayGrant;
-  if (first === undefined || capabilities.some(entry => entry.mayGrant !== first)) return 'unknown';
-  // `mayGrant` is LOCALITY now (`grants/service.ts`), which is the half this fallback can answer. It
-  // cannot see whether a local browser has unlocked, so it reports `direct-local` for one that has not
-  // — the row-level `locked` refusals still say so, and inventing `local-locked` from no evidence would
-  // be the same guess this function refuses to make about an empty list.
-  return connectionPosture(!first, first);
+/** The posture, from the daemon's own account of the request. Only an explicit `true` is governed. */
+export function connectionPosture(governed: boolean | undefined): ConnectionPosture {
+  return governed === true ? 'governed' : 'unknown';
 }
 
 /** What each posture means for the whole screen, in the words a person would use about themselves. */
@@ -264,32 +232,18 @@ export interface PostureCopy {
 }
 
 const POSTURE_COPY = {
-  'direct-local': {
-    badge: 'Direct — on this machine',
-    headline: 'This browser is talking straight to the machine, so none of these limits apply to it.',
+  governed: {
+    badge: 'Governed',
+    headline: 'The operator’s limits apply to this browser, even when it runs on the machine itself.',
     detail:
-      'Everything below is open because you are standing at the machine, not because it was granted. Somebody at the machine already has the machine, so gating them would be friction with no safety. The same browser on your phone, over the network or the relay, would be governed by every limit on this page.',
-    tone: 'ok',
-  },
-  'local-locked': {
-    badge: 'On this machine — locked',
-    headline: 'This browser is on the machine, and is waiting for the operator password before it acts as one.',
-    detail:
-      'A browser is a paired device wherever it runs, including here, so the limits below apply to it until you enter the password once. After that this tab is ungoverned for five minutes and nothing else asks again. It is a deliberateness step rather than a wall — anybody at this keyboard can open a terminal — and it is what stops an unattended tab being one tap from reconfiguring the machine.',
-    tone: 'limit',
-  },
-  'governed-remote': {
-    badge: 'Remote — governed',
-    headline: 'This browser reached the machine from somewhere else, so the operator’s limits apply to it.',
-    detail:
-      'Every capability below is open only because the operator allowed it, and can be closed on the host. This is the case the limits exist for: possession of the machine is exactly what this connection does not have.',
+      'Every capability below is open only because the operator allowed it, and changing one, or opening a terminal, the browser, a pairing code or a stored secret, asks you to confirm with your passkey.',
     tone: 'disclosure',
   },
   unknown: {
     badge: 'Cannot tell',
     headline: 'This daemon did not say how it saw this connection, so Ferretry will not claim either way.',
     detail:
-      'A page on 127.0.0.1 can still be reaching the machine through the relay, so the address in the address bar does not answer this and is deliberately not used. Until the daemon reports it, treat the limits below as the ones that would apply to a remote device — the safe reading, not the flattering one.',
+      'Until the daemon reports it, treat the limits below as applying to this browser — the safe reading, not the flattering one.',
     tone: 'fault',
   },
 } satisfies Record<ConnectionPosture, PostureCopy>;
@@ -299,24 +253,22 @@ export const postureCopy = (posture: ConnectionPosture): PostureCopy => POSTURE_
 /**
  * Why THIS capability is open right now — the per-row version of the posture.
  *
- * `ungoverned` is the answer for every row on a loopback connection and is the distinction the owner
- * asked for: open because of where you are, rather than open because somebody decided. The other three
- * are the governed answers, and they are the reasons the daemon already gives.
+ * `granted` is open because the operator allowed it. `step-up` is a row that is allowed in principle and
+ * waits on a passkey confirmation from this device. The rest are the reasons the daemon already gives.
  */
-export type OpenReason = 'ungoverned' | 'granted' | 'ungated' | 'closed' | 'unknown';
+export type OpenReason = 'granted' | 'step-up' | 'closed' | 'unknown';
 
 export function openReason(entry: CapabilityGrantView, axis: CapabilityAxis, posture: ConnectionPosture): OpenReason {
+  if (axisRefusal(entry, axis) === 'step-up-required') return 'step-up';
   if (!axisAllowed(entry, axis)) return 'closed';
-  if (posture === 'direct-local') return 'ungoverned';
   if (posture === 'unknown') return 'unknown';
-  return axisRefusal(entry, axis) === 'ungated' ? 'ungated' : 'granted';
+  return 'granted';
 }
 
 /** The short mark a row carries, so five rows do not all read "allowed". */
 const OPEN_REASON_LABELS = {
-  ungoverned: 'Open — you are at the machine',
   granted: 'Open — granted',
-  ungated: 'Open — nothing behind it',
+  'step-up': 'Open — after your passkey',
   closed: 'Closed',
   unknown: 'Open — reason unknown',
 } satisfies Record<OpenReason, string>;
@@ -356,6 +308,9 @@ const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
   // host by itself; what it hands out is a credential that carries every other capability, so weighing it
   // by its own reach would rate it `narrow` and read as the mildest switch on the screen.
   pairing: 'broad',
+  // Running a command is code execution on the host, with credentials in its environment: the same tier
+  // as a terminal, whatever the secret store holds.
+  secrets: 'broad',
 };
 
 export const capabilityWeight = (capability: DaemonCapability): AccessWeight => CAPABILITY_WEIGHTS[capability];
@@ -407,10 +362,9 @@ export const CAPABILITY_LIST_SCOPE_NOTE =
 /**
  * The sentence a reader is shown for a state that is not a plain yes.
  *
- * `offersUnlock` is the load-bearing field: it is the difference between a control that says "ask the
- * operator" and one that can be opened right here. It is true for exactly one reason — `locked` — and
- * false for `rate-limited`, where a prompt would invite five more wrong guesses at a daemon that has
- * already stopped listening.
+ * `offersStepUp` is the load-bearing field: it is the difference between a control that says "ask the
+ * operator" and one that can be opened right here with a passkey touch. It is true for exactly one
+ * reason — `step-up-required`.
  */
 export interface GrantGuidance {
   /** How the row should read: an allowed state, a limit somebody chose, or a fault. */
@@ -419,8 +373,8 @@ export interface GrantGuidance {
   readonly badge: string;
   /** What is true, and what to do about it. Ends in a full stop; may be two sentences. */
   readonly explanation: string;
-  /** Whether an unlock prompt would resolve this. */
-  readonly offersUnlock: boolean;
+  /** Whether a passkey step-up would resolve this. */
+  readonly offersStepUp: boolean;
 }
 
 /**
@@ -432,65 +386,41 @@ export interface GrantGuidance {
  * feature exists to remove.
  */
 const GUIDANCE = {
-  /**
-   * Allowed. It deliberately does NOT claim the password stood behind it.
-   *
-   * `granted` is what a `use` axis reads on every machine, password or not, so wording it as "the
-   * password stood behind this" states something false on the common setup — and beside a header that
-   * already says no password is set, a reader is entitled to believe one of the two is lying.
-   */
-  granted: { tone: 'ok', badge: 'Allowed', explanation: 'The operator allows this.', offersUnlock: false },
-  /**
-   * Allowed with nothing behind it — a disclosure, not a refusal.
-   *
-   * IT DOES NOT REPEAT THE WHOLE DISCLOSURE. That sentence is owed once, and the card states it in the
-   * header; restating it under five capabilities × the configure axis prints it five times on one
-   * screen, which is exactly the nagging `docs/grants.md` rules out. The row says the short fact and
-   * lets the header carry the consequence.
-   */
-  ungated: {
-    tone: 'disclosure',
-    badge: 'Allowed',
-    explanation: 'Allowed, and no operator password is standing behind it.',
-    offersUnlock: false,
-  },
+  granted: { tone: 'ok', badge: 'Allowed', explanation: 'The operator allows this.', offersStepUp: false },
   'not-granted': {
     tone: 'limit',
     badge: 'Switched off',
     explanation: 'The operator of this machine switched this off. It is turned back on on the host.',
-    offersUnlock: false,
+    offersStepUp: false,
   },
   /**
-   * The password gates CHANGING THE SETTINGS of something already on — never turning one on.
-   *
-   * The old wording ("this needs the operator password") was true of every refusal in #289 and is now
-   * false for the one that matters most: a remote caller holding the password still cannot widen a
-   * grant. A sentence that implies otherwise invites somebody to type a password expecting authority it
-   * does not buy, which is worse than saying nothing.
+   * The machine allows it and THIS device was never given it. A passkey does not help: the next step
+   * is widening this one device, at the machine or from a device that holds the capability and
+   * `pairing.configure`.
    */
-  locked: {
+  'device-not-granted': {
     tone: 'limit',
-    badge: 'Needs the password',
-    // NOT "unlock below" any more. The prompt is a modal raised at the moment authority is needed, so a
-    // sentence pointing DOWN describes a field that is not there — and pointing anywhere is the wrong job
-    // for this copy, whose business is what is true rather than where the control is.
+    badge: 'Not given to this device',
     explanation:
-      'Changing this needs the operator password for this machine, typed once to unlock it. (Switching a capability on is a separate matter and is only ever done at the machine.)',
-    offersUnlock: true,
+      'The machine allows this, but this device has not been given it. Widen this device at the machine, or from a device that holds it and can configure pairing.',
+    offersStepUp: false,
   },
-  'rate-limited': {
+  /**
+   * A passkey touch on THIS device stands between the person and a dangerous act. It never buys
+   * widening — no browser can turn a capability on.
+   */
+  'step-up-required': {
     tone: 'limit',
-    badge: 'Too many tries',
-    explanation:
-      'Too many wrong operator passwords have been tried, so this daemon has stopped checking them for now. Wait for the lockout to pass, or clear it on the host.',
-    offersUnlock: false,
+    badge: 'Needs your passkey',
+    explanation: 'This needs your passkey. Confirm on this device and it goes ahead.',
+    offersStepUp: true,
   },
   undetermined: {
     tone: 'fault',
     badge: 'Unknown',
     explanation:
       'This daemon could not read its own grant document, so it is refusing everything governed by it. Nothing is broken about this browser; the document on the host needs repairing.',
-    offersUnlock: false,
+    offersStepUp: false,
   },
 } satisfies Record<GrantRefusal, GrantGuidance>;
 
@@ -498,7 +428,7 @@ const GUIDANCE = {
  * The guidance for one refusal, with the capability named where naming it helps.
  *
  * The two refusals that name a capability are the two a person can act on per capability. The other
- * four are facts about the machine, and repeating "the agent fleet" inside a sentence about a
+ * two are facts about the machine, and repeating "the agent fleet" inside a sentence about a
  * daemon that cannot read its own document would make five rows say the same thing five times.
  */
 export function grantGuidance(refusal: GrantRefusal, capability?: DaemonCapability): GrantGuidance {
@@ -507,12 +437,17 @@ export function grantGuidance(refusal: GrantRefusal, capability?: DaemonCapabili
   if (refusal === 'not-granted')
     return {
       ...base,
-      explanation: `The operator of this machine switched off ${capabilityNoun(capability)} for callers that are not on the host. It is turned back on on the host.`,
+      explanation: `The operator of this machine switched off ${capabilityNoun(capability)} for paired devices, this browser included. It is turned back on at the machine with \`fy\`.`,
     };
-  if (refusal === 'locked')
+  if (refusal === 'device-not-granted')
     return {
       ...base,
-      explanation: `Changing ${capabilityNoun(capability)} needs the operator password for this machine, typed once to unlock it.`,
+      explanation: `This machine allows ${capabilityNoun(capability)}, but this device has not been given it. Widen this device at the machine with \`${deviceGrantCommand(capability, 'use')}\`, or from a device that holds it and can configure pairing.`,
+    };
+  if (refusal === 'step-up-required')
+    return {
+      ...base,
+      explanation: `Using or changing ${capabilityNoun(capability)} from here needs your passkey. Confirm on this device and it goes ahead.`,
     };
   return base;
 }
@@ -535,7 +470,7 @@ export function axisGuidance(entry: CapabilityGrantView, axis: CapabilityAxis, c
     tone: 'limit',
     badge: 'Fixed on the host',
     explanation: `This browser may use ${capabilityNoun(entry.capability)} and may not change this. The operator did not grant it permission to change ${capabilityNoun(entry.capability)}, which is also what stops it re-granting itself the capability — so this is changed at the machine.`,
-    offersUnlock: false,
+    offersStepUp: false,
   };
 }
 
@@ -569,61 +504,39 @@ export const grantPatch = (capability: DaemonCapability, axis: CapabilityAxis, n
  *
  * ## LOCALITY DECIDES THIS, AND NOTHING ELSE CAN
  *
- * A remote caller may never widen a grant — no operator password, no unlock, no credential changes it.
- * So this is not a question about what to prompt for; it is a question about whether to render a
- * control at all. A switch that always fails is worse than no switch: it teaches somebody the product
- * is broken rather than that the machine decided.
+ * Only the host's admin token over loopback may widen a grant, and a browser never holds it — so for a
+ * browser this reads false, even on the machine itself, and no passkey step-up changes that. It is not
+ * a question about what to prompt for; it is a question about whether to render a control at all. A
+ * switch that always fails is worse than no switch: it teaches somebody the product is broken rather
+ * than that the machine decided.
  *
  * READ STRAIGHT OFF THE WIRE, deliberately, rather than inferred from the posture. The daemon is
- * enforcing this rule and now states it per capability, so a second copy of the rule in the browser is
- * a second thing that can disagree with it — and the disagreement would show up as a control that
- * either fails on press or is missing when it should work.
+ * enforcing this rule and states it per capability, so a second copy of the rule in the browser is a
+ * second thing that can disagree with it.
  */
 export function mayGrantCapability(entry: CapabilityGrantView): boolean {
   return entry.mayGrant;
 }
 
 /**
- * Whether this exact change still needs an unlock.
+ * Whether the daemon would accept THIS browser changing either axis of this capability at all.
  *
- * NARROWED BY THE RULE CHANGE. Widening is now decided by locality rather than by the password, so the
- * only change an unlock is ever needed for is altering the settings of a capability that is already on
- * — which is `configure` on a machine with a password set. Turning an axis OFF is never gated: it is
- * what somebody does during an incident, and a prompt between a person and shutting a door is a
- * liability.
+ * THE DAEMON'S RULE, restated exactly: a governed caller must already hold `use` and `configure` on a
+ * capability to touch either of its axes, because an operator who said the UI may not configure
+ * `terminal` is also saying the UI may not re-grant itself `terminal`. A browser is always governed;
+ * an ungoverned caller (the CLI) has nothing to hold, so the per-capability gate adds nothing for it.
+ * The passkey step-up is deliberately not part of this: it can always be obtained on the spot, so it
+ * never makes a control unchangeable.
  */
-export function grantChangeNeedsUnlock(view: GrantsView, capability: DaemonCapability, next: boolean): boolean {
-  if (!next || !view.passwordSet) return false;
-  const entry = view.capabilities.find(candidate => candidate.capability === capability);
-  return entry !== undefined;
-}
-
-/**
- * Whether pressing this switch would be refused until this browser unlocks.
- *
- * THE DIRECTION DECIDES IT. Narrowing is never gated — a prompt between a person and shutting a door is
- * a liability during the incident that made them reach for it — so this is only ever true of a widening
- * press. `mayGrant` false means the switch is not a control at all and the one-way notice already says
- * so; the case this catches is the new one: a browser ON the machine that has not proved the password
- * yet, where a switch that looked live and failed on press would read as broken software.
- */
-export function axisChangeLocked(view: GrantsView, entry: CapabilityGrantView, recorded: boolean): boolean {
-  if (recorded || !entry.mayGrant) return false;
-  return view.governed && view.passwordSet && !view.unlocked;
-}
+export const grantChangeable = (view: GrantsView, entry: CapabilityGrantView): boolean =>
+  !view.governed || (entry.granted.use && entry.granted.configure);
 
 /**
  * Who the limits on this screen actually apply to, in one sentence that cannot be wrong for a real
  * configuration.
- *
- * A SINGLE SENTENCE WAS THE DEFECT. "These apply to callers that are not on this machine" was true when
- * a local browser was ungoverned by construction; it is false for a local browser waiting to unlock, and
- * false in the direction that sends somebody hunting for a permission problem they do not have.
  */
 const GRANT_SCOPE_NOTES = {
-  'direct-local': 'not-on-this-machine',
-  'local-locked': 'this-browser-until-unlocked',
-  'governed-remote': 'this-browser',
+  governed: 'this-browser',
   unknown: 'cannot-tell',
 } satisfies Record<ConnectionPosture, string>;
 
@@ -631,13 +544,9 @@ const GRANT_SCOPE_NOTES = {
 export const grantScopeKey = (posture: ConnectionPosture): string => GRANT_SCOPE_NOTES[posture];
 
 export function grantScopeNote(posture: ConnectionPosture): string {
-  if (posture === 'direct-local')
-    return 'These apply to callers that are not on this machine — a paired phone, a browser across the network, a session carried over the relay. This browser is on the machine and has unlocked, so none of them apply to it right now.';
-  if (posture === 'local-locked')
-    return 'These apply to a paired phone or a browser across the network — and, until you enter the operator password once, to this browser too. A browser is a paired device wherever it runs, including on the machine itself.';
-  if (posture === 'governed-remote')
-    return 'These apply to this browser. It reached the machine from somewhere else, which is the case the limits exist for: possession of the machine is exactly what this connection does not have.';
-  return 'This daemon did not say how it saw this connection, so treat these as the limits that would apply to a remote device — the safe reading rather than the flattering one.';
+  if (posture === 'governed')
+    return 'These apply to this browser, because a paired device is governed wherever it runs, on the machine itself included.';
+  return 'This daemon did not say how it saw this connection, so treat these as limits that apply to this browser — the safe reading.';
 }
 
 /** Whether the operator's document already records this axis the way a change would set it. */
@@ -677,8 +586,8 @@ interface HttpFailure {
  */
 const REFUSAL_BY_CODE: Readonly<Record<string, GrantRefusal>> = {
   grant_not_granted: 'not-granted',
-  grant_locked: 'locked',
-  grant_rate_limited: 'rate-limited',
+  [STEP_UP_REQUIRED_CODE]: 'step-up-required',
+  grant_device_not_granted: 'device-not-granted',
   grant_undetermined: 'undetermined',
   grants_undetermined: 'undetermined',
   grant_forbidden: 'not-granted',
@@ -690,7 +599,7 @@ const REFUSAL_BY_CODE: Readonly<Record<string, GrantRefusal>> = {
  * `detail` is the DAEMON'S OWN SENTENCE, kept whole. It already names the command a human runs,
  * composed by the layer that knows what this product's client is called — a browser that replaced it
  * with its own wording would either repeat it or contradict it. The guidance beside it is what the
- * browser adds: the tone, the badge, and whether an unlock is on offer.
+ * browser adds: the tone, the badge, and whether a passkey step-up is on offer.
  */
 export interface GrantRefusalNotice {
   readonly refusal: GrantRefusal;
@@ -704,266 +613,24 @@ export function grantRefusalNotice(error: unknown): GrantRefusalNotice | null {
   if (typeof failure.code !== 'string') return null;
   const refusal = REFUSAL_BY_CODE[failure.code];
   if (refusal === undefined) return null;
-  // A code is not enough on its own: `grant_rate_limited` is also how the UNLOCK route refuses, and
-  // that is a 429 about a password rather than a 403 about a capability. Both statuses are accepted
-  // because both mean the same thing to the control that is disabled.
-  if (failure.status !== 403 && failure.status !== 429 && failure.status !== 503) return null;
+  // A grant refusal is a 403, or a 503 when the daemon cannot read its own grant document.
+  if (failure.status !== 403 && failure.status !== 503) return null;
   const detail = typeof failure.message === 'string' && failure.message !== '' ? failure.message : '';
   return { refusal, detail, guidance: grantGuidance(refusal) };
 }
 
-// ─── the unlock exchange ───────────────────────────────────────────────────────────────────────
-
 /**
- * An unlock, stamped with the daemon that minted it.
+ * Which axes THIS device's own grant withholds although the machine allows them, as one sentence.
  *
- * The stamp is not decoration. One browser can be paired to several daemons, and a token is proof
- * against exactly one of them; presenting daemon A's unlock to daemon B would be a credential
- * crossing a machine boundary, which is the failure this repository keys everything by daemon to
- * prevent. `expiresAtMs` is held as the instant rather than a duration so a screen left open cannot
- * keep believing a token is live.
+ * `null` when the caller is not a governed device (`deviceGranted` is absent on the host) or when its
+ * grant withholds nothing the machine allows. It names only what the device grant adds to the daemon-wide
+ * answer, because the daemon-wide refusal already has its own sentence.
  */
-export interface HeldUnlock {
-  readonly daemonId: DaemonId;
-  readonly token: string;
-  readonly expiresAtMs: number;
+export function deviceGrantNote(entry: CapabilityGrantView, clientName = 'fy'): string | null {
+  const device = entry.deviceGranted;
+  if (device === undefined) return null;
+  const withheld = (['use', 'configure'] as const).filter(axis => entry.granted[axis] && !device[axis]);
+  const first = withheld[0];
+  if (first === undefined) return null;
+  return `This device has not been given ${withheld.map(axisLabel).join(' or ').toLowerCase()} of ${capabilityNoun(entry.capability)}, although the machine allows it. Widen this device at the machine with \`${deviceGrantCommand(entry.capability, first, clientName)}\`, or from a device that holds it and can configure pairing.`;
 }
-
-/** The unlock to send with a change, or `undefined` when there is none this daemon can use now. */
-export function usableUnlock(held: HeldUnlock | null, daemonId: DaemonId, nowMs: number): string | undefined {
-  if (held === null || held.daemonId !== daemonId || held.expiresAtMs <= nowMs) return undefined;
-  return held.token;
-}
-
-/** Whole seconds left on a held unlock, floored at zero, for a countdown a reader can act on. */
-export function unlockSecondsRemaining(held: HeldUnlock | null, daemonId: DaemonId, nowMs: number): number {
-  if (held === null || held.daemonId !== daemonId) return 0;
-  return Math.max(0, Math.ceil((held.expiresAtMs - nowMs) / 1_000));
-}
-
-/**
- * Why an unlock attempt failed, in the words the daemon used, with the one number a person needs.
- *
- * ATTEMPTS REMAINING IS SHOWN, because a limiter a person cannot see is a limiter that looks like a
- * broken daemon. It is read from the daemon's own sentence rather than counted here: the count is
- * per-daemon state and a browser that kept its own would disagree with the machine the moment two
- * tabs were open. When the sentence carries no number, the field is absent rather than guessed.
- */
-export interface OperatorUnlockFailure {
-  readonly message: string;
-  /** Whether typing another password could succeed. False while the daemon is not checking. */
-  readonly retryable: boolean;
-  readonly attemptsRemaining?: number;
-}
-
-const ATTEMPTS_PATTERN = /(\d+)\s+attempts?\s+remaining/u;
-
-export function operatorUnlockFailure(error: unknown): OperatorUnlockFailure {
-  const failure = (error === null || typeof error !== 'object' ? {} : error) as HttpFailure;
-  const daemonSaid = typeof failure.message === 'string' && failure.message !== '' ? failure.message : '';
-  const code = typeof failure.code === 'string' ? failure.code : '';
-  if (code === 'grant_rate_limited')
-    return {
-      message: daemonSaid === '' ? GUIDANCE['rate-limited'].explanation : daemonSaid,
-      retryable: false,
-      attemptsRemaining: 0,
-    };
-  if (code === 'grant_no_password')
-    return {
-      message: daemonSaid === '' ? 'This machine has no operator password, so there is nothing to unlock.' : daemonSaid,
-      retryable: false,
-    };
-  if (code === 'grant_wrong_password') {
-    const found = ATTEMPTS_PATTERN.exec(daemonSaid);
-    const parsed = found?.[1] === undefined ? undefined : Number(found[1]);
-    return {
-      message: daemonSaid === '' ? 'That is not this machine’s operator password.' : daemonSaid,
-      retryable: true,
-      ...(parsed === undefined || Number.isNaN(parsed) ? {} : { attemptsRemaining: parsed }),
-    };
-  }
-  return {
-    message: daemonSaid === '' ? 'The unlock could not be completed.' : daemonSaid,
-    retryable: true,
-  };
-}
-
-/** The limiter, stated before anybody has spent a try, so five is a known budget rather than a surprise. */
-export const UNLOCK_LIMIT_NOTE = `Five wrong passwords and this daemon stops checking for fifteen minutes. It counts per machine, not per browser, so a colleague’s wrong guesses spend the same ${String(GRANT_UNLOCK_MAX_ATTEMPTS)}.`;
-
-/**
- * WHAT THE UNLOCK COVERS AND HOW LONG IT LASTS, said once where the password is typed.
- *
- * It is the sentence the inline field never carried, and its absence is what made a `sudo`-shaped
- * mechanism read as authorisation for one action: a person met a password box beside one button and
- * concluded, reasonably, that it belonged to that button. So the scope goes in the prompt — the window,
- * what happens inside it, and the two facts that stop it being a standing grant: it belongs to this
- * screen, and closing the page ends it.
- *
- * Deliberately NOT repeated beside each control the unlock then covers. A note at every control is a
- * note that teaches people the product nags, and it re-creates the per-action framing this removes.
- */
-export const UNLOCK_HOLDING_NOTE = `It lasts ${String(GRANT_UNLOCK_TTL_SECONDS / 60)} minutes and covers everything you change here in that time — nothing asks again. It is held by this screen only, for this machine only, is never saved, and closing the page ends it.`;
-
-// ─── setting the operator password ─────────────────────────────────────────────────────────────
-
-/**
- * THE COMMANDS ON THE HOST, named in one place because they are the way back out of every dead end.
- *
- * A control that can lock somebody out carries the way back at the point of decision, and the way back
- * out of this one is a terminal on the machine. `set` never asks for the old password — that is the
- * property the whole design leans on, and it is the sentence a person who has forgotten theirs needs.
- */
-export const PASSWORD_HOST_SET_COMMAND = 'fy daemon password set';
-
-/**
- * ARRIVAL AND CREDENTIAL ARE DIFFERENT FACTS, said before the tap rather than discovered by one.
- *
- * The route this control calls is refused to every caller off the host, and a person holding a phone
- * on the same desk reads "on the same network" as "on the machine". Naming the distinction is what
- * stops the refusal reading as a bug.
- */
-export const PASSWORD_ARRIVAL_VS_CREDENTIAL =
-  'Being at this machine and holding its password are separate things. A browser running on the machine can set it; a paired phone cannot, even sitting on the same desk, because the daemon refuses this from every connection that arrived from somewhere else.';
-
-/**
- * The explained-unavailable state for a remote browser. NOT a greyed control and not silence.
- *
- * Hiding it would leave somebody hunting for a setting the product does have; greying it out with
- * nothing beside it is the dead end these panels exist to remove. So the reason and the alternative
- * are rendered where the control would have been.
- */
-export const PASSWORD_REMOTE_UNAVAILABLE = `This browser reached the machine from somewhere else, so it cannot set the operator password — the daemon refuses that from any connection that did not arrive on the host, whatever credential it holds. Set it from a browser on the machine, or run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal there.`;
-
-/**
- * That setting one cannot be undone, said BEFORE the first press rather than discovered after it.
- *
- * There is no control that removes a password, and the reason is worth the sentence: removing one
- * revokes no paired device, so a machine that had devices paired would keep them and lose the only
- * thing standing in front of them. The consequence a reader actually meets is narrower — they will be
- * asked for it here from now on — and that is what this says.
- */
-export const PASSWORD_ONE_WAY_NOTE =
-  'Setting a password cannot be undone. There is no way to remove one — removing it would leave every device already paired with this machine free to change its settings with nothing to prove — so from then on this browser is asked for it before it changes anything here.';
-
-/**
- * The recovery path, in the words of somebody who does not have the password.
- *
- * THIS IS THE SENTENCE THAT KEEPS THE FEATURE FROM BEING A LOCKOUT. A local browser needs the current
- * password to replace it, so the reader who has forgotten theirs is exactly the reader this control
- * strands — and the escape hatch is a terminal on this machine, which never asks for the old one. It
- * is the ONLY escape hatch now that nothing removes a password, which is why it is stated whole rather
- * than as one option among several.
- */
-export const PASSWORD_RECOVERY_NOTE = `Forgotten it? Run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal on this machine — it replaces the password without asking for the old one. That is the way back: nothing removes a password, but nothing about it can lock you out of your own machine either.`;
-
-/** What this browser may do about the password right now, and why, in one answer. */
-export type PasswordControlState =
-  /** On the host and past the gate: the control is live. */
-  | { readonly kind: 'ready'; readonly first: boolean }
-  /** On the host, a password exists, and this browser has not proved it yet. */
-  | { readonly kind: 'locked' }
-  /** Not on the host. The daemon would refuse it, so the reason is rendered instead of the control. */
-  | { readonly kind: 'remote' };
-
-/**
- * Whether this browser may move the password, decided from the DAEMON's own account of the request.
- *
- * IT RESTATES THE DAEMON'S RULE RATHER THAN INVENTING ONE, and the rule has two halves that a single
- * boolean cannot carry: the route is refused off the host at all (`hostLocal`), and a local browser is
- * a paired device that must unlock first (`governed`). A control that guessed either half would either
- * fail on press or hide itself on the one machine that can use it.
- */
-export function passwordControlState(view: GrantsView): PasswordControlState {
-  if (!view.hostLocal) return { kind: 'remote' };
-  if (view.passwordSet && !view.unlocked) return { kind: 'locked' };
-  return { kind: 'ready', first: !view.passwordSet };
-}
-
-/**
- * Why a candidate password is not acceptable yet, or nothing when it is.
- *
- * THE RULE HAS ONE OWNER AND IT IS THE PROTOCOL. Re-checking a length here would be a second copy of
- * the minimum that could fall behind the schema the daemon parses with, so the schema is asked. It is
- * asked BEFORE the call so a person is told at the field rather than by a 400, and the value is passed
- * through and dropped — nothing about the candidate is retained, logged or echoed.
- */
-export function operatorPasswordProblem(candidate: string): string | undefined {
-  if (candidate === '') return 'Enter a password to set.';
-  if (OperatorPasswordSchema.safeParse(candidate).success) return undefined;
-  return `Use at least ${String(OPERATOR_PASSWORD_MIN_LENGTH)} characters. It gates changes from other devices and is rate-limited, so length is the only rule.`;
-}
-
-/**
- * The rule, before anybody has typed anything wrong.
- *
- * IT READS THE MINIMUM FROM THE SAME CONSTANT the refusal above does, rather than spelling a number in
- * prose: a hint that said "eight" while the schema wanted ten would be a lie told at the exact moment
- * somebody is trying to comply with it.
- */
-export const OPERATOR_PASSWORD_RULE_NOTE = `At least ${String(OPERATOR_PASSWORD_MIN_LENGTH)} characters. It is stored as a verifier and can never be read back — not by a command, not by a route, not by this browser.`;
-
-/** Whether the two typed values agree, checked in the browser so a typo is not stored as the password. */
-export const operatorPasswordMismatch = (candidate: string, confirmation: string): boolean =>
-  candidate !== '' && confirmation !== '' && candidate !== confirmation;
-
-// ─── the password a first pairing requires ─────────────────────────────────────────────────────
-
-/**
- * Whether adding a device will be refused until a password exists.
- *
- * ## THIS IS A PRE-CHECK. THE RULE ITSELF IS IN THE DAEMON
- *
- * `POST /v1/pair/code` refuses on a machine with no operator password, for every caller — a phone, a
- * browser on the machine, and the host's own `fy pair`. That refusal is the guarantee; see
- * `docs/grants.md` and `PairingService.mint`. What this function is for is telling somebody BEFORE they
- * tap, because a control that fails on press is worse than one that explains itself.
- *
- * IT RESTATES THE DAEMON'S ANSWER, IT DOES NOT DECIDE ANYTHING. The requirement used to live here, and
- * the consequence was a guarantee that only covered the browser: `fy pair` could hand out a key before
- * the lock existed. Moving it down means one rule, one sentence, and nothing here that can drift out of
- * step with what the daemon will actually do.
- *
- * ## WHY THE REQUIREMENT EXISTS AT PAIRING AND NOWHERE ELSE
- *
- * `fleet.configure` is on by default for a governed caller, so on a machine with no password any paired
- * device may provision the host — writing executable wrappers into the operator's accounts — with
- * nothing to prove. Requiring the password at the moment remote access is CREATED deletes that state
- * rather than warning about it. A person setting up on their own machine with nothing paired is asked
- * for nothing, because there is no remote caller for a gate to stand in front of.
- */
-export const pairingNeedsPassword = (view: GrantsView): boolean => !view.passwordSet;
-
-/** Whether Add-a-device should offer a code, and what to say first when it should not. */
-export type PairingGate =
-  /** Nothing to say in advance: offer the button and let the daemon answer. */
-  | { readonly kind: 'open' }
-  /** This browser KNOWS the daemon will refuse. `local` says whether it is the one that can fix it. */
-  | { readonly kind: 'needs-password'; readonly local: boolean };
-
-/**
- * The pre-check, from the grant view this browser has — or nothing said at all when it has none.
- *
- * AN UNREADABLE VIEW IS `open`, AND THAT IS THE CHANGE. This used to fail closed and refuse to offer a
- * button, which was the right instinct while the browser was the only thing enforcing the requirement
- * and is a dead end now that it is not: the daemon refuses on its own account, so a browser that cannot
- * read the grant view has nothing to add by hiding a control. Somebody taps, and the machine that KNOWS
- * answers — with the reason and the remedy, which this panel renders whole.
- */
-export function pairingGate(view: GrantsView | null): PairingGate {
-  if (view === null || !pairingNeedsPassword(view)) return { kind: 'open' };
-  return { kind: 'needs-password', local: view.hostLocal };
-}
-
-/** Why the Add-a-device button is not the first thing on this panel, said where the button was. */
-export const PAIRING_PASSWORD_REQUIREMENT =
-  'Adding a device needs an operator password on this machine first. A paired device can change the settings of whatever is already switched on here — including the agent fleet, which writes runnable files into your accounts — and the password is what stands in front of that. Set one below and the code follows.';
-
-/**
- * The same requirement, for a reader who cannot satisfy it from where they are.
- *
- * An existing install with devices already paired and no password reaches this: the requirement applies
- * to the NEXT pairing, and a remote browser cannot set the password. So it names the two places that
- * can, rather than presenting a button that would be refused.
- */
-export const PAIRING_PASSWORD_REQUIREMENT_REMOTE = `Adding a device needs an operator password on this machine first, and only the machine itself can set one. Open Ferretry in a browser on that machine, or run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal there, and this panel will hand out codes again.`;

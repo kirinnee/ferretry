@@ -268,8 +268,16 @@ export type RelayTunnelPair = Extract<RelayTunnelClientMessage, { t: 'pair' }>;
 export type RelayTunnelData = Extract<RelayTunnelClientMessage, { t: 'data' }>;
 
 export type RelayTunnelDaemonMessage =
-  /** The device's proof verified. `accessExpiresAt` is when this session's lease ends unless renewed. */
-  | { readonly t: 'authenticated'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly accessExpiresAt: string }
+  /**
+   * The device's proof verified. `accessExpiresAt` is when this session's lease ends unless renewed;
+   * `rotateBy` is when the device's key is due for replacement (`docs/design/zero-trust.md` B6).
+   */
+  | {
+      readonly t: 'authenticated';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly accessExpiresAt: string;
+      readonly rotateBy?: string;
+    }
   | {
       readonly t: 'res';
       readonly id: number;
@@ -314,7 +322,12 @@ export type RelayTunnelDaemonMessage =
       readonly protocol: typeof SESSION_PROTOCOL_ID;
       readonly reason: 'pairing_refused';
     }
-  | { readonly t: 'stream-opened'; readonly protocol: typeof SESSION_PROTOCOL_ID; readonly accessExpiresAt: string }
+  | {
+      readonly t: 'stream-opened';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly accessExpiresAt: string;
+      readonly rotateBy?: string;
+    }
   /**
    * The upgrade was refused, with everything a status can say — said BEFORE anything switched.
    *
@@ -414,6 +427,8 @@ export function tunnelApiRequest(
   device: SessionDevice,
   sessionId: string,
   arrival?: SessionArrival,
+  /** The carrying session's transcript hash, which a device-key rotation's proof is signed over. */
+  transcriptHash?: Uint8Array,
 ): ApiRequest {
   const body = source.body ?? '';
   return {
@@ -426,6 +441,7 @@ export function tunnelApiRequest(
     loopback: arrival?.loopback ?? false,
     privilegedLoopback: arrival?.privilegedLoopback ?? false,
     device,
+    ...(transcriptHash === undefined ? {} : { transcriptHash }),
     // The route's own bound applies to a session's body exactly as it does to an HTTP one: a body the
     // tunnel reassembled up to 32 MiB is still refused by a route that reads at most 512 KiB.
     text: async limitBytes => {
