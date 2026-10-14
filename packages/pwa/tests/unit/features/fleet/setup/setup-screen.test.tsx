@@ -15,7 +15,11 @@ const studio = pairing('studio', 'studio mac');
 
 const memory = () => {
   const values = new Map<string, string>();
-  return { values, getItem: (key: string) => values.get(key) ?? null, setItem: (k: string, v: string) => values.set(k, v) };
+  return {
+    values,
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (k: string, v: string) => values.set(k, v),
+  };
 };
 
 const settle = async (): Promise<void> => {
@@ -131,7 +135,9 @@ describe('MachineSetupScreen', () => {
     const screen = await open(scriptedClient({ '/v1/fleet/machine': machineView() }));
     expect(screen.q('[data-setup-message] h1')?.textContent).toBe('studio mac is already set up');
     expect(screen.q('[data-machine-stepper]')).toBeNull();
-    const [sessions, settings] = [...screen.view.container.querySelectorAll<HTMLButtonElement>('[data-setup-message] button')];
+    const [sessions, settings] = [
+      ...screen.view.container.querySelectorAll<HTMLButtonElement>('[data-setup-message] button'),
+    ];
     await interact(() => must(sessions, 'sessions').click());
     await interact(() => must(settings, 'settings').click());
     expect(screen.went).toEqual(['/d/studio', '/d/studio/settings#machines/studio%20mac/runtimes']);

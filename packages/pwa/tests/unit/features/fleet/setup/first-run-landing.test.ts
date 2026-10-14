@@ -5,7 +5,6 @@ import { machineClient, machineView, pairing } from '../shell/machine-support.ts
 
 const studio = pairing('studio', 'studio mac');
 
-
 describe('landingAfterPairing', () => {
   it('opens the full-screen first run of a machine that is not set up, outside Settings', async () => {
     const paths: string[] = [];

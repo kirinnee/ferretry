@@ -244,13 +244,13 @@ old Daemons section is merged in: each machine is ONE place, its connection and 
 Each machine has five views, drawn as underlined tabs in sentence case (they scroll sideways on a
 phone, keeping the current one centred):
 
-| Tab             | Shows                                                                                                                                             | Primary action               |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| **Runtimes**    | each runtime: status shape, name, credential email (+ label), profile, default model, **Agent** badge; a missing-harness note with Install        | **+ Add runtime**            |
-| **Credentials** | grouped by harness: email, label, "Shared with claude in your terminal", "Copied slot from _machine_", status, "Used by _n_ runtimes", usage bars | **+ Add a login**            |
-| **Profiles**    | name, layer count, "used by _n_ runtimes", "base for _n_ profiles"                                                                                | **+ Build a new profile**    |
-| **Components**  | the six kinds with a one-line description and a count; each opens its list                                                                        | **+ New _kind_** (in a list) |
-| **Machine**     | Agent permissions; Tools on _machine_ (installed + version, or Install); Setup (**Clone from another machine**, **Import again**); Connection and security (Warden, Secrets, devices, grants, Security, Security log, Carrier, Host checks…); About this machine | — |
+| Tab             | Shows                                                                                                                                                                                                                                                            | Primary action               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| **Runtimes**    | each runtime: status shape, name, credential email (+ label), profile, default model, **Agent** badge; a missing-harness note with Install                                                                                                                       | **+ Add runtime**            |
+| **Credentials** | grouped by harness: email, label, "Shared with claude in your terminal", "Copied slot from _machine_", status, "Used by _n_ runtimes", usage bars                                                                                                                | **+ Add a login**            |
+| **Profiles**    | name, layer count, "used by _n_ runtimes", "base for _n_ profiles"                                                                                                                                                                                               | **+ Build a new profile**    |
+| **Components**  | the six kinds with a one-line description and a count; each opens its list                                                                                                                                                                                       | **+ New _kind_** (in a list) |
+| **Machine**     | Agent permissions; Tools on _machine_ (installed + version, or Install); Setup (**Clone from another machine**, **Import again**); Connection and security (Warden, Secrets, devices, grants, Security, Security log, Carrier, Host checks…); About this machine | —                            |
 
 Detail pages (one concept each):
 

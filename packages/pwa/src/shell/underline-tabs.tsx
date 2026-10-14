@@ -21,7 +21,7 @@
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../lib/class-names.ts';
 
-export interface UnderlineTab<T extends string> {
+interface UnderlineTab<T extends string> {
   readonly id: T;
   readonly label: string;
   readonly icon?: ReactNode;

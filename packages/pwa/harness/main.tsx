@@ -1005,7 +1005,6 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   );
 }
 
-
 /**
  * `?app-chrome=<destination>`: the app's level-one navigation as a page — the top bar's text links and
  * Find box on a desktop, the bottom bar on a phone — around an empty page, for review captures.
@@ -1028,7 +1027,9 @@ function AppChromeHarness({ active }: { readonly active: string }) {
         themeToggle={<Button size="sm">Theme</Button>}
       />
       <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
-      {phone ? <AppTabBar daemon={daemon.daemonId} active={destination ?? 'settings'} onOpenPalette={() => {}} /> : null}
+      {phone ? (
+        <AppTabBar daemon={daemon.daemonId} active={destination ?? 'settings'} onOpenPalette={() => {}} />
+      ) : null}
     </div>
   );
 }
@@ -1051,7 +1052,8 @@ const harnessSetupStorage = (): Pick<Storage, 'getItem' | 'setItem'> => {
 function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string }) {
   useAppViewport();
   const connections = settingsConnections('many');
-  const record = connections.find(connection => String(connection.daemonId) === daemonId) ?? HARNESS_SETTINGS_CONNECTIONS[0];
+  const record =
+    connections.find(connection => String(connection.daemonId) === daemonId) ?? HARNESS_SETTINGS_CONNECTIONS[0];
   const storage = useMemo(harnessSetupStorage, []);
   return (
     <section

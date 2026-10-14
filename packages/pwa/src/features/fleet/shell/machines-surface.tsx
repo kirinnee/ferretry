@@ -160,7 +160,10 @@ export function MachinesSurface({
       {/* A machine whose setup was left for later — or never started — says so above everything else, with
           the one button that resumes it. Setup itself is a full screen of its own, never a tab here. */}
       {notSetUp && onSetUp !== undefined ? (
-        <div className="kt-panel flex flex-wrap items-center justify-between gap-3 p-panel" data-machine-finish-setup="">
+        <div
+          className="kt-panel flex flex-wrap items-center justify-between gap-3 p-panel"
+          data-machine-finish-setup=""
+        >
           <div className="min-w-0">
             <p className="m-0 text-row font-semibold text-fg">Finish setting up {name}</p>
             <p className="mb-0 mt-1 text-cell leading-base text-muted">

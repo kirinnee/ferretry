@@ -889,7 +889,8 @@ const assertSetupGeometry = async (page: Page, where: string): Promise<void> => 
     const final = stepper.getAttribute('data-step') === 'done';
     const steps = [...stepper.querySelectorAll('[data-stepper-steps] [data-stepper-step]')];
     const current = steps.findIndex(step => step.getAttribute('aria-current') === 'step');
-    if (final ? current !== -1 : current === -1) found.push(`the stepper marks ${current === -1 ? 'no' : 'a'} current step`);
+    if (final ? current !== -1 : current === -1)
+      found.push(`the stepper marks ${current === -1 ? 'no' : 'a'} current step`);
     steps.forEach((step, index) => {
       const expected = final || index < current ? 'done' : index === current ? 'now' : 'todo';
       if (step.getAttribute('data-state') !== expected)
@@ -906,7 +907,9 @@ const assertSetupGeometry = async (page: Page, where: string): Promise<void> => 
     if (foot === null) return [...found, 'there is no pinned footer'];
     const box = foot.getBoundingClientRect();
     if (box.top < 0 || box.bottom > window.innerHeight + 0.5)
-      found.push(`the footer (${box.top.toFixed(0)}–${box.bottom.toFixed(0)}px) is not inside the ${window.innerHeight}px viewport`);
+      found.push(
+        `the footer (${box.top.toFixed(0)}–${box.bottom.toFixed(0)}px) is not inside the ${window.innerHeight}px viewport`,
+      );
     const buttons = [...foot.querySelectorAll('button')];
     if (buttons.length === 0) found.push('the footer holds no Back and no action');
     for (const button of buttons) {

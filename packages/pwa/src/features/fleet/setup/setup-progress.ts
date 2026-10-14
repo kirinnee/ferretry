@@ -61,7 +61,10 @@ export const writeSetupProgress = (
 ): void => {
   const { [String(daemonId)]: _previous, ...others } = readAll(storage);
   try {
-    storage.setItem(SETUP_PROGRESS_KEY, JSON.stringify(progress === null ? others : { ...others, [daemonId]: progress }));
+    storage.setItem(
+      SETUP_PROGRESS_KEY,
+      JSON.stringify(progress === null ? others : { ...others, [daemonId]: progress }),
+    );
   } catch {
     // Full or blocked storage: the setup still works, it just cannot resume.
   }

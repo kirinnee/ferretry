@@ -49,9 +49,12 @@ describe('setup progress', () => {
   });
 
   it('still works when storage refuses a write', () => {
-    const full = { getItem: () => null, setItem: () => {
-      throw new Error('QuotaExceededError');
-    } };
+    const full = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+    };
     expect(() => writeSetupProgress(full, studio, PROGRESS)).not.toThrow();
   });
 

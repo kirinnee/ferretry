@@ -89,11 +89,7 @@ export const shownSteps = (flow: StepperFlow): readonly ShownStep[] => {
 /** The numbered list: a column beside a full-screen step, a row above an inline one. */
 function StepList({ steps, layout }: { readonly steps: readonly ShownStep[]; readonly layout: 'column' | 'row' }) {
   return (
-    <ol
-      aria-label="Steps"
-      className={cn('kt-steps', layout === 'row' && 'kt-steps--row')}
-      data-stepper-steps={layout}
-    >
+    <ol aria-label="Steps" className={cn('kt-steps', layout === 'row' && 'kt-steps--row')} data-stepper-steps={layout}>
       {steps.map(step => (
         <li
           key={step.id}
@@ -107,7 +103,9 @@ function StepList({ steps, layout }: { readonly steps: readonly ShownStep[]; rea
           </span>
           <span className="kt-step__name">
             {step.label}
-            <span className="sr-only">{step.state === 'done' ? ', done' : step.state === 'now' ? ', current' : ''}</span>
+            <span className="sr-only">
+              {step.state === 'done' ? ', done' : step.state === 'now' ? ', current' : ''}
+            </span>
           </span>
         </li>
       ))}
