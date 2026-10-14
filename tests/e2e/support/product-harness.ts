@@ -228,7 +228,7 @@ export async function launchProductBrowser(
   let closing = false;
   const close = (): Promise<void> => {
     closing = true;
-    return closeChromeBounded(() => browser.close());
+    return closeChromeBounded(browser);
   };
   teardown.add('product chrome', close);
   const context = await browser.newContext({

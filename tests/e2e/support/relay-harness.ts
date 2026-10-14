@@ -705,7 +705,7 @@ export async function launchChrome(teardown: HarnessTeardown, options: ChromeOpt
   page.on('pageerror', payload => pageErrors.push(String(payload)));
 
   const stop = async (): Promise<void> => {
-    await closeChromeBounded(() => browser.close());
+    await closeChromeBounded(browser);
   };
   teardown.add('chrome', stop);
   return { page, console: consoleLines, pageErrors, stop };
@@ -990,6 +990,8 @@ let spawnGuarded = false;
 /** Launches in flight, and the children spawned by them — the only ones a pipe failure may end. */
 let launching = 0;
 const launchingChildren = new Set<ChildProcess>();
+/** The processes each launched browser owns, so a forced close ends THAT browser and no other. */
+const browserProcesses = new WeakMap<object, readonly ChildProcess[]>();
 
 /**
  * Give every extra stdio socket an 'error' listener the moment its child exists.
@@ -1053,9 +1055,16 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const failuresBefore = pipeFailures.length;
+    const childrenBefore = new Set(launchingChildren);
     launching += 1;
     try {
-      return await launch();
+      const browser = await launch();
+      if (typeof browser === 'object' && browser !== null)
+        browserProcesses.set(
+          browser,
+          [...launchingChildren].filter(child => !childrenBefore.has(child)),
+        );
+      return browser;
     } catch (error) {
       const text = String((error as Error).message ?? error);
       const pipeBroke = pipeFailures.length > failuresBefore;
@@ -1074,26 +1083,23 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
 }
 
 /**
- * Close Chrome, and if Playwright's `close()` never settles, end the Chrome this process started.
+ * Close one browser, and if Playwright's `close()` never settles, end that browser's own processes.
  *
- * Seen in full-tier runs after a journey had already failed: `browser.close()` hung, and the teardown
- * behind it never ran. Only Chrome processes whose PARENT is this test process are signalled, so a
- * browser belonging to any other run on the host is never touched.
+ * Seen in full-tier runs: `browser.close()` hung, and the teardown behind it never ran. The processes
+ * ended are exactly the ones `launchChromiumWithRetry` recorded for this browser, so no other browser,
+ * in this journey, a later one or another run on the host, is ever touched.
  */
-export async function closeChromeBounded(close: () => Promise<void>): Promise<void> {
-  const closed = await Promise.race([close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(() => false);
+export async function closeChromeBounded(browser: { close(): Promise<void> }): Promise<void> {
+  const closed = await Promise.race([browser.close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(
+    () => false,
+  );
   if (closed) return;
-  const children = Bun.spawnSync(['pgrep', '-P', String(process.pid), '-f', 'chrom'], {
-    stdout: 'pipe',
-    stderr: 'ignore',
-  });
-  for (const pid of children.stdout
-    .toString()
-    .split('\n')
-    .map(Number)
-    .filter(n => Number.isInteger(n) && n > 1)) {
+  // ONLY this browser's processes. Ending every Chrome this process had started killed the NEXT
+  // journey's live browser (SIGKILL, seen on a hosted runner) when an earlier close never settled.
+  for (const child of browserProcesses.get(browser) ?? []) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
     try {
-      process.kill(pid, 'SIGKILL');
+      child.kill('SIGKILL');
     } catch {
       // Already gone.
     }

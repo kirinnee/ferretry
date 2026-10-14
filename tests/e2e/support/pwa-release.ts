@@ -291,7 +291,7 @@ export async function launchReleaseBrowser(
   page.on('console', payload => consoleLines.push(String((payload as { text(): string }).text())));
   page.on('pageerror', payload => consoleLines.push(`pageerror: ${String(payload)}`));
   const stop = async (): Promise<void> => {
-    await closeChromeBounded(() => browser.close());
+    await closeChromeBounded(browser);
   };
   teardown.add('release chrome', stop);
   return { page, console: consoleLines, setOffline: offline => context.setOffline(offline), stop };
