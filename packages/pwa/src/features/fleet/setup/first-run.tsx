@@ -111,6 +111,9 @@ const flowInput = (mode: FirstRunMode, machineName: string, scan: FleetSetupScan
 /** A step's own actions: under the step inline, pinned to the bottom of the screen on the full-screen run. */
 const Foot = StepperFoot;
 
+/** The step every first run ends on before Done, once there is something to name. */
+const NAMES_UPCOMING: readonly StepperStep[] = [{ id: 'names', label: 'Name runtimes' }];
+
 function ContinueButton({ onClick, disabled = false }: { readonly onClick: () => void; readonly disabled?: boolean }) {
   return (
     <Button type="button" variant="primary" data-step-next="" disabled={disabled} onClick={onClick}>
@@ -564,6 +567,9 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
       checking={checking}
       onRetry={onRetry}
       presentation={presentation}
+      // Name runtimes joins the flow only once something is chosen to import; the stepper names it from
+      // the first screen so the whole job is visible, the way the approved design draws it.
+      upcoming={NAMES_UPCOMING}
     >
       {body()}
     </MachineStepper>

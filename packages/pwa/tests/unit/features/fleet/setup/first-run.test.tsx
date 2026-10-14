@@ -323,7 +323,9 @@ describe('MachineFirstRun: the harness steps', () => {
     try {
       // Import again has no Check tools step.
       expect(step(h)).toBe('claude');
-      expect(h.text('[data-stepper-position]')).toBe('Step 1 of 2 · Claude Code');
+      expect(h.text('[data-stepper-position]')).toBe('Step 1 of 3 · Claude Code');
+      // Name runtimes is named from the first screen, still to come, before anything is chosen to import.
+      expect(h.q('[data-stepper-steps="row"] [data-stepper-step="names"]')?.getAttribute('data-state')).toBe('todo');
       expect(h.text('[data-first-run-question]')).toBe('We found Claude Code on studio-mac. Use your login and setup?');
       const claude = h.text('[data-first-run-step="claude"]');
       expect(claude).toContain('you@example.com');

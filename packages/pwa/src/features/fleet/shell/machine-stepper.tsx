@@ -39,6 +39,7 @@ import {
   keepGoing,
   type StepperFlow,
   type StepperState,
+  type StepperStep,
   stepPosition,
   stopStepper,
 } from './stepper-model.ts';
@@ -56,6 +57,8 @@ export interface MachineStepperProps {
   readonly onRetry: () => void;
   /** Inside Settings, or the full-screen first run. */
   readonly presentation?: 'inline' | 'screen';
+  /** Steps the flow will ask once they apply, drawn as still to come ({@link shownSteps}). */
+  readonly upcoming?: readonly StepperStep[];
   /** The current step's body. Not rendered while confirming or paused. */
   readonly children: ReactNode;
 }
@@ -72,18 +75,25 @@ interface ShownStep {
 /**
  * The steps a person is walked through. A last "Done" step is not one of them — it is where the walk
  * ends — so on it every named step reads as done.
+ *
+ * `upcoming` are steps the flow WILL ask once an answer makes them apply (the first run's Name runtimes,
+ * which exists only once something is chosen to import). They are drawn after the real steps, as still
+ * to come, so the stepper names the whole job from the first screen. On the final step they are dropped:
+ * a step that never applied was not done.
  */
-export const shownSteps = (flow: StepperFlow): readonly ShownStep[] => {
-  const { index } = stepPosition(flow);
-  return flow.steps
-    .map((step, position) => ({ step, position }))
-    .filter(({ step }) => step.final !== true)
-    .map(({ step, position }, number) => ({
+export const shownSteps = (flow: StepperFlow, upcoming: readonly StepperStep[] = []): readonly ShownStep[] => {
+  const { index, step: at } = stepPosition(flow);
+  const real = flow.steps.filter(step => step.final !== true);
+  const later = at.final === true ? [] : upcoming.filter(extra => !flow.steps.some(step => step.id === extra.id));
+  return [...real, ...later].map((step, number) => {
+    const position = flow.steps.indexOf(step);
+    return {
       id: step.id,
       label: step.label,
       number: number + 1,
-      state: position < index ? 'done' : position === index ? 'now' : 'todo',
-    }));
+      state: position === -1 || position > index ? 'todo' : position < index ? 'done' : 'now',
+    };
+  });
 };
 
 /** The numbered list: a column beside a full-screen step, a row above an inline one. */
@@ -146,6 +156,7 @@ export function MachineStepper({
   checking = false,
   onRetry,
   presentation = 'inline',
+  upcoming,
   children,
 }: MachineStepperProps) {
   const flow = currentFlow(state);
@@ -153,7 +164,7 @@ export function MachineStepper({
   const final = step.final === true;
   const titleRef = useRef<HTMLHeadingElement>(null);
   const stepKey = `${state.stack.length}:${flow.kind}:${flow.at}`;
-  const steps = shownSteps(flow);
+  const steps = shownSteps(flow, upcoming);
   const current = steps.findIndex(candidate => candidate.state === 'now');
   const position =
     current === -1 ? `${flow.title} · done` : `Step ${current + 1} of ${steps.length} · ${steps[current]?.label}`;

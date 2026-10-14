@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-import { MachineStepper } from '../../../../../src/features/fleet/shell/machine-stepper.tsx';
+import { MachineStepper, shownSteps } from '../../../../../src/features/fleet/shell/machine-stepper.tsx';
 import { StepperFoot } from '../../../../../src/features/fleet/shell/stepper-foot.tsx';
 import {
   currentFlow,
@@ -235,5 +235,24 @@ describe('StepperFoot', () => {
     );
     expect(view.container.querySelector('div > button')?.textContent).toBe('Skip');
     await view.unmount();
+  });
+});
+
+describe('shownSteps', () => {
+  it('names a step that will apply later as still to come, and drops it once the walk is done', () => {
+    const later = [{ id: 'name', label: 'Name' }];
+    const start = currentFlow(startStepper(flow));
+    expect(shownSteps(start, later).map(step => `${step.number} ${step.id}:${step.state}`)).toEqual([
+      '1 credential:now',
+      '2 profile:todo',
+      '3 name:todo',
+    ]);
+    // A step that is already in the flow is not drawn twice.
+    expect(shownSteps(start, [{ id: 'profile', label: 'Profile' }])).toHaveLength(2);
+    const done = currentFlow(stepForward(stepForward(startStepper(flow))));
+    expect(shownSteps(done, later).map(step => `${step.id}:${step.state}`)).toEqual([
+      'credential:done',
+      'profile:done',
+    ]);
   });
 });
