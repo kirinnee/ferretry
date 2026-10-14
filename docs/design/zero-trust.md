@@ -382,6 +382,9 @@ state home (sessions, chat, tasks, attention, pins) do not. A refusal is
 `403 { code: "grant_step_up_required" }`, which the app answers by raising the passkey prompt and retrying
 once.
 
+Starting an agent with your own flags, mode or directory is covered by the unlock (owner decision
+2026-10-14).
+
 ### B2. The ceremony, and who verifies it
 
 The **browser performs** the WebAuthn ceremony; the **daemon is the verifier**. The relay carries
