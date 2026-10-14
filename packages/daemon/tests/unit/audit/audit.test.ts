@@ -70,7 +70,10 @@ class MemoryJournal implements AuditJournalPort {
   }
 
   async recent(limit: number, keptOffset: number): Promise<AuditReading> {
-    const all = this.lines.map((line, index) => ({ record: JSON.parse(line) as AuditRecord, store: this.stores[index] }));
+    const all = this.lines.map((line, index) => ({
+      record: JSON.parse(line) as AuditRecord,
+      store: this.stores[index],
+    }));
     const of = (store: AuditStore) =>
       all
         .filter(entry => entry.store === store)
@@ -343,7 +346,13 @@ describe('audit folding and bounds', () => {
       isKeptAuditEntry({ event: 'pairing.refused', actor: { kind: 'anonymous' }, outcome: 'succeeded' }),
     ).be.false();
     // Activity a paired device can repeat at will is never kept: a store that took it could be flooded.
-    for (const event of ['terminal.opened', 'terminal.input', 'secrets.used', 'fleet.configured', 'agent.prompted'] as const)
+    for (const event of [
+      'terminal.opened',
+      'terminal.input',
+      'secrets.used',
+      'fleet.configured',
+      'agent.prompted',
+    ] as const)
       should(isKeptAuditEntry({ ...refusal, event, outcome: 'succeeded' })).be.false();
   });
 
@@ -399,19 +408,21 @@ describe('audit folding and bounds', () => {
     const kept = records(journal).filter((_, index) => journal.stores[index] === 'kept');
     // The allowance, one marked overspend per event, and the host's: a fixed number whoever floods.
     should(sameDay).equal(AUDIT_KEPT_DAILY_ALLOWANCE + 3);
-    should(kept.filter(record => record.detail?.keptAllowanceSpent === true).map(record => [record.event, record.detail]))
-      .deepEqual([
-        ['grants.changed', { keptAllowanceSpent: true }],
-        ['device.revoked', { keptAllowanceSpent: true }],
-        ['grants.changed', { keptAllowanceSpent: true, repeats: 29 }],
-      ]);
+    should(
+      kept.filter(record => record.detail?.keptAllowanceSpent === true).map(record => [record.event, record.detail]),
+    ).deepEqual([
+      ['grants.changed', { keptAllowanceSpent: true }],
+      ['device.revoked', { keptAllowanceSpent: true }],
+      ['grants.changed', { keptAllowanceSpent: true, repeats: 29 }],
+    ]);
     should(kept.at(-2)?.actor).deepEqual({ kind: 'device' });
     // A new day, a new allowance.
     should(kept.at(-1)?.detail).be.undefined();
     // Every overspent record is still in the ordinary history, in full.
     should(journal.stores.filter(store => store === 'general')).have.length(31);
-    should(journal.rotations.filter((rotation, index) => journal.stores[index] === 'kept' && rotation === 'rotate'))
-      .have.length(1);
+    should(
+      journal.rotations.filter((rotation, index) => journal.stores[index] === 'kept' && rotation === 'rotate'),
+    ).have.length(1);
     should(failures).deepEqual([]);
   });
 
@@ -565,7 +576,9 @@ describe('auditedRoutes', () => {
     await api.dispatch(request({ method: 'POST', path: '/v1/pair/code', headers: ADMIN, loopback: true }));
     await api.dispatch(request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, device: DEVICE }));
     await api.dispatch(request({ method: 'POST', path: '/v1/sessions/s-1/terminals', headers: ADMIN, loopback: true }));
-    await api.dispatch(request({ method: 'POST', path: '/v1/fleet/proposals/p-1/apply', headers: ADMIN, loopback: true }));
+    await api.dispatch(
+      request({ method: 'POST', path: '/v1/fleet/proposals/p-1/apply', headers: ADMIN, loopback: true }),
+    );
     await api.dispatch(request({ method: 'GET', path: '/v1/unaudited', headers: ADMIN, loopback: true }));
 
     // Assert
@@ -614,9 +627,15 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    const refused = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, loopback: true, body: '{}' }));
-    const failed = await api.dispatch(request({ method: 'POST', path: '/v1/fleet/login', headers: ADMIN, loopback: true }));
-    await api.dispatch(request({ method: 'POST', path: '/v1/fleet/machine/tools/install', headers: ADMIN, loopback: true }));
+    const refused = await api.dispatch(
+      request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, loopback: true, body: '{}' }),
+    );
+    const failed = await api.dispatch(
+      request({ method: 'POST', path: '/v1/fleet/login', headers: ADMIN, loopback: true }),
+    );
+    await api.dispatch(
+      request({ method: 'POST', path: '/v1/fleet/machine/tools/install', headers: ADMIN, loopback: true }),
+    );
 
     // Assert
     should(refused.status).equal(403);
@@ -636,7 +655,13 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
     const use = async () =>
       await api.dispatch(
-        request({ method: 'POST', path: '/v1/secrets/use', headers: ADMIN, loopback: true, body: '{"command":["echo","hunter2"]}' }),
+        request({
+          method: 'POST',
+          path: '/v1/secrets/use',
+          headers: ADMIN,
+          loopback: true,
+          body: '{"command":["echo","hunter2"]}',
+        }),
       );
 
     // Act
@@ -689,7 +714,9 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    const changed = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, loopback: true, body: '{}' }));
+    const changed = await api.dispatch(
+      request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, loopback: true, body: '{}' }),
+    );
     const revoked = await api.dispatch(
       request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, device: DEVICE }),
     );
@@ -710,7 +737,9 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    await api.dispatch(request({ method: 'POST', path: '/v1/secrets', headers: ADMIN, loopback: true, body: '{"value":"hunter2"}' }));
+    await api.dispatch(
+      request({ method: 'POST', path: '/v1/secrets', headers: ADMIN, loopback: true, body: '{"value":"hunter2"}' }),
+    );
     await api.dispatch(request({ method: 'PATCH', path: '/v1/security', headers: ADMIN, loopback: true, body: '{}' }));
     await api.dispatch(request({ method: 'DELETE', path: '/v1/secrets/API_KEY', headers: ADMIN, loopback: true }));
 
@@ -764,13 +793,20 @@ describe('GET /v1/audit', () => {
     for (const subject of ['one', 'two', 'three'])
       await log.record({ event: 'terminal.opened', actor: { kind: 'host' }, subject, outcome: 'succeeded' });
     const api = await dispatcher(
-      auditRoutes({ recent: async (limit, offset) => await journal.recent(limit, offset), flush: async () => undefined }),
+      auditRoutes({
+        recent: async (limit, offset) => await journal.recent(limit, offset),
+        flush: async () => undefined,
+      }),
     );
 
     // Act
-    const page = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '2']], headers: ADMIN, loopback: true }));
+    const page = await api.dispatch(
+      request({ path: '/v1/audit', query: [['limit', '2']], headers: ADMIN, loopback: true }),
+    );
     const fallback = await api.dispatch(request({ path: '/v1/audit', headers: ADMIN, loopback: true }));
-    const tooMany = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '201']], headers: ADMIN, loopback: true }));
+    const tooMany = await api.dispatch(
+      request({ path: '/v1/audit', query: [['limit', '201']], headers: ADMIN, loopback: true }),
+    );
     const warden = await api.dispatch(request({ path: '/v1/audit', headers: WARDEN }));
 
     // Assert
@@ -790,9 +826,19 @@ describe('GET /v1/audit', () => {
     const device = { kind: 'device', deviceId: DEVICE_ID } as const;
     await log.record({ event: 'device.paired', actor: device, subject: DEVICE_ID, outcome: 'succeeded' });
     for (let index = 0; index < 3; index += 1)
-      await log.record({ event: 'grants.changed', actor: { kind: 'host' }, subject: `g${String(index)}`, outcome: 'succeeded' });
+      await log.record({
+        event: 'grants.changed',
+        actor: { kind: 'host' },
+        subject: `g${String(index)}`,
+        outcome: 'succeeded',
+      });
     for (let index = 0; index < 300; index += 1)
-      await log.record({ event: 'pairing.code-minted', actor: device, subject: `p${String(index)}`, outcome: 'succeeded' });
+      await log.record({
+        event: 'pairing.code-minted',
+        actor: device,
+        subject: `p${String(index)}`,
+        outcome: 'succeeded',
+      });
     const api = await dispatcher(
       auditRoutes({ recent: async (limit, offset) => await log.recent(limit, offset), flush: async () => undefined }),
     );
@@ -803,7 +849,15 @@ describe('GET /v1/audit', () => {
     ) as { records: AuditRecord[]; kept: AuditRecord[]; keptTotal: number };
     const paged = jsonBody(
       await api.dispatch(
-        request({ path: '/v1/audit', query: [['limit', '2'], ['keptOffset', '2']], headers: ADMIN, loopback: true }),
+        request({
+          path: '/v1/audit',
+          query: [
+            ['limit', '2'],
+            ['keptOffset', '2'],
+          ],
+          headers: ADMIN,
+          loopback: true,
+        }),
       ),
     ) as { kept: AuditRecord[]; keptTotal: number };
 
@@ -824,7 +878,10 @@ describe('GET /v1/audit', () => {
     await grants.refresh();
     const api = new ApiDispatcher(
       new ApiRouter(
-        auditRoutes({ recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }), flush: async () => undefined }),
+        auditRoutes({
+          recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }),
+          flush: async () => undefined,
+        }),
       ),
       CREDENTIALS,
       grants,
@@ -845,7 +902,10 @@ describe('GET /v1/audit', () => {
     await grants.refresh();
     const api = new ApiDispatcher(
       new ApiRouter(
-        auditRoutes({ recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }), flush: async () => undefined }),
+        auditRoutes({
+          recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }),
+          flush: async () => undefined,
+        }),
       ),
       CREDENTIALS,
       grants,

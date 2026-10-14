@@ -110,11 +110,12 @@ describe('Settings › Security log', () => {
     const createClient: SecurityLogClientFactory = async () => ({
       request: (async (path: string) => {
         offsets.push(path);
-        if (!path.includes('keptOffset')) return empty({
-          kept: [paired('fy_device_id_new000'), record({ event: 'grants.changed', outcome: 'succeeded' })],
-          keptTotal: 3,
-          records: Array.from({ length: 3 }, () => record({ event: 'pairing.code-minted' })),
-        });
+        if (!path.includes('keptOffset'))
+          return empty({
+            kept: [paired('fy_device_id_new000'), record({ event: 'grants.changed', outcome: 'succeeded' })],
+            keptTotal: 3,
+            records: Array.from({ length: 3 }, () => record({ event: 'pairing.code-minted' })),
+          });
         if (olderFails) throw new Error('');
         return empty({ kept: [paired('fy_device_id_old000')], keptTotal: 3 });
       }) as SecurityLogClient['request'],
@@ -127,8 +128,17 @@ describe('Settings › Security log', () => {
 
     const sections = [...shown.container.querySelectorAll('[data-security-log-section]')];
     expect(sections.map(section => section.getAttribute('data-security-log-section'))).toEqual(['kept', 'activity']);
-    const rows = () => [...shown.container.querySelectorAll('[data-security-log-event]')].map(row => row.getAttribute('data-security-log-event'));
-    expect(rows()).toEqual(['device.paired', 'grants.changed', 'pairing.code-minted', 'pairing.code-minted', 'pairing.code-minted']);
+    const rows = () =>
+      [...shown.container.querySelectorAll('[data-security-log-event]')].map(row =>
+        row.getAttribute('data-security-log-event'),
+      );
+    expect(rows()).toEqual([
+      'device.paired',
+      'grants.changed',
+      'pairing.code-minted',
+      'pairing.code-minted',
+      'pairing.code-minted',
+    ]);
     const older = must(shown.container.querySelector<HTMLButtonElement>('[data-security-log-older]'), 'show older');
     expect(older.textContent).toBe('Show older (1 more)');
 
@@ -139,10 +149,20 @@ describe('Settings › Security log', () => {
       'The older changes could not be read.',
     );
     olderFails = false;
-    await interact(() => must(shown.container.querySelector<HTMLButtonElement>('[data-security-log-older]'), 'retry').click());
-    await settleUntil(() => shown.container.querySelector('[data-security-log-older]') === null, 'every change shown', runAsync);
+    await interact(() =>
+      must(shown.container.querySelector<HTMLButtonElement>('[data-security-log-older]'), 'retry').click(),
+    );
+    await settleUntil(
+      () => shown.container.querySelector('[data-security-log-older]') === null,
+      'every change shown',
+      runAsync,
+    );
     expect(rows().slice(0, 3)).toEqual(['device.paired', 'grants.changed', 'device.paired']);
-    expect(offsets).toEqual(['/v1/audit?limit=100', '/v1/audit?limit=100&keptOffset=2', '/v1/audit?limit=100&keptOffset=2']);
+    expect(offsets).toEqual([
+      '/v1/audit?limit=100',
+      '/v1/audit?limit=100&keptOffset=2',
+      '/v1/audit?limit=100&keptOffset=2',
+    ]);
     window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
     // Each look names exactly the pairings that page put on screen.
     expect(seen).toEqual([

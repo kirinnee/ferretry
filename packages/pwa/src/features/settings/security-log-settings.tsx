@@ -184,7 +184,11 @@ export function SecurityLog({
                 {older.reading ? 'Reading…' : `Show older (${String(remaining)} more)`}
               </button>
               {older.failure === null ? null : (
-                <span role="alert" className="min-w-0 text-cell leading-base text-err" data-security-log-older-failed="">
+                <span
+                  role="alert"
+                  className="min-w-0 text-cell leading-base text-err"
+                  data-security-log-older-failed=""
+                >
                   {older.failure}
                 </span>
               )}
@@ -289,7 +293,12 @@ export function SecurityLogSurface({
     );
   if (load.status === 'failed')
     return (
-      <section className="kt-panel p-panel" role="alert" aria-label="Security log unavailable" data-security-log-failed="">
+      <section
+        className="kt-panel p-panel"
+        role="alert"
+        aria-label="Security log unavailable"
+        data-security-log-failed=""
+      >
         <h3 className="m-0 flex items-center gap-2 text-row font-semibold text-fg">
           <CircleAlert size={16} aria-hidden="true" className="text-err" />
           The security log could not be read

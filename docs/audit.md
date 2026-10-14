@@ -26,10 +26,10 @@ design (`docs/design/zero-trust.md` on `feat/zero-trust`). The wire contract is
   3. A device's kept record is written **never-rotating**: if the kept store is full it is refused
      (and written to the general store, with the operator told in the boot journal) rather than renaming
      the oldest kept file away. Only this machine's own records rotate the kept store.
-  The flood test (`tests/integration/audit/file-audit-journal.test.ts`, "a flood by a paired device")
-  drives every audited route and socket as a paired device for a simulated week, plus the review's
-  15,000-attach probe, and asserts `device.paired` is still on disk and on the reader's page. Both
-  tests fail against the round-1 code.
+     The flood test (`tests/integration/audit/file-audit-journal.test.ts`, "a flood by a paired device")
+     drives every audited route and socket as a paired device for a simulated week, plus the review's
+     15,000-attach probe, and asserts `device.paired` is still on disk and on the reader's page. Both
+     tests fail against the round-1 code.
 - One `O_APPEND` write per record, synced, mode `0600`. Every open is `O_NOFOLLOW | O_NONBLOCK` and is
   followed by an `fstat` of the handle: anything but a regular file with exactly one link is refused,
   so a FIFO cannot hang the daemon and a hard link cannot redirect the log.
@@ -72,31 +72,31 @@ actor phrases (`this computer`, `a supervising agent`, …).
 
 ## What is recorded today
 
-| Event                  | Where it is caught                                                                |
-| ---------------------- | --------------------------------------------------------------------------------- |
-| `device.paired`        | `AuditedPairingService.onGranted` — direct and relayed, with the carrier          |
-| `pairing.refused`      | `AuditedPairingService` — folded per carrier                                      |
-| `pairing.code-minted`  | `POST /v1/pair/code`                                                              |
-| `pairing.code-revoked` | `DELETE /v1/pair/code/:pairingId`                                                 |
-| `device.revoked`       | `DELETE /v1/pair/devices/:deviceId`                                               |
-| `push.changed`         | push subscription enrol and remove                                                |
+| Event                  | Where it is caught                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------- |
+| `device.paired`        | `AuditedPairingService.onGranted` — direct and relayed, with the carrier            |
+| `pairing.refused`      | `AuditedPairingService` — folded per carrier                                        |
+| `pairing.code-minted`  | `POST /v1/pair/code`                                                                |
+| `pairing.code-revoked` | `DELETE /v1/pair/code/:pairingId`                                                   |
+| `device.revoked`       | `DELETE /v1/pair/devices/:deviceId`                                                 |
+| `push.changed`         | push subscription enrol and remove                                                  |
 | `grants.changed`       | `PATCH /v1/grants`, one device's grants (`PATCH /v1/pair/devices/:deviceId/grants`) |
-| `security.changed`     | `PATCH /v1/security`, an owner re-opening a passkey window                         |
-| `passkey.registered`   | `POST /v1/passkeys`                                                               |
-| `step-up.succeeded`    | a passed step-up or unlock (`detail.action`); `step-up.failed` when refused       |
-| `device.key-rotated`   | `AuditedPairingService.rotateDeviceKey`, inside a step-up                         |
+| `security.changed`     | `PATCH /v1/security`, an owner re-opening a passkey window                          |
+| `passkey.registered`   | `POST /v1/passkeys`                                                                 |
+| `step-up.succeeded`    | a passed step-up or unlock (`detail.action`); `step-up.failed` when refused         |
+| `device.key-rotated`   | `AuditedPairingService.rotateDeviceKey`, inside a step-up                           |
 | `device.expired`       | `AuditedPairingService.revokeDevice` with no actor — the daemon's own idle expiry   |
-| `session.opened`       | `POST /v1/sessions` and a fork — an agent started, folded per device              |
-| `agent.prompted`       | `POST /v1/sessions/:sessionId/send` and `/answer` — folded per device per session  |
-| `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install |
-| `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                |
-| `terminal.input`       | keystroke frames on a terminal stream — counted, never their bytes                |
-| `browser.opened`       | browser sign-in window, browser control, and every browser stream attach          |
-| `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                  |
-| `secrets.changed`      | secret put and delete — the name only                                             |
-| `warden.configured`    | `PATCH /v1/warden/config`                                                         |
-| `warden.ran`           | `POST /v1/warden/run`                                                             |
-| `worktree.removed`     | `POST /v1/worktrees/remove`                                                       |
+| `session.opened`       | `POST /v1/sessions` and a fork — an agent started, folded per device                |
+| `agent.prompted`       | `POST /v1/sessions/:sessionId/send` and `/answer` — folded per device per session   |
+| `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install   |
+| `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                  |
+| `terminal.input`       | keystroke frames on a terminal stream — counted, never their bytes                  |
+| `browser.opened`       | browser sign-in window, browser control, and every browser stream attach            |
+| `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                    |
+| `secrets.changed`      | secret put and delete — the name only                                               |
+| `warden.configured`    | `PATCH /v1/warden/config`                                                           |
+| `warden.ran`           | `POST /v1/warden/run`                                                               |
+| `worktree.removed`     | `POST /v1/worktrees/remove`                                                         |
 
 Routes are recorded by decorating the finished route and socket tables (`auditedRoutes` and
 `auditedSocketRoutes` in `packages/daemon/src/lib/audit/routes.ts`), so a relayed request is recorded

@@ -75,7 +75,12 @@ export class AuditedPairingService extends PairingService {
   override async revokeDevice(id: string, actor?: string): Promise<boolean> {
     const removed = await super.revokeDevice(id, actor);
     if (removed && actor === undefined)
-      await this.#audit.log.record({ event: 'device.expired', actor: { kind: 'host' }, subject: id, outcome: 'succeeded' });
+      await this.#audit.log.record({
+        event: 'device.expired',
+        actor: { kind: 'host' },
+        subject: id,
+        outcome: 'succeeded',
+      });
     return removed;
   }
 }

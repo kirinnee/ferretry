@@ -281,7 +281,11 @@ describe('a flood by a paired device', () => {
           method: 'GET',
           path: rule.path,
           minimum: 'operator',
-          accept: async () => async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
+          accept: async () => async () => ({
+            open: async () => undefined,
+            fromClient: () => undefined,
+            close: () => undefined,
+          }),
         }),
       ),
     );
@@ -337,13 +341,13 @@ describe('a flood by a paired device', () => {
     }
     await world.log.flush(Number.POSITIVE_INFINITY);
     const paths = auditJournalPaths(world.state);
-    const kept = (await readFile(paths.kept.live, 'utf8')) + (await readFile(paths.kept.rotated, 'utf8').catch(() => ''));
+    const kept =
+      (await readFile(paths.kept.live, 'utf8')) + (await readFile(paths.kept.rotated, 'utf8').catch(() => ''));
     const general = await readFile(paths.rotated, 'utf8');
     // Page back through the kept list the way a reader does, until it has seen every record.
     const first = await world.log.recent(200, 0);
     const pages = [first.kept];
-    while (pages.flat().length < first.keptTotal)
-      pages.push((await world.log.recent(200, pages.flat().length)).kept);
+    while (pages.flat().length < first.keptTotal) pages.push((await world.log.recent(200, pages.flat().length)).kept);
 
     // Assert
     should(general.length).be.above(0); // the general store DID rotate: the flood was real
@@ -358,7 +362,12 @@ describe('a flood by a paired device', () => {
   it('should leave device.paired on disk after 15,000 terminal attaches', async () => {
     // Arrange
     const world = await flooded();
-    await world.log.record({ event: 'device.paired', actor: { kind: 'device', deviceId: thief }, subject: thief, outcome: 'succeeded' });
+    await world.log.record({
+      event: 'device.paired',
+      actor: { kind: 'device', deviceId: thief },
+      subject: thief,
+      outcome: 'succeeded',
+    });
     const terminal = world.sockets[0];
 
     // Act: the review's probe — re-attach in a loop, as fast as a socket allows.

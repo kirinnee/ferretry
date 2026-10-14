@@ -82,7 +82,8 @@ export function renderAuditRecord(record: AuditRecord): string {
  * hole in the history, and a shorter listing that said nothing would read as a clean one.
  */
 export function renderAudit(view: AuditView, keptOffset = 0): string {
-  if (view.records.length === 0 && view.keptTotal === 0) return withGaps(['no security events have been recorded'], view);
+  if (view.records.length === 0 && view.keptTotal === 0)
+    return withGaps(['no security events have been recorded'], view);
   const shownTo = keptOffset + view.kept.length;
   const lines: string[] = [
     view.kept.length === view.keptTotal

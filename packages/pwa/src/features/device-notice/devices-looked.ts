@@ -71,7 +71,5 @@ export function rememberDevicesSeen(
 
 /** Tells every listener on this page that somebody was shown these devices of this machine. */
 export function announceDevicesLooked(daemonId: DaemonId, deviceIds: readonly string[]): void {
-  window.dispatchEvent(
-    new CustomEvent<DevicesLookedDetail>(DEVICES_LOOKED_EVENT, { detail: { daemonId, deviceIds } }),
-  );
+  window.dispatchEvent(new CustomEvent<DevicesLookedDetail>(DEVICES_LOOKED_EVENT, { detail: { daemonId, deviceIds } }));
 }
