@@ -548,21 +548,37 @@ describe('per-machine push workers', () => {
       await activate('/sw.verified.js?machine=Work%20laptop', '/push/work/');
       await activate('/sw.verified.js?machine=Home', '/push/home/');
     });
+    // Deadlines, not attempt counts: the whole integration tier shares one machine, and a worker or a
+    // notification that lands late under that load is still a pass.
     const idOf = async (path: string): Promise<string> => {
-      for (let attempt = 0; attempt < 100 && !seen.has(`${origin()}${path}`); attempt += 1) {
-        await new Promise(resolveTick => setTimeout(resolveTick, 20));
+      const deadline = Date.now() + 15_000;
+      while (!seen.has(`${origin()}${path}`) && Date.now() < deadline) {
+        await new Promise(resolveTick => setTimeout(resolveTick, 50));
       }
-      return seen.get(`${origin()}${path}`) ?? '';
+      const id = seen.get(`${origin()}${path}`);
+      if (id === undefined) throw new Error(`DevTools never reported the registration at ${path}`);
+      return id;
     };
+    const sent = new Map<string, Record<string, unknown>>();
     const push = async (path: string, payload: Record<string, unknown>): Promise<void> => {
+      sent.set(path, payload);
       await cdp.send('ServiceWorker.deliverPushMessage', {
         origin: origin(),
         registrationId: await idOf(path),
         data: JSON.stringify({ version: 1, eventKey: `e-${Math.random()}`, body: 'b', count: 1, ...payload }),
       });
     };
+    // A DevTools delivery is occasionally dropped (measured: 1 run in 9), so an unseen push is sent again.
+    // It carries the same tag, so a late first copy REPLACES the second rather than adding to the list.
     const shown = async (path: string) => {
-      for (let attempt = 0; attempt < 100; attempt += 1) {
+      const deadline = Date.now() + 15_000;
+      let resendAt = Date.now() + 3_000;
+      while (Date.now() < deadline) {
+        const again = sent.get(path);
+        if (Date.now() >= resendAt && again !== undefined) {
+          resendAt = Date.now() + 3_000;
+          await push(path, again);
+        }
         const list = await page.evaluate(async scope => {
           const registration = await navigator.serviceWorker.getRegistration(scope);
           return (await registration?.getNotifications())?.map(notification => ({
@@ -572,7 +588,7 @@ describe('per-machine push workers', () => {
           }));
         }, path);
         if (list !== undefined && list.length > 0) return list;
-        await new Promise(resolveTick => setTimeout(resolveTick, 20));
+        await new Promise(resolveTick => setTimeout(resolveTick, 50));
       }
       return [];
     };
