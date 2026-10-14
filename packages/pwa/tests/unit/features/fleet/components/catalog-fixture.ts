@@ -257,7 +257,7 @@ export const studioMachine = (overrides: Partial<FleetMachineView> = {}): FleetM
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
   runtimeCount: 3,
   runningSessions: 0,
-  authority: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+  authority: { mayApply: true, applyRefusal: 'granted' },
   ...overrides,
 });
 

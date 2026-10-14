@@ -1,5 +1,5 @@
 import type { FleetAccountChange, FleetAccountChangeOutcome } from '@ferretry/protocol';
-import { WriteAuthority } from './account-authority.ts';
+import { requireMayApply } from './account-authority.ts';
 import type { AccountCommandDeps, AccountWriteOptions } from './account-ports.ts';
 import { renderChangeOutcome, renderChangeView } from './account-render.ts';
 
@@ -12,8 +12,6 @@ export interface ChangeRequest {
    */
   readonly destructive: boolean;
   readonly options: AccountWriteOptions;
-  /** One a command already opened, so a caller off this machine is asked for the password once. */
-  readonly authority?: WriteAuthority;
 }
 
 /**
@@ -44,8 +42,7 @@ export async function confirmStep(
  * Stage one change, show its preview, and apply exactly what was previewed.
  *
  * The daemon derives the next setup from the change and holds it until the explicit apply, so what a
- * person approves here is what lands — the same reviewed path the browser takes. A caller off this
- * machine is asked for the operator password at most once per command.
+ * person approves here is what lands — the same reviewed path the browser takes.
  *
  * Returns the outcome when it applied, `undefined` when it stopped (a dry run, a "no"). A failed
  * apply sets a non-zero exit, so a script can trust the status.
@@ -54,8 +51,8 @@ export async function runChange(
   deps: AccountCommandDeps,
   request: ChangeRequest,
 ): Promise<FleetAccountChangeOutcome | undefined> {
-  const authority = request.authority ?? (await WriteAuthority.open(deps));
-  const view = await deps.gateway.stage(request.change, authority.current);
+  await requireMayApply(deps);
+  const view = await deps.gateway.stage(request.change);
   const json = request.options.json === true;
   if (!json) deps.out.report(renderChangeView(view));
   if (request.options.dryRun) {
@@ -64,7 +61,7 @@ export async function runChange(
     return undefined;
   }
   if (request.destructive && !(await confirmStep(deps, 'Go ahead?', request.options.yes))) return undefined;
-  const outcome = await deps.gateway.apply(view.id, await authority.forApply());
+  const outcome = await deps.gateway.apply(view.id);
   const rendered = renderChangeOutcome(outcome);
   if (json) deps.out.report(JSON.stringify({ change: view, outcome }, null, 2));
   else if (rendered.ok) deps.out.success(rendered.text);

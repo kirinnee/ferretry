@@ -10,6 +10,29 @@ export const PushPreferencesSchema = z.object({
 });
 export type PushPreferences = z.infer<typeof PushPreferencesSchema>;
 
+/**
+ * The push services a subscription may point at: the hosts every major browser's push service runs on.
+ *
+ * WHY AN ALLOWLIST. The daemon POSTs to the endpoint — at once, as an enrolment confirmation, and on every
+ * later notification — from the host's own network position. An endpoint that could be any HTTPS URL
+ * would make every paired device a way to send requests to the host's LAN, tailnet or cloud metadata
+ * address. A browser only ever hands out an endpoint on its vendor's push service, so nothing a real
+ * browser produces is refused. A browser whose push service is not here cannot enrol, which is the
+ * declared cost.
+ */
+export const PUSH_SERVICE_HOSTS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com'] as const;
+/** Push services that shard by subdomain: Apple's (Safari) and Microsoft's WNS (Edge). */
+export const PUSH_SERVICE_HOST_SUFFIXES = ['.push.apple.com', '.notify.windows.com'] as const;
+
+/** Whether a host is one of the push services above. Exact, lowercased, and never an IP literal. */
+export function isPushServiceHost(host: string): boolean {
+  const name = host.toLowerCase();
+  return (
+    (PUSH_SERVICE_HOSTS as readonly string[]).includes(name) ||
+    PUSH_SERVICE_HOST_SUFFIXES.some(suffix => name.endsWith(suffix) && name.length > suffix.length)
+  );
+}
+
 const PushEndpointSchema = z
   .url()
   .max(4_096)
@@ -18,7 +41,11 @@ const PushEndpointSchema = z
     const endpoint = new URL(value);
     if (endpoint.protocol !== 'https:' || endpoint.username !== '' || endpoint.password !== '') {
       context.addIssue({ code: 'custom', message: 'endpoint must be an HTTPS URL without credentials' });
+      return;
     }
+    // The default port only: a push service listens on 443, and any other port is somebody else's server.
+    if (endpoint.port !== '' || !isPushServiceHost(endpoint.hostname))
+      context.addIssue({ code: 'custom', message: 'endpoint must be a browser push service' });
   });
 
 const P256dhSchema = z.base64url().length(87);

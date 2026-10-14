@@ -97,7 +97,10 @@ const devices = {
 
 /** This tier proves the SOCKET — its order, liveness, patience and teardown — so the two ports the
  *  link uses for streams and pairing answer nothing here. What they carry is the unit tier's subject. */
-const relayStreams = async (): Promise<SocketUpgradeDecision> => ({ outcome: 'unclaimed' });
+const relayStreams = {
+  upgrade: async (): Promise<SocketUpgradeDecision> => ({ outcome: 'unclaimed' }),
+  reauthorize: () => true,
+};
 const relayPairing = { redeemInSession: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) };
 
 const session = (): SessionId => {
@@ -568,16 +571,19 @@ describe('what a stopped carrier owes a live stream', () => {
       identity,
       devices,
       connections: new LiveDeviceConnections(),
-      sockets: async () => ({
-        outcome: 'accepted',
-        attach: async () => ({
-          open: async () => {
-            attached = true;
-          },
-          fromClient: () => undefined,
-          close: () => closed.push('released'),
+      sockets: {
+        upgrade: async () => ({
+          outcome: 'accepted',
+          attach: async () => ({
+            open: async () => {
+              attached = true;
+            },
+            fromClient: () => undefined,
+            close: () => closed.push('released'),
+          }),
         }),
-      }),
+        reauthorize: () => true,
+      },
       pairing: relayPairing,
       dispatch: async () => ok({}),
       socketFactory: fake.factory,

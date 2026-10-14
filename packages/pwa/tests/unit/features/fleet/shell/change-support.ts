@@ -9,14 +9,12 @@ import type {
 import type { z } from 'zod';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 
-export const UNLOCK_TOKEN = `fy_unlock_${'A'.repeat(22)}`;
 const CHANGE_ID = 'fy_fprop_abcdefghijklmnopqrstuv';
 
 /** What this caller may do, as `GET /v1/fleet/machine` carries it. */
 const authority = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineAuthority => ({
   mayApply: true,
   applyRefusal: 'granted',
-  confirmation: 'none',
   ...overrides,
 });
 
@@ -49,8 +47,6 @@ export const OUTCOME: FleetAccountChangeOutcome = {
   summary: 'Imported this machine’s setup',
 };
 
-export const UNLOCKED = { token: UNLOCK_TOKEN, expiresAt: '2026-10-13T09:00:00.000Z', ttlSeconds: 300 };
-
 export interface Call {
   readonly path: string;
   readonly headers: Record<string, string>;
@@ -60,7 +56,7 @@ export interface Call {
 export type Answer = unknown | Error | ((call: Call) => unknown);
 
 /**
- * Answers by path: `/v1/fleet/machine`, `/v1/grants/unlock`, `/v1/fleet/proposals`,
+ * Answers by path: `/v1/fleet/machine`, `/v1/fleet/proposals`,
  * `/v1/fleet/proposals/<id>/apply`. A path with no answer fails like an unreachable machine.
  */
 export const scriptedClient = (answers: Readonly<Record<string, Answer>>, calls: Call[] = []): FleetClient => ({

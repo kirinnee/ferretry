@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { RegisterPushDeviceRequest } from '@ferretry/protocol';
+import { LIMITED_DEVICE_GRANTS, type RegisterPushDeviceRequest } from '@ferretry/protocol';
 import should from 'should';
 import {
   PairedPushDevices,
@@ -91,6 +91,7 @@ describe('PairedPushDevices', () => {
           createdAt: AT,
           lastSeenAt: AT,
           publicKey: 'MCowBQYDK2VwAyEA0000000000000000000000000000000000000000000',
+          grants: LIMITED_DEVICE_GRANTS,
         },
       ],
     });
@@ -109,7 +110,7 @@ describe('PushService.register', () => {
   it('should enrol a browser against the device that asked, and confirm it by using it', async () => {
     const { service, store, transport } = world();
 
-    const view = await service.register(deviceId('a'), registration('https://push.example.test/send/one'));
+    const view = await service.register(deviceId('a'), registration('https://fcm.googleapis.com/send/one'));
 
     should(view.id).equal('push-22222222-2222-4222-8222-222222222222');
     should(view.deviceName).equal('Pixel 8');
@@ -136,18 +137,31 @@ describe('PushService.register', () => {
     should(view.deviceName).equal('New name');
   });
 
-  it('should refuse and forget an endpoint the push service has already discarded', async () => {
+  it('should forget an endpoint the push service has already discarded, and answer the same as a live one', async () => {
+    // The answer is never the confirmation's fate: a register that said "the push service refused it"
+    // would be a reachability oracle for the host's network (review M2).
     const { service, store } = world({ outcomes: ['expired'] });
 
-    const refusal = await refused(service.register(deviceId('a'), registration('https://push.example.test/send/gone')));
-    should(refusal.code).equal('invalid');
+    const view = await service.register(deviceId('a'), registration('https://fcm.googleapis.com/send/gone'));
+    should(view.id).be.a.String();
     should(store.records).be.empty();
+  });
+
+  it('should refuse to re-file the enrolment of another device under the caller, and leave it where it was', async () => {
+    const { service, store } = world();
+    const endpoint = 'https://fcm.googleapis.com/send/shared';
+    await service.register(deviceId('a'), registration(endpoint));
+
+    const refusal = await refused(service.register(deviceId('b'), registration(endpoint)));
+    should(refusal.code).equal('invalid');
+    should(refusal.message).match(/enrolled for another device/u);
+    should(store.records.map(record => record.deviceId)).eql([deviceId('a')]);
   });
 
   it('should keep an enrolment whose confirmation merely failed to get through', async () => {
     const { service, store } = world({ outcomes: ['failed'] });
 
-    const view = await service.register(deviceId('a'), registration('https://push.example.test/send/one'));
+    const view = await service.register(deviceId('a'), registration('https://fcm.googleapis.com/send/one'));
 
     // A timeout or a 5xx says something about the network, not about the browser. Deleting the
     // enrolment over one would cost somebody their notifications for a transient fault.
@@ -158,7 +172,7 @@ describe('PushService.register', () => {
   it('should refuse a registration the wire could not describe before it is persisted', async () => {
     const { service, store } = world();
 
-    await service.register('not-a-device-id', registration('https://push.example.test/send/one')).should.be.rejected();
+    await service.register('not-a-device-id', registration('https://fcm.googleapis.com/send/one')).should.be.rejected();
     should(store.records).be.empty();
   });
 });
@@ -182,6 +196,17 @@ describe('PushService.list', () => {
 
     should(await service.list()).have.length(1);
     should(store.forgotten).be.empty();
+  });
+
+  it('should answer one device its own enrolments, and say who filed an id', async () => {
+    // Self-enrolment needs no capability (B5), so a device may always see and end its OWN rows.
+    const mine = record();
+    const theirs = record({ id: 'push-33333333-3333-4333-8333-333333333333', deviceId: deviceId('b') });
+    const { service } = world({ records: [mine, theirs], granted: [deviceId('a'), deviceId('b')] });
+
+    should((await service.listFor(deviceId('a'))).map(device => device.id)).eql([mine.id]);
+    should(await service.ownerOf(theirs.id)).equal(deviceId('b'));
+    should(await service.ownerOf('push-99999999-9999-4999-8999-999999999999')).be.undefined();
   });
 });
 
@@ -217,7 +242,7 @@ describe('PushService.forgetDevice', () => {
     const one = record();
     const two = record({
       id: 'push-44444444-4444-4444-8444-444444444444',
-      subscription: subscription('https://push.example.test/send/two', 5),
+      subscription: subscription('https://fcm.googleapis.com/send/two', 5),
     });
     const other = record({ id: 'push-55555555-5555-4555-8555-555555555555', deviceId: deviceId('b') });
     const { service, store } = world({ records: [one, two, other] });

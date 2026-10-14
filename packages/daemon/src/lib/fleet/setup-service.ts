@@ -8,7 +8,7 @@
  * Neither has a route of its own that writes. Each is an EXECUTOR the catalogue's change flow runs
  * (`catalog-service.ts`): `POST /v1/fleet/proposals` with `setup.import` or `clone.import` stages it and
  * {@link FleetSetupService.executors} describes what applying would do; the apply runs it, after the
- * same revision and operator-password checks every change gets. What is described is
+ * same revision check and `fleet.configure` step-up every change gets. What is described is
  * what runs: the plan is composed again at the apply and refused when it no longer matches the one the
  * person reviewed, because the host's own setup — or the target machine — can move in between.
  *
@@ -23,7 +23,7 @@
  *
  * Is refused as unreadable, never converted and never touched: the scan and the import say so with the
  * sentence that tells a person to move it aside and set the machine up again. Installing a tool
- * writes no configuration, so it asks only for the operator password.
+ * writes no configuration, so it asks only for the `fleet.configure` step-up.
  *
  * ## Nothing is imported at boot
  *
@@ -119,7 +119,6 @@ export type SetupCatalogDeps = Pick<
   | 'locate'
   | 'machineName'
   | 'credentials'
-  | 'confirmChange'
   | 'provisioner'
   | 'layout'
   | 'mint'

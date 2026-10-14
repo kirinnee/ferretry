@@ -7,8 +7,8 @@
  *
  * The scan reads the person's own harness setup — file names, server names, secret-looking key names —
  * and the export is everything a Clone copies, so neither is a `fleet.use` read even though both write
- * nothing. Installing a tool runs a package manager on this machine, so
- * it adds the per-change operator password for a caller the boundary says owes it. No answer carries
+ * nothing. Installing a tool runs a package manager on this machine, which is a `fleet.configure` act
+ * a caller off this host makes only behind the passkey step-up. No answer carries
  * a credential or a secret value.
  *
  * ## `noStore` on all three
@@ -32,7 +32,7 @@ import { FleetSetupRefusal, type FleetSetupService } from '../../fleet/setup-ser
 /** First-run scan, tool install and the clone export. */
 export type FleetSetupSubsystem = Pick<FleetSetupService, 'scan' | 'installTools' | 'exportBundle' | 'executors'>;
 
-/** `403` for a caller who could not confirm; `409` for every other refusal, as the fleet's own answer. */
+/** `403` for a caller the grants refuse; `409` for every other refusal, as the fleet's own answer. */
 function refusal(error: FleetSetupRefusal): ApiError {
   return new ApiError(error.code === 'fleet_setup_unauthorized' ? 403 : 409, error.message, error.code);
 }

@@ -25,10 +25,10 @@ import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
-import { StdinOperatorPassword } from '../src/adapters/grants/stdin-operator-password';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
+import { IntlLocalTime } from '../src/adapters/passkey/local-time';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
 import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/tmux-attacher';
 import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
@@ -55,11 +55,13 @@ import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
-import { FirstPasswordOffer } from '../src/lib/daemon/first-password';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { MachineSetupNotice } from '../src/lib/daemon/setup-notice';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
+import { registerDeviceCommands } from '../src/lib/device/commands';
+import { DeviceController } from '../src/lib/device/controller';
+import { ProtocolDeviceGateway } from '../src/lib/device/gateway';
 import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
 import { FilesystemController } from '../src/lib/filesystem/controller';
 import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
@@ -83,6 +85,9 @@ import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
+import { registerPasskeyCommands } from '../src/lib/passkey/commands';
+import { PasskeyController } from '../src/lib/passkey/controller';
+import { ProtocolPasskeyGateway } from '../src/lib/passkey/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -93,6 +98,9 @@ import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
+import { registerSecurityCommands } from '../src/lib/security/commands';
+import { SecurityController } from '../src/lib/security/controller';
+import { ProtocolSecurityGateway } from '../src/lib/security/gateway';
 import {
   AnswerQuestionController,
   InterruptSessionController,
@@ -470,29 +478,6 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     clientName: BINARY_NAME,
     clock,
     out,
-    /**
-     * The first-password offer, made after a start somebody typed.
-     *
-     * IT SPEAKS TO THE DAEMON THIS VERB JUST STARTED, through the shared lazy client — which connects
-     * on first use, and its first use is after the readiness wait. That ordering is why the daemon
-     * group can hold a client at all: the address and the admin token both exist by the time this asks
-     * anything. It is the SAME gateway `fy daemon password set` uses, so a password set from the prompt
-     * is one that command can replace.
-     */
-    firstPassword: new FirstPasswordOffer({
-      passwords: {
-        passwordSet: async () => (await new ProtocolGrantGateway(client).read()).passwordSet,
-        setPassword: async password => {
-          await new ProtocolGrantGateway(client).setPassword(password);
-        },
-      },
-      prompt: world.prompt,
-      out,
-      // Read when the question is asked rather than captured at build time, and it is the same answer
-      // every other prompt in this CLI uses: both ends of the terminal, or nobody is there.
-      interactive: () => world.io.interactive(),
-      clientName: BINARY_NAME,
-    }),
     // The machine's own answer, through the same lazy client, after the start has already waited for it.
     setupNotice: new MachineSetupNotice({
       setUp: async () => (await new ProtocolAccountGateway(client).machine()).setUp,
@@ -536,7 +521,6 @@ function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): Accoun
     prompt: world.prompt,
     interactive: world.interactive,
     binaryName: BINARY_NAME,
-    readPasswordFromStdin: () => new StdinOperatorPassword(BINARY_NAME).read(),
     readText: path => Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
     sleep: milliseconds => Bun.sleep(milliseconds),
     now: () => Date.now(),
@@ -681,9 +665,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // to answer "is the daemon up?" on a host that has none, which is exactly what a fresh
   // `daemon install` leaves behind. Its health probe therefore has its own unauthenticated client.
   //
-  // It does hold the shared one, for the first-password offer alone. That is safe because the shared
-  // client is LAZY — it resolves the address and the admin token on first use, and the only thing here
-  // that uses it runs after a start has already waited for the daemon to serve.
+  // It does hold the shared one, for the setup notice alone. That is safe because the shared client is
+  // LAZY — it resolves the address and the admin token on first use, and the only thing here that uses
+  // it runs after a start has already waited for the daemon to serve.
   ({ program, world, client }) =>
     registerDaemonCommands(
       program,
@@ -699,7 +683,31 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new GrantController({
           gateway: new ProtocolGrantGateway(client),
-          passwords: new StdinOperatorPassword(BINARY_NAME),
+          out: world.io,
+          clientName: BINARY_NAME,
+        }),
+    ),
+  // `fy device` reads and changes what each paired device may do. It takes the shared client, which is
+  // lazy, so listing devices is the first thing that resolves the address and the admin token.
+  ({ program, world, client }) =>
+    registerDeviceCommands(
+      program,
+      () =>
+        new DeviceController({
+          gateway: new ProtocolDeviceGateway(client),
+          out: world.io,
+          prompt: world.prompt,
+          interactive: world.interactive,
+          clientName: BINARY_NAME,
+        }),
+    ),
+  // The security verbs mount onto the same group, after it, and take the shared client for the same reason.
+  ({ program, world, client }) =>
+    registerSecurityCommands(
+      program,
+      () =>
+        new SecurityController({
+          gateway: new ProtocolSecurityGateway(client),
           out: world.io,
           clientName: BINARY_NAME,
         }),
@@ -718,6 +726,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         qr: new QrCodeTerminal(),
         terminal: new ProcessTerminalSize(),
         browser: desktopBrowserOpener(),
+        binaryName: BINARY_NAME,
+      }),
+    ),
+  // The owner's passkey recovery verb. It dials the daemon with the host's admin credential, which is the
+  // one caller the daemon treats as "at the machine" — no other credential could be answered.
+  ({ program, world, client }) =>
+    registerPasskeyCommands(
+      program,
+      new PasskeyController({
+        gateway: new ProtocolPasskeyGateway(client),
+        out: world.io,
+        time: new IntlLocalTime(),
         binaryName: BINARY_NAME,
       }),
     ),

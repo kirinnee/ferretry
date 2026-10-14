@@ -11,6 +11,7 @@ import type { DeviceKeyStore } from '../../src/lib/device-keys.ts';
 
 export class MemoryDeviceKeyStore implements DeviceKeyStore {
   readonly keys = new Map<string, CryptoKey>();
+  readonly pending = new Map<string, CryptoKey>();
   readonly saved: string[] = [];
   readonly removed: string[] = [];
 
@@ -26,5 +27,26 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore {
   async remove(daemonId: string): Promise<void> {
     this.removed.push(daemonId);
     this.keys.delete(daemonId);
+    this.pending.delete(daemonId);
+  }
+
+  async loadPending(daemonId: string): Promise<CryptoKey | undefined> {
+    return this.pending.get(daemonId);
+  }
+
+  async savePending(daemonId: string, key: CryptoKey): Promise<void> {
+    this.pending.set(daemonId, key);
+  }
+
+  async promotePending(daemonId: string): Promise<boolean> {
+    const key = this.pending.get(daemonId);
+    if (key === undefined) return false;
+    this.keys.set(daemonId, key);
+    this.pending.delete(daemonId);
+    return true;
+  }
+
+  async discardPending(daemonId: string): Promise<void> {
+    this.pending.delete(daemonId);
   }
 }

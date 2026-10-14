@@ -1,6 +1,9 @@
 import { join } from 'node:path';
 import {
+  type CapabilityGrants,
+  CapabilityGrantsSchema,
   type DaemonId,
+  LIMITED_DEVICE_GRANTS,
   DaemonIdSchema,
   DaemonNameSchema,
   InstantSchema,
@@ -27,6 +30,11 @@ const DeviceRecordSchema = z.strictObject({
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
   publicKey: DeviceKeySchema,
+  // A record written before per-device grants reads as LIMITED (fleet.use only), a narrowing and
+  // therefore safe — so the document stays at schema 2. Every write carries the field.
+  grants: CapabilityGrantsSchema.default(LIMITED_DEVICE_GRANTS),
+  /** When `publicKey` last replaced an earlier one. Absent until a first rotation. */
+  keyRotatedAt: InstantSchema.optional(),
 });
 
 const DEVICE_DOCUMENT_VERSION = 2;
@@ -147,6 +155,25 @@ export class StatePairingRepository implements PairingDeviceStore {
     await this.write(records =>
       records.some(existing => existing.id === id)
         ? records.map(existing => (existing.id === id ? { ...existing, lastSeenAt } : existing))
+        : undefined,
+    );
+  }
+
+  async rotateKey(id: string, publicKey: string, keyRotatedAt: string): Promise<boolean> {
+    return await this.write(records =>
+      records.some(existing => existing.id === id)
+        ? records.map(existing =>
+            existing.id === id ? DeviceRecordSchema.parse({ ...existing, publicKey, keyRotatedAt }) : existing,
+          )
+        : undefined,
+    );
+  }
+
+  async setGrants(id: string, grants: CapabilityGrants): Promise<boolean> {
+    const parsed = CapabilityGrantsSchema.parse(grants);
+    return await this.write(records =>
+      records.some(existing => existing.id === id)
+        ? records.map(existing => (existing.id === id ? { ...existing, grants: parsed } : existing))
         : undefined,
     );
   }

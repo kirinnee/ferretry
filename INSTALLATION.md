@@ -152,18 +152,7 @@ A few commands take you from a fresh install to a phone watching an agent work. 
    what to bring in, and the start ends with one line saying so. `fy doctor` checks what else the
    host is missing, and says what each missing program stops.
 
-2. **Answer the password question.** At a terminal, the first start offers to set an **operator
-   password**. It is not your system or `sudo` password; it is a Ferretry-only secret. Using this
-   machine locally never needs it. Pairing a phone or another device does, because a paired device
-   can change this machine's settings, so press Enter to skip it for now if you like. With no
-   terminal (a script, for example) nothing is asked, and the start prints the command instead. Set
-   or replace it at any time with:
-
-   ```bash
-   fy daemon password set
-   ```
-
-3. **Set the machine up.** Ferretry asks, one question at a time, whether to use what it found:
+2. **Set the machine up.** Ferretry asks, one question at a time, whether to use what it found:
 
    > We found Claude Code on _this machine_. Use your login and setup? **Import** · **Skip**
 
@@ -172,7 +161,7 @@ A few commands take you from a fresh install to a phone watching an agent work. 
    `claude-default` and `codex-default`. Skip both and nothing is set up; you can come back any time.
 
    Answer it in whichever place suits you:
-   - **In the app.** Pair your phone (step 5) and the app opens these questions by itself. A tool
+   - **In the app.** Pair your phone (step 4) and the app opens these questions by itself. A tool
      that is installed but not signed in offers **Sign in now** right there.
    - **In the terminal.** `fy daemon setup` asks the same questions.
    - **In a script**, with no questions: `fy daemon import claude` or `fy daemon import codex`. Add
@@ -180,7 +169,7 @@ A few commands take you from a fresh install to a phone watching an agent work. 
 
    `fy runtimes` lists what was made.
 
-4. **Check the logins.**
+3. **Check the logins.**
 
    ```bash
    fy credentials
@@ -195,7 +184,7 @@ A few commands take you from a fresh install to a phone watching an agent work. 
    `fy credential signin <id>`. That one sign-in covers every runtime that uses the login. You can
    do the same from the browser: Settings → **Machines** → your machine → **Credentials**.
 
-5. **Pair your phone.**
+4. **Pair your phone.**
 
    ```bash
    fy pair
@@ -203,10 +192,11 @@ A few commands take you from a fresh install to a phone watching an agent work. 
 
    Scan the QR code with your phone's camera. The code lasts two minutes and works once. The phone
    does not need to reach this machine directly: when it cannot, it pairs through Ferretry's hosted
-   relay, which never sees the code or anything you send. If the machine is not set up yet, the app
-   asks step 3's questions as soon as the phone is paired.
+   relay, which never sees the code or anything you send. There is no password to set first: the phone
+   registers a passkey, and the dangerous acts it can do later ask for that passkey. If the machine is not set up yet, the app
+   asks step 2's questions as soon as the phone is paired.
 
-6. **Start a session** on an agent runtime (the ones the setup made are):
+5. **Start a session** on an agent runtime (the ones the setup made are):
 
    ```bash
    fy start --agent claude-default "your task"

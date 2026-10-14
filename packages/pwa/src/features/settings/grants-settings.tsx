@@ -9,29 +9,19 @@
  * bare "forbidden". The wording lives in `src/lib/grants.ts` so the Fleet tab, the Files pane and this
  * screen cannot word the same refusal three ways.
  *
- * ## LOOPBACK HAS NOTHING TO DECIDE, AND THE SCREEN SAYS SO
+ * ## A BROWSER ON THE MACHINE IS GOVERNED LIKE ANY OTHER
  *
- * A browser on `127.0.0.1` is ungoverned: every capability reads allowed and every reason reads
- * `granted`, because somebody at the machine already has the machine. The rows are still shown — this
- * is where an operator inspects the decision, and hiding it on the one machine that can change it
- * would be perverse — but the screen states, once, that they apply to callers that are not on this
- * host. Without that line a person reads `configure off` and goes hunting for a permission problem
- * their own command line does not have.
+ * Only the host's admin token over loopback — the CLI — is the owner at the machine, so a browser on
+ * `127.0.0.1` reads the same limits, asks for the same passkey, and can switch things off but never back
+ * on. The screen says so once, and widening is only ever offered as the command to run at the machine.
  *
- * ## AN UNLOCK IS OFFERED ONLY WHERE IT WOULD WORK
+ * ## THE PASSKEY IS OFFERED ONLY WHERE IT WOULD HELP
  *
- * Narrowing is never gated, so a revoke never raises a prompt: a password between a person and
- * shutting a door is a liability during the incident when it matters. Widening on a machine with a
- * password needs an unlock, and this screen asks for it inline. Widening on a machine with NO password
- * is a host act — there is nothing for a remote caller to prove — so the daemon's refusal naming
- * `fy daemon config` is rendered rather than pre-empted by a prompt that could not have helped.
- *
- * ## THE UNLOCK DIES WITH THIS SCREEN
- *
- * It is held in a `useState`, stamped with the daemon that minted it, and written to no storage of any
- * kind. Nothing here can persist it: there is no store, no `localStorage`, no URL, and the value is
- * refused for another daemon or past its expiry by `usableUnlock`. A token that outlived the tab it
- * was minted in would be a standing configure grant nobody re-consented to.
+ * A governed browser's dangerous acts need a passkey step-up. The carrier asks for it by itself when
+ * the daemon refuses, so no press is ever blocked here; what this screen adds is the way to do it
+ * BEFORE the press — one button, which is the app's single step-up prompt (`store.stepUp.require`),
+ * never a second prompt of its own — and one plain sentence saying why a row reads "needs your passkey".
+ * Nothing about a step-up is held here: the daemon remembers it, and the view says whether it does.
  */
 
 import {
@@ -42,43 +32,32 @@ import {
   type DaemonCapability,
   type GrantsView,
 } from '@ferretry/protocol';
-import { CircleAlert, KeyRound, Lock, LockOpen, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CircleAlert, Fingerprint, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
-
-import { useDaemonClient } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
-  axisChangeLocked,
   axisGuidance,
   axisLabel,
   axisQuestion,
   capabilityLabel,
   capabilityReach,
   connectionPosture,
+  deviceGrantNote,
   type GrantGuidance,
   grantAlreadyReads,
-  grantChangeNeedsUnlock,
-  grantGuidance,
+  grantChangeable,
   grantOnlyAtMachine,
   grantPatch,
   grantScopeKey,
   grantScopeNote,
-  type HeldUnlock,
-  NO_PASSWORD_DISCLOSURE,
-  type OperatorUnlockFailure,
-  operatorUnlockFailure,
   originNote,
-  PASSWORD_SET_DISCLOSURE,
-  passwordControlState,
   remoteRevokeWarning,
-  unlockSecondsRemaining,
-  usableUnlock,
+  STEP_UP_NOTE,
 } from '../../lib/grants.ts';
+import { useDaemonClient, useStepUpRequest } from '../../lib/store.tsx';
 import { CapabilityList } from './capability-list.tsx';
-import { changeGrants, type GrantClient, readGrants, setOperatorPassword, unlockGrants } from './grants-api.ts';
-import { OperatorPasswordCard } from './operator-password.tsx';
-import { OperatorUnlockDialog } from './operator-unlock-dialog.tsx';
+import { changeGrants, type GrantClient, readGrants } from './grants-api.ts';
 
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
 const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
@@ -100,7 +79,6 @@ function AxisControl({
   axis,
   changeable,
   oneWay,
-  lockedUntilUnlock,
   busy,
   onChange,
 }: {
@@ -110,8 +88,6 @@ function AxisControl({
   readonly changeable: boolean;
   /** True when this caller may switch the capability off but never back on. */
   readonly oneWay: boolean;
-  /** True when this press would widen and this browser has not proved the password yet. */
-  readonly lockedUntilUnlock: boolean;
   readonly busy: boolean;
   readonly onChange: (next: boolean) => void;
 }) {
@@ -124,7 +100,7 @@ function AxisControl({
    * the owner's rule made structural: "do not render a control that always fails."
    */
   const deadWideningSwitch = oneWay && !recorded;
-  const disabled = busy || !changeable || deadWideningSwitch || lockedUntilUnlock;
+  const disabled = busy || !changeable || deadWideningSwitch;
   const describedBy = useId();
   /**
    * The one sentence that keeps this from being a greyed switch.
@@ -138,14 +114,9 @@ function AxisControl({
         tone: 'limit' as const,
         badge: 'Only at the machine',
         explanation: grantOnlyAtMachine(entry.capability),
-        offersUnlock: false,
+        offersStepUp: false,
       }
-    : // A widening press this browser may make ONCE IT UNLOCKS. It is not the `not-granted` sentence —
-      // that one sends a person to the host to turn on something they can turn on right here — and it is
-      // not a live switch either, because it would be refused. It is the password, named.
-      lockedUntilUnlock
-      ? grantGuidance('locked', entry.capability)
-      : axisGuidance(entry, axis, changeable);
+    : axisGuidance(entry, axis, changeable);
 
   return (
     <div className="min-w-0">
@@ -210,22 +181,20 @@ function CapabilityCard({
 }) {
   const headingId = useId();
   /**
-   * Whether this browser may change this capability's grants at all.
-   *
-   * The DAEMON's rule, restated exactly: a caller without a proved password must already hold
-   * `configure` on a capability to touch either of its axes, because an operator who said the UI may
-   * not configure `terminal` is also saying the UI may not re-grant itself `terminal`. A held unlock
-   * makes the caller the operator, so the per-capability gate has nothing left to add.
+   * Whether this browser may change this capability's grants at all — the DAEMON's rule, in
+   * `grantChangeable`. A passkey step-up never decides it: that can be obtained on the spot.
    */
-  const changeable = view.unlocked || (entry.granted.use && entry.granted.configure);
+  const changeable = grantChangeable(view, entry);
   /**
    * Whether a switch here can travel back.
    *
-   * `mayGrant` is false for every remote caller, unconditionally — no password and no unlock buys
-   * widening. So for such a caller an OFF axis is not a control at all, and an ON axis is a door that
-   * only closes. Both facts are stated rather than discovered by pressing something.
+   * `mayGrant` is false for every browser, unconditionally — no passkey step-up buys widening, and a
+   * browser on the machine itself is still a browser. So for such a caller an OFF axis is not a control
+   * at all, and an ON axis is a door that only closes. Both facts are stated rather than discovered by
+   * pressing something.
    */
   const oneWay = !entry.mayGrant;
+  const deviceNote = deviceGrantNote(entry);
 
   return (
     <section
@@ -246,6 +215,14 @@ function CapabilityCard({
       </div>
       <p className="m-0 text-meta leading-base text-muted">{capabilityReach(entry.capability)}</p>
       <p className="m-0 text-meta leading-base text-faint">{originNote(entry)}</p>
+      {deviceNote === null ? null : (
+        <p
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+          data-grant-device-note={entry.capability}
+        >
+          {deviceNote}
+        </p>
+      )}
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
         {CAPABILITY_AXES.map(axis => (
           <AxisControl
@@ -254,13 +231,12 @@ function CapabilityCard({
             axis={axis}
             changeable={changeable}
             oneWay={oneWay}
-            lockedUntilUnlock={axisChangeLocked(view, entry, entry.granted[axis])}
             busy={busy}
             onChange={next => onChange(axis, next)}
           />
         ))}
       </div>
-      {/* THE ONE-WAY DOOR, said before anybody walks through it. A remote caller may switch this off
+      {/* THE ONE-WAY DOOR, said before anybody walks through it. A browser may switch this off
           and can never switch it back on, so the consequence belongs beside the switch rather than in
           a document read afterwards. It is shown while the capability is still ON, because that is the
           only moment the warning can change what somebody does. */}
@@ -277,129 +253,47 @@ function CapabilityCard({
 }
 
 /**
- * The unlock prompt.
+ * The passkey panel: says whether this device has confirmed, and offers to.
  *
- * IT SAYS WHAT THE LIMITER IS BEFORE ANYBODY SPENDS A TRY, and how many are left after a wrong one —
- * a limiter a person cannot see is a limiter that looks like a broken daemon. It discloses nothing
- * else about the password: not whether it was close, not its length, nothing. The field is
- * `type="password"` with `autoComplete="off"` because this is a local operator secret rather than a
- * site login, and a browser password manager offering to save it would put it somewhere this product
- * cannot reason about.
+ * ONE SENTENCE AND ONE BUTTON. The button is the app's own step-up prompt, so a second prompt component
+ * would be a second place for the ceremony to go wrong. It is rendered only for a governed caller who has
+ * not stepped up and only when the screen was handed a way to ask; a caller on the machine is never
+ * asked, and a confirmed device is told so rather than shown a button that would do nothing.
  */
-export function GrantUnlockPrompt({
-  held,
-  daemonId,
-  nowMs,
-  failure,
+export function GrantStepUpPanel({
+  steppedUp,
   busy,
-  hostLocal = false,
-  onUnlock,
+  onStepUp,
 }: {
-  readonly held: HeldUnlock | null;
-  readonly daemonId: DaemonConnection['daemonId'];
-  readonly nowMs: number;
-  readonly failure: OperatorUnlockFailure | null;
+  readonly steppedUp: boolean;
   readonly busy: boolean;
-  /**
-   * Whether this browser is ON the machine, which changes WHAT the password buys here.
-   *
-   * "Turning a capability on from off this host needs it" was the whole story while a local browser was
-   * ungoverned. It is now false for the reader most likely to meet this prompt — a browser on the
-   * machine, which needs the unlock for its own changes — so the sentence branches rather than saying
-   * something true of somebody else.
-   */
-  readonly hostLocal?: boolean;
-  readonly onUnlock: (password: string) => void;
+  readonly onStepUp?: (() => void) | undefined;
 }) {
-  const [asking, setAsking] = useState(false);
-  const secondsLeft = unlockSecondsRemaining(held, daemonId, nowMs);
-  const unlocked = usableUnlock(held, daemonId, nowMs) !== undefined;
-  /**
-   * What the password buys HERE, branched on where this browser is.
-   *
-   * "Turning a capability on from off this host needs it" was the whole story while a local browser was
-   * ungoverned, and it is false for the reader most likely to meet this prompt. The sentence travels into
-   * the dialog rather than being written there, because this is the grants panel's own vocabulary.
-   */
-  const purpose = hostLocal
-    ? 'A browser is a paired device even on the machine, so changing these settings needs the password once. Turning something off never does.'
-    : 'Turning a capability on from off this host needs it. Turning one off never does.';
-
-  if (unlocked)
-    return (
-      <section
-        className="kt-panel flex min-w-0 flex-col gap-1 p-panel"
-        aria-label="Operator unlock"
-        data-grant-unlock="held"
-      >
-        <p className="m-0 flex items-center gap-1.5 text-ui font-semibold text-ok">
-          <LockOpen size={15} aria-hidden="true" />
-          Unlocked for {secondsLeft}s
-        </p>
-        <p className="m-0 text-meta leading-base text-muted">
-          Held in this tab only, for this machine only. It is never saved, and closing this page ends it — so a change
-          made later needs the password again.
-        </p>
-      </section>
-    );
-
-  /**
-   * THE PROMPT IS A MODAL, AND IT IS THE FLEET PANEL'S MODAL.
-   *
-   * Two inline password fields in one product, worded differently, is how the fleet came to describe its
-   * own authority in terms no other capability used — so the presentation is shared and this panel keeps
-   * only the trigger and its own sentence. What stays inline is the SENTENCE, because somebody arriving
-   * at a refused switch has to know a password is what stands there before they open anything.
-   */
   return (
     <section
       className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-label="Operator unlock"
-      data-grant-unlock="prompt"
+      aria-label="Passkey confirmation"
+      data-grant-step-up={steppedUp ? 'held' : 'needed'}
     >
       <p className="m-0 flex items-center gap-1.5 text-ui font-semibold text-fg">
-        <Lock size={15} className="text-accent" aria-hidden="true" />
-        Operator password
+        <Fingerprint size={15} className="text-accent" aria-hidden="true" />
+        {steppedUp ? 'Confirmed with your passkey' : 'Passkey confirmation'}
       </p>
-      <p className="m-0 text-meta leading-base text-muted" data-grant-unlock-purpose={hostLocal ? 'local' : 'remote'}>
-        {purpose}
-      </p>
-      <div>
-        <button
-          type="button"
-          className="kt-btn min-h-[44px]"
-          data-grant-unlock-open=""
-          disabled={busy}
-          onClick={() => setAsking(true)}
-        >
-          <KeyRound size={15} aria-hidden="true" />
-          Unlock…
-        </button>
-      </div>
-      {/* The failure stays reachable after the dialog closes, because a lockout is a state of the MACHINE
-          rather than of one prompt: somebody who dismissed the modal still needs to know why nothing works. */}
-      {failure === null ? null : (
-        <p
-          role="alert"
-          className={cn(
-            'm-0 rounded-control border px-2 py-1 text-meta leading-base',
-            failure.retryable ? TONE_CLASS.limit : TONE_CLASS.fault,
-          )}
-          data-grant-unlock-failure={failure.retryable ? 'retryable' : 'final'}
-        >
-          {failure.message}
-        </p>
+      <p className="m-0 text-meta leading-base text-muted">{STEP_UP_NOTE}</p>
+      {steppedUp || onStepUp === undefined ? null : (
+        <div>
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            data-grant-step-up-open=""
+            disabled={busy}
+            onClick={onStepUp}
+          >
+            <Fingerprint size={15} aria-hidden="true" />
+            Confirm with passkey…
+          </button>
+        </div>
       )}
-      <OperatorUnlockDialog
-        open={asking}
-        purpose={purpose}
-        holding={true}
-        busy={busy}
-        failure={failure}
-        submitLabel="Unlock"
-        onSubmit={onUnlock}
-        onClose={() => setAsking(false)}
-      />
     </section>
   );
 }
@@ -407,19 +301,12 @@ export function GrantUnlockPrompt({
 export interface GrantsCardProps {
   readonly connection: DaemonConnection;
   readonly view: GrantsView;
-  /** Now, supplied rather than read, so an unlock countdown is deterministic in a test. */
-  readonly nowMs: number;
   readonly busy?: boolean;
-  readonly held?: HeldUnlock | null;
-  readonly unlockFailure?: OperatorUnlockFailure | null;
   /** A refusal the daemon answered a change with, rendered whole. */
   readonly changeFailure?: string | null;
-  /** A refusal the daemon answered a password change with, kept apart so one alert is not two. */
-  readonly passwordFailure?: string | null;
   readonly onChange: (capability: DaemonCapability, axis: CapabilityAxis, next: boolean) => void;
-  readonly onUnlock: (password: string) => void;
-  /** The value is passed through and never held by this component. There is no companion that removes one. */
-  readonly onSetPassword: (password: string) => void;
+  /** Asks for the passkey step-up now. Absent when this screen was given no way to ask. */
+  readonly onStepUp?: () => void;
 }
 
 /**
@@ -431,15 +318,10 @@ export interface GrantsCardProps {
 export function GrantsCard({
   connection,
   view,
-  nowMs,
   busy = false,
-  held = null,
-  unlockFailure: failure = null,
   changeFailure = null,
-  passwordFailure = null,
   onChange,
-  onUnlock,
-  onSetPassword,
+  onStepUp,
 }: GrantsCardProps) {
   const headingId = useId();
   /**
@@ -452,17 +334,8 @@ export function GrantsCard({
   const entries = DAEMON_CAPABILITIES.map(capability =>
     view.capabilities.find(candidate => candidate.capability === capability),
   ).filter((entry): entry is CapabilityGrantView => entry !== undefined);
-  /** Whether anything here could need the password, so the prompt is not offered where it is inert. */
-  const unlockUseful = view.passwordSet && view.lockedUntil === undefined;
-  /**
-   * Which of the four connections this is, from the DAEMON's two facts rather than one.
-   *
-   * `governed` and `hostLocal` are independent now: a browser on the machine is governed until it
-   * unlocks. Deriving locality from `governed` alone would call somebody standing at the machine remote
-   * the moment their unlock expired.
-   */
-  const posture = connectionPosture(view.governed, view.hostLocal);
-  const passwordState = passwordControlState(view);
+  /** Which of the connections this is, from the DAEMON's own account of the request. */
+  const posture = connectionPosture(view.governed);
 
   return (
     <section
@@ -480,76 +353,34 @@ export function GrantsCard({
           moment it is not. It is never inferred from this page's address, which would invert the answer
           over a relay. The fallback stays for a browser meeting an OLDER daemon that does not send the
           field. */}
-      <CapabilityList
-        connection={connection}
-        capabilities={view.capabilities}
-        governed={view.governed}
-        hostLocal={view.hostLocal}
-      />
+      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
             <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
             What a paired device may do
           </h3>
-          <span
-            className={cn(
-              'rounded-control border px-2 py-0.5 text-meta font-medium',
-              view.passwordSet ? TONE_CLASS.ok : TONE_CLASS.disclosure,
-            )}
-            data-grant-password-set={view.passwordSet ? 'yes' : 'no'}
-          >
-            {view.passwordSet ? 'operator password set' : 'no operator password'}
-          </span>
+          {view.governed ? (
+            <span
+              className={cn(
+                'rounded-control border px-2 py-0.5 text-meta font-medium',
+                view.steppedUp ? TONE_CLASS.ok : TONE_CLASS.disclosure,
+              )}
+              data-grant-stepped-up={view.steppedUp ? 'yes' : 'no'}
+            >
+              {view.steppedUp ? 'passkey confirmed' : 'passkey not confirmed yet'}
+            </span>
+          ) : null}
         </div>
         {/* The line that stops the commonest wrong reading of this whole screen, BRANCHED because one
-            sentence can no longer be true for every connection: a browser on the machine is governed too
-            until it unlocks, and telling that reader the limits are somebody else’s would send them
-            hunting for a permission problem they do not have. */}
+            sentence cannot be true for every connection. */}
         <p className="m-0 text-cell leading-base text-muted" data-grant-scope={grantScopeKey(posture)}>
           {grantScopeNote(posture)}
         </p>
-        {/* The disclosure, ONCE, next to the configure controls it is about. Not a modal, not a
-            recurring warning, and not a question anybody has to answer. */}
-        <p
-          className={cn(
-            'm-0 rounded-control border px-3 py-2 text-ui leading-base',
-            view.passwordSet ? TONE_CLASS.disclosure : TONE_CLASS.limit,
-          )}
-          data-grant-disclosure={view.passwordSet ? 'password-set' : 'no-password'}
-        >
-          {view.passwordSet ? PASSWORD_SET_DISCLOSURE : NO_PASSWORD_DISCLOSURE}
-        </p>
-        {view.lockedUntil === undefined ? null : (
-          <p
-            role="alert"
-            className={cn('m-0 rounded-control border px-3 py-2 text-ui leading-base', TONE_CLASS.fault)}
-            data-grant-locked-until={view.lockedUntil}
-          >
-            <TriangleAlert size={14} className="mr-1 inline" aria-hidden="true" />
-            Too many wrong operator passwords, so this daemon has stopped checking them. It starts again at{' '}
-            {view.lockedUntil}. The limit counts per machine, so this can be a colleague’s wrong guesses rather than
-            yours.
-          </p>
-        )}
       </section>
 
-      {unlockUseful ? (
-        <GrantUnlockPrompt
-          held={held}
-          daemonId={connection.daemonId}
-          nowMs={nowMs}
-          failure={failure}
-          busy={busy}
-          hostLocal={view.hostLocal}
-          onUnlock={onUnlock}
-        />
-      ) : null}
-
-      {/* THE GATE ITSELF, beside the unlock that spends it rather than on another screen. It is rendered
-          in every posture: where it cannot succeed it renders the reason and the host command, because a
-          setting that silently disappears on a phone is a setting somebody goes looking for. */}
-      <OperatorPasswordCard state={passwordState} busy={busy} failure={passwordFailure} onSet={onSetPassword} />
+      {/* The passkey, for a caller the limits govern. */}
+      {view.governed ? <GrantStepUpPanel steppedUp={view.steppedUp} busy={busy} onStepUp={onStepUp} /> : null}
 
       {entries.map(entry => (
         <CapabilityCard
@@ -579,8 +410,7 @@ export function GrantsCard({
 }
 
 export type GrantClientFactory = (connection: DaemonConnection) => Promise<GrantClient>;
-/** Now, injected, so nothing in this surface reads a clock a test cannot move. */
-export type GrantClock = () => number;
+export type StepUpRequest = (connection: DaemonConnection) => Promise<boolean>;
 
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
@@ -594,16 +424,19 @@ const message = (cause: unknown): string => (cause instanceof Error ? cause.mess
 export function GrantsSurface({
   connection,
   createClient: injectedClient,
-  now = Date.now,
+  requestStepUp: injectedStepUp,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: GrantClientFactory;
-  readonly now?: GrantClock;
+  /** Test and harness override for the app's step-up prompt. */
+  readonly requestStepUp?: StepUpRequest;
 }) {
   // The carrier-routed client unless a test or the harness hands one in: a plain-network client
   // reaches no daemon at all, because a paired browser is answered only inside its own session.
   const routedClient = useDaemonClient();
   const createClient = injectedClient ?? routedClient;
+  const appStepUp = useStepUpRequest();
+  const requestStepUp = injectedStepUp ?? appStepUp;
   const [client, setClient] = useState<GrantClient | null>(null);
   const [loaded, setLoaded] = useState<{
     readonly daemonId: DaemonConnection['daemonId'];
@@ -615,22 +448,12 @@ export function GrantsSurface({
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [changeFailure, setChangeFailure] = useState<string | null>(null);
-  const [passwordFailure, setPasswordFailure] = useState<string | null>(null);
-  /** The unlock, in component state. Never a store, never storage. It dies with this screen. */
-  const [held, setHeld] = useState<HeldUnlock | null>(null);
-  const [failure, setFailure] = useState<OperatorUnlockFailure | null>(null);
-
   useEffect(() => {
     let current = true;
     setClient(null);
     setLoaded(null);
     setLoadFailure(null);
     setChangeFailure(null);
-    setPasswordFailure(null);
-    // A held unlock belongs to the daemon that minted it, so switching machines drops it rather than
-    // carrying a credential across a boundary everything else here is keyed by.
-    setHeld(null);
-    setFailure(null);
     void createClient(connection)
       .then(async next => {
         const view = await readGrants(next);
@@ -651,15 +474,12 @@ export function GrantsSurface({
       if (client === null || loaded?.daemonId !== connection.daemonId) return;
       const view = loaded.view;
       // Nothing is sent for a change the document already records: the patch would be accepted and
-      // report nothing changed, and on a governed machine a no-op widen would spend an unlock demand.
+      // report nothing changed, and on a governed machine a no-op would still ask for a passkey.
       if (grantAlreadyReads(view, capability, axis, next)) return;
       setBusy(true);
       setChangeFailure(null);
       try {
-        const unlock = grantChangeNeedsUnlock(view, capability, next)
-          ? usableUnlock(held, connection.daemonId, now())
-          : undefined;
-        const updated = await changeGrants(client, grantPatch(capability, axis, next), unlock);
+        const updated = await changeGrants(client, grantPatch(capability, axis, next));
         setLoaded({ daemonId: connection.daemonId, view: updated });
       } catch (cause) {
         setChangeFailure(message(cause));
@@ -667,76 +487,38 @@ export function GrantsSurface({
         setBusy(false);
       }
     },
-    [client, connection.daemonId, held, loaded, now],
+    [client, connection.daemonId, loaded],
   );
 
   /**
-   * Sets or replaces the password. Nothing here removes one — that verb does not exist.
+   * Asks for the passkey BEFORE a press, then re-reads the view.
    *
-   * THE VALUE IS AN ARGUMENT AND NOTHING ELSE. It is not put in state, not logged, and not echoed back;
-   * the held unlock travels in a header because replacing an existing password is a privileged change,
-   * and the view is re-read afterwards because `passwordSet` decides what every other control on this
-   * screen may do. Every unlock is void once the password moves — the daemon drops them, so a stale
-   * `held` here would claim an authority the machine has already withdrawn.
+   * The re-read is the point: holding a step-up changes what the view says is possible — the refusals
+   * move off `step-up-required` — and a screen still showing the old ones would keep explaining a limit
+   * the reader has just cleared. A dismissed prompt changes nothing and says nothing.
    */
-  const movePassword = useCallback(
-    async (password: string) => {
-      if (client === null || loaded?.daemonId !== connection.daemonId) return;
-      setBusy(true);
-      setPasswordFailure(null);
-      try {
-        await setOperatorPassword(client, password, usableUnlock(held, connection.daemonId, now()));
-        setHeld(null);
-        setFailure(null);
-        setLoaded({ daemonId: connection.daemonId, view: await readGrants(client) });
-      } catch (cause) {
-        setPasswordFailure(message(cause));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [client, connection.daemonId, held, loaded?.daemonId, now],
-  );
-
-  const unlock = useCallback(
-    async (password: string) => {
-      if (client === null || loaded?.daemonId !== connection.daemonId) return;
-      setBusy(true);
-      setFailure(null);
-      try {
-        const minted = await unlockGrants(client, password);
-        setHeld({
-          daemonId: connection.daemonId,
-          token: minted.token,
-          expiresAtMs: Date.parse(minted.expiresAt),
-        });
-        // Re-read, because holding an unlock changes what the view says is possible: `configure`
-        // reasons move off `locked`, and a screen still showing the old ones would keep explaining a
-        // limit the reader has just cleared.
-        setLoaded({ daemonId: connection.daemonId, view: await readGrants(client) });
-      } catch (cause) {
-        setFailure(operatorUnlockFailure(cause));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [client, connection.daemonId, loaded?.daemonId],
-  );
+  const stepUp = useCallback(async () => {
+    if (client === null || requestStepUp === undefined || loaded?.daemonId !== connection.daemonId) return;
+    setBusy(true);
+    setChangeFailure(null);
+    try {
+      if (await requestStepUp(connection)) setLoaded({ daemonId: connection.daemonId, view: await readGrants(client) });
+    } catch (cause) {
+      setChangeFailure(message(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [client, connection, loaded?.daemonId, requestStepUp]);
 
   if (loaded?.daemonId === connection.daemonId)
     return (
       <GrantsCard
         connection={connection}
         view={loaded.view}
-        nowMs={now()}
         busy={busy}
-        held={held}
-        unlockFailure={failure}
         changeFailure={changeFailure}
-        passwordFailure={passwordFailure}
         onChange={(capability, axis, next) => void change(capability, axis, next)}
-        onUnlock={password => void unlock(password)}
-        onSetPassword={password => void movePassword(password)}
+        {...(requestStepUp === undefined ? {} : { onStepUp: () => void stepUp() })}
       />
     );
   if (loadFailure?.daemonId === connection.daemonId)

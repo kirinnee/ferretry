@@ -48,7 +48,7 @@
  *   moves to `device-unavailable` and the service relaunches);
  * - **by choice**, when the person says the device code did not work ({@link decideCodexSubmit}).
  *
- * The method switches inside ONE flow, so the operator password its start proved is not asked twice.
+ * The method switches inside ONE flow, so the step-up its start was held behind is not asked twice.
  *
  * ## Everything here is PURE
  *

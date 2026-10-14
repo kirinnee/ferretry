@@ -7,8 +7,7 @@
  * no token while it happens — the harness writes its own login into the one store every runtime on it
  * reads, so one sign-in fixes all of them.
  *
- * Before a sign-in starts, this is the ordinary change panel ("Sign in to Claude Code", with the
- * operator password when this browser owes it). Once one is running, it is the harness's panel. The
+ * Before a sign-in starts, this is the ordinary change panel ("Sign in to Claude Code"). Once one is running, it is the harness's panel. The
  * live flow is re-read every two seconds only while it waits for the person, because they are acting
  * somewhere this browser cannot see; it stops the moment the flow ends.
  */
@@ -47,8 +46,6 @@ export interface CredentialSignInProps {
   readonly onSignedIn: () => void;
   /** A sign-in the caller already started (Add a login starts it in the same click that made the login). */
   readonly initialFlow?: CredentialLoginFlow;
-  /** The unlock that start used, to read the flow back with. */
-  readonly initialUnlock?: string;
   /** Supplied in tests. */
   readonly pollMs?: number;
 }
@@ -75,7 +72,6 @@ export function CredentialSignIn({
   changes,
   onSignedIn,
   initialFlow,
-  initialUnlock,
   pollMs = SIGN_IN_POLL_MS,
 }: CredentialSignInProps) {
   const [flow, setFlow] = useState<CredentialLoginFlow | null>(initialFlow ?? null);
@@ -83,7 +79,6 @@ export function CredentialSignIn({
   const [refusal, setRefusal] = useState<string | null>(null);
   /** Codex's sign-in method for the next start. Follows a flow that moved to a link by itself. */
   const [method, setMethod] = useState<HarnessLoginCodexMethod>('device-code');
-  const unlock = useRef<string | undefined>(initialUnlock);
   const reported = useRef<string | null>(null);
 
   const finished = useCallback(
@@ -102,33 +97,23 @@ export function CredentialSignIn({
     if (flow === null || !waiting(flow)) return;
     const timer = setTimeout(() => {
       void createClient(connection)
-        .then(client => readCredentialSignIn(client, flow.flowId, unlock.current))
+        .then(client => readCredentialSignIn(client, flow.flowId))
         .then(finished)
         .catch((error: unknown) => setRefusal(changeRefusalSentence(error)));
     }, pollMs);
     return () => clearTimeout(timer);
   }, [connection, createClient, finished, flow, pollMs]);
 
-  const start = async (operatorPassword: string | undefined): Promise<void> => {
+  const start = async (): Promise<void> => {
     setRefusal(null);
-    const authorization = await changes.authorize(operatorPassword);
-    if (authorization.kind === 'refused') return;
-    unlock.current = authorization.unlock;
     setBusy(true);
     try {
       const client = await createClient(connection);
       finished(
-        await startCredentialSignIn(
-          client,
-          {
-            credentialId: credential.id,
-            ...(credential.harness === 'codex' && method === 'link' ? { method } : {}),
-            ...(authorization.operatorPassword === undefined
-              ? {}
-              : { operatorPassword: authorization.operatorPassword }),
-          },
-          authorization.unlock,
-        ),
+        await startCredentialSignIn(client, {
+          credentialId: credential.id,
+          ...(credential.harness === 'codex' && method === 'link' ? { method } : {}),
+        }),
       );
     } catch (error) {
       setRefusal(changeRefusalSentence(error));
@@ -143,7 +128,7 @@ export function CredentialSignIn({
     setRefusal(null);
     try {
       const client = await createClient(connection);
-      const answer = await submitCredentialSignInCode(client, flow.flowId, code, unlock.current);
+      const answer = await submitCredentialSignInCode(client, flow.flowId, code);
       if (answer.outcome === 'accepted') finished(answer.flow);
       else setRefusal(answer.reason);
     } catch (error) {
@@ -159,7 +144,7 @@ export function CredentialSignIn({
     setRefusal(null);
     try {
       const client = await createClient(connection);
-      const answer = await switchCredentialSignInToLink(client, flow.flowId, unlock.current);
+      const answer = await switchCredentialSignInToLink(client, flow.flowId);
       if (answer.outcome === 'accepted') {
         setMethod('link');
         finished(answer.flow);
@@ -176,7 +161,7 @@ export function CredentialSignIn({
     setBusy(true);
     try {
       const client = await createClient(connection);
-      await cancelCredentialSignIn(client, flow.flowId, unlock.current);
+      await cancelCredentialSignIn(client, flow.flowId);
     } catch {
       // The flow ends on its own within minutes; the panel goes back to its start either way.
     } finally {
@@ -208,7 +193,7 @@ export function CredentialSignIn({
           busyLabel="Starting sign-in…"
           refusal={refusal ?? changes.refusal}
           submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
-          onSubmit={password => void start(password)}
+          onSubmit={() => void start()}
         />
         {credential.harness === 'codex' ? (
           <div data-credential-sign-in-method={method}>

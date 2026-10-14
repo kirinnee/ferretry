@@ -177,7 +177,7 @@ export interface SessionTerminalDeckProps {
  * What a failed terminal call says.
  *
  * A grant refusal is worded as one rather than shown as a bare 403: the operator may have switched
- * `terminal` off, or the operator password may be needed, and "HTTP 403" tells a person neither. The
+ * `terminal` off, or a passkey confirmation may be needed, and "HTTP 403" tells a person neither. The
  * daemon's own sentence — which names the command that changes it — is kept after the guidance.
  */
 const failure = (error: unknown): string => {

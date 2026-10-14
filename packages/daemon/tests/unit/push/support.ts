@@ -41,7 +41,7 @@ export function record(overrides: Partial<PushSubscriptionRecord> = {}): PushSub
     id: pushId('a'),
     deviceId: deviceId('a'),
     deviceName: 'Pixel 8',
-    subscription: subscription('https://push.example.test/send/one'),
+    subscription: subscription('https://fcm.googleapis.com/send/one'),
     prefs: allEvents,
     createdAt: AT,
     updatedAt: AT,

@@ -46,8 +46,8 @@
  * ## One Codex flow, two children, in turn
  *
  * A Codex flow can move from a device code to Codex's link sign-in — by itself when Codex says device
- * codes are unavailable, or when the person asks. The flow keeps its id, its window and the password its
- * start proved; the device child is killed and the link child launched in its place. `relaunch` on the
+ * codes are unavailable, or when the person asks. The flow keeps its id, its window and the authority its
+ * start was granted under; the device child is killed and the link child launched in its place. `relaunch` on the
  * record is what tells the run loop that this exit was the switch and not the end.
  *
  * The link sign-in's return trip is an ADDRESS, carrying an authorization code. It goes from
@@ -61,7 +61,7 @@ import type {
   HarnessLoginSubmission,
   HarnessLoginSubmitRequest,
 } from '@ferretry/protocol';
-import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts';
+import type { CallerGovernance } from '../api/capability.ts';
 import { type CredentialSignInTarget, FleetCredentialRefusal } from '../fleet/credentials-service.ts';
 import {
   CLAUDE_LOGIN_ARGV,
@@ -123,15 +123,6 @@ export interface DaemonHarnessLoginOptions {
   /** This process's environment, which is sanitized before any child sees it. */
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly timer: HarnessLoginTimer;
-  /**
-   * Proves the operator password for ONE start.
-   *
-   * The same closure shape the fleet's proposal apply takes, and for the same reason: this service must
-   * be able to ask "was this password right" without being able to read one, hold one, or reach anything
-   * else the grant service can do. The attempt it spends is one of the same five an unlock spends, so
-   * there is no second budget and no second gate.
-   */
-  readonly confirmChange: (password: string) => Promise<ChangeConfirmation>;
   /** What a person types to run this binary, so a refusal names a command they actually have. */
   readonly clientName: string;
   /** How long a flow may live. Bounded in minutes, like the browser login window's one-to-sixty. */
@@ -196,8 +187,8 @@ export class HarnessLoginService {
    * Sign one account-model CREDENTIAL in (design §4.6, E12, E31).
    *
    * The harness's OWN login is launched with that credential's store in its environment — so an empty slot nothing uses yet can be signed
-   * in, and every runtime that later names it reads the login this wrote. Same gate, same order: every
-   * refusal the document can answer is answered before a password attempt is spent.
+   * in, and every runtime that later names it reads the login this wrote. A caller off this host reaches here
+   * only through `fleet.configure`, which holds it behind a live passkey step-up.
    */
   async start(request: HarnessLoginStartRequest, governance: CallerGovernance | undefined): Promise<HarnessLoginFlow> {
     // Absent governance is refused rather than waved through. It cannot arise through the served route,
@@ -225,9 +216,6 @@ export class HarnessLoginService {
         'Claude Code has one way to sign in; choosing a device code or a link applies to Codex only',
       );
     }
-    // Every refusal the document can answer is answered before a password attempt is spent.
-    this.#assertKeyFree(credentialId);
-    if (governance.confirmChange) await this.#confirm(credentialId, request.operatorPassword);
     return this.#launch(target, request.method === 'link');
   }
 
@@ -334,40 +322,11 @@ export class HarnessLoginService {
     }
   }
 
-  /** Prove the operator password against THIS sign-in, or refuse in words naming the next step. */
-  async #confirm(identityKey: string, password: string | undefined): Promise<void> {
-    const refuse = (message: string): never => {
-      throw new HarnessLoginRefusal('fleet_login_unauthorized', message);
-    };
-    if (password === undefined) {
-      return refuse(
-        `signing "${identityKey}" in from off this host needs this machine's operator password, entered against this exact sign-in`,
-      );
-    }
-    const outcome = await this.options.confirmChange(password);
-    if (outcome.kind === 'confirmed') return;
-    if (outcome.reason === 'rate-limited') {
-      return refuse(
-        `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; "${identityKey}" was not signed in. Wait for the lockout to pass, or clear it on the host with \`${this.options.clientName} daemon password set\`.`,
-      );
-    }
-    if (outcome.reason === 'no-password') {
-      // Handled because the port declares it, not because it can still happen: a machine can no longer
-      // go from having a password to not having one while it runs. A branch that stopped answering would
-      // tell somebody they mistyped a password on a machine that has none.
-      return refuse(
-        `this machine has no operator password, so the confirmation for "${identityKey}" could not be checked`,
-      );
-    }
-    return refuse(`that is not this machine's operator password, so "${identityKey}" was not signed in`);
-  }
-
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────
 
   #launch(target: Extract<CredentialSignInTarget, { kind: 'store' }>, link: boolean): HarnessLoginFlow {
-    // Checked AGAIN, and this is the check that holds: `start`'s copy runs before the password is
-    // proved, and that proof is an await, so two starts for one credential can both pass it. Nothing
-    // between here and the record landing in `#flows` awaits, so the later of the two is refused here.
+    // Nothing between here and the record landing in `#flows` awaits, so of two starts for one
+    // credential the later is refused here.
     this.#assertKeyFree(target.credentialId);
     const record = this.#record(target.harness, target.credentialId, link);
     // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the

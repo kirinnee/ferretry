@@ -15,6 +15,11 @@
  * ONE KEY PER DAEMON. A browser paired with three machines holds three keys, so unpairing one forgets
  * only its own, and a key that leaked by any route would answer for one daemon only.
  *
+ * A SECOND SLOT, PENDING, exists only while a rotation is in flight (`docs/design/zero-trust.md` B6).
+ * The replacement key is written there BEFORE the request that carries its public half leaves, so a
+ * lost answer cannot strand the device with a key nobody holds: if the old key is later refused, the
+ * pending one is tried. It becomes THE key only when the daemon says it swapped (`promotePending`).
+ *
  * WHAT IT CANNOT DO: protect the key from code running in this page. An XSS or a malicious deploy can
  * USE the key while the tab is open — it cannot carry it away — and that limit is stated in the design.
  */
@@ -67,7 +72,16 @@ export class DeviceKeyUnreadableError extends Error {
 export interface DeviceKeyStore {
   load(daemonId: string): Promise<CryptoKey | undefined>;
   save(daemonId: string, key: CryptoKey): Promise<void>;
+  /** Forgets the key AND any pending replacement: an unpaired daemon leaves nothing behind. */
   remove(daemonId: string): Promise<void>;
+  /** The replacement a rotation has minted and not yet seen accepted, if one is in flight. */
+  loadPending(daemonId: string): Promise<CryptoKey | undefined>;
+  /** Keeps a replacement BEFORE it is sent. Overwrites an earlier one, which can no longer matter. */
+  savePending(daemonId: string, key: CryptoKey): Promise<void>;
+  /** The pending key becomes the key. `false` when nothing was pending, which changes nothing. */
+  promotePending(daemonId: string): Promise<boolean>;
+  /** Forgets the pending key without touching the key. Idempotent. */
+  discardPending(daemonId: string): Promise<void>;
 }
 
 /** A freshly minted device key: the private half to keep, and the public half to register. */
@@ -107,6 +121,9 @@ const DATABASE = 'ferretry-device-keys';
 const STORE = 'keys';
 const VERSION = 1;
 
+/** The record a pending key lives under. A daemon id is `fy_daemon_…`, so this can never be one. */
+const pendingSlot = (daemonId: string): string => `pending:${daemonId}`;
+
 const settled = <T>(request: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -124,8 +141,7 @@ export class IndexedDbDeviceKeyStore implements DeviceKeyStore {
   constructor(private readonly factory: DeviceKeyDatabaseFactory | undefined = globalThis.indexedDB) {}
 
   async load(daemonId: string): Promise<CryptoKey | undefined> {
-    const value = await this.#run('readonly', store => store.get(daemonId));
-    return value instanceof CryptoKey ? value : undefined;
+    return await this.#read(daemonId);
   }
 
   async save(daemonId: string, key: CryptoKey): Promise<void> {
@@ -134,6 +150,33 @@ export class IndexedDbDeviceKeyStore implements DeviceKeyStore {
 
   async remove(daemonId: string): Promise<void> {
     await this.#run('readwrite', store => store.delete(daemonId));
+    await this.discardPending(daemonId);
+  }
+
+  async loadPending(daemonId: string): Promise<CryptoKey | undefined> {
+    return await this.#read(pendingSlot(daemonId));
+  }
+
+  async savePending(daemonId: string, key: CryptoKey): Promise<void> {
+    await this.#run('readwrite', store => store.put(key, pendingSlot(daemonId)));
+  }
+
+  /** Written to the key's slot first and cleared from the pending slot after, so a crash between the two leaves a key, never none. */
+  async promotePending(daemonId: string): Promise<boolean> {
+    const pending = await this.loadPending(daemonId);
+    if (pending === undefined) return false;
+    await this.save(daemonId, pending);
+    await this.discardPending(daemonId);
+    return true;
+  }
+
+  async discardPending(daemonId: string): Promise<void> {
+    await this.#run('readwrite', store => store.delete(pendingSlot(daemonId)));
+  }
+
+  async #read(slot: string): Promise<CryptoKey | undefined> {
+    const value = await this.#run('readonly', store => store.get(slot));
+    return value instanceof CryptoKey ? value : undefined;
   }
 
   async #run<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {

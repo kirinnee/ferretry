@@ -229,9 +229,8 @@ const CORS_METHODS = new Set(['DELETE', 'GET', 'PATCH', 'POST']);
  * THIS SET IS A TRANSPORT GATE, NOT A PREFERENCE. A header missing here is not degraded, it is
  * unreachable: `corsPreflight` refuses the whole `OPTIONS` below, the refusal carries no
  * `access-control-allow-origin`, and the request the browser wanted to make never leaves it. That is
- * how `x-ferretry-operator-unlock` shipped broken — the unlock became part of every governed
- * mutation the operator password authorizes, nothing added it here, and the hosted PWA could not
- * apply a fleet proposal or change a grant at all while every daemon-side test stayed green.
+ * how a governed-mutation header once shipped broken — nothing added it here, and the hosted PWA
+ * could not apply a fleet proposal or change a grant at all while every daemon-side test stayed green.
  *
  * It stays an enumeration rather than a prefix or a wildcard, because a wildcard would admit any
  * header a page can invent — including one a future route learns to read. `scripts/validate/`
@@ -242,7 +241,6 @@ const CORS_REQUEST_HEADERS = new Set([
   'authorization',
   'content-type',
   'range',
-  'x-ferretry-operator-unlock',
   'x-ferretry-session-id',
   'x-fy-board-capability',
   'x-fy-request-id',

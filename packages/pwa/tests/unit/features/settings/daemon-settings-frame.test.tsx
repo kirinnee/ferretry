@@ -76,6 +76,7 @@ describe('daemon settings panel rail', () => {
       'secrets',
       'devices',
       'grants',
+      'security',
       'resource-limits',
       'doctor',
       'model-pricing',
@@ -92,7 +93,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(9);
+    expect(glyphs).toHaveLength(10);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.

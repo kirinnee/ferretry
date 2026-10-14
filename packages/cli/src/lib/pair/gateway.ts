@@ -3,6 +3,7 @@ import {
   PairingCodeMintResponseSchema,
   type PairingCodeStatusResponse,
   PairingCodeStatusResponseSchema,
+  type PairingGrantSet,
   type PairingId,
 } from '@ferretry/protocol';
 import type { IPairGateway, PairingApiClient } from './ports.ts';
@@ -43,16 +44,17 @@ export class ProtocolPairingGateway implements IPairGateway {
   constructor(private readonly client: PairingApiClient) {}
 
   /**
-   * Minting is bodyless.
+   * The body names only what the device will hold, and only when that is not the default.
    *
-   * The device names ITSELF when it redeems, so there is nothing for the host to send — and the request
-   * schema is strict, so inventing a field here would be refused rather than ignored.
+   * The device names ITSELF when it redeems, so there is nothing else for the host to send — and the
+   * request schema is strict, so inventing a field here would be refused rather than ignored. The
+   * default sends `{}`, exactly what an older daemon expects.
    */
-  async mint(): Promise<PairingCodeMintResponse> {
+  async mint(grants: PairingGrantSet): Promise<PairingCodeMintResponse> {
     return await this.client.request(PAIRING_CODE_PATH, PairingCodeMintResponseSchema, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify(grants === 'full' ? {} : { grants }),
     });
   }
 

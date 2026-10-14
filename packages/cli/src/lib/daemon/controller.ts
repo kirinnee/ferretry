@@ -137,32 +137,18 @@ export interface DaemonControllerDeps {
   /**
    * Whether anybody is at a terminal, asked when the question is asked rather than captured here.
    *
-   * A function for the same reason the first-password offer takes one: the answer belongs to the
-   * terminal at the moment somebody would have to type, not to the moment this controller was built.
+   * A function so the answer belongs to the terminal at the moment somebody would have to type, not to
+   * the moment this controller was built.
    */
   readonly interactive: () => boolean;
   /** The binary somebody types, so a reset can name the command that brings the machine back. */
   readonly clientName: string;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
-  /**
-   * The first-operator-password offer, made after a start that a PERSON asked for.
-   *
-   * REQUIRED rather than optional, because an absent one is indistinguishable from a controller that
-   * silently never asks — and "the machine quietly stopped offering" is the failure mode this whole
-   * requirement exists to remove. It decides for itself whether anybody is there to answer; see
-   * `FirstPasswordOffer` for why it can never block a start.
-   */
-  readonly firstPassword: IFirstPasswordOffer;
   /** The one line a start ends with when this machine is not set up yet. See `MachineSetupNotice`. */
   readonly setupNotice: IMachineSetupNotice;
   readonly readiness?: ReadinessPolicy;
   readonly shutdown?: ShutdownPolicy;
-}
-
-/** Offering to set this machine's first operator password. Satisfied by `FirstPasswordOffer`. */
-interface IFirstPasswordOffer {
-  offer(): Promise<void>;
 }
 
 /** Saying, once, that this machine is not set up yet. Satisfied by `MachineSetupNotice`. */
@@ -210,19 +196,13 @@ export class DaemonController {
   }
 
   /**
-   * Brings the daemon up, then — if a person is there — offers to set the machine's first password.
+   * Brings the daemon up, then says — outside the lifecycle claim — whether the machine is set up.
    *
-   * THE OFFER IS OUTSIDE THE LIFECYCLE CLAIM, and that placement is the point rather than tidiness. A
-   * prompt inside the claim would hold every other `fy daemon …` invocation on this host for as long
-   * as somebody stared at the question: `stop` would appear to hang, and the operator's remedy would
-   * be to kill the terminal that was asking them something. Nothing in the offer touches the state
-   * this verb serialises — it speaks to the daemon that is now serving.
-   *
-   * A FAILED START ASKS NOTHING, because `#serialized` throws before this line.
+   * THE NOTICE IS OUTSIDE THE CLAIM so nothing it does can hold every other `fy daemon …` invocation
+   * on this host. A FAILED START SAYS NOTHING, because `#serialized` throws before this line.
    */
   async start(): Promise<void> {
     await this.#serialized('start', () => this.#start());
-    await this.deps.firstPassword.offer();
     await this.deps.setupNotice.say();
   }
 
@@ -237,9 +217,9 @@ export class DaemonController {
   /**
    * Removes every trace of this daemon's persistent data, after showing what that costs.
    *
-   * INSIDE THE LIFECYCLE CLAIM, unlike the first-password offer, and the prompt is inside it too. That
-   * placement is the opposite of `start`'s and both are right: `start` must not hold every other
-   * invocation on this host while somebody reads an optional question, whereas a reset that released
+   * INSIDE THE LIFECYCLE CLAIM, and the prompt is inside it too. That placement is the opposite of
+   * `start`'s notice and both are right: `start` must not hold every other
+   * invocation on this host while somebody reads an optional line, whereas a reset that released
    * the claim to ask its question would let a peer `start` bring the daemon back up between the answer
    * and the deletion — recreating a state home underneath a removal that had already been authorized.
    * The claim is what makes measure-show-ask-stop-remove one transaction rather than five moments.

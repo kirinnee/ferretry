@@ -100,7 +100,7 @@ const sessionsSource = (initial: FleetSnapshot | null = null) => {
 
 const subscriptionHandle = (): PushSubscriptionHandle => ({
   toJSON: () => ({
-    endpoint: 'https://push.example.test/x',
+    endpoint: 'https://fcm.googleapis.com/x',
     expirationTime: null,
     keys: { p256dh: 'B'.repeat(87), auth: 'C'.repeat(22) },
   }),

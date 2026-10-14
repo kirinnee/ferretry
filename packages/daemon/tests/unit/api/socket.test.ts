@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
+import {
+  type CapabilityGuard,
+  type CapabilityPresentation,
+  NO_GOVERNED_ROUTES_GUARD,
+  NO_STEP_UP_WITNESS,
+} from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
 import type { CredentialMinimum } from '../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
@@ -139,6 +144,153 @@ describe('ApiSocketDispatcher', () => {
     // Assert
     should(device.outcome).equal('accepted');
     should(host.outcome).equal('accepted');
+  });
+
+  it('should answer again for an open stream without accepting anything', () => {
+    // Arrange
+    let accepted = 0;
+    const route = streamRoute();
+    const counting = {
+      ...route,
+      accept: async (context: Parameters<typeof route.accept>[0]) => {
+        accepted += 1;
+        return await route.accept(context);
+      },
+    };
+    const dispatcher = dispatcherFor(counting);
+
+    // Act + Assert — still allowed for its own caller, never for an anonymous one.
+    should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', headers: human }))).be.true();
+    should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream' }))).be.false();
+    should(accepted).equal(0);
+  });
+
+  it('should count the step-up an open stream was admitted with as standing when it is asked again', async () => {
+    // A remote terminal is admitted on a live passkey step-up and then runs for hours. Re-checking it on
+    // a lease renewal must not demand a step-up that has since lapsed, or every remote terminal would
+    // die at its first renewal after the confirmation expired. Everything else is still re-decided.
+    // Arrange
+    const presented: CapabilityPresentation[] = [];
+    const stepUpGuard: CapabilityGuard = {
+      decide: (_demand, presentation) => {
+        presented.push(presentation);
+        return presentation.stepUp
+          ? { allowed: true, refusal: 'granted' }
+          : { allowed: false, refusal: 'step-up-required' };
+      },
+      governance: () => ({ governed: true, decide: () => ({ allowed: false, refusal: 'undetermined' }) }),
+      explain: () => 'confirm with your passkey',
+    };
+    const terminal = { ...streamRoute(), capability: { capability: 'terminal', axis: 'use' } } as const;
+    const dispatcher = new ApiSocketDispatcher(
+      new ApiRouter([terminal]),
+      CREDENTIALS,
+      stepUpGuard,
+      undefined,
+      NO_STEP_UP_WITNESS,
+    );
+    const device = { deviceId: 'fy_device_id_phone', appSession: 'app-one' } as const;
+
+    // Act
+    const fresh = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+    const standing = dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }));
+
+    // Assert — a NEW stream with no live step-up is refused; the open one keeps going.
+    should(fresh.outcome).equal('refused');
+    should(standing).be.true();
+    // The refused upgrade names the act too, from the same boundary the request table uses.
+    should(fresh.outcome === 'refused' ? jsonBody(fresh.response) : null).containDeep({
+      code: 'grant_step_up_required',
+      demand: { capability: 'terminal', axis: 'use' },
+    });
+    should(presented.map(presentation => presentation.stepUp)).eql([false, true]);
+  });
+
+  describe('the unlock at renewal', () => {
+    const device = { deviceId: 'fy_device_id_phone', appSession: 'app-one' } as const;
+    const terminal = { ...streamRoute(), capability: { capability: 'terminal', axis: 'use' } } as const;
+    /** A guard that allows the act only when a step-up stands, as a governed terminal does. */
+    const stepUpGuard: CapabilityGuard = {
+      decide: (_demand, presentation) =>
+        presentation.stepUp ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' },
+      governance: () => ({ governed: true, decide: () => ({ allowed: false, refusal: 'undetermined' }) }),
+      explain: () => 'confirm with your passkey',
+    };
+    const dispatcherUnder = (unlocked: { value: boolean }) =>
+      new ApiSocketDispatcher(new ApiRouter([terminal]), CREDENTIALS, stepUpGuard, undefined, {
+        // No per-act step-up is held: only the unlock stands in for it, and only at the upgrade.
+        held: () => unlocked.value,
+        unlockRequired: () => !unlocked.value,
+      });
+
+    it('should open a stream for an unlocked device and keep it open while the unlock holds', async () => {
+      // Arrange
+      const unlocked = { value: true };
+      const dispatcher = dispatcherUnder(unlocked);
+
+      // Act
+      const opened = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+      const standing = dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }));
+
+      // Assert
+      should(opened.outcome).equal('accepted');
+      should(standing).be.true();
+    });
+
+    it('should refuse a stream for a locked device with 401 unlock_required', async () => {
+      // Arrange
+      const dispatcher = dispatcherUnder({ value: false });
+
+      // Act
+      const refused = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+
+      // Assert
+      should(refused.outcome).equal('refused');
+      should(
+        refused.outcome === 'refused' ? [refused.response.status, jsonBody(refused.response).code] : null,
+      ).deepEqual([401, 'unlock_required']);
+    });
+
+    it('should end an open stream at its renewal once its device’s unlock lapsed, step-up standing or not', async () => {
+      // Arrange — admitted while unlocked, then the unlock lapses.
+      const unlocked = { value: true };
+      const dispatcher = dispatcherUnder(unlocked);
+      const opened = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream', device }));
+      unlocked.value = false;
+
+      // Act
+      const standing = dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }));
+
+      // Assert — the step-up counts as standing, so what ends the stream is the unlock alone.
+      should(opened.outcome).equal('accepted');
+      should(standing).be.false();
+    });
+
+    it('should call the witness as its own, so a witness that reads its own state still answers', () => {
+      // Arrange — an unlockRequired that reads `this`, as the step-up service's does.
+      class Witness {
+        locked = true;
+        held(): boolean {
+          return false;
+        }
+        unlockRequired(): boolean {
+          return this.locked;
+        }
+      }
+      const witness = new Witness();
+      const dispatcher = new ApiSocketDispatcher(
+        new ApiRouter([terminal]),
+        CREDENTIALS,
+        stepUpGuard,
+        undefined,
+        witness,
+      );
+
+      // Act + Assert
+      should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }))).be.false();
+      witness.locked = false;
+      should(dispatcher.reauthorize(request({ path: '/v1/sessions/s1/stream', device }))).be.true();
+    });
   });
 
   it('should refuse an unauthenticated upgrade before the route is ever accepted', async () => {

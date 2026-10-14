@@ -188,6 +188,16 @@ const sessionCases: SchemaCase[] = [
     schema: session.StartSessionRequestSchema,
     value: { agent: 'agent', mode: 'auto', prompt: 'Do work', boardAccess: 'none', effort: 'high' },
   },
+  {
+    name: 'start request with harness flags',
+    schema: session.StartSessionRequestSchema,
+    value: {
+      agent: 'agent',
+      mode: 'interactive',
+      boardAccess: 'none',
+      harnessFlags: ['--settings', '{"hooks":{}}', ''],
+    },
+  },
   { name: 'send request', schema: session.SendRequestSchema, value: { message: 'Continue' } },
   {
     name: 'structured question answer',
@@ -478,6 +488,26 @@ describe('session schemas', () => {
         name: 'empty startup effort',
         schema: session.StartSessionRequestSchema,
         value: { agent: 'agent', mode: 'auto', prompt: 'work', effort: '' },
+      },
+      {
+        name: 'a harness flag holding a control character',
+        schema: session.StartSessionRequestSchema,
+        value: { agent: 'agent', mode: 'auto', prompt: 'work', harnessFlags: ['--model\nsonnet'] },
+      },
+      {
+        name: 'an over-long harness flag',
+        schema: session.StartSessionRequestSchema,
+        value: { agent: 'agent', mode: 'auto', prompt: 'work', harnessFlags: ['x'.repeat(16_385)] },
+      },
+      {
+        name: 'too many harness flags',
+        schema: session.StartSessionRequestSchema,
+        value: { agent: 'agent', mode: 'auto', prompt: 'work', harnessFlags: Array.from({ length: 65 }, () => '-v') },
+      },
+      {
+        name: 'a permission mode outside the closed set',
+        schema: session.StartSessionRequestSchema,
+        value: { agent: 'agent', mode: 'bypass', prompt: 'work' },
       },
       { name: 'empty rename', schema: session.RenameSessionRequestSchema, value: {} },
       { name: 'help without message', schema: session.SignalSessionRequestSchema, value: { kind: 'help' } },

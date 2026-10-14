@@ -16,7 +16,6 @@ import {
   machineAnswer,
   machineView,
   NOTHING_INSTALLED,
-  NOW,
   runtimes,
   runtimeView,
   STAGED,
@@ -76,7 +75,6 @@ const props = (
     createClient: async () => client,
     sources: setup.sources ?? [record(WORK, 1)],
     browser: fakeWindow(setup.hash ?? '#machines/studio-mac/settings'),
-    now: NOW,
   };
 };
 
