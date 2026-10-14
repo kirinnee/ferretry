@@ -59,7 +59,13 @@ import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession }
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
-import { browserCredentials, describeStepUpFailure, unlockCeremony, stepUpCeremony } from './step-up-ceremony.ts';
+import {
+  browserCredentials,
+  describeStepUpFailure,
+  firstPasskeyOffer,
+  stepUpCeremony,
+  unlockCeremony,
+} from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
@@ -185,7 +191,10 @@ export class DaemonApiPool {
   }
 }
 
-/** How this browser names itself to a daemon it is asking to trust it. */
+/**
+ * How this browser names itself when the caller named nothing. The confirm screen always names it
+ * (`device-name.ts`), so only a caller with no person in front of it lands here.
+ */
 const PAIRING_DEVICE_NAME = 'Ferretry PWA';
 
 /**
@@ -199,6 +208,8 @@ const PAIRING_DEVICE_NAME = 'Ferretry PWA';
 const DIRECT_PAIRING_TIMEOUT_MS = 4_000;
 
 export interface ExchangePairingOptions {
+  /** What this device is called at the machine — `fy device ls`, revoke, the device list. */
+  readonly deviceName?: string;
   /** Where this browser keeps device keys. The new key is saved here only once the daemon accepted it. */
   readonly deviceKeys: DeviceKeyStore;
   readonly hostedRelayUrl?: string;
@@ -268,7 +279,7 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
       response = await redeemPairingInSession({
         crypto,
         seed,
-        deviceName: PAIRING_DEVICE_NAME,
+        deviceName: options.deviceName ?? PAIRING_DEVICE_NAME,
         method,
         publicKey: minted.publicKey,
         key,
@@ -347,7 +358,7 @@ export interface AppStore {
    * gate, its own two routes. Rendered by a second `StepUpDialog` with the presence copy.
    */
   readonly unlockGate: StepUpGate;
-  readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
+  readonly pair: (seed: PairingSeed, deviceName?: string) => Promise<DaemonConnection>;
   /**
    * Whether Ferretry's default relay is advertising itself right now.
    *
@@ -444,6 +455,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       origin: appOrigin,
     }),
     describe: describeStepUpFailure(appOrigin),
+    // A device with no passkey, inside its window, is offered to set one up rather than sent elsewhere.
+    firstPasskey: firstPasskeyOffer(async daemon => await clients.client(daemon)),
     // The machine's own number, read once as the prompt opens (an exempt route, so it answers before an unlock).
     scope: async daemon => {
       try {
@@ -608,8 +621,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pushDevices,
     pushService,
     readDefaultRelay,
-    pair: async seed => {
+    pair: async (seed, deviceName) => {
       const connection = await exchangePairing(seed, {
+        ...(deviceName === undefined ? {} : { deviceName }),
         deviceKeys,
         relayCrypto,
         ...(options.relayDial === undefined ? {} : { relayDial: options.relayDial }),

@@ -45,6 +45,10 @@ const STEP_UP_COPY: PasskeyPromptCopy = {
   confirm: 'Use passkey',
 };
 
+/** What the unlock prompt leads with for a device that may add its first passkey now. */
+export const FIRST_PASSKEY_TITLE = 'Set up Face ID for this device';
+const FIRST_PASSKEY_CONFIRM = 'Set up passkey';
+
 /** The unlock that opens the app: one sentence, one line on how long it stays, one button. */
 export const UNLOCK_COPY: PasskeyPromptCopy = {
   kind: 'unlock',
@@ -76,6 +80,9 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
   const machine = machineName(prompt.daemon.daemonId);
   const acts = ACT_LIST.format(prompt.acts);
   const scope = prompt.scope ?? copy.scope;
+  // A device with no passkey yet, inside its window: the way in is to set one up, so the prompt says so
+  // first — the other remedies are for after the window has closed, and its failure sentence names them.
+  const setup = copy.kind === 'unlock' && prompt.firstPasskey === true;
 
   return (
     <div
@@ -102,10 +109,18 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
       >
         <h2 id={`${uid}-title`} className="m-0 flex min-w-0 items-center gap-2 text-title font-semibold text-fg">
           <ShieldCheck size={16} className="shrink-0 text-accent" aria-hidden="true" />
-          {copy.title}
+          {setup ? FIRST_PASSKEY_TITLE : copy.title}
         </h2>
         <p id={`${uid}-purpose`} className="m-0 mt-2 text-ui leading-base text-muted">
-          {copy.kind === 'unlock' ? (
+          {setup ? (
+            <>
+              This device has no passkey for{' '}
+              <span className="font-semibold text-fg" data-step-up-machine="">
+                {machine}
+              </span>{' '}
+              yet, and it can add one now: Face ID, a fingerprint or this device&rsquo;s PIN. Then it unlocks.
+            </>
+          ) : copy.kind === 'unlock' ? (
             <>
               Unlock{' '}
               <span className="font-semibold text-fg" data-step-up-machine="">
@@ -144,11 +159,12 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             className="kt-btn min-h-[44px] flex-1 justify-center"
             data-variant="primary"
             data-step-up-confirm=""
+            {...(setup ? { 'data-step-up-first-passkey': '' } : {})}
             disabled={prompt.busy}
             onClick={() => void gate.confirm()}
           >
             <Fingerprint size={15} aria-hidden="true" />
-            {prompt.busy ? 'Waiting for your passkey…' : copy.confirm}
+            {prompt.busy ? 'Waiting for your passkey…' : setup ? FIRST_PASSKEY_CONFIRM : copy.confirm}
           </button>
           <button
             type="button"

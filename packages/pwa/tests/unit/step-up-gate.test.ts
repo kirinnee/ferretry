@@ -404,3 +404,30 @@ describe('what a confirmation buys, read when the prompt opens', () => {
     should(gate.snapshot()).be.null();
   });
 });
+
+describe('a device that may add its first passkey, read when the prompt opens', () => {
+  it('should mark the prompt so it leads with setting one up, and say nothing when the read fails', async () => {
+    // Arrange
+    const offered = new StepUpGate({
+      ceremony: manualCeremony().ceremony,
+      describe: String,
+      firstPasskey: async () => true,
+    });
+    const unknown = new StepUpGate({
+      ceremony: manualCeremony().ceremony,
+      describe: String,
+      firstPasskey: async () => {
+        throw new Error('offline');
+      },
+    });
+
+    // Act
+    void offered.require(first);
+    void unknown.require(first);
+    await flush();
+
+    // Assert
+    should(offered.snapshot()?.firstPasskey).be.true();
+    should(unknown.snapshot()?.firstPasskey).be.undefined();
+  });
+});

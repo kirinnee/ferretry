@@ -379,8 +379,8 @@ function ConnectionPicker() {
       onArrivalTaken={takeArrival}
       connections={snapshot.connections}
       selectedDaemonId={snapshot.selectedDaemonId}
-      onPair={async seed => {
-        const connection = await store.pair(seed);
+      onPair={async (seed, deviceName) => {
+        const connection = await store.pair(seed, deviceName);
         // A machine that is not set up opens its first run straight away; anything else, its sessions.
         navigate(
           await landingAfterPairing(store.connections.select(connection.daemonId), daemon =>
@@ -519,8 +519,8 @@ function SetupGuide() {
           onArrivalTaken={takeArrival}
           connections={snapshot.connections}
           selectedDaemonId={selected}
-          onPair={async seed => {
-            await store.pair(seed);
+          onPair={async (seed, deviceName) => {
+            await store.pair(seed, deviceName);
             onPaired();
           }}
           onSelect={daemonId => {
