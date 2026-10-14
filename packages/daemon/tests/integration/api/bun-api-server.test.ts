@@ -1,4 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
+import type { VersionSkew } from '@ferretry/protocol';
+import { FyApiClient } from '@ferretry/protocol/client';
 import should from 'should';
 import { z } from 'zod';
 import { BunApiServer, BunHttpServe, type HostServeOptions, toApiRequest } from '../../../src/adapters/api/index.ts';
@@ -28,6 +30,7 @@ import {
   FleetEventStreamService,
 } from '../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
+import { daemonVersion } from '../../../src/lib/version.ts';
 
 /**
  * These tests bind a REAL socket, so every one of them asks for port 0 on 127.0.0.1 and stops the
@@ -104,6 +107,28 @@ describe('BunApiServer', () => {
     should(body.path).equal('/mirror/s-1');
     should(body.id).equal('s-1');
     should(body.after).deepEqual(['7']);
+  });
+
+  it('should name a version skew to the protocol client that reads the header it writes', async () => {
+    // Arrange
+    // B5: the daemon wrote `x-ferretry-version` while the client read `x-fy-version`, so a skew
+    // could never be detected. Both ends now read the protocol's one name; this drives the real
+    // server through the real client so a second spelling fails here, not in a user's terminal.
+    const handle = await serve(mirror);
+    const skews: VersionSkew[] = [];
+    const client = await FyApiClient.connect({
+      baseUrl: handle.url,
+      token: CREDENTIALS.admin,
+      version: '0.0.0-skew',
+      onVersionSkew: skew => skews.push(skew),
+    });
+
+    // Act
+    await client.request('/mirror/s-1', z.object({ id: z.string() }));
+
+    // Assert
+    should(skews).have.length(1);
+    should(skews[0]).have.properties({ clientVersion: '0.0.0-skew', daemonVersion });
   });
 
   it('should lowercase header names so the domain reads them consistently', async () => {
@@ -272,7 +297,7 @@ describe('BunApiServer', () => {
     should(response.status).equal(200);
     should(response.headers.get('access-control-allow-origin')).equal(origin);
     should(response.headers.get('access-control-allow-credentials')).equal('true');
-    should(response.headers.get('access-control-expose-headers')).containEql('x-ferretry-version');
+    should(response.headers.get('access-control-expose-headers')).containEql('x-fy-version');
     should(response.headers.get('vary')).equal('Origin');
   });
 

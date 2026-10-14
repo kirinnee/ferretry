@@ -20,9 +20,9 @@ import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
-import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
+import { distinctDaemonName } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
-import { AccountStatus } from './account-status.tsx';
+import { AccountStatus, type AccountStatusProps } from './account-status.tsx';
 import { type MachineReach, machineReachSummary, readMachineReach } from './machine-reach.ts';
 import { MACHINE_TABS, type MachineTabId } from './machine-route.ts';
 
@@ -77,11 +77,33 @@ export const emptyMachineTab = (tab: MachineTabId): ComponentType<MachineTabProp
     return <EmptyMachineTab tab={tab} machineName={machineName} />;
   };
 
-const reachWord = (reach: MachineReach) =>
-  reach.kind === 'checking' ? 'checking' : reach.kind === 'offline' ? 'needs_sign_in' : 'ready';
+/**
+ * What a row shows: the machine's answer, or LOCKED — it wants a passkey before it says anything, and its
+ * prompt waits until it is on screen. Locked is the gate's fact, never the read's.
+ */
+type ShownReach = MachineReach | { readonly kind: 'locked' };
 
-const reachLabel = (reach: MachineReach): string =>
-  reach.kind === 'checking' ? 'Checking' : reach.kind === 'offline' ? 'Offline' : 'Online';
+const LOCKED_SUMMARY = 'Locked · Open it to unlock';
+
+const REACH_WORDS: Readonly<Record<ShownReach['kind'], AccountStatusProps['word']>> = {
+  checking: 'checking',
+  offline: 'needs_sign_in',
+  locked: 'refresh_due',
+  online: 'ready',
+  unreadable: 'ready',
+};
+
+const reachWord = (reach: ShownReach): AccountStatusProps['word'] => REACH_WORDS[reach.kind];
+
+const REACH_LABELS: Readonly<Record<ShownReach['kind'], string>> = {
+  checking: 'Checking',
+  offline: 'Offline',
+  locked: 'Locked',
+  online: 'Online',
+  unreadable: 'Online',
+};
+
+const reachLabel = (reach: ShownReach): string => REACH_LABELS[reach.kind];
 
 export interface MachinesSurfaceProps {
   /** The daemon this Settings page is for. */
@@ -103,6 +125,11 @@ export interface MachinesSurfaceProps {
   readonly onNamed?: (daemonId: DaemonId, name: string) => void;
   readonly createClient: FleetClientFactory;
   readonly tabs?: MachineTabSurfaces;
+  /**
+   * Machines whose reads wait on an unlock. Each shows as locked rather than checking for ever: its
+   * prompt waits until it is on screen, so opening it is how it unlocks.
+   */
+  readonly locked?: readonly DaemonId[];
 }
 
 export function MachinesSurface({
@@ -116,6 +143,7 @@ export function MachinesSurface({
   onNamed,
   createClient,
   tabs = {},
+  locked = [],
 }: MachinesSurfaceProps) {
   const [reach, setReach] = useState<ReadonlyMap<DaemonId, MachineReach>>(new Map());
   const [listing, setListing] = useState(false);
@@ -163,8 +191,11 @@ export function MachinesSurface({
       </p>
     );
 
-  const name = daemonDisplayName(record);
-  const current = reach.get(daemonId) ?? { kind: 'checking' };
+  const name = distinctDaemonName(record, connections);
+  const lockedNow = new Set(locked);
+  const reachOf = (id: DaemonId): ShownReach =>
+    lockedNow.has(id) ? { kind: 'locked' } : (reach.get(id) ?? { kind: 'checking' });
+  const current = reachOf(daemonId);
   const machine = current.kind === 'online' ? current.machine : null;
   const Surface = tabs[tab];
 
@@ -215,7 +246,7 @@ export function MachinesSurface({
           </div>
           <ul className="m-0 mt-3 flex list-none flex-col gap-2 p-0">
             {connections.map(connection => {
-              const state = reach.get(connection.daemonId) ?? { kind: 'checking' };
+              const state = reachOf(connection.daemonId);
               const here = connection.daemonId === daemonId;
               return (
                 <li key={connection.daemonId}>
@@ -231,8 +262,12 @@ export function MachinesSurface({
                   >
                     <AccountStatus word={reachWord(state)} label={reachLabel(state)} />
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-row font-semibold text-fg">{daemonDisplayName(connection)}</span>
-                      <span className="text-cell text-muted">{machineReachSummary(state)}</span>
+                      <span className="truncate text-row font-semibold text-fg">
+                        {distinctDaemonName(connection, connections)}
+                      </span>
+                      <span className="text-cell text-muted">
+                        {state.kind === 'locked' ? LOCKED_SUMMARY : machineReachSummary(state)}
+                      </span>
                     </span>
                     {here ? (
                       <Badge tone="accent">Current</Badge>

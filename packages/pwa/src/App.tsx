@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -58,7 +59,7 @@ import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
-import { daemonDisplayName } from './features/settings/daemon-settings.tsx';
+import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
@@ -91,6 +92,7 @@ import {
   workerUrl,
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
+import { useTheme } from './hooks/use-theme.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
@@ -133,7 +135,7 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
-import { StoreProvider, useAppStore, useConnectionSnapshot } from './lib/store.tsx';
+import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
 import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
@@ -541,9 +543,10 @@ function SetupGuide() {
             navigate,
           );
       }}
-      renderPairing={({ onPaired }) => (
+      renderPairing={({ onPaired, onStatedFailure }) => (
         <PairingScreen
           embedded
+          onStatedFailure={onStatedFailure}
           arrival={arrival}
           scanHost={scanHost}
           onArrivalTaken={takeArrival}
@@ -1011,6 +1014,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
 
 function SettingsRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
+  const lockedMachines = useLockedMachines(store.unlockGate);
   const connectionSnapshot = useConnectionSnapshot();
   const { navigate } = useRouter();
   const dictation = useSttSettings(store.stt);
@@ -1074,6 +1078,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       daemonSettingsTabs={daemonSettingsTabs}
       // The same pool as every other daemon call, so a machine read rides the measured carrier.
       createMachineClient={createDaemonClient}
+      lockedMachines={lockedMachines}
       machineTabs={MACHINE_TAB_SURFACES}
       onSelectDaemon={daemonId => {
         store.connections.select(daemonId);
@@ -1325,6 +1330,19 @@ export function AppShell() {
     pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
       ? undefined
       : connectionSnapshot.connections.find(candidate => candidate.daemonId === pageRoute.daemonId);
+  /*
+   * A PASSKEY PROMPT COMES FROM THE MACHINE ON SCREEN: the one the route names, or — on setup and the
+   * picker, which name none — the one just paired or chosen. Every other machine's background reads wait
+   * for it, and the machine list shows them locked, rather than raising a prompt over this machine's page.
+   */
+  const onScreen =
+    pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
+      ? connectionSnapshot.selectedDaemonId
+      : pageRoute.daemonId;
+  useEffect(() => {
+    store.stepUp.focus(onScreen);
+    store.unlockGate.focus(onScreen);
+  }, [onScreen, store]);
   const [permission, setPermission] = useState<NotificationPermissionState>(notificationPermission);
   /*
    * THE SETUP JOURNEY IS DECIDED AT ENTRY, AND HELD ONLY WHILE IT LASTS.
@@ -1673,15 +1691,16 @@ export function AppShell() {
 
   const promptMachineName = (daemonId: string): string => {
     const record = connectionSnapshot.connections.find(candidate => candidate.daemonId === daemonId);
-    return record === undefined ? 'This machine' : daemonDisplayName(record);
+    return record === undefined ? 'This machine' : distinctDaemonName(record, connectionSnapshot.connections);
   };
 
   return (
     <NotificationControlsContext.Provider value={notificationControlsHost}>
+      <ThemeFollower />
       {release.notice === null ? null : (
-        <div className="fixed inset-x-0 top-[var(--app-top,0px)] z-50">
+        <ReleaseNoticeDock>
           <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
-        </div>
+        </ReleaseNoticeDock>
       )}
       {/*
         FIRST IN DOM ORDER, so the Tab that follows a route change lands on the
@@ -1708,6 +1727,46 @@ export function AppShell() {
       <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
     </NotificationControlsContext.Provider>
   );
+}
+
+/** The root variable through which the shell keeps room for the release notice (`.kt-shell`, index.css). */
+const RELEASE_NOTICE_INSET = '--release-notice-h';
+
+/**
+ * The release notice, pinned above the page, AND the room for it. It used to float over the shell, so at
+ * 390px it covered the first card of whatever was on screen. Its height is published on the root and the
+ * shell's top padding grows by it, so the page starts below the notice rather than under it.
+ */
+function ReleaseNoticeDock({ children }: { readonly children: ReactNode }) {
+  const dock = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = dock.current;
+    if (element === null) return;
+    const root = document.documentElement;
+    const publish = (): void => root.style.setProperty(RELEASE_NOTICE_INSET, `${element.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(publish);
+    observer?.observe(element);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty(RELEASE_NOTICE_INSET);
+    };
+  }, []);
+  return (
+    <div ref={dock} className="fixed inset-x-0 top-[var(--app-top,0px)] z-50" data-release-notice-dock="">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Keeps `<html data-theme>` following a live OS light/dark switch on EVERY page. The listener lives in
+ * `useTheme`, and only the theme toggle and Settings mounted it, so a `system` preference on a phone
+ * layout, setup or a session page kept the old scheme until a reload. Renders nothing.
+ */
+function ThemeFollower() {
+  useTheme();
+  return null;
 }
 
 /** Public client-only root. Providers live here; `main.tsx` only calls `createRoot`. */

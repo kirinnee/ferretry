@@ -197,6 +197,24 @@ export interface RelayLinkClock {
   now(): number;
 }
 
+/**
+ * How long one device proof authorises a session, how far ahead of its end the renewal is asked, and the
+ * most one session may live. INJECTED so a suite — or an end-to-end run against a compiled daemon — can
+ * drive a lease end and the cap in seconds; production is {@link DEFAULT_ACCESS_LEASE_POLICY}.
+ */
+export interface AccessLeasePolicy {
+  readonly leaseMs: number;
+  readonly renewLeadMs: number;
+  readonly maxSessionMs: number;
+}
+
+/** The protocol's own numbers: fifteen minutes, asked again two minutes ahead, twelve hours at most. */
+export const DEFAULT_ACCESS_LEASE_POLICY: AccessLeasePolicy = Object.freeze({
+  leaseMs: ACCESS_LEASE_SECONDS * 1_000,
+  renewLeadMs: ACCESS_RENEW_LEAD_SECONDS * 1_000,
+  maxSessionMs: MAX_SESSION_SECONDS * 1_000,
+});
+
 /** A cancellable one-shot timer, so the link never holds a runtime timer handle of its own. */
 export interface RelayLinkTimer {
   cancel(): void;
@@ -326,6 +344,8 @@ export interface RelayLinkDependencies {
   readonly pairing: RelayPairingRedeemer;
   readonly scheduler: RelayLinkScheduler;
   readonly clock: RelayLinkClock;
+  /** The lease and its cap. Absent means {@link DEFAULT_ACCESS_LEASE_POLICY}. */
+  readonly lease?: AccessLeasePolicy;
   /**
    * Where this link's sessions ARRIVED, for a direct link; absent for a relayed one.
    *
@@ -952,9 +972,10 @@ export class RelayLink {
     session.provedAtMs ??= now;
     // CAPPED, so silent renewal cannot keep one session alive forever. The last lease ends AT the cap
     // and is not renewed; the browser opens a fresh session, which needs a fresh proof.
-    const capAtMs = session.provedAtMs + MAX_SESSION_SECONDS * 1_000;
-    session.leaseExpiresAtMs = Math.min(now + ACCESS_LEASE_SECONDS * 1_000, capAtMs);
-    const renewInMs = session.leaseExpiresAtMs - ACCESS_RENEW_LEAD_SECONDS * 1_000 - now;
+    const lease = this.deps.lease ?? DEFAULT_ACCESS_LEASE_POLICY;
+    const capAtMs = session.provedAtMs + lease.maxSessionMs;
+    session.leaseExpiresAtMs = Math.min(now + lease.leaseMs, capAtMs);
+    const renewInMs = session.leaseExpiresAtMs - lease.renewLeadMs - now;
     if (session.leaseExpiresAtMs < capAtMs && renewInMs > 0)
       session.renewal = this.deps.scheduler.after(renewInMs, () => this.#askRenewal(session));
     session.lease = this.deps.scheduler.after(session.leaseExpiresAtMs - now, () => {

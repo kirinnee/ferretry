@@ -48,6 +48,26 @@ export interface DaemonSettingsProps {
 export const daemonDisplayName = (connection: DaemonConnection & { readonly label?: string }): string =>
   connection.label?.trim() || connection.daemonName || connection.baseUrl;
 
+/**
+ * {@link daemonDisplayName}, told apart from every other paired machine that would read the same.
+ *
+ * Two machines on one host both call themselves by its name, so a prompt naming "kirin-box" could not
+ * say WHICH machine wants the passkey. A twin is followed by its address, and by its fingerprint when
+ * even the address is shared.
+ */
+export const distinctDaemonName = (
+  connection: DaemonConnection & { readonly label?: string },
+  paired: readonly (DaemonConnection & { readonly label?: string })[],
+): string => {
+  const name = daemonDisplayName(connection);
+  const twins = paired.filter(other => other.daemonId !== connection.daemonId && daemonDisplayName(other) === name);
+  if (twins.length === 0) return name;
+  const sharedAddress = name === connection.baseUrl || twins.some(other => other.baseUrl === connection.baseUrl);
+  return sharedAddress
+    ? `${name} (${connection.daemonId.slice(0, 16)})`
+    : `${name} (${connection.baseUrl.replace(/^[a-z]+:\/\//u, '')})`;
+};
+
 type Reachability = 'checking' | 'reachable' | 'unreachable';
 
 interface ReachabilityState {

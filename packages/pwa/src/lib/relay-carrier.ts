@@ -74,6 +74,7 @@ import {
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
 import type { KeyRotation } from './key-rotation.ts';
 import { stepUpAct } from './grants.ts';
+import type { PromptOrigin } from './step-up-gate.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -609,15 +610,17 @@ export interface DaemonCarrierRouterOptions {
   /**
    * Asked when the daemon refuses a request for want of a passkey step-up (`grant_step_up_required`):
    * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
-   * nothing can ask, and the refusal is returned as it came.
+   * nothing can ask, and the refusal is returned as it came. `origin` says whether a person started the
+   * request: a read (`GET`, `HEAD`) is the page's own background work, anything else is a press.
    */
-  readonly stepUp?: (daemon: DaemonConnection, act?: string) => Promise<boolean>;
+  readonly stepUp?: (daemon: DaemonConnection, act?: string, origin?: PromptOrigin) => Promise<boolean>;
   /**
    * Asked when the daemon answers `401 unlock_required`: this machine wants a passkey on opening and
    * this device has not given one. `true` once the person has confirmed, and the request is then sent
-   * again ONCE. Absent means nothing can ask, and the refusal is returned as it came.
+   * again ONCE. Absent means nothing can ask, and the refusal is returned as it came. `origin` as for
+   * {@link stepUp}.
    */
-  readonly unlockRequired?: (daemon: DaemonConnection) => Promise<boolean>;
+  readonly unlockRequired?: (daemon: DaemonConnection, origin?: PromptOrigin) => Promise<boolean>;
   /**
    * Whether a person is at this device right now (`presence.ts`). A request sent while they are is
    * marked, and only marked requests keep the device from idling out on the daemon. Absent means
@@ -794,8 +797,8 @@ export class DaemonCarrierRouter {
   readonly #hostedRelay: () => Promise<string | undefined>;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
-  readonly #stepUp: ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined;
-  readonly #unlockRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
+  readonly #stepUp: DaemonCarrierRouterOptions['stepUp'];
+  readonly #unlockRequired: DaemonCarrierRouterOptions['unlockRequired'];
   readonly #presence: () => boolean;
   readonly #rotation: KeyRotation | undefined;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
@@ -1021,6 +1024,9 @@ export class DaemonCarrierRouter {
    */
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
     let response = await this.#sendOnce(daemon, url, init);
+    // A READ IS THE PAGE'S OWN WORK, so a passkey it needs waits for its machine to be on screen; anything
+    // else is a press, and asks at once.
+    const origin = requestOrigin(init);
     // PRESENCE COMES FIRST: while this machine wants a passkey on opening it answers every request `401
     // unlock_required`, so nothing else it says can be read yet. One prompt, one resend; a dismissed
     // prompt returns the refusal unchanged, and a second refusal is the answer.
@@ -1030,7 +1036,7 @@ export class DaemonCarrierRouter {
       response.status === 401 &&
       (await answersWithCode(response, UNLOCK_REQUIRED_CODE))
     ) {
-      if (!(await confirmUnlock(daemon))) return response;
+      if (!(await confirmUnlock(daemon, origin))) return response;
       response = await this.#sendOnce(daemon, url, init);
     }
     // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to
@@ -1042,7 +1048,7 @@ export class DaemonCarrierRouter {
     if (demand === undefined) return response;
     // The act the daemon NAMED, or nothing: an unparseable demand still asks, and the prompt says "this change".
     const act = demand === null ? undefined : stepUpAct(demand);
-    if (!(await ask(daemon, act))) return response;
+    if (!(await ask(daemon, act, origin))) return response;
     return await this.#sendOnce(daemon, url, init);
   }
 
@@ -1478,6 +1484,12 @@ export class DaemonCarrierRouter {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/** A read (`GET`, `HEAD`) is background work; any other method is something a person pressed. */
+const requestOrigin = (init: RequestInit): PromptOrigin => {
+  const method = (init.method ?? 'GET').toUpperCase();
+  return method === 'GET' || method === 'HEAD' ? 'background' : 'explicit';
+};
 
 /** Whether a refusal carries this `code`. Read from a copy; the body stays. */
 const answersWithCode = async (response: Response, code: string): Promise<boolean> => {

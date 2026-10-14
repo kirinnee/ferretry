@@ -87,6 +87,12 @@ export interface PairingScreenProps {
    * `<main>` inside the first is not a landmark, it is a bug.
    */
   readonly embedded?: boolean;
+  /**
+   * Told `true` while the failure on screen is `stated` — its sentence is the whole remedy — and `false`
+   * otherwise, so a host drops the advice it adds around this screen (the code expiring, the step
+   * finishing itself), which is about the one thing that was working.
+   */
+  readonly onStatedFailure?: (stated: boolean) => void;
 }
 
 /**
@@ -164,8 +170,13 @@ export function PairingScreen({
   onOpenSetup,
   embedded = false,
   defaultName = browserDeviceName,
+  onStatedFailure,
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
+  const statedFailure = stage.kind === 'failed' && stage.cause === 'stated';
+  useEffect(() => {
+    onStatedFailure?.(statedFailure);
+  }, [onStatedFailure, statedFailure]);
   // Chosen once per screen, so a person editing it is never overwritten and two attempts send one name.
   const [deviceName, setDeviceName] = useState(defaultName);
   const [pasting, setPasting] = useState(false);

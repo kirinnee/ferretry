@@ -247,11 +247,14 @@ describe('PairingScreen exchange', () => {
    * check-your-network advice may follow it: each would send the reader to fix something that works.
    */
   it('names the machine as the side to update, alone, when it runs an older Ferretry', async () => {
+    // B6: the host is told, so the setup step stops adding advice about the code beneath it.
+    const told: boolean[] = [];
     const screen = await screenWith({
       arrival: PREFILLED,
       onPair: async () => {
         throw new DaemonOutdatedError();
       },
+      onStatedFailure: stated => told.push(stated),
     });
 
     await interact(() => buttonNamed(screen.container, 'Pair this device').click());
@@ -260,6 +263,7 @@ describe('PairingScreen exchange', () => {
     expect(alert.textContent).toBe(OLDER_DAEMON_SENTENCE);
     expect(screen.container.textContent).not.toContain('its code is probably still good');
     expect(screen.container.textContent).not.toContain('Pairing codes are single-use');
+    expect(told).toEqual([false, true]);
     await screen.unmount();
   });
 

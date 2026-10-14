@@ -240,6 +240,8 @@ function fixture(
     readonly discoveredRelayUrl?: string;
     /** The machine's idle period, when a case is about the setting rather than the default. */
     readonly idleExpiryDays?: () => number;
+    /** How long one idle day is, when a case drives the period in seconds. */
+    readonly idleDayMs?: number;
   } = {},
 ) {
   const clock = new FakeClock();
@@ -265,6 +267,7 @@ function fixture(
     deviceState: options.deviceState,
     ...(options.connections === undefined ? {} : { connections: options.connections }),
     ...(options.idleExpiryDays === undefined ? {} : { idleExpiryDays: options.idleExpiryDays }),
+    ...(options.idleDayMs === undefined ? {} : { idleDayMs: options.idleDayMs }),
     ...(options.audit === undefined ? {} : { audit: options.audit }),
   });
   const mint = () => service.mint();
@@ -1333,6 +1336,24 @@ describe('PairingService idle period setting', () => {
     days.current = 10;
 
     should(await service.expireIdleDevices()).equal(1);
+  });
+
+  it('should count the idle period in the day it was given, so the shortest one can be driven in seconds', async () => {
+    // B20: one day is the shortest period a machine may set, and nothing could wait one out end to end.
+    const built = fixture({ idleExpiryDays: () => 1, idleDayMs: 5_000 });
+    built.mint();
+    const redemption = await redeemDirect(built.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+
+    built.clock.nowMs += 4_999;
+    const before = await built.service.deviceKey(FIRST_DEVICE_ID);
+    const counted = built.service.devicesIdleLongerThan(1);
+    built.clock.nowMs += 1;
+
+    should(before).equal(DEVICE_KEY);
+    should(counted).equal(0);
+    should(built.service.devicesIdleLongerThan(1)).equal(1);
+    should(await built.service.deviceKey(FIRST_DEVICE_ID)).be.undefined();
   });
 
   it('should count what a period would end without ending any of it', async () => {

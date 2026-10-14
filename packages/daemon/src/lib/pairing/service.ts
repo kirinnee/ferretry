@@ -385,6 +385,11 @@ interface PairingServiceOptions {
    * (`idleExpiryDays`, `docs/design/zero-trust.md` B6). Absent means {@link DEVICE_IDLE_EXPIRY_DAYS}.
    */
   readonly idleExpiryDays?: () => number;
+  /**
+   * How long one idle DAY is, in milliseconds. A seam, so a suite or an end-to-end run can drive the
+   * shortest idle period (one day) in seconds; absent means a real day.
+   */
+  readonly idleDayMs?: number;
   readonly compare?: (left: string, right: string) => boolean;
   readonly pairingAppUrl?: string;
   readonly capabilities?: readonly string[];
@@ -645,7 +650,8 @@ export class PairingService {
    */
   devicesIdleLongerThan(days: number): number {
     const now = this.options.clock.now();
-    return this.options.credentials.all().filter(record => now - this.#lastSeenMs(record) >= days * DAY_MS).length;
+    return this.options.credentials.all().filter(record => now - this.#lastSeenMs(record) >= days * this.#dayMs())
+      .length;
   }
 
   /** When this device's current key was put in place: its last rotation, or its pairing. */
@@ -669,7 +675,11 @@ export class PairingService {
   }
 
   #idleExpiryMs(): number {
-    return (this.options.idleExpiryDays?.() ?? DEVICE_IDLE_EXPIRY_DAYS) * DAY_MS;
+    return (this.options.idleExpiryDays?.() ?? DEVICE_IDLE_EXPIRY_DAYS) * this.#dayMs();
+  }
+
+  #dayMs(): number {
+    return this.options.idleDayMs ?? DAY_MS;
   }
 
   #lastSeenMs(record: PairingDeviceRecord): number {

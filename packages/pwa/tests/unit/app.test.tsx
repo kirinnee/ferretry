@@ -54,6 +54,7 @@ import {
 } from '../../src/App.tsx';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
+import { themePreferences } from '../../src/hooks/use-theme.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -873,6 +874,44 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('follows a live OS light/dark switch on setup, where no theme control is mounted', async () => {
+    // Arrange — B8: only the theme toggle and Settings ran `useTheme`, so the setup page, a phone
+    // layout and a session page kept the old scheme until a reload.
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    // The tab-wide store outlives each file: an earlier one may have left it on Dark.
+    const mode = themePreferences.snapshot().mode;
+    themePreferences.setMode('system');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: () => ({
+        matches: false,
+        addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+        removeEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+      }),
+    });
+    try {
+      const { view } = await renderShell('/');
+      const before = document.documentElement.dataset.theme;
+
+      // Act
+      await interact(() => {
+        for (const listener of listeners) listener({ matches: true } as MediaQueryListEvent);
+      });
+
+      // Assert
+      expect(view.container.querySelector('[data-onboarding="setup"]')).not.toBeNull();
+      expect(before).toEndWith('-light');
+      expect(document.documentElement.dataset.theme).toEndWith('-dark');
+      await view.unmount();
+    } finally {
+      if (original) Object.defineProperty(window, 'matchMedia', original);
+      else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'matchMedia');
+      themePreferences.setMode(mode);
+    }
+  });
+
   it('names the machine asking in the one passkey prompt, and a machine it no longer holds plainly', async () => {
     // Arrange
     const { store, view } = await renderShell('/', [alpha.daemonId]);
@@ -897,6 +936,31 @@ describe('AppShell', () => {
     // Assert
     expect(named).toContain(alpha.baseUrl);
     expect(unnamed).toContain('This machine');
+    await view.unmount();
+  });
+
+  it('raises a machine’s unlock only while it is on screen, and names a twin by its address', async () => {
+    // Arrange — B19: two machines on one host both call themselves "kirin-box". The second one's
+    // background reads raised its unlock over the first one's page, named by the host they share.
+    const twinA = daemonConnection({ ...alpha, daemonName: 'kirin-box' });
+    const twinB = daemonConnection({ ...beta, daemonName: 'kirin-box' });
+    const { store, view } = await renderShell(`/d/${ALPHA}`, [twinA, twinB]);
+    const prompt = (): Element | null => view.container.querySelector('[data-step-up-dialog]');
+
+    // Act — B's read waits while A is on screen, then B comes on screen.
+    void store.unlockGate.require(twinB, undefined, 'background');
+    await settle();
+    const overA = prompt();
+    const locked = store.unlockGate.waitingDaemons();
+    await popTo(`/d/${BETA}`);
+    await settle();
+    const named = prompt()?.querySelector('[data-step-up-machine]')?.textContent;
+    await interact(() => store.unlockGate.dismiss());
+
+    // Assert
+    expect(overA).toBeNull();
+    expect(locked).toEqual([twinB.daemonId]);
+    expect(named).toBe('kirin-box (beta.example.test)');
     await view.unmount();
   });
 
@@ -3539,6 +3603,19 @@ describe('App', () => {
   it('registers the release checker and shows its notice when an update was refused', async () => {
     // Arrange: a secure page whose active worker answers every check with a refusal.
     const undo: (() => void)[] = [];
+    // B7: the notice floated over the page and hid its first card at 390px. Its measured height is room
+    // the shell keeps, so a dock this tall must publish exactly that.
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-release-notice-dock') ? 132 : 0;
+      },
+    });
+    undo.push(() => {
+      if (offsetHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'offsetHeight');
+    });
     const registered: string[] = [];
     const active = {
       scriptURL: '/sw.verified.js',
@@ -3599,7 +3676,10 @@ describe('App', () => {
       expect(must(view.container.querySelector('[data-release-notice]'), 'the release notice').textContent).toContain(
         'An update failed verification',
       );
+      const inset = document.documentElement.style.getPropertyValue('--release-notice-h');
       await view.unmount();
+      expect(inset).toBe('132px');
+      expect(document.documentElement.style.getPropertyValue('--release-notice-h')).toBe('');
     } finally {
       while (undo.length > 0) undo.pop()?.();
     }

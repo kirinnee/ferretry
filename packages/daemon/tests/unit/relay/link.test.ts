@@ -86,6 +86,7 @@ import {
 } from '../../../src/lib/pairing/index.ts';
 import {
   ACCESS_LEASE_ENDED_REASON,
+  type AccessLeasePolicy,
   MAX_INCOMING_BODIES,
   MAX_PRE_CREDENTIAL_SESSIONS,
   RELAY_CREDENTIAL_DEADLINE_MS,
@@ -236,6 +237,7 @@ function harness(
     readonly reauthorize?: (request: ApiRequest) => boolean;
     /** When this device's key is due for replacement; absent means the directory has no opinion at all. */
     readonly rotateBy?: (deviceId: string) => number | undefined;
+    readonly lease?: AccessLeasePolicy;
   } = {},
 ): Harness {
   const sent = wire();
@@ -280,6 +282,7 @@ function harness(
       },
     },
     clock: extra.now === undefined ? TEST_CLOCK : { now: extra.now },
+    ...(extra.lease === undefined ? {} : { lease: extra.lease }),
     scheduler: {
       after: (milliseconds, action) => {
         const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
@@ -3393,6 +3396,41 @@ describe('what keeps a device from idling out, and what keeps a session from liv
       harnessed.timers.filter(timer => !timer.cancelled && timer !== lastLease && timer.milliseconds < 900_000),
     ).be.empty();
     lastLease?.fire();
+    should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE });
+  });
+
+  it('should run the lease, its renewal and the cap on an injected policy, in seconds rather than hours', async () => {
+    // B20: the policy is the seam an end-to-end run drives a lease end and the cap through, without
+    // waiting out fifteen minutes or twelve hours. Six-second leases, asked again two seconds ahead,
+    // and a nine-second cap: one renewal, then a last lease that ends exactly at the cap.
+    let now = 0;
+    const lease: AccessLeasePolicy = { leaseMs: 6_000, renewLeadMs: 2_000, maxSessionMs: 9_000 };
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { now: () => now, lease });
+    const opened = await keyedSession(harnessed);
+    let channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
+    const leaseTimers = (from: number) => harnessed.timers.slice(from).filter(timer => timer.milliseconds !== 45_000);
+    const first = leaseTimers(0).filter(timer => !timer.cancelled);
+
+    now = 4_000;
+    first[0]?.fire();
+    await sealed();
+    const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
+    await harnessed.link.receiveBinary(
+      encodeFrame({ kind: FRAME_KINDS.credit, sessionId: sessionOne(), sequence: 0, payload: encodeCreditPayload(1) }),
+    );
+    const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
+    const before = harnessed.timers.length;
+    channel = await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
+    const last = leaseTimers(before);
+    last.at(-1)?.fire();
+
+    should(first.map(timer => timer.milliseconds)).eql([4_000, 6_000]);
+    should(last.map(timer => timer.milliseconds)).eql([5_000]);
     should(lastClose(harnessed.wire)).containDeep({ t: 'closed', code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE });
   });
 

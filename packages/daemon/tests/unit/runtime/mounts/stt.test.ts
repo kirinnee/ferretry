@@ -1,8 +1,8 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
+import { FY_VERSION_HEADER } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { VERSION_HEADER } from '../../../../src/lib/api/responses.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { sttEnhancementRoutes } from '../../../../src/lib/runtime/mounts/stt.ts';
 import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
@@ -62,7 +62,7 @@ describe('the dictation enhancement mount', () => {
     // UNPARSED: the service applies the wire schema itself, which is what lets it answer `too_long`
     // and `provider_unknown` rather than the mount's generic invalid-body refusal.
     should(enhancer.seen).deepEqual([{ text: 'helo wold', provider: 'groq' }]);
-    should(response.headers.get(VERSION_HEADER)).equal(daemonVersion);
+    should(response.headers.get(FY_VERSION_HEADER)).equal(daemonVersion);
   });
 
   it('should answer an enhancement failure with the status and code the domain decided', async () => {
