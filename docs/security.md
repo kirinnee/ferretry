@@ -69,6 +69,12 @@ From any device, a passkey step-up is needed to:
 - **change the fleet** (apply a change, sign in an account, setup, clone)
 - **change permissions** (grants), for the machine or for a device
 - **pair a new device** or **remove a device**
+
+**Adding a device always asks.** Making a pairing code, or giving another device more access, needs a
+passkey confirmation **for that one act** — even on an unlocked device, and even with "ask again for
+each change" switched off. The unlock alone is never enough to put another device on your machine, so a
+thief with your unlocked phone can't pair a device of their own. `fy pair` at the machine is never asked.
+
 - control the **browser**, or change the **warden** (the supervising agent)
 
 Reading the fleet, chatting with sessions, and your own tasks, pins and attention items do **not**

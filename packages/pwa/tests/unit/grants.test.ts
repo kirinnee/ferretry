@@ -91,6 +91,11 @@ describe('grant vocabulary', () => {
       DAEMON_CAPABILITIES.length,
     );
     expect(stepUpAct({ capability: 'terminal', axis: 'use' })).toBe('open a terminal');
+    // An act that adds access is named as itself, never as the capability's general use.
+    expect(stepUpAct({ capability: 'pairing', axis: 'use', act: 'add-device' })).toBe('add a device');
+    expect(stepUpAct({ capability: 'pairing', axis: 'use', act: 'widen-device' })).toBe(
+      'give another device more access',
+    );
     expect(stepUpAct({ capability: 'browser', axis: 'use' })).toBe('open the remote browser');
     expect(stepUpAct({ capability: 'pairing', axis: 'use' })).toBe('add or manage a paired device');
     expect(stepUpAct({ capability: 'secrets', axis: 'use' })).toBe('run a command with a stored secret');

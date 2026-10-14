@@ -57,6 +57,11 @@ interface World {
   readonly target?: CapabilityGrants;
   readonly daemonWide?: CapabilityGrants;
   readonly steppedUp?: boolean;
+  /**
+   * Whether the caller proved a passkey for THIS act — what a widen needs. Follows `steppedUp` unless
+   * set: `false` with `steppedUp` on is an unlocked device that has not confirmed the widen.
+   */
+  readonly freshProof?: boolean;
   /** Replaces the real device-grant service, for a case driving a failure it would never raise. */
   readonly service?: DeviceGrantSubsystem;
 }
@@ -70,6 +75,7 @@ async function mount(world: World = {}) {
   await grants.refresh();
   const audit: GrantAuditEntry[] = [];
   let rechecks = 0;
+  let spentFresh = 0;
   const service = deviceGrantsOver(grants, devices, audit, () => {
     rechecks += 1;
   });
@@ -93,9 +99,13 @@ async function mount(world: World = {}) {
     undefined,
     {
       held: () => world.steppedUp ?? true,
+      freshlyHeld: () => world.freshProof ?? world.steppedUp ?? true,
+      spendFresh: () => {
+        spentFresh += 1;
+      },
     },
   );
-  return { dispatcher, devices, audit, service, rechecks: () => rechecks };
+  return { dispatcher, devices, audit, service, rechecks: () => rechecks, spentFresh: () => spentFresh };
 }
 
 const patch = (body: unknown, target = targetId) =>
@@ -159,6 +169,43 @@ describe('changing one device’s grants', () => {
     // Assert
     should(response.status).equal(200);
     should(devices.get(targetId)?.terminal).deepEqual({ use: true, configure: false });
+  });
+
+  it('should refuse a remote widen on the unlock alone, naming the act, and spend a fresh proof on one', async () => {
+    // Arrange — OWNER DECISION: widening another device always wants a passkey proved for it, even on an
+    // unlocked device with `stepUpOnActions` off. The unlock is the held step-up; no fresh proof is.
+    const unlocked = await mount({ caller: MANAGER, freshProof: false });
+    const confirmed = await mount({ caller: MANAGER });
+
+    // Act
+    const refused = await unlocked.dispatcher.dispatch(patch({ terminal: { use: true } }));
+    const allowed = await confirmed.dispatcher.dispatch(patch({ terminal: { use: true } }));
+
+    // Assert
+    should(refused.status).equal(403);
+    should(jsonBody(refused).code).equal(STEP_UP_REQUIRED_CODE);
+    should(jsonBody(refused).demand).deepEqual({ capability: 'pairing', axis: 'use', act: 'widen-device' });
+    should(unlocked.devices.get(targetId)).deepEqual(LIMITED_DEVICE_GRANTS);
+    should(allowed.status).equal(200);
+    // One confirmation, one widen: the proof is spent.
+    should(confirmed.spentFresh()).equal(1);
+  });
+
+  it('should let an unlocked device NARROW without a fresh proof, and spend none', async () => {
+    // Arrange
+    const { dispatcher, devices, spentFresh } = await mount({
+      caller: MANAGER,
+      target: MANAGER,
+      freshProof: false,
+    });
+
+    // Act
+    const response = await dispatcher.dispatch(patch({ terminal: { use: false } }));
+
+    // Assert
+    should(response.status).equal(200);
+    should(devices.get(targetId)?.terminal).deepEqual({ use: false, configure: false });
+    should(spentFresh()).equal(0);
   });
 
   it('should ask a remote manager for a step-up first', async () => {

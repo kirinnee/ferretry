@@ -27,6 +27,11 @@ export interface StepUpPrompt {
   readonly failure?: string;
   /** What this confirmation buys, once the machine has said; until then the prompt's own words stand. */
   readonly scope?: string;
+  /**
+   * This device has no passkey for the machine yet and may add its first one right now (its window is
+   * open). The prompt then leads with setting one up, which its button does before it unlocks.
+   */
+  readonly firstPasskey?: boolean;
 }
 
 export interface StepUpGateDependencies {
@@ -39,6 +44,11 @@ export interface StepUpGateDependencies {
    * nothing: the prompt keeps the words it already has, and a confirmation never waits on it.
    */
   readonly scope?: (daemon: DaemonConnection) => Promise<string>;
+  /**
+   * Whether this device can only get in by adding its FIRST passkey, which it may do now. Read once when
+   * the prompt opens, like {@link scope}; a read that fails says nothing.
+   */
+  readonly firstPasskey?: (daemon: DaemonConnection) => Promise<boolean>;
 }
 
 interface Waiting {
@@ -124,18 +134,24 @@ export class StepUpGate {
   #show(waiting: Waiting): void {
     this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false });
     const read = this.deps.scope;
-    if (read === undefined) return;
-    void read(waiting.daemon).then(
-      scope => this.#adopt(waiting, scope),
-      () => undefined,
-    );
+    if (read !== undefined)
+      void read(waiting.daemon).then(
+        scope => this.#adopt(waiting, { scope }),
+        () => undefined,
+      );
+    const first = this.deps.firstPasskey;
+    if (first !== undefined)
+      void first(waiting.daemon).then(
+        firstPasskey => this.#adopt(waiting, { firstPasskey }),
+        () => undefined,
+      );
   }
 
-  /** The machine's own words for what a confirmation buys, if its prompt is still the one on screen. */
-  #adopt(waiting: Waiting, scope: string): void {
+  /** What the machine said about this prompt, if its prompt is still the one on screen. */
+  #adopt(waiting: Waiting, said: Pick<StepUpPrompt, 'scope' | 'firstPasskey'>): void {
     const prompt = this.#prompt;
     if (prompt === null || this.#waiting.get(waiting.daemon.daemonId) !== waiting) return;
-    this.#set({ ...prompt, scope });
+    this.#set({ ...prompt, ...said });
   }
 
   /** A later request on the machine already on screen adds its act to the one prompt, keeping its state. */

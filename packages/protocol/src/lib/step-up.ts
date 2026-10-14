@@ -218,8 +218,25 @@ export const STEP_UP_REQUIRED_CODE = 'grant_step_up_required' as const;
 export const StepUpDemandSchema = z.strictObject({
   capability: DaemonCapabilitySchema,
   axis: CapabilityAxisSchema,
+  /**
+   * The ONE act this confirmation is for, when the act is one that adds access to this machine and so
+   * wants a passkey proved for it alone ({@link STEP_UP_ACTS}). Absent for every other step-up.
+   */
+  act: z.enum(['add-device', 'widen-device']).optional(),
 });
 export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
+
+/**
+ * The acts that ADD ACCESS to a machine, and so always need a fresh passkey confirmation of their own
+ * from a device — even an unlocked one, even with `stepUpOnActions` off (owner decision 2026-10-14).
+ * The machine itself (its admin token, on the host) is never asked.
+ */
+export const STEP_UP_ACTS = {
+  /** Minting a pairing code: the next device to redeem it gets access. */
+  addDevice: 'add-device',
+  /** Turning on, for another device, something it did not hold. */
+  widenDevice: 'widen-device',
+} as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**
  * The `403 grant_step_up_required` body: the ordinary error envelope plus the {@link StepUpDemand}.

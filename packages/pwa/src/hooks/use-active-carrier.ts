@@ -21,3 +21,16 @@ export function useActiveCarrier(router: DaemonCarrierRouter, daemonId: DaemonId
   const snapshot = useCallback(() => router.choice(daemonId), [router, daemonId]);
   return useSyncExternalStore(subscribe, snapshot);
 }
+
+/**
+ * Whether this daemon refused this browser's device (`4403`), as a React subscription.
+ *
+ * The same store as the carrier: the refusal is learned when a request is carried, so the screen that
+ * says "pair again" appears the moment the first panel's request is refused, and goes when a re-pair
+ * replaces the pairing.
+ */
+export function useDeviceRefused(router: DaemonCarrierRouter, daemonId: DaemonId): boolean {
+  const subscribe = useCallback((listener: () => void) => router.subscribe(listener), [router]);
+  const snapshot = useCallback(() => router.deviceRefused(daemonId), [router, daemonId]);
+  return useSyncExternalStore(subscribe, snapshot);
+}

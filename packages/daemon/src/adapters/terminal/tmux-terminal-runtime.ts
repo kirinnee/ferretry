@@ -8,6 +8,7 @@ import {
   terminalTmuxSessionName,
 } from '../../lib/terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
+import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 
 const OWNER_OPTION = '@fy_terminal_owner';
 const ID_OPTION = '@fy_terminal_id';
@@ -66,7 +67,8 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     ].join(SEPARATOR);
     const result = await this.tmux.execute(['list-sessions', '-F', format]);
     if (result.code !== 0) {
-      if (/no server running|failed to connect|no sessions/i.test(result.stderr)) return [];
+      // No server and a server with nothing in it are the same answer: there are no terminals.
+      if (isTmuxServerAbsent(result.stderr) || /no sessions/iu.test(result.stderr)) return [];
       throw failure('could not list terminal sessions', result.stderr);
     }
     const records: TerminalRecord[] = [];
@@ -234,7 +236,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
 
   async kill(record: TerminalRecord): Promise<void> {
     const result = await this.tmux.execute(['kill-session', '-t', record.tmuxSession]);
-    if (result.code !== 0 && !/can't find session|no server running/i.test(result.stderr)) {
+    if (result.code !== 0 && !/can't find session/iu.test(result.stderr) && !isTmuxServerAbsent(result.stderr)) {
       throw failure('could not close terminal', result.stderr);
     }
   }

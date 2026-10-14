@@ -53,6 +53,12 @@ interface AppSessionSpan {
  */
 export class StepUpRegistry {
   readonly #held = new Map<string, HeldStepUp>();
+  /**
+   * Step-ups not yet spent on an act that ADDS ACCESS — minting a pairing code, widening a device — by
+   * when each was proved. Such an act wants a passkey proved for it, so it takes one of these, and only
+   * while it is a challenge's lifetime old: the window a step-up otherwise covers is not enough.
+   */
+  readonly #fresh = new Map<string, number>();
   readonly #spans = new Map<string, AppSessionSpan>();
 
   constructor(
@@ -82,6 +88,7 @@ export class StepUpRegistry {
   grant(subject: StepUpSubject, nowMs: number): number {
     const held: HeldStepUp = { grantedAtMs: nowMs };
     this.#held.set(key(subject), held);
+    this.#fresh.set(key(subject), nowMs);
     return this.#endOf(held);
   }
 
@@ -111,9 +118,28 @@ export class StepUpRegistry {
     return this.expiresAt(subject, nowMs) !== undefined;
   }
 
+  /**
+   * Whether this copy proved a passkey within a challenge's lifetime and has not spent that proof on an
+   * act that adds access. Never true without a live step-up, so a page that closed holds none.
+   */
+  freshlyHeld(subject: StepUpSubject, nowMs: number): boolean {
+    const provedAtMs = this.#fresh.get(key(subject));
+    return (
+      provedAtMs !== undefined &&
+      nowMs - provedAtMs < PASSKEY_CHALLENGE_TTL_SECONDS * 1_000 &&
+      this.held(subject, nowMs)
+    );
+  }
+
+  /** An act that adds access was admitted on this copy's fresh proof: the next one needs another. */
+  spendFresh(subject: StepUpSubject): void {
+    this.#fresh.delete(key(subject));
+  }
+
   /** Revoking a device ends every step-up any copy of the app on it holds. */
   forgetDevice(deviceId: string): void {
     for (const id of [...this.#held.keys()]) if (id.startsWith(`${deviceId}\u0000`)) this.#held.delete(id);
+    for (const id of [...this.#fresh.keys()]) if (id.startsWith(`${deviceId}\u0000`)) this.#fresh.delete(id);
   }
 
   /** When a held step-up lapses under the window in force now. A single-use one lasts a challenge's life. */
@@ -129,12 +155,14 @@ export class StepUpRegistry {
     if (span.closedAtMs === undefined || nowMs - span.closedAtMs < APP_SESSION_GRACE_MS) return span;
     this.#spans.delete(id);
     this.#held.delete(id);
+    this.#fresh.delete(id);
     return undefined;
   }
 
   /** A new span. Whatever an earlier life of the same id held does not carry into it. */
   #begin(id: string): AppSessionSpan {
     this.#held.delete(id);
+    this.#fresh.delete(id);
     const span: AppSessionSpan = { open: 0, closedAtMs: undefined };
     this.#spans.set(id, span);
     return span;

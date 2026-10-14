@@ -47,8 +47,11 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { HarnessLoginRefusal, type HarnessLoginService } from '../../fleet-login/service.ts';
 
-/** The subsystem these routes serve. Narrowed to the four calls. */
-export type HarnessLoginSubsystem = Pick<HarnessLoginService, 'start' | 'status' | 'submit' | 'cancel'>;
+/**
+ * The subsystem these routes serve: the four calls, and the shutdown that ends every child they started
+ * — a sign-in must not outlive the daemon that launched it.
+ */
+export type HarnessLoginSubsystem = Pick<HarnessLoginService, 'start' | 'status' | 'submit' | 'cancel' | 'shutdown'>;
 
 /**
  * Every login refusal, in the transport's own taxonomy.

@@ -38,6 +38,12 @@ export class BunDaemonProcess implements IDaemonProcessPort {
    * The log file descriptor is opened here rather than delegated to a `sh -c` redirect: kteam wrapped
    * the launch in `sh -c 'exec "$1" >> "$2" 2>&1'`, which put a shell in the middle of the process
    * tree for no gain and made the daemon's parent a shell that had already exited.
+   *
+   * IT IS A NEW SESSION (`detached`, which is `setsid()`). Without one the daemon stayed in the
+   * terminal's session and process group, so closing that terminal sent it `SIGHUP` and the machine
+   * went away with the window it was started from. With stdin ignored and both streams on the log, it
+   * holds nothing of the terminal at all. Only this direct mode comes here: a service manager starts
+   * the daemon itself.
    */
   async spawnDetached(launch: DetachedLaunch): Promise<DaemonStartHandle> {
     const [command, ...args] = launch.argv;
@@ -46,6 +52,7 @@ export class BunDaemonProcess implements IDaemonProcessPort {
     try {
       const child = Bun.spawn([command, ...args], {
         env: { ...launch.environment },
+        detached: true,
         stdin: 'ignore',
         stdout: log.fd,
         stderr: log.fd,

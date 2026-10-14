@@ -1554,6 +1554,20 @@ describe('daemon lifecycle serialization', () => {
     should(subject.out.text).containEql('owner 4242');
   });
 
+  it('should say so when it removed a claim whose holder had exited', async () => {
+    // Arrange — the e2e case: a `fy daemon start` killed mid-flight left its claim behind.
+    const lifecycle = new FakeLifecycleLock();
+    lifecycle.abandoned = 'start (owner 4242, since 2026-08-06T00:00:00.000Z), which is no longer running';
+    const subject = harness({ lifecycle, probes: [health()] });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(subject.out.text).containEql('fyd start removed a lifecycle claim left behind by start (owner 4242');
+    should(subject.out.text).containEql('which is no longer running');
+  });
+
   it('should name a claim it could not give up, because the next command will be blocked by it', async () => {
     // Arrange
     const lifecycle = new FakeLifecycleLock();
@@ -1725,5 +1739,39 @@ describe('daemon remedies name the client that was typed', () => {
 
     // Assert
     should(subject.out.text).containEql('run zz daemon restart to use the installed daemon');
+  });
+});
+
+describe('DaemonController with no daemon executable', () => {
+  it.each([
+    { verb: 'start', run: (controller: DaemonController) => controller.start() },
+    { verb: 'install', run: (controller: DaemonController) => controller.install() },
+    { verb: 'restart', run: (controller: DaemonController) => controller.restart() },
+  ])('should refuse $verb before taking any lifecycle claim', async ({ run }) => {
+    // Arrange — the claim is host-wide, so waiting for it behind another invocation could cost the
+    // whole 140-second budget only to end in "cannot find fyd", which was knowable at the start.
+    const { controller, lifecycle } = harness({
+      probes: [undefined],
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act + Assert
+    await should(run(controller)).be.rejectedWith(/cannot find fyd on PATH/u);
+    should(lifecycle.requests).be.empty();
+  });
+
+  it('should still let start report a daemon that is already serving', async () => {
+    // Arrange — a serving daemon needs no executable, so the early check must not refuse it.
+    const { controller, lifecycle, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert
+    should(out.text).equal('ok: fyd is already serving (pid 4242)');
+    should(lifecycle.requests).not.be.empty();
   });
 });

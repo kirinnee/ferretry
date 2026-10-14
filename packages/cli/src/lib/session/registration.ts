@@ -1,3 +1,4 @@
+import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import { type Command, Option } from 'commander';
 import type { AnswerQuestionController } from './answer-controller.ts';
 import type { InterruptSessionController, ResumeSessionController } from './lifecycle-controllers.ts';
@@ -8,6 +9,9 @@ import type { SendMessageController } from './send-controller.ts';
 import type { SignalSessionController } from './signal-controller.ts';
 import type { StartSessionController } from './start-controller.ts';
 import type { SessionStatusController } from './status-controller.ts';
+
+/** The agent runtime a first run makes for Claude Code, named the way the import names it. */
+const FIRST_RUN_EXAMPLE = importedRuntimeName('claude', IMPORT_NAMES.defaultProfile);
 
 /** Every session controller, plus the presenter that reports a failure. */
 export interface SessionCommandDeps {
@@ -67,9 +71,9 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .argument('[prompt...]', 'the task prompt; required for --mode auto')
     .requiredOption(
       '-a, --agent <agent>',
-      `the runtime to run the session on — an agent runtime (\`${bin} runtimes\`), such as claude-auto-default. ` +
-        'A runtime that is not an agent (such as claude-default) is for using the tool yourself in a terminal ' +
-        'and cannot run sessions, in either --mode',
+      `the runtime to run the session on — an agent runtime (\`${bin} runtimes\`), such as ${FIRST_RUN_EXAMPLE}. ` +
+        'A runtime that is not an agent is for using the tool yourself in a terminal and cannot run sessions, ' +
+        'in either --mode',
     )
     .addOption(
       new Option('--mode <mode>', 'auto for an autonomous teammate, interactive for a human terminal')

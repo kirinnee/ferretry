@@ -45,9 +45,14 @@ import { firstRunEntry } from './features/onboarding/first-run-entry.ts';
 import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from './features/onboarding/hosted-relay.ts';
 import { detectInstallChannel } from './features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from './features/onboarding/onboarding-page.tsx';
-import { OnboardingProgressStore, resetOnboardingProgress } from './features/onboarding/onboarding-progress.ts';
+import {
+  OnboardingProgressStore,
+  resetOnboardingProgress,
+  startOnboardingPairing,
+} from './features/onboarding/onboarding-progress.ts';
 import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
+import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
@@ -68,7 +73,7 @@ import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
 import { WardenStrip } from './features/warden/warden-strip.tsx';
 import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
-import { useActiveCarrier } from './hooks/use-active-carrier.ts';
+import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
@@ -87,6 +92,7 @@ import {
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
+import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import type {
@@ -375,8 +381,8 @@ function ConnectionPicker() {
       onArrivalTaken={takeArrival}
       connections={snapshot.connections}
       selectedDaemonId={snapshot.selectedDaemonId}
-      onPair={async seed => {
-        const connection = await store.pair(seed);
+      onPair={async (seed, deviceName) => {
+        const connection = await store.pair(seed, deviceName);
         // A machine that is not set up opens its first run straight away; anything else, its sessions.
         navigate(
           await landingAfterPairing(store.connections.select(connection.daemonId), daemon =>
@@ -515,8 +521,8 @@ function SetupGuide() {
           onArrivalTaken={takeArrival}
           connections={snapshot.connections}
           selectedDaemonId={selected}
-          onPair={async seed => {
-            await store.pair(seed);
+          onPair={async (seed, deviceName) => {
+            await store.pair(seed, deviceName);
             onPaired();
           }}
           onSelect={daemonId => {
@@ -568,7 +574,7 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
     <NewSessionPage
       accounts={store.accountPicker}
       connection={connection}
-      machineName={record === undefined ? connection.baseUrl : daemonDisplayName(record)}
+      machineName={daemonDisplayName(record ?? connection)}
       fleet={store.fleet}
       projects={store.projects}
       startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
@@ -1048,6 +1054,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       onRenameDaemon={(daemonId, label) => {
         store.connections.rename(daemonId, label);
       }}
+      onMachineNamed={(daemonId, name) => store.connections.learnDaemonName(daemonId, name)}
       onRemoveDaemon={daemonId => {
         const removedActiveDaemon = daemonId === connection.daemonId;
         store.connections.remove(daemonId);
@@ -1249,6 +1256,35 @@ const PAGE_SLOTS: PageHostSlots = {
   Learning: LearningRoute,
   ImportedHistory: ImportedHistoryRoute,
 };
+
+/**
+ * A MACHINE THAT NO LONGER ACCEPTS THIS BROWSER GETS ONE SENTENCE, NOT ONE ERROR PER PANEL.
+ *
+ * The router learns the refusal from the first request the daemon refuses and stops dialling; this
+ * swaps the page for the notice that says so and offers the repair. A re-pair replaces the pairing,
+ * the router forgets the refusal with it, and the page comes back.
+ */
+function DeviceRefusedGate({
+  connection,
+  children,
+}: {
+  readonly connection: DaemonConnectionRecord;
+  readonly children: ReactNode;
+}) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const refused = useDeviceRefused(store.carrier, connection.daemonId);
+  if (!refused) return children;
+  return (
+    <DeviceRefusedNotice
+      machineName={daemonDisplayName(connection)}
+      onPairAgain={() => {
+        startOnboardingPairing(detectDeviceKind(navigator));
+        navigate(setupPath());
+      }}
+    />
+  );
+}
 
 /** The mounted shell; exported so render tests can inject the router and store providers. */
 export function AppShell() {
@@ -1555,9 +1591,11 @@ export function AppShell() {
             enabled={touchAffected}
             onOpen={openPalette}
           >
-            <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
-              <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
-            </ChunkErrorBoundary>
+            <DeviceRefusedGate connection={connection}>
+              <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
+                <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+              </ChunkErrorBoundary>
+            </DeviceRefusedGate>
           </PullToPaletteRegion>
           <CommandPalette
             open={palette.open}

@@ -20,6 +20,7 @@ import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
+import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnation';
 import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
@@ -402,8 +403,22 @@ function isExecutableFile(path: string): boolean {
   }
 }
 
+/**
+ * How long `fyd --version` may take before its answer is "unknown".
+ *
+ * Unbounded, a daemon executable that hangs on `--version` — a wrapper waiting on a lock, a binary for
+ * the wrong platform under emulation — hung every lifecycle verb with nothing on screen. The version is
+ * only ever used to SAY a running daemon is older than the installed one, so an unknown version costs
+ * one notice and nothing else.
+ */
+const DAEMON_VERSION_TIMEOUT_MS = 5_000;
+
 function daemonBinaryVersion(path: string): string | undefined {
-  const result = Bun.spawnSync([path, '--version'], { stdout: 'pipe', stderr: 'ignore' });
+  const result = Bun.spawnSync([path, '--version'], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+    timeout: DAEMON_VERSION_TIMEOUT_MS,
+  });
   if (result.exitCode !== 0) return undefined;
   const version = new TextDecoder().decode(result.stdout).trim();
   return version === '' ? undefined : version;
@@ -459,8 +474,14 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     nix: new NixStoreGcRoot(processes),
     // The claim reads the same clock the readiness and shutdown waits do, so the bound a caller waits
     // and the bound a peer may legitimately hold are measured against one source of time.
-    lifecycle: new FileDaemonLifecycleLock(processes, clock),
-    installedDaemon: () => resolveDaemonBinary(environment, daemonName),
+    lifecycle: new FileDaemonLifecycleLock(processes, new HostProcessIncarnations(processes), clock),
+    // Resolved once per invocation: a verb now asks before its claim and again inside it, and each
+    // answer that FOUND a daemon spawns its `--version`. A miss is not kept, so a daemon installed
+    // while this invocation waited is still found.
+    installedDaemon: (() => {
+      let found: InstalledDaemonBinary | undefined;
+      return () => (found ??= resolveDaemonBinary(environment, daemonName));
+    })(),
     retired: new FileRetiredArtifacts(),
     resetTrees: new FileResetTrees(),
     /**

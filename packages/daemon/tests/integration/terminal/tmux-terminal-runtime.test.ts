@@ -1,6 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { TmuxTerminalRuntime } from '../../../src/adapters/index.ts';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BunTmuxProcess, TmuxTerminalRuntime } from '../../../src/adapters/index.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
 
 const ok = (stdout = ''): TmuxCommandResult => ({ code: 0, stdout, stderr: '' });
@@ -252,5 +255,57 @@ describe('TmuxTerminalRuntime', () => {
     // Act + Assert
     await should(subject.kill(terminal)).be.fulfilled();
     await should(subject.kill(terminal)).be.rejectedWith(/could not close terminal/u);
+  });
+});
+
+describe('TmuxTerminalRuntime with no private server', () => {
+  // Measured on tmux 3.6a with `tmux -S <path> list-sessions`. The first is what a fresh daemon's
+  // never-created socket says, and the listing used to throw on it — which made every managed
+  // worktree unremovable, because the removal reads a throw as undetermined evidence of terminals.
+  const ABSENT = [
+    'error connecting to /tmp/fy-home/tmux.sock (No such file or directory)',
+    'no server running on /tmp/fy-home/tmux.sock',
+  ];
+
+  it.each(ABSENT)('should list no terminals when tmux says %s', async stderr => {
+    // Arrange
+    const subject = new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }]));
+
+    // Act + Assert
+    should(await subject.list()).deepEqual([]);
+  });
+
+  it.each(ABSENT)('should treat closing a terminal as done when tmux says %s', async stderr => {
+    // Act + Assert — the server's absence took the terminal with it.
+    await new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }])).kill(terminal);
+  });
+
+  it('should keep a socket it may not open as an error, never as an empty listing', async () => {
+    // Arrange — measured too: a live server whose socket this user cannot open. Reading this as "no
+    // terminals" would let a removal proceed past terminals it could not see.
+    const stderr = 'error connecting to /tmp/fy-home/tmux.sock (Permission denied)';
+
+    // Act + Assert
+    await should(new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }])).list()).be.rejectedWith(
+      /could not list terminal sessions: error connecting to .*Permission denied/u,
+    );
+    await should(
+      new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }])).kill(terminal),
+    ).be.rejectedWith(/could not close terminal/u);
+  });
+
+  it('should list no terminals through the real tmux on a socket nothing has created', async () => {
+    // Arrange — no fake: whatever this host's tmux prints for a missing server is what is read.
+    const executable = Bun.which('tmux');
+    if (executable === null) throw new Error('tmux is required for terminal integration coverage');
+    const home = await mkdtemp(join(tmpdir(), 'fy-term-absent-'));
+    try {
+      const subject = new TmuxTerminalRuntime(new BunTmuxProcess(executable, join(home, 'never-started.sock')));
+
+      // Act + Assert
+      should(await subject.list()).deepEqual([]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

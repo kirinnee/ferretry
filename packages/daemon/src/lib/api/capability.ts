@@ -89,6 +89,12 @@ export interface CapabilityPresentation {
    */
   readonly stepUp: boolean;
   /**
+   * Whether that device proved a passkey FOR THIS ACT — within a challenge's lifetime and not yet spent
+   * on another act that adds access. Only minting a pairing code and widening a device read it; the
+   * unlock never makes it true. Absent reads as `false`.
+   */
+  readonly freshStepUp?: boolean;
+  /**
    * The proven device's OWN grants, when the caller is a paired device; `null` when the session proved
    * a device this daemon no longer holds; absent for a caller that is not a device (the host's admin
    * token, a warden), which no device grant narrows.
@@ -215,6 +221,10 @@ export interface StepUpWitness {
    * verified by the same subsystem — and it never counts as a step-up.
    */
   unlockRequired?(subject: SessionDevice): boolean;
+  /** Whether this device proved a passkey for the act at hand. Absent means it never has. */
+  freshlyHeld?(subject: SessionDevice): boolean;
+  /** Spends that proof. */
+  spendFresh?(subject: SessionDevice): void;
 }
 
 /**

@@ -261,6 +261,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     // The SESSION's proven device, never a header's claim. No device — a bearer caller, a warden —
     // holds no step-up and never can.
     stepUp: request.device !== undefined && stepUps.held(request.device),
+    freshStepUp: request.device !== undefined && stepUps.freshlyHeld?.(request.device) === true,
     // The SESSION's proven device's own grants, from the live registry. `null` for a device that was
     // admitted but is gone, so it is refused rather than served unnarrowed.
     ...(authentication.tokenClass === 'device'
@@ -319,6 +320,9 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       presentation,
       spendStepUp: () => {
         if (request.device !== undefined) stepUps.spend?.(request.device);
+      },
+      spendFreshStepUp: () => {
+        if (request.device !== undefined) stepUps.spendFresh?.(request.device);
       },
     },
   };

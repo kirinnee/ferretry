@@ -237,6 +237,7 @@ describe('judging one device-grant change', () => {
       next: ALL_ON,
       hostLocal: true,
       stepUp: false,
+      freshStepUp: false,
       holder: undefined,
     });
 
@@ -254,6 +255,7 @@ describe('judging one device-grant change', () => {
       next,
       hostLocal: false,
       stepUp: true,
+      freshStepUp: true,
       holder: manager,
     });
     const unconfirmed = judgeDeviceGrantChange({
@@ -261,12 +263,31 @@ describe('judging one device-grant change', () => {
       next,
       hostLocal: false,
       stepUp: false,
+      freshStepUp: false,
+      holder: manager,
+    });
+
+    // Assert — a widen without a passkey proved for it names the act it is waiting on.
+    should(confirmed).deepEqual({ kind: 'allowed' });
+    should(unconfirmed).deepEqual({ kind: 'widen-step-up-required' });
+  });
+
+  it('should refuse a remote widen on the unlock alone: it needs a passkey proved for it', () => {
+    // Arrange — an unlocked device (its step-up is held) with `stepUpOnActions` off.
+    const next = withGrant(LIMITED_DEVICE_GRANTS, 'terminal', { use: true, configure: false });
+
+    // Act
+    const verdict = judgeDeviceGrantChange({
+      current: LIMITED_DEVICE_GRANTS,
+      next,
+      hostLocal: false,
+      stepUp: true,
+      freshStepUp: false,
       holder: manager,
     });
 
     // Assert
-    should(confirmed).deepEqual({ kind: 'allowed' });
-    should(unconfirmed).deepEqual({ kind: 'step-up-required' });
+    should(verdict).deepEqual({ kind: 'widen-step-up-required' });
   });
 
   it('should refuse a remote widen of what the caller does not hold, even with a step-up', () => {
@@ -279,6 +300,7 @@ describe('judging one device-grant change', () => {
       next,
       hostLocal: false,
       stepUp: true,
+      freshStepUp: false,
       holder: manager,
     });
 
@@ -297,6 +319,7 @@ describe('judging one device-grant change', () => {
       next,
       hostLocal: false,
       stepUp: true,
+      freshStepUp: false,
       holder,
     });
 
@@ -315,9 +338,17 @@ describe('judging one device-grant change', () => {
       next,
       hostLocal: false,
       stepUp: true,
+      freshStepUp: false,
       holder: LIMITED_DEVICE_GRANTS,
     });
-    const unconfirmed = judgeDeviceGrantChange({ current, next, hostLocal: false, stepUp: false, holder: undefined });
+    const unconfirmed = judgeDeviceGrantChange({
+      current,
+      next,
+      hostLocal: false,
+      stepUp: false,
+      freshStepUp: false,
+      holder: undefined,
+    });
 
     // Assert
     should(confirmed).deepEqual({ kind: 'allowed' });
@@ -333,7 +364,14 @@ describe('judging one device-grant change', () => {
     });
 
     // Act
-    const verdict = judgeDeviceGrantChange({ current, next, hostLocal: false, stepUp: false, holder: manager });
+    const verdict = judgeDeviceGrantChange({
+      current,
+      next,
+      hostLocal: false,
+      stepUp: false,
+      freshStepUp: false,
+      holder: manager,
+    });
 
     // Assert
     should(verdict).deepEqual({ kind: 'forbidden', widened: ['secrets.use'] });

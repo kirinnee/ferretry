@@ -310,6 +310,16 @@ interface LifecycleArtifacts {
  * is absent, and the artifact claim covers everything derived from the same `XDG_STATE_HOME`: the Nix
  * garbage-collection root, and the retired snapshot store a verb removes.
  *
+ * **The manager-target claim is per user, not per state home, and that is deliberate.** A temporary
+ * `FY_HOME` does not get a service of its own: there is one `fyd.service` per user manager (one
+ * `com.ferretry.fyd` per launchd domain), and whichever state home a mutating verb runs under, it may
+ * install, start or stop THAT unit. Keying the claim on the state home would let a test home and the
+ * real one interleave writes to the same unit. What made a scratch home block the owner's real daemon
+ * for 140 seconds was not this scope but a killed command's claim that could never be recognised as
+ * abandoned; a claim now records which process holds it, so a holder that provably exited is removed
+ * by the next command instead of waited out (`adapters/daemon/lifecycle-lock.ts`). A LIVE command
+ * under any home still holds the unit for as long as it runs, which is the exclusion working.
+ *
  * **The artifact claim keeps the path and qualifier the snapshot store gave it**, which is deliberate
  * rather than leftover. During an upgrade an older `fy` is still on this host and still takes that
  * exact claim, and the older one is precisely the invocation that might be writing into the store this

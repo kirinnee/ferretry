@@ -57,7 +57,7 @@ import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
-import type { DaemonCarrierRouter } from '../../src/lib/relay-carrier.ts';
+import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
@@ -951,6 +951,78 @@ describe('AppShell', () => {
     await settle();
     expect(second.view.container.querySelector('[data-passkey-nudge]')).toBeNull();
     await second.view.unmount();
+  });
+
+  it('replaces the page with one sentence and Pair again when the machine no longer accepts this browser', async () => {
+    // Arrange — the router has learned a 4403. Only that one read is substituted; the rest is real.
+    const carrierSeam: MeasuredCarrierSeam = {
+      publish: () => undefined,
+      wrap: router =>
+        new Proxy(router, {
+          get(target, property) {
+            if (property === 'deviceRefused') return () => true;
+            const value = Reflect.get(target, property, target);
+            return typeof value === 'function' ? (value as (...args: never[]) => unknown).bind(target) : value;
+          },
+        }),
+    };
+    const { view } = await renderShell(`/d/${ALPHA}/projects`, [alpha.daemonId], { carrierSeam });
+    await settle();
+
+    // Assert — ONE sentence, not one "could not reach" per panel.
+    const notice = must(view.container.querySelector('[data-device-refused]'), 'the refused-device notice');
+    expect(notice.querySelector('[role="alert"]')?.textContent).toBe(DEVICE_NOT_ACCEPTED_SENTENCE);
+    expect(view.container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(view.container.textContent).not.toContain('could not reach');
+
+    // Act — the person pairs again.
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-device-refused-pair]'), 'Pair again').click(),
+    );
+    await settle();
+
+    // Assert — on the pairing step of the guide, not its first question.
+    expect(window.location.pathname).toBe('/setup');
+    expect(JSON.parse(localStorage.getItem('fy-onboarding-v4') ?? '{}')).toMatchObject({
+      stage: 'walk',
+      route: 'add-client',
+      current: 'scan',
+    });
+    expect(stepOfSetup(view.container)).toBe('scan');
+    await view.unmount();
+  });
+
+  it('brings the page back once the refusal is gone', async () => {
+    let refused = true;
+    const listeners = new Set<() => void>();
+    const carrierSeam: MeasuredCarrierSeam = {
+      publish: () => {
+        for (const listener of [...listeners]) listener();
+      },
+      wrap: router =>
+        new Proxy(router, {
+          get(target, property) {
+            if (property === 'deviceRefused') return () => refused;
+            if (property === 'subscribe')
+              return (listener: () => void) => {
+                listeners.add(listener);
+                return () => listeners.delete(listener);
+              };
+            const value = Reflect.get(target, property, target);
+            return typeof value === 'function' ? (value as (...args: never[]) => unknown).bind(target) : value;
+          },
+        }),
+    };
+    const { view } = await renderShell(`/d/${ALPHA}/projects`, [alpha.daemonId], { carrierSeam });
+    await settle();
+    expect(view.container.querySelector('[data-device-refused]')).not.toBeNull();
+
+    refused = false;
+    await interact(() => carrierSeam.publish(undefined as never));
+    await settle();
+
+    expect(view.container.querySelector('[data-device-refused]')).toBeNull();
+    await view.unmount();
   });
 
   it('mounts the daemon-scoped projects registry from its routed destination', async () => {

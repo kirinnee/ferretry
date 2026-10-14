@@ -14,6 +14,7 @@ import {
   addPasskeyCeremony,
   browserCredentials,
   describeStepUpFailure,
+  firstPasskeyOffer,
   unlockCeremony,
   stepUpCeremony,
 } from '../../src/lib/step-up-ceremony.ts';
@@ -287,6 +288,96 @@ describe('running the presence ceremony', () => {
   });
   afterEach(() => {
     if (!hadPublicKeyCredential) Reflect.deleteProperty(globalThis, 'PublicKeyCredential');
+  });
+
+  it('should add the FIRST passkey and then unlock with it, for a device that has none yet', async () => {
+    // Arrange — inside the first-passkey window: no credential to assert with, registration open.
+    const paths: string[] = [];
+    let registered = false;
+    const client: StepUpClient = {
+      request: async <T>(path: string, schema: z.ZodType<T>): Promise<T> => {
+        paths.push(path);
+        if (path === '/v1/passkeys') registered = true;
+        // The machine refuses to unlock a copy of the app it holds no passkey for.
+        if (path === '/v1/unlock/options' && !registered) throw new FyHttpError('refused', 403, 'step_up_no_passkey');
+        const answers: Record<string, unknown> = {
+          '/v1/unlock/options': {
+            challenge: toBase64Url(Uint8Array.of(5)),
+            rpId: 'ferretry.pages.dev',
+            allowCredentials: [{ type: 'public-key', id: toBase64Url(Uint8Array.of(0xaa, 0xbb)) }],
+            timeout: 60_000,
+          },
+          '/v1/passkeys/options': {
+            challenge: toBase64Url(Uint8Array.of(9)),
+            rp: { id: 'ferretry.pages.dev', name: 'Ferretry' },
+            user: { id: toBase64Url(Uint8Array.of(1)), name: 'device-one', displayName: 'device-one' },
+            pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+            timeout: 60_000,
+            excludeCredentials: [],
+          },
+          '/v1/passkeys': { id: toBase64Url(Uint8Array.of(0xaa, 0xbb)), createdAt: INSTANT, origin: ORIGIN },
+          '/v1/unlock': { unlockedUntil: INSTANT },
+        };
+        return schema.parse(answers[path]);
+      },
+    };
+    const credentials: CredentialsPort = {
+      create: async () =>
+        ({
+          type: 'public-key',
+          rawId: buffer(0xaa, 0xbb),
+          response: { clientDataJSON: buffer(0x7b, 0x7d), attestationObject: buffer(1), getTransports: () => [] },
+        }) as unknown as Credential,
+      get: async () =>
+        ({
+          type: 'public-key',
+          rawId: buffer(0xaa, 0xbb),
+          response: { clientDataJSON: buffer(0x7b, 0x7d), authenticatorData: buffer(1, 2, 3), signature: buffer(4, 5) },
+        }) as unknown as Credential,
+    };
+
+    // Act
+    await unlockCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon);
+
+    // Assert — set up, then unlocked with the passkey it just made.
+    should(paths).eql([
+      '/v1/unlock/options',
+      '/v1/passkeys/options',
+      '/v1/passkeys',
+      '/v1/unlock/options',
+      '/v1/unlock',
+    ]);
+  });
+
+  it('should pass any other refusal of the unlock options through untouched', async () => {
+    const client: StepUpClient = {
+      request: async () => {
+        throw new FyHttpError('refused', 403, 'step_up_origin_not_allowed');
+      },
+    };
+    const credentials: CredentialsPort = { create: async () => null, get: async () => null };
+    await should(unlockCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon)).be.rejectedWith({
+      code: 'step_up_origin_not_allowed',
+    });
+  });
+
+  it('should send a closed window to the other remedies, in the no-passkey sentence', () => {
+    should(describeStepUpFailure(ORIGIN)(new FyHttpError('refused', 403, 'step_up_registration_closed'))).equal(
+      passkeySentence('no-passkey', ORIGIN),
+    );
+  });
+
+  it('should offer the first passkey only while this device has none and its window is open', async () => {
+    const offer = async (passkeys: unknown[], registration: string) =>
+      await firstPasskeyOffer(async () => ({
+        request: async <T>(_path: string, schema: z.ZodType<T>): Promise<T> => schema.parse({ passkeys, registration }),
+      }))(daemon);
+    const held = [{ id: 'aabb', createdAt: INSTANT, origin: ORIGIN }];
+
+    should(await offer([], 'first-window')).be.true();
+    should(await offer([], 'reopened')).be.true();
+    should(await offer([], 'closed')).be.false();
+    should(await offer(held, 'confirm-existing')).be.false();
   });
 
   it('should use the presence routes, never the step-up ones', async () => {

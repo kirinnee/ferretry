@@ -69,8 +69,12 @@ type HarnessLoginWrite = (value: string) => Promise<boolean>;
 /** One running harness login child. */
 export interface HarnessLoginChild {
   readonly write: HarnessLoginWrite;
-  /** Ends the child. Idempotent: cancelling twice is not an error. */
-  kill(): void;
+  /**
+   * Ends the child AND everything it started — a harness launcher that spawned the real binary is one
+   * sign-in, and the binary is what holds the callback port. `SIGTERM` unless told otherwise.
+   * Idempotent: cancelling twice is not an error.
+   */
+  kill(signal?: 'SIGTERM' | 'SIGKILL'): void;
   /** The exit code, once it has one. */
   readonly exited: Promise<number>;
 }

@@ -1,10 +1,17 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { SystemMillisecondClock } from '../../../src/adapters/daemon/clock.ts';
 import { DaemonLifecycleBusyError, FileDaemonLifecycleLock } from '../../../src/adapters/daemon/lifecycle-lock.ts';
+import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
+import { HostProcessIncarnations } from '../../../src/adapters/daemon/process-incarnation.ts';
+import type {
+  IProcessIncarnationPort,
+  ObservedProcess,
+  ProcessScope,
+} from '../../../src/adapters/daemon/process-incarnation.ts';
 import type { CommandOutcome, IDaemonProcessPort } from '../../../src/lib/daemon/ports.ts';
 
 /**
@@ -56,13 +63,42 @@ class ScriptedProcesses implements IDaemonProcessPort {
   }
 }
 
-function lock(processes: IDaemonProcessPort = new ScriptedProcesses()): FileDaemonLifecycleLock {
-  return new FileDaemonLifecycleLock(processes, new SystemMillisecondClock(), { pollMs: 1 });
+/**
+ * A process-identity port whose answers are scripted, so every verdict can be reached on any host.
+ *
+ * The default knows nothing — no scope, every pid unknown — which is what a host with neither `/proc`
+ * nor the macOS sources offers, and it leaves the liveness answer to `ScriptedProcesses` as before.
+ */
+class ScriptedIncarnations implements IProcessIncarnationPort {
+  constructor(
+    private readonly here: ProcessScope | undefined = undefined,
+    private readonly seen: ReadonlyMap<number, ObservedProcess> = new Map(),
+  ) {}
+
+  scope(): Promise<ProcessScope | undefined> {
+    return Promise.resolve(this.here);
+  }
+
+  observe(pid: number): Promise<ObservedProcess> {
+    return Promise.resolve(this.seen.get(pid) ?? { kind: 'unknown' });
+  }
+}
+
+function lock(
+  processes: IDaemonProcessPort = new ScriptedProcesses(),
+  incarnations: IProcessIncarnationPort = new ScriptedIncarnations(),
+): FileDaemonLifecycleLock {
+  return new FileDaemonLifecycleLock(processes, incarnations, new SystemMillisecondClock(), { pollMs: 1 });
 }
 
 /** Nothing is expected to contend in most of these, so a notice is a failure the test should see. */
 const neverWaits = (holder: string): void => {
   throw new Error(`did not expect to wait for ${holder}`);
+};
+
+/** Nothing in most of these was left by a dead holder, so a removal is a failure the test should see. */
+const neverReclaims = (holder: string): void => {
+  throw new Error(`did not expect to remove a claim left by ${holder}`);
 };
 
 /**
@@ -76,16 +112,19 @@ const CONTENDER = (adapters: string): string => `
 import { appendFileSync } from 'node:fs';
 import { FileDaemonLifecycleLock } from '${adapters}/lifecycle-lock.ts';
 import { BunDaemonProcess } from '${adapters}/process.ts';
+import { HostProcessIncarnations } from '${adapters}/process-incarnation.ts';
 import { SystemMillisecondClock } from '${adapters}/clock.ts';
 
 const [lockPath, journal, name, holdMs, waitMs, rendezvous] = Bun.argv.slice(2);
-const lock = new FileDaemonLifecycleLock(new BunDaemonProcess(), new SystemMillisecondClock(), { pollMs: 5 });
+const processes = new BunDaemonProcess();
+const lock = new FileDaemonLifecycleLock(processes, new HostProcessIncarnations(processes), new SystemMillisecondClock(), { pollMs: 5 });
 try {
   const claim = await lock.acquire({
     lockPath,
     verb: 'start',
     waitMs: Number(waitMs),
     waiting: holder => appendFileSync(journal, \`waiting \${name}: \${holder}\\n\`),
+    reclaimed: holder => appendFileSync(journal, \`reclaimed \${name}: \${holder}\\n\`),
   });
   appendFileSync(journal, \`enter \${name}\\n\`);
   if (rendezvous === undefined) {
@@ -163,7 +202,13 @@ describe('daemon lifecycle claim across invocations', () => {
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
     const journal = join(root, 'journal.txt');
     await writeFile(journal, '');
-    const claim = await lock().acquire({ lockPath, verb: 'restart', waitMs: 0, waiting: neverWaits });
+    const claim = await lock().acquire({
+      lockPath,
+      verb: 'restart',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
 
     // Act
     const refused = await contend(script, [lockPath, journal, 'late', '0', '0']);
@@ -204,7 +249,13 @@ describe('daemon lifecycle claim', () => {
     // Arrange
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
-    const held = await lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits });
+    const held = await lock().acquire({
+      lockPath,
+      verb: 'start',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
     const notices: string[] = [];
 
     // Act — the successor queues, the holder releases, and the successor gets in.
@@ -213,6 +264,7 @@ describe('daemon lifecycle claim', () => {
       verb: 'stop',
       waitMs: 30_000,
       waiting: holder => notices.push(holder),
+      reclaimed: neverReclaims,
     });
     await Bun.sleep(20);
     const residue = await held.release();
@@ -226,11 +278,10 @@ describe('daemon lifecycle claim', () => {
     should(await readdir(join(root, 'lifecycle'))).be.empty();
   });
 
-  it('should report a non-visible owner without declaring its live claim abandoned', async () => {
-    // Arrange — the crash case, stated out loud: a killed lifecycle command leaves its claim behind,
-    // and nothing takes it over automatically. Exact-name unlink plus rmdir would be race-safe; the
-    // unsafe input is the liveness verdict, because a live owner in another PID namespace can look
-    // dead here. Availability loses until a person independently rules out a live holder.
+  it('should report an owner it cannot see without declaring a claim that proves nothing abandoned', async () => {
+    // Arrange — a claim an older release wrote: an owner number and nothing saying which process it
+    // is. A missing number could be a live holder in another namespace, so availability loses until a
+    // person independently rules out a live holder.
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
     await mkdir(lockPath, { recursive: true });
@@ -243,12 +294,13 @@ describe('daemon lifecycle claim', () => {
       verb: 'start',
       waitMs: 0,
       waiting: neverWaits,
+      reclaimed: neverReclaims,
     });
 
     // Assert
     await should(refusal).be.rejectedWith(DaemonLifecycleBusyError);
     await should(refusal).be.rejectedWith(/owner 4242, since 2026-08-06T00:00:00.000Z/u);
-    await should(refusal).be.rejectedWith(/not visible from this invocation's PID namespace/u);
+    await should(refusal).be.rejectedWith(/does not record enough to prove it has exited/u);
     await should(refusal).be.rejectedWith(/verify independently that no lifecycle command is running/u);
   });
 
@@ -262,9 +314,9 @@ describe('daemon lifecycle claim', () => {
     await writeFile(join(lockPath, 'claim-leaked.json'), JSON.stringify(claim));
 
     // Act + Assert
-    await should(lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits })).be.rejectedWith(
-      /that owner is still running/u,
-    );
+    await should(
+      lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits, reclaimed: neverReclaims }),
+    ).be.rejectedWith(/that owner is still running/u);
   });
 
   it.each([
@@ -285,9 +337,9 @@ describe('daemon lifecycle claim', () => {
     // Act + Assert — an unreadable claim and one that was just released are reported as one thing,
     // because telling them apart needs an observation a filesystem cannot give atomically and both
     // lead a person to the same two actions.
-    await should(lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits })).be.rejectedWith(
-      /could not be read, so it may have been released in the meantime/u,
-    );
+    await should(
+      lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits, reclaimed: neverReclaims }),
+    ).be.rejectedWith(/could not be read, so it may have been released in the meantime/u);
   });
 
   it('should treat a file sitting on the claim name as contention, not as a free name', async () => {
@@ -299,9 +351,9 @@ describe('daemon lifecycle claim', () => {
     await writeFile(lockPath, 'left by something else');
 
     // Act + Assert
-    await should(lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits })).be.rejectedWith(
-      DaemonLifecycleBusyError,
-    );
+    await should(
+      lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits, reclaimed: neverReclaims }),
+    ).be.rejectedWith(DaemonLifecycleBusyError);
     should(await readFile(lockPath, 'utf8')).equal('left by something else');
   });
 
@@ -313,7 +365,13 @@ describe('daemon lifecycle claim', () => {
     await mkdir(lockPath, { recursive: true });
 
     // Act
-    const claim = await lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits });
+    const claim = await lock().acquire({
+      lockPath,
+      verb: 'start',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
 
     // Assert
     should(await claim.release()).be.undefined();
@@ -332,6 +390,7 @@ describe('daemon lifecycle claim', () => {
         verb: 'start',
         waitMs: 0,
         waiting: neverWaits,
+        reclaimed: neverReclaims,
       }),
     ).be.rejectedWith(/EEXIST/u);
   });
@@ -341,9 +400,21 @@ describe('daemon lifecycle claim', () => {
     // somebody else takes the freed name. The superseded holder must not delete theirs.
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
-    const superseded = await lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits });
+    const superseded = await lock().acquire({
+      lockPath,
+      verb: 'start',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
     await rm(lockPath, { recursive: true, force: true });
-    const successor = await lock().acquire({ lockPath, verb: 'restart', waitMs: 0, waiting: neverWaits });
+    const successor = await lock().acquire({
+      lockPath,
+      verb: 'restart',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
 
     // Act
     const residue = await superseded.release();
@@ -359,7 +430,13 @@ describe('daemon lifecycle claim', () => {
     // Arrange
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
-    const claim = await lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits });
+    const claim = await lock().acquire({
+      lockPath,
+      verb: 'start',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
     await writeFile(join(lockPath, 'occupied'), 'something nobody published');
 
     // Act
@@ -374,7 +451,13 @@ describe('daemon lifecycle claim', () => {
     // Arrange — the claim directory replaced by a file while the work ran.
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
-    const claim = await lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits });
+    const claim = await lock().acquire({
+      lockPath,
+      verb: 'start',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
     await rm(lockPath, { recursive: true, force: true });
     await writeFile(lockPath, 'not a directory any more');
 
@@ -390,7 +473,13 @@ describe('daemon lifecycle claim', () => {
     // somebody back to look at nothing.
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
-    const claim = await lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits });
+    const claim = await lock().acquire({
+      lockPath,
+      verb: 'start',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
     await rm(lockPath, { recursive: true, force: true });
 
     // Act + Assert
@@ -400,7 +489,11 @@ describe('daemon lifecycle claim', () => {
   it('should use the shipped poll cadence when none is configured', async () => {
     // Arrange
     const root = await createTemporaryRoot();
-    const subject = new FileDaemonLifecycleLock(new ScriptedProcesses(), new SystemMillisecondClock());
+    const subject = new FileDaemonLifecycleLock(
+      new ScriptedProcesses(),
+      new ScriptedIncarnations(),
+      new SystemMillisecondClock(),
+    );
 
     // Act
     const claim = await subject.acquire({
@@ -408,9 +501,198 @@ describe('daemon lifecycle claim', () => {
       verb: 'restart',
       waitMs: 0,
       waiting: neverWaits,
+      reclaimed: neverReclaims,
     });
 
     // Assert
+    should(await claim.release()).be.undefined();
+  });
+});
+
+describe('a claim whose holder has exited', () => {
+  const HERE: ProcessScope = { boot: 'boot-a', namespace: 'pid:[4026531836]' };
+  const OWNER = 4_242;
+  const claimed = (holder: ProcessScope & { readonly start: string }) => ({
+    owner: OWNER,
+    token: 'abandoned',
+    verb: 'start',
+    at: 1_785_974_400_000,
+    holder,
+  });
+
+  async function abandonedClaim(holder: ProcessScope & { readonly start: string }): Promise<string> {
+    const root = await createTemporaryRoot();
+    const lockPath = join(root, 'lifecycle', 'fyd.lock');
+    await mkdir(lockPath, { recursive: true });
+    await writeFile(join(lockPath, 'claim-abandoned.json'), JSON.stringify(claimed(holder)));
+    return lockPath;
+  }
+
+  it.each([
+    { name: 'no process of that number is left', seen: { kind: 'gone' } as const, scope: HERE },
+    {
+      name: 'the number now belongs to a process that started later',
+      seen: { kind: 'running', start: '999' } as const,
+      scope: HERE,
+    },
+    {
+      name: 'the claim was made on an earlier boot',
+      seen: { kind: 'running', start: '100' } as const,
+      scope: { ...HERE, boot: 'boot-b' },
+    },
+  ])('should remove it and say so when $name', async ({ seen, scope }) => {
+    // Arrange — the e2e defect: a killed `fy daemon start` left this behind, and every mutating verb
+    // on the host waited 140 seconds and then blamed "another PID namespace" for a process that had
+    // simply died. Inside the holder's own scope that verdict is a proof, not a guess.
+    const lockPath = await abandonedClaim({ ...HERE, start: '100' });
+    const removed: string[] = [];
+
+    // Act
+    const claim = await lock(
+      new ScriptedProcesses(seen.kind === 'running'),
+      new ScriptedIncarnations(scope, new Map([[OWNER, seen]])),
+    ).acquire({
+      lockPath,
+      verb: 'stop',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: holder => removed.push(holder),
+    });
+
+    // Assert — taken at once, with the removal named, and the dead holder's proof is gone.
+    should(removed).deepEqual(['start (owner 4242, since 2026-08-06T00:00:00.000Z), which is no longer running']);
+    should((await readdir(lockPath)).includes('claim-abandoned.json')).be.false();
+    should(await claim.release()).be.undefined();
+  });
+
+  it('should leave a live holder in its own scope alone', async () => {
+    // Arrange — same scope, same start time: this is the very process that took the claim.
+    const lockPath = await abandonedClaim({ ...HERE, start: '100' });
+    const incarnations = new ScriptedIncarnations(HERE, new Map([[OWNER, { kind: 'running', start: '100' }]]));
+
+    // Act + Assert — and the PROCESS port is told the owner is dead, to show it is not what decided.
+    await should(
+      lock(new ScriptedProcesses(false), incarnations).acquire({
+        lockPath,
+        verb: 'stop',
+        waitMs: 0,
+        waiting: neverWaits,
+        reclaimed: neverReclaims,
+      }),
+    ).be.rejectedWith(/held by start \(owner 4242, since 2026-08-06T00:00:00.000Z\): that owner is still running/u);
+  });
+
+  it('should name another PID namespace only when the claim proves the holder was in one', async () => {
+    // Arrange — a container sharing this /tmp: its pid numbers mean nothing here.
+    const lockPath = await abandonedClaim({ ...HERE, namespace: 'pid:[4026532999]', start: '100' });
+    const incarnations = new ScriptedIncarnations(HERE, new Map([[OWNER, { kind: 'gone' }]]));
+
+    // Act
+    const refusal = lock(new ScriptedProcesses(false), incarnations).acquire({
+      lockPath,
+      verb: 'stop',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: neverReclaims,
+    });
+
+    // Assert
+    await should(refusal).be.rejectedWith(/that owner runs in another PID namespace/u);
+    await should(refusal).be.rejectedWith(/verify independently that no lifecycle command is running/u);
+    should(await readdir(lockPath)).deepEqual(['claim-abandoned.json']);
+  });
+
+  it('should decide nothing when this invocation cannot say which scope it is in', async () => {
+    // Arrange — a recorded holder, read on a host that offers neither source.
+    const lockPath = await abandonedClaim({ ...HERE, start: '100' });
+
+    // Act + Assert
+    await should(
+      lock(new ScriptedProcesses(false), new ScriptedIncarnations()).acquire({
+        lockPath,
+        verb: 'stop',
+        waitMs: 0,
+        waiting: neverWaits,
+        reclaimed: neverReclaims,
+      }),
+    ).be.rejectedWith(/does not record enough to prove it has exited/u);
+  });
+
+  it('should fall back to the liveness answer when its own scope cannot see the owner', async () => {
+    // Arrange — same scope, but this host would not answer for that pid.
+    const lockPath = await abandonedClaim({ ...HERE, start: '100' });
+
+    // Act + Assert
+    await should(
+      lock(new ScriptedProcesses(true), new ScriptedIncarnations(HERE)).acquire({
+        lockPath,
+        verb: 'stop',
+        waitMs: 0,
+        waiting: neverWaits,
+        reclaimed: neverReclaims,
+      }),
+    ).be.rejectedWith(/that owner is still running/u);
+  });
+
+  it('should try a removal once and then say the claim could not be removed', async () => {
+    // Arrange — a claim directory nobody may write into, so the dead holder's proof cannot be unlinked.
+    const lockPath = await abandonedClaim({ ...HERE, start: '100' });
+    await chmod(lockPath, 0o500);
+    const removed: string[] = [];
+
+    // Act
+    const refusal = lock(
+      new ScriptedProcesses(false),
+      new ScriptedIncarnations(HERE, new Map([[OWNER, { kind: 'gone' }]])),
+    ).acquire({
+      lockPath,
+      verb: 'stop',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: holder => removed.push(holder),
+    });
+
+    // Assert — one attempt, one notice, then the refusal names the directory to clear.
+    await should(refusal).be.rejectedWith(
+      /that owner is no longer running, but its claim could not be removed; remove /u,
+    );
+    should(removed).have.length(1);
+    await chmod(lockPath, 0o700);
+  });
+
+  it('should recognise a real invocation that was killed while holding the claim', async () => {
+    // Arrange — the shape of the e2e repro with nothing scripted: a separate `bun` takes the claim
+    // with the shipped adapters and is SIGKILLed inside it, so it never releases.
+    const root = await createTemporaryRoot();
+    const script = await contenderScript(root);
+    const lockPath = join(root, 'lifecycle', 'fyd.lock');
+    const journal = join(root, 'journal.txt');
+    await writeFile(journal, '');
+    const holder = Bun.spawn([process.execPath, script, lockPath, journal, 'killed', '60000', '0'], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    const deadline = Date.now() + 20_000;
+    while (!(await readFile(journal, 'utf8')).includes('enter killed') && Date.now() < deadline) await Bun.sleep(10);
+    holder.kill('SIGKILL');
+    await holder.exited;
+    const processes = new BunDaemonProcess();
+    const removed: string[] = [];
+
+    // Act
+    const claim = await lock(processes, new HostProcessIncarnations(processes)).acquire({
+      lockPath,
+      verb: 'start',
+      waitMs: 0,
+      waiting: neverWaits,
+      reclaimed: notice => removed.push(notice),
+    });
+
+    // Assert — no wait, no refusal, and the removal says whose claim it was.
+    should(removed).have.length(1);
+    should(removed[0]).match(
+      new RegExp(`^start \\(owner ${String(holder.pid)}, since .*\\), which is no longer running$`, 'u'),
+    );
     should(await claim.release()).be.undefined();
   });
 });

@@ -39,6 +39,7 @@
 import {
   type DeviceKeyRotation,
   MAX_TUNNEL_BODY_BYTES,
+  OLDER_APP_SENTENCE,
   OLDER_DAEMON_SENTENCE,
   type PairingResponse,
   PairingResponseSchema,
@@ -983,6 +984,13 @@ export class RelayClientSession {
           message.reason === PRE_DEVICE_KEY_REFUSAL
         ) {
           this.#quietly(RELAY_CLOSE_CODES.versionUnsupported, OLDER_DAEMON_SENTENCE);
+          return;
+        }
+        // The other direction: a NEWER daemon refusing this app's hello says so in the sentence every
+        // surface shares. Passed through as that sentence alone, so the router can tell the person to
+        // update the app rather than the machine that is already current.
+        if (message.code === RELAY_CLOSE_CODES.versionUnsupported && message.reason === OLDER_APP_SENTENCE) {
+          this.#quietly(RELAY_CLOSE_CODES.versionUnsupported, OLDER_APP_SENTENCE);
           return;
         }
         if (message.code === RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE) {
