@@ -404,17 +404,18 @@ row states what its revoke will do before the press.
 - **Devices paired before device keys were deleted on upgrade.** A `devices.json` from before schema 2
   held only token digests, which no session can prove against, so the daemon drops those grants at boot
   and says so once. Each such device must pair again.
-- **A step-up bounds who acts, not what the act does.** A governed device holding a step-up may mint a code,
-  open a terminal or apply a fleet change for the length of the window; the step-up says the person holding
-  the device agreed recently, nothing about the act itself ([grants.md](grants.md)).
+- **An unlock bounds who acts, not what the act does.** A governed device inside its unlock may open a
+  terminal or apply a fleet change for the rest of the unlock period with no further prompt; minting a code
+  still wants a passkey for that one act. The passkey says the person holding the device agreed recently,
+  nothing about the act itself ([grants.md](grants.md), [design/zero-trust.md](design/zero-trust.md) B1).
 - **A device's first passkey has a ten-minute window.** It can be added only in the ten minutes after
   pairing (B2), so a newly paired device with no passkey for the machine sees one dismissible line
-  pointing at Settings → Daemons → Security → Add a passkey. A device that misses the window cannot step up
-  until the owner re-opens it at the machine (below) or it pairs again; until then it keeps only the uses
-  that need no step-up ([design/zero-trust.md](design/zero-trust.md) B2).
+  pointing at Settings → Daemons → Security → Add a passkey. A device that misses the window cannot unlock
+  the machine, so it can do nothing there, until the owner re-opens it at the machine (below) or it pairs
+  again ([design/zero-trust.md](design/zero-trust.md) B1, B2).
 
 **Recovering a device that cannot add a passkey: `fy passkey window <device>`.** A device that missed its
-first ten-minute window, or lost the authenticator that held its passkey, cannot step up again — and a
+first ten-minute window, or lost the authenticator that held its passkey, cannot unlock again — and a
 browser cannot re-open its own window, because no browser is ever "at the machine". The owner does it at
 the machine: `fy passkey window <device>` takes a paired device's id, or its name when exactly one device
 has that name, and calls `POST /v1/passkeys/registration-window` with the host's admin token over loopback.
