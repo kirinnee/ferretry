@@ -33,8 +33,10 @@ import {
   TerminalListViewSchema,
   TerminalViewSchema,
   TranscriptProvenanceSchema,
+  UNLOCK_REQUIRED_CODE,
   WILDCARD_BIND_HOST,
 } from '@ferretry/protocol';
+import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { z } from 'zod';
 import { buildWorld, checkConfiguration, type DaemonWorld, start, type WorldSeams } from '../../../bin/fyd.ts';
@@ -81,6 +83,14 @@ import {
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { healthViewFixture } from '../../fixtures/health-view.ts';
+import {
+  CREDENTIAL_ID as PASSKEY_CREDENTIAL_ID,
+  ORIGIN as PASSKEY_ORIGIN,
+  assertion as passkeyAssertion,
+  clientData as passkeyClientData,
+  es256Authenticator,
+  registration as passkeyRegistration,
+} from '../../support/passkey-authenticator.ts';
 import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
@@ -172,6 +182,52 @@ async function waitUntil(predicate: () => boolean, what: string): Promise<void> 
 }
 
 /** A `config/daemon.json` body. A boot imports nothing, so no case needs to opt out of an import. */
+/**
+ * Registers a first passkey and unlocks with it, over one device session — the two ceremonies a freshly
+ * paired browser performs, answered against the challenges THIS daemon issued.
+ */
+async function unlockThroughTheDaemon(
+  session: { request: TestSession['request'] },
+  passkey: Awaited<ReturnType<typeof es256Authenticator>>,
+): Promise<void> {
+  const body = (value: unknown) => ({ body: JSON.stringify(value), headers: { 'content-type': 'application/json' } });
+  const challengeOf = (answer: { readonly body: string }): string =>
+    z.object({ challenge: z.string() }).parse(JSON.parse(answer.body)).challenge;
+  const registrationChallenge = challengeOf(
+    await session.request('POST', '/v1/passkeys/options', body({ origin: PASSKEY_ORIGIN })),
+  );
+  const made = await passkeyRegistration(passkey, {
+    client: passkeyClientData('webauthn.create', { challenge: registrationChallenge }),
+  });
+  const registered = await session.request(
+    'POST',
+    '/v1/passkeys',
+    body({
+      credentialId: toBase64Url(PASSKEY_CREDENTIAL_ID),
+      clientDataJSON: toBase64Url(made.clientDataJSON),
+      attestationObject: toBase64Url(made.attestationObject),
+    }),
+  );
+  if (registered.status !== 201) throw new Error(`the first passkey was refused: ${registered.body}`);
+  const unlockChallenge = challengeOf(
+    await session.request('POST', '/v1/unlock/options', body({ origin: PASSKEY_ORIGIN })),
+  );
+  const proved = await passkeyAssertion(passkey, {
+    client: passkeyClientData('webauthn.get', { challenge: unlockChallenge }),
+  });
+  const unlocked = await session.request(
+    'POST',
+    '/v1/unlock',
+    body({
+      credentialId: toBase64Url(PASSKEY_CREDENTIAL_ID),
+      clientDataJSON: toBase64Url(proved.clientDataJSON),
+      authenticatorData: toBase64Url(proved.authenticatorData),
+      signature: toBase64Url(proved.signature),
+    }),
+  );
+  if (unlocked.status !== 200) throw new Error(`the unlock was refused: ${unlocked.body}`);
+}
+
 function daemonDocument(document: Record<string, unknown>): string {
   return JSON.stringify(document);
 }
@@ -972,6 +1028,15 @@ describe('daemon boot lifecycle', () => {
     // THE DEVICE KEY IS THE CREDENTIAL: a session it signs is served; the same id signed by another
     // key is refused; and an app still sending the old bearer token is told to update.
     const asDevice = await deviceSession(base, minted.daemonId, paired.deviceId, device, { origin });
+    /*
+     * THE UNLOCK, THROUGH THE PRODUCTION COMPOSITION ROOT (zero-trust.md B1). The machine unlocks on
+     * opening by default, so the freshly paired device is refused everything first; it registers its
+     * first passkey inside the window after pairing — served before an unlock — and unlocks with it.
+     * A software authenticator stands in for the person's; the daemon's verifier is the real one.
+     */
+    const locked = await asDevice.request('GET', '/v1/usage');
+    const passkey = await es256Authenticator();
+    await unlockThroughTheDaemon(asDevice, passkey);
     const usage = await asDevice.request('GET', '/v1/usage');
     const refreshed = DaemonCarriersViewSchema.parse(JSON.parse((await asDevice.request('GET', '/v1/carriers')).body));
     asDevice.close();
@@ -1020,6 +1085,7 @@ describe('daemon boot lifecycle', () => {
     if (status.status !== 'redeemed') throw new Error('expected a redeemed pairing status');
     should(status.deviceName).equal('Browser phone');
     should(usage.status).equal(200);
+    should([locked.status, JSON.parse(locked.body).code]).deepEqual([401, UNLOCK_REQUIRED_CODE]);
     should(refreshed.carriers).deepEqual(paired.carriers);
     should(impostorClosed.code).equal(4403);
     should(outdatedApp.status).equal(426);
