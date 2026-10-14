@@ -373,6 +373,7 @@ let sidewaysChecks = 0;
 const capturePairingFailures = async (page: Page, viewportName: string): Promise<void> => {
   for (const [label, slug] of [
     ['Pairing failed — machine is older', 'pairing-failed-older-machine'],
+    ['Pairing failed — app is older', 'pairing-failed-older-app'],
     ['Pairing failed — browser cannot make the key', 'pairing-failed-no-device-key'],
   ] as const) {
     const card = page.getByLabel(label, { exact: true });
@@ -392,6 +393,24 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
       document.documentElement.dataset.theme = 'studio-dark';
     });
   }
+  // The notice a refused device sees in place of the page: no button to press, the same fit rule.
+  const refused = page.getByLabel('Machine no longer accepts this browser', { exact: true });
+  await refused.scrollIntoViewIfNeeded();
+  const sideways = await refused.evaluate(element =>
+    [element, ...element.querySelectorAll<HTMLElement>('*')].some(node => node.scrollWidth > node.clientWidth + 1),
+  );
+  if (sideways) throw new Error(`the refused-device notice scrolls sideways at ${viewportName}`);
+  for (const theme of ['studio-dark', 'studio-light'] as const) {
+    await page.evaluate(name => {
+      document.documentElement.dataset.theme = name;
+    }, theme);
+    const target = join(outDir, `device-refused${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
+    await captureElement(page, refused, target);
+    process.stdout.write(`📸 device refused ${theme} ${viewportName} -> ${target}\n`);
+  }
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'studio-dark';
+  });
 };
 
 /**

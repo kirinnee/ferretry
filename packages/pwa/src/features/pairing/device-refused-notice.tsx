@@ -31,7 +31,13 @@ export function DeviceRefusedNotice({ machineName, onPairAgain }: DeviceRefusedN
       <p role="alert" className="m-0 text-cell leading-base text-fg">
         {DEVICE_NOT_ACCEPTED_SENTENCE}
       </p>
-      <button type="button" data-device-refused-pair="" onClick={onPairAgain} className="kt-btn min-h-[44px]">
+      <button
+        type="button"
+        data-device-refused-pair=""
+        onClick={onPairAgain}
+        className="kt-btn min-h-[44px]"
+        data-variant="primary"
+      >
         Pair again
       </button>
     </section>

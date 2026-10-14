@@ -202,7 +202,8 @@ import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/sessio
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
-import { DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
+import { AppOutdatedError, DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
+import { DeviceRefusedNotice } from '../src/features/pairing/device-refused-notice.tsx';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import { unlockStaysSentence } from '../src/lib/security-settings-client.ts';
@@ -4308,6 +4309,36 @@ function Shell() {
             onRemove={() => {}}
             onSelect={() => {}}
           />
+        </Card>
+      ),
+    },
+    {
+      label: 'Pairing failed — app is older',
+      render: () => (
+        <Card aria-label="Pairing failed — app is older" className="min-w-0 overflow-hidden">
+          <PairingScreen
+            connections={[]}
+            selectedDaemonId={null}
+            arrival={HARNESS_ARRIVAL}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => {
+              throw new AppOutdatedError();
+            }}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
+    /*
+     * What replaces a machine's pages once it no longer accepts this browser (a revoke, or an idle
+     * expiry): one sentence and the one action that repairs it, on either carrier.
+     */
+    {
+      label: 'Machine no longer accepts this browser',
+      render: () => (
+        <Card aria-label="Machine no longer accepts this browser" className="min-w-0 overflow-hidden">
+          <DeviceRefusedNotice machineName="studio.example" onPairAgain={() => {}} />
         </Card>
       ),
     },
