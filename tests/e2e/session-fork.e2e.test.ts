@@ -244,11 +244,11 @@ async function connect(environment: E2eEnvironment): Promise<FyApiClient> {
 async function stopPrivateTmux(environment: E2eEnvironment): Promise<void> {
   const executable = environment.childEnvironment().FY_E2E_REAL_TMUX;
   if (executable === undefined || executable === '') return;
-  const process = Bun.spawn([executable, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], {
+  // Synchronous: an async spawn can lose its epoll registration under load (see fixture.ts runCaptured).
+  Bun.spawnSync([executable, '-S', join(environment.paths.fyHome, 'tmux.sock'), 'kill-server'], {
     stdout: 'ignore',
     stderr: 'ignore',
   });
-  await process.exited;
 }
 
 describe('compiled daemon conversation fork', () => {

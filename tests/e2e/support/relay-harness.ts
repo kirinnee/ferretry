@@ -465,17 +465,19 @@ export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
       ['bun', 'run', 'scripts/build-release.ts', outDir],
     ];
     for (const command of steps) {
-      const build = Bun.spawn([...command], {
+      // SYNCHRONOUS: Bun 1.3's async spawn lost its epoll registration on a hosted runner
+      // (`EBADF … epoll_ctl`), and because this build is memoised, the one failure failed every journey
+      // after it in ~90ms. Nothing in-process has to answer while the bundle builds, so blocking costs
+      // nothing, and `spawnSync` never touches epoll.
+      const build = Bun.spawnSync([...command], {
         cwd: join(REPOSITORY_ROOT, 'packages', 'pwa'),
         env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin, NO_COLOR: '1' },
         stdout: 'pipe',
         stderr: 'pipe',
       });
-      const [code, out, err] = await Promise.all([
-        build.exited,
-        new Response(build.stdout).text(),
-        new Response(build.stderr).text(),
-      ]);
+      const code = build.exitCode;
+      const out = build.stdout.toString();
+      const err = build.stderr.toString();
       if (code !== 0)
         throw new Error(
           `the PWA bundle failed to build at \`${command.join(' ')}\` (code ${String(code)})\n${out}\n${err}`,
@@ -484,6 +486,10 @@ export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
     await stat(join(outDir, 'app', 'index.html'));
     return outDir;
   })();
+  // A failed build is not memoised: the next journey builds again instead of inheriting the failure.
+  bundlePromise.catch(() => {
+    bundlePromise = undefined;
+  });
   return bundlePromise;
 }
 
