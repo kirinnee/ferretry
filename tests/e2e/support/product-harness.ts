@@ -129,7 +129,9 @@ export async function asOwner(
   path: string,
   body?: unknown,
 ): Promise<DaemonCall> {
+  // Bounded and named: an unbounded owner call on a slow runner surfaced only as "The operation timed out."
   const response = await fetch(environment.httpUrl(path), {
+    signal: AbortSignal.timeout(20_000),
     method,
     headers: {
       Authorization: `Bearer ${await adminToken(environment)}`,
@@ -395,7 +397,8 @@ export async function captureScreens(
         );
         await page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
       }
-      const path = join(directory, `${screen}-${label}-${scheme}.png`);
+      // Artifact paths may not contain `:` and friends: a step suffix like `:re-pair` failed the upload.
+      const path = join(directory, `${screen.replace(/[^A-Za-z0-9._-]/gu, '-')}-${label}-${scheme}.png`);
       const missed = await evidenceScreenshot(page, path);
       if (missed !== null)
         await recordStep({
@@ -583,7 +586,7 @@ export async function mintPairingLink(
  * a standalone `paired`, or the embedded frame unmounting as the setup guide moves on.
  */
 export async function confirmPairing(page: ProductPage, url: string): Promise<'paired' | 'unmounted'> {
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 });
+  await page.goto(url, { waitUntil: 'load', timeout: 30_000 });
   await page.waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 }).catch(async () => {
     const shot = join(EVIDENCE_ROOT, 'pairing-never-confirmed-' + String(Date.now()) + '.png');
     await mkdir(EVIDENCE_ROOT, { recursive: true });
