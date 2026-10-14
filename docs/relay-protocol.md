@@ -1365,8 +1365,8 @@ pending key once — so a dropped response never strands the device.
 A machine unlocks on opening by default (`unlockOnOpen`, [design/zero-trust.md](design/zero-trust.md) B1).
 A session still opens — the device key is proved as always — but every request and every stream open
 answers `401 { "code": "unlock_required" }` until the device unlocks with a passkey through
-`POST /v1/unlock/options` and `POST /v1/unlock`, which are served, as are `GET /v1/passkeys` and
-`GET /v1/security`. One unlock lasts `unlockValidityHours` for that device, across page loads, and is the
+`POST /v1/unlock/options` and `POST /v1/unlock`, which are served, as are `GET /v1/passkeys`,
+`GET /v1/security` and passkey registration under its own rules. One unlock lasts `unlockValidityHours` for that device, across page loads, and is the
 step-up for every act inside it unless the owner asks per act. A stream already open when the unlock lapses
 ends with the sealed `1008` at its next lease renewal. This is a daemon response, not a session record:
 nothing on the wire beside it changes.

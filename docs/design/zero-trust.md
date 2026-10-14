@@ -716,8 +716,9 @@ fail-closed path; and the audit record for every change.
   record per rotation. Its own file, so the grant history reader is unchanged.
 - **The unlock.** The shared request boundary answers every request of a governed device
   `401 unlock_required` until that device unlocks. Exempt (`unlockExempt` on the route): `GET /v1/passkeys`,
-  `GET /v1/security`, `POST /v1/unlock/options` and `POST /v1/unlock`; registration keeps its own rules
-  (B2). A stream open is refused the same way, because both route tables share the boundary. An unlock is
+  `GET /v1/security`, `POST /v1/unlock/options`, `POST /v1/unlock`, and passkey registration
+  (`POST /v1/passkeys/options`, `POST /v1/passkeys`), which keeps its own rules (B2) — a freshly paired
+  device holds no passkey, so registering one is how it gets in. A stream open is refused the same way, because both route tables share the boundary. An unlock is
   held in the daemon's memory per **device** for `unlockValidityHours`, so it survives page loads and ends
   on a restart or a revoke. Registering a first passkey counts as an unlock, so a device on a new machine
   can still get in. Every browser is asked, on the host too (B4).
