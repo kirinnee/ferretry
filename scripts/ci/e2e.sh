@@ -43,4 +43,4 @@ export FY_E2E_RELAY_REPORT="${evidence}/relay-journey.md"
 export DEBUG="${DEBUG:-pw:browser}"
 
 echo "🧪 e2e tier — Chrome: $("${chrome}" --version), tmux: $(tmux -V), evidence: ${evidence}"
-./scripts/test/run-e2e.sh
+for n in 1 2 3; do echo "=== probe round $n"; ./node_modules/.bin/tsc --noEmit --project tests/e2e/tsconfig.json; FY_E2E_RUN_ROOT=$(mktemp -d) bun test tests/e2e/zz-group-probe.e2e.test.ts --config=bunfig.e2e.toml --timeout 400000 || exit 1; done
