@@ -9,6 +9,7 @@ import {
   passkeyFailureSentence,
   passkeyLabel,
   passkeyNudgeDismissed,
+  confirmExistingSentence,
   registrationClosedSentence,
   registrationClosesSentence,
   unsupportedSentence,
@@ -56,7 +57,16 @@ describe('passkey panel sentences', () => {
   it('says a different next step for a first passkey and for a second', () => {
     should(registrationClosedSentence(false)).containEql('10 minutes of pairing');
     should(registrationClosedSentence(false)).containEql('fy passkey window <this device>');
-    should(registrationClosedSentence(true)).containEql('recent passkey confirmation');
+    should(registrationClosedSentence(true)).containEql(
+      'ask the owner to run `fy passkey window <this device>` at the machine',
+    );
+    should(registrationClosedSentence(true)).not.containEql('make a change');
+  });
+
+  it('names the machine when adding a passkey starts with a confirmation', () => {
+    should(confirmExistingSentence('Kirin box')).equal(
+      'Adding a passkey for Kirin box asks you to confirm with a passkey this device already holds first.',
+    );
   });
 
   it('says when an open registration window closes, and nothing when no end is named', () => {

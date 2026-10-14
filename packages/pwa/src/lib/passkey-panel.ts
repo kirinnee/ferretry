@@ -28,10 +28,14 @@ export function webAuthnSupported(
 export const unsupportedSentence = (origin: string): string =>
   `This browser cannot use passkeys at ${origin}. Passkeys need a secure address (HTTPS or localhost) and a browser that supports them.`;
 
+/** What adding a passkey asks of a device that already holds one, naming the machine it is for. */
+export const confirmExistingSentence = (machine: string): string =>
+  `Adding a passkey for ${machine} asks you to confirm with a passkey this device already holds first.`;
+
 /** Why no passkey can be added right now, per the registration rule. */
 export const registrationClosedSentence = (hasPasskeys: boolean): string =>
   hasPasskeys
-    ? 'Adding another passkey needs a recent passkey confirmation: make a change in Settings and confirm it, then come back here.'
+    ? 'This device cannot add another passkey right now: ask the owner to run `fy passkey window <this device>` at the machine.'
     : 'A first passkey can be added only within 10 minutes of pairing: add one from a device that already has access, or ask the owner to run `fy passkey window <this device>` at the machine.';
 
 /** When an open registration window closes, in one sentence, or `null` when the machine named no end. */

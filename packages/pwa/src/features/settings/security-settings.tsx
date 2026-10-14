@@ -12,6 +12,8 @@
  *
  * "Add a passkey" appears only when the machine says registration is open (`registration !== 'closed'`)
  * and this browser can run a ceremony at all. Otherwise one sentence says why, in place of the button.
+ * When this device already holds a passkey (`confirm-existing`) the button is followed by the sentence
+ * that names the machine and says the add starts with a confirmation from a passkey already held.
  *
  * ## EVERY FAILURE IS ONE SENTENCE
  *
@@ -25,6 +27,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
+  confirmExistingSentence,
   PASSKEY_COST_SENTENCE,
   passkeyFailureSentence,
   passkeyLabel,
@@ -33,14 +36,9 @@ import {
   unsupportedSentence,
   webAuthnSupported,
 } from '../../lib/passkey-panel.ts';
-import { type CredentialsPort, createPasskey } from '../../lib/passkeys.ts';
-import { browserCredentials } from '../../lib/step-up-ceremony.ts';
-import {
-  fetchPasskeys,
-  passkeyRegistrationOptions,
-  registerPasskey,
-  type StepUpClient,
-} from '../../lib/step-up-client.ts';
+import type { CredentialsPort } from '../../lib/passkeys.ts';
+import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
+import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { SecuritySettingsBlock } from './security-settings-block.tsx';
 
@@ -53,13 +51,14 @@ interface SecurityCardProps {
   readonly view: PasskeysView;
   readonly supported: boolean;
   readonly origin: string;
+  readonly machine: string;
   readonly busy: boolean;
   readonly failure: string | null;
   readonly onAdd: () => void;
 }
 
 /** The panel's content for a loaded list. Pure over its props so every state is one render. */
-function SecurityCard({ view, supported, origin, busy, failure, onAdd }: SecurityCardProps) {
+function SecurityCard({ view, supported, origin, machine, busy, failure, onAdd }: SecurityCardProps) {
   const headingId = useId();
   const canAdd = supported && view.registration !== 'closed';
   const closes =
@@ -109,6 +108,11 @@ function SecurityCard({ view, supported, origin, busy, failure, onAdd }: Securit
               {closes}
             </span>
           )}
+          {view.registration === 'confirm-existing' ? (
+            <span className="text-meta leading-base text-faint" data-security-confirm-existing="">
+              {confirmExistingSentence(machine)}
+            </span>
+          ) : null}
         </div>
       ) : (
         <p className="m-0 text-cell leading-base text-muted" data-security-unavailable="">
@@ -130,6 +134,8 @@ function SecurityCard({ view, supported, origin, busy, failure, onAdd }: Securit
 
 export interface SecuritySurfaceProps {
   readonly connection: DaemonConnection;
+  /** The machine's name as the person knows it; its address when none is given. */
+  readonly machineName?: string;
   readonly createClient?: PasskeyClientFactory;
   /** Test seam; production uses the browser's own credential container. */
   readonly credentials?: () => CredentialsPort;
@@ -147,6 +153,7 @@ type Loaded =
 /** The live panel for one machine, keyed by the caller on its daemon id. */
 export function SecuritySurface({
   connection,
+  machineName,
   createClient: injectedClient,
   credentials = browserCredentials,
   origin = () => window.location.origin,
@@ -186,9 +193,7 @@ export function SecuritySurface({
     setBusy(true);
     setFailure(null);
     try {
-      const options = await passkeyRegistrationOptions(client, here);
-      const registration = await createPasskey(credentials(), options, supported());
-      await registerPasskey(client, registration);
+      await addPasskeyCeremony(credentials(), client, here, supported());
     } catch (reason) {
       setFailure(passkeyFailureSentence(reason, here));
       setBusy(false);
@@ -209,6 +214,7 @@ export function SecuritySurface({
           view={loaded.view}
           supported={supported()}
           origin={origin()}
+          machine={machineName ?? connection.baseUrl}
           busy={busy}
           failure={failure}
           onAdd={() => void add()}

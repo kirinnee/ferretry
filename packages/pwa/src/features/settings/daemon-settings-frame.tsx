@@ -286,6 +286,7 @@ export function DaemonSettingsFrame({
         Surface: ({ connection: activeConnection }) => (
           <SecuritySurface
             connection={activeConnection}
+            machineName={name}
             {...(createPasskeyClient ? { createClient: createPasskeyClient } : {})}
           />
         ),
@@ -335,6 +336,7 @@ export function DaemonSettingsFrame({
       createPasskeyClient,
       createSecretClient,
       createWardenClient,
+      name,
       onRemoveDaemon,
       onRenameDaemon,
       probeDaemon,

@@ -65,13 +65,23 @@ class MemoryStore implements PasskeyStore {
   async add(passkey: StoredPasskey) {
     this.held.push(passkey);
   }
-  async updateSignCount() {}
+  async updateSignCount(id: string, credentialId: string, signCount: number) {
+    const passkey = this.held.find(entry => entry.deviceId === id && entry.credentialId === credentialId);
+    if (passkey === undefined || signCount <= passkey.signCount) return false;
+    this.held = this.held.map(entry => (entry === passkey ? { ...entry, signCount } : entry));
+    return true;
+  }
   async forgetDevice() {}
 }
 
+/** Every assertion carries a higher counter than the last, as a real authenticator's does. */
+let assertions = 0;
 const verifier: PasskeyVerifierPort = {
   verifyRegistration: async () => ({ ok: false, reason: 'unused' }),
-  verifyAssertion: async () => ({ ok: true, signCount: 5, origin: ORIGIN }),
+  verifyAssertion: async () => {
+    assertions += 1;
+    return { ok: true, signCount: 100 + assertions, origin: ORIGIN };
+  },
 };
 
 const json = (value: unknown): string => JSON.stringify(value);

@@ -212,4 +212,46 @@ describe('ChallengeLedger', () => {
     should(ledger.take(phoneOtherTab, 'register', NOW)).be.undefined();
     should(ledger.take(laptop, 'step-up', NOW)).eql(bytes(3));
   });
+
+  it('should sweep lapsed challenges on every issue, so unanswered ones never accumulate', () => {
+    // A device opening a session per fresh appSession, asking once and leaving (review L1).
+    // Arrange
+    const ledger = new ChallengeLedger();
+    for (let index = 0; index < 50; index += 1)
+      ledger.issue({ deviceId: phone.deviceId, appSession: `tab-${index}` }, 'step-up', bytes(index), NOW);
+    const live = ledger.size;
+
+    // Act — two minutes later, one more is asked for
+    ledger.issue(laptop, 'step-up', bytes(9), NOW + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000);
+
+    // Assert — the fifty unanswered ones are gone, and the new one still answers
+    should(live).equal(50);
+    should(ledger.size).equal(1);
+    should(ledger.take(laptop, 'step-up', NOW + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000)).eql(bytes(9));
+  });
+
+  it('should pair a confirmation only with the registration challenge it was issued with, and spend it either way', () => {
+    // Arrange
+    const ledger = new ChallengeLedger();
+    ledger.issue(phone, 'register-confirm', bytes(5), NOW, bytes(1));
+
+    // Act
+    const mismatched = ledger.takeConfirmation(phone, bytes(2), NOW);
+    ledger.issue(phone, 'register-confirm', bytes(5), NOW, bytes(1));
+    const crossed = ledger.takeConfirmation(phoneOtherTab, bytes(1), NOW);
+    const matched = ledger.takeConfirmation(phone, bytes(1), NOW);
+    const replayed = ledger.takeConfirmation(phone, bytes(1), NOW);
+    ledger.issue(phone, 'register-confirm', bytes(5), NOW);
+    const unbound = ledger.takeConfirmation(phone, bytes(1), NOW);
+    ledger.issue(phone, 'step-up', bytes(5), NOW, bytes(1));
+    const wrongPurpose = ledger.takeConfirmation(phone, bytes(1), NOW);
+
+    // Assert
+    should(mismatched).be.undefined();
+    should(crossed).be.undefined();
+    should(matched).eql(bytes(5));
+    should(replayed).be.undefined();
+    should(unbound).be.undefined();
+    should(wrongPurpose).be.undefined();
+  });
 });

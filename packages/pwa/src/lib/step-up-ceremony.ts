@@ -6,11 +6,25 @@
  * HTTP status is never what a person reads.
  */
 
-import { type StepUpRefusal, stepUpRefusalCode } from '@ferretry/protocol';
+import { type PasskeyView, type StepUpRefusal, stepUpRefusalCode } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { DaemonConnection } from './daemon-connection.ts';
-import { assertPasskey, type CredentialsPort, PasskeyCeremonyError, passkeySentence } from './passkeys.ts';
-import { unlockOptions, type StepUpClient, stepUpOptions, submitUnlock, submitStepUp } from './step-up-client.ts';
+import {
+  assertPasskey,
+  type CredentialsPort,
+  createPasskey,
+  PasskeyCeremonyError,
+  passkeySentence,
+} from './passkeys.ts';
+import {
+  passkeyRegistrationOptions,
+  registerPasskey,
+  type StepUpClient,
+  stepUpOptions,
+  submitStepUp,
+  submitUnlock,
+  unlockOptions,
+} from './step-up-client.ts';
 
 export interface StepUpCeremonyDependencies {
   readonly client: (daemon: DaemonConnection) => Promise<StepUpClient>;
@@ -37,6 +51,25 @@ export const unlockCeremony =
     const assertion = await assertPasskey(deps.credentials, options);
     await submitUnlock(client, assertion);
   };
+
+/**
+ * Add a passkey in ONE ceremony. A device that already holds a passkey must first answer the options'
+ * `confirm` with it (an assertion), then create the new one; the registration carries that assertion so
+ * the daemon can bind the two. A first passkey carries no `confirm` and so asks for no assertion.
+ * A dismissed assertion ends the ceremony before any creation prompt appears.
+ */
+export async function addPasskeyCeremony(
+  credentials: CredentialsPort,
+  client: StepUpClient,
+  origin: string,
+  supported?: boolean,
+): Promise<PasskeyView> {
+  const options = await passkeyRegistrationOptions(client, origin);
+  const confirmation =
+    options.confirm === undefined ? undefined : await assertPasskey(credentials, options.confirm, supported);
+  const registration = await createPasskey(credentials, options, supported);
+  return await registerPasskey(client, { ...registration, ...(confirmation === undefined ? {} : { confirmation }) });
+}
 
 const refusalWith = (reason: unknown, refusal: StepUpRefusal): boolean =>
   reason instanceof FyHttpError && reason.code === stepUpRefusalCode(refusal);

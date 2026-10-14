@@ -30,8 +30,13 @@ export interface PasskeyStore {
   holder(credentialId: string): Promise<string | undefined>;
   /** Stores a new credential. Refuses — never overwrites — one another device already holds. */
   add(passkey: StoredPasskey): Promise<void>;
-  /** Records a verified assertion's counter. A passkey that is gone meanwhile is not an error. */
-  updateSignCount(deviceId: string, credentialId: string, signCount: number): Promise<void>;
+  /**
+   * Records a verified assertion's counter as ONE compare-and-set, and says whether it moved: `false`
+   * when the stored count is already at or past `signCount` (unless both are zero — an authenticator
+   * that keeps no counter) or the passkey is gone. Two copies of the app verifying against the same
+   * stored count must not both win, or the later write rewinds it and hides a cloned authenticator.
+   */
+  updateSignCount(deviceId: string, credentialId: string, signCount: number): Promise<boolean>;
   forgetDevice(deviceId: string): Promise<void>;
 }
 

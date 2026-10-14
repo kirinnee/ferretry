@@ -13,6 +13,7 @@ import {
   ChallengeLedger,
   type DeviceKeyRotationPort,
   type PasskeyStore,
+  passkeyAddedNotice,
   passkeyVerifier,
   relyingPartyIdFor,
   type StepUpCaller,
@@ -56,10 +57,12 @@ class MemoryPasskeys implements PasskeyStore {
   async add(passkey: StoredPasskey) {
     this.rows.push(passkey);
   }
+  /** The adapter's compare-and-set, so a counter that did not move refuses here as it does there. */
   async updateSignCount(id: string, credentialId: string, signCount: number) {
-    this.rows = this.rows.map(row =>
-      row.deviceId === id && row.credentialId === credentialId ? { ...row, signCount } : row,
-    );
+    const row = this.rows.find(candidate => candidate.deviceId === id && candidate.credentialId === credentialId);
+    if (row === undefined || (row.signCount >= signCount && (row.signCount !== 0 || signCount !== 0))) return false;
+    this.rows = this.rows.map(candidate => (candidate === row ? { ...row, signCount } : candidate));
+    return true;
   }
   async forgetDevice(id: string) {
     this.rows = this.rows.filter(row => row.deviceId !== id);
@@ -70,6 +73,9 @@ const phone: StepUpSubject = { deviceId: deviceId('a'), appSession: 'tab-one' };
 /** A second paired device, for the cases where one device's passkey must never work for another. */
 const laptop: StepUpSubject = { deviceId: deviceId('b'), appSession: 'laptop-tab' };
 const remote = (subject: StepUpSubject = phone): StepUpCaller => ({ device: subject, hostLocal: false });
+
+/** The `register-confirm` challenge, distinct from {@link CHALLENGE} so the two can never be mixed up here. */
+const CONFIRM = Uint8Array.from({ length: 32 }, (_, index) => (index * 11 + 5) & 0xff);
 
 function fixture(
   options: {
@@ -82,9 +88,15 @@ function fixture(
     rotation?: DeviceKeyRotationPort;
     /** The step-up window in force, in minutes, which a case may change after the fact; the default otherwise. */
     window?: { minutes: number };
+    /** The challenges the daemon "randomly" issues, in order; the last repeats. */
+    challenges?: readonly Uint8Array[];
+    announce?: (notice: unknown) => Promise<unknown>;
   } = {},
 ) {
   const clock = { now: options.nowMs ?? PAIRED_AT_MS + 60_000 };
+  const directory = { paired: options.paired !== false };
+  const issued = [...(options.challenges ?? [CHALLENGE])];
+  const announced: unknown[] = [];
   const store = new MemoryPasskeys();
   // Both of the phone's tabs hold a live session throughout, so a step-up is judged on its window and
   // binding alone; what ends a span is the span tests' subject.
@@ -101,12 +113,12 @@ function fixture(
     verifier: passkeyVerifier(webCrypto),
     registry,
     challenges: new ChallengeLedger(),
-    // The software authenticator signs over a fixed challenge, so the daemon "randomly" issues it.
-    random: { bytes: length => CHALLENGE.slice(0, length) },
+    // The software authenticator signs over a known challenge, so the daemon "randomly" issues it.
+    random: { bytes: length => ((issued.length > 1 ? issued.shift() : issued[0]) ?? CHALLENGE).slice(0, length) },
     clock: { nowMs: () => clock.now },
     devices: {
       device: async id =>
-        options.paired === false || (id !== phone.deviceId && id !== laptop.deviceId)
+        !directory.paired || (id !== phone.deviceId && id !== laptop.deviceId)
           ? undefined
           : { name: id === phone.deviceId ? 'Phone' : 'Laptop', createdAt: new Date(PAIRED_AT_MS).toISOString() },
     },
@@ -121,8 +133,13 @@ function fixture(
         audited.push(entry);
       },
     },
+    announce:
+      options.announce ??
+      (async notice => {
+        announced.push(notice);
+      }),
   });
-  return { clock, store, registry, service, audited };
+  return { clock, store, registry, service, audited, announced, directory };
 }
 
 const registrationBody = async (authenticator: Authenticator, credentialId = CREDENTIAL_ID) => {
@@ -149,6 +166,21 @@ const assertionBody = async (
     signature: toBase64Url(made.signature),
   };
 };
+
+/** An assertion over `challenge` by `authenticator`, as the existing passkey's answer to `confirm`. */
+const confirmationBy = async (
+  authenticator: Authenticator,
+  challenge: Uint8Array = CONFIRM,
+  signCount = 1,
+  credentialId = toBase64Url(CREDENTIAL_ID),
+) =>
+  await assertionBody(
+    authenticator,
+    { client: clientData('webauthn.get', { challenge: toBase64Url(challenge) }), auth: { signCount } },
+    credentialId,
+  );
+
+const SECOND_ID = Uint8Array.from({ length: 16 }, () => 0x11);
 
 /** Registers the phone's first passkey through both calls, as the app does. */
 async function enrol(service: StepUpService, authenticator: Authenticator, caller = remote()) {
@@ -179,9 +211,10 @@ describe('StepUpService', () => {
     });
 
     it('should refuse registration options for a device the directory no longer knows', async () => {
-      // Arrange — a step-up still held in memory for a device whose grant is already gone
-      const { clock, registry, service } = fixture({ paired: false });
-      registry.grant(phone, clock.now);
+      // Arrange — a window the owner re-opened, still in memory, for a device whose grant is already gone
+      const { service, directory } = fixture({ nowMs: PAIRED_AT_MS + 86_400_000 });
+      await service.reopenRegistration({ hostLocal: true }, phone.deviceId);
+      directory.paired = false;
 
       // Act
       const options = await service.registrationOptions(remote(), ORIGIN);
@@ -231,46 +264,155 @@ describe('StepUpService', () => {
       should(await service.view(remote())).eql({ ok: true, value: { passkeys: [], registration: 'closed' } });
     });
 
-    it('should close the window once the device holds a passkey and its step-up has lapsed', async () => {
-      // Arrange
-      const { clock, service } = fixture();
-      await enrol(service, await es256Authenticator());
-      clock.now += STEP_UP_TTL_SECONDS * 1_000;
-
-      // Act
-      const options = await service.registrationOptions(remote(), ORIGIN);
-
-      // Assert
-      should(options).eql({ ok: false, refusal: 'registration-closed' });
-    });
-
-    it('should let a device with a current step-up add a second passkey after the window', async () => {
-      // Arrange — enrolled inside the window; now both the window and that step-up have lapsed.
-      const { clock, service, store } = fixture();
+    it('should ask a device that holds a passkey to confirm with it, and let a step-up stand in for nothing', async () => {
+      // Arrange — enrolled inside the window, then stepped up: it holds a live step-up now.
+      const { service } = fixture({ challenges: [CHALLENGE, CHALLENGE, CHALLENGE, CONFIRM] });
       const first = await es256Authenticator();
       await enrol(service, first);
-      clock.now += STEP_UP_TTL_SECONDS * 1_000;
-      const closed = await service.view(remote());
       await service.stepUpOptions(remote(), ORIGIN);
       should((await service.stepUp(remote(), await assertionBody(first))).ok).be.true();
-      const second = await es256Authenticator();
 
       // Act
       const view = await service.view(remote());
-      await service.registrationOptions(remote(), ORIGIN);
-      const added = await service.register(
-        remote(),
-        await registrationBody(
-          second,
-          Uint8Array.from({ length: 16 }, () => 0x11),
-        ),
-      );
+      const options = await service.registrationOptions(remote(), ORIGIN);
 
       // Assert
-      should(closed).match({ ok: true, value: { registration: 'closed' } });
-      should(view).match({ ok: true, value: { registration: 'stepped-up' } });
-      should(added).match({ ok: true, value: { origin: ORIGIN } });
-      should(store.rows).have.length(2);
+      should(service.held(phone)).be.true();
+      should(view).match({ ok: true, value: { registration: 'confirm-existing' } });
+      should(options).match({
+        ok: true,
+        value: {
+          challenge: toBase64Url(CHALLENGE),
+          confirm: {
+            challenge: toBase64Url(CONFIRM),
+            rpId: relyingPartyIdFor(ORIGIN),
+            allowCredentials: [{ type: 'public-key', id: toBase64Url(CREDENTIAL_ID) }],
+            timeout: PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
+          },
+        },
+      });
+    });
+
+    it('should add a second passkey only with a fresh assertion by the first, made for this registration', async () => {
+      // Arrange — long after the window, holding no step-up.
+      const { clock, service, store, audited } = fixture({ challenges: [CHALLENGE, CHALLENGE, CONFIRM] });
+      const first = await es256Authenticator();
+      await enrol(service, first);
+      clock.now += STEP_UP_TTL_SECONDS * 1_000;
+      const second = await es256Authenticator();
+
+      // Act
+      await service.registrationOptions(remote(), ORIGIN);
+      const added = await service.register(remote(), {
+        ...(await registrationBody(second, SECOND_ID)),
+        confirmation: await confirmationBy(first),
+      });
+
+      // Assert — added, the first passkey's counter moved, and no step-up was granted by any of it.
+      should(added).match({ ok: true, value: { id: toBase64Url(SECOND_ID), origin: ORIGIN } });
+      should(store.rows.map(row => [row.credentialId, row.signCount])).eql([
+        [toBase64Url(CREDENTIAL_ID), 1],
+        [toBase64Url(SECOND_ID), 0],
+      ]);
+      should(service.held(phone)).be.false();
+      should(audited.map(entry => entry.changes)).eql([
+        [`passkey.added=${phone.deviceId}`],
+        [`passkey.added=${phone.deviceId}`],
+      ]);
+    });
+
+    it('should refuse a second passkey with a missing, stale, wrong-purpose or other-device confirmation', async () => {
+      // Arrange — each attempt asks for fresh options; the daemon issues R, C each time (and S for a step-up).
+      const STALE = Uint8Array.from({ length: 32 }, () => 0x42);
+      const STEP = Uint8Array.from({ length: 32 }, () => 0x24);
+      const { service, store, registry } = fixture({
+        challenges: [CHALLENGE, CHALLENGE, STALE, CHALLENGE, CONFIRM, STEP, CHALLENGE, CONFIRM, CHALLENGE, CONFIRM],
+      });
+      const first = await es256Authenticator();
+      await enrol(service, first);
+      registry.open(laptop);
+      const laptopKey = await es256Authenticator();
+      const laptopId = toBase64Url(new Uint8Array([9, 9, 9, 9]));
+      store.rows.push({ ...(store.rows[0] as StoredPasskey), credentialId: laptopId, deviceId: laptop.deviceId });
+      const second = await registrationBody(await es256Authenticator(), SECOND_ID);
+
+      // Act
+      // 1. No confirmation at all — holding a session (or a step-up) is not one.
+      await service.registrationOptions(remote(), ORIGIN); // R, STALE
+      const missing = await service.register(remote(), second);
+      // 2. Stale: answers the confirm challenge from an EARLIER options call.
+      await service.registrationOptions(remote(), ORIGIN); // R, C
+      const stale = await service.register(remote(), { ...second, confirmation: await confirmationBy(first, STALE) });
+      // 3. Wrong purpose: a step-up's assertion offered as the confirmation.
+      await service.stepUpOptions(remote(), ORIGIN); // STEP
+      await service.registrationOptions(remote(), ORIGIN); // R, C
+      const wrongPurpose = await service.register(remote(), {
+        ...second,
+        confirmation: await confirmationBy(first, STEP),
+      });
+      // 4. Another device's passkey, signing a perfectly fresh confirm challenge.
+      await service.registrationOptions(remote(), ORIGIN); // R, C
+      const otherDevice = await service.register(remote(), {
+        ...second,
+        confirmation: await confirmationBy(laptopKey, CONFIRM, 1, laptopId),
+      });
+
+      // Assert
+      for (const outcome of [missing, stale, wrongPurpose, otherDevice])
+        should(outcome).eql({ ok: false, refusal: 'not-verified' });
+      should(store.rows.filter(row => row.deviceId === phone.deviceId)).have.length(1);
+    });
+
+    it('should not let page code add a software passkey to a device that holds one, step-up or not', async () => {
+      // Page code (XSS, a malicious deploy) can mint a key pair with WebCrypto and build a registration
+      // and an "assertion" with it, flags and all. It cannot sign with the passkey the daemon holds.
+      // Arrange
+      const { service, store, registry } = fixture({ challenges: [CHALLENGE, CHALLENGE, CONFIRM] });
+      await enrol(service, await es256Authenticator());
+      registry.grant(phone, PAIRED_AT_MS + 60_000);
+      const forged = await es256Authenticator();
+
+      // Act
+      await service.registrationOptions(remote(), ORIGIN);
+      const selfSigned = await service.register(remote(), {
+        ...(await registrationBody(forged, SECOND_ID)),
+        confirmation: await confirmationBy(forged, CONFIRM, 1, toBase64Url(SECOND_ID)),
+      });
+      await service.registrationOptions(remote(), ORIGIN);
+      // The forged key claiming the REAL credential's id: the signature does not verify under its key.
+      const impersonated = await service.register(remote(), {
+        ...(await registrationBody(forged, SECOND_ID)),
+        confirmation: await confirmationBy(forged),
+      });
+
+      // Assert
+      should(selfSigned).eql({ ok: false, refusal: 'not-verified' });
+      should(impersonated).eql({ ok: false, refusal: 'not-verified' });
+      should(store.rows).have.length(1);
+    });
+
+    it('should refuse options for a confirmation no passkey at this origin could give', async () => {
+      // Arrange — the phone's only passkey was made at ORIGIN.
+      const { service } = fixture();
+      await enrol(service, await es256Authenticator());
+
+      // Act / Assert
+      should(await service.registrationOptions(remote(), OTHER_ORIGIN)).eql({ ok: false, refusal: 'no-passkey' });
+    });
+
+    it('should tell the other devices a passkey was added, and keep it when the notice cannot be sent', async () => {
+      // Arrange
+      const announced = fixture();
+      const failing = fixture({ announce: async () => Promise.reject(new Error('push service down')) });
+
+      // Act
+      const told = await enrol(announced.service, await es256Authenticator());
+      const kept = await enrol(failing.service, await es256Authenticator());
+
+      // Assert
+      should(told.ok && kept.ok).be.true();
+      should(announced.announced).eql([passkeyAddedNotice('Phone')]);
+      should(failing.store.rows).have.length(1);
     });
 
     it('should let the owner at the machine re-open a window for one passkey, ten minutes, audited', async () => {
@@ -285,7 +427,7 @@ describe('StepUpService', () => {
       const unknown = await service.reopenRegistration(owner, deviceId('z'));
       const view = await service.view(remote());
       const added = await enrol(service, await es256Authenticator());
-      // Spent by that one passkey: another copy of the app on the phone, holding no step-up, is closed.
+      // Spent by that one passkey: from now on a further one needs a confirmation by it.
       const afterwards = await service.view(remote({ ...phone, appSession: 'tab-two' }));
 
       // Assert
@@ -295,14 +437,45 @@ describe('StepUpService', () => {
       should(unknown).eql({ ok: false, refusal: 'unknown-device' });
       should(view).eql({ ok: true, value: { passkeys: [], registration: 'reopened', registrationClosesAt: closesAt } });
       should(added.ok).be.true();
-      should(afterwards.ok && afterwards.value.registration).equal('closed');
+      should(afterwards.ok && afterwards.value.registration).equal('confirm-existing');
       should(audited).eql([
         {
           actor: 'admin-cli',
           changes: [`passkey.registration-window=${phone.deviceId}`],
           at: new Date(opensAt).toISOString(),
         },
+        {
+          actor: `device:${phone.deviceId}`,
+          changes: [`passkey.added=${phone.deviceId}`],
+          at: new Date(opensAt).toISOString(),
+        },
       ]);
+    });
+
+    it('should let a re-opened window add a passkey with no confirmation, for a device whose authenticator is lost', async () => {
+      // Arrange — the phone holds a passkey it can no longer use; the owner re-opens its window.
+      const { service, store } = fixture({ nowMs: PAIRED_AT_MS + 86_400_000 });
+      store.rows.push({
+        credentialId: toBase64Url(CREDENTIAL_ID),
+        deviceId: phone.deviceId,
+        algorithm: -7,
+        publicKeySpki: 'AAAA',
+        signCount: 3,
+        origin: ORIGIN,
+        createdAt: new Date(PAIRED_AT_MS).toISOString(),
+      });
+      await service.reopenRegistration({ hostLocal: true }, phone.deviceId);
+
+      // Act
+      const view = await service.view(remote());
+      const options = await service.registrationOptions(remote(), ORIGIN);
+      const added = await service.register(remote(), await registrationBody(await es256Authenticator(), SECOND_ID));
+
+      // Assert
+      should(view.ok && view.value.registration).equal('reopened');
+      should(options.ok && 'confirm' in options.value).be.false();
+      should(added.ok).be.true();
+      should(service.held(phone)).be.false();
     });
 
     it('should close a re-opened window when its ten minutes end, or when the device is revoked', async () => {
@@ -397,7 +570,7 @@ describe('StepUpService', () => {
   });
 
   describe('registering', () => {
-    it('should store the verified credential and count the registration as a step-up', async () => {
+    it('should store the verified credential and grant NO step-up for it', async () => {
       // Arrange
       const { service, store } = fixture();
       const authenticator = await es256Authenticator();
@@ -425,7 +598,8 @@ describe('StepUpService', () => {
           createdAt: new Date(PAIRED_AT_MS + 60_000).toISOString(),
         },
       ]);
-      should(service.held(phone)).be.true();
+      // A registration proves nothing about the person: the next act asks for a step-up like any other.
+      should(service.held(phone)).be.false();
       should(service.held({ ...phone, appSession: 'tab-two' })).be.false();
     });
 
@@ -465,9 +639,12 @@ describe('StepUpService', () => {
       const authenticator = await es256Authenticator();
       await enrol(service, authenticator);
 
-      // Act
+      // Act — confirmed by that very passkey, so the duplicate is what refuses
       await service.registrationOptions(remote(), ORIGIN);
-      const again = await service.register(remote(), await registrationBody(authenticator));
+      const again = await service.register(remote(), {
+        ...(await registrationBody(authenticator)),
+        confirmation: await confirmationBy(authenticator, CHALLENGE),
+      });
 
       // Assert
       should(again).eql({ ok: false, refusal: 'not-verified' });
@@ -612,9 +789,9 @@ describe('StepUpService', () => {
       });
     });
 
-    it('should refuse a rewound or stuck counter and keep the stored one', async () => {
+    it('should refuse a rewound or stuck counter, keep the stored one and write the refusal down', async () => {
       // Arrange
-      const { service, store } = fixture();
+      const { service, store, audited } = fixture();
       const authenticator = await es256Authenticator();
       await enrol(service, authenticator);
       await service.stepUpOptions(remote(), ORIGIN);
@@ -636,6 +813,35 @@ describe('StepUpService', () => {
       should(stuck).eql({ ok: false, refusal: 'not-verified' });
       should(rewound).eql({ ok: false, refusal: 'not-verified' });
       should(store.rows[0]?.signCount).equal(7);
+      should(audited.map(entry => entry.changes).slice(1)).eql([
+        [`passkey.counter-refused=${phone.deviceId}`],
+        [`passkey.counter-refused=${phone.deviceId}`],
+      ]);
+    });
+
+    it('should refuse a counter a concurrent assertion already moved past, and write it down', async () => {
+      // Two copies of the app verify against the same stored count; the store's compare-and-set lets one win.
+      // Arrange
+      const { service, store, audited } = fixture();
+      const authenticator = await es256Authenticator();
+      await enrol(service, authenticator);
+      await service.stepUpOptions(remote(), ORIGIN);
+      const body = await assertionBody(authenticator, { auth: { signCount: 6 } });
+      // The other tab's assertion landed first, at 9, after this one was verified against 0.
+      const raced = store.updateSignCount.bind(store);
+      store.updateSignCount = async (id, credentialId, count) => {
+        await raced(id, credentialId, 9);
+        return await raced(id, credentialId, count);
+      };
+
+      // Act
+      const stepped = await service.stepUp(remote(), body);
+
+      // Assert
+      should(stepped).eql({ ok: false, refusal: 'not-verified' });
+      should(store.rows[0]?.signCount).equal(9);
+      should(service.held(phone)).be.false();
+      should(audited.at(-1)?.changes).eql([`passkey.counter-refused=${phone.deviceId}`]);
     });
 
     it('should never let a passkey registered at one origin assert for another', async () => {
@@ -779,7 +985,10 @@ describe('StepUpService step-up window (B6)', () => {
     // Arrange
     const window = { minutes: 15 };
     const { clock, service } = fixture({ window });
-    await enrol(service, await es256Authenticator());
+    const authenticator = await es256Authenticator();
+    await enrol(service, authenticator);
+    await service.stepUpOptions(remote(), ORIGIN);
+    should((await service.stepUp(remote(), await assertionBody(authenticator))).ok).be.true();
     clock.now += 6 * 60_000;
     should(service.held(phone)).be.true();
 
@@ -814,7 +1023,10 @@ describe('StepUpService step-up window (B6)', () => {
   it('should leave a step-up held when an act is spent under a window above 0', async () => {
     // Arrange
     const { service } = fixture({ window: { minutes: 15 } });
-    await enrol(service, await es256Authenticator());
+    const authenticator = await es256Authenticator();
+    await enrol(service, authenticator);
+    await service.stepUpOptions(remote(), ORIGIN);
+    should((await service.stepUp(remote(), await assertionBody(authenticator))).ok).be.true();
 
     // Act
     service.spend(phone);
@@ -1047,7 +1259,8 @@ describe('StepUpService unlock on opening (B6)', () => {
     should(service.held(phone)).be.true();
   });
 
-  it('should count registering a passkey as a confirmation on opening', async () => {
+  it('should NOT count registering a passkey as an unlock: the new device unlocks with it next', async () => {
+    // Review M3: code in the page can forge an attestation, so a registration proves nothing about the person.
     // Arrange
     const { service } = fixture({ settings: { unlockOnOpen: true } });
     should(service.unlockRequired(phone)).be.true();
@@ -1056,13 +1269,15 @@ describe('StepUpService unlock on opening (B6)', () => {
     await enrol(service, await es256Authenticator());
 
     // Assert
-    should(service.unlockRequired(phone)).be.false();
+    should(service.unlockRequired(phone)).be.true();
+    should(service.held(phone)).be.false();
   });
 
   it('should forget a revoked device’s confirmation', async () => {
     // Arrange
-    const { service } = fixture({ settings: { unlockOnOpen: true } });
-    await enrol(service, await es256Authenticator());
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
+    await service.unlockOptions(remote(), ORIGIN);
+    should((await service.unlock(remote(), await nextAssertion(authenticator, 1))).ok).be.true();
     should(service.unlockRequired(phone)).be.false();
 
     // Act
