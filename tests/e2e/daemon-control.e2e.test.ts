@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { withE2eEnvironment } from './fixture';
+import { type E2eEnvironment, withE2eEnvironment } from './fixture';
 
 /**
  * Journeys for the `fy daemon …` control group.
@@ -78,6 +78,23 @@ function startStubDaemon(serving: boolean): Stub {
   };
 }
 
+/**
+ * Records the stub's address where the CLI's daemon verbs look for this state home's daemon.
+ *
+ * `FY_URL` IS NOT ENOUGH ANY MORE, on purpose (#224): `status`, `stop`, `restart` and `reset` manage
+ * the daemon process on THIS host, so they probe the address the state home recorded in
+ * `config/daemon.json` and never a forwarded `FY_URL` — honouring it reported a stranger's counts
+ * and handed its pid to a local SIGTERM. Without this file they probe the fixed default port, which
+ * is the host's live daemon when there is one. `FY_URL` stays in `connection` for the verbs that do
+ * honour it.
+ */
+async function recordAddress(environment: E2eEnvironment, stub: Stub): Promise<void> {
+  const config = join(environment.paths.fyHome, 'config');
+  await mkdir(config, { recursive: true });
+  const port = Number(new URL(stub.baseUrl).port);
+  await writeFile(join(config, 'daemon.json'), `${JSON.stringify({ host: '127.0.0.1', port })}\n`, 'utf8');
+}
+
 function connection(stub: Stub, daemonBinary: string): Record<string, string> {
   return { FY_URL: stub.baseUrl, FY_TOKEN: 'e2e-token', FY_DAEMON_BIN: daemonBinary };
 }
@@ -92,6 +109,7 @@ describe('daemon control journeys', () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = startStubDaemon(true);
+      await recordAddress(environment, stub);
 
       try {
         // Act
@@ -116,6 +134,7 @@ describe('daemon control journeys', () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = startStubDaemon(true);
+      await recordAddress(environment, stub);
 
       try {
         // Act
@@ -144,6 +163,7 @@ describe('daemon control journeys', () => {
     await withE2eEnvironment(async environment => {
       // Arrange — the stub is up but answers nothing, standing in for a host with no daemon.
       const stub = startStubDaemon(false);
+      await recordAddress(environment, stub);
 
       try {
         // Act
@@ -166,6 +186,7 @@ describe('daemon control journeys', () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = startStubDaemon(false);
+      await recordAddress(environment, stub);
 
       try {
         // Act
@@ -188,6 +209,7 @@ describe('daemon control journeys', () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = startStubDaemon(false);
+      await recordAddress(environment, stub);
       const logDirectory = join(environment.paths.fyHome, 'logs');
       await mkdir(logDirectory, { recursive: true });
       await writeFile(join(logDirectory, 'fyd.log'), 'bound on 127.0.0.1\nready\n', 'utf8');
@@ -209,10 +231,21 @@ describe('daemon control journeys', () => {
     });
   });
 
+  /**
+   * PRODUCT BUG (minor, reported to the e2e lead) behind this test's ~31s timeouts: `start` takes
+   * the lifecycle claims BEFORE it looks for the executable (`DaemonController.start` serializes,
+   * then `#start` calls `installedDaemon()`). On Linux one of those claims is HOST-GLOBAL
+   * (`/tmp/.<uid>.systemd.fyd.service.target.lifecycle.lock`, `layout.ts` `lifecycleLocksFor`), so
+   * while any other `fy daemon` verb on the machine holds it — a concurrent e2e run, or a claim
+   * stranded by a killed `start` — this refusal waits up to 140s instead of saying at once that there
+   * is no `fyd`, and the fixture's 30s command timeout fires first. Run this file with no other
+   * `fy daemon` lifecycle verb active on the host.
+   */
   it('should require a live executable only for the verbs that launch one', async () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = startStubDaemon(false);
+      await recordAddress(environment, stub);
 
       try {
         // Act — no `FY_DAEMON_BIN`, and the temp PATH has no `fyd`.
