@@ -125,6 +125,42 @@ describe('MachineSetupScreen', () => {
     await screen.view.unmount();
   });
 
+  it('stays on the first run through its import, so Done shows even though the machine is now set up', async () => {
+    // The machine is checked again right after the import, and then answers that it IS set up.
+    let imported = false;
+    const client = scriptedClient({
+      '/v1/fleet/machine': () => (imported ? machineView() : FRESH_MACHINE),
+      '/v1/fleet/setup/scan': scan(),
+      '/v1/fleet/runtimes': runtimes([]),
+      '/v1/fleet/proposals': (call: { body: unknown }) => ({
+        id: 'fy_fprop_abcdefghijklmnopqrstuv',
+        revision: 'absent',
+        change: (call.body as { change: unknown }).change,
+        summary: 'Import this machine’s setup',
+        consequences: [],
+        expiresAt: '2026-10-13T08:15:00.000Z',
+        state: 'pending',
+        preview: { kind: 'executor', executor: 'setup', description: 'Imports Claude Code and Codex.' },
+      }),
+      '/v1/fleet/proposals/fy_fprop_abcdefghijklmnopqrstuv/apply': () => {
+        imported = true;
+        return { outcome: 'executed', executor: 'setup', summary: 'studio mac is ready' };
+      },
+    });
+    const screen = await open(client);
+    await screen.click('[data-step-next]');
+    await screen.click('[data-harness-import]');
+    await screen.click('[data-harness-skip]');
+    expect(step(screen)).toBe('names');
+    await screen.click('[data-change-submit]');
+    expect(imported).toBe(true);
+    expect(step(screen)).toBe('done');
+    expect(screen.q('[data-setup-message]')).toBeNull();
+    await screen.click('[data-first-run-finish]');
+    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/runtimes']);
+    await screen.view.unmount();
+  });
+
   it('works without storage: it only cannot resume', async () => {
     const screen = await open(freshClient(), null);
     expect(step(screen)).toBe('tools');

@@ -12,7 +12,7 @@
  * "Finish setting up ‹machine›" banner until the machine is set up.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { daemonSessionsPath, daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { Button } from '../../../shell/primitives.tsx';
@@ -81,10 +81,14 @@ export function MachineSetupScreen({
     [daemonId, storage],
   );
 
+  // ONCE THE FIRST RUN IS ON SCREEN IT STAYS THERE. Its last step imports, and the machine is checked
+  // again right after — which answers "checking", then "set up". Either would replace the run with a
+  // message before it can show its own Done step, so a run that has started is only ever paused.
+  const started = useRef(false);
   const body = (() => {
-    if (shown.kind === 'checking' || shown.kind === 'locked')
+    if (!started.current && (shown.kind === 'checking' || shown.kind === 'locked'))
       return <SetupMessage title={`Checking ${machineName}…`} />;
-    if (shown.kind === 'unreadable')
+    if (!started.current && shown.kind === 'unreadable')
       return (
         <SetupMessage
           title={`Can’t set up ${machineName} here`}
@@ -96,7 +100,7 @@ export function MachineSetupScreen({
           }
         />
       );
-    if (shown.kind === 'online' && shown.machine.setUp)
+    if (!started.current && shown.kind === 'online' && shown.machine.setUp)
       return (
         <SetupMessage
           title={`${machineName} is already set up`}
@@ -113,6 +117,7 @@ export function MachineSetupScreen({
           }
         />
       );
+    started.current = true;
     return (
       <MachineFirstRun
         mode="setup"
@@ -121,7 +126,7 @@ export function MachineSetupScreen({
         machineName={machineName}
         machine={shown.kind === 'online' ? shown.machine : null}
         online={shown.kind !== 'offline'}
-        checking={false}
+        checking={shown.kind === 'checking'}
         onRetry={() => reach.check(daemonId)}
         createClient={createClient}
         {...(progress === undefined ? {} : { progress })}
