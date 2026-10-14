@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { resolveDevice } from '../../../src/lib/passkey/resolve';
-import { device, LAPTOP, LAPTOP_ID, OTHER_LAPTOP, PIXEL, PIXEL_ID } from './fixtures';
+import { resolveDevice } from '../../../src/lib/device/resolve';
+import { device, LAPTOP, LAPTOP_ID, OTHER_LAPTOP, PIXEL, PIXEL_ID } from '../passkey/fixtures';
 
 describe('resolving the device the owner typed', () => {
   it('should find a device by its id', () => {

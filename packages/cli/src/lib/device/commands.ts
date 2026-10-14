@@ -28,6 +28,10 @@ export function registerDeviceCommands(program: Command, controller: () => Devic
         'A remote device may widen ANOTHER device only if it holds pairing.configure, holds the capability',
         'itself, and confirms with a passkey step-up on that device.',
         '',
+        `A stolen or lost phone is removed HERE, at the machine: \`${bin} device revoke <device>\` takes its access away,`,
+        'closes every session it has open and forgets its passkeys, with no browser involved. It is recorded in the audit',
+        'journal.',
+        '',
         `Capabilities: ${DAEMON_CAPABILITIES.join(', ')}`,
       ].join('\n'),
     );
@@ -61,5 +65,26 @@ export function registerDeviceCommands(program: Command, controller: () => Devic
     )
     .action(async (query: string, capability: string, options: DeviceCommandOptions) => {
       await controller().grant(query, capability, options);
+    });
+
+  device
+    .command('revoke <device>')
+    .description('remove a paired device: close its sessions and forget its passkeys')
+    .option('-y, --yes', 'skip the typed confirmation; required when not on a terminal')
+    .addHelpText(
+      'after',
+      [
+        '',
+        "This is the at-the-machine way to remove a stolen phone: it needs no browser, only the host's admin",
+        'token. The device must be paired again to return.',
+        '',
+        '<device> is a device id, or a device name when exactly one device has that name.',
+        '',
+        `  ${bin} device revoke "Pixel 9"`,
+        `  ${bin} device revoke "Pixel 9" --yes`,
+      ].join('\n'),
+    )
+    .action(async (query: string, options: DeviceCommandOptions) => {
+      await controller().revoke(query, options);
     });
 }

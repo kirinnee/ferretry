@@ -5321,6 +5321,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           deviceState: [push, stepUp],
           // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
           connections: deviceConnections,
+          // A revocation somebody asked for lands in the owner's journal beside the grant changes.
+          audit: grantAudit,
         }),
       };
     },

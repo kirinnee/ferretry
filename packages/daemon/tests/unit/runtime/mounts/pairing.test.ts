@@ -44,6 +44,8 @@ const device = (id: string, name: string): PairedDevice => ({
 class FakePairing implements PairingSubsystem {
   readonly revoked: PairingId[] = [];
   readonly revokedDevices: string[] = [];
+  /** Who each revocation was asked by, as the dispatcher derived it. */
+  readonly revokers: string[] = [];
   observation: PairingCodeStatusResponse | undefined = {
     pairingId,
     status: 'pending',
@@ -79,12 +81,13 @@ class FakePairing implements PairingSubsystem {
     return this.granted;
   }
 
-  async revokeDevice(id: string): Promise<boolean> {
+  async revokeDevice(id: string, actor: string): Promise<boolean> {
     const remaining = this.granted.filter(entry => entry.id !== id);
     // Records what was actually taken away rather than what was asked, so a fixture can tell a
     // revocation that happened from one the route refused or found nothing to do.
     if (remaining.length === this.granted.length) return false;
     this.revokedDevices.push(id);
+    this.revokers.push(actor);
     this.granted = remaining;
     return true;
   }
@@ -397,6 +400,29 @@ describe('pairing routes', () => {
     should(again.status).equal(404);
     should(malformed.status).equal(404);
     should(jsonBody(malformed).code).equal('pairing_device_not_found');
+  });
+
+  it('should hand the revocation to the subsystem under the server-derived actor, never a claimed one', async () => {
+    // Arrange
+    const subject = new FakePairing();
+    const surface = await mount(subject, true, confirmedStepUp);
+
+    // Act
+    const byOwner = await surface.dispatch(
+      request({
+        method: 'DELETE',
+        path: `/v1/pair/devices/${deviceTwoId}`,
+        headers: { ...admin, 'x-ferretry-client': 'cli' },
+        loopback: true,
+      }),
+    );
+    const byDevice = await surface.dispatch(
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceOneId}`, ...localBrowser }),
+    );
+
+    // Assert
+    should([byOwner.status, byDevice.status]).deepEqual([200, 200]);
+    should(subject.revokers).deepEqual(['admin-cli', `device:${deviceOneId}`]);
   });
 
   it('should govern the device list and its revocation exactly as it governs the mint', async () => {
