@@ -973,6 +973,13 @@ const pipeFailures: Error[] = [];
 export function stdioPipeFailures(): readonly string[] {
   return pipeFailures.map(error => error.message);
 }
+
+const browserExits: string[] = [];
+
+/** Every Playwright-launched browser that has exited, with its code or signal. */
+export function browserExitLog(): readonly string[] {
+  return [...browserExits];
+}
 let spawnGuarded = false;
 /** Launches in flight, and the children spawned by them — the only ones a pipe failure may end. */
 let launching = 0;
@@ -999,6 +1006,13 @@ function guardExtraStdioPipes(): void {
       | { readonly stdio?: unknown }
       | undefined;
     if (Array.isArray(options?.stdio) && options.stdio.length > 3) {
+      // Who ended a browser is the first question when a journey loses one: record every exit.
+      const startedAt = new Date().toISOString();
+      child.once('exit', (code: number | null, signal: string | null) => {
+        browserExits.push(
+          `chrome pid ${String(child.pid)} started ${startedAt} exited ${new Date().toISOString()} code=${String(code)} signal=${String(signal)}`,
+        );
+      });
       for (let fd = 3; fd < options.stdio.length; fd += 1) {
         const onFailure = (error: Error): void => {
           pipeFailures.push(error);

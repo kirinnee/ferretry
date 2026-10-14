@@ -30,6 +30,7 @@ import {
   launchChromiumWithRetry,
   resolvePlaywright,
   evidenceScreenshot,
+  browserExitLog,
   stdioPipeFailures,
 } from './relay-harness.ts';
 
@@ -222,7 +223,11 @@ export async function launchProductBrowser(
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     }),
   );
-  const close = (): Promise<void> => closeChromeBounded(() => browser.close());
+  let closing = false;
+  const close = (): Promise<void> => {
+    closing = true;
+    return closeChromeBounded(() => browser.close());
+  };
   teardown.add('product chrome', close);
   const context = await browser.newContext({
     viewport: options.viewport ?? DESKTOP,
@@ -245,11 +250,13 @@ export async function launchProductBrowser(
     });
   });
   (browser as unknown as { on?: (event: string, handler: () => void) => void }).on?.('disconnected', () => {
+    // A close the harness asked for is not news; a browser that went away on its own is.
+    if (closing) return;
     void recordStep({
       journey: 'harness',
       step: 'chrome:disconnected',
       status: 'FLAG',
-      evidence: `the browser connection closed at ${new Date().toISOString()}; stdio guard caught: ${stdioPipeFailures().join(' | ') || 'nothing'}`,
+      evidence: `the browser went away on its own at ${new Date().toISOString()}; stdio guard caught: ${stdioPipeFailures().join(' | ') || 'nothing'}; exits: ${browserExitLog().slice(-3).join(' | ') || 'none recorded'}`,
     });
   });
   let session: Promise<CdpSession> | undefined;

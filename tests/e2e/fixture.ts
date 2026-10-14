@@ -240,54 +240,76 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, descriptio
   }
 }
 
+/**
+ * The shell that runs every short-lived command: output into files, exit status into a file LAST.
+ *
+ * `"$code.tmp"` then `mv` makes the status file appear atomically, so a reader that sees it also sees
+ * complete output files.
+ */
+const RECORDING_SHELL =
+  'out=$1; err=$2; code=$3; shift 3; "$@" >"$out" 2>"$err" </dev/null; echo $? >"$code.tmp"; mv "$code.tmp" "$code"';
+
+/**
+ * Run one short-lived command to completion: `{ code, out, err }`, or a timeout.
+ *
+ * WHY NOT A PIPE AND AN 'exit' EVENT. Bun 1.3 on a loaded runner sometimes loses the epoll
+ * registration that tells it a child exited (`EBADF … epoll_ctl`). The command still ran, but its
+ * result was lost. Re-running it is NOT a fix: a second `fy worktree rm` reported "already removed"
+ * and failed a journey that had in fact passed. So the result is written where nothing can lose it. A
+ * tiny shell runs the command with stdout and stderr redirected to files and writes the exit status to
+ * a third file when it is done, and this function waits for that file. The command runs exactly once,
+ * and nothing depends on Bun observing the child.
+ *
+ * The shell is its own process group, so a timeout ends the command and anything it started.
+ */
 async function runCaptured(
   executable: string,
   args: readonly string[],
   options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly timeoutMs?: number },
 ): Promise<CommandResult> {
-  let captured = await captureProcess(executable, args, options);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const scratch = await mkdtemp(join(tmpdir(), 'fy-e2e-run-'));
+  const files = { out: join(scratch, 'out'), err: join(scratch, 'err'), code: join(scratch, 'code') };
+  const launch = () =>
+    spawn('/bin/sh', ['-c', RECORDING_SHELL, 'sh', files.out, files.err, files.code, executable, ...args], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: 'ignore',
+      detached: true,
+    });
+  let child: ReturnType<typeof launch>;
   try {
-    try {
-      return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
-    } catch (error) {
-      /**
-       * The same Bun epoll loss as in `captureProcess`, delivered through the child's 'error' event
-       * instead of thrown by `spawn`: Bun could not register to hear the child exit, so its result is
-       * lost, not wrong.
-       *
-       * A child that never got a pid never ran, and one more attempt is still a single run. One that DID
-       * get a pid is waited out first — polled until the pid is gone, inside the same timeout — so two
-       * copies never run at once, and only then run once more. That second run is acceptable for this
-       * tier's commands (a second `fy pair` mints a fresh code; a read reads again) and is the price of
-       * a runner that drops epoll registrations; a command that must never run twice does not belong in
-       * `runFy`.
-       */
-      if (!isTransientBunSpawnFailure(error)) throw error;
-      const pid = captured.child.pid;
-      if (pid !== undefined) {
-        const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-        for (;;) {
-          try {
-            process.kill(pid, 0);
-          } catch {
-            break;
-          }
-          // A child Bun lost track of may never be reaped: a zombie has exited, whatever kill(0) says.
-          const state = await readFile(`/proc/${String(pid)}/stat`, 'utf8').catch(() => '');
-          if (/^\d+ \(.*\) Z /u.test(state)) break;
-          if (Date.now() > deadline) throw error;
-          await Bun.sleep(50);
-        }
-      }
-      await Bun.sleep(0);
-      captured = await captureProcess(executable, args, options);
-      return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
-    }
+    child = launch();
   } catch (error) {
-    captured.child.kill('SIGKILL');
-    await captured.exited.catch(() => undefined);
-    const output = captured.output();
-    throw new Error(`${(error as Error).message}\nstdout:\n${output.out}\nstderr:\n${output.err}`, { cause: error });
+    // No child exists when `spawn` throws, so one more attempt is still a single run.
+    if (!isTransientBunSpawnFailure(error)) throw error;
+    await Bun.sleep(0);
+    child = launch();
+  }
+  // Bun may still report the lost registration as an 'error'; the status file is the answer instead.
+  child.on('error', () => undefined);
+  const read = async (path: string): Promise<string> => readFile(path, 'utf8').catch(() => '');
+  try {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const status = (await read(files.code)).trim();
+      if (status !== '') return { code: Number(status), out: await read(files.out), err: await read(files.err) };
+      if (Date.now() > deadline) {
+        if (child.pid !== undefined) {
+          try {
+            process.kill(-child.pid, 'SIGKILL');
+          } catch {
+            // Already gone.
+          }
+        }
+        throw new Error(
+          `${basename(executable)} timed out after ${String(timeoutMs)}ms\nstdout:\n${await read(files.out)}\nstderr:\n${await read(files.err)}`,
+        );
+      }
+      await Bun.sleep(15);
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
   }
 }
 
