@@ -584,6 +584,9 @@ export class FleetCredentialsService {
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),
       needsLabel: needsLabel(entry, email, emails, entries),
       ...(entry.credential.clonedFrom === undefined ? {} : { clonedFrom: entry.credential.clonedFrom }),
+      ...(entry.credential.clonedFromDaemon === undefined
+        ? {}
+        : { clonedFromDaemon: entry.credential.clonedFromDaemon }),
       sharedWithTerminal: entry.credential.store === 'host',
       status: {
         word: status.word,

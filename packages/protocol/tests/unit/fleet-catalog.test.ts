@@ -290,6 +290,13 @@ describe('the account-model catalogue wire contract', () => {
       { kind: 'machine.settings', agentPermissions: 'auto' },
       { kind: 'setup.import', acceptedUpdates: ['instructions/main'], addDuplicates: true },
       { kind: 'clone.import', mode: 'alongside', bundle: { version: 1 } },
+      {
+        kind: 'clone.import',
+        mode: 'replace',
+        bundle: { version: 1 },
+        skip: ['hooks/guard'],
+        source: { daemonId: 'sha256:abc' },
+      },
     ];
 
     // Act

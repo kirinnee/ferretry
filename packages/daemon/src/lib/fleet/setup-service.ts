@@ -588,6 +588,8 @@ export class FleetSetupService {
         installed: HARNESSES.filter(harness => catalog.locate(harness) !== undefined),
         existingSkillItems: await this.deps.skillItems(),
         existingSecrets: await this.deps.secrets.names().catch(() => []),
+        ...(change.skip === undefined ? {} : { skip: change.skip }),
+        ...(change.source === undefined ? {} : { sourceDaemon: change.source.daemonId }),
       });
     } catch (error) {
       if (error instanceof CloneRefusal) throw new FleetCatalogRefusal('fleet_change_refused', error.message);

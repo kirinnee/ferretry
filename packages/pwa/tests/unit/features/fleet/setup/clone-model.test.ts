@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CLONE_FLOW_KIND,
+  cloneOriginName,
   clonePreview,
+  cloneSharesSentence,
   cloneSlots,
   cloneSourceState,
   cloneSteps,
   copiesRows,
+  documentSize,
   existingSentence,
+  runnableTitle,
 } from '../../../../../src/features/fleet/setup/clone-model.ts';
 import type { MachineReach } from '../../../../../src/features/fleet/shell/machine-reach.ts';
 import { bundle, credentialView, FRESH_MACHINE, machineView } from './setup-support.ts';
@@ -178,6 +182,8 @@ describe('copiesRows', () => {
       checkPaths: [],
       missingTools: [],
       notCopied: [],
+      runnables: [],
+      skipped: 0,
     });
     expect(rows.map(row => row.title)).toEqual(['3 components', '1 model set', '0 profiles', '2 runtimes']);
     expect(rows[0]?.detail).toBe('Instructions, MCP servers, skills, settings and hooks');
@@ -221,5 +227,59 @@ describe('cloneSlots', () => {
 
   it('is empty when nothing was cloned from the source', () => {
     expect(cloneSlots([credentialView('own')], 'work-linux')).toEqual([]);
+  });
+});
+
+describe('the review of what a copy runs (cross-machine §3a)', () => {
+  it('lists every MCP server, hook and setting that would run on the target, from the bundle itself', () => {
+    const preview = clonePreview(bundle(), machineView());
+    expect(preview.runnables.map(runnable => runnable.reference)).toEqual(['mcp/notes']);
+    expect(preview.runnables[0]?.entries[0]).toEqual({
+      label: 'Starts',
+      text: '/home/me/bin/notes-server',
+      document: false,
+    });
+  });
+
+  it('leaves a skipped component out of every count, and counts it as left out', () => {
+    const preview = clonePreview(bundle(), machineView(), ['mcp/notes']);
+    expect(preview.components).toBe(1);
+    expect(preview.skipped).toBe(1);
+    expect(preview.checkPaths).not.toContainEqual({ title: 'MCP server · notes', path: '/home/me/bin/notes-server' });
+    // Still listed, so the person can tick it back.
+    expect(preview.runnables.map(runnable => runnable.reference)).toEqual(['mcp/notes']);
+  });
+
+  it('titles a runnable by its kind and name, and sizes a document by its lines', () => {
+    expect(runnableTitle({ reference: 'hooks/guard', kind: 'hooks', name: 'guard', entries: [] })).toBe(
+      'Hooks · guard',
+    );
+    expect(documentSize('a\nb\n')).toBe('2 lines');
+    expect(documentSize('one')).toBe('1 line');
+  });
+
+  it('says what the source shares with the target before anything is picked (§3d)', () => {
+    expect(cloneSharesSentence('work-linux')).toBe(
+      'work-linux receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for work-linux to see. Logins and secret values never leave it.',
+    );
+  });
+});
+
+describe('cloneOriginName', () => {
+  const names = new Map([['sha256:work', 'Work laptop']]);
+
+  it('names a copy by the reader’s own label for the machine the browser verified', () => {
+    expect(cloneOriginName({ clonedFrom: 'work-mac', clonedFromDaemon: 'sha256:work' }, names)).toBe('Work laptop');
+  });
+
+  it('falls back to the name the source gave itself, said to be only that', () => {
+    expect(cloneOriginName({ clonedFrom: 'work-mac', clonedFromDaemon: 'sha256:gone' }, names)).toBe(
+      'work-mac (the name it gave itself)',
+    );
+    expect(cloneOriginName({ clonedFrom: 'work-mac' }, names)).toBe('work-mac (the name it gave itself)');
+  });
+
+  it('is undefined for something that was not copied', () => {
+    expect(cloneOriginName({}, names)).toBeUndefined();
   });
 });

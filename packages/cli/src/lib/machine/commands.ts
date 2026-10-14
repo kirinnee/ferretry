@@ -1,4 +1,5 @@
 import {
+  cloneRunnables,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
   type FleetMachineView,
@@ -166,17 +167,27 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
       .command('clone')
       .description('copy a setup exported from another machine; its logins arrive as empty slots to sign in')
       .argument('<file>', `the output of \`${bin} machine export\` on the other machine`)
+      .option('--replace', 'replace this machine’s profiles and runtimes instead of adding alongside (logins are kept)')
       .option(
-        '--replace',
-        'replace this machine’s profiles and runtimes instead of adding alongside (logins are kept)',
+        '--skip <component...>',
+        'leave a component out (mcp/notes, hooks/guard): the preview lists every one that runs a command here',
       ),
   ).action(async (file: string, _options: unknown, command: Command) => {
     const options = mergedOptions(command);
     const bundle = parseCloneBundle(await readLocalFile(deps.readText, file), file);
     const replace = options.replace === true;
+    const skip = Array.isArray(options.skip) ? (options.skip as string[]) : [];
+    // A copy that brings commands to run here always asks first, like a replace: the preview above the
+    // question is the only place a person sees them.
+    const runs = cloneRunnables(bundle).some(runnable => !skip.includes(runnable.reference));
     const outcome = await runChange(deps, {
-      change: { kind: 'clone.import', mode: replace ? 'replace' : 'alongside', bundle: { ...bundle } },
-      destructive: replace,
+      change: {
+        kind: 'clone.import',
+        mode: replace ? 'replace' : 'alongside',
+        bundle: { ...bundle },
+        ...(skip.length === 0 ? {} : { skip }),
+      },
+      destructive: replace || runs,
       options: writeFlags(options),
     });
     if (outcome !== undefined && options.json !== true) {

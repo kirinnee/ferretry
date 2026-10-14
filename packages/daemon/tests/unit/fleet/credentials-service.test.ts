@@ -437,7 +437,9 @@ describe('the credential list', () => {
       at: 4_000,
     };
     const service = serviceOf(
-      catalogOf(v2({ work: { ...claudeFerretry, clonedFrom: 'laptop' } }, { a: 'work' })),
+      catalogOf(
+        v2({ work: { ...claudeFerretry, clonedFrom: 'laptop', clonedFromDaemon: 'sha256:laptop' } }, { a: 'work' }),
+      ),
       fake,
     );
 
@@ -454,6 +456,7 @@ describe('the credential list', () => {
         store: 'ferretry',
         needsLabel: false,
         clonedFrom: 'laptop',
+        clonedFromDaemon: 'sha256:laptop',
         sharedWithTerminal: false,
         status: {
           word: 'refresh_due',

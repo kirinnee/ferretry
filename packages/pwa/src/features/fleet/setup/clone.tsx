@@ -6,9 +6,13 @@
  * hands it to this machine as the data of ONE reviewed change, `clone.import`, through the shared
  * change helper. Logins never travel: each becomes an empty slot here that needs sign-in, and Done
  * offers **Sign in once for n runtimes** on the busiest one (E31).
+ *
+ * The Preview lists everything the copy would RUN here — each MCP server's command line, each hook,
+ * each runnable setting and document — with a box to leave any of them out, and the change names the
+ * source by the daemon id this browser paired with, not by the name the source reports.
  */
 
-import type { FleetCloneBundle, FleetCredentialView } from '@ferretry/protocol';
+import type { CloneRunnable, FleetCloneBundle, FleetCredentialView } from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
@@ -28,15 +32,18 @@ import {
   type CloneMode,
   type ClonePreview,
   clonePreview,
+  cloneSharesSentence,
   cloneSlots,
   cloneSourceState,
   cloneSteps,
   copiesRows,
+  documentSize,
   existingSentence,
+  runnableTitle,
 } from './clone-model.ts';
 import { machineItemHash } from './settings-route.ts';
 import { useSetupAccess } from './setup-access.ts';
-import { RadioChoices, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
+import { RadioChoices, SetupCommand, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
 import { countWords, listWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 export interface CloneMachineProps extends MachineTabProps {
@@ -74,6 +81,7 @@ export function CloneMachine(props: CloneMachineProps) {
   const [reading, setReading] = useState(false);
   const [profiles, setProfiles] = useState(0);
   const [mode, setMode] = useState<CloneMode>('alongside');
+  const [skip, setSkip] = useState<readonly string[]>([]);
   const [result, setResult] = useState<CloneResult | null>(null);
   const [stepper, setStepper] = useState<StepperState>(() =>
     startStepper({
@@ -119,7 +127,7 @@ export function CloneMachine(props: CloneMachineProps) {
   const state = withSteps(stepper, steps);
   const at = currentFlow(state).at;
   const next = (): void => setStepper(stepForward(state));
-  const preview = bundle === null ? null : clonePreview(bundle, machine);
+  const preview = bundle === null ? null : clonePreview(bundle, machine, skip);
 
   const readSource = (password?: string): void => {
     setSourceIssue(null);
@@ -133,13 +141,22 @@ export function CloneMachine(props: CloneMachineProps) {
           return;
         }
         setBundle(answer.value);
+        // A fresh read is a fresh review: nothing it lists has been left out yet.
+        setSkip([]);
         setStepper(current => stepForward(withSteps(current, steps)));
       });
   };
 
   const copy = (password: string | undefined): void => {
-    if (bundle === null || preview === null) return;
-    void changes.apply({ kind: 'clone.import', mode, bundle: { ...bundle } }, password).then(async applied => {
+    if (bundle === null || preview === null || pickedRecord === undefined) return;
+    const change = {
+      kind: 'clone.import' as const,
+      mode,
+      bundle: { ...bundle },
+      ...(skip.length === 0 ? {} : { skip: [...skip] }),
+      source: { daemonId: String(pickedRecord.daemonId) },
+    };
+    void changes.apply(change, password).then(async applied => {
       if (applied.kind === 'refused') return;
       const credentials = await target.read((client, unlock) => readFleetCredentials(client, unlock));
       setResult({
@@ -175,6 +192,9 @@ export function CloneMachine(props: CloneMachineProps) {
         <div className="flex min-w-0 flex-col gap-3" data-clone-step="source">
           <p className="m-0 text-cell leading-base text-fg">
             Copy setup from which machine into <span className="font-mono">{machineName}</span>?
+          </p>
+          <p className="m-0 text-cell leading-base text-muted" data-clone-shares="">
+            {cloneSharesSentence(machineName)}
           </p>
           {sources.length === 0 ? (
             <SetupNote name="no-sources" title="No other machine is paired">
@@ -266,7 +286,28 @@ export function CloneMachine(props: CloneMachineProps) {
               />
             ))}
           </SetupSection>
+          {preview.runnables.length === 0 ? null : (
+            <RunsHere
+              runnables={preview.runnables}
+              skip={skip}
+              source={bundle.machine}
+              machineName={machineName}
+              onToggle={(reference, copy) =>
+                setSkip(current =>
+                  copy ? current.filter(entry => entry !== reference) : [...current, reference].toSorted(),
+                )
+              }
+            />
+          )}
           <SetupSection title="Doesn’t copy" name="not-copied">
+            {preview.skipped === 0 ? null : (
+              <SetupRow
+                status="needs_sign_in"
+                statusLabel="Doesn’t copy"
+                title={`${countWords(preview.skipped, 'component')} you left out`}
+                detail={`Not copied to ${machineName}, and removed from every profile that used ${preview.skipped === 1 ? 'it' : 'them'}.`}
+              />
+            )}
             <SetupRow
               status="needs_sign_in"
               statusLabel="Doesn’t copy"
@@ -373,6 +414,89 @@ export function CloneMachine(props: CloneMachineProps) {
     >
       {body()}
     </MachineStepper>
+  );
+}
+
+/**
+ * Everything the copy would run on this machine, one panel per component, each with a box that
+ * leaves it out. A document is folded, because a hook script can be long — but every line of it is
+ * there, and its size is on the fold.
+ */
+function RunsHere({
+  runnables,
+  skip,
+  source,
+  machineName,
+  onToggle,
+}: {
+  readonly runnables: readonly CloneRunnable[];
+  readonly skip: readonly string[];
+  readonly source: string;
+  readonly machineName: string;
+  readonly onToggle: (reference: string, copy: boolean) => void;
+}) {
+  return (
+    <SetupSection title={`Runs on ${machineName}`} name="runs">
+      <SetupNote
+        tone="warn"
+        name="runs-warning"
+        title={`${countWords(runnables.length, 'component')} would run commands here`}
+      >
+        <span>
+          They start the next time an agent launches on <span className="font-mono">{machineName}</span>. Read each one
+          and untick any you don’t trust: if <span className="font-mono">{source}</span> was ever broken into, this is
+          where it would plant a command.
+        </span>
+      </SetupNote>
+      {runnables.map(runnable => {
+        const copy = !skip.includes(runnable.reference);
+        return (
+          <div
+            key={runnable.reference}
+            className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
+            data-clone-runnable={runnable.reference}
+            data-copy={copy ? 'yes' : 'no'}
+          >
+            <label className="relative flex min-h-control min-w-0 cursor-pointer items-center gap-3 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus">
+              <input
+                type="checkbox"
+                checked={copy}
+                onChange={event => onToggle(runnable.reference, event.currentTarget.checked)}
+                className="shrink-0 accent-[var(--accent)]"
+                data-clone-copy={runnable.reference}
+              />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">
+                  {runnableTitle(runnable)}
+                </span>
+                <span className={copy ? 'text-cell text-muted' : 'text-cell text-warn'}>
+                  {copy ? `Copies to ${machineName}` : 'Left out: not copied'}
+                </span>
+              </span>
+            </label>
+            <dl className="m-0 flex min-w-0 flex-col gap-2">
+              {runnable.entries.map((entry, index) => (
+                <div key={`${entry.label}-${String(index)}`} className="flex min-w-0 flex-col gap-1">
+                  <dt className="[overflow-wrap:anywhere] text-meta text-muted">{entry.label}</dt>
+                  <dd className="m-0 min-w-0">
+                    {entry.document ? (
+                      <details className="min-w-0">
+                        <summary className="min-h-control cursor-pointer text-cell text-fg">
+                          Show all {documentSize(entry.text)}
+                        </summary>
+                        <SetupCommand>{entry.text}</SetupCommand>
+                      </details>
+                    ) : (
+                      <SetupCommand>{entry.text}</SetupCommand>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        );
+      })}
+    </SetupSection>
   );
 }
 

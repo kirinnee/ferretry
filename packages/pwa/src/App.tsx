@@ -28,7 +28,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
-import { ComponentsTab } from './features/fleet/components/components-tab.tsx';
+import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.tsx';
@@ -967,7 +967,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   }),
   credentials: CredentialsTab,
   profiles: ProfilesTab,
-  components: ComponentsTab,
+  components: ComponentsSurface,
   settings: MachineSettingsSurface,
 };
 

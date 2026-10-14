@@ -214,4 +214,20 @@ describe('registerMachineCommands', () => {
     should(world.prompt.questions).have.length(1);
     should(world.out.lines.filter(line => line.text.includes('fz credentials'))).have.length(2);
   });
+
+  it('should ask before a copy that brings a command to run here, and not once every such piece is skipped', async () => {
+    // Arrange
+    const runs = { ...bundle(), components: { ...bundle().components, mcp: { notes: { command: 'npx' } } } };
+    const world = fakeWorld({ answers: ['n'], files: { 'setup.json': JSON.stringify(runs) } });
+
+    // Act
+    await runCommand(registerMachineCommands, world, ['machine', 'clone', 'setup.json']);
+    await runCommand(registerMachineCommands, world, ['machine', 'clone', 'setup.json', '--skip', 'mcp/notes']);
+
+    // Assert
+    should(world.prompt.questions).have.length(1);
+    const staged = world.gateway.called('stage').map(call => call.args[0] as { skip?: string[] });
+    should(staged.map(change => change.skip)).eql([undefined, ['mcp/notes']]);
+    should(world.gateway.called('apply')).have.length(1);
+  });
 });

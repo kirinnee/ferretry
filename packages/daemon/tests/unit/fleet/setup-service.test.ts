@@ -774,6 +774,40 @@ describe('the clone.import executor', () => {
     );
   });
 
+  it('should leave out what the person skipped and record the source daemon the browser verified', async () => {
+    // Arrange
+    const { service, applied } = world();
+    const bundle = {
+      ...BUNDLE(),
+      components: { ...BUNDLE().components, mcp: { notes: { command: 'npx', args: ['-y', 'notes'] } } },
+    };
+    const change = {
+      kind: 'clone.import',
+      mode: 'alongside',
+      bundle,
+      skip: ['mcp/notes'],
+      source: { daemonId: 'sha256:work-mac' },
+    } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+
+    // Act
+    const description = await service.executors.clone.describe(change);
+    await service.executors.clone.execute(change);
+
+    // Assert
+    should(description).containEql('Leaves out mcp/notes: you chose not to copy it.');
+    const config = configOf(applied[0]?.documents ?? []);
+    should(config).not.containEql('notes');
+    should(config).containEql('clonedFromDaemon: sha256:work-mac');
+  });
+
+  it('should list each command a copy runs in the description', async () => {
+    const { service } = world();
+    const bundle = { ...BUNDLE(), components: { ...BUNDLE().components, mcp: { notes: { command: 'npx' } } } };
+    should(
+      await service.executors.clone.describe({ kind: 'clone.import', mode: 'alongside', bundle } as never),
+    ).containEql('Runs: mcp/notes — Starts: npx');
+  });
+
   it('should say nothing about signing in when the copy has no runtimes', async () => {
     const { service } = world();
     const bundle = { ...BUNDLE(), runtimes: {}, credentials: [] };

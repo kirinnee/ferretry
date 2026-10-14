@@ -1501,6 +1501,32 @@ describe('componentCatalog content', () => {
     should(body).not.containEql(FAKE_PASSWORD);
   });
 
+  it('should say where a cloned component came from, by name and by the verified daemon id', () => {
+    // Arrange
+    const model = parseAccountModel({
+      version: 2,
+      components: {
+        mcp: {
+          copied: { command: 'npx', clonedFrom: 'work-mac', clonedFromDaemon: 'sha256:work' },
+          named: { command: 'npx', clonedFrom: 'work-mac' },
+          own: { command: 'npx' },
+        },
+      },
+    });
+
+    // Act
+    const actual = componentCatalog(model, factsOf());
+
+    // Assert
+    should(componentNamed(actual, 'mcp/copied')).containDeep({
+      clonedFrom: 'work-mac',
+      clonedFromDaemon: 'sha256:work',
+    });
+    should(componentNamed(actual, 'mcp/named').clonedFrom).equal('work-mac');
+    should(componentNamed(actual, 'mcp/named')).not.have.property('clonedFromDaemon');
+    should(componentNamed(actual, 'mcp/own')).not.have.property('clonedFrom');
+  });
+
   it('should name the first path under somebody else’s home, and none under this machine’s', () => {
     // Act
     const actual = componentCatalog(contentModel(), contentFacts());

@@ -16,10 +16,22 @@
  *   runtime whose harness is missing is still copied (E29), and a `${secret:NAME}` reference stays a
  *   reference — one the target does not hold is named (L7, G7).
  *
+ * ## What runs on the target is listed, and each piece can be left behind
+ *
+ * MCP servers, hooks and settings start programs on the target the next time an agent launches there,
+ * so a copy from a machine that was broken into plants commands. {@link describeClone} lists every one
+ * of them in words — the same list the app's preview shows, from `cloneRunnables` in the protocol —
+ * and {@link CloneOptions.skip} leaves any component out, with every layer that names it. Everything
+ * copied records where it came from: the source's own name, and the daemon id the copying browser
+ * verified when it paired with it (`clonedFromDaemon`), because a name is only what a machine says.
+ * A carried document whose path is absolute or climbs out with `..` refuses the whole bundle.
+ *
  * Pure: a model and documents in, a plan out. Reading the source's files and writing the target's
  * are the setup service's.
  */
 import {
+  type CloneRunnable,
+  cloneRunnables,
   FLEET_CLONE_BUNDLE_FORMAT,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
@@ -141,6 +153,10 @@ export interface CloneOptions {
   readonly existingSkillItems: readonly string[];
   /** Secret names the target's store holds, so a reference it lacks is named (G7). */
   readonly existingSecrets: readonly string[];
+  /** Components (`<kind>/<name>`) the person chose not to copy. Each must be one the bundle has. */
+  readonly skip?: readonly string[];
+  /** The source's daemon id as the copying browser verified it, recorded on everything copied. */
+  readonly sourceDaemon?: string;
 }
 
 /** One thing that took another name because the target already had one (E28). */
@@ -182,6 +198,10 @@ export interface ClonePlan {
   /** Replace only: what the target lost first. */
   readonly removed: { readonly components: number; readonly profiles: number; readonly runtimes: number };
   readonly notCopied: readonly { readonly path: string; readonly reason: string }[];
+  /** Every copied component that runs something here, under the name it lands with. */
+  readonly runnables: readonly CloneRunnable[];
+  /** The components the person chose not to copy, as the bundle named them. */
+  readonly skipped: readonly string[];
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text. */
@@ -194,7 +214,11 @@ const countComponents = (components: AccountModel['components'], kinds: readonly
 
 const NON_MODEL_KINDS = COMPONENT_KINDS.filter(kind => kind !== 'modelSets');
 
-/** The bundle, refused with a sentence when it is not one. */
+/**
+ * The bundle, refused with a sentence when it is not one — or when a document it carries names a path
+ * outside the asset tree. The provisioner would refuse that write too; refusing here says why, before
+ * anything is planned.
+ */
 export function parseCloneBundle(input: unknown): FleetCloneBundle {
   const parsed = FleetCloneBundleSchema.safeParse(input);
   if (!parsed.success) {
@@ -202,7 +226,59 @@ export function parseCloneBundle(input: unknown): FleetCloneBundle {
       'That is not a setup exported by Ferretry, or it was exported by a version this machine cannot read.',
     );
   }
+  const outside = parsed.data.files.find(file => !isAssetRelative(file.path) || file.path.includes('\\'));
+  if (outside !== undefined) {
+    throw new CloneRefusal(
+      `The setup from ${parsed.data.machine} carries a file at ${outside.path}, outside its own setup folder, so none of it can be copied.`,
+    );
+  }
   return parsed.data;
+}
+
+/** Whether a carried document belongs to a component: its file, or inside its folder. */
+const belongsTo = (component: Readonly<Record<string, unknown>>, path: string): boolean =>
+  component.file === path ||
+  (typeof component.directory === 'string' && path.startsWith(`${component.directory.replace(/\/$/u, '')}/`));
+
+/**
+ * The bundle without the components the person left out: each one, every layer that names it, and
+ * every document only it carried. A skip that names nothing in the bundle is refused, so a stale
+ * review can never be mistaken for one that left something out.
+ */
+function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[]): FleetCloneBundle {
+  if (skip.length === 0) return bundle;
+  const skipped = new Set(skip);
+  const components: Record<string, Record<string, unknown>> = {};
+  const leftOut: Readonly<Record<string, unknown>>[] = [];
+  for (const [kind, entries] of Object.entries(bundle.components)) {
+    components[kind] = {};
+    for (const [name, component] of Object.entries(entries)) {
+      if (!skipped.delete(`${kind}/${name}`)) (components[kind] as Record<string, unknown>)[name] = component;
+      else if (typeof component === 'object' && component !== null) leftOut.push(component as Record<string, unknown>);
+    }
+  }
+  const unknown = [...skipped][0];
+  if (unknown !== undefined) {
+    throw new CloneRefusal(`The setup from ${bundle.machine} has no ${unknown} to leave out. Review it again.`);
+  }
+  const profiles = Object.fromEntries(
+    Object.entries(bundle.profiles).map(([name, profile]) => {
+      const layers = (profile as { layers?: unknown }).layers;
+      return [
+        name,
+        Array.isArray(layers)
+          ? { ...(profile as object), layers: layers.filter(layer => !skip.includes(layer as string)) }
+          : profile,
+      ];
+    }),
+  );
+  const kept = Object.values(components).flatMap(entries => Object.values(entries)) as Record<string, unknown>[];
+  const files = bundle.files.filter(
+    file =>
+      !leftOut.some(component => belongsTo(component, file.path)) ||
+      kept.some(component => belongsTo(component, file.path)),
+  );
+  return { ...bundle, components, profiles, files };
 }
 
 /** The bundle as a model of its own, so a damaged one is refused before anything is renamed. */
@@ -255,8 +331,16 @@ function referencedFiles(model: AccountModel): Set<string> {
  * Plan copying a bundle onto this machine. Throws {@link CloneRefusal} when the bundle is damaged or
  * the copy would make a configuration this machine cannot read.
  */
-export function planClone(target: AccountModel, bundle: FleetCloneBundle, options: CloneOptions): ClonePlan {
+export function planClone(target: AccountModel, offered: FleetCloneBundle, options: CloneOptions): ClonePlan {
+  const skipped = [...new Set(options.skip ?? [])].toSorted();
+  const bundle = withoutSkipped(offered, skipped);
   const source = bundleModel(bundle);
+  // Where it came from, on everything copied. Whatever the source said about its own items' origin is
+  // replaced: that is the source's claim, and this copy's origin is the source.
+  const origin = {
+    clonedFrom: bundle.machine,
+    ...(options.sourceDaemon === undefined ? {} : { clonedFromDaemon: options.sourceDaemon }),
+  };
   const replace = options.mode === 'replace';
   const base: AccountModel = replace
     ? {
@@ -281,7 +365,7 @@ export function planClone(target: AccountModel, bundle: FleetCloneBundle, option
       harness: credential.harness,
       store: 'ferretry',
       ...(label === undefined ? {} : { label }),
-      clonedFrom: bundle.machine,
+      ...origin,
     };
   }
 
@@ -299,7 +383,8 @@ export function planClone(target: AccountModel, bundle: FleetCloneBundle, option
       const free = freeName(name, candidate => components[kind][candidate] !== undefined);
       if (free !== name) renamed.push({ what: 'component', from: `${kind}/${name}`, to: `${kind}/${free}` });
       componentNames.set(`${kind}/${name}`, `${kind}/${free}`);
-      const copy: Record<string, unknown> = { ...value };
+      const { clonedFrom: _claimed, clonedFromDaemon: _claimedDaemon, ...own } = value;
+      const copy: Record<string, unknown> = { ...own, ...origin };
       for (const field of ['file', 'directory'] as const) {
         const file = copy[field];
         if (typeof file !== 'string' || !isAssetRelative(file) || field === 'directory') continue;
@@ -415,10 +500,25 @@ export function planClone(target: AccountModel, bundle: FleetCloneBundle, option
         }
       : { components: 0, profiles: 0, runtimes: 0 },
     notCopied: bundle.notCopied,
+    runnables: cloneRunnables(bundle).map(runnable => {
+      const reference = componentNames.get(runnable.reference) as string;
+      return { ...runnable, reference, name: reference.slice(runnable.kind.length + 1) };
+    }),
+    skipped,
   };
 }
 
 const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;
+
+/** One thing a copied component runs, as one line; a whole document follows on its own lines, indented. */
+function runnableLine(reference: string, entry: CloneRunnable['entries'][number]): string {
+  if (!entry.document) return `Runs: ${reference} — ${entry.label}: ${entry.text}`;
+  const body = entry.text.replace(/\n$/u, '').split('\n');
+  return [
+    `Runs: ${reference} — ${entry.label}, ${plural(body.length, 'line')}:`,
+    ...body.map(line => `  ${line}`),
+  ].join('\n');
+}
 
 /** What applying the copy would do, as the confirm card says it (§4.7 Preview and Done). */
 export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine: string): readonly string[] {
@@ -431,6 +531,15 @@ export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine
   lines.push(
     `Copies ${plural(plan.copied.components, 'component')}, ${plural(plan.copied.modelSets, 'model set')}, ${plural(plan.copied.profiles, 'profile')} and ${plural(plan.copied.runtimes, 'runtime')} from ${bundle.machine}.`,
   );
+  for (const reference of plan.skipped) lines.push(`Leaves out ${reference}: you chose not to copy it.`);
+  if (plan.runnables.length > 0) {
+    lines.push(
+      `${plural(plan.runnables.length, 'component')} from ${bundle.machine} ${plan.runnables.length === 1 ? 'runs' : 'run'} on ${machine} the next time an agent starts there. Everything each one runs is listed here; leave out any you don’t trust.`,
+    );
+  }
+  for (const runnable of plan.runnables) {
+    for (const entry of runnable.entries) lines.push(runnableLine(runnable.reference, entry));
+  }
   if (plan.slots.length > 0) {
     const slots = plan.slots
       .map(slot => `${slot.email ?? slot.label ?? slot.id} (used by ${plural(slot.runtimes.length, 'runtime')})`)

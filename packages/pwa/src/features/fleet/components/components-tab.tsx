@@ -9,7 +9,9 @@
 
 import type { FleetAccountChange, FleetComponentKind, FleetComponentView, FleetMachineView } from '@ferretry/protocol';
 import { Lock } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useConnectionSnapshot } from '../../../lib/store.tsx';
+import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { Button } from '../../../shell/primitives.tsx';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
@@ -70,7 +72,24 @@ const parentOf = (page: Page, catalog: AccountCatalog): Page => {
   }
 };
 
-export function ComponentsTab({ connection, machineName, machine, online, createClient }: MachineTabProps) {
+/** The tab as the composition root mounts it: the reader's own name for each paired machine comes from the store. */
+export function ComponentsSurface(props: MachineTabProps) {
+  const { connections } = useConnectionSnapshot();
+  const machineNames = useMemo(
+    () => new Map(connections.map(record => [String(record.daemonId), daemonDisplayName(record)])),
+    [connections],
+  );
+  return <ComponentsTab {...props} machineNames={machineNames} />;
+}
+
+export function ComponentsTab({
+  connection,
+  machineName,
+  machine,
+  online,
+  createClient,
+  machineNames = new Map(),
+}: MachineTabProps & { readonly machineNames?: ReadonlyMap<string, string> }) {
   const { read, reload } = useAccountCatalog(connection, createClient);
   const [page, setPage] = useState<Page>({ kind: 'kinds' });
   const [saved, setSaved] = useState<string | undefined>(undefined);
@@ -96,7 +115,18 @@ export function ComponentsTab({ connection, machineName, machine, online, create
       setSaved(message);
     });
   };
-  const shared = { catalog, machine, machineName, online, connection, createClient, onBack: back, open, done };
+  const shared = {
+    catalog,
+    machine,
+    machineName,
+    machineNames,
+    online,
+    connection,
+    createClient,
+    onBack: back,
+    open,
+    done,
+  };
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-components-page={page.kind}>
@@ -122,6 +152,8 @@ interface SharedProps {
   readonly catalog: AccountCatalog;
   readonly machine: FleetMachineView | null;
   readonly machineName: string;
+  /** This browser's own label for each paired machine, by daemon id. */
+  readonly machineNames: ReadonlyMap<string, string>;
   readonly online: boolean;
   readonly connection: MachineTabProps['connection'];
   readonly createClient: MachineTabProps['createClient'];
@@ -156,7 +188,7 @@ function KindsPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Pa
   );
 }
 
-function ListPage({ catalog, machineName, of, onBack, open }: SharedProps & { of: FleetComponentKind }) {
+function ListPage({ catalog, machineName, machineNames, of, onBack, open }: SharedProps & { of: FleetComponentKind }) {
   const group = catalog.components.kinds.find(candidate => candidate.kind === of);
   const list = group?.components ?? [];
   return (
@@ -176,7 +208,7 @@ function ListPage({ catalog, machineName, of, onBack, open }: SharedProps & { of
               key={component.reference}
               title={component.name}
               mono={component.kind === 'mcp'}
-              badges={<ComponentBadges badges={componentBadges(component, machineName)} />}
+              badges={<ComponentBadges badges={componentBadges(component, machineName, machineNames)} />}
               sub={`Used by ${counted(component.usedBy.profiles.length, 'profile')}, ${counted(component.usedBy.runtimes.length, 'runtime')}`}
               onOpen={() => open({ kind: 'detail', reference: component.reference })}
               data={{ 'data-component-row': component.reference }}
@@ -307,13 +339,13 @@ function Content({ component }: { component: FleetComponentView }) {
 }
 
 function DetailPage(props: SharedProps & { component: FleetComponentView }) {
-  const { component, catalog, machineName, open, onBack } = props;
+  const { component, catalog, machineName, machineNames, open, onBack } = props;
   const [deleting, setDeleting] = useState(false);
   const layerIn = profilesWithLayer(component.reference, catalog.profiles.profiles);
   return (
     <>
       <PageHead title={component.name} sub={KIND_ONE[component.kind]} mono={component.kind === 'mcp'} onBack={onBack} />
-      <ComponentBadges badges={componentBadges(component, machineName)} />
+      <ComponentBadges badges={componentBadges(component, machineName, machineNames)} />
       {component.harness === undefined && component.kind !== 'modelSets' ? (
         <Prose>Ferretry adapts this for each harness, so it works in Claude Code and Codex.</Prose>
       ) : null}
