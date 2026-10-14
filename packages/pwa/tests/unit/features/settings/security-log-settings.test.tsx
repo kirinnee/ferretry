@@ -172,6 +172,33 @@ describe('Settings › Security log', () => {
     await shown.unmount();
   });
 
+  it('drops an older page that answers after the reader moved to another machine', async () => {
+    let releaseOlder: (view: AuditView) => void = () => undefined;
+    const createClient: SecurityLogClientFactory = async connection => ({
+      request: (async (path: string) => {
+        if (connection.daemonId === beta.daemonId) return empty({ records: [record({ event: 'terminal.opened' })] });
+        if (!path.includes('keptOffset')) return empty({ kept: [record()], keptTotal: 2 });
+        return await new Promise<AuditView>(resolve => {
+          releaseOlder = resolve;
+        });
+      }) as SecurityLogClient['request'],
+    });
+    const shown = await mount(<SecurityLogSurface connection={alpha} createClient={createClient} now={now} />);
+    await settled(shown.container, '[data-security-log-older]');
+    await interact(() =>
+      must(shown.container.querySelector<HTMLButtonElement>('[data-security-log-older]'), 'older').click(),
+    );
+    await shown.render(<SecurityLogSurface connection={beta} createClient={createClient} now={now} />);
+    await settled(shown.container, '[data-security-log-panel]');
+    await runAsync(async () => releaseOlder(empty({ kept: [record({ event: 'grants.changed' })], keptTotal: 2 })));
+    expect(
+      [...shown.container.querySelectorAll('[data-security-log-event]')].map(row =>
+        row.getAttribute('data-security-log-event'),
+      ),
+    ).toEqual(['terminal.opened']);
+    await shown.unmount();
+  });
+
   it('marks nothing as looked when the read is refused', async () => {
     const seen: DevicesLookedDetail[] = [];
     const listener = (event: Event): void => void seen.push((event as CustomEvent<DevicesLookedDetail>).detail);

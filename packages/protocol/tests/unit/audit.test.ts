@@ -23,7 +23,11 @@ const auditCases: SchemaCase[] = [
   { name: 'detail', schema: audit.AuditDetailSchema, value: record.detail },
   { name: 'record', schema: audit.AuditRecordSchema, value: record },
   { name: 'query', schema: audit.AuditQuerySchema, value: { limit: 200 } },
-  { name: 'view', schema: audit.AuditViewSchema, value: { records: [record], unreadable: 1 } },
+  {
+    name: 'view',
+    schema: audit.AuditViewSchema,
+    value: { records: [record], kept: [record], keptTotal: 3, unreadable: 1 },
+  },
 ];
 
 describe('audit schemas', () => {
@@ -60,8 +64,8 @@ describe('audit schemas', () => {
 
   it('should default the page and coerce a query string', () => {
     // Arrange / Act / Assert
-    should(audit.AuditQuerySchema.parse({})).deepEqual({ limit: audit.AUDIT_DEFAULT_LIMIT });
-    should(audit.AuditQuerySchema.parse({ limit: '7' })).deepEqual({ limit: 7 });
+    should(audit.AuditQuerySchema.parse({})).deepEqual({ limit: audit.AUDIT_DEFAULT_LIMIT, keptOffset: 0 });
+    should(audit.AuditQuerySchema.parse({ limit: '7', keptOffset: '40' })).deepEqual({ limit: 7, keptOffset: 40 });
   });
 
   it('should have no room for a command line, a blob or a nested document', () => {
@@ -79,7 +83,12 @@ describe('audit schemas', () => {
       { name: 'empty name', schema: audit.AuditActorSchema, value: { kind: 'device', deviceName: '' } },
       { name: 'limit zero', schema: audit.AuditQuerySchema, value: { limit: 0 } },
       { name: 'limit past 200', schema: audit.AuditQuerySchema, value: { limit: 201 } },
-      { name: 'negative unreadable', schema: audit.AuditViewSchema, value: { records: [], unreadable: -1 } },
+      {
+        name: 'negative unreadable',
+        schema: audit.AuditViewSchema,
+        value: { records: [], kept: [], keptTotal: 0, unreadable: -1 },
+      },
+      { name: 'negative offset', schema: audit.AuditQuerySchema, value: { keptOffset: -1 } },
     ];
 
     // Act / Assert
