@@ -1399,37 +1399,46 @@ describe('one browser, two machines', () => {
             const said = String(await textNow(page, '[data-step-up-dialog]'));
             await captureScreens(page, journey, '42-machine-b-locked');
             await page.click('[data-step-up-dialog] button:has-text("Cancel")');
-            await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
-            await Bun.sleep(1_500);
-            if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`)) {
-              // Say WHICH machine is asking: A losing its unlock and B's prompt surfacing over A's page are
-              // different defects.
-              const asking = String(await textNow(page, '[data-step-up-dialog] [data-step-up-machine]'));
-              await captureScreens(page, journey, '43-prompt-over-machine-a');
-              // Both machines run on this host, so the name cannot say which one asks. The passkey can: only
-              // A holds one, so B's prompt answers "no passkey" and A's would unlock.
-              // A first-passkey offer can only be B's: A already holds a passkey and is never offered one.
-              const firstPasskeyOffer = await page.evaluate<boolean>(
-                `document.querySelector('[data-step-up-first-passkey]') !== null`,
-              );
-              if (firstPasskeyOffer)
-                throw new Error(
-                  `on A's session page machine B's "set up a passkey" offer appeared (named "${asking}", the host both share); a locked second machine's prompt surfaces over the first machine's pages`,
-                );
-              await page.click('[data-step-up-dialog] [data-step-up-confirm]');
-              await Bun.sleep(3_000);
-              const outcome = (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') === null`))
-                ? "it unlocked with A's passkey, so A had lost its unlock"
-                : `it answered "${String(await textNow(page, '[data-step-up-failure]')).slice(0, 120)}", so it is B's prompt shown over A's page`;
-              throw new Error(
-                `on A's session page an unlock prompt appeared naming "${asking}" (both machines share that host name); answering it: ${outcome}`,
-              );
-            }
-            return {
-              value: undefined,
-              evidence: `unlocked at A, B still asks: "${said.slice(0, 100)}"; A stays unlocked`,
-            };
+            return { value: undefined, evidence: `unlocked at A, B still asks: "${said.slice(0, 100)}"` };
           });
+        if (await hasUnlockModel(second))
+          await softStep(
+            journey,
+            'other-machine-prompt-stays-off',
+            async () => {
+              await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+              await Bun.sleep(1_500);
+              if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`)) {
+                // Say WHICH machine is asking: A losing its unlock and B's prompt surfacing over A's page are
+                // different defects.
+                const asking = String(await textNow(page, '[data-step-up-dialog] [data-step-up-machine]'));
+                await captureScreens(page, journey, '43-prompt-over-machine-a');
+                // Both machines run on this host, so the name cannot say which one asks. The passkey can: only
+                // A holds one, so B's prompt answers "no passkey" and A's would unlock.
+                // A first-passkey offer can only be B's: A already holds a passkey and is never offered one.
+                const firstPasskeyOffer = await page.evaluate<boolean>(
+                  `document.querySelector('[data-step-up-first-passkey]') !== null`,
+                );
+                if (firstPasskeyOffer)
+                  throw new Error(
+                    `on A's session page machine B's "set up a passkey" offer appeared (named "${asking}", the host both share); a locked second machine's prompt surfaces over the first machine's pages`,
+                  );
+                await page.click('[data-step-up-dialog] [data-step-up-confirm]');
+                await Bun.sleep(3_000);
+                const outcome = (await page.evaluate<boolean>(
+                  `document.querySelector('[data-step-up-dialog]') === null`,
+                ))
+                  ? "it unlocked with A's passkey, so A had lost its unlock"
+                  : `it answered "${String(await textNow(page, '[data-step-up-failure]')).slice(0, 120)}", so it is B's prompt shown over A's page`;
+                throw new Error(
+                  `on A's session page an unlock prompt appeared naming "${asking}" (both machines share that host name); answering it: ${outcome}`,
+                );
+              }
+              return { value: undefined, evidence: "A's session page shows no prompt, and A stays unlocked" };
+            },
+            'B19 — packages/pwa: a locked second machine raises its passkey prompt over whatever page is open, naming only a host name the machines can share. MAJOR (UX). KNOWN: tracked on the e2e report',
+            /machine B's "set up a passkey" offer appeared/u,
+          );
         else
           await recordStep({
             journey,

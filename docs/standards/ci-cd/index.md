@@ -18,11 +18,12 @@ If a workflow step contains repository logic beyond that shape, the logic is in 
 
 ## Workflow split
 
-| Workflow  | Trigger                                   | Responsibility                                     |
-| --------- | ----------------------------------------- | -------------------------------------------------- |
-| `CI`      | every push, pull request, manual dispatch | gates, tests, compile, SIT, cross-platform smoke   |
-| `Release` | `CI` completed successfully on `main`     | semantic-release: version, changelog, `vX.Y.Z` tag |
-| `CD`      | push of a `v*.*.*` tag                    | GoReleaser publishes the release and its channels  |
+| Workflow  | Trigger                                                     | Responsibility                                         |
+| --------- | ----------------------------------------------------------- | ------------------------------------------------------ |
+| `CI`      | every push, pull request, manual dispatch                   | gates, tests, compile, SIT, cross-platform smoke       |
+| `E2E`     | pull requests touching the tier's packages, manual dispatch | the e2e tier: compiled binaries, real PWA, real Chrome |
+| `Release` | `CI` completed successfully on `main`                       | semantic-release: version, changelog, `vX.Y.Z` tag     |
+| `CD`      | push of a `v*.*.*` tag                                      | GoReleaser publishes the release and its channels      |
 
 The chain is deliberately one-directional: CI proves the tree, Release decides the version and
 pushes the tag, the tag fires CD. Nothing else publishes anything.
@@ -61,6 +62,30 @@ Notable details:
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
   the binary name from the CLI package's `bin` key so the matrix stays rename-proof
   ([Architecture](../architecture/index.md)).
+
+## E2E tier
+
+`E2E` (`.github/workflows/e2e.yaml`) runs `nix develop .#ci -c ./scripts/ci/e2e.sh`. That script compiles the
+binaries and hands off to `scripts/test/run-e2e.sh`, which runs every journey in `tests/e2e/` against the
+compiled `fy`/`fyd`, the real built PWA, the runner's Google Chrome and a local rendezvous
+([Testing](../testing/index.md)). It is its own workflow because GitHub filters by path per workflow. It runs on
+pull requests that touch `packages/{pwa,daemon,relay,protocol,cli}` or the tier itself, and on manual dispatch.
+
+- **Evidence is an artifact.** The `e2e-evidence` artifact uploads with `if: always()`. It holds every screen
+  the journeys reached at 390 px and 1280 px in both colour schemes, the per-step journey log, and the relay
+  ledger.
+- **It is NOT a required check yet.** The tier drives a real browser through Bun, and Bun 1.3 occasionally
+  drops a child's pipes. The harness retries those failures, or bounds them and names them, but the real
+  flake rate on hosted runners is unmeasured. It becomes a required branch-protection check after **two
+  weeks** of runs, measured from the merge of the change that added this section. If the rate is not
+  close to zero by then, a flake goes on record as a bug with its run, rather than the check being
+  required anyway.
+- **A known open bug does not turn it red, and cannot hide.** A journey step that asserts a reported, still-open
+  product bug passes `softStep` a `knownWhen` pattern. While that exact failure reproduces, the step is
+  logged as `KNOWN` with its bug note. Once it passes, the run fails with "remove the marker". Any other
+  failure of that step is an ordinary failure.
+- About ten minutes on `ubuntu-latest`, with `timeout-minutes: 30` so a wedged browser cannot hold a runner
+  for six hours.
 
 ## Superseded runs
 

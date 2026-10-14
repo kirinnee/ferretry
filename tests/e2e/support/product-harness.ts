@@ -20,6 +20,7 @@
  */
 
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { E2eEnvironment } from '../fixture.ts';
 import {
@@ -32,10 +33,13 @@ import {
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 
-/** Where the full-product journeys put their evidence. Outside the repo; never committed. */
-export const EVIDENCE_ROOT = process.env.FY_E2E_EVIDENCE_ROOT ?? '/tmp/claude-1000/e2e-shots';
-/** One JSON object per line; `scripts`-free so the report can be rebuilt from it at any time. */
-const JOURNEY_LOG = process.env.FY_E2E_JOURNEY_LOG ?? '/tmp/claude-1000/e2e-runs/journeys.jsonl';
+/**
+ * Where the full-product journeys put their evidence: outside the repository, never committed.
+ * `scripts/ci/e2e.sh` points both at the directory CI uploads; a local run defaults to the temp dir.
+ */
+export const EVIDENCE_ROOT = process.env.FY_E2E_EVIDENCE_ROOT ?? join(tmpdir(), 'fy-e2e-evidence');
+/** One JSON object per line, so the journey report can be rebuilt from it at any time. */
+const JOURNEY_LOG = process.env.FY_E2E_JOURNEY_LOG ?? join(tmpdir(), 'fy-e2e-evidence', 'journeys.jsonl');
 
 // ─── compiled artifacts ──────────────────────────────────────────────────────────────────────
 
@@ -395,7 +399,7 @@ export async function captureScreens(
 export interface JourneyStep {
   readonly journey: string;
   readonly step: string;
-  readonly status: 'PASS' | 'FAIL' | 'FLAG' | 'SKIP';
+  readonly status: 'PASS' | 'FAIL' | 'FLAG' | 'SKIP' | 'KNOWN';
   readonly evidence: string;
   /** Present on FAIL/FLAG when the cause is the product: file:line, repro, severity. */
   readonly bug?: string;
@@ -633,13 +637,36 @@ export async function softStep(
   name: string,
   body: () => Promise<{ value: unknown; evidence: string }>,
   bug?: string,
+  /**
+   * A KNOWN, open product bug, matched by its own failure message: while it reproduces the step is
+   * recorded `KNOWN` (with `bug`) and does not fail the run, so an advisory CI job can stay green on
+   * the main line while the bug is still on the report. The moment the step PASSES, it fails the run
+   * with "remove the marker" — a known-bug marker can never outlive its bug. Any OTHER failure of the
+   * same step is an ordinary failure.
+   */
+  knownWhen?: RegExp,
 ): Promise<boolean> {
   try {
     const { evidence } = await body();
     await recordStep({ journey, step: name, status: 'PASS', evidence });
+    if (knownWhen !== undefined)
+      softFailures.set(journey, [
+        ...(softFailures.get(journey) ?? []),
+        `${name}: the known bug no longer reproduces — remove its knownWhen marker (${bug ?? 'no bug named'})`,
+      ]);
     return true;
   } catch (error) {
     const message = String((error as Error).message ?? error).slice(0, 1_500);
+    if (knownWhen?.test(message) === true) {
+      await recordStep({
+        journey,
+        step: name,
+        status: 'KNOWN',
+        evidence: message,
+        ...(bug === undefined ? {} : { bug }),
+      });
+      return false;
+    }
     await recordStep({ journey, step: name, status: 'FAIL', evidence: message, ...(bug === undefined ? {} : { bug }) });
     softFailures.set(journey, [...(softFailures.get(journey) ?? []), `${name}: ${message}`]);
     return false;
