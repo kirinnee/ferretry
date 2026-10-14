@@ -34,8 +34,14 @@
  */
 
 import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { SessionConfigSchema, SessionStateSchema } from '../../../packages/protocol/src/lib/index.ts';
+import {
+  DEFAULT_SECURITY_SETTINGS,
+  SecuritySettingsSchema,
+  SessionConfigSchema,
+  SessionStateSchema,
+} from '../../../packages/protocol/src/lib/index.ts';
 import { buildWorld } from '../../../packages/daemon/bin/fyd.ts';
 import { parseSessionId } from '../../../packages/daemon/src/lib/session-id.ts';
 
@@ -101,9 +107,29 @@ export async function seedRunningSession(home: string, at = new Date().toISOStri
       SessionStateSchema.parse({ id: SEEDED_SESSION_ID, status: 'running', turn: 1, lastActivityAt: at }),
     );
     await opened.storage.close();
+    await writeUnlockOff(home, at);
     return { sessionId: SEEDED_SESSION_ID };
   } finally {
     if (previous === undefined) delete process.env.FY_HOME;
     else process.env.FY_HOME = previous;
   }
+}
+
+/**
+ * THE MACHINE IS SEEDED WITH THE UNLOCK OFF, and this is the second thing this file substitutes.
+ *
+ * A machine unlocks on opening by default (`docs/design/zero-trust.md` B1): a paired browser can do
+ * nothing until it unlocks with a passkey. A real passkey needs a real authenticator, and this journey
+ * proves the CARRIER — pairing and a live stream across a relay — not the unlock, whose gate, lapse and
+ * stream re-check are proved in the daemon's unit tier against the real dispatcher. So this home's
+ * `state/security.json` turns the unlock off, written in the document's own schema, and every other
+ * setting is the default.
+ */
+async function writeUnlockOff(home: string, at: string): Promise<void> {
+  const state = join(home, 'state');
+  await mkdir(state, { recursive: true });
+  const settings = SecuritySettingsSchema.parse({ ...DEFAULT_SECURITY_SETTINGS, unlockOnOpen: false });
+  await writeFile(join(state, 'security.json'), `${JSON.stringify({ schemaVersion: 1, settings, updatedAt: at })}\n`, {
+    mode: 0o600,
+  });
 }
