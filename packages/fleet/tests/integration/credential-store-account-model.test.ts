@@ -74,6 +74,37 @@ class ScriptedCommand implements CredentialCommand {
   }
 }
 
+/** What Claude writes over a refresh token the provider refused (`invalid_grant`): a dead login. */
+const DEAD_CLAUDE_BLOB = JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0 } });
+
+/**
+ * A keychain that keeps items by (`acct`, `svce`) and answers `find-generic-password` the way
+ * `security` does: with `-a`, that exact pair; with `-s` alone, the FIRST item of that name.
+ */
+class FakeKeychain implements CredentialCommand {
+  readonly #items: { readonly account: string; readonly service: string; readonly secret: string }[] = [];
+
+  add(account: string, service: string, secret: string): void {
+    this.#items.push({ account, service, secret });
+  }
+
+  run(command: readonly [string, ...string[]]): Promise<CredentialCommandResult> {
+    const option = (flag: string): string | undefined => {
+      const at = command.indexOf(flag);
+      return at < 0 ? undefined : command[at + 1];
+    };
+    if (command[1] !== 'find-generic-password') throw new Error(`unexpected command: ${command.join(' ')}`);
+    const service = option('-s');
+    const account = option('-a');
+    const found = this.#items.find(
+      item => item.service === service && (account === undefined || item.account === account),
+    );
+    return Promise.resolve(
+      found === undefined ? { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' } : { code: 0, stdout: `${found.secret}\n` },
+    );
+  }
+}
+
 const storeOn = (platform: string, replies: readonly CredentialCommandResult[] = []) => {
   const command = new ScriptedCommand(replies);
   return {
@@ -209,7 +240,15 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude on macOS', () =
     // Assert
     should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
     should(command.calls).deepEqual([
-      ['security', 'find-generic-password', '-s', secureStorageKeychainService(resolution.secureStorage), '-w'],
+      [
+        'security',
+        'find-generic-password',
+        '-a',
+        'placeholder-user',
+        '-s',
+        secureStorageKeychainService(resolution.secureStorage),
+        '-w',
+      ],
     ]);
   });
 
@@ -220,7 +259,46 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude on macOS', () =
 
     await store.readStored(resolution);
 
-    should(command.calls).deepEqual([['security', 'find-generic-password', '-s', DEFAULT_KEYCHAIN_SERVICE, '-w']]);
+    should(command.calls).deepEqual([
+      ['security', 'find-generic-password', '-a', 'placeholder-user', '-s', DEFAULT_KEYCHAIN_SERVICE, '-w'],
+    ]);
+  });
+
+  it('should read the item under Claude’s own acct when a stale item shares its name', async () => {
+    // Arrange — a Mac that ran an older Ferretry: a dead copy under another acct was stored FIRST, so a
+    // read by name alone meets it before the login Claude has just written under $USER.
+    const world = await machine();
+    const resolution = world.resolve('claude-you', { harness: 'claude', store: 'host' });
+    const keychain = new FakeKeychain();
+    keychain.add('', DEFAULT_KEYCHAIN_SERVICE, DEAD_CLAUDE_BLOB);
+    keychain.add('placeholder-user', DEFAULT_KEYCHAIN_SERVICE, claudeBlob(NOW + HOUR));
+    const store = new PlatformFleetCredentialStore({
+      platform: 'darwin',
+      command: keychain,
+      now: () => NOW,
+      keychainAccount: 'placeholder-user',
+    });
+
+    // Act
+    const actual = await store.readStored(resolution);
+
+    // Assert
+    should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
+  });
+
+  it('should read an item under another acct as absent, exactly as Claude would', async () => {
+    const world = await machine();
+    const resolution = world.resolve('claude-you', { harness: 'claude', store: 'host' });
+    const keychain = new FakeKeychain();
+    keychain.add('someone-else', DEFAULT_KEYCHAIN_SERVICE, claudeBlob(NOW + HOUR));
+    const store = new PlatformFleetCredentialStore({
+      platform: 'darwin',
+      command: keychain,
+      now: () => NOW,
+      keychainAccount: 'placeholder-user',
+    });
+
+    should(await store.readStored(resolution)).deepEqual({ state: 'missing' });
   });
 
   it('should fall back to the store file only when the item is absent', async () => {

@@ -49,6 +49,17 @@
  * puts each Codex runtime's link in place. Nothing in that path copies a credential, and nothing links
  * a Claude one.
  *
+ * ## THAT ONE ITEM IS NAMED BY TWO ATTRIBUTES, AND READING BY ONE OF THEM SIGNED THE OWNER OUT
+ *
+ * Claude looks its item up by the PAIR (`acct`, `svce`): `find-generic-password -a <user> -w -s
+ * <service>` (claude-code 2.1.296), where `<user>` is `$USER`. `security` asked by `-s` alone
+ * answers with WHICHEVER item of that name it meets first — and a Mac that ever ran an older Ferretry
+ * holds a second `Claude Code-credentials` beside the harness's, under another `acct` (see
+ * {@link harnessKeychainAccount}). Reading that stale copy, `storedMaterial` reported a login Claude
+ * had just written as `missing`, and a web sign-in that succeeded ended with "no usable login was
+ * written". So the account model reads with `-a` as well, and therefore reads exactly the item Claude
+ * itself would read — never a stranger with the same name.
+ *
  * **Credential material never leaves this adapter layer.** `read` returns a classification and `clone` copies
  * end to end, so no service, renderer or log line is ever handed a token. Nothing here writes a
  * message containing material, and the classifiers it calls are pure functions over it.
@@ -154,9 +165,11 @@ export interface PlatformCredentialStoreDeps {
   /** The clock classification compares an expiry against. */
   readonly now: () => number;
   /**
-   * The keychain `acct` attribute to use when the item being written does not exist yet and the donor
-   * item does not name one. Supplied by the composition root, which is the only place that may read
-   * the environment. See {@link harnessKeychainAccount} for why it must never be empty.
+   * The keychain `acct` attribute Claude uses on this host: the one an account-model credential is READ
+   * under (Claude looks its item up by `acct` and `svce` together), and the one written when the item
+   * being written does not exist yet and the donor item does not name one. Supplied by the composition
+   * root, which is the only place that may read the environment. See {@link harnessKeychainAccount} for
+   * why it must never be empty.
    */
   readonly keychainAccount: string;
   /**
@@ -328,7 +341,11 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
   async storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial> {
     if (resolution.harness === 'codex') return await readFileMaterial(resolution.canonicalFile);
     if (this.deps.platform === 'darwin') {
-      const keychain = await this.#readKeychainItem(secureStorageKeychainService(resolution.secureStorage));
+      // By the PAIR Claude reads by, never `-s` alone: see the module note.
+      const keychain = await this.#readKeychainItem(
+        secureStorageKeychainService(resolution.secureStorage),
+        this.deps.keychainAccount,
+      );
       if (keychain.outcome !== 'absent') return keychain;
     }
     return await readClaudeStoreFile(resolution.credentialFile);
@@ -368,9 +385,16 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return material;
   }
 
-  async #readKeychainItem(service: string): Promise<CredentialMaterial> {
+  /**
+   * One keychain item's material. With `account`, the item stored under exactly that (`acct`, `svce`)
+   * pair — the lookup Claude itself makes. Without it, the first item of that name, which is only
+   * right where nothing else could carry the name (the legacy per-home path).
+   */
+  async #readKeychainItem(service: string, account?: string): Promise<CredentialMaterial> {
     const { code, stdout } = await this.deps.command.run(
-      ['security', 'find-generic-password', '-s', service, '-w'],
+      account === undefined
+        ? ['security', 'find-generic-password', '-s', service, '-w']
+        : ['security', 'find-generic-password', '-a', account, '-s', service, '-w'],
       this.#timeout(),
     );
     if (code === KEYCHAIN_ITEM_NOT_FOUND) return { outcome: 'absent' };
