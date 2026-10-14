@@ -27,7 +27,7 @@ import {
 import type { EnforcedGrants, GrantAuditPort, GrantClock, GrantDocumentPort } from './types.ts';
 
 /** A refusal the grant subsystem raises, in a taxonomy the mount turns into a status. */
-export type GrantFailure = 'invalid' | 'forbidden' | 'step-up-required' | 'unavailable';
+export type GrantFailure = 'invalid' | 'forbidden' | 'device-not-granted' | 'step-up-required' | 'unavailable';
 
 export class GrantError extends Error {
   constructor(
@@ -209,12 +209,25 @@ export class CapabilityGrantService implements CapabilityGuard {
         `${widened.join(', ')} can only be turned on from the machine itself — no remote caller may. Run \`${this.deps.clientName} daemon config set ${widened[0]?.split('.')[0] ?? 'fleet'} --${widened[0]?.split('.')[1] ?? 'use'}\` on the host.`,
       );
     if (evaluation.governed) {
+      // A device whose record vanished while its session was open is refused, never treated as
+      // unnarrowed (the policy's own rule for `null`).
+      if (evaluation.device === null)
+        throw new GrantError('forbidden', 'this device is no longer paired, so it cannot change the grants');
       for (const capability of patchedCapabilities(patch)) {
         const grant = current[capability];
         if (!grant.use || !grant.configure)
           throw new GrantError(
             'forbidden',
             `the operator of this machine has not granted the UI permission to change the ${capability} grant`,
+          );
+        // BOTH halves, as every other decision reads them (effective = daemon-wide ∧ device). Without the
+        // device half, a default device — read and chat only — could switch a capability off for EVERY
+        // device after its first passkey, and no remote caller could ever switch it back on.
+        const own = evaluation.device?.[capability];
+        if (own !== undefined && (!own.use || !own.configure))
+          throw new GrantError(
+            'device-not-granted',
+            `this device has not been given ${capability}, so it cannot change the ${capability} grant for the machine`,
           );
       }
       if (!evaluation.stepUp)
