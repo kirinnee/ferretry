@@ -764,7 +764,15 @@ export class E2eEnvironment {
       return await withTimeout(daemon.exited, timeoutMs, 'E2E daemon shutdown');
     } catch {
       daemon.child.kill('SIGKILL');
-      return daemon.exited;
+      /**
+       * Bounded even after SIGKILL: `exited` resolves on 'close', which waits for EVERY holder of the
+       * daemon's stdio pipes. A grandchild the daemon left running (a pending `codex login`, seen in the
+       * full-product journeys) keeps them open, and an unbounded wait hung a journey for ten minutes.
+       */
+      return withTimeout(daemon.exited, 3_000, 'E2E daemon pipes after SIGKILL').catch(() => ({
+        code: 137,
+        ...daemon.output(),
+      }));
     }
   }
 

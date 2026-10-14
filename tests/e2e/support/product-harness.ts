@@ -670,7 +670,10 @@ export async function reapLeftovers(environment: E2eEnvironment, journey: string
   const lines = (await new Response(listed.stdout).text())
     .split('\n')
     .map(line => line.trim())
-    .filter(line => line !== '' && !line.includes('pgrep') && !/\btmux\b/u.test(line));
+    .filter(line => line !== '' && !line.includes('pgrep') && !/\btmux\b/u.test(line))
+    // The harness's own processes (the rendezvous, the PWA build) name this root in their arguments
+    // and are ended by the journey teardown, not by the daemon.
+    .filter(line => !line.includes('/scripts/test/rendezvous-process.ts'));
   if (lines.length > 0) {
     await recordStep({
       journey,

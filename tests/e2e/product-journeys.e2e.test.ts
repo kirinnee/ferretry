@@ -104,7 +104,14 @@ async function withProduct(
       // The relay journey publishes this run's rendezvous, which BOTH ends then discover.
       directory.publish(rendezvous?.relayUrl ?? null);
       const distDir = await buildPwaBundle(directory.origin);
-      const origin = await startPwaOrigin(distDir, teardown);
+      const served = await startPwaOrigin(distDir, teardown);
+      /**
+       * The app is opened at `localhost`, never `127.0.0.1`: a WebAuthn relying-party id must be a
+       * domain, so Chrome refuses every passkey ceremony on an IP-address origin ("The browser refused a
+       * passkey at http://127.0.0.1:…"). `localhost` is a secure context and a legal RP id, and still
+       * loopback.
+       */
+      const origin: PwaOrigin = { ...served, origin: served.origin.replace('//127.0.0.1:', '//localhost:') };
       const tools = await installFakeTools(environment);
       const configPath = await writeDaemonConfig(join(environment.paths.root, 'daemon.json'), {
         bindPort: environment.ports.api,
@@ -318,7 +325,10 @@ async function registerPasskeyAndUnlock(product: Product, daemonId: string, jour
 
   // Locked: the first thing the app asks for is refused until the device is unlocked.
   await softStep(journey, 'locked-before-unlock', async () => {
-    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    // What a person does next: the setup guide's last screen offers "Open my fleet".
+    if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
+      await page.click('[data-onboarding-open-fleet]');
+    else await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
     await expectScreen(page, '[data-step-up-dialog]', 20_000);
     await captureScreens(page, journey, '12-locked-unlock-prompt');
     const said = String(await textNow(page, '[data-step-up-dialog]'));
@@ -425,10 +435,17 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   await step(journey, 'first-run-opens-itself', async () => {
     const open = await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`);
     if (open) await page.click('[data-onboarding-open-fleet]');
+    // Under the unlock model the guide's last screen was left to unlock; the documented trigger is
+    // Settings › Machines on a machine that is not set up.
+    else
+      await page.goto(`${product.origin.origin}/d/${daemonId}/settings#machines`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      });
     await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
     return {
       value: undefined,
-      evidence: `the first-run stepper opened at ${page.url()} (${open ? 'via Open my fleet' : 'directly'})`,
+      evidence: `the first-run stepper opened at ${page.url()} (${open ? 'via Open my fleet' : 'on opening Settings › Machines'})`,
     };
   });
   await captureScreens(page, journey, '02-first-run-start');
@@ -687,6 +704,13 @@ describe('the product, from a fresh machine to a working session', () => {
           if (relay.sinkhole.attempts() <= directBefore) throw new Error('the browser never tried the direct address');
           await product.browser.page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
           await expectScreen(product.browser.page, '[data-carrier-kind]');
+          // `none` means not measured YET (App.tsx: no ok measurement); the measurement lands shortly after.
+          await waitUntil(
+            product.browser.page,
+            `document.querySelector('[data-carrier-kind]')?.getAttribute('data-carrier-kind') !== 'none'`,
+            30_000,
+            'the carrier to be measured',
+          ).catch(() => undefined);
           const kind = await product.browser.page.evaluate<string | null>(
             `document.querySelector('[data-carrier-kind]')?.getAttribute('data-carrier-kind') ?? null`,
           );
@@ -776,9 +800,15 @@ describe('signing a harness in from the first run', () => {
       // Arrange — paired, on the first run, Claude imported.
       const { environment, browser } = product;
       const page = browser.page;
-      await pair(product, journey);
+      const daemonId = await pair(product, journey);
+      await registerPasskeyAndUnlock(product, daemonId, journey);
       if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
         await page.click('[data-onboarding-open-fleet]');
+      else
+        await page.goto(`${product.origin.origin}/d/${daemonId}/settings#machines`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        });
       await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
       await reachClaudeQuestion(page, journey);
       await page.click('[data-harness-import]');
@@ -857,7 +887,6 @@ describe('signing a harness in from the first run', () => {
           const started = await asOwner(environment, 'POST', '/v1/fleet/login', {
             credentialId: 'codex-you',
             method: 'link',
-            operatorPassword: OPERATOR_PASSWORD,
           });
           if (started.status >= 300)
             throw new Error(
@@ -964,19 +993,27 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
       });
 
       // Both changes are in the audit log (#461) and Settings shows them.
-      await softStep(
-        journey,
-        'security-changes-audited',
-        async () => {
-          const audit = await environment.runFy(['daemon', 'audit', '--json'], { FY_URL: environment.httpUrl() });
-          if (audit.code !== 0)
-            throw new Error(`fy daemon audit failed (${String(audit.code)}): ${audit.err.trim().slice(0, 200)}`);
-          if (!/security/u.test(audit.out))
-            throw new Error(`the audit log has no security-settings change: ${audit.out.slice(0, 400)}`);
-          return { value: undefined, evidence: 'fy daemon audit lists the security changes' };
-        },
-        'cross-PR gap: #461 audits the deleted password routes and has no rule for PATCH /v1/security (pr461 packages/daemon/src/lib/audit/routes.ts:61,63); #464 writes security changes to state/security-audit.jsonl instead. MAJOR if the audit log is meant to hold them',
-      );
+      if ((await asOwner(environment, 'GET', '/v1/audit')).status === 404)
+        await recordStep({
+          journey,
+          step: 'security-changes-audited',
+          status: 'SKIP',
+          evidence: 'no audit log on this build (#461 not merged)',
+        });
+      else
+        await softStep(
+          journey,
+          'security-changes-audited',
+          async () => {
+            const audit = await environment.runFy(['daemon', 'audit', '--json'], { FY_URL: environment.httpUrl() });
+            if (audit.code !== 0)
+              throw new Error(`fy daemon audit failed (${String(audit.code)}): ${audit.err.trim().slice(0, 200)}`);
+            if (!/security/u.test(audit.out))
+              throw new Error(`the audit log has no security-settings change: ${audit.out.slice(0, 400)}`);
+            return { value: undefined, evidence: 'fy daemon audit lists the security changes' };
+          },
+          'cross-PR gap: #461 audits the deleted password routes and has no rule for PATCH /v1/security (pr461 packages/daemon/src/lib/audit/routes.ts:61,63); #464 writes security changes to state/security-audit.jsonl instead. MAJOR if the audit log is meant to hold them',
+        );
 
       // fy passkey window re-opens registration for one device, and a second passkey can be added.
       await softStep(journey, 'passkey-window', async () => {
@@ -985,7 +1022,24 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
         });
         if (opened.code !== 0)
           throw new Error(`fy passkey window failed (${String(opened.code)}): ${opened.err.trim()}`);
-        const authenticator = await authenticatorFor(browser);
+        // A SECOND authenticator (a USB security key): the platform one already holds a credential for
+        // this device, and WebAuthn's excludeCredentials rightly stops it registering twice.
+        const cdp = await browser.cdp();
+        const { authenticatorId } = await cdp.send<{ authenticatorId: string }>('WebAuthn.addVirtualAuthenticator', {
+          options: {
+            protocol: 'ctap2',
+            transport: 'usb',
+            hasResidentKey: true,
+            hasUserVerification: true,
+            isUserVerified: true,
+            automaticPresenceSimulation: true,
+          },
+        });
+        const authenticator = {
+          credentials: async () =>
+            (await cdp.send<{ credentials: unknown[] }>('WebAuthn.getCredentials', { authenticatorId })).credentials
+              .length,
+        };
         const before = await authenticator.credentials();
         await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, {
           waitUntil: 'networkidle',
@@ -999,7 +1053,11 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
           `document.querySelectorAll('[data-security-card] [data-security-passkey]').length >= 2`,
           30_000,
           'a second passkey',
-        );
+        ).catch(async (error: unknown) => {
+          throw new Error(
+            `${String((error as Error).message)}. Card says: ${String(await textNow(page, '[data-security-card]'))}`,
+          );
+        });
         if ((await authenticator.credentials()) !== before + 1)
           throw new Error('the authenticator did not gain a credential');
         return {
@@ -1251,6 +1309,30 @@ describe('one browser, two machines', () => {
         await captureScreens(page, journey, '41-machine-b-settings');
 
         // Assert — A's session is still A's, B has none, and each answers only for itself.
+        // An unlock is per machine: A is unlocked, and that buys nothing at B.
+        if (await hasUnlockModel(second))
+          await softStep(journey, 'unlock-is-per-machine', async () => {
+            await page.goto(`${product.origin.origin}/d/${bId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+            await expectScreen(page, '[data-step-up-dialog]', 20_000);
+            const said = String(await textNow(page, '[data-step-up-dialog]'));
+            await captureScreens(page, journey, '42-machine-b-locked');
+            await page.click('[data-step-up-dialog] button:has-text("Cancel")');
+            await page.goto(a.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+            await Bun.sleep(1_500);
+            if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))
+              throw new Error('machine A asked to unlock again after visiting B');
+            return {
+              value: undefined,
+              evidence: `unlocked at A, B still asks: "${said.slice(0, 100)}"; A stays unlocked`,
+            };
+          });
+        else
+          await recordStep({
+            journey,
+            step: 'unlock-is-per-machine',
+            status: 'SKIP',
+            evidence: 'no unlock model on this build (#464 not merged)',
+          });
         await softStep(journey, 'sessions-stay-per-machine', async () => {
           const bSessions = await asOwner(second, 'GET', '/v1/sessions');
           if (JSON.stringify(bSessions.body).includes(a.sessionUrl.split('/session/')[1] ?? '@@'))
@@ -1288,16 +1370,6 @@ describe('one browser, two machines', () => {
         });
 
         // The cross-machine parts of journey 9 need #464 (step-up per daemon) and #468 (clone shows commands).
-        const security = await asOwner(product.environment, 'GET', '/v1/security');
-        await recordStep({
-          journey,
-          step: 'unlock-is-per-machine',
-          status: security.status === 404 ? 'SKIP' : 'FAIL',
-          evidence:
-            security.status === 404
-              ? 'no unlock model on this build (#464 not merged)'
-              : 'unlock model present — write the A-unlock-is-useless-at-B assertion',
-        });
         await recordStep({
           journey,
           step: 'clone-shows-commands',
