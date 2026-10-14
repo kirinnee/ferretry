@@ -426,9 +426,13 @@ describe('the direct carrier', () => {
       await connect(route, { clientAddress: '192.0.2.7' }).should.be.rejectedWith({ status: 429 });
     first.handler.close();
     await connect(route, { clientAddress: '192.0.2.7' });
-    // Every tab on the host shares one address, so the per-address bound would refuse the host itself.
+    // Every tab on the host shares one address, so the per-address bound would refuse the host itself —
+    // but only on a host-proven carrier. A bare loopback peer is a proxy's remote caller, and bounded.
     for (let index = 0; index < MAX_DIRECT_UNPROVEN_PER_PEER + 2; index += 1)
-      await connect(route, { clientAddress: '127.0.0.1', loopback: true });
+      await connect(route, { clientAddress: '127.0.0.1', loopback: true, privilegedLoopback: true });
+    await connect(route, { clientAddress: '127.0.0.2', loopback: true });
+    await connect(route, { clientAddress: '127.0.0.2', loopback: true });
+    await connect(route, { clientAddress: '127.0.0.2', loopback: true }).should.be.rejectedWith({ status: 429 });
   });
 
   it('should stop counting a socket as unproven once its device has proved itself, and still cap the total', async () => {

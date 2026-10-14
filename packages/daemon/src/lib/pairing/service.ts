@@ -615,12 +615,12 @@ export class PairingService {
    * There is no await between the write and the in-memory removal, so no session can be admitted
    * against a key this daemon has already promised to forget.
    *
-   * DEVICE-SCOPED STATE GOES FIRST, before the grant it belongs to. That is the opposite of the order
-   * above and for the same reason: whichever step fails, the world it leaves has to be coherent. Purging
-   * first means a failure leaves the device fully paired with its state intact — retryable, nothing
-   * half-done — whereas revoking first would leave a phone that is unpaired and still receiving this
-   * machine's notifications, which is the outcome the purge exists to prevent. The cost of this order is
-   * a moment in which a still-paired device has lost its notifications; it is strictly the safer half.
+   * THE GRANT GOES FIRST, then the device's live sessions, and only then its passkeys, step-ups and push
+   * enrolments. A stolen phone loses its access in the first step, so no request can be served between
+   * the purge and the revocation, and a purge that fails cannot leave the phone paired with its passkeys
+   * gone (review L5). What a failed purge leaves is harmless: notifications reach only devices that are
+   * still paired (`PushService` drops an orphaned enrolment at delivery), and a passkey bound to a
+   * device id that is never minted again can step nobody up.
    *
    * WHEN `actor` IS GIVEN, the revocation is written to the audit journal as `device.revoked=<id>` —
    * and only once it has actually happened, as the LAST step. A refused or unknown revocation leaves no
@@ -630,14 +630,17 @@ export class PairingService {
    * revocation failed.
    */
   async revokeDevice(id: string, actor?: string): Promise<boolean> {
-    for (const owner of this.options.deviceState ?? []) await owner.forgetDevice(id);
     const removed = await this.options.devices.remove(id);
+    if (removed) {
+      this.options.credentials.remove(id);
+      this.#seen.delete(id);
+      // Only now, with nothing left that verifies: a socket ended any earlier could be reopened on the
+      // key this revocation is about to remove.
+      this.options.connections?.endDevice(id);
+    }
+    // Even with no grant left to remove: revoking a lost phone twice is how its leftovers are cleaned up.
+    for (const owner of this.options.deviceState ?? []) await owner.forgetDevice(id);
     if (!removed) return false;
-    this.options.credentials.remove(id);
-    this.#seen.delete(id);
-    // Only now, with nothing left that verifies: a socket ended any earlier could be reopened on the
-    // key this revocation is about to remove.
-    this.options.connections?.endDevice(id);
     if (actor !== undefined) {
       await this.options.audit?.record({
         actor,

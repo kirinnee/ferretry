@@ -174,7 +174,7 @@ GET ws(s)://<daemon address>/v1/rendezvous/<daemonId>/client      (WebSocket upg
   first: at most **30 admitted upgrades a minute from one peer address** (a refusal spends none), at
   most **2 unproven sockets per remote address** (the host's loopback is exempt: every tab on it shares
   one), and at most **16 unproven and 64 direct sessions** in all — a full cap closes the OLDEST
-  unproven socket for the newcomer, so a squatter must out-race honest arrivals. The slot is taken when the upgrade is
+  unproven socket for the newcomer, so a squatter must out-race honest arrivals. The per-address exemption for the host's own tabs applies only on a host-proven carrier (a loopback-only bind): behind a proxy on a wildcard bind, every remote caller arrives from `127.0.0.1` and shares one bounded address. Declared: a proxy in front of a loopback-only bind still shares the exemption, so that deployment is exposed to a cheap denial of direct sessions (the relay is unaffected). The slot is taken when the upgrade is
   admitted, not when the socket attaches, so a burst of concurrent upgrades cannot all pass the check
   before any is counted; a reserved slot whose socket never attaches is handed back after ten seconds.
   An upgrade from an origin the daemon does not serve is refused with the same `403` an HTTP request
