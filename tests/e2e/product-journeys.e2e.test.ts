@@ -321,7 +321,8 @@ async function registerPasskeyAndUnlock(product: Product, daemonId: string, jour
     });
     return;
   }
-  const authenticator = await authenticatorFor(browser);
+  // Installed before the first navigation, so the prompt counter sees every prompt.
+  await authenticatorFor(browser);
 
   // Locked: the first thing the app asks for is refused until the device is unlocked.
   await softStep(journey, 'locked-before-unlock', async () => {
@@ -331,42 +332,85 @@ async function registerPasskeyAndUnlock(product: Product, daemonId: string, jour
     else await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
     await expectScreen(page, '[data-step-up-dialog]', 20_000);
     await captureScreens(page, journey, '12-locked-unlock-prompt');
-    const said = String(await textNow(page, '[data-step-up-dialog]'));
-    // With no passkey yet the prompt cannot succeed; it must say so rather than fail mutely.
+    return {
+      value: undefined,
+      evidence: `prompt: "${String(await textNow(page, '[data-step-up-dialog]')).slice(0, 160)}"`,
+    };
+  });
+  await setUpPasskeyAndUnlock(product, daemonId, journey, '');
+}
+
+/**
+ * From a locked prompt to an unlocked device, whichever way this build asks.
+ *
+ * With #470, a device inside its first-passkey window is offered "Set up Face ID for this device"
+ * (`[data-step-up-first-passkey]`) and ONE tap registers and unlocks. Before it, the prompt could only
+ * fail ("no passkey"), the passkey was added in Settings › Security, and a second prompt unlocked. Both
+ * are driven to the same end — one credential in the authenticator and no prompt left on screen — and
+ * the step names say which path ran. `suffix` keeps step names unique when a journey does this twice.
+ */
+async function setUpPasskeyAndUnlock(
+  product: Product,
+  daemonId: string,
+  journey: string,
+  suffix: string,
+): Promise<void> {
+  const { browser, origin } = product;
+  const page = browser.page;
+  const authenticator = await authenticatorFor(browser);
+  const before = await authenticator.credentials();
+  if (!(await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))) {
+    await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    await expectScreen(page, '[data-step-up-dialog]', 20_000);
+  }
+  if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-first-passkey]') !== null`)) {
+    await step(journey, `first-passkey-one-tap${suffix}`, async () => {
+      await captureScreens(page, journey, `13-first-passkey-offer${suffix}`);
+      await page.click('[data-step-up-dialog] [data-step-up-confirm]');
+      await page.waitForSelector('[data-step-up-dialog]', { state: 'detached', timeout: 30_000 }).catch(async () => {
+        throw new Error(`the one-tap setup did not finish: ${String(await textNow(page, '[data-step-up-dialog]'))}`);
+      });
+      const after = await authenticator.credentials();
+      if (after !== before + 1)
+        throw new Error(`the authenticator holds ${String(after)} credential(s), was ${String(before)}`);
+      return {
+        value: undefined,
+        evidence: `one tap registered a passkey (${String(after)} credential(s)) and unlocked`,
+      };
+    });
+    return;
+  }
+
+  // The older path: the prompt cannot succeed with no passkey, and must say so.
+  await softStep(journey, `no-passkey-said${suffix}`, async () => {
     await page.click('[data-step-up-dialog] [data-step-up-confirm]');
     await expectScreen(page, '[data-step-up-failure]', 20_000);
     const failure = String(await textNow(page, '[data-step-up-failure]'));
     if (!/passkey/iu.test(failure)) throw new Error(`unlocking with no passkey says: ${failure}`);
-    await captureScreens(page, journey, '13-locked-no-passkey');
+    await captureScreens(page, journey, `13-locked-no-passkey${suffix}`);
     await page.click('[data-step-up-dialog] button:has-text("Cancel")');
-    return {
-      value: undefined,
-      evidence: `prompt: "${said.slice(0, 120)}"; with no passkey: "${failure.slice(0, 160)}"`,
-    };
+    return { value: undefined, evidence: `with no passkey: "${failure.slice(0, 160)}"` };
   });
-
-  await step(journey, 'register-passkey', async () => {
+  await step(journey, `register-passkey${suffix}`, async () => {
     await page.goto(`${origin.origin}/d/${daemonId}/settings#security`, { waitUntil: 'networkidle', timeout: 30_000 });
     // The settings page reads non-exempt panels too, so the prompt may come up first; with no passkey
     // it cannot succeed, so dismiss it and use the card that registers one.
     if (await page.evaluate<boolean>(`document.querySelector('[data-step-up-dialog]') !== null`))
       await page.click('[data-step-up-dialog] button:has-text("Cancel")');
     await expectScreen(page, '[data-security-card] [data-security-add]', 20_000);
-    await captureScreens(page, journey, '14-security-card-empty');
-    const before = await authenticator.credentials();
+    await captureScreens(page, journey, `14-security-card-empty${suffix}`);
     await page.click('[data-security-card] [data-security-add]');
     await expectScreen(page, '[data-security-card] [data-security-passkey]', 30_000);
     const after = await authenticator.credentials();
     if (after !== before + 1)
       throw new Error(`the authenticator holds ${String(after)} credential(s), was ${String(before)}`);
-    await captureScreens(page, journey, '15-security-card-passkey');
+    await captureScreens(page, journey, `15-security-card-passkey${suffix}`);
     return {
       value: undefined,
       evidence: `a passkey was registered by the CDP virtual authenticator (UV) and listed; ${String(after)} credential(s)`,
     };
   });
-
-  await step(journey, 'unlock', async () => {
+  await step(journey, `unlock${suffix}`, async () => {
     await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'networkidle', timeout: 30_000 });
     const asked = await unlockIfAsked(page, 20_000);
     if (!asked) throw new Error('the app never asked to unlock a locked machine');
@@ -1170,6 +1214,9 @@ describe('access ends when it should, and the person is told', () => {
         async () => {
           const link = await mintPairingLink(environment, product.origin.origin);
           const settled = await pairAgain(journey, 'pair-again-link', page, link.url);
+          // A revoke forgets the device's passkeys, so the new pairing is locked until it sets one up again.
+          if (await hasUnlockModel(environment))
+            await setUpPasskeyAndUnlock(product, outcome.daemonId, journey, ':re-pair');
           await page.goto(outcome.sessionUrl, { waitUntil: 'networkidle', timeout: 30_000 });
           await waitUntil(
             page,
