@@ -432,7 +432,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   grants: grantSubsystem(),
   audit: {
     log: { record: async () => undefined },
-    recent: async () => ({ records: [], unreadable: 0 }),
+    recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }),
     deviceName: async () => undefined,
     flush: async () => undefined,
     failures: { auditWriteFailed: () => undefined },

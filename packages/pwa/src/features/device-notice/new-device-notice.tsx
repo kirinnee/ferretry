@@ -104,6 +104,9 @@ function MachineNewDevices({
   const [busy, setBusy] = useState(false);
   /** The latest list, for a look announced by a panel that never read it. */
   const latest = useRef<PairedDevicesView | null>(null);
+  /** The set as last remembered, so a look can add to it without waiting for a render. */
+  const seenNow = useRef(seen);
+  seenNow.current = seen;
 
   const remember = useCallback(
     (next: ReadonlySet<string>) => {
@@ -151,9 +154,12 @@ function MachineNewDevices({
     const onLooked = (event: Event): void => {
       const detail = (event as CustomEvent<DevicesLookedDetail>).detail;
       if (detail.daemonId !== daemonId) return;
-      // Only what this notice has actually read is marked: a device paired after the last read is
-      // still unseen, whoever looked.
-      if (latest.current !== null) remember(allSeen(latest.current));
+      // Only what the panel actually SHOWED is marked, and only devices this notice has read: a device
+      // whose pairing was not on screen, or paired after the last read, is still unseen.
+      if (latest.current === null) return;
+      const listed = allSeen(latest.current);
+      const shown = detail.deviceIds.filter(id => listed.has(id));
+      if (shown.length > 0) remember(new Set([...(seenNow.current ?? []), ...shown]));
     };
     window.addEventListener(DEVICES_LOOKED_EVENT, onLooked);
     return () => window.removeEventListener(DEVICES_LOOKED_EVENT, onLooked);

@@ -25,7 +25,13 @@ const record = (overrides: Partial<AuditRecord> = {}): AuditRecord => ({
   ...overrides,
 });
 
-const view = (overrides: Partial<AuditView> = {}): AuditView => ({ records: [record()], unreadable: 0, ...overrides });
+const view = (overrides: Partial<AuditView> = {}): AuditView => ({
+  records: [record({ event: 'terminal.opened' })],
+  kept: [record()],
+  keptTotal: 1,
+  unreadable: 0,
+  ...overrides,
+});
 
 class RecordingOutput implements IAuditOutput {
   readonly messages: string[] = [];
@@ -44,9 +50,11 @@ class RecordingOutput implements IAuditOutput {
 
 class FakeGateway implements IAuditGateway {
   readonly limits: number[] = [];
+  readonly offsets: (number | undefined)[] = [];
   constructor(private readonly answer: AuditView = view()) {}
-  async read(limit: number): Promise<AuditView> {
+  async read(limit: number, keptOffset?: number): Promise<AuditView> {
     this.limits.push(limit);
+    this.offsets.push(keptOffset);
     return this.answer;
   }
 }
@@ -124,7 +132,33 @@ describe('audit render', () => {
 
   it('should say plainly when nothing has been recorded', () => {
     // Act + Assert
-    expect(renderAudit(view({ records: [] }))).toBe('no security events have been recorded');
+    expect(renderAudit(view({ records: [], kept: [], keptTotal: 0 }))).toBe('no security events have been recorded');
+  });
+
+  it('should show the security changes first, apart from the activity, however much activity there is', () => {
+    // Arrange
+    const activity = Array.from({ length: 200 }, () => record({ event: 'pairing.code-minted' }));
+
+    // Act
+    const lines = renderAudit(view({ records: activity })).split('\n');
+
+    // Assert
+    expect(lines[0]).toBe('Security changes — who may reach this machine (all of them):');
+    expect(lines[1]).toContain('A device was paired');
+    expect(lines[3]).toBe('Recent activity:');
+    expect(lines).toHaveLength(204);
+  });
+
+  it('should say how many older security changes there are and how to see them', () => {
+    // Act
+    const text = renderAudit(view({ keptTotal: 5 }), 2);
+    const empty = renderAudit(view({ kept: [], keptTotal: 3, records: [] }), 3);
+
+    // Assert
+    expect(text).toContain('Security changes — who may reach this machine (3–3 of 5):');
+    expect(text).toContain('  … 2 older — run with --kept-skip 3 to see them');
+    expect(empty).toContain('  none on this page');
+    expect(empty).toContain('Recent activity:\n  none');
   });
 
   it('should warn loudly at the end when lines could not be read', () => {
@@ -164,6 +198,23 @@ describe('audit controller', () => {
 
     // Assert
     expect(gateway.limits).toEqual([7]);
+  });
+
+  it('should pass --kept-skip through, and refuse one that is not a whole number', async () => {
+    // Arrange
+    const { gateway, instance } = controller();
+    const refused = controller();
+
+    // Act
+    await instance.show({ keptSkip: '50' });
+    await instance.show({});
+    await refused.instance.show({ keptSkip: '-1' });
+
+    // Assert
+    expect(gateway.offsets).toEqual([50, 0]);
+    expect(refused.gateway.limits).toEqual([]);
+    expect(refused.out.exitCode).toBe(1);
+    expect(refused.out.errors[0]).toContain('--kept-skip must be a whole number');
   });
 
   it('should cap --limit at 200', async () => {
@@ -227,9 +278,11 @@ describe('audit gateway', () => {
 
     // Act
     const answer = await new ProtocolAuditGateway(client as never).read(25);
+    await new ProtocolAuditGateway(client as never).read(25, 0);
+    await new ProtocolAuditGateway(client as never).read(25, 40);
 
     // Assert
-    expect(seen).toEqual([`${AUDIT_PATH}?limit=25`]);
+    expect(seen).toEqual([`${AUDIT_PATH}?limit=25`, `${AUDIT_PATH}?limit=25`, `${AUDIT_PATH}?limit=25&keptOffset=40`]);
     expect(answer.records).toHaveLength(1);
   });
 });
@@ -243,10 +296,11 @@ describe('audit commands', () => {
     registerAuditCommands(program, () => instance);
 
     // Act
-    await program.parseAsync(['daemon', 'audit', '--limit', '9', '--json'], { from: 'user' });
+    await program.parseAsync(['daemon', 'audit', '--limit', '9', '--kept-skip', '4', '--json'], { from: 'user' });
 
     // Assert
     expect(gateway.limits).toEqual([9]);
+    expect(gateway.offsets).toEqual([4]);
   });
 
   it('should fail at startup when the daemon group is missing', () => {

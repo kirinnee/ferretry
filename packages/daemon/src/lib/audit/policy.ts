@@ -72,27 +72,50 @@ export function auditRecord(entry: AuditEntry, at: string): AuditRecord {
  *
  * A REFUSAL OR A FAILURE folds by who, what and how it ended — and by carrier, when the record names
  * one, so a stranger guessing over the relay does not hide the one guessing on the LAN. The SUBJECT is
- * deliberately not part of the key: a flood of random ids is one flood. TERMINAL INPUT folds per
- * terminal, because "this device typed into that shell" is the fact, and a keystroke count is all a
- * reader needs of it. Every other success is its own act and is never folded.
+ * deliberately not part of the key: a flood of random ids is one flood.
+ *
+ * A SUCCESSFUL ACT OF ACTIVITY — anything not in `AUDIT_KEPT_EVENTS`: an attach, keystrokes, a secret
+ * used, an agent prompted — folds by who, what, what it was done to and every detail it carries. A
+ * device can repeat activity at will, so "this phone attached to that terminal 15,000 times this
+ * minute" is one line with a count, and two acts that differ in anything a reader would care about
+ * never fold together.
+ *
+ * A SUCCESS OF A KEPT EVENT is never folded: each pairing, revocation or grant change is its own fact.
  */
 export function auditFoldKey(entry: AuditEntry): string | undefined {
   const who = `${entry.actor.kind}:${entry.actor.deviceId ?? ''}`;
+  if (entry.outcome === 'succeeded') {
+    if (AUDIT_KEPT_EVENTS.includes(entry.event)) return undefined;
+    const detail = Object.entries(entry.detail ?? {}).toSorted(([left], [right]) => left.localeCompare(right));
+    return JSON.stringify([who, entry.event, entry.subject ?? '', detail]);
+  }
   const carrier = typeof entry.detail?.carrier === 'string' ? entry.detail.carrier : '';
-  if (entry.event === 'terminal.input') return `${who}|${entry.event}|${entry.subject ?? ''}`;
-  if (entry.outcome === 'succeeded') return undefined;
   return `${who}|${entry.event}|${entry.outcome}|${carrier}`;
 }
 
 /**
- * Whether a record goes to the store a flood cannot reach.
+ * Whether a record goes to the store a flood cannot reach — before the daily allowance is applied.
  *
- * Only a SUCCESS of a kept event: a refusal is what a flood is made of, so letting refusals into the
- * kept store would hand the flood the one store it must not have.
+ * Only a SUCCESS of a kept event: a refusal is what a flood is made of, and activity is what a paired
+ * device can repeat for free, so letting either in would hand the flood the one store it must not have.
  */
 export function isKeptAuditEntry(entry: AuditEntry): boolean {
   return entry.outcome === 'succeeded' && AUDIT_KEPT_EVENTS.includes(entry.event);
 }
+
+/**
+ * How many kept records every caller who is NOT this machine may write, together, per UTC day.
+ *
+ * ONE ALLOWANCE FOR ALL OF THEM, not one per device: a device can mint codes and pair new devices,
+ * and every one it pairs would bring an allowance of its own. Fifty a day is far more pairings, grant
+ * changes and secret edits than a person makes from their phones, and at about 300 bytes a line it is
+ * months of the owner's own history before the kept store could rotate. The host — somebody at the
+ * machine, who already owns the files — has no allowance.
+ *
+ * The first record past the allowance is still kept, marked `detail.keptAllowanceSpent`, so the
+ * reader is TOLD the allowance ran out and that later records that day are among the activity.
+ */
+export const AUDIT_KEPT_DAILY_ALLOWANCE = 50;
 
 /** What stands in for a text field the contract would refuse — never the text itself. */
 export const AUDIT_INVALID_TEXT = '<invalid>';

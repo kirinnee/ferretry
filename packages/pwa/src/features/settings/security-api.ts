@@ -15,6 +15,17 @@ export const AUDIT_PATH = '/v1/audit';
 /** How many records the panel asks for: enough for "what happened recently", well inside the cap. */
 export const SECURITY_LOG_LIMIT = 100;
 
-export async function readSecurityLog(client: SecurityLogClient, limit = SECURITY_LOG_LIMIT): Promise<AuditView> {
-  return await client.request(`${AUDIT_PATH}?limit=${String(limit)}`, AuditViewSchema);
+/**
+ * One page of the log: the recent activity, and the security changes from `keptOffset` back.
+ *
+ * Both lists are bounded by `limit`; the changes are a list of their own so no amount of activity can
+ * push one off the page, and `keptTotal` says how many older pages there are to ask for.
+ */
+export async function readSecurityLog(
+  client: SecurityLogClient,
+  limit = SECURITY_LOG_LIMIT,
+  keptOffset = 0,
+): Promise<AuditView> {
+  const skip = keptOffset === 0 ? '' : `&keptOffset=${String(keptOffset)}`;
+  return await client.request(`${AUDIT_PATH}?limit=${String(limit)}${skip}`, AuditViewSchema);
 }

@@ -6019,7 +6019,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // name is read from the same grant store pairing keeps, so a record names what the list shows.
         audit: {
           log: auditLog,
-          recent: async limit => await auditLog.recent(limit),
+          recent: async (limit, keptOffset) => await auditLog.recent(limit, keptOffset),
           flush: async () => await auditLog.flush(),
           failures: auditFailures,
           deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,

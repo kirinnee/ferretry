@@ -99,7 +99,7 @@ describe('a real pairing, read back off the disk', () => {
         needle,
         leaked: false,
       });
-    const paired = reading.records.filter(record => record.event === 'device.paired');
+    const paired = reading.kept.filter(record => record.event === 'device.paired');
     should(paired.map(record => [record.actor.deviceName, record.detail?.carrier])).deepEqual([
       ['Tablet', 'relay'],
       ['Pixel 8', 'direct'],

@@ -46,7 +46,21 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'warden.ran': 'The supervisor was run',
   'browser.opened': 'A browser was opened',
   'worktree.removed': 'A worktree was removed',
+  'agent.started': 'An agent was started',
+  'agent.prompted': 'An agent was given a message',
 };
+
+/**
+ * The devices whose PAIRING a list of records shows: what the Security panel may mark as seen.
+ *
+ * Only a successful `device.paired` names a device that was paired, so only those count — a device
+ * that merely appears as the actor of some other record has not had its pairing shown to anybody.
+ */
+export function pairedDevicesShown(records: readonly AuditRecord[]): readonly string[] {
+  return records
+    .filter(record => record.event === 'device.paired' && record.outcome === 'succeeded')
+    .flatMap(record => (record.subject === undefined ? [] : [record.subject]));
+}
 
 export const SECURITY_LOG_EMPTY = 'Nothing has happened yet.';
 
@@ -165,7 +179,7 @@ export function firstLookSeen(view: PairedDevicesView): ReadonlySet<string> {
   );
 }
 
-/** Every device now on the list, as seen: what "That was me" on the last one, and opening Security, mean. */
+/** Every device now on the list. */
 export function allSeen(view: PairedDevicesView | null): ReadonlySet<string> {
   return new Set((view?.devices ?? []).map(device => device.id));
 }

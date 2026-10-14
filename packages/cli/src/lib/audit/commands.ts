@@ -14,7 +14,8 @@ export function registerAuditCommands(program: Command, controller: () => AuditC
   daemon
     .command('audit')
     .description('show the security log: who was paired, removed or refused, and what was done, newest first')
-    .option('--limit <n>', 'how many records to show (at most 200)')
+    .option('--limit <n>', 'how many records of each section to show (at most 200)')
+    .option('--kept-skip <n>', 'skip the newest n security changes, to page back through older ones')
     .option('--json', 'print the protocol document instead of the human listing')
     .action(async (options: AuditCommandOptions) => {
       await controller().show(options);

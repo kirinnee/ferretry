@@ -6,6 +6,8 @@ import { renderAudit } from './render.ts';
 export interface AuditCommandOptions {
   readonly json?: boolean;
   readonly limit?: string;
+  /** How many of the newest security changes to skip, to page back through older ones. */
+  readonly keptSkip?: string;
 }
 
 export interface AuditControllerDeps {
@@ -32,9 +34,20 @@ export class AuditController {
       this.deps.out.setExitCode(1);
       return;
     }
-    const view = await this.deps.gateway.read(limit);
-    this.deps.out.success(options.json === true ? JSON.stringify(view) : renderAudit(view));
+    const keptOffset = parseSkip(options.keptSkip);
+    if (keptOffset === undefined) {
+      this.deps.out.error('--kept-skip must be a whole number of 0 or more');
+      this.deps.out.setExitCode(1);
+      return;
+    }
+    const view = await this.deps.gateway.read(limit, keptOffset);
+    this.deps.out.success(options.json === true ? JSON.stringify(view) : renderAudit(view, keptOffset));
   }
+}
+
+function parseSkip(raw: string | undefined): number | undefined {
+  if (raw === undefined) return 0;
+  return /^\d+$/u.test(raw.trim()) ? Number(raw) : undefined;
 }
 
 function parseLimit(raw: string | undefined): number | undefined {

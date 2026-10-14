@@ -27,6 +27,8 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'warden.ran': 'The supervisor was run',
   'browser.opened': 'A browser was opened',
   'worktree.removed': 'A worktree was removed',
+  'agent.started': 'An agent was started',
+  'agent.prompted': 'An agent was given a message',
 };
 
 const pad = (value: number): string => String(value).padStart(2, '0');
@@ -70,14 +72,36 @@ export function renderAuditRecord(record: AuditRecord): string {
 }
 
 /**
- * The security log, newest first.
+ * The security log, newest first, in two sections.
+ *
+ * SECURITY CHANGES COME FIRST AND ARE NEVER CROWDED OUT. Pairings, removals and permission changes are
+ * the daemon's `kept` list, read apart from the activity, so however much activity a device produces
+ * the changes are still on the page. When there are more than one page holds, the heading says how
+ * many and the flag that shows the older ones.
  *
  * DAMAGE IS SAID LOUDLY AT THE END, where the eye lands last. A line the daemon could not read is a
  * hole in the history, and a shorter listing that said nothing would read as a clean one.
  */
-export function renderAudit(view: AuditView): string {
-  const lines: string[] =
-    view.records.length === 0 ? ['no security events have been recorded'] : view.records.map(renderAuditRecord);
+export function renderAudit(view: AuditView, keptOffset = 0): string {
+  if (view.records.length === 0 && view.keptTotal === 0) return withGaps(['no security events have been recorded'], view);
+  const shownTo = keptOffset + view.kept.length;
+  const lines: string[] = [
+    view.kept.length === view.keptTotal
+      ? 'Security changes — who may reach this machine (all of them):'
+      : `Security changes — who may reach this machine (${String(keptOffset + 1)}–${String(shownTo)} of ${String(view.keptTotal)}):`,
+    ...(view.kept.length === 0 ? ['  none on this page'] : view.kept.map(record => `  ${renderAuditRecord(record)}`)),
+  ];
+  if (shownTo < view.keptTotal)
+    lines.push(`  … ${String(view.keptTotal - shownTo)} older — run with --kept-skip ${String(shownTo)} to see them`);
+  lines.push(
+    '',
+    'Recent activity:',
+    ...(view.records.length === 0 ? ['  none'] : view.records.map(record => `  ${renderAuditRecord(record)}`)),
+  );
+  return withGaps(lines, view);
+}
+
+function withGaps(lines: string[], view: AuditView): string {
   if (view.unreadable > 0)
     lines.push(
       '',

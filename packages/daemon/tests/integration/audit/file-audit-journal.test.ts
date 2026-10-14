@@ -6,7 +6,15 @@ import type { AuditRecord } from '@ferretry/protocol';
 import should from 'should';
 import { AUDIT_FILE_MAX_BYTES, auditJournalPaths, FileAuditJournal } from '../../../src/adapters/audit/index.ts';
 import { ApiDispatcher, ApiRouter, type ApiRoute, jsonResponse } from '../../../src/lib/api/index.ts';
-import { AUDITED_ROUTES, AuditLog, auditedRoutes } from '../../../src/lib/audit/index.ts';
+import {
+  AUDIT_FOLD_WINDOW_MS,
+  AUDITED_ROUTES,
+  AUDITED_SOCKET_ROUTES,
+  AuditLog,
+  auditedRoutes,
+  auditedSocketRoutes,
+} from '../../../src/lib/audit/index.ts';
+import type { SocketDownstream, SocketRoute } from '../../../src/lib/api/socket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
 import { request } from '../../unit/api/support.ts';
 import { grantSubsystem } from '../../unit/runtime/mounts/support.ts';
@@ -35,13 +43,13 @@ describe('FileAuditJournal', () => {
     const journal = new FileAuditJournal(state);
 
     // Act
-    const empty = await journal.recent(10);
+    const empty = await journal.recent(10, 0);
     await Promise.all(['a', 'b', 'c'].map(async subject => await journal.append(line(subject), 'general')));
-    const reading = await journal.recent(2);
+    const reading = await journal.recent(2, 0);
     const live = auditJournalPaths(state).live;
 
     // Assert
-    should(empty).deepEqual({ records: [], unreadable: 0 });
+    should(empty).deepEqual({ records: [], kept: [], keptTotal: 0, unreadable: 0 });
     should(reading.records.map(record => record.subject)).deepEqual(['c', 'b']);
     should((await stat(live)).mode & 0o777).equal(0o600);
     should((await readFile(live, 'utf8')).split('\n')).deepEqual([line('a'), line('b'), line('c'), '']);
@@ -55,7 +63,7 @@ describe('FileAuditJournal', () => {
 
     // Act
     for (const subject of ['1', '2', '3', '4', '5', '6', '7']) await journal.append(line(subject), 'general');
-    const reading = await journal.recent(200);
+    const reading = await journal.recent(200, 0);
 
     // Assert
     should((await readFile(rotated, 'utf8')).trim().split('\n')).deepEqual([line('4'), line('5'), line('6')]);
@@ -74,7 +82,7 @@ describe('FileAuditJournal', () => {
     });
 
     // Act
-    const reading = await new FileAuditJournal(state).recent(1);
+    const reading = await new FileAuditJournal(state).recent(1, 0);
 
     // Assert
     should(reading.unreadable).equal(3);
@@ -94,7 +102,7 @@ describe('FileAuditJournal', () => {
       () => undefined,
       (error: unknown) => error,
     );
-    const read = await journal.recent(1).then(
+    const read = await journal.recent(1, 0).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -105,7 +113,7 @@ describe('FileAuditJournal', () => {
     should(write).be.instanceOf(Error);
     should(read).be.instanceOf(Error);
     should(await readFile(elsewhere, 'utf8')).equal('');
-    should((await journal.recent(5)).records.map(record => record.subject)).deepEqual(['after']);
+    should((await journal.recent(5, 0)).records.map(record => record.subject)).deepEqual(['after']);
   });
 
   it('should fail a size check it cannot make rather than overrun the bound', async () => {
@@ -125,6 +133,23 @@ describe('FileAuditJournal', () => {
     should(error).be.instanceOf(Error);
   });
 
+  it('should refuse a never-rotating line to a full store, and leave the store untouched', async () => {
+    // Arrange
+    const state = await stateDirectory();
+    const journal = new FileAuditJournal(state, 2 * (line('x').length + 1));
+    const { kept } = auditJournalPaths(state);
+    await journal.append(line('1'), 'kept', 'never');
+    await journal.append(line('2'), 'kept', 'never');
+
+    // Act
+    const refused = await journal.append(line('3'), 'kept', 'never');
+    const rotated = await journal.append(line('4'), 'kept');
+
+    // Assert
+    should([refused, rotated]).deepEqual([false, true]);
+    should(await readFile(kept.rotated, 'utf8')).equal(`${line('1')}\n${line('2')}\n`);
+  });
+
   it('should keep a kept-store line however many general lines rotate past it', async () => {
     // Arrange
     const state = await stateDirectory();
@@ -133,10 +158,10 @@ describe('FileAuditJournal', () => {
 
     // Act
     for (let index = 0; index < 40; index += 1) await journal.append(line(`flood-${index}`), 'general');
-    const reading = await journal.recent(200);
+    const reading = await journal.recent(200, 0);
 
     // Assert
-    should(reading.records.map(record => record.subject)).containEql('paired');
+    should(reading.kept.map(record => record.subject)).containEql('paired');
     should((await readFile(auditJournalPaths(state).kept.live, 'utf8')).trim()).equal(line('paired'));
   });
 
@@ -158,7 +183,7 @@ describe('FileAuditJournal', () => {
       () => undefined,
       (error: unknown) => error,
     );
-    const read = await journal.recent(1).then(
+    const read = await journal.recent(1, 0).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -194,15 +219,173 @@ describe('a flood of refusals', () => {
       await log.record({ event: 'grants.changed', actor: thief, subject: `guess-${index}`, outcome: 'refused' });
     }
     await log.flush(Number.POSITIVE_INFINITY);
-    const reading = await log.recent(200);
+    const reading = await log.recent(200, 0);
 
     // Assert
-    should(reading.records.map(record => record.event)).containEql('device.paired');
+    should(reading.kept.map(record => record.event)).containEql('device.paired');
     const repeats = reading.records
       .filter(record => record.event === 'grants.changed')
       .reduce((total, record) => total + (typeof record.detail?.repeats === 'number' ? record.detail.repeats : 1), 0);
     should(repeats).equal(200);
   });
+});
+
+/**
+ * H1 round 2: NOTHING A PAIRED DEVICE CAN REPEAT AT WILL may rotate its own pairing off the disk, or off
+ * the page a reader is shown.
+ *
+ * The device drives EVERY audited route and socket — successes and refusals alike, with fresh subjects
+ * so no fold can hide the volume — through the real decorators, the real `AuditLog` and the real
+ * `FileAuditJournal` at its real bound. Then the probe from the review: 15,000 terminal attaches.
+ */
+describe('a flood by a paired device', () => {
+  const thief = `fy_device_id_${'t'.repeat(22)}`;
+
+  class Downstream implements SocketDownstream {
+    send(): number {
+      return 1;
+    }
+    close(): void {}
+    bufferedBytes(): number {
+      return 0;
+    }
+  }
+
+  async function flooded(maxBytes?: number) {
+    const state = await stateDirectory();
+    let now = Date.parse(AT);
+    const failures: string[] = [];
+    const log = new AuditLog({
+      journal: new FileAuditJournal(state, maxBytes),
+      clock: { now: () => new Date(now).toISOString() },
+      failures: { auditWriteFailed: message => failures.push(message) },
+    });
+    const subsystem = { log, failures: { auditWriteFailed: () => undefined }, deviceName: async () => 'Thief' };
+    const credential = { kind: 'authenticated', tokenClass: 'device', deviceId: thief } as const;
+    let fails = false;
+    const routes = auditedRoutes(
+      subsystem,
+      AUDITED_ROUTES.map(
+        (rule): ApiRoute => ({
+          method: rule.method,
+          path: rule.path,
+          minimum: 'operator',
+          handle: async () => (fails ? { ...jsonResponse({}), status: 403 } : jsonResponse({ used: ['K'], name: 'K' })),
+        }),
+      ),
+    );
+    const sockets = auditedSocketRoutes(
+      subsystem,
+      AUDITED_SOCKET_ROUTES.map(
+        (rule): SocketRoute => ({
+          method: 'GET',
+          path: rule.path,
+          minimum: 'operator',
+          accept: async () => async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
+        }),
+      ),
+    );
+    const call = async (index: number): Promise<void> => {
+      const subject = `x${String(index)}`;
+      for (const route of routes)
+        await route.handle({
+          request: request({ method: route.method, path: route.path }),
+          params: new Map([...route.path.matchAll(/:([A-Za-z]+)/gu)].map(match => [match[1] ?? '', subject])),
+          credential,
+        });
+      for (const socket of sockets) {
+        const attach = await socket.accept({
+          request: request({ path: socket.path }),
+          params: new Map([
+            ['sessionId', subject],
+            ['terminalId', subject],
+          ]),
+          credential,
+        });
+        const handler = await attach(new Downstream());
+        handler.fromClient(new Uint8Array([1]));
+      }
+    };
+    return {
+      state,
+      log,
+      failures,
+      call,
+      tick: (ms: number) => (now += ms),
+      refuse: (value: boolean) => (fails = value),
+      sockets,
+      credential,
+    };
+  }
+
+  it('should leave device.paired on disk and on the reader’s page after a flood of everything a device can do', async () => {
+    // Arrange: a 32 KiB bound, so a test-sized flood rotates each store many times over.
+    const world = await flooded(32 * 1024);
+    await world.log.record({
+      event: 'device.paired',
+      actor: { kind: 'device', deviceId: thief, deviceName: 'Thief' },
+      subject: thief,
+      outcome: 'succeeded',
+    });
+
+    // Act: a week of every route and socket, succeeding and refused, a fresh subject every time.
+    const calls = 120;
+    for (let index = 0; index < calls; index += 1) {
+      world.refuse(index % 2 === 1);
+      await world.call(index);
+      world.tick((7 * 86_400_000) / calls);
+    }
+    await world.log.flush(Number.POSITIVE_INFINITY);
+    const paths = auditJournalPaths(world.state);
+    const kept = (await readFile(paths.kept.live, 'utf8')) + (await readFile(paths.kept.rotated, 'utf8').catch(() => ''));
+    const general = await readFile(paths.rotated, 'utf8');
+    // Page back through the kept list the way a reader does, until it has seen every record.
+    const first = await world.log.recent(200, 0);
+    const pages = [first.kept];
+    while (pages.flat().length < first.keptTotal)
+      pages.push((await world.log.recent(200, pages.flat().length)).kept);
+
+    // Assert
+    should(general.length).be.above(0); // the general store DID rotate: the flood was real
+    should(kept.startsWith('{')).be.true();
+    should(kept).containEql('"event":"device.paired"');
+    should(pages.flat().map(record => record.event)).containEql('device.paired');
+    // Once a device fills the kept store it is refused, never rotated — and the operator is told.
+    should(world.failures.length).be.above(0);
+    for (const failure of world.failures) should(failure).containEql('kept store is full');
+  }, 60_000);
+
+  it('should leave device.paired on disk after 15,000 terminal attaches', async () => {
+    // Arrange
+    const world = await flooded();
+    await world.log.record({ event: 'device.paired', actor: { kind: 'device', deviceId: thief }, subject: thief, outcome: 'succeeded' });
+    const terminal = world.sockets[0];
+
+    // Act: the review's probe — re-attach in a loop, as fast as a socket allows.
+    for (let index = 0; index < 15_000; index += 1) {
+      await terminal?.accept({
+        request: request({ path: '/attach' }),
+        params: new Map([
+          ['sessionId', 's-1'],
+          ['terminalId', 'term-1'],
+        ]),
+        credential: world.credential,
+      });
+      if (index % 1_000 === 999) world.tick(AUDIT_FOLD_WINDOW_MS);
+    }
+    await world.log.flush(Number.POSITIVE_INFINITY);
+    const paths = auditJournalPaths(world.state);
+    const reading = await world.log.recent(200, 0);
+
+    // Assert
+    should(await readFile(paths.kept.live, 'utf8')).containEql('"event":"device.paired"');
+    should(reading.kept.map(record => record.event)).deepEqual(['device.paired']);
+    const attaches = reading.records
+      .filter(record => record.event === 'terminal.opened')
+      .reduce((total, record) => total + (typeof record.detail?.repeats === 'number' ? record.detail.repeats : 1), 0);
+    should(attaches).equal(15_000);
+    should(reading.records.length).be.below(40);
+  }, 60_000);
 });
 
 /**
@@ -270,7 +453,8 @@ describe('the security log on disk', () => {
     const paths = auditJournalPaths(state);
     const files = [paths.live, paths.rotated, paths.kept.live, paths.kept.rotated];
     const written = (await Promise.all(files.map(async file => await readFile(file, 'utf8').catch(() => '')))).join('');
-    const reading = await log.recent(200);
+    const read = await log.recent(200, 0);
+    const reading = { ...read, records: [...read.kept, ...read.records] };
 
     // Assert
     should(reading.records).have.length(AUDITED_ROUTES.length);

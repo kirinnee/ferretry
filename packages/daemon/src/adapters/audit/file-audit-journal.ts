@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { chmod, type FileHandle, lstat, open, readFile, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { type AuditRecord, AuditRecordSchema } from '@ferretry/protocol';
-import type { AuditJournalPort, AuditReading, AuditStore } from '../../lib/index.ts';
+import type { AuditJournalPort, AuditReading, AuditRotation, AuditStore } from '../../lib/index.ts';
 
 /** Each live file's bound. A line that would carry it past this rotates first. */
 export const AUDIT_FILE_MAX_BYTES = 1024 * 1024;
@@ -30,11 +30,11 @@ export function auditJournalPaths(state: string): StorePaths & { readonly kept: 
  *
  * ## TWO STORES, SO A FLOOD CANNOT ERASE WHAT MATTERS
  *
- * The `kept` store holds only the successes a reader must never lose (see `isKeptAuditEntry`); the
- * `general` store holds everything else, every refusal included. Each rotates on its own, so filling
- * `general` with refusals — the cheapest thing a caller can produce — leaves every pairing,
- * revocation and grant change in `kept` where it was. `recent` reads all four files and interleaves
- * them by instant.
+ * The `kept` store holds only the successes a reader must never lose (see `AuditLog.record`); the
+ * `general` store holds everything else, every refusal and all activity included. Each rotates on its
+ * own, so filling `general` — with refusals, or with attaches a paired device repeats at will — leaves
+ * every pairing, revocation and grant change in `kept` where it was. `recent` reads all four files
+ * and returns the two stores APART, so neither can push the other off a reader's page.
  *
  * ## ONE `O_APPEND` WRITE PER RECORD
  *
@@ -46,7 +46,8 @@ export function auditJournalPaths(state: string): StorePaths & { readonly kept: 
  * ## BOUNDED BY ROTATION, NOT BY TRUNCATION
  *
  * When the next line would carry the live file past {@link AUDIT_FILE_MAX_BYTES}, the live file is
- * renamed over its rotated file and a new one is started. Rename is the only way a record leaves, and
+ * renamed over its rotated file and a new one is started — unless the append said `never`, which is
+ * how a paired device's kept record is written: then a full store refuses the line instead. Rename is the only way a record leaves, and
  * it takes a whole file at a time, so nothing is ever edited — four files, four mebibytes total.
  *
  * ## OWNER-ONLY, AND NEVER THROUGH A LINK
@@ -80,16 +81,22 @@ export class FileAuditJournal implements AuditJournalPort {
    * Serialised in this process so the size check and the write that follows it are not split by
    * another record — two records each deciding "it still fits" is how a bound is overrun by one line.
    */
-  async append(line: string, store: AuditStore): Promise<void> {
-    const write = this.#writes.then(async () => await this.#append(line, this.#stores[store]));
-    this.#writes = write.catch(() => undefined);
-    await write;
+  async append(line: string, store: AuditStore, rotation: AuditRotation = 'rotate'): Promise<boolean> {
+    const write = this.#writes.then(async () => await this.#append(line, this.#stores[store], rotation));
+    this.#writes = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await write;
   }
 
-  async #append(line: string, paths: StorePaths): Promise<void> {
+  async #append(line: string, paths: StorePaths, rotation: AuditRotation): Promise<boolean> {
     const encoded = Buffer.from(`${line}\n`, 'utf8');
     const size = await this.#size(paths.live);
-    if (size > 0 && size + encoded.byteLength > this.maxBytes) await rename(paths.live, paths.rotated);
+    if (size > 0 && size + encoded.byteLength > this.maxBytes) {
+      if (rotation === 'never') return false;
+      await rename(paths.live, paths.rotated);
+    }
     const handle = await open(
       paths.live,
       constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -104,21 +111,23 @@ export class FileAuditJournal implements AuditJournalPort {
       await handle.close();
     }
     await chmod(dirname(paths.live), 0o700).catch(() => undefined);
+    return true;
   }
 
   /**
-   * The newest records across every file, and every line that could not be read.
+   * The newest general records, a page of the kept records, and every line that could not be read.
    *
    * Each file is bounded, so reading them whole is reading at most four mebibytes. Each store is
-   * newest-first by construction; the two are interleaved by instant, and a tie keeps the kept store's
-   * record first. The unreadable count covers EVERY file whatever `limit` is: damage in the history
-   * is a fact about the history, not about the page a caller happened to ask for.
+   * newest-first by construction. The unreadable count covers EVERY file whatever `limit` is: damage
+   * in the history is a fact about the history, not about the page a caller happened to ask for.
    */
-  async recent(limit: number): Promise<AuditReading> {
+  async recent(limit: number, keptOffset: number): Promise<AuditReading> {
     const kept = await this.#store(this.#stores.kept);
     const general = await this.#store(this.#stores.general);
     return {
-      records: newestFirst(kept.records, general.records).slice(0, limit),
+      records: general.records.slice(0, limit),
+      kept: kept.records.slice(keptOffset, keptOffset + limit),
+      keptTotal: kept.records.length,
       unreadable: kept.unreadable + general.unreadable,
     };
   }
@@ -162,25 +171,6 @@ async function assertPlainFile(handle: FileHandle): Promise<void> {
   const facts = await handle.stat();
   if (!facts.isFile()) throw new Error('the security log path is not a regular file');
   if (facts.nlink > 1) throw new Error('the security log file has a second hard link');
-}
-
-/** Two newest-first lists merged newest-first by instant; on a tie the first list's record leads. */
-function newestFirst(first: readonly AuditRecord[], second: readonly AuditRecord[]): AuditRecord[] {
-  const merged: AuditRecord[] = [];
-  let left = 0;
-  let right = 0;
-  while (left < first.length || right < second.length) {
-    const a = first[left];
-    const b = second[right];
-    if (b === undefined || (a !== undefined && Date.parse(a.at) >= Date.parse(b.at))) {
-      merged.push(a as AuditRecord);
-      left += 1;
-    } else {
-      merged.push(b);
-      right += 1;
-    }
-  }
-  return merged;
 }
 
 /** Every record in one file, oldest first, and the count of lines that are not one. */

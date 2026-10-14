@@ -9,8 +9,8 @@ export interface IAuditOutput {
 
 /** The one daemon call the audit command needs. */
 export interface IAuditGateway {
-  /** The most recent security records, newest first. */
-  read(limit: number): Promise<AuditView>;
+  /** The most recent activity and a page of the security changes from `keptOffset`, each newest first. */
+  read(limit: number, keptOffset?: number): Promise<AuditView>;
 }
 
 /** The only client capability the audit gateway consumes. */

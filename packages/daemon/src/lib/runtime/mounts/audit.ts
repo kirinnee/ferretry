@@ -6,7 +6,7 @@ import type { AuditReading } from '../../audit/index.ts';
 
 /** The read half of the security log. The write half is `AuditSink`, which no route exposes. */
 export interface AuditSubsystem {
-  recent(limit: number): Promise<AuditReading>;
+  recent(limit: number, keptOffset: number): Promise<AuditReading>;
   /**
    * Closes every fold window that has run its length. The composition root calls it on a timer, so a
    * burst that stops is still written down — see `AuditLog.flush`.
@@ -16,6 +16,11 @@ export interface AuditSubsystem {
 
 /**
  * `GET /v1/audit` — who reached this machine and what they did, newest first.
+ *
+ * THE KEPT RECORDS ARE THEIR OWN LIST. Pairings, revocations and every other change to who may reach
+ * this machine come back in `kept`, paged by `keptOffset`, beside the recent activity in `records`
+ * — never interleaved with it, because two hundred newer attaches would otherwise push the one pairing
+ * that matters off every reader's page.
  *
  * GOVERNED BY `pairing.configure`, NOT `pairing.use`. The log is not only the device list: it says
  * which secrets were used and stored, which terminals were typed into, which settings moved and who
@@ -39,8 +44,8 @@ export function auditRoutes(subsystem: AuditSubsystem): readonly ApiRoute[] {
       capability: { capability: 'pairing', axis: 'configure' },
       noStore: true,
       handle: async context => {
-        const { limit } = parseQuery(context.request, AuditQuerySchema);
-        return jsonResponse(AuditViewSchema.parse(await subsystem.recent(limit)));
+        const { limit, keptOffset } = parseQuery(context.request, AuditQuerySchema);
+        return jsonResponse(AuditViewSchema.parse(await subsystem.recent(limit, keptOffset)));
       },
     },
   ];

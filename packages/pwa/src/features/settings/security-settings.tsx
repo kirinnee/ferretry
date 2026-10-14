@@ -18,13 +18,23 @@
  * words, with the machine's own sentence and the one place the log is always readable — the machine
  * itself — rather than as an empty list, which would read as "nothing has happened".
  *
- * Opening this panel also counts as looking at the devices, so the new-device notice for this machine
- * stops announcing what somebody has now seen.
+ * ## SECURITY CHANGES COME FIRST, AND NOTHING CAN PUSH THEM OFF THE PAGE
+ *
+ * The daemon returns pairings, removals and permission changes as a list of their own, apart from the
+ * activity, and this panel shows that list first with a "Show older" button that pages back until every
+ * one has been shown. A device that re-attaches to a terminal ten thousand times fills the activity
+ * list, not this one.
+ *
+ * ## LOOKING HERE MARKS ONLY WHAT WAS SHOWN
+ *
+ * The new-device notice stops announcing a device once somebody has seen it. This panel counts as having
+ * seen a device only when the device's pairing record is actually on screen — never on open, never on a
+ * refused or failed read — so opening Security cannot make an attacker's pairing disappear unseen.
  */
 
 import type { AuditRecord, AuditView } from '@ferretry/protocol';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
@@ -33,6 +43,7 @@ import {
   auditActorWords,
   auditDetailWords,
   auditOutcomeBadge,
+  pairedDevicesShown,
   relativeWords,
   SECURITY_LOG_EMPTY,
   securityLogGapWarning,
@@ -44,9 +55,18 @@ export type SecurityLogClientFactory = (connection: DaemonConnection) => Promise
 
 type LoadState =
   | { readonly status: 'loading' }
-  | { readonly status: 'loaded'; readonly view: AuditView }
+  | { readonly status: 'loaded'; readonly view: AuditView; readonly older: OlderState }
   | { readonly status: 'refused'; readonly reason: string }
   | { readonly status: 'failed'; readonly reason: string };
+
+/** The security changes paged in past the first page, and whether a page is being read. */
+interface OlderState {
+  readonly kept: readonly AuditRecord[];
+  readonly reading: boolean;
+  readonly failure: string | null;
+}
+
+const NO_OLDER: OlderState = { kept: [], reading: false, failure: null };
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause)).trim();
 
@@ -90,8 +110,31 @@ function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly
   );
 }
 
+function SecurityList({ records, nowMs }: { readonly records: readonly AuditRecord[]; readonly nowMs: number }) {
+  return (
+    <ul className="m-0 mt-1 list-none p-0">
+      {records.map((record, index) => (
+        // Records have no id; a list only ever grows at its end while mounted, so position is stable.
+        <SecurityRow key={`${record.at}-${String(index)}`} record={record} nowMs={nowMs} />
+      ))}
+    </ul>
+  );
+}
+
 /** The loaded log, separated from the read so its every state can be rendered without a client. */
-export function SecurityLog({ view, nowMs }: { readonly view: AuditView; readonly nowMs: number }) {
+export function SecurityLog({
+  view,
+  nowMs,
+  older = NO_OLDER,
+  onShowOlder,
+}: {
+  readonly view: AuditView;
+  readonly nowMs: number;
+  readonly older?: OlderState;
+  readonly onShowOlder?: () => void;
+}) {
+  const kept = [...view.kept, ...older.kept];
+  const remaining = view.keptTotal - kept.length;
   return (
     <section
       className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
@@ -102,8 +145,8 @@ export function SecurityLog({ view, nowMs }: { readonly view: AuditView; readonl
         Security log
       </h3>
       <p className="m-0 text-cell leading-base text-muted">
-        Who was paired or removed, refused attempts, permission changes, opened terminals and used secrets on this
-        machine, newest first.
+        Who was paired or removed and what changed about who may reach this machine, then the recent activity: refused
+        attempts, opened terminals, used secrets. Newest first.
       </p>
       {view.unreadable > 0 ? (
         <p
@@ -115,17 +158,47 @@ export function SecurityLog({ view, nowMs }: { readonly view: AuditView; readonl
           <span className="min-w-0">{securityLogGapWarning(view.unreadable)}</span>
         </p>
       ) : null}
-      {view.records.length === 0 ? (
+      {view.records.length === 0 && view.keptTotal === 0 ? (
         <p className="m-0 text-ui leading-base text-fg" data-security-empty="">
           {SECURITY_LOG_EMPTY}
         </p>
       ) : (
-        <ul className="m-0 mt-1 list-none p-0">
-          {view.records.map((record, index) => (
-            // Records have no id; the list is never reordered while mounted, so position is stable.
-            <SecurityRow key={`${record.at}-${String(index)}`} record={record} nowMs={nowMs} />
-          ))}
-        </ul>
+        <>
+          <h4 className="m-0 mt-1 text-ui font-semibold text-fg" data-security-section="kept">
+            Security changes
+          </h4>
+          {kept.length === 0 ? (
+            <p className="m-0 text-cell leading-base text-muted">None yet.</p>
+          ) : (
+            <SecurityList records={kept} nowMs={nowMs} />
+          )}
+          {remaining > 0 ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="kt-btn min-h-[44px]"
+                data-security-older=""
+                disabled={older.reading}
+                onClick={onShowOlder}
+              >
+                {older.reading ? 'Reading…' : `Show older (${String(remaining)} more)`}
+              </button>
+              {older.failure === null ? null : (
+                <span role="alert" className="min-w-0 text-cell leading-base text-err" data-security-older-failed="">
+                  {older.failure}
+                </span>
+              )}
+            </div>
+          ) : null}
+          <h4 className="m-0 mt-2 text-ui font-semibold text-fg" data-security-section="activity">
+            Recent activity
+          </h4>
+          {view.records.length === 0 ? (
+            <p className="m-0 text-cell leading-base text-muted">None yet.</p>
+          ) : (
+            <SecurityList records={view.records} nowMs={nowMs} />
+          )}
+        </>
       )}
     </section>
   );
@@ -148,12 +221,13 @@ export function SecuritySurface({
   useEffect(() => {
     let current = true;
     setState({ daemonId: connection.daemonId, load: { status: 'loading' } });
-    // Opening the log is looking: the notice, which holds the device list, marks what it has read.
-    announceDevicesLooked(connection.daemonId);
     void createClient(connection)
       .then(async client => await readSecurityLog(client))
       .then(view => {
-        if (current) setState({ daemonId: connection.daemonId, load: { status: 'loaded', view } });
+        if (!current) return;
+        setState({ daemonId: connection.daemonId, load: { status: 'loaded', view, older: NO_OLDER } });
+        // Only now, and only the pairings this page puts on screen: see the module comment.
+        announceDevicesLooked(connection.daemonId, pairedDevicesShown(view.kept));
       })
       .catch((cause: unknown) => {
         if (!current) return;
@@ -171,8 +245,34 @@ export function SecuritySurface({
     };
   }, [connection, createClient]);
 
+  const showOlder = useCallback(() => {
+    const daemonId = connection.daemonId;
+    const loaded = state.load;
+    if (state.daemonId !== daemonId || loaded.status !== 'loaded') return;
+    // Counted from the newest: a change recorded since the first read shifts the page by one, so a row
+    // can repeat at the boundary but never be skipped.
+    const offset = loaded.view.kept.length + loaded.older.kept.length;
+    const update = (older: OlderState): void =>
+      setState(previous =>
+        previous.daemonId === daemonId && previous.load.status === 'loaded'
+          ? { daemonId, load: { ...previous.load, older } }
+          : previous,
+      );
+    update({ ...loaded.older, reading: true, failure: null });
+    void createClient(connection)
+      .then(async client => await readSecurityLog(client, undefined, offset))
+      .then(page => {
+        update({ kept: [...loaded.older.kept, ...page.kept], reading: false, failure: null });
+        announceDevicesLooked(daemonId, pairedDevicesShown(page.kept));
+      })
+      .catch((cause: unknown) => {
+        update({ ...loaded.older, reading: false, failure: reasonOf(cause) || 'The older changes could not be read.' });
+      });
+  }, [connection, createClient, state]);
+
   const load: LoadState = state.daemonId === connection.daemonId ? state.load : { status: 'loading' };
-  if (load.status === 'loaded') return <SecurityLog view={load.view} nowMs={now()} />;
+  if (load.status === 'loaded')
+    return <SecurityLog view={load.view} nowMs={now()} older={load.older} onShowOlder={showOlder} />;
   if (load.status === 'refused')
     return (
       <section

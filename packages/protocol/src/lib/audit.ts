@@ -31,7 +31,9 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * `terminal.input` is keystrokes reaching a terminal, FOLDED: one record per terminal per window
  * carrying how many frames arrived, never what they said. The rest name the act on the route that
  * performs it — a secret put or deleted, a pairing code withdrawn, a push enrolment added or removed,
- * the warden reconfigured or run, a browser opened or attached, a worktree removed.
+ * the warden reconfigured or run, a browser opened or attached, a worktree removed. `agent.started` is
+ * an agent session started or forked and `agent.prompted` a message or an answer handed to one: an
+ * agent in auto mode runs commands, so "which device told it what to do" belongs to this history.
  */
 export const AUDIT_EVENTS = [
   'device.paired',
@@ -57,28 +59,35 @@ export const AUDIT_EVENTS = [
   'warden.ran',
   'browser.opened',
   'worktree.removed',
+  'agent.started',
+  'agent.prompted',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
 /**
- * The events that must survive a flood.
+ * The events that must never be lost: who may reach this machine, and what they may do there.
  *
- * A record of one of these that SUCCEEDED is written to its own bounded store, which no refusal and
- * no ordinary record can rotate: a device that hammers a refused route fills the ordinary store and
- * cannot push its own pairing, a revocation or a grant change out of view. See `docs/audit.md`.
+ * A SUCCESS of one of these is written to the KEPT store, which no refusal and no ordinary record can
+ * rotate. Everything that is merely ACTIVITY — a terminal attached or typed into, a secret used, an
+ * agent prompted, a code minted — is deliberately NOT here, however much it matters: a paired device
+ * can repeat activity at will, and a store that took it would be a store a device could flood. Activity
+ * is folded per actor, event and subject per window into the general store instead.
+ *
+ * Every event here can still be caused by a paired device — it can pair a second device, change a
+ * grant, store a secret — so the daemon also caps how many kept records ALL callers who are not this
+ * machine may write per day. See `docs/audit.md`.
  */
 export const AUDIT_KEPT_EVENTS: readonly AuditEvent[] = [
   'device.paired',
   'device.revoked',
+  'device.expired',
   'device.key-rotated',
+  'passkey.registered',
   'grants.changed',
-  'fleet.configured',
-  'secrets.used',
   'secrets.changed',
   'security.changed',
-  'terminal.opened',
-  'terminal.input',
+  'warden.configured',
 ];
 
 /**
@@ -182,11 +191,18 @@ export const AUDIT_DEFAULT_LIMIT = 50 as const;
 
 export const AuditQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(AUDIT_MAX_LIMIT).default(AUDIT_DEFAULT_LIMIT),
+  /** How many of the newest kept records to skip, so a reader can page back through every one. */
+  keptOffset: z.coerce.number().int().min(0).default(0),
 });
 export type AuditQuery = z.infer<typeof AuditQuerySchema>;
 
 /**
- * The recent audit history, newest first.
+ * The recent audit history, newest first, in TWO LISTS.
+ *
+ * `kept` is a page of the records that must never be lost (see {@link AUDIT_KEPT_EVENTS}) and
+ * `records` is the recent activity — everything else, refusals included. They are separate so that
+ * no amount of activity can push a pairing out of view: a reader shows `kept` first, and
+ * `keptTotal` says how many there are so it can page back with `keptOffset` until it has seen all.
  *
  * `unreadable` IS NOT DECORATION. A line this daemon cannot parse is damage — a truncated write, a
  * hand edit, tampering — and dropping it silently would let a damaged history read as a clean one.
@@ -194,6 +210,8 @@ export type AuditQuery = z.infer<typeof AuditQuerySchema>;
  */
 export const AuditViewSchema = z.strictObject({
   records: z.array(AuditRecordSchema).max(AUDIT_MAX_LIMIT).readonly(),
+  kept: z.array(AuditRecordSchema).max(AUDIT_MAX_LIMIT).readonly(),
+  keptTotal: NonNegativeIntegerSchema,
   unreadable: NonNegativeIntegerSchema,
 });
 export type AuditView = z.infer<typeof AuditViewSchema>;

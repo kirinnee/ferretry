@@ -6,6 +6,7 @@ import { ApiDispatcher, ApiError, type ApiRoute, ApiRouter, jsonResponse } from 
 import {
   AUDIT_FOLD_WINDOW_MS,
   AUDIT_INVALID_TEXT,
+  AUDIT_KEPT_DAILY_ALLOWANCE,
   AUDITED_ROUTES,
   AUDITED_SOCKET_ROUTES,
   type AuditEntry,
@@ -13,6 +14,7 @@ import {
   type AuditJournalPort,
   AuditLog,
   type AuditReading,
+  type AuditRotation,
   type AuditStore,
   auditActorOf,
   auditedRoutes,
@@ -53,17 +55,34 @@ const DEVICE_KEY = toBase64Url(
 class MemoryJournal implements AuditJournalPort {
   readonly lines: string[] = [];
   readonly stores: AuditStore[] = [];
+  readonly rotations: AuditRotation[] = [];
   failure: Error | undefined;
+  /** When set, the kept store is full: a `never` append to it is refused. */
+  keptFull = false;
 
-  async append(line: string, store: AuditStore): Promise<void> {
+  async append(line: string, store: AuditStore, rotation: AuditRotation = 'rotate'): Promise<boolean> {
     if (this.failure !== undefined) throw this.failure;
+    if (store === 'kept' && this.keptFull && rotation === 'never') return false;
     this.lines.push(line);
     this.stores.push(store);
+    this.rotations.push(rotation);
+    return true;
   }
 
-  async recent(limit: number): Promise<AuditReading> {
-    const records = this.lines.map(line => JSON.parse(line) as AuditRecord).reverse();
-    return { records: records.slice(0, limit), unreadable: 0 };
+  async recent(limit: number, keptOffset: number): Promise<AuditReading> {
+    const all = this.lines.map((line, index) => ({ record: JSON.parse(line) as AuditRecord, store: this.stores[index] }));
+    const of = (store: AuditStore) =>
+      all
+        .filter(entry => entry.store === store)
+        .map(entry => entry.record)
+        .reverse();
+    const kept = of('kept');
+    return {
+      records: of('general').slice(0, limit),
+      kept: kept.slice(keptOffset, keptOffset + limit),
+      keptTotal: kept.length,
+      unreadable: 0,
+    };
   }
 }
 
@@ -161,7 +180,9 @@ describe('AuditLog', () => {
 
     // Assert
     should(journal.lines).have.length(1);
-    should(reading.records[0]).deepEqual({
+    should(reading.records).deepEqual([]);
+    should(reading.keptTotal).equal(1);
+    should(reading.kept[0]).deepEqual({
       at: AT,
       event: 'device.revoked',
       actor: { kind: 'host' },
@@ -281,7 +302,8 @@ describe('audit folding and bounds', () => {
       ['term-2', undefined],
       ['term-1', { repeats: 4 }],
     ]);
-    should(journal.stores).deepEqual(['kept', 'kept', 'kept']);
+    // Activity: folded, and never in the kept store, however much of it there is.
+    should(journal.stores).deepEqual(['general', 'general', 'general']);
   });
 
   it('should close every window first when the table of open windows is full', async () => {
@@ -304,6 +326,7 @@ describe('audit folding and bounds', () => {
   it('should key repeats by who, what, how it ended and the carrier — never the subject', () => {
     // Arrange / Act / Assert
     should(auditFoldKey({ ...refusal, outcome: 'succeeded' })).be.undefined();
+    should(auditFoldKey({ ...refusal, event: 'device.paired', outcome: 'succeeded' })).be.undefined();
     should(auditFoldKey(refusal)).equal(auditFoldKey({ ...refusal, subject: 'other' }));
     should(auditFoldKey(refusal)).not.equal(auditFoldKey({ ...refusal, outcome: 'failed' }));
     should(auditFoldKey({ ...refusal, detail: { carrier: 'relay' } })).not.equal(
@@ -319,6 +342,92 @@ describe('audit folding and bounds', () => {
     should(
       isKeptAuditEntry({ event: 'pairing.refused', actor: { kind: 'anonymous' }, outcome: 'succeeded' }),
     ).be.false();
+    // Activity a paired device can repeat at will is never kept: a store that took it could be flooded.
+    for (const event of ['terminal.opened', 'terminal.input', 'secrets.used', 'fleet.configured', 'agent.prompted'] as const)
+      should(isKeptAuditEntry({ ...refusal, event, outcome: 'succeeded' })).be.false();
+  });
+
+  it('should fold a repeated SUCCESS of activity per who, what, subject and detail', async () => {
+    // Arrange
+    const { journal, log } = auditLog();
+    const attach = (subject: string, mode = 'attach'): AuditEntry => ({
+      event: 'terminal.opened',
+      actor: { kind: 'device', deviceId: DEVICE_ID },
+      subject,
+      outcome: 'succeeded',
+      detail: { mode },
+    });
+
+    // Act
+    for (let index = 0; index < 500; index += 1) await log.record(attach('term-1'));
+    await log.record(attach('term-2'));
+    await log.record(attach('term-1', 'create'));
+    await log.flush(Number.POSITIVE_INFINITY);
+
+    // Assert
+    should(records(journal).map(record => [record.subject, record.detail])).deepEqual([
+      ['term-1', { mode: 'attach' }],
+      ['term-2', { mode: 'attach' }],
+      ['term-1', { mode: 'create' }],
+      ['term-1', { mode: 'attach', repeats: 499 }],
+    ]);
+    should(journal.stores.every(store => store === 'general')).be.true();
+    should(auditFoldKey(attach('a'))).not.equal(auditFoldKey({ ...attach('a'), actor: { kind: 'host' } }));
+  });
+
+  it('should ration every caller but the host to one shared daily allowance of kept records', async () => {
+    // Arrange
+    const { failures, journal, log, tick } = auditLog();
+    const grantChange = (deviceId: string): AuditEntry => ({
+      event: 'grants.changed',
+      actor: { kind: 'device', deviceId },
+      outcome: 'succeeded',
+    });
+
+    // Act: two devices together spend the allowance and keep going; the host is never rationed.
+    for (let index = 0; index < AUDIT_KEPT_DAILY_ALLOWANCE + 30; index += 1)
+      await log.record(grantChange(index % 2 === 0 ? DEVICE_ID : OTHER_DEVICE_ID));
+    await log.record({ event: 'device.revoked', actor: { kind: 'device', deviceId: DEVICE_ID }, outcome: 'succeeded' });
+    await log.record({ event: 'grants.changed', actor: { kind: 'host' }, outcome: 'succeeded' });
+    await log.flush();
+    const sameDay = journal.stores.filter(store => store === 'kept').length;
+    tick(86_400_000);
+    await log.flush();
+    await log.record(grantChange(DEVICE_ID));
+
+    // Assert
+    const kept = records(journal).filter((_, index) => journal.stores[index] === 'kept');
+    // The allowance, one marked overspend per event, and the host's: a fixed number whoever floods.
+    should(sameDay).equal(AUDIT_KEPT_DAILY_ALLOWANCE + 3);
+    should(kept.filter(record => record.detail?.keptAllowanceSpent === true).map(record => [record.event, record.detail]))
+      .deepEqual([
+        ['grants.changed', { keptAllowanceSpent: true }],
+        ['device.revoked', { keptAllowanceSpent: true }],
+        ['grants.changed', { keptAllowanceSpent: true, repeats: 29 }],
+      ]);
+    should(kept.at(-2)?.actor).deepEqual({ kind: 'device' });
+    // A new day, a new allowance.
+    should(kept.at(-1)?.detail).be.undefined();
+    // Every overspent record is still in the ordinary history, in full.
+    should(journal.stores.filter(store => store === 'general')).have.length(31);
+    should(journal.rotations.filter((rotation, index) => journal.stores[index] === 'kept' && rotation === 'rotate'))
+      .have.length(1);
+    should(failures).deepEqual([]);
+  });
+
+  it('should write a device’s kept record to the ordinary history, and say so, when the kept store is full', async () => {
+    // Arrange
+    const { failures, journal, log } = auditLog();
+    journal.keptFull = true;
+
+    // Act
+    await log.record({ event: 'device.paired', actor: { kind: 'device', deviceId: DEVICE_ID }, outcome: 'succeeded' });
+    await log.record({ event: 'device.paired', actor: { kind: 'host' }, outcome: 'succeeded' });
+
+    // Assert
+    should(journal.stores).deepEqual(['general', 'kept']);
+    should(failures).have.length(1);
+    should(failures[0]).containEql('kept store is full');
   });
 
   it('should write an over-long or control-character subject as <invalid> with its length', async () => {
@@ -542,9 +651,10 @@ describe('auditedRoutes', () => {
     // Assert
     const written = records(journal);
     should(written[0]?.detail).deepEqual({ used: 'API_KEY,DB_PASS', status: 200 });
+    // A use that named nothing reads the same both times, so the second is folded into the first.
     should(written[1]?.detail).deepEqual({ status: 200 });
-    should(written[2]?.detail).deepEqual({ status: 200 });
-    const joined = String(written[3]?.detail?.used);
+    should(written).have.length(3);
+    const joined = String(written[2]?.detail?.used);
     should(joined.length <= 160).be.true();
     should(joined).match(/^SECRET_NUMBER_0,.*,\+\d+$/u);
     should(journal.lines.join('\n')).not.containEql('hunter2');
@@ -635,7 +745,7 @@ describe('GET /v1/audit', () => {
     for (const subject of ['one', 'two', 'three'])
       await log.record({ event: 'terminal.opened', actor: { kind: 'host' }, subject, outcome: 'succeeded' });
     const api = await dispatcher(
-      auditRoutes({ recent: async limit => await journal.recent(limit), flush: async () => undefined }),
+      auditRoutes({ recent: async (limit, offset) => await journal.recent(limit, offset), flush: async () => undefined }),
     );
 
     // Act
@@ -655,6 +765,38 @@ describe('GET /v1/audit', () => {
     should(warden.status).equal(403);
   });
 
+  it('should always serve the kept records apart, however much activity is newer, and page back through them', async () => {
+    // Arrange: a device pairs, then floods two hundred cheap general successes with distinct subjects.
+    const { journal, log } = auditLog();
+    const device = { kind: 'device', deviceId: DEVICE_ID } as const;
+    await log.record({ event: 'device.paired', actor: device, subject: DEVICE_ID, outcome: 'succeeded' });
+    for (let index = 0; index < 3; index += 1)
+      await log.record({ event: 'grants.changed', actor: { kind: 'host' }, subject: `g${String(index)}`, outcome: 'succeeded' });
+    for (let index = 0; index < 300; index += 1)
+      await log.record({ event: 'pairing.code-minted', actor: device, subject: `p${String(index)}`, outcome: 'succeeded' });
+    const api = await dispatcher(
+      auditRoutes({ recent: async (limit, offset) => await log.recent(limit, offset), flush: async () => undefined }),
+    );
+
+    // Act
+    const first = jsonBody(
+      await api.dispatch(request({ path: '/v1/audit', query: [['limit', '200']], headers: ADMIN })),
+    ) as { records: AuditRecord[]; kept: AuditRecord[]; keptTotal: number };
+    const paged = jsonBody(
+      await api.dispatch(
+        request({ path: '/v1/audit', query: [['limit', '2'], ['keptOffset', '2']], headers: ADMIN }),
+      ),
+    ) as { kept: AuditRecord[]; keptTotal: number };
+
+    // Assert
+    should(journal.lines.length).equal(304);
+    should(first.records).have.length(200);
+    should(first.records.some(record => record.event === 'device.paired')).be.false();
+    should(first.kept.map(record => record.subject)).deepEqual(['g2', 'g1', 'g0', DEVICE_ID]);
+    should(first.keptTotal).equal(4);
+    should(paged.kept.map(record => record.subject)).deepEqual(['g0', DEVICE_ID]);
+  });
+
   it('should be refused when the operator switched pairing off for remote devices', async () => {
     // Arrange
     const grants = grantSubsystem({
@@ -663,7 +805,7 @@ describe('GET /v1/audit', () => {
     await grants.refresh();
     const api = new ApiDispatcher(
       new ApiRouter(
-        auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined }),
+        auditRoutes({ recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }), flush: async () => undefined }),
       ),
       CREDENTIALS,
       grants,
@@ -684,7 +826,7 @@ describe('GET /v1/audit', () => {
     await grants.refresh();
     const api = new ApiDispatcher(
       new ApiRouter(
-        auditRoutes({ recent: async () => ({ records: [], unreadable: 0 }), flush: async () => undefined }),
+        auditRoutes({ recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }), flush: async () => undefined }),
       ),
       CREDENTIALS,
       grants,
@@ -911,7 +1053,7 @@ describe('AuditedPairingService', () => {
       record: async () => {
         throw new Error('disk full');
       },
-      recent: async () => ({ records: [], unreadable: 0 }),
+      recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 0 }),
       flush: async () => undefined,
     } as unknown as AuditLog;
     const { service, failures, devices } = pairing({

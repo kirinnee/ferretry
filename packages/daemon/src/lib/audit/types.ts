@@ -29,10 +29,16 @@ export interface AuditSink {
   record(entry: AuditEntry): Promise<void>;
 }
 
-/** What one bounded read found: the records it could parse, and a count of the lines it could not. */
+/**
+ * What one bounded read found: the recent activity, a page of the kept records, how many kept records
+ * there are in all, and a count of the lines it could not parse.
+ */
 export interface AuditReading {
-  /** Newest first. */
+  /** The general store, newest first. */
   readonly records: readonly AuditRecord[];
+  /** The kept store, newest first, from the requested offset. */
+  readonly kept: readonly AuditRecord[];
+  readonly keptTotal: number;
   readonly unreadable: number;
 }
 
@@ -40,21 +46,33 @@ export interface AuditReading {
  * Which of the two stores a line goes to.
  *
  * `kept` holds the successes a reader must never lose — a pairing, a revocation, a grant change — and
- * nothing else; `general` holds everything else, refusals included. Each is bounded on its own, so a
- * flood fills `general` and cannot rotate a single `kept` line away.
+ * nothing else; `general` holds everything else, refusals and activity included. Each is bounded on
+ * its own, so a flood fills `general` and cannot rotate a single `kept` line away.
  */
 export type AuditStore = 'kept' | 'general';
+
+/**
+ * Whether an append may rotate its store to make room.
+ *
+ * `never` is how a paired device's record is written to the kept store: a full store REFUSES it
+ * rather than renaming its oldest file away, so nothing a device does can ever push a kept record —
+ * its own pairing included — off the disk. Only this machine's own records rotate the kept store.
+ */
+export type AuditRotation = 'rotate' | 'never';
 
 /**
  * The two bounded append-only stores.
  *
  * `append` is ONE write of ONE line into one store — the adapter rotates that store beforehand when
- * the line would carry it past its bound. `recent` reads both stores, newest first by instant, and
- * counts what it cannot parse.
+ * the line would carry it past its bound. `recent` reads both stores and returns them APART — the
+ * newest `limit` general records, and `limit` kept records starting `keptOffset` from the newest — so
+ * no amount of activity can push a kept record off the page a reader is shown. It counts what it
+ * cannot parse in either.
  */
 export interface AuditJournalPort {
-  append(line: string, store: AuditStore): Promise<void>;
-  recent(limit: number): Promise<AuditReading>;
+  /** `false` when the store was full and `rotation` was `never`, so nothing was written. */
+  append(line: string, store: AuditStore, rotation?: AuditRotation): Promise<boolean>;
+  recent(limit: number, keptOffset: number): Promise<AuditReading>;
 }
 
 export interface AuditClock {

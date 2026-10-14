@@ -115,6 +115,28 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { action: 'control' },
   },
+  { method: 'POST', path: '/v1/sessions', event: 'agent.started', detail: { action: 'start' } },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/fork',
+    event: 'agent.started',
+    subject: 'sessionId',
+    detail: { action: 'fork' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/send',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'send' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/answer',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'answer' },
+  },
   { method: 'POST', path: '/v1/warden/run', event: 'warden.ran' },
   { method: 'PATCH', path: '/v1/warden/config', event: 'warden.configured' },
 ];
@@ -286,8 +308,9 @@ export const AUDITED_SOCKET_ROUTES: readonly AuditedSocketRule[] = [
  *
  * INPUT IS COUNTED, NEVER CAPTURED. Each binary frame is one `terminal.input` record naming the
  * terminal and nothing about the bytes; `AuditLog` folds them per terminal per window, so a session of
- * typing is a handful of lines that say how many frames arrived. The record is not awaited: a
- * keystroke must never wait on a disk.
+ * typing is a handful of lines that say how many frames arrived. Attaches fold the same way, per
+ * device and terminal, so re-attaching in a loop is one counted line a minute and never reaches the
+ * kept store. The record is not awaited: a keystroke must never wait on a disk.
  */
 export function auditedSocketRoutes(
   subsystem: AuditedRoutesSubsystem,

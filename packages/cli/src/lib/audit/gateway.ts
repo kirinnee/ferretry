@@ -7,7 +7,8 @@ export const AUDIT_PATH = '/v1/audit';
 export class ProtocolAuditGateway implements IAuditGateway {
   constructor(private readonly client: AuditApiClient) {}
 
-  async read(limit: number): Promise<AuditView> {
-    return await this.client.request(`${AUDIT_PATH}?limit=${String(limit)}`, AuditViewSchema);
+  async read(limit: number, keptOffset = 0): Promise<AuditView> {
+    const skip = keptOffset === 0 ? '' : `&keptOffset=${String(keptOffset)}`;
+    return await this.client.request(`${AUDIT_PATH}?limit=${String(limit)}${skip}`, AuditViewSchema);
   }
 }

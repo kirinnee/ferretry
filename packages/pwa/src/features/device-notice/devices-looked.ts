@@ -13,8 +13,9 @@
  *
  * A LOOK is also announced as a window event, so the Security panel and the notice — two components
  * that never hold a reference to each other — agree the moment one of them looks, with or without
- * storage underneath them. The Security panel does not read the device list, so its event carries no
- * ids: the notice, which holds the list, marks every device on it as seen.
+ * storage underneath them. The event NAMES the devices that were shown: the Security panel announces
+ * only the devices whose pairing it actually put on screen, and only once its log has loaded, so a
+ * refused read, a failed one, or a log whose pairing is not on the page marks nothing as seen.
  */
 
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -25,6 +26,8 @@ export const DEVICES_LOOKED_EVENT = 'ferretry:devices-looked';
 
 export interface DevicesLookedDetail {
   readonly daemonId: DaemonId;
+  /** The devices that were actually shown. A device not named here is still news. */
+  readonly deviceIds: readonly string[];
 }
 
 export const devicesLookedKey = (daemonId: DaemonId): string => `ferretry.devices-seen.v2:${String(daemonId)}`;
@@ -66,7 +69,9 @@ export function rememberDevicesSeen(
   }
 }
 
-/** Tells every listener on this page that somebody looked at this machine's devices. */
-export function announceDevicesLooked(daemonId: DaemonId): void {
-  window.dispatchEvent(new CustomEvent<DevicesLookedDetail>(DEVICES_LOOKED_EVENT, { detail: { daemonId } }));
+/** Tells every listener on this page that somebody was shown these devices of this machine. */
+export function announceDevicesLooked(daemonId: DaemonId, deviceIds: readonly string[]): void {
+  window.dispatchEvent(
+    new CustomEvent<DevicesLookedDetail>(DEVICES_LOOKED_EVENT, { detail: { daemonId, deviceIds } }),
+  );
 }
