@@ -58,6 +58,7 @@ import {
   MAX_DIRECT_UNPROVEN_PER_PEER,
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../../src/lib/relay/direct-carrier.ts';
+import { transcriptKey } from '../../../src/lib/relay/link.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';
 
@@ -139,7 +140,7 @@ function carrier(
       requests.push(request);
       return (await options.answer?.(request)) ?? { status: 200, headers: new Map(), body: '{"ok":true}' };
     },
-    sockets: async () => ({ outcome: 'unclaimed' }),
+    sockets: { upgrade: async () => ({ outcome: 'unclaimed' }), reauthorize: () => true },
     devices: {
       deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
       seen: () => undefined,
@@ -426,9 +427,13 @@ describe('the direct carrier', () => {
       await connect(route, { clientAddress: '192.0.2.7' }).should.be.rejectedWith({ status: 429 });
     first.handler.close();
     await connect(route, { clientAddress: '192.0.2.7' });
-    // Every tab on the host shares one address, so the per-address bound would refuse the host itself.
+    // Every tab on the host shares one address, so the per-address bound would refuse the host itself —
+    // but only on a host-proven carrier. A bare loopback peer is a proxy's remote caller, and bounded.
     for (let index = 0; index < MAX_DIRECT_UNPROVEN_PER_PEER + 2; index += 1)
-      await connect(route, { clientAddress: '127.0.0.1', loopback: true });
+      await connect(route, { clientAddress: '127.0.0.1', loopback: true, privilegedLoopback: true });
+    await connect(route, { clientAddress: '127.0.0.2', loopback: true });
+    await connect(route, { clientAddress: '127.0.0.2', loopback: true });
+    await connect(route, { clientAddress: '127.0.0.2', loopback: true }).should.be.rejectedWith({ status: 429 });
   });
 
   it('should stop counting a socket as unproven once its device has proved itself, and still cap the total', async () => {
@@ -523,7 +528,7 @@ describe('a direct session ending for the reasons a relayed one does', () => {
       appSession: APP_SESSION,
       proof: await signDeviceProof(crypto_, deviceKey, deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION)),
     });
-    return { ...harnessed, handler, wire };
+    return { ...harnessed, handler, wire, transcript };
   }
 
   it('should close the socket when its device is revoked, with the same 4403 an unknown device gets', async () => {
@@ -543,6 +548,23 @@ describe('a direct session ending for the reasons a relayed one does', () => {
     should(shared.endDevice(DEVICE_ID)).equal(2);
     should(relayedEnded).equal(1);
     should(wire.closes.at(-1)?.code).equal(RELAY_CLOSE_CODES.authRejected);
+  });
+
+  it('should hand the lapse through to the registry, so a key replacement ends a direct session too', async () => {
+    const { connections, wire } = await provenDirect();
+
+    should(connections.lapseDevice(DEVICE_ID, '')).equal(1);
+
+    should(wire.closes.at(-1)?.code).equal(RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE);
+  });
+
+  it('should spare the direct session that carried the replacement, and keep it open', async () => {
+    const { connections, wire, transcript } = await provenDirect();
+
+    // The carrying session is named by its own transcript hash, hex.
+    should(connections.lapseDevice(DEVICE_ID, transcriptKey(transcript))).equal(0);
+
+    should(wire.closes).be.empty();
   });
 
   it('should close the socket with the lease code when nobody renews', async () => {

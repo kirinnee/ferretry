@@ -54,16 +54,13 @@ export interface FoundationPaths {
    */
   readonly daemonIdentity: string;
   /**
-   * The operator password's VERIFIER — an argon2id digest and nothing else.
+   * A RETIRED file: where the operator password's verifier used to live.
    *
-   * ITS OWN FILE, and under `state` rather than `config`, for two reasons that both matter. A
-   * verifier is not a setting an operator edits, so it does not belong in a document they open; and
-   * `config/daemon.json` is the file that gets copied into backups, dotfile repositories and screen
-   * shares, which is exactly the journey a password verifier should not make. It is written mode 0600
-   * for the same reason the vault key is, and the grants it gates stay in the configuration document
-   * where `--print-config` can report them with their provenance.
+   * The passkey step-up replaced that password, so nothing reads or writes this path any more. It is
+   * named only so boot can delete a copy an older daemon left behind and say so once — a verifier for a
+   * gate that no longer exists is a file somebody could mistake for one that still protects them.
    */
-  readonly operatorPassword: string;
+  readonly retiredOperatorPassword: string;
   /**
    * Where a change to the grants is written down, one JSON line per change.
    *
@@ -72,6 +69,8 @@ export interface FoundationPaths {
    * a token and never anything about the password.
    */
   readonly grantAudit: string;
+  /** Who changed this machine's security settings, and every device key replaced (B6). */
+  readonly securityAudit: string;
 }
 export interface SessionPaths {
   readonly directory: string;
@@ -105,8 +104,9 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     sessions: join(state, 'sessions'),
     temporary: join(state, 'tmp'),
     daemonIdentity: join(state, 'daemon-identity.json'),
-    operatorPassword: join(state, 'operator-password.json'),
+    retiredOperatorPassword: join(state, 'operator-password.json'),
     grantAudit: join(state, 'grant-audit.jsonl'),
+    securityAudit: join(state, 'security-audit.jsonl'),
   };
 }
 

@@ -51,8 +51,6 @@ export interface CloneMachineProps extends MachineTabProps {
   readonly sources: readonly DaemonConnectionRecord[];
   readonly onDone: () => void;
   readonly onLeave: () => void;
-  /** Supplied in tests. */
-  readonly now?: () => number;
 }
 
 interface CloneResult {
@@ -67,15 +65,13 @@ function Foot({ children }: { readonly children: ReactNode }) {
 }
 
 export function CloneMachine(props: CloneMachineProps) {
-  const { sources, machineName, machine, connection, createClient, online, checking, onRetry, onDone, onLeave, now } =
-    props;
-  const clock = now === undefined ? {} : { now };
-  const target = useSetupAccess({ connection, createClient, ...clock });
+  const { sources, machineName, machine, connection, createClient, online, checking, onRetry, onDone, onLeave } = props;
+  const target = useSetupAccess({ connection, createClient });
   const { changes } = target;
   const [reach, setReach] = useState<ReadonlyMap<DaemonId, MachineReach>>(new Map());
   const [picked, setPicked] = useState<DaemonId | null>(null);
   const pickedRecord = sources.find(source => source.daemonId === picked);
-  const source = useSetupAccess({ connection: pickedRecord ?? connection, createClient, ...clock });
+  const source = useSetupAccess({ connection: pickedRecord ?? connection, createClient });
   const [bundle, setBundle] = useState<FleetCloneBundle | null>(null);
   const [sourceIssue, setSourceIssue] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
@@ -115,7 +111,7 @@ export function CloneMachine(props: CloneMachineProps) {
   latest.current = target;
   useEffect(() => {
     void latest.current
-      .read((client, unlock) => readFleetProfiles(client, unlock))
+      .read(client => readFleetProfiles(client))
       .then(answer => {
         if (answer.kind === 'done') setProfiles(answer.value.profiles.length);
       });
@@ -129,15 +125,15 @@ export function CloneMachine(props: CloneMachineProps) {
   const next = (): void => setStepper(stepForward(state));
   const preview = bundle === null ? null : clonePreview(bundle, machine, skip);
 
-  const readSource = (password?: string): void => {
+  const readSource = (): void => {
     setSourceIssue(null);
     setReading(true);
     void source
-      .read((client, unlock) => readFleetExport(client, unlock), password)
+      .read(client => readFleetExport(client))
       .then(answer => {
         setReading(false);
         if (answer.kind === 'refused') {
-          if (!answer.passwordRejected) setSourceIssue(answer.sentence);
+          setSourceIssue(answer.sentence);
           return;
         }
         setBundle(answer.value);
@@ -147,7 +143,7 @@ export function CloneMachine(props: CloneMachineProps) {
       });
   };
 
-  const copy = (password: string | undefined): void => {
+  const copy = (): void => {
     if (bundle === null || preview === null || pickedRecord === undefined) return;
     const change = {
       kind: 'clone.import' as const,
@@ -156,9 +152,9 @@ export function CloneMachine(props: CloneMachineProps) {
       ...(skip.length === 0 ? {} : { skip: [...skip] }),
       source: { daemonId: String(pickedRecord.daemonId) },
     };
-    void changes.apply(change, password).then(async applied => {
+    void changes.apply(change).then(async applied => {
       if (applied.kind === 'refused') return;
-      const credentials = await target.read((client, unlock) => readFleetCredentials(client, unlock));
+      const credentials = await target.read(client => readFleetCredentials(client));
       setResult({
         source: bundle.machine,
         summary: applied.outcome.outcome === 'executed' ? applied.outcome.summary : applied.staged.summary,
@@ -239,29 +235,17 @@ export function CloneMachine(props: CloneMachineProps) {
               <span>{sourceIssue}</span>
             </SetupNote>
           )}
-          {pickedRecord !== undefined && source.locked ? (
-            <ChangeApplyPanel
-              machineName={daemonDisplayName(pickedRecord)}
-              authority={source.changes.authority}
-              busy={reading}
-              refusal={source.changes.refusal}
-              submitLabel="Next"
-              busyLabel="Reading…"
-              onSubmit={password => readSource(password)}
-            />
-          ) : (
-            <Foot>
-              <Button
-                type="button"
-                variant="primary"
-                data-step-next=""
-                disabled={pickedState?.kind !== 'ready' || reading || source.changes.authority === null}
-                onClick={() => readSource()}
-              >
-                {reading ? 'Reading…' : 'Next'}
-              </Button>
-            </Foot>
-          )}
+          <Foot>
+            <Button
+              type="button"
+              variant="primary"
+              data-step-next=""
+              disabled={pickedState?.kind !== 'ready' || reading || source.changes.authority === null}
+              onClick={() => readSource()}
+            >
+              {reading ? 'Reading…' : 'Next'}
+            </Button>
+          </Foot>
         </div>
       );
     }

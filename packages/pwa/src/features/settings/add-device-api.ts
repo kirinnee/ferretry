@@ -21,6 +21,8 @@
  */
 
 import {
+  type DeviceGrantsPatch,
+  DeviceGrantsPatchSchema,
   type IFyApiClient,
   type PairedDevicesView,
   PairedDevicesViewSchema,
@@ -107,4 +109,27 @@ export function pairingFailure(cause: unknown): PairingFailure {
   const message = cause instanceof Error ? cause.message : String(cause);
   const code = (cause as { readonly code?: unknown } | null)?.code;
   return typeof code === 'string' ? { message, code } : { message };
+}
+
+/**
+ * Changes what ONE device may do and answers with the whole device list.
+ *
+ * The patch is PARTIAL by contract, for the reason the daemon-wide patch is: a stale tab restating axes
+ * it never looked at must not revert a decision made elsewhere. A step-up is the carrier's business — it
+ * asks for the passkey on `grant_step_up_required` and resends once — so nothing here carries a credential.
+ */
+export async function changeDeviceGrants(
+  client: PairingClient,
+  deviceId: string,
+  patch: DeviceGrantsPatch,
+): Promise<PairedDevicesView> {
+  return await client.request(
+    `${PAIRED_DEVICES_PATH}/${encodeURIComponent(deviceId)}/grants`,
+    PairedDevicesViewSchema,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(DeviceGrantsPatchSchema.parse(patch)),
+    },
+  );
 }

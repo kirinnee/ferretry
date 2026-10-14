@@ -21,12 +21,7 @@ import type {
   HarnessLoginSubmission,
 } from '@ferretry/protocol';
 import { Command } from 'commander';
-import type {
-  AccountAuthority,
-  AccountCommandDeps,
-  AccountHarness,
-  IAccountGateway,
-} from '../../../src/lib/fleet/account-ports.ts';
+import type { AccountCommandDeps, AccountHarness, IAccountGateway } from '../../../src/lib/fleet/account-ports.ts';
 
 /** One call the fake gateway saw. */
 interface GatewayCall {
@@ -40,8 +35,7 @@ export const LATER = '2026-10-13T00:10:00.000Z';
 
 export const authorityOf = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineAuthority => ({
   mayApply: true,
-  applyRefusal: 'ungated',
-  confirmation: 'none',
+  applyRefusal: 'granted',
   ...overrides,
 });
 
@@ -233,7 +227,6 @@ export interface FakeAnswers {
   profiles: () => FleetLayeredProfileCatalog;
   runtimes: () => FleetRuntimeCatalog;
   credentials: () => FleetCredentialList;
-  unlock: () => string;
   check: () => FleetCredentialView;
   stage: (change: FleetAccountChange) => FleetAccountChangeView;
   apply: () => FleetAccountChangeOutcome;
@@ -257,7 +250,6 @@ class FakeGateway implements IAccountGateway {
       profiles: () => ({ format: 'version-2', profiles: [] }),
       runtimes: () => ({ format: 'version-2', runtimes: [] }),
       credentials: () => ({ format: 2, machine: 'studio', credentials: [] }),
-      unlock: () => 'unlock-token',
       check: () => credential(),
       stage: change => changeView(change),
       apply: () => committed(),
@@ -300,42 +292,35 @@ class FakeGateway implements IAccountGateway {
   credentials() {
     return this.#record('credentials', [], this.answers.credentials);
   }
-  unlock(password: string) {
-    return this.#record('unlock', [password], this.answers.unlock);
+  check(id: string) {
+    return this.#record('check', [id], this.answers.check);
   }
-  check(id: string, authority: AccountAuthority) {
-    return this.#record('check', [id, authority], this.answers.check);
+  stage(change: FleetAccountChange) {
+    return this.#record('stage', [change], () => this.answers.stage(change));
   }
-  stage(change: FleetAccountChange, authority: AccountAuthority) {
-    return this.#record('stage', [change, authority], () => this.answers.stage(change));
+  apply(id: string) {
+    return this.#record('apply', [id], this.answers.apply);
   }
-  apply(id: string, authority: AccountAuthority) {
-    return this.#record('apply', [id, authority], this.answers.apply);
+  scan() {
+    return this.#record('scan', [], this.answers.scan);
   }
-  scan(authority: AccountAuthority) {
-    return this.#record('scan', [authority], this.answers.scan);
+  installTools(harnesses: readonly AccountHarness[]) {
+    return this.#record('installTools', [harnesses], this.answers.installTools);
   }
-  installTools(harnesses: readonly AccountHarness[], authority: AccountAuthority) {
-    return this.#record('installTools', [harnesses, authority], this.answers.installTools);
+  exportBundle() {
+    return this.#record('exportBundle', [], this.answers.exportBundle);
   }
-  exportBundle(authority: AccountAuthority) {
-    return this.#record('exportBundle', [authority], this.answers.exportBundle);
+  startSignIn(id: string, method?: HarnessLoginCodexMethod) {
+    return this.#record('startSignIn', [id, ...(method === undefined ? [] : [method])], this.answers.startSignIn);
   }
-  startSignIn(id: string, authority: AccountAuthority, method?: HarnessLoginCodexMethod) {
-    return this.#record(
-      'startSignIn',
-      [id, authority, ...(method === undefined ? [] : [method])],
-      this.answers.startSignIn,
-    );
+  signInStatus(id: string) {
+    return this.#record('signInStatus', [id], this.answers.signInStatus);
   }
-  signInStatus(id: string, authority: AccountAuthority) {
-    return this.#record('signInStatus', [id, authority], this.answers.signInStatus);
+  submitSignInCode(id: string, code: string) {
+    return this.#record('submitSignInCode', [id, code], this.answers.submitSignInCode);
   }
-  submitSignInCode(id: string, code: string, authority: AccountAuthority) {
-    return this.#record('submitSignInCode', [id, code, authority], this.answers.submitSignInCode);
-  }
-  cancelSignIn(id: string, authority: AccountAuthority) {
-    return this.#record('cancelSignIn', [id, authority], this.answers.cancelSignIn);
+  cancelSignIn(id: string) {
+    return this.#record('cancelSignIn', [id], this.answers.cancelSignIn);
   }
 }
 
@@ -371,21 +356,12 @@ class FakeOutput {
 /** Scripted answers, in order; every question is recorded. */
 class FakePrompt {
   readonly questions: string[] = [];
-  readonly secrets: string[] = [];
 
-  constructor(
-    private readonly answers: string[] = [],
-    private readonly secret = 'operator-password-1',
-  ) {}
+  constructor(private readonly answers: string[] = []) {}
 
   async ask(message: string): Promise<string> {
     this.questions.push(message);
     return this.answers.shift() ?? '';
-  }
-
-  async askSecret(message: string): Promise<string> {
-    this.secrets.push(message);
-    return this.secret;
   }
 }
 
@@ -404,7 +380,6 @@ export function fakeWorld(
     gateway?: Partial<FakeAnswers>;
     answers?: string[];
     interactive?: boolean;
-    stdinPassword?: string;
     files?: Record<string, string>;
     now?: () => number;
   } = {},
@@ -420,10 +395,6 @@ export function fakeWorld(
     prompt,
     interactive: options.interactive ?? true,
     binaryName: 'fz',
-    readPasswordFromStdin: async () => {
-      if (options.stdinPassword === undefined) throw new Error('no password on stdin');
-      return options.stdinPassword;
-    },
     readText: async path => {
       const text = files.get(path);
       if (text === undefined) throw new Error(`ENOENT ${path}`);

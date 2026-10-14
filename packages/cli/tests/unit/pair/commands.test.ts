@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
 import { registerPairCommands } from '../../../src/lib/pair/commands';
-import { type PairDeps, PairController } from '../../../src/lib/pair/controller';
+import { PairController, type PairDeps } from '../../../src/lib/pair/controller';
 import {
   CapturingExit,
   CapturingScreen,
@@ -39,13 +39,13 @@ function run(argv: string[], binaryName = 'fy') {
 }
 
 describe('pair command surface', () => {
-  it('should name the binary it runs as when it says how to set the password', async () => {
-    // Arrange + Act — not the shipped name, so a help line that spells "fy" cannot pass.
+  it('should say nothing about a password, because minting needs none', async () => {
+    // Arrange + Act
     const { parsed, printed } = run(['pair', '--help'], 'foo');
     await should(parsed).be.rejected();
 
     // Assert
-    should(printed.join('')).containEql('Set one with `foo daemon password set`');
+    should(printed.join('').toLowerCase()).not.containEql('password');
   });
 
   it('should pair with no flags at all', async () => {
@@ -105,5 +105,49 @@ describe('pair --open', () => {
     browser.opened.should.have.length(1);
     // The SAME link the QR carries — not a second opinion about where to go.
     browser.opened[0]?.should.equal(qr.requests[0]?.value);
+  });
+});
+
+describe('pair --limited', () => {
+  it('should mint the full set unless asked', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['pair', '--no-wait']);
+    await parsed;
+
+    // Assert
+    should(gateway.mintedWith).eql(['full']);
+  });
+
+  it('should mint the limited set under --limited', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['pair', '--limited', '--no-wait']);
+    await parsed;
+
+    // Assert
+    should(gateway.mintedWith).eql(['limited']);
+  });
+
+  it('should refuse the removed --full flag', async () => {
+    // Arrange + Act
+    const { parsed } = run(['pair', '--full', '--no-wait']);
+
+    // Assert
+    await should(parsed).be.rejected();
+  });
+
+  it('should say a device can do anything behind its unlock, what --limited does, and name the binary it runs as', async () => {
+    // Arrange + Act
+    const { parsed, printed } = run(['pair', '--help'], 'foo');
+    await should(parsed).be.rejected();
+
+    // Assert
+    const help = printed.join('').replace(/\s+/gu, ' ');
+    should(help).containEql('--limited');
+    should(help).containEql('can do anything on this machine');
+    should(help).containEql('unlocks it with its passkey');
+    should(help).containEql('read the fleet and chat with sessions');
+    should(help).containEql('`foo device grant`');
+    should(help).not.containEql('--full');
+    should(help).not.match(/\bfy device/u);
   });
 });

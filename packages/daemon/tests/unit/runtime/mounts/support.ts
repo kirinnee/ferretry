@@ -54,6 +54,7 @@ import {
 } from '../../../../src/lib/core/index.ts';
 import {
   CapabilityGrantService,
+  DeviceGrantService,
   DEFAULT_CAPABILITY_GRANTS,
   type GrantAuditEntry,
 } from '../../../../src/lib/grants/index.ts';
@@ -163,11 +164,15 @@ import { catalog, inventory } from '../../core/fixtures.ts';
 
 export const AT = '2024-05-01T10:00:00.000Z';
 export const IDS = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'] as const;
-/** The host's two tokens, and a directory in which every device a session names is still paired. */
+/**
+ * The host's two tokens, and a directory in which every device a session names is still paired and has
+ * been given every capability — so a mount test is about its own routes, not the per-device half of
+ * `effective = daemonWide ∧ device`, which `device-grants.test.ts` owns.
+ */
 export const CREDENTIALS = {
   admin: 'admin-secret',
   warden: 'warden-secret',
-  devices: { has: (_deviceId: string) => true },
+  devices: { has: (_deviceId: string) => true, grants: (_deviceId: string) => DEFAULT_CAPABILITY_GRANTS },
 } as const;
 
 /** The human's CLI. */
@@ -1599,10 +1604,9 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   };
 }
 
-/** What a grant fixture starts from: the recorded decision, and whether a password is set. */
+/** What a grant fixture starts from: the recorded decision. */
 export interface GrantWorld {
   readonly grants?: CapabilityGrants;
-  readonly password?: string;
   /** Set to make the document unreadable, so a fixture can prove the fail-closed reading. */
   readonly broken?: boolean;
   readonly nowMs?: number;
@@ -1618,8 +1622,6 @@ export interface GrantWorld {
 export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
   let recorded = world.grants ?? DEFAULT_CAPABILITY_GRANTS;
   const recordedChanges: GrantAuditEntry[] = [];
-  let stored = world.password;
-  let minted = 0;
   return new CapabilityGrantService({
     document: {
       read: async () => {
@@ -1629,19 +1631,6 @@ export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
       written: async () => (world.grants === undefined ? [] : DAEMON_CAPABILITIES),
       write: async next => {
         recorded = next;
-      },
-    },
-    passwords: {
-      isSet: async () => stored !== undefined,
-      set: async password => {
-        stored = password;
-      },
-      verify: async candidate => stored !== undefined && candidate === stored,
-    },
-    tokens: {
-      mint: () => {
-        minted += 1;
-        return `fy_unlock_${String(minted).padStart(22, 'a')}`;
       },
     },
     clock: { nowMs: () => world.nowMs ?? 1_700_000_000_000 },
@@ -1678,8 +1667,6 @@ export const GRANTED: CapabilityGuard = {
   // that cannot exist.
   governance: () => ({
     governed: false,
-    passwordSet: false,
-    confirmChange: false,
     decide: () => ({ allowed: true, refusal: 'granted' }),
   }),
   explain: () => undefined,
@@ -1696,8 +1683,6 @@ export const NARROWED: CapabilityGuard = {
     demand.axis === 'configure' ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' },
   governance: () => ({
     governed: true,
-    passwordSet: true,
-    confirmChange: true,
     decide: (demand: CapabilityDemand) =>
       demand.axis === 'configure' ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' },
   }),
@@ -1705,20 +1690,34 @@ export const NARROWED: CapabilityGuard = {
 };
 
 /**
- * A guard for a caller the operator's grants DO govern, on a machine with an operator password.
+ * The REAL device-grant subsystem over a grant subsystem and an in-memory device store.
  *
- * The remote paired browser, in other words — and, since a machine cannot pair a device until a
- * password exists (`PairingService.mint`), the only shape a remote caller comes in. It permits every
- * capability, exactly as {@link GRANTED} does, so a test using it is about the per-change
- * confirmation rather than about the grant document.
+ * `devices` maps an id to its grants; an id absent from it is a device this daemon does not hold.
  */
-export const GOVERNED: CapabilityGuard = {
-  decide: () => ({ allowed: true, refusal: 'granted' }),
-  governance: () => ({
-    governed: true,
-    passwordSet: true,
-    confirmChange: true,
-    decide: () => ({ allowed: true, refusal: 'granted' }),
-  }),
-  explain: () => undefined,
-};
+export function deviceGrantsOver(
+  grants: CapabilityGrantService,
+  devices: Map<string, CapabilityGrants> = new Map(),
+  audit: GrantAuditEntry[] = [],
+  changed: () => void = () => undefined,
+): DeviceGrantService {
+  return new DeviceGrantService({
+    devices: {
+      deviceGrants: id => devices.get(id),
+      setDeviceGrants: async (id, next) => {
+        if (!devices.has(id)) return false;
+        devices.set(id, next);
+        return true;
+      },
+    },
+    daemonWide: () => grants.enforced(),
+    audit: {
+      record: async entry => {
+        audit.push(entry);
+      },
+      recent: async () => ({ entries: [], unreadable: 0, truncated: false }),
+    },
+    clock: { nowMs: () => 1_700_000_000_000 },
+    clientName: 'fy',
+    changed,
+  });
+}

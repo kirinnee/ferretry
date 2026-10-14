@@ -18,7 +18,6 @@ import {
   FleetToolInstallRequestSchema,
   type FleetToolInstallResult,
   FleetToolInstallResultSchema,
-  OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
 import type { FleetClient } from './fleet-client.ts';
 
@@ -26,25 +25,21 @@ export const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
 export const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
 export const FLEET_EXPORT_PATH = '/v1/fleet/export';
 
-const unlockHeaders = (unlock: string | undefined): Record<string, string> =>
-  unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock };
-
 /** What the first run (and Import again) would find on this machine. Names only, never a value. */
-export const readFleetSetupScan = async (client: FleetClient, unlock?: string): Promise<FleetSetupScan> =>
-  await client.request(FLEET_SETUP_SCAN_PATH, FleetSetupScanSchema, { headers: unlockHeaders(unlock) });
+export const readFleetSetupScan = async (client: FleetClient): Promise<FleetSetupScan> =>
+  await client.request(FLEET_SETUP_SCAN_PATH, FleetSetupScanSchema);
 
-/** Install harness tools with the exact command the scan showed. From off the machine: the operator password. */
+/** Install harness tools with the exact command the scan showed.. */
 export const installFleetTools = async (
   client: FleetClient,
   request: FleetToolInstallRequest,
-  unlock?: string,
 ): Promise<FleetToolInstallResult> =>
   await client.request(FLEET_TOOLS_INSTALL_PATH, FleetToolInstallResultSchema, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(FleetToolInstallRequestSchema.parse(request)),
   });
 
 /** The Clone bundle a source machine exports: no credential, no history. */
-export const readFleetExport = async (client: FleetClient, unlock?: string): Promise<FleetCloneBundle> =>
-  await client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, { headers: unlockHeaders(unlock) });
+export const readFleetExport = async (client: FleetClient): Promise<FleetCloneBundle> =>
+  await client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema);

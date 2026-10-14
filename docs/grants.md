@@ -5,54 +5,48 @@ than the name suggests.
 
 ## The one-sentence version
 
-**The host's command line is ungoverned; a local browser is ungoverned once it unlocks. Everything
-else here is about the caller who reached this daemon from somewhere else** — a paired phone, a
-browser across the network, a session carried over the relay.
+**Only the owner at the machine — `fy` with the host's admin token — is ungoverned. Everything here is about
+every other caller**: a paired phone, a browser across the network, a session carried over the relay, and a
+browser on the host itself. Being **governed means needing an unlock**: such a caller can do nothing until its
+device unlocks the machine with a passkey, and then may do what the operator granted for the unlock period,
+with no further prompt unless the owner asked for one per act.
 
 ## Why the host command line is exempt
 
 Somebody standing at the machine already _has_ the machine. They can edit
 `<FY_HOME>/config/daemon.json`, run `fy` directly, or start any program they like. A permission model
 that gated the command line would add friction and no safety — and it would slam the one door a
-**forgotten password** can still be repaired through, which is the whole reason this feature cannot
-brick a machine. `fy` authenticates with the admin token, and reading that file already requires
-being on the host.
+**lost passkey** or a mis-narrowed device can still be repaired through, which is the whole reason this
+feature cannot brick a machine. `fy` authenticates with the admin token, and reading that file already
+requires being on the host.
 
-## Why a local browser is not
+## A browser on the host is an ordinary device
 
-A **browser is a paired device wherever it runs**, including on the machine itself. An unattended tab
-on somebody's desk was one tap from provisioning the host — writing runnable wrappers into their
-accounts — so a local browser is governed by everything below **until it presents an unlock**, and
-ungoverned afterwards. One gate at the door, then full authority; no per-action prompt and no second
-gate. That is exactly what `sudo` provides.
+A **browser is a paired device wherever it runs**, including on the machine itself, and it is **governed like
+every other device** (owner decision, 2026-10-13; [design/zero-trust.md](design/zero-trust.md) B4). The reason
+is that nothing can tell it apart from a stranger: `ssh -L`, `socat`, `cloudflared`, `tailscale serve` or any
+reverse proxy to `127.0.0.1` arrives exactly as a local browser does — a loopback peer, even on a
+loopback-only bind. Only the host's admin token proves the owner, because reading it needs this machine's disk.
 
-**It is friction, not a boundary, and no comment in this repository may say otherwise.** A person at
-that keyboard can open a terminal, read the admin token and do all of it anyway. What the gate buys is
-that a destructive change is _deliberate_: it defends against a slip, casual misuse and a tab left
-open. It does not defend against an attacker with local access.
+So a browser on the host confirms the dangerous acts with a passkey, as a phone does, and cannot widen a
+grant: that is `fy` at the machine. There is still no password to set and **a fresh install needs no setup,
+no questionnaire and no secret** to be useful.
 
-**A machine with no password cannot ask for one**, so a local browser there is ungoverned as it always
-was. That is the state every new install starts in: **no setup, no questionnaire and no password** to
-be useful. A password is required when a **device** is paired ([pairing](pairing.md)), which is the
-moment remote access starts existing — and the **daemon** is what requires it, so it does not matter
-whether the pairing was started from the browser or from `fy pair`. `fy daemon start` also offers to set
-one when a person is watching, but that is convenience: a service-manager start has no terminal to ask
-at, so the refusal at pairing is what makes the requirement a promise rather than a habit.
+**It is friction, not a boundary, and no comment in this repository may say otherwise.** A person at that
+keyboard can open a terminal, read the admin token and do all of it anyway. What the model buys is that every
+browser is bounded and deliberate, not that the host is defended against somebody sitting at it.
 
-So the answer has four cases rather than two:
+The answer has two cases:
 
-| caller                                      | governed?                         |
-| ------------------------------------------- | --------------------------------- |
-| `fy` on the host (admin token, loopback)    | no, always                        |
-| a local browser, no password on the machine | no — there is no gate to pass     |
-| a local browser, password set, no unlock    | **yes** — until it unlocks        |
-| a local browser, password set, unlocked     | no, for the unlock's five minutes |
-| anything off the host                       | yes, unconditionally              |
+| caller                                   | governed?            |
+| ---------------------------------------- | -------------------- |
+| `fy` on the host (admin token, loopback) | no, always           |
+| anything else, a browser on the host too | yes, unconditionally |
 
-`GrantsView` therefore carries **two** booleans rather than one: `governed` (do the limits apply to
-me) and `hostLocal` (did this request arrive on the machine). They used to be exact inverses; they are
-not any more, and a UI that derived one from the other would badge somebody standing at the machine as
-remote the moment their unlock expired. Widening still follows `hostLocal` — see the table below.
+`GrantsView` carries `governed` (do the limits apply to me), `hostLocal` (did this request arrive on the
+machine) and `steppedUp` (does this device hold a passkey step-up right now). Today `hostLocal` is exactly
+`!governed`; the two stay separate fields because they are different questions, and a UI that derived one
+from the other would have to be rewritten the day a third caller class appears.
 
 ## "Loopback" means how the request arrived
 
@@ -74,21 +68,18 @@ Nothing re-derives it, and no header can move it.
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
 presents every loopback-looking signal it can.
 
-**A loopback peer is still not proof of the host.** A remote caller forwarded through a locally bound
-proxy (`tailscale serve`, `cloudflared`) arrives from a loopback peer too, so every host-locality rule
-— `privilegedOnly` routes, widening (`hostLocal`) and whether a caller is governed — reads
-`arrivedOnHost` in `packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits:
+**A loopback peer is not proof of the owner.** A remote caller forwarded through a locally bound proxy
+(`tailscale serve`, `cloudflared`, `ssh -L`) arrives from a loopback peer too, so every owner rule — widening
+(`hostLocal`), whether a caller is governed, and the owner's passkey recovery — reads `arrivedOnHost` in
+`packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits **only the host's admin token over a
+loopback peer**: reading that token already needs this machine's disk, so nobody can present it who did not
+already have the machine.
 
-- a request whose carrier proved the host (`privilegedLoopback`: a loopback-only bind that advertises
-  no foreign address, `mayTrustDirectLoopback`), or
-- the host's **admin token** over a loopback peer — reading that token already needs this machine's
-  disk, and without it `fy daemon password set` would stop working on a daemon bound beyond loopback.
+The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises no foreign address,
+`mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
+— a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
-The consequence, stated plainly: on a daemon bound to a wildcard address or advertised through a proxy,
-a **browser on the same machine is treated as remote** — governed, unable to widen and unable to set the
-operator password. `fy` on the host still can.
-
-## Six capabilities, two axes
+## Seven capabilities, two axes
 
 | capability   | what it covers                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------------- |
@@ -97,7 +88,8 @@ operator password. `fy` on the host still can.
 | `browser`    | the human login window and per-session browser control                                              |
 | `filesystem` | reading session working trees and registering projects on the host                                  |
 | `warden`     | supervision status, sweeps and the warden configuration                                             |
-| `pairing`    | pairing codes, the paired-device list, and Web Push enrolment                                       |
+| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
+| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
 
 Each has two axes, and they are different questions:
 
@@ -114,9 +106,10 @@ Both axes default to **enabled** for every capability. The dangerous act is stru
 unavailable to a remote caller, so starting open costs much less than it would otherwise, and starting
 closed would make a fresh remote session useless until somebody walked to the machine.
 
-**The primary security layer is locality, not the password.** A remote caller can never turn a
-capability on. The operator password is a _second, optional_ lock over remote **configure**, for an
-operator who wants one.
+**The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
+step-up is the **second layer**, over every remote `configure` and the remote `use` of `terminal`,
+`browser` and `pairing`; it needs no setup beyond pairing, because the passkey is the one the person
+already holds.
 
 **What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
 _grant_, and says nothing about what an already-granted capability may _do_. `terminal.use` is
@@ -135,13 +128,9 @@ so it is worth saying out loud why it needs no exception to the permissive defau
   the admin token — a file on the machine. So the UI could not add a second device even while running
   _on_ the machine, and "add a device" had no home outside a terminal. The routes now sit at `admin`
   scope with a `pairing` demand, which is the layer that can say "loopback yes, remote by decision".
-- **The scope move widens the layer beneath this one.** Any paired device reaching the daemon over
-  loopback can mint — once it is past the operator-password gate, which is where a local browser now
-  proves itself. That is the loopback principle applied consistently — somebody at the machine already
-  has the machine — and a grant cannot narrow it, because a grant only ever governs a caller who is not
-  on this host. It is stated here rather than discovered, because it is the part of the design a
-  reviewer should agree to. The PWA additionally refuses to mint the FIRST code until a password exists;
-  see [pairing](pairing.md).
+- **The scope move does not widen the layer beneath this one.** A paired device minting a code is governed
+  wherever it runs, a browser on the host included: it needs `pairing.use` and a step-up. Only `fy pair`
+  with the host's admin token mints without either; see [pairing](pairing.md).
 - **Its safety is the one-way gate, not its default.** A caller who is not on the host may switch
   `pairing` **off** and can never switch it back **on**. An operator who decides that only the machine
   itself hands out credentials therefore makes a decision that sticks: a stolen phone cannot restore an
@@ -199,6 +188,22 @@ So when a seventh capability is added, ask in this order:
 A capability whose coarse switch disables its own remedy is not a flaw to be gated away. It is a one-way
 door, and a one-way door has to be **labelled on the side somebody approaches it from.**
 
+### Capability seven was added: `secrets`
+
+The questions above, answered for it ([design/zero-trust.md](design/zero-trust.md) B5):
+
+1. **What does somebody reach for this switch to STOP?** A paired device running commands with the
+   machine's stored secrets in their environment (`POST /v1/secrets/use` is code execution on the host),
+   or rewriting and deleting those secrets. Before `secrets` existed these routes named no demand, so any
+   paired device could do both; that is closed, and `secrets.use` also needs a step-up from a governed caller.
+2. **Does switching it off also stop the thing that undoes it?** No. Turning `secrets` off for remote
+   callers stops nothing a remedy needs: the secrets are untouched, a leaked device is revoked through
+   `pairing`, and the host's own `fy secret` commands are ungoverned. Turning it back on is a host act,
+   like every other capability.
+3. **So the way back on the control** is the same sentence every capability's remote turn-off already
+   carries: the host command `fy daemon config set secrets --use`. There is no ordering to follow, so
+   nothing like `pairing`'s "revoke FIRST" note is needed.
+
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
 `rg -rn "adopt" src` prints every hit with `adopt` rewritten to `n`, which reads as "the command is not
@@ -218,159 +223,113 @@ The third is the one that needed a gate rather than a note, because nothing was 
 right about the artefact it was handed, and the formatter had changed the artefact. See
 `scripts/validate/conflict-markers.sh`, which knows the laundered shape as well as the raw one.
 
-## The operator password
+## The unlock, and the passkey step-up inside it
 
-- **It is not the system root password.** Nothing here shells out to `sudo`, and it cannot elevate
-  anything on the machine. It is a Ferretry operator secret for one daemon.
-- Stored as an **argon2id verifier** (Bun's built-in, at the OWASP interactive parameters) in
-  `<FY_HOME>/state/operator-password.json`, mode `0600` — deliberately **not** in
-  `config/daemon.json`, which is the file that travels into backups, dotfile repositories and screen
-  shares.
-- **Use, never read.** There is no getter on the port, no route that returns one, and nothing above
-  the verifier is ever handed a password to leak. `passwordSet` is a boolean and is the entire
-  disclosure.
-- **Rate limited per daemon**: five attempts, then a fifteen-minute lockout. A correct password
-  during a lockout is still refused — a limiter that let one through early would leak that the guess
-  was right while claiming to be closed. Each attempt is **charged before the password is checked**,
-  so a burst of parallel guesses cannot all pass the lockout check while the slow verify is pending.
-- Set it with `fy daemon password set`, reading the value from **stdin**. There is no flag that takes
-  one: an argument is in shell history and in `/proc/<pid>/cmdline` for every account on the box.
-- **A local browser can also set and replace it** — `PUT /v1/grants/password`, which is
-  `privilegedOnly`, so no caller off the host reaches it whatever credential it holds. Replacing an
-  existing one needs an unlock, because a browser that could rewrite the password it cannot prove would
-  make the gate one tap wide. Setting the **first** one needs nothing: there is no gate yet.
-- **Setting a password is ONE-WAY. Nothing removes one.** There is no `fy daemon password clear`, no
-  request body that means "remove it" — `GrantPasswordRequestSchema` requires the field — and no port
-  method below it that could express one. The reason is the whole point of the layer: removing a
-  password **revokes no device**. `PairingService.mint` refuses to hand out a code without a password,
-  so a device credential only ever exists on a machine that had one; a removal therefore leaves that
-  machine with **paired devices and no gate**, which is the one state the rest of this document treats
-  as unreachable. A warning beside the button was the whole mitigation, and a warning is not a rule.
-  - **The cost, accepted knowingly.** Somebody who sets a password and never pairs anything has no
-    route back to a passwordless machine: they unlock to change local settings from a browser, for a
-    hole that in their case was never open. That is the trade.
-  - **The narrower alternative, considered and not taken.** `clear` could have refused only while
-    paired devices exist — closing the hole and preserving the way back for a solo local user. The
-    owner chose outright removal instead: one rule with no state in it, rather than a verb whose
-    availability depends on a list somebody has to check.
-- **`fy daemon password set` never asks for the old password, and that door must stay open.** It is the
-  escape hatch, and with nothing able to remove a password it is the ONLY one: a local browser needs the
-  current password to move it, so a forgotten password would otherwise brick the daemon forever — no
-  remote path, no local path, nothing. The admin token is
-  ungoverned for exactly this reason (`isGovernedCaller`), the UI names the command wherever somebody
-  could get stuck, and `packages/daemon/tests/unit/{grants/service,runtime/mounts/grants}.test.ts`
-  assert recovery from a state where the password is unknown.
-- **`fy daemon reset` is the second escape hatch, and it never asks for the password either.** It stops
-  the daemon and removes both trees this installation occupies — the state home, and the client-owned
-  artifacts under `XDG_STATE_HOME` — so the machine comes back with no password, no paired devices and
-  no secrets at all. Gating it on the password would close the door it exists to open. It is destructive
-  rather than a repair, so it prints every path, its size, and how many secrets, devices and sessions
-  are about to go before it asks for a typed confirmation; `--yes` is for scripts. **The browser has no
-  equivalent**, and that is not an omission: a reset destroys the device grant the browser is
-  authenticated by and stops the daemon serving it, so the request could never be answered. Reset is a
-  thing somebody does at the machine.
-- **Every held unlock dies when the password moves.** Rotating after a device is lost achieves nothing
-  if what the old one bought survives it, so the browser drops its own held token too rather than
-  presenting an authority the machine has already withdrawn.
+**The unlock comes first** (owner decision 2026-10-14, [design/zero-trust.md](design/zero-trust.md) B1): a
+governed device is answered `401 unlock_required` on everything but the routes it needs to get in, until it
+unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default) for that device.
+**While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
+the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
+with the unlock turned off always asks per act.
+
+There is no operator password. The passkey step-up replaced it for every purpose it had — the local
+browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for
+compatibility**. [design/zero-trust.md](design/zero-trust.md) B owns the ceremony (who verifies it, the
+step-up window, which origin a passkey belongs to); this section owns what the grant layer does with it.
+When a per-act step-up is asked for, its window is the `stepUpWindowMinutes` security setting (0–60, default
+15); at `0` a step-up admits exactly one act and the boundary spends it. An unlock is never spent.
+
+**What needs one** — which an unlock satisfies by default. A **governed** caller needs a current step-up for:
+
+- **every `configure` demand**, on every capability; and
+- **`use` of `terminal`, `browser`, `pairing` and `secrets`** — session terminals are arbitrary code on the
+  host, the browser capability drives a browser the operator is signed into, pairing hands out credentials,
+  and using a secret runs a command with it in that command's environment.
+
+Every other `use` — reading the fleet, the filesystem view, supervision status — is ordinary operation and
+needs nothing beyond the grant. The rule is one predicate, `demandNeedsStepUp`, read by the same place that
+reads the grant, so the two cannot drift.
+
+- **A step-up is a fact about a device and an app session, held in the daemon's memory.** The browser never
+  holds a value it could replay, so there is no token to steal, no header and no lifetime to configure here.
+  `GrantsView.steppedUp` reports it, always `false` for a caller with no proven device.
+- **The refusal is `step-up-required`**, wire code `grant_step_up_required` (`STEP_UP_REQUIRED_CODE`). The
+  axis is granted and nothing is broken; the next step is a passkey confirmation on the same device and
+  then the one retry. The grants route answers with the same code as the authorization boundary, so the
+  browser's single retry-after-confirmation path covers both.
+- **There is nothing on the machine to guess or forget.** There is no secret to be rate limited, rotated,
+  forgotten or recovered. A device with no passkey registers one within its pairing window; losing every
+  passkey is repaired at the machine, which is where recovery already lived.
+- **A remote warden is governed and can never step up.** Its credential is not a paired device, so it has
+  no passkey to present: `warden.configure` is therefore unreachable to it, while `warden.use` — which needs
+  no step-up — is unchanged.
+- **A stale `state/operator-password.json` is deleted at boot**, with one notice line. Nothing reads it any
+  more; leaving it would be a verifier on disk guarding nothing.
 
 ### Where the browser asks for it
 
-**One prompt, and it is a modal raised at the moment authority is needed** —
-`features/settings/operator-unlock-dialog.tsx`, which the grants surface and the fleet cockpit both use.
-There is deliberately no second implementation: two inline password fields worded differently is how one
-capability came to describe its own authority in terms no other capability used.
+**One prompt, raised at the moment a refusal says a step-up is needed.** The browser answers
+`grant_step_up_required` by running the passkey ceremony through the app's single step-up requirement and
+retrying the request once. There is deliberately no second implementation: two prompts worded differently
+is how one capability once came to describe its own authority in terms no other used.
 
-**The shape is what the presentation gets wrong, and it got it wrong once already.** The mechanism has
-behaved like `sudo` since `#362` — one typed password mints the unlock, rides the request that needed it,
-and is not asked for again while the unlock is held. What a person MET was an inline password field inside
-a staged-change card, under an expiry and a config revision, beside Confirm-and-Apply. So the screen said
-_authorisation for this one action_ while the code said _unlock this machine_, and the owner read it the
-way it was drawn. A prompt that arrives on the click, names what it unlocks, and leaves is the same
-mechanism told truthfully.
+- **The prompt is the operating system's**, not a field the page draws, and it asks a person who already
+  holds the device. Nothing typed into the page can be captured by the page.
+- **A surface that has just stepped up re-reads its own permissions**, so what it renders is what the daemon
+  would now answer — otherwise it goes on claiming a confirmation is owed while the action beside it needs
+  none.
+- **The prompt appears only where a step-up would help.** A refusal a step-up cannot fix (`not-granted`,
+  `undetermined`) gets its sentence and no prompt, and a caller on the host is never asked.
 
-- **The scope and the lifetime are stated once, in the prompt** (`UNLOCK_HOLDING_NOTE`): the window, that
-  it covers everything changed inside it, that this screen holds it, and that closing the page ends it.
-  **Not repeated beside each control the unlock then covers** — a note at every control teaches people
-  the product nags and re-creates the per-action framing.
-- **A per-change confirmation says something different, because it IS different.** It mints nothing and is
-  spent inside the request that carries it, so the prompt for one must not promise a window: the dialog
-  branches on whether the value becomes a held unlock.
-- **Past the gate, the panel stops advertising a gate.** A surface that has just minted an unlock re-reads
-  its own permissions WITH the token, so what it renders is what the daemon would now answer — otherwise
-  it goes on claiming a password is owed while the apply beside it needs none, which is the one-gate model
-  reported wrongly.
-- **The prompt appears only where an unlock would help.** Where no password exists there is nothing to
-  unlock and no prompt at all, and a refusal an unlock cannot fix gets its sentence and no prompt
-  (`GrantGuidance.offersUnlock`).
+### The per-change confirmation is gone, and what that costs
 
-## The per-change confirmation: `fleet.configure` asks once more
+Applying a fleet proposal (`POST /v1/fleet/proposals/:proposalId/apply`) and starting a harness sign-in
+(`POST /v1/fleet/login`) used to ask a governed caller for the password again, bound to that one act. They
+now sit under the ordinary `fleet.configure` step-up and **ask for nothing in the request body**; the
+request schemas are empty objects. That is a real weakening and it is stated rather than discovered:
 
-**Two routes ask a governed caller to prove the operator password again, each against one exact act:
-`POST /v1/fleet/proposals/:proposalId/apply` and `POST /v1/fleet/login`.** It is worth its own section
-because it looks like a second gate and is not one.
+- The old property was "bound to one diff". The new one is "bound to a biometric check on this device within
+  the window". It is weaker against a request an attacker could replay, which a sealed session no longer
+  allows, and stronger against a password somebody watched being typed or reused elsewhere.
+- Within the window, a step-up covers any number of `configure` acts — and by default the window is the whole
+  unlock. The opt-in per-act confirmation (`stepUpOnActions`) is a window, not a confirmation bound to one
+  diff; none bound to one diff is planned: the artifact worth binding to (a staged diff, one sign-in identity)
+  exists only for the fleet, and a prompt on every act of a capability without one trains people to click
+  through.
+- The remote risk in a sign-in is still **account substitution**, not disclosure: a caller who can start one
+  and forward its code can bind this fleet to a provider account THEY control. That is a change to how the
+  host behaves, so it sits on `fleet.configure` and the step-up is what stands in front of it.
 
-The second one arrived with the UI-driven harness sign-in and it changed nothing about the mechanism — it is
-the same flag, the same check, the same five attempts and the same vocabulary. What it added is one more
-artifact worth binding to, and the reason is not that a sign-in is dangerous in the way a write is:
+## Who may change the security settings
 
-> The remote risk in a sign-in is **account substitution**, not disclosure. A caller who can start one and
-> forward its code can bind this fleet to a provider account THEY control, and every agent run afterwards
-> authenticates as that account. Nothing leaks; the fleet was quietly re-pointed.
-
-That is a change to how the host behaves, so it sits on `fleet.configure` and the START proves the password.
-Nothing else in that flow does: reading it, forwarding the one code and cancelling are `configure` and no
-more, because a second prompt inside one ceremony is the patchwork this document refuses.
-
-- **It is the SAME secret, and the SAME budget.** The password travels in the apply body, is checked by
-  `CapabilityGrantService.confirmChange`, and spends one of the same five tries an unlock spends, with the
-  same fifteen-minute lockout. There is no second credential, no second lifetime, and no second refusal
-  vocabulary — which is precisely what the mechanism it replaced had, and why it was deleted
-  ([fleet-authority-unification](design/fleet-authority-unification.md)).
-- **It mints nothing.** An unlock is a bearer value good for five minutes and any number of `configure`
-  demands. This is spent inside the one request that carries it and leaves nothing behind, which is the
-  whole of what "bound to one diff" means. **What it buys is narrow and worth stating narrowly:** a
-  borrowed or replayed unlock is not by itself enough to write executable wrappers into somebody's home.
-  It buys nothing at all against a caller that has the password.
-- **An UNGOVERNED caller is asked for nothing.** The host's own command line, and a browser on this machine
-  that has already unlocked, apply a fleet change with no prompt of any kind. `#358` established that
-  shape — one gate at the door, then full authority, the way `sudo` behaves — and adding a per-action
-  prompt behind it would be the patchwork this document exists to refuse.
-- **A machine with no operator password is asked for nothing either.** There is no secret to bind a change
-  to, and a control that cannot refuse is theatre. The capability layer reports that state as `ungated`
-  rather than `granted` for exactly this reason: so a surface can say once, beside the control, that
-  nothing is standing behind it.
-- **The confirmation happens BEFORE the change is spent.** A mistyped password must not burn a staged
-  change the caller was entitled to apply, which would make the mechanism a denial of service against the
-  person it exists to ask.
-- `GET /v1/fleet/machine` carries `authority.confirmation: 'none' | 'operator-password'` so a panel says this
-  before somebody clicks, and `authority.applyRefusal` is the shared `GrantRefusal`, so the fleet panel words a
-  refusal exactly as the grants panel does.
-
-**Why only the fleet.** Every capability can do damage, and this is not a claim that the fleet's is worse
-in kind. It is that both fleet acts that ask are discrete, NAMED artifacts a person reads before agreeing —
-a numbered manifest of writes, or one identity to sign in — so there is something for a confirmation to be
-_bound to_. `terminal.use` is
-a stream of arbitrary code with no such boundary; a per-change prompt there would be a per-keystroke prompt,
-which is the control that trains people to click through. If a second capability ever grows a reviewable
-artifact, the machinery is `CallerGovernance.confirmChange` and it is not fleet-specific.
+The per-machine security settings ([design/zero-trust.md](design/zero-trust.md) B6 — the unlock and its period,
+the per-act step-up and its window, key rotation, idle expiry) follow the same asymmetry as the grants. Changing one is a
+`configure` act on `pairing`: `PATCH /v1/security` demands `pairing.configure`, so a remote caller needs
+that grant **and** a current step-up, and may only **narrow**. Widening any field is host-only
+(`arrivedOnHost`): a remote widen is `403 security_widen_at_machine`, whose sentence names
+`fy daemon security set <setting> <value>`. A request that changes several fields is judged field by field
+and refused whole if any one widens remotely. Reading them (`GET /v1/security`) needs no capability.
 
 ## Widening is a local act. There is no remote path to it.
 
-"Local" below means **on the host and past the gate** — `fy`, or a browser that has unlocked (or a
-machine with no password at all). A local browser that has _not_ unlocked reads the `locked` refusal on
-`configure` and on any widen, and its remedy is the password rather than a command to run on the host it
-is already sitting at.
+This section is about the DAEMON-WIDE document. One device's own grants have one more path: a remote
+device that holds `pairing.configure` and an axis itself may give that axis to another device, with a
+step-up — never more than the daemon-wide document allows, so it is a copy, not a widening of the machine
+(see [Per-device grants](#per-device-grants)).
 
-| act                                | local (past the gate) | remote (governed)                              |
-| ---------------------------------- | --------------------- | ---------------------------------------------- |
-| turn **on** (off→on)               | allowed               | **never — password or no password**            |
-| turn **off** (on→off)              | allowed               | allowed                                        |
-| configure a capability that is on  | allowed               | allowed; the password gates it when one is set |
-| configure a capability that is off | allowed               | refused — it is off                            |
+"Local" below means **the owner at the machine** — `fy` with the admin token. Every other caller, a browser
+on the host included, is governed, and **no step-up buys it a widening**.
 
-Widening follows **`hostLocal`, not `governed`**: a local browser waiting to unlock may still widen once
-it has, so `mayGrant` stays true for it. Reporting `false` there would tell somebody standing at the
-machine that a door they can reopen is shut for good.
+| act                                | on the host (ungoverned) | remote (governed)                          |
+| ---------------------------------- | ------------------------ | ------------------------------------------ |
+| turn **on** (off→on)               | allowed                  | **never — a step-up does not change this** |
+| turn **off** (on→off)              | allowed                  | allowed, **with a step-up**                |
+| configure a capability that is on  | allowed                  | allowed, **with a step-up**                |
+| configure a capability that is off | allowed                  | refused — it is off (`not-granted`)        |
+
+Widening follows **`hostLocal`**, which is now exactly `!governed`; both stay on the wire because they
+answer different questions ("do the limits apply to me" and "did this request arrive at the machine") and a
+screen should read the one it means rather than a rule it would have to restate.
 
 A patch that widens one capability and narrows another is refused **entirely**. A half-applied widen
 leaves the operator with a machine in a state they did not ask for and were not told about, and the
@@ -381,9 +340,10 @@ cannot switch it back on from that phone. It is what makes the rule safe, and it
 yourself out of your own machine — so the refusal names the remedy exactly, and `mayGrant` on every
 capability view lets a UI say so _before_ somebody walks through, rather than after.
 
-Revoking must never be harder than granting: in an incident the fastest possible path to _"the UI can
-no longer do that"_ matters more than a confirmation, and a password prompt between a person and
-shutting a door is a liability.
+Revoking must never be harder than granting. A governed narrowing costs one touch on the device already in
+hand — a step-up and nothing else — and never a trip to the host, which is the property that matters in an
+incident. It is not free, and the cost is stated: a phone whose passkey the thief cannot use cannot narrow
+either, so the remedy for that case is the host.
 
 ## A grant only ever narrows
 
@@ -391,6 +351,68 @@ The grant layer is consulted **after** authentication and after the route's cred
 `privilegedOnly` checks. Every branch either keeps the answer those produced or removes it. There is no input that
 turns a refused route into a served one — a paired device's session cannot reach an `admin-token`
 route because a grant says `use: true`, and no document an operator writes can make it.
+
+## Per-device grants
+
+The document above answers **what any remote caller may ever do on this machine**. Each paired device
+also carries its **own** grants, in its record in `<FY_HOME>/state/devices.json`, and a governed caller
+gets both at once ([design/zero-trust.md](design/zero-trust.md) B5):
+
+```
+effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.grants[capability][axis]
+```
+
+- **A newly paired device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), behind
+  the unlock: it can do nothing until it unlocks, and then anything the daemon-wide document allows.
+- **A `fy pair --limited` code** gives the device that redeems it `fleet.use` only (`LIMITED_DEVICE_GRANTS`):
+  it can read the fleet and chat with sessions, and every other axis starts off until somebody widens it.
+  A full code minted from another device is refused unless that device holds every capability itself, so no
+  device can pass on more than it holds; at the machine anything goes. The code carries the choice inside
+  the daemon, never in the QR or the link.
+- **The host is ungoverned** (B4): `fy`, and anything else that arrived on the host, is narrowed by
+  neither document.
+- **A refusal says which half refused.** The daemon-wide half answers `not-granted` (remedy:
+  `fy daemon config set …`); the device half answers `device-not-granted`, wire code
+  `grant_device_not_granted` (remedy: `fy device grant <device> <capability> --use|--configure`). The
+  daemon-wide answer is asked first, so its remedy — a change for everyone — is named before the per-device one.
+- **A device the session proved but whose record is gone** is refused as `undetermined`, never served
+  unnarrowed. A governed caller that is not a device (a remote warden) has no device record, so only the
+  daemon-wide half and the step-up apply to it.
+- **`devices.json` stays at `schemaVersion: 2`.** A record written before per-device grants has no `grants`
+  field and reads as the default — `fleet.use` only — which is a narrowing and therefore safe. Every write
+  carries the field. A record whose `grants` is malformed fails the document closed, as every other
+  malformed field does.
+
+### Changing a device's grants
+
+`PATCH /v1/pair/devices/:deviceId/grants` with a partial `DeviceGrantsPatch`, answering the whole device
+list. At the machine — `fy` with the admin token, the only ungoverned caller (B4):
+`fy device grant <device> <capability> --use|--no-use|--configure|--no-configure`. In the app, Settings →
+Add a device shows each device's capabilities as toggles; a browser is a governed device wherever it runs, so
+its toggles follow the remote column below — a toggle it may not turn on says so, with the `fy` command.
+
+| change                        | the owner (`fy`) | any device (a browser on the host too)                                                 |
+| ----------------------------- | ---------------- | -------------------------------------------------------------------------------------- |
+| turn an axis **on** (widen)   | allowed          | only an axis it holds itself, effective, **and** it holds `pairing.configure`; step-up |
+| turn an axis **off** (narrow) | allowed          | allowed with a step-up — any device, its own included                                  |
+
+- **No device can grant what it does not hold**, so nothing escalates: the most a device can give another
+  is a copy of what it has. A widen of anything else by a device is `403 grant_forbidden`, naming the host command.
+- **Narrowing is never harder than widening.** The route demands `pairing.use`, so any device holding that
+  — and a step-up — can narrow. A device with no `pairing.use` (the default) cannot reach the route at all;
+  its own grants are narrowed at the machine or by a device that may manage devices.
+- **`configure` implies `use` on the result**: turning `configure` on turns `use` on with it, turning `use`
+  off turns `configure` off, and a field naming both reads as the narrowing.
+- **Judged field by field, refused whole.** One illegal widen refuses the whole patch before anything is
+  written, and before any step-up is asked — a widen no step-up could buy must not ask for a passkey first.
+- **It reaches open streams.** After a change the connection registry re-asks every open stream
+  (`recheckAll`, then `ApiSocketDispatcher.reauthorize`), so a narrowed terminal closes rather than running on.
+- **It is audited** through the same journal as the daemon-wide grants (`state/grant-audit.jsonl`,
+  `fy daemon config history`), one change per axis as `<deviceId>/capability.axis=on|off`, attributed to
+  the actor.
+- `PairedDevicesView.mayWiden` tells a screen which axes **this** caller may turn on, so a toggle that
+  would be refused says so before it is pressed. `CapabilityGrantView.deviceGranted` tells a governed
+  device what its own record says, so a panel can say which half withheld an axis.
 
 ## Unknown is not permitted
 
@@ -404,17 +426,18 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 
 ## Where it lives
 
-| thing                      | path                                                                    |
-| -------------------------- | ----------------------------------------------------------------------- |
-| the wire contract          | `packages/protocol/src/lib/grants.ts`                                   |
-| the decision               | `packages/daemon/src/lib/grants/`                                       |
-| the authorization boundary | `packages/daemon/src/lib/api/capability.ts`, `dispatcher.ts`            |
-| the routes                 | `packages/daemon/src/lib/runtime/mounts/grants.ts`                      |
-| the grants themselves      | `<FY_HOME>/config/daemon.json`, under `grants`                          |
-| the password verifier      | `<FY_HOME>/state/operator-password.json` (mode 0600)                    |
-| the change record          | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history` |
-| the command line           | `fy daemon config`, `fy daemon password`                                |
-| all of it, removed         | `fy daemon reset` on the host — both roots, no password required        |
+| thing                      | path                                                                       |
+| -------------------------- | -------------------------------------------------------------------------- |
+| the wire contract          | `packages/protocol/src/lib/grants.ts`                                      |
+| the decision               | `packages/daemon/src/lib/grants/`                                          |
+| the authorization boundary | `packages/daemon/src/lib/api/capability.ts`, `dispatcher.ts`               |
+| the routes                 | `packages/daemon/src/lib/runtime/mounts/grants.ts`                         |
+| the grants themselves      | `<FY_HOME>/config/daemon.json`, under `grants`                             |
+| one device's own grants    | `<FY_HOME>/state/devices.json`, each record's `grants`; `fy device`        |
+| the change record          | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history`    |
+| the step-up                | `packages/protocol/src/lib/step-up.ts`, `packages/daemon/src/lib/step-up/` |
+| the command line           | `fy daemon config`                                                         |
+| all of it, removed         | `fy daemon reset` on the host — both roots                                 |
 
 `fyd --print-config` reports every capability with its **origin** — `default` or `config file` — the
 same provenance treatment every other value gets, because a person reading a permission report is
@@ -425,28 +448,32 @@ usually asking which of these they chose and which something chose for them.
 Every refusal names a command that fixes it. That is the point of the layer, not a nicety — a person
 meeting a denial should not have to know this file exists:
 
-| refusal        | what the sentence says to do                                                         |
-| -------------- | ------------------------------------------------------------------------------------ |
-| `not-granted`  | `fy daemon config set <capability> --use` / `--configure`, on the host               |
-| `locked`       | enter the password — or, if you do not have it, `fy daemon password set` at the host |
-| `rate-limited` | wait for the lockout, or `fy daemon password set` at the host                        |
-| `undetermined` | `fy daemon config` on the host, to see and repair the document                       |
+| refusal              | what the sentence says to do                                               |
+| -------------------- | -------------------------------------------------------------------------- |
+| `granted`            | nothing — the caller was served                                            |
+| `not-granted`        | `fy daemon config set <capability> --use` / `--configure`, on the host     |
+| `device-not-granted` | `fy device grant <device> <capability> --use` / `--configure`, on the host |
+| `step-up-required`   | confirm with the passkey on this device; the app does it and retries once  |
+| `undetermined`       | `fy daemon config` on the host, to see and repair the document             |
 
-`locked` is the one worth explaining. Its reader may not be the operator: the axis is granted, nothing
-is broken, and "unlock first" is a complete instruction for whoever holds the password and **no
-instruction at all** for whoever does not. It names both remedies and says which is whose.
+`step-up-required` is the one worth explaining. The axis is granted and nothing is broken, so it is the only
+refusal the **caller** can clear without the operator: the person holding the device confirms and carries on.
+A caller that cannot step up at all — a remote warden, which has no device — meets it as a final answer, and
+the remedy is the host.
 
 `fyd --check` states the posture in one line, and states it **after** answering whether anything off
 the host can reach this daemon at all:
 
 ```
-grants       nothing off this host can reach this daemon (host 127.0.0.1, no relay), so no grant applies today
+grants       nothing off this host can reach this daemon (host 127.0.0.1, no relay), so no grant governs another machine today
 ```
 
 ```
 grants       reachable off this host (the relay at wss://…) — a remote caller may use everything, and change settings for everything
-             ! no operator password is set, so any paired device can change this machine's fleet and settings without one; set one with `fy daemon password set`
 ```
+
+There is no "set a password" advice beside it, because there is nothing to set: the gate in front of those
+changes is the passkey step-up, which a paired device already has the means to satisfy.
 
 Reachability counts the **relay**, not just the bind address. The daemon dials _out_ to a rendezvous,
 so a loopback bind is reachable from anywhere the moment a relay is enabled — a check that read `host`
@@ -464,36 +491,22 @@ command says so at the moment somebody might be tempted to do that instead.
 
 ## Declared GAPs
 
-- **An SSH tunnel to the daemon port reads as loopback**, because the socket genuinely is local. The
-  model accepts this — a tunnel needs shell access, and anybody with that can read the admin token
-  anyway — but `pairing` is the capability where it matters most, so it is written down rather than
-  discovered.
-- **The local browser gate is bypassable by design, and only the browser is gated.** Anybody at that
-  keyboard can open a terminal, read the admin token and change everything without the password. The
-  gate buys deliberateness against slips and unattended tabs, nothing more, and the escape hatch it
-  depends on is the same door that makes it bypassable. There is no version of this that is both
-  unbypassable and recoverable, and recoverable is the one that was chosen.
-- ~~The first-password requirement lives in the PWA's pairing flow, not in the daemon.~~ **Closed.**
-  `POST /v1/pair/code` refuses while no operator password exists, for **every** caller — a phone, a
-  browser on the machine, and `fy pair` on the host, which mints through that same route. The guarantee
-  is therefore "**no passwordless remote device can be created**", not "the browser will not create one".
-  The rule is `PairingService.mint`, which answers a refusal instead of a code; the browser's panel is a
-  **pre-check** that explains before somebody taps, and `fy pair` prints the daemon's sentence. One rule,
-  one sentence, and no second copy to drift. The check is at the **mint**, which used to leave a window:
-  a code minted while a password existed still redeemed if the password was removed inside that code's
-  two minutes. Nothing removes a password any more, so nothing can open that window — and the check
-  stays where it is regardless, because expiring a live code somebody is walking to their phone to scan
-  would be a rule reaching backwards.
-- **A daemon started by a service manager can still come up passwordless, and that is not a hole.**
-  `fy daemon start` offers to set the first password when a person is there to answer — and only then:
-  systemd and launchd run the daemon executable with no terminal, so a prompt there would hang the unit
-  and the machine would silently stop running the daemon at boot. Startup prompting is therefore
-  convenience and can never be the promise; **pairing refusing is the promise**, and it holds however the
-  daemon was started.
-- **An install that already has paired devices and no password is not migrated.** Nothing nags it and
-  nothing is revoked; the requirement lands at its **next** pairing, which needs no separate prompt and
-  cannot lock anybody out. Such an operator can also set one at any time from a local browser or with
-  `fy daemon password set`.
+- **An SSH tunnel to the daemon port is a governed caller**, like any browser: it is a loopback peer, and a
+  loopback peer proves nothing about the owner. Only the admin token does.
+- **The host's command line is ungoverned, so an unattended, unlocked host is unprotected.** Anybody at that
+  keyboard can open a terminal, read the admin token and change everything; the step-up does not defend it.
+  That is the same door the recovery path depends on — a lost phone, a lost passkey (`fy passkey window
+<device>` re-opens a device's passkey window for ten minutes) or a device narrowed to nothing is repaired
+  at the machine — and there is no version of this that is both unbypassable and recoverable. Recoverable
+  is the one that was chosen. A browser tab left open on the host is no longer the exception: it is governed.
+- **A step-up is per device and per app session, and bounds nothing about what the confirmed act does.**
+  Within its window a step-up covers any number of `configure` acts and any number of `terminal.use`
+  streams. It says "the person holding this device agreed recently", not "this particular diff was read".
+  The per-change confirmation that bound an act to one staged change is gone, and the fleet's apply and
+  sign-in now rest on the window alone.
+- **A remote warden can never step up.** A step-up is a passkey held by a paired device, and a warden has
+  no device, so `warden.configure` and every other step-up demand is unreachable to it from off the host.
+  It is named here so nobody reads the refusal as a fault.
 - **`configure` has no route of its own for `terminal`, `browser` or `pairing`.** Those three
   subsystems have no host settings the API can change today, so their configure axis governs exactly
   one thing: whether a remote caller may re-grant that capability. It is not decoration — it is the
@@ -510,16 +523,20 @@ command says so at the moment somebody might be tempted to do that instead.
   the whole UI depends on rather than fleet configuration, so tying it to the `fleet` capability
   would make revoking `fleet` break the session list. If a future event kind carries fleet
   configuration, it needs its own decision.
-- **Web Push enrolment is governed by `pairing`, not by a capability of its own.** The four
-  `/v1/push/*` routes each demand `pairing.use`, because what they do is device management: only a
-  paired device may enrol, the enrolment is filed against that device's grant, and revoking the grant
-  destroys it. Pairing is _who may reach this daemon_; push is _who this daemon may reach_; one
-  operator decision about devices governs both, and the list above stays closed.
+- ~~Web Push enrolment is governed by `pairing`.~~ **Closed by B5.** A device enrolling **itself** — reading
+  the key, enrolling, listing and un-enrolling its own enrolments — needs no capability and no step-up,
+  because it grants nothing: it lets this daemon reach the device that asked, and only it. A default
+  device (`fleet.use` only) therefore still gets alerts. Seeing every device's enrolments, or revoking one
+  another device filed, is device management and is decided by `pairing.use`, asked of the same grant
+  layer every governed route is decided by. A caller on the host sees all of them.
 
-  **The honest cost, stated rather than discovered:** an operator who switches `pairing` off for
-  remote callers also loses remote enrolment **and** remote un-enrolment. That is coherent — both are
-  device management, and revoking a device still takes its notifications with it from anywhere — but it
-  is not the same thing as a switch labelled "notifications". If a separately nameable notification
-  decision is wanted, it is one constant in `packages/daemon/src/lib/runtime/mounts/push.ts` plus
-  wherever a capability is declared; that second half is what the unified configuration model owns, and
-  adding a seventh member here before it lands would be the duplication that model exists to remove.
+  **The honest cost, stated rather than discovered:** switching `pairing` off for remote callers no longer
+  stops a paired device enrolling itself for notifications. That is the intended shape — notifications are
+  not a credential — and revoking the device still takes its enrolments with it. Enrolling still needs a
+  passkey step-up from a governed device, and the endpoint must be a browser push service: the host sends
+  requests to it ([design/zero-trust.md](design/zero-trust.md) B5).
+
+- **The secret routes needed no capability before B5**, so a device paired before it could run a command
+  with a stored secret without the operator ever being asked. They now demand `secrets` (see the capability
+  seven section); a device paired before B5 reads as the default, `fleet.use` only, so it lost that access
+  on upgrade and must be widened deliberately.

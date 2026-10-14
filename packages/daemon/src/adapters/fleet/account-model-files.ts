@@ -78,7 +78,6 @@ export interface FileFleetCatalogOptions {
   /** Every session's state document, raw. */
   sessionStates(): Promise<readonly unknown[]>;
   readonly credentials: FleetCatalogServiceDeps['credentials'];
-  readonly confirmChange: FleetCatalogServiceDeps['confirmChange'];
   readonly locate: FleetCatalogServiceDeps['locate'];
   readonly machineName: () => string;
   /** What a person types to run this binary: the wrapper's history claim and statusLine run it. */
@@ -130,7 +129,6 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
       }),
     machineName: options.machineName,
     credentials: options.credentials,
-    confirmChange: options.confirmChange,
     provisioner: new FileFleetProvisioner(
       allowedRoots,
       new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots)),

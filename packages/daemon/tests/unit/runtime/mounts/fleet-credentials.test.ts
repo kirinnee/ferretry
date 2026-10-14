@@ -7,7 +7,7 @@
  * check is handed the caller's governance rather than deciding it.
  */
 import { describe, it } from 'bun:test';
-import type { FleetCredentialCheckRequest, FleetCredentialList, FleetCredentialView } from '@ferretry/protocol';
+import type { FleetCredentialList, FleetCredentialView } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -50,7 +50,6 @@ const LIST: FleetCredentialList = { format: 2, machine: 'studio', credentials: [
 
 interface Checked {
   readonly id: string;
-  readonly request: FleetCredentialCheckRequest;
   readonly governance: CallerGovernance | undefined;
 }
 
@@ -67,9 +66,9 @@ function recording(check: FleetCredentialsSubsystem['check']): {
     calls,
     subsystem: {
       list: async () => LIST,
-      check: async (id, body, governance) => {
-        calls.push({ id, request: body, governance });
-        return await check(id, body, governance);
+      check: async (id, governance) => {
+        calls.push({ id, governance });
+        return await check(id, governance);
       },
     },
   };
@@ -97,9 +96,7 @@ describe('the fleet credentials mount', () => {
     const { subsystem, calls } = recording(async () => VIEW);
 
     // Act
-    const response = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/credentials/work/check', JSON.stringify({ operatorPassword: 'correct horse' })),
-    );
+    const response = await dispatcher(subsystem).dispatch(post('/v1/fleet/credentials/work/check'));
 
     // Assert
     should(response.status).equal(200);
@@ -107,8 +104,21 @@ describe('the fleet credentials mount', () => {
     should(response.headers.get('cache-control')).equal('no-store');
     should(calls).have.length(1);
     should(calls[0]?.id).equal('work');
-    should(calls[0]?.request).deepEqual({ operatorPassword: 'correct horse' });
-    should(calls[0]?.governance).containDeep({ governed: false, passwordSet: false, confirmChange: false });
+    should(calls[0]?.governance).containDeep({ governed: false });
+  });
+
+  it('should refuse a body that names anything, before the service runs', async () => {
+    // Arrange
+    const { subsystem, calls } = recording(async () => VIEW);
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/credentials/work/check', JSON.stringify({ operatorPassword: 'correct horse' })),
+    );
+
+    // Assert
+    should(response.status).equal(400);
+    should(calls).be.empty();
   });
 
   it('should answer 404 for a login that does not exist', async () => {

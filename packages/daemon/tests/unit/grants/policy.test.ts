@@ -1,96 +1,110 @@
 import { describe, it } from 'bun:test';
-import { DAEMON_CAPABILITIES, GRANT_UNLOCK_LOCKOUT_SECONDS, GRANT_UNLOCK_MAX_ATTEMPTS } from '@ferretry/protocol';
+import {
+  type CapabilityAxis,
+  type CapabilityGrants,
+  DAEMON_CAPABILITIES,
+  type DaemonCapability,
+  GRANT_REFUSALS,
+  type GrantRefusal,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   applyGrantPatch,
-  type CallerArrival,
   capabilityNoun,
   DEFAULT_CAPABILITY_GRANTS,
   decideCapability,
+  demandNeedsStepUp,
   describeDemand,
   describeGrantRefusal,
+  type GrantEvaluation,
   grantChanges,
-  INITIAL_UNLOCK_ATTEMPTS,
   isGovernedCaller,
-  isUnlockLocked,
-  mayChangeOperatorPassword,
-  NO_PASSWORD_DISCLOSURE,
   patchedCapabilities,
-  recordUnlockFailure,
-  recordUnlockSuccess,
-  unlockAttemptsRemaining,
   widenedBy,
 } from '../../../src/lib/grants/index.ts';
 import { tunnelApiRequest } from '../../../src/lib/relay/tunnel.ts';
 
-const evaluation = (overrides: Partial<Parameters<typeof decideCapability>[1]> = {}) => ({
+const AXES: readonly CapabilityAxis[] = ['use', 'configure'];
+
+/** A remote caller holding a step-up against the permissive defaults, unless a case says otherwise. */
+const evaluation = (overrides: Partial<GrantEvaluation> = {}): GrantEvaluation => ({
   grants: DEFAULT_CAPABILITY_GRANTS,
-  passwordSet: false,
-  unlockHeld: false,
-  rateLimited: false,
   governed: true,
   hostLocal: false,
+  stepUp: true,
   ...overrides,
 });
 
-/** One caller, as the four facts governance reads about it. The default is a remote device. */
-const arrival = (overrides: Partial<CallerArrival> = {}): CallerArrival => ({
-  loopback: false,
-  adminToken: false,
-  passwordSet: false,
-  unlockHeld: false,
-  ...overrides,
+/** Every capability shut on both axes. */
+const SHUT: CapabilityGrants = Object.fromEntries(
+  DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false }]),
+) as CapabilityGrants;
+
+/** The defaults with ONE capability's grant replaced. */
+const grantsWith = (capability: DaemonCapability, grant: { use: boolean; configure: boolean }): CapabilityGrants => ({
+  ...DEFAULT_CAPABILITY_GRANTS,
+  [capability]: grant,
 });
+
+/**
+ * THE SPECIFICATION, written out rather than derived from the code under test: every `configure`, and
+ * the `use` of the three capabilities whose ordinary use reaches past the daemon.
+ */
+const NEEDS_STEP_UP: Readonly<Record<DaemonCapability, Readonly<Record<CapabilityAxis, boolean>>>> = {
+  fleet: { use: false, configure: true },
+  terminal: { use: true, configure: true },
+  browser: { use: true, configure: true },
+  filesystem: { use: false, configure: true },
+  warden: { use: false, configure: true },
+  pairing: { use: true, configure: true },
+  secrets: { use: true, configure: true },
+};
+
+/** The grant document states a matrix row can find a capability in. */
+const DOCUMENT_STATES = [
+  { label: 'both axes granted', grant: { use: true, configure: true } },
+  { label: 'use granted, configure refused', grant: { use: true, configure: false } },
+  { label: 'use refused, configure granted', grant: { use: false, configure: true } },
+  { label: 'both axes refused', grant: { use: false, configure: false } },
+] as const;
+
+/** What a governed caller is answered, stated case by case from the contract. */
+function expectedGoverned(
+  capability: DaemonCapability,
+  axis: CapabilityAxis,
+  grant: { use: boolean; configure: boolean },
+  stepUp: boolean,
+): GrantRefusal {
+  if (!grant.use) return 'not-granted';
+  if (axis === 'configure' && !grant.configure) return 'not-granted';
+  if (NEEDS_STEP_UP[capability][axis] && !stepUp) return 'step-up-required';
+  return 'granted';
+}
 
 describe('who the grants govern', () => {
-  it('should govern every caller that did not arrive over loopback, whatever it holds', () => {
-    // Arrival is still the first question, and no credential answers it: a remote caller holding the
-    // host's admin token, a live unlock, or both is governed all the same.
+  it('should govern exactly the callers that did not arrive on the host', () => {
     // Act + Assert
-    should(isGovernedCaller(arrival({ loopback: false }))).be.true();
-    should(isGovernedCaller(arrival({ loopback: false, adminToken: true, unlockHeld: true }))).be.true();
+    should(isGovernedCaller({ loopback: false })).be.true();
+    should(isGovernedCaller({ loopback: true })).be.false();
   });
 
-  it('should exempt the host command line, which holds the admin token', () => {
-    // Reading that token file already requires being on the machine, so gating it would be friction with
-    // no safety — and it would close the one door a FORGOTTEN password is repaired through. This is the
-    // escape hatch, asserted rather than assumed.
-    // Act + Assert
-    should(isGovernedCaller(arrival({ loopback: true, adminToken: true, passwordSet: true }))).be.false();
-    should(mayChangeOperatorPassword(arrival({ loopback: true, adminToken: true, passwordSet: true }))).be.true();
-  });
-
-  it('should govern a LOCAL BROWSER until it presents an unlock, then stop', () => {
-    // A browser is a paired device wherever it runs, and an unattended tab on the machine was one tap
-    // from provisioning it. So local arrival alone is no longer an exemption: one gate at the door, then
-    // full authority. It is friction rather than a boundary — somebody at the keyboard can open a
-    // terminal — and what it buys is that a destructive change is deliberate.
+  it('should leave a host-proven local browser ungoverned, whatever the document says', () => {
+    // A browser that carried the host proof (`arrivedOnHost`) is somebody at the machine, who already
+    // has the machine. Neither a grant nor a step-up is asked of it — not even for the terminal.
     // Arrange
-    const local = { loopback: true, adminToken: false, passwordSet: true };
+    const local = evaluation({
+      grants: SHUT,
+      governed: isGovernedCaller({ loopback: true }),
+      hostLocal: true,
+      stepUp: false,
+    });
 
     // Act + Assert
-    should(isGovernedCaller(arrival({ ...local, unlockHeld: false }))).be.true();
-    should(isGovernedCaller(arrival({ ...local, unlockHeld: true }))).be.false();
-  });
-
-  it('should leave a local browser ungoverned while this machine has no password at all', () => {
-    // The state every new user starts in. There is nothing to unlock with and no gate to pass, so a
-    // fresh install is useful immediately and nobody is asked to invent a secret before their first run.
-    // A password is required to PAIR — the daemon's own mint refuses without one, whichever door the
-    // request came through — because that is where remote access begins. Never at startup, and never
-    // for using this machine, which is the property this case exists to keep.
-    // Act + Assert
-    should(isGovernedCaller(arrival({ loopback: true, passwordSet: false }))).be.false();
-    should(mayChangeOperatorPassword(arrival({ loopback: true, passwordSet: false }))).be.true();
-  });
-
-  it('should refuse a local browser the password itself until it unlocks', () => {
-    // Otherwise the gate would be one tap wide: a locked browser could simply replace the password it
-    // could not prove, and every sentence about deliberateness would be false. The way back for somebody
-    // who has genuinely forgotten it is the admin token above, never this.
-    // Act + Assert
-    should(mayChangeOperatorPassword(arrival({ loopback: true, passwordSet: true, unlockHeld: false }))).be.false();
-    should(mayChangeOperatorPassword(arrival({ loopback: true, passwordSet: true, unlockHeld: true }))).be.true();
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        should(decideCapability({ capability, axis }, local)).deepEqual({ allowed: true, refusal: 'granted' });
+      }
+    }
   });
 
   it('should treat a RELAYED request as remote even though the relay terminates on this host', () => {
@@ -98,8 +112,7 @@ describe('who the grants govern', () => {
     //
     // The rendezvous socket is opened by the daemon and terminates inside this very host, so a check
     // that read a peer address, a `Host` header or a URL would see loopback for a phone on the other
-    // side of the world and hand it the machine. The carrier answers instead, and it answers `false`
-    // unconditionally — which is what makes every restriction in this feature real.
+    // side of the world and hand it the machine. The carrier answers instead, and it answers `false`.
     // Arrange — a relayed request that presents every loopback-looking signal it possibly could.
     const relayed = tunnelApiRequest(
       {
@@ -116,137 +129,169 @@ describe('who the grants govern', () => {
       'rendezvous-session',
     );
 
-    // Act — and it presents the host's own token class too, which changes nothing off the host.
-    const governed = isGovernedCaller(arrival({ loopback: relayed.loopback, adminToken: true }));
+    // Act
+    const governed = isGovernedCaller({ loopback: relayed.loopback });
 
-    // Assert — the address it claims changes nothing.
+    // Assert — the address it claims changes nothing, and without a step-up it cannot configure.
     should(relayed.loopback).be.false();
     should(governed).be.true();
     should(
-      decideCapability({ capability: 'fleet', axis: 'configure' }, evaluation({ passwordSet: true })),
-    ).have.property('refusal', 'locked');
+      decideCapability(
+        { capability: 'fleet', axis: 'configure' },
+        evaluation({ governed, hostLocal: relayed.loopback, stepUp: false }),
+      ),
+    ).deepEqual({ allowed: false, refusal: 'step-up-required' });
+  });
+
+  it('should keep a remote warden governed, and it can never step up', () => {
+    // A warden is not a paired browser session: it proves no device, so the dispatcher's witness has
+    // nothing to look up and `stepUp` is always false. It may watch — `warden.use` and `fleet.use` need
+    // no step-up — but every configure and every dangerous use is refused, however the document reads.
+    // Arrange
+    const warden = evaluation({ governed: isGovernedCaller({ loopback: false }), stepUp: false });
+
+    // Act + Assert
+    should(decideCapability({ capability: 'warden', axis: 'use' }, warden)).deepEqual({
+      allowed: true,
+      refusal: 'granted',
+    });
+    should(decideCapability({ capability: 'fleet', axis: 'use' }, warden)).deepEqual({
+      allowed: true,
+      refusal: 'granted',
+    });
+    for (const capability of DAEMON_CAPABILITIES) {
+      should(decideCapability({ capability, axis: 'configure' }, warden)).deepEqual({
+        allowed: false,
+        refusal: 'step-up-required',
+      });
+    }
+    for (const capability of ['terminal', 'browser', 'pairing'] as const) {
+      should(decideCapability({ capability, axis: 'use' }, warden).refusal).equal('step-up-required');
+    }
   });
 });
 
-describe('the per-capability decision', () => {
+describe('which demands need a step-up', () => {
+  it('should need one for every configure and for the use of terminal, browser, pairing and secrets only', () => {
+    // Act + Assert
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        should(demandNeedsStepUp({ capability, axis })).equal(NEEDS_STEP_UP[capability][axis]);
+      }
+    }
+  });
+});
+
+describe('the per-capability decision matrix', () => {
   it('should default every axis of every capability to enabled', () => {
-    // Permissive by default, restrictive by choice: the product should let a person do as much as
-    // possible from the UI, and the security layer is something a cautious operator turns on.
+    // Permissive by default, restrictive by choice.
     // Assert
     for (const capability of DAEMON_CAPABILITIES) {
       should(DEFAULT_CAPABILITY_GRANTS[capability]).deepEqual({ use: true, configure: true });
     }
   });
 
-  it('should serve an ungoverned caller whatever the document says', () => {
-    // Arrange — the operator has switched everything off for remote callers.
-    const shut = Object.fromEntries(
-      DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false }]),
-    ) as typeof DEFAULT_CAPABILITY_GRANTS;
+  for (const capability of DAEMON_CAPABILITIES) {
+    for (const axis of AXES) {
+      for (const state of DOCUMENT_STATES) {
+        for (const stepUp of [true, false]) {
+          const governedRefusal = expectedGoverned(capability, axis, state.grant, stepUp);
+          it(`${capability}.${axis}, ${state.label}, ${stepUp ? 'stepped up' : 'no step-up'}: governed → ${governedRefusal}, ungoverned → granted`, () => {
+            // Arrange
+            const grants = grantsWith(capability, state.grant);
 
-    // Act
-    const decision = decideCapability(
-      { capability: 'warden', axis: 'configure' },
-      evaluation({ grants: shut, governed: false }),
-    );
+            // Act
+            const governed = decideCapability({ capability, axis }, evaluation({ grants, stepUp }));
+            const ungoverned = decideCapability(
+              { capability, axis },
+              evaluation({ grants, stepUp, governed: false, hostLocal: true }),
+            );
 
-    // Assert
-    should(decision).deepEqual({ allowed: true, refusal: 'granted' });
-  });
+            // Assert
+            // A step-up is only SPENT by an act that leaned on one: allowed AND the demand needs it.
+            const leanedOnStepUp = governedRefusal === 'granted' && NEEDS_STEP_UP[capability][axis] && stepUp;
+            should(governed).deepEqual({
+              allowed: governedRefusal === 'granted',
+              refusal: governedRefusal,
+              ...(leanedOnStepUp ? { steppedUp: true } : {}),
+            });
+            should(ungoverned).deepEqual({ allowed: true, refusal: 'granted' });
+          });
+        }
+      }
 
-  it('should refuse every capability when the grants could not be determined', () => {
-    // Permissive DEFAULTS settle what silence means. They say nothing about damage, and unknown is
-    // never permitted — a daemon that cannot say what it may do must stop doing it.
-    // Act
-    const use = decideCapability({ capability: 'terminal', axis: 'use' }, evaluation({ grants: undefined }));
-    const configure = decideCapability(
-      { capability: 'terminal', axis: 'configure' },
-      evaluation({ grants: undefined }),
-    );
-
-    // Assert
-    should(use).deepEqual({ allowed: false, refusal: 'undetermined' });
-    should(configure).deepEqual({ allowed: false, refusal: 'undetermined' });
-  });
-
-  it('should refuse configure when use itself is refused', () => {
-    // A capability the UI may not exercise but may reconfigure is incoherent: it would let a browser
-    // change how a shell spawns while being unable to open one.
-    // Arrange
-    const grants = { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: true } };
-
-    // Act
-    const decision = decideCapability({ capability: 'terminal', axis: 'configure' }, evaluation({ grants }));
-
-    // Assert
-    should(decision).deepEqual({ allowed: false, refusal: 'not-granted' });
-  });
-
-  it('should allow configure with no password, and report that nothing was gating it', () => {
-    // The honest cost of permissive defaults, reported rather than hidden: `ungated` is what lets a
-    // UI say once, beside the control, that this machine has nothing standing behind it.
-    // Act
-    const decision = decideCapability({ capability: 'fleet', axis: 'configure' }, evaluation({ passwordSet: false }));
-
-    // Assert
-    should(decision).deepEqual({ allowed: true, refusal: 'ungated' });
-    should(NO_PASSWORD_DISCLOSURE).match(/any paired device can change/u);
-  });
-
-  it('should demand an unlock once an operator password exists, and honour a held one', () => {
-    // Act
-    const locked = decideCapability({ capability: 'fleet', axis: 'configure' }, evaluation({ passwordSet: true }));
-    const unlocked = decideCapability(
-      { capability: 'fleet', axis: 'configure' },
-      evaluation({ passwordSet: true, unlockHeld: true }),
-    );
-
-    // Assert
-    should(locked).deepEqual({ allowed: false, refusal: 'locked' });
-    should(unlocked).deepEqual({ allowed: true, refusal: 'granted' });
-  });
-
-  it('should refuse a held unlock while the daemon is rate-limited', () => {
-    // The limiter is checked BEFORE the unlock is honoured: a daemon that stopped checking passwords
-    // must not keep serving on the strength of the last one it accepted.
-    // Act
-    const decision = decideCapability(
-      { capability: 'warden', axis: 'configure' },
-      evaluation({ passwordSet: true, unlockHeld: true, rateLimited: true }),
-    );
-
-    // Assert
-    should(decision).deepEqual({ allowed: false, refusal: 'rate-limited' });
-  });
-
-  it('should still serve the use axis while configure is locked', () => {
-    // Watching is not changing. A cautious operator gates the host-changing half without making the
-    // product unusable from a phone.
-    // Act
-    const decision = decideCapability(
-      { capability: 'warden', axis: 'use' },
-      evaluation({ passwordSet: true, rateLimited: true }),
-    );
-
-    // Assert
-    should(decision).deepEqual({ allowed: true, refusal: 'granted' });
-  });
-
-  it('should never turn a refused capability into a served one', () => {
-    // The invariant, stated as a test: across every input combination this function can be given, a
-    // capability the operator switched off is refused. A grant only ever narrows.
-    // Arrange
-    const off = { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } };
-
-    // Act + Assert
-    for (const passwordSet of [true, false]) {
-      for (const unlockHeld of [true, false]) {
-        for (const rateLimited of [true, false]) {
-          const decision = decideCapability(
-            { capability: 'browser', axis: 'use' },
-            evaluation({ grants: off, passwordSet, unlockHeld, rateLimited }),
+      for (const stepUp of [true, false]) {
+        it(`${capability}.${axis}, undetermined document, ${stepUp ? 'stepped up' : 'no step-up'}: governed → undetermined, ungoverned → granted`, () => {
+          // Permissive DEFAULTS settle what silence means, never what damage means — and a step-up
+          // cannot buy back an answer the daemon no longer has.
+          // Act
+          const governed = decideCapability({ capability, axis }, evaluation({ grants: undefined, stepUp }));
+          const ungoverned = decideCapability(
+            { capability, axis },
+            evaluation({ grants: undefined, stepUp, governed: false, hostLocal: true }),
           );
-          should(decision.allowed).be.false();
+
+          // Assert
+          should(governed).deepEqual({ allowed: false, refusal: 'undetermined' });
+          should(ungoverned).deepEqual({ allowed: true, refusal: 'granted' });
+        });
+      }
+    }
+  }
+
+  it('should mark a decision steppedUp only when an allowed act leaned on the caller’s step-up', () => {
+    // The boundary spends a single-use step-up on exactly this mark, so it must never ride a refusal, an
+    // ungoverned caller, or a demand that needed no step-up (a held one is not consumed by those).
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        for (const stepUp of [true, false]) {
+          const demand = { capability, axis };
+          const needs = NEEDS_STEP_UP[capability][axis];
+          should(decideCapability(demand, evaluation({ stepUp })).steppedUp === true).equal(needs && stepUp);
+          should(decideCapability(demand, evaluation({ stepUp, governed: false })).steppedUp).be.undefined();
+          should(decideCapability(demand, evaluation({ stepUp, grants: undefined })).steppedUp).be.undefined();
+          should(decideCapability(demand, evaluation({ stepUp, grants: SHUT })).steppedUp).be.undefined();
+        }
+      }
+    }
+  });
+
+  it('should reach every refusal the protocol declares, and no other', () => {
+    // The matrix above is only exhaustive if it produces the whole vocabulary.
+    // Arrange
+    const seen = new Set<GrantRefusal>();
+
+    // Act
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        for (const grants of [undefined, DEFAULT_CAPABILITY_GRANTS, SHUT]) {
+          for (const stepUp of [true, false]) {
+            for (const governed of [true, false]) {
+              for (const device of [undefined, DEFAULT_CAPABILITY_GRANTS, SHUT]) {
+                const context = evaluation({ grants, stepUp, governed, ...(device === undefined ? {} : { device }) });
+                seen.add(decideCapability({ capability, axis }, context).refusal);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Assert
+    should([...seen].sort()).deepEqual([...GRANT_REFUSALS].sort());
+  });
+
+  it('should never turn a refused capability into a served one for a governed caller', () => {
+    // The invariant: a capability the operator switched off is refused whatever else is true.
+    // Act + Assert
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        for (const stepUp of [true, false]) {
+          for (const hostLocal of [true, false]) {
+            should(
+              decideCapability({ capability, axis }, evaluation({ grants: SHUT, stepUp, hostLocal })).allowed,
+            ).be.false();
+          }
         }
       }
     }
@@ -254,30 +299,74 @@ describe('the per-capability decision', () => {
 });
 
 describe('what a refused caller is told', () => {
-  it('should name the next step for every refusal, and explain nothing for the two that passed', () => {
-    // A denial that says only "forbidden" is a dead end: the person cannot tell a mistake from a
-    // password from a decision somebody made on purpose.
-    // Act
-    const demand = { capability: 'warden', axis: 'configure' } as const;
-    const said = (['not-granted', 'locked', 'rate-limited', 'undetermined'] as const).map(refusal => ({
-      refusal,
-      sentence: describeGrantRefusal(demand, refusal, 'fy'),
-    }));
+  it('should explain nothing for a demand that was granted', () => {
+    // Act + Assert
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        should(describeGrantRefusal({ capability, axis }, 'granted', 'fy')).be.undefined();
+      }
+    }
+  });
 
-    // Assert — EVERY refusal now names a runnable command, `locked` included. That one used to say
-    // only "unlock first", which is a dead end for the person who does not HAVE the password: the
-    // axis is granted, nothing is broken, and no instruction applied to them.
-    for (const { sentence } of said) should(sentence).match(/`fy [^`]+`/u);
-    should(describeGrantRefusal({ capability: 'warden', axis: 'use' }, 'granted', 'fy')).be.undefined();
-    should(describeGrantRefusal({ capability: 'warden', axis: 'use' }, 'ungated', 'fy')).be.undefined();
-    // The `use` refusal names the use flag rather than the configure one.
-    should(describeGrantRefusal({ capability: 'terminal', axis: 'use' }, 'not-granted', 'fy')).match(/--use/u);
+  it('should name a runnable host command for not-granted and undetermined, with the right flag', () => {
+    // A denial that says only "forbidden" is a dead end.
+    // Act + Assert
+    for (const capability of DAEMON_CAPABILITIES) {
+      const use = describeGrantRefusal({ capability, axis: 'use' }, 'not-granted', 'fy') ?? '';
+      const configure = describeGrantRefusal({ capability, axis: 'configure' }, 'not-granted', 'fy') ?? '';
+      const undetermined = describeGrantRefusal({ capability, axis: 'use' }, 'undetermined', 'fy') ?? '';
+      should(use).containEql(`\`fy daemon config set ${capability} --use\``);
+      should(use).containEql(capabilityNoun(capability));
+      should(configure).containEql(`\`fy daemon config set ${capability} --configure\``);
+      should(configure).match(/change the settings/u);
+      should(undetermined).containEql('`fy daemon config`');
+      should(undetermined).containEql(capabilityNoun(capability));
+    }
+  });
+
+  it('should thread the client name rather than inventing one', () => {
+    // Act
+    const said = describeGrantRefusal({ capability: 'fleet', axis: 'use' }, 'not-granted', 'ferretry') ?? '';
+
+    // Assert
+    should(said).containEql('`ferretry daemon config set fleet --use`');
+    should(said).not.containEql('`fy ');
+  });
+
+  it('should say step-up-required as one sentence that asks for the passkey and names no password', () => {
+    // Act
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        const said = describeGrantRefusal({ capability, axis }, 'step-up-required', 'fy') ?? '';
+
+        // Assert — one sentence: a single terminal full stop and nothing after it.
+        should(said).match(/^[^.]+\.$/u);
+        should(said).containEql('passkey confirmation from this device');
+        should(said).containEql(capabilityNoun(capability));
+        should(said).not.match(/password|unlock/iu);
+        // It is no decision the operator made, so it must not read as one.
+        should(said).not.match(/has not granted/u);
+      }
+    }
+    should(describeGrantRefusal({ capability: 'terminal', axis: 'use' }, 'step-up-required', 'fy')).equal(
+      'using session terminals needs a passkey confirmation from this device.',
+    );
+    should(describeGrantRefusal({ capability: 'fleet', axis: 'configure' }, 'step-up-required', 'fy')).equal(
+      'changing the settings for the agent fleet needs a passkey confirmation from this device.',
+    );
   });
 
   it('should name each capability as a person reads it', () => {
     // Assert
-    should(capabilityNoun('fleet')).equal('the agent fleet');
-    should(capabilityNoun('filesystem')).equal('the project filesystem');
+    should(DAEMON_CAPABILITIES.map(capabilityNoun)).deepEqual([
+      'the agent fleet',
+      'session terminals',
+      'the browser',
+      'the project filesystem',
+      'fleet supervision',
+      'device pairing',
+      'the secret store',
+    ]);
     should(describeDemand('fleet', 'configure')).equal('fleet.configure');
   });
 });
@@ -289,103 +378,42 @@ describe('applying a change', () => {
     const current = { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } };
 
     // Act
-    const next = applyGrantPatch(current, { terminal: { configure: false } });
+    const next = applyGrantPatch(current, { terminal: { configure: false }, browser: { use: false } });
 
     // Assert
     should(next.warden).deepEqual({ use: true, configure: false });
     should(next.terminal).deepEqual({ use: true, configure: false });
-    should(patchedCapabilities({ terminal: { configure: false } })).deepEqual(['terminal']);
+    should(next.browser).deepEqual({ use: false, configure: true });
+    should(next.fleet).deepEqual({ use: true, configure: true });
+    should(patchedCapabilities({ terminal: { configure: false }, browser: { use: false } })).deepEqual([
+      'terminal',
+      'browser',
+    ]);
+    should(patchedCapabilities({})).be.empty();
   });
 
-  it('should report which axes a change turns ON, and report none for a change that only revokes', () => {
-    // Widening needs the password; narrowing never does, because revoking must never be harder than
-    // granting — in an incident you want the fastest possible path to "the UI can no longer do that".
-    // Arrange
-    const shut = { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: false, configure: false } };
-
+  it('should report which axes a change turns ON, and none for a change that only revokes', () => {
+    // Widening is host-only; narrowing is the one thing a remote caller may do.
     // Act
-    const widened = widenedBy(shut, DEFAULT_CAPABILITY_GRANTS);
-    const narrowed = widenedBy(DEFAULT_CAPABILITY_GRANTS, shut);
+    const widened = widenedBy(grantsWith('fleet', { use: false, configure: false }), DEFAULT_CAPABILITY_GRANTS);
+    const configureOnly = widenedBy(grantsWith('pairing', { use: true, configure: false }), DEFAULT_CAPABILITY_GRANTS);
+    const narrowed = widenedBy(DEFAULT_CAPABILITY_GRANTS, SHUT);
 
     // Assert
     should(widened).deepEqual(['fleet.use', 'fleet.configure']);
+    should(configureOnly).deepEqual(['pairing.configure']);
     should(narrowed).be.empty();
-    should(grantChanges(DEFAULT_CAPABILITY_GRANTS, shut)).deepEqual(['fleet.use=off', 'fleet.configure=off']);
+  });
+
+  it('should record every axis a change moves, in report order', () => {
+    // Act + Assert
+    should(grantChanges(DEFAULT_CAPABILITY_GRANTS, grantsWith('fleet', { use: false, configure: false }))).deepEqual([
+      'fleet.use=off',
+      'fleet.configure=off',
+    ]);
+    should(grantChanges(grantsWith('warden', { use: true, configure: false }), DEFAULT_CAPABILITY_GRANTS)).deepEqual([
+      'warden.configure=on',
+    ]);
     should(grantChanges(DEFAULT_CAPABILITY_GRANTS, DEFAULT_CAPABILITY_GRANTS)).be.empty();
-  });
-});
-
-describe('the wrong-password ledger', () => {
-  it('should lock the daemon out after the declared number of attempts', () => {
-    // A local gate that counts is worth little; one that does not is worth nothing.
-    // Arrange
-    const now = 1_700_000_000_000;
-
-    // Act
-    let state = INITIAL_UNLOCK_ATTEMPTS;
-    for (let attempt = 0; attempt < GRANT_UNLOCK_MAX_ATTEMPTS; attempt += 1) state = recordUnlockFailure(state, now);
-
-    // Assert
-    should(isUnlockLocked(state, now)).be.true();
-    should(unlockAttemptsRemaining(state, now)).equal(0);
-    should(state.lockedUntilMs).equal(now + GRANT_UNLOCK_LOCKOUT_SECONDS * 1_000);
-  });
-
-  it('should count down the attempts a caller has left', () => {
-    // A limiter a person cannot see looks like a broken daemon.
-    // Arrange
-    const now = 1_700_000_000_000;
-
-    // Act
-    const once = recordUnlockFailure(INITIAL_UNLOCK_ATTEMPTS, now);
-
-    // Assert
-    should(unlockAttemptsRemaining(once, now)).equal(GRANT_UNLOCK_MAX_ATTEMPTS - 1);
-    should(isUnlockLocked(once, now)).be.false();
-  });
-
-  it('should give a full budget back once a lockout has lapsed', () => {
-    // Keeping the failures forever would turn a fifteen-minute lockout into a permanent one after a
-    // single further mistake — denial of service against the operator, not defence against a guesser.
-    // Arrange
-    const now = 1_700_000_000_000;
-    let state = INITIAL_UNLOCK_ATTEMPTS;
-    for (let attempt = 0; attempt < GRANT_UNLOCK_MAX_ATTEMPTS; attempt += 1) state = recordUnlockFailure(state, now);
-    const after = now + GRANT_UNLOCK_LOCKOUT_SECONDS * 1_000 + 1;
-
-    // Act
-    const remaining = unlockAttemptsRemaining(state, after);
-    const next = recordUnlockFailure(state, after);
-
-    // Assert
-    should(isUnlockLocked(state, after)).be.false();
-    should(remaining).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
-    should(next).deepEqual({ failures: 1 });
-  });
-
-  it('should clear the ledger and the lockout when the password is finally right', () => {
-    // Assert
-    should(recordUnlockSuccess()).deepEqual(INITIAL_UNLOCK_ATTEMPTS);
-    should(isUnlockLocked(INITIAL_UNLOCK_ATTEMPTS, 1)).be.false();
-  });
-});
-
-describe('the one refusal whose reader may not be the operator', () => {
-  it('should give `locked` a remedy for somebody who does not have the password', () => {
-    // The axis is GRANTED and nothing is broken — the caller simply cannot prove they are the
-    // operator. "Unlock first, then try again" is a complete instruction for the person holding the
-    // password and no instruction at all for the person who is not. Both readers now get a step.
-    // Act
-    const said = describeGrantRefusal({ capability: 'fleet', axis: 'configure' }, 'locked', 'fy') ?? '';
-
-    // Assert
-    should(said).match(/Enter it to unlock/u);
-    should(said).match(/fy daemon password set/u);
-    // And it names no verb that removes the password: none exists, and a refusal that sent somebody to
-    // one would be a dead end wearing the clothes of an instruction.
-    should(said).not.match(/password clear/u);
-    should(said).match(/never asks for the old one/u);
-    // And it never implies the operator refused something they in fact allowed.
-    should(said).not.match(/has not granted/u);
   });
 });

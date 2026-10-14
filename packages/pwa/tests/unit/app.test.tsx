@@ -873,6 +873,87 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('names the machine asking in the one passkey prompt, and a machine it no longer holds plainly', async () => {
+    // Arrange
+    const { store, view } = await renderShell('/', [alpha.daemonId]);
+    const ghost = daemonConnection({
+      daemonId: GAMMA_ID,
+      baseUrl: 'https://gamma.example.test',
+      deviceId: GAMMA_TOKEN,
+    });
+    const purpose = (): string | null | undefined =>
+      view.container.querySelector('[data-step-up-dialog] p')?.textContent;
+
+    // Act — a paired machine asks, then one this browser holds no record of.
+    void store.stepUp.require(alpha);
+    await settle();
+    const named = purpose();
+    await interact(() => store.stepUp.dismiss());
+    void store.stepUp.require(ghost);
+    await settle();
+    const unnamed = purpose();
+    await interact(() => store.stepUp.dismiss());
+
+    // Assert
+    expect(named).toContain(alpha.baseUrl);
+    expect(unnamed).toContain('This machine');
+    await view.unmount();
+  });
+
+  it('nudges a paired device with no passkey toward Settings → Daemons → Security, once, and not on Settings itself', async () => {
+    const PASSKEYS = {
+      '/v1/passkeys': { passkeys: [], registration: 'first-window' },
+      '/v1/security': {
+        settings: {
+          stepUpWindowMinutes: 15,
+          deviceKeyRotationDays: 30,
+          unlockOnOpen: true,
+          unlockValidityHours: 8,
+          stepUpOnActions: false,
+          idleExpiryDays: 30,
+        },
+        source: 'defaults',
+        mayWiden: false,
+        widenCommand: 'fy daemon security set <field> <value>',
+      },
+    };
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { fleet: PASSKEYS });
+    await settle();
+
+    const nudge = view.container.querySelector('[data-passkey-nudge]');
+    expect(nudge?.getAttribute('data-passkey-nudge')).toBe(ALPHA);
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-passkey-nudge-open]'), 'the nudge link').click(),
+    );
+    await settle();
+
+    expect(window.location.pathname).toBe(`/d/${ALPHA}/settings`);
+    expect(window.location.hash).toBe('#security');
+    expect(view.container.querySelector('[data-security-card]')).not.toBeNull();
+    expect(view.container.querySelector('[data-passkey-nudge]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('remembers a dismissed nudge for that machine across mounts', async () => {
+    const PASSKEYS = { '/v1/passkeys': { passkeys: [], registration: 'first-window' } };
+    const first = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { fleet: PASSKEYS });
+    await settle();
+    await interact(() =>
+      must(
+        first.view.container.querySelector<HTMLButtonElement>('[data-passkey-nudge-dismiss]'),
+        'the dismiss',
+      ).click(),
+    );
+    expect(first.view.container.querySelector('[data-passkey-nudge]')).toBeNull();
+    await first.view.unmount();
+
+    const second = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { fleet: PASSKEYS });
+    await settle();
+    expect(second.view.container.querySelector('[data-passkey-nudge]')).toBeNull();
+    await second.view.unmount();
+  });
+
   it('mounts the daemon-scoped projects registry from its routed destination', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/projects`, [alpha.daemonId]);
     await settle();

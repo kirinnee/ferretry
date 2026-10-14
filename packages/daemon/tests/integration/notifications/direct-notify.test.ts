@@ -253,7 +253,7 @@ describe('direct notification over the composed daemon surface', () => {
     const secondDevice = record({
       id: pushId('b'),
       deviceId: deviceId('b'),
-      subscription: { ...firstDevice.subscription, endpoint: 'https://push.example.test/send/two' },
+      subscription: { ...firstDevice.subscription, endpoint: 'https://fcm.googleapis.com/send/two' },
     });
     const world = await daemon({ records: [firstDevice, secondDevice] });
     world.sessions.set(secondId, sessionView(secondId, { mode: 'interactive' }));

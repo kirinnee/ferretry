@@ -47,8 +47,6 @@ const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(t
 
 const LOCAL: CallerGovernance = {
   governed: false,
-  passwordSet: false,
-  confirmChange: false,
   decide: () => ({ allowed: true, refusal: 'granted' }),
 } as never;
 
@@ -87,7 +85,6 @@ async function machine(): Promise<Machine> {
         throw new Error('not exercised');
       },
     },
-    confirmChange: async () => ({ kind: 'confirmed' }),
     locate: () => undefined,
     machineName: () => 'studio',
     clientName: 'fy',
@@ -211,7 +208,7 @@ describe('a reviewed change applied by the real provisioner', () => {
       content: 'Main guidance.\n',
       create: true,
     });
-    await host.service.apply(component.id, {}, LOCAL);
+    await host.service.apply(component.id, LOCAL);
 
     // Act — a profile that now has it as a layer: the link's source exists only because of the last apply.
     const profile = await host.service.propose({
@@ -220,7 +217,7 @@ describe('a reviewed change applied by the real provisioner', () => {
       layers: ['mcp/notes', 'instructions/main'],
       create: false,
     });
-    const outcome = await host.service.apply(profile.id, {}, LOCAL);
+    const outcome = await host.service.apply(profile.id, LOCAL);
 
     // Assert
     should(outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
@@ -253,7 +250,7 @@ describe('a reviewed change applied by the real provisioner', () => {
       content: 'Written by this apply.\n',
       create: false,
     });
-    const outcome = await host.service.apply(staged.id, {}, LOCAL);
+    const outcome = await host.service.apply(staged.id, LOCAL);
 
     // Assert — the preview did not refuse the not-yet-written source, and the apply wrote both.
     should(outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
@@ -269,7 +266,7 @@ describe('a reviewed change applied by the real provisioner', () => {
     await writeFile(path.join(host.fleet, 'config.yaml'), `${renderConfig(MODEL)}# edited by hand\n`);
 
     // Act
-    const error = await host.service.apply(staged.id, {}, LOCAL).then(
+    const error = await host.service.apply(staged.id, LOCAL).then(
       () => undefined,
       (thrown: unknown) => thrown,
     );

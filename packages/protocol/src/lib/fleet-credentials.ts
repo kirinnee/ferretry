@@ -18,7 +18,6 @@
  */
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
-import { OperatorPasswordSchema } from './grants.ts';
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
@@ -159,8 +158,6 @@ export const FleetCredentialListSchema = z.strictObject({
 });
 export type FleetCredentialList = z.infer<typeof FleetCredentialListSchema>;
 
-/** A person's **Check now**, with the per-change confirmation a governed caller owes. */
-export const FleetCredentialCheckRequestSchema = z.strictObject({
-  operatorPassword: OperatorPasswordSchema.optional(),
-});
+/** A person's **Check now**. Empty: a governed caller's confirmation is the `fleet.configure` step-up. */
+export const FleetCredentialCheckRequestSchema = z.strictObject({});
 export type FleetCredentialCheckRequest = z.infer<typeof FleetCredentialCheckRequestSchema>;

@@ -29,7 +29,6 @@ import {
   health,
   installedDaemon,
   layout,
-  RecordingFirstPassword,
   RecordingSetupNotice,
   runningReport,
   SteppingClock,
@@ -38,7 +37,6 @@ import {
 
 interface Harness {
   readonly controller: DaemonController;
-  readonly firstPassword: RecordingFirstPassword;
   readonly out: CapturedOutput;
   readonly service: FakeSupervisor;
   readonly direct: FakeSupervisor;
@@ -83,7 +81,6 @@ function harness(options: {
   const nix = options.nix ?? new FakeNixGcRoot();
   const retired = options.retired ?? new FakeRetiredArtifacts();
   const lifecycle = options.lifecycle ?? new FakeLifecycleLock();
-  const firstPassword = new RecordingFirstPassword();
   const resetTrees = options.resetTrees ?? new FakeResetTrees();
   const prompt = options.prompt ?? new FakePrompt();
   const controller = new DaemonController({
@@ -106,13 +103,12 @@ function harness(options: {
     clientName: 'fy',
     clock,
     out,
-    firstPassword,
     setupNotice: new RecordingSetupNotice(),
     readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
   });
-  return { controller, out, service, direct, logs, clock, nix, retired, lifecycle, firstPassword, resetTrees, prompt };
+  return { controller, out, service, direct, logs, clock, nix, retired, lifecycle, resetTrees, prompt };
 }
 
 /** A host with no daemon executable: the resolver refuses, as it does for a relative FY_DAEMON_BIN. */
@@ -385,80 +381,46 @@ describe('daemon start', () => {
     should((caught as Error).message).match(/did not become ready within 1s; inspect .*logs\/fyd\.log/u);
   });
 
-  it('should offer the first operator password after the transaction, and only after a start', async () => {
-    // WHY IT IS AFTER THE RELEASE. The offer can put a question in front of a person, and a question
-    // asked while the lifecycle claim is held would block every other `fy daemon …` invocation on this
-    // host until somebody answered it — so `daemon stop` in another terminal would look wedged, and the
-    // remedy would be killing the terminal that was asking. The trail is the only way to state that.
-    // Arrange — the offer writes into the LOCK's own trail, which is the only way to state ordering.
-    const lifecycle = new FakeLifecycleLock();
-    const offer = new RecordingFirstPassword(lifecycle.trail);
-    const started = harness({
-      probes: [undefined, health()],
-      serviceFallback: stoppedReport,
-      lifecycle,
-      overrides: { firstPassword: offer },
-    });
-    const claims = layout().lifecycleLocks.length;
-
-    // Act
-    await started.controller.start();
-
-    // Assert — every claim is released before the question is asked.
-    should(offer.offers).equal(1);
-    should(lifecycle.trail).deepEqual([
-      ...Array.from({ length: claims }, () => 'acquire:start'),
-      ...Array.from({ length: claims }, () => 'release:start'),
-      'offer:first-password',
-    ]);
-
-    // And no OTHER verb asks. `restart` in particular meets an operator who is mid-incident, and a
-    // prompt between them and a daemon that is down is the last thing that surface should add.
-    const installed = harness({ probes: [undefined, health()] });
-    await installed.controller.install();
-    const restarted = harness({
-      probes: [health(), undefined, health()],
-      serviceReports: [stoppedReport],
-      serviceFallback: stoppedReport,
-    });
-    await restarted.controller.restart();
-    const stopped = harness({ probes: [health(), undefined], serviceFallback: stoppedReport });
-    await stopped.controller.stop();
-    should([installed.firstPassword.offers, restarted.firstPassword.offers, stopped.firstPassword.offers]).deepEqual([
-      0, 0, 0,
-    ]);
-  });
-
-  it('should ask nothing when the daemon never came up', async () => {
-    // A daemon that did not start is not a machine anybody is finishing the setup of, and the person in
-    // front of it has a failure to read. `start` throws before the offer, which is what proves it.
-    // Arrange
-    const { controller, firstPassword } = harness({ probes: [undefined], serviceFallback: stoppedReport });
-
-    // Act
-    await controller.start().catch(() => undefined);
-
-    // Assert
-    should(firstPassword.offers).equal(0);
-  });
-
-  it('should end a start with the not-set-up line, after the password offer and outside every claim', async () => {
-    // Arrange — both write into the LOCK's own trail, which is the only way to state ordering.
+  it('should end a start with the not-set-up line, after the transaction and outside every claim', async () => {
+    // Arrange — the notice writes into the LOCK's own trail, which is the only way to state ordering.
     const lifecycle = new FakeLifecycleLock();
     const notice = new RecordingSetupNotice(lifecycle.trail);
     const started = harness({
       probes: [undefined, health()],
       serviceFallback: stoppedReport,
       lifecycle,
-      overrides: { firstPassword: new RecordingFirstPassword(lifecycle.trail), setupNotice: notice },
+      overrides: { setupNotice: notice },
     });
+    const claims = layout().lifecycleLocks.length;
 
     // Act
     await started.controller.start();
 
-    // Assert — the last thing a start says, once.
+    // Assert — the last thing a start says, once, with every claim released before it.
     should(notice.says).equal(1);
-    should(lifecycle.trail.slice(-2)).deepEqual(['offer:first-password', 'say:setup-notice']);
+    should(lifecycle.trail).deepEqual([
+      ...Array.from({ length: claims }, () => 'acquire:start'),
+      ...Array.from({ length: claims }, () => 'release:start'),
+      'say:setup-notice',
+    ]);
+  });
+
+  it('should say nothing when the daemon never came up', async () => {
+    // A daemon that did not start is not a machine anybody is finishing the setup of, and the person in
+    // front of it has a failure to read. `start` throws before the notice, which is what proves it.
+    // Arrange
+    const notice = new RecordingSetupNotice();
+    const { controller } = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      overrides: { setupNotice: notice },
+    });
+
+    // Act
+    await controller.start().catch(() => undefined);
+
+    // Assert
+    should(notice.says).equal(0);
   });
 });
 
@@ -830,7 +792,7 @@ describe('daemon reset', () => {
     should(subject.out.text).containEql('fyd had no persistent data on this host; nothing was removed');
   });
 
-  it('should name the command that brings the machine back, and the password it will offer', async () => {
+  it('should name the command that brings the machine back', async () => {
     // Arrange
     const subject = resetSubject({ resetTrees: populatedTrees(), probes: [health(), undefined] });
 
@@ -839,7 +801,7 @@ describe('daemon reset', () => {
 
     // Assert — a clean slate is only useful if somebody knows the next move.
     should(subject.out.text).containEql('Run `fy daemon start` to bring fyd up on a clean slate');
-    should(subject.out.text).containEql('operator password');
+    should(subject.out.text).not.containEql('password');
   });
 
   it('should name the links inside the trees that point out of them', async () => {
@@ -874,9 +836,8 @@ describe('daemon reset', () => {
     should(trail).have.length(4);
   });
 
-  it('should never ask for the operator password, because forgetting it is a reason to reset', async () => {
-    // Arrange — the second escape hatch alongside `fy daemon password set`. A reset gated on the
-    // password would close the door it exists to open.
+  it('should ask for nothing but the confirmation word', async () => {
+    // Arrange
     const subject = resetSubject({ resetTrees: populatedTrees(), probes: [health(), undefined] });
 
     // Act
@@ -884,7 +845,6 @@ describe('daemon reset', () => {
 
     // Assert — the only thing asked for is the confirmation word.
     should(subject.prompt.asked).deepEqual(['Type "reset" to confirm:']);
-    should(subject.firstPassword.offers).equal(0);
   });
 });
 
@@ -1631,7 +1591,6 @@ describe('daemon controller defaults', () => {
       clientName: 'fy',
       clock: new SteppingClock(),
       out: new CapturedOutput(),
-      firstPassword: new RecordingFirstPassword(),
       setupNotice: new RecordingSetupNotice(),
     });
 
@@ -1678,7 +1637,6 @@ describe('daemon lifecycle verbs act only on this state home', () => {
     await should(subject.controller.start()).be.rejectedWith(DaemonOwnershipError);
     should(subject.out.text).not.containEql('already serving');
     should(subject.service.startedExecutables).be.empty();
-    should(subject.firstPassword.offers).equal(0);
   });
 
   it('should refuse install and uninstall over a definition that serves another state home', async () => {

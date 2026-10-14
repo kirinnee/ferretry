@@ -50,6 +50,12 @@ export interface ApiRequest {
    */
   readonly device?: SessionDevice;
   /**
+   * The transcript hash of the session that carried this request, set beside `device` by the same one
+   * constructor. What a device-key rotation's proof is signed over (`docs/design/zero-trust.md` B6);
+   * a hash, public to both ends of the session, and never a secret.
+   */
+  readonly transcriptHash?: Uint8Array;
+  /**
    * Fires when the caller gives up, so a long read can stop instead of finishing for nobody.
    *
    * Optional because most handlers answer in one read and have nothing to abandon, and requiring it
@@ -85,22 +91,29 @@ export interface ApiResponse {
 }
 
 /**
- * Whether this request is PROVED to come from the machine itself — the answer every host-locality
- * rule reads: a `privilegedOnly` route, widening a grant, and whether the operator's limits govern.
+ * Whether this request is the OWNER AT THE MACHINE — the answer every owner rule reads: whether the
+ * operator's limits govern, widening a grant or a security setting, and the host's own passkey paths.
  *
- * A LOOPBACK PEER IS NOT ENOUGH. A remote caller forwarded through a locally bound proxy (`tailscale
- * serve`, `cloudflared`) arrives as a loopback peer too, so `loopback` alone would let a paired phone
- * behind one widen its own grants and replace the operator password. Only the carrier's
- * `privilegedLoopback` proof counts for a device.
+ * ONLY THE HOST'S ADMIN TOKEN, OVER A LOOPBACK PEER, IS THE OWNER. Reading that token needs this
+ * machine's disk, so nobody can present it who did not already have the machine. A loopback peer on
+ * its own proves nothing: `ssh -L`, `socat`, `cloudflared`, `tailscale serve` or any reverse proxy to
+ * `127.0.0.1` is indistinguishable from a browser on this host. So a browser here is an ordinary
+ * paired device — governed, and asked for a passkey step-up like any other (owner decision,
+ * 2026-10-13; `docs/design/zero-trust.md` B4). A relayed hop is never loopback, so it never qualifies.
  *
- * THE HOST'S ADMIN TOKEN OVER LOOPBACK IS THE ONE EXCEPTION, and it is load-bearing: reading that
- * token already requires this machine's disk, so a proxy cannot forward anybody who holds it who did
- * not already have the machine — and without it `fy daemon password set`, the escape hatch for a
- * forgotten password, would close on every daemon bound beyond loopback. A relayed hop is never
- * loopback, so neither branch can admit one.
+ * The carrier's `privilegedLoopback` proof still exists, for the one thing that is about the PLACE and
+ * not the owner: a `privilegedOnly` route such as a local terminal attach (see {@link arrivedPrivileged}).
  */
 export function arrivedOnHost(request: ApiRequest, adminToken: boolean): boolean {
-  return request.privilegedLoopback === true || (adminToken && request.loopback);
+  return adminToken && request.loopback;
+}
+
+/**
+ * Whether this request may use a `privilegedOnly` route: it arrived on a host-proven carrier (a
+ * loopback-only bind), or it is the owner at the machine. About the place, never about authority.
+ */
+export function arrivedPrivileged(request: ApiRequest, adminToken: boolean): boolean {
+  return request.privilegedLoopback === true || arrivedOnHost(request, adminToken);
 }
 
 /** Lowercases header names so callers may write them however they like. */

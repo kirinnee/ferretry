@@ -14,6 +14,7 @@ import { StatePushRepository, StateVapidKeys, WebPushFetchTransport } from '../.
 import { ApiDispatcher, type ApiRequest, ApiRouter, headersFrom, queryFrom } from '../../../src/lib/api/index.ts';
 import {
   CapabilityGrantService,
+  DeviceGrantService,
   createFoundationPaths,
   DEFAULT_CAPABILITY_GRANTS,
   PairedPushDevices,
@@ -116,17 +117,20 @@ async function daemon(label: string) {
   await files.ensureDirectory(paths.state, 0o700);
 
   /**
-   * ONE verifier for both subsystems, exactly as the composition root holds one.
+   * WHETHER THE PAIRED BROWSER HAS CONFIRMED WITH ITS PASSKEY, and the one switch this file turns.
    *
-   * It reports a password because this daemon has to be able to PAIR for anything below to exist —
-   * the mint refuses on a passwordless machine, which is proved where that rule lives. Giving pairing
-   * and the grant subsystem different answers would be a fixture that cannot happen in production.
+   * Enrolment is governed by `pairing.use`, and the policy holds that behind a step-up for a caller
+   * who did not arrive on the host — which is every browser below, since none of them sets
+   * `loopback`. So the journeys run CONFIRMED (the state a person is in after tapping the passkey
+   * prompt) and one case flips it to prove the same route refuses an unconfirmed device. The witness
+   * is a fake of the step-up SERVICE, not of the gate: the real policy, grant service, dispatcher and
+   * routes are all in play, and `StepUpService`'s own ceremony is proved where it lives.
    */
-  const operatorPassword = {
-    isSet: async () => true,
-    set: async () => undefined,
-    clear: async () => undefined,
-    verify: async () => false,
+  const stepUp = {
+    confirmed: true,
+    held(): boolean {
+      return this.confirmed;
+    },
   };
   const cryptography = new NodePairingCryptography();
   const pairingRepository = new StatePairingRepository(paths, files, cryptography);
@@ -153,8 +157,6 @@ async function daemon(label: string) {
     devices: pairingRepository,
     credentials,
     deviceState: [push],
-    operatorPassword,
-    clientName: 'fy',
   });
 
   const grants = new CapabilityGrantService({
@@ -163,20 +165,35 @@ async function daemon(label: string) {
       written: async () => DAEMON_CAPABILITIES,
       write: async () => undefined,
     },
-    passwords: operatorPassword,
-    tokens: { mint: () => `fy_unlock_${'a'.repeat(22)}` },
     clock: { nowMs: () => Date.now() },
     audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
     clientName: 'fy',
   });
   await grants.refresh();
+  const deviceGrants = new DeviceGrantService({
+    devices: pairing,
+    daemonWide: () => grants.enforced(),
+    audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+    clock: { nowMs: () => Date.now() },
+    clientName: 'fy',
+  });
 
   const surface = new ApiDispatcher(
-    new ApiRouter([...pairingRoutes(pairing), ...pushRoutes(push)]),
-    { admin: ADMIN, warden: 'warden-secret', devices: { has: deviceId => credentials.get(deviceId) !== undefined } },
+    new ApiRouter([...pairingRoutes(pairing, deviceGrants), ...pushRoutes(push, grants)]),
+    {
+      admin: ADMIN,
+      warden: 'warden-secret',
+      // The REAL registry's grants: a device paired here holds the default, `fleet.use` only.
+      devices: {
+        has: deviceId => credentials.get(deviceId) !== undefined,
+        grants: deviceId => credentials.get(deviceId)?.grants,
+      },
+    },
     grants,
+    undefined,
+    stepUp,
   );
-  return { paths, files, surface, pairing, pushService, document: join(paths.state, 'push.json') };
+  return { paths, files, surface, pairing, pushService, stepUp, document: join(paths.state, 'push.json') };
 }
 
 /**
@@ -222,7 +239,7 @@ describe('push enrolment over the real route surface', () => {
     should(Buffer.from(publicKey, 'base64url')).have.length(65);
 
     // ── enrolment ───────────────────────────────────────────────────────────────────────────────
-    const subscription = await subscribed('https://push.example.test/send/pixel');
+    const subscription = await subscribed('https://fcm.googleapis.com/send/pixel');
     const enrolled = await world.surface.dispatch(
       request({
         method: 'POST',
@@ -249,8 +266,8 @@ describe('push enrolment over the real route surface', () => {
       view.id,
     ]);
     // Nothing on this wire can be replayed to wake the device: the triple lives only in the document.
-    should(listed.body).not.match(/push\.example\.test/u);
-    should(await world.files.readText(world.document)).match(/push\.example\.test/u);
+    should(listed.body).not.match(/fcm\.googleapis\.com/u);
+    should(await world.files.readText(world.document)).match(/fcm\.googleapis\.com/u);
 
     // ── revoking the DEVICE takes the notifications with it ─────────────────────────────────────
     const revoked = await world.surface.dispatch(
@@ -271,7 +288,7 @@ describe('push enrolment over the real route surface', () => {
     should(PushDeviceListResponseSchema.parse(JSON.parse(remaining.body)).devices).be.empty();
     // Gone from the DOCUMENT, not merely filtered out of an answer: a row that survived would be a
     // capability to wake a phone whose owner revoked it.
-    should(await world.files.readText(world.document)).not.match(/push\.example\.test/u);
+    should(await world.files.readText(world.document)).not.match(/fcm\.googleapis\.com/u);
   });
 
   it('should leave one device’s enrolment alone when another is revoked', async () => {
@@ -302,8 +319,8 @@ describe('push enrolment over the real route surface', () => {
       should(response.status).equal(201);
       return PushDeviceViewSchema.parse(JSON.parse(response.body));
     };
-    const phoneEnrolment = await enrol(phone, 'Pixel 8', 'https://push.example.test/send/pixel');
-    const tabletEnrolment = await enrol(tablet, 'iPad', 'https://push.example.test/send/ipad');
+    const phoneEnrolment = await enrol(phone, 'Pixel 8', 'https://fcm.googleapis.com/send/pixel');
+    const tabletEnrolment = await enrol(tablet, 'iPad', 'https://fcm.googleapis.com/send/ipad');
 
     await world.surface.dispatch(
       request({ method: 'DELETE', path: `/v1/pair/devices/${phone.deviceId}`, headers: admin, loopback: true }),
@@ -318,7 +335,8 @@ describe('push enrolment over the real route surface', () => {
     should(phoneEnrolment.id).not.equal(tabletEnrolment.id);
   });
 
-  it('should refuse an enrolment the push service has already discarded, and store nothing', async () => {
+  it('should forget an enrolment the push service has already discarded, answering as for a live one', async () => {
+    // The answer is never the confirmation's fate, or it would be a reachability oracle (review M2).
     const world = await daemon('push-gone');
     const browser = await pair(world, 'Pixel 8');
     world.pushService.status = 410;
@@ -330,18 +348,48 @@ describe('push enrolment over the real route surface', () => {
         device: browser.device,
         body: JSON.stringify({
           deviceName: 'Pixel 8',
-          subscription: await subscribed('https://push.example.test/send/dead'),
+          subscription: await subscribed('https://fcm.googleapis.com/send/dead'),
           prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );
 
-    should(response.status).equal(400);
-    should(JSON.parse(response.body).code).equal('push_invalid');
+    should(response.status).equal(201);
     const listed = await world.surface.dispatch(
       request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
     );
     should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).be.empty();
+  });
+
+  it('should let a DEFAULT paired browser enrol ITSELF once it has confirmed, and not before', async () => {
+    // Self-enrolment grants nothing, so it needs no `pairing.use`: a default device still gets alerts.
+    // But it makes this host send requests to the endpoint, so a governed device confirms with its
+    // passkey first (review M2).
+    const world = await daemon('push-unconfirmed');
+    const browser = await pair(world, 'Pixel 8');
+    world.stepUp.confirmed = false;
+    const body = JSON.stringify({
+      deviceName: 'Pixel 8',
+      subscription: await subscribed('https://fcm.googleapis.com/send/unconfirmed'),
+      prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
+    });
+
+    const unconfirmed = await world.surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser.device, body }),
+    );
+    world.stepUp.confirmed = true;
+    const enrolled = await world.surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/subscriptions', device: browser.device, body }),
+    );
+    const listed = await world.surface.dispatch(
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser.device }),
+    );
+
+    should(unconfirmed.status).equal(403);
+    should(JSON.parse(unconfirmed.body).code).equal('grant_step_up_required');
+    should(enrolled.status).equal(201);
+    should(world.pushService.received).have.length(1);
+    should(PushDeviceListResponseSchema.parse(JSON.parse(listed.body)).devices).have.length(1);
   });
 
   it('should refuse the host’s own token an enrolment, having no browser to enrol', async () => {
@@ -355,7 +403,7 @@ describe('push enrolment over the real route surface', () => {
         loopback: true,
         body: JSON.stringify({
           deviceName: 'The machine',
-          subscription: await subscribed('https://push.example.test/send/host'),
+          subscription: await subscribed('https://fcm.googleapis.com/send/host'),
           prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),

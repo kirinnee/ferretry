@@ -158,14 +158,21 @@ operator believing they configured something they did not. Boot, `fyd --check` a
 each name the resolved path AND the rule that produced it, and **nothing is ever launched to find
 out**. It is discovery only: a start still launches the absolute wrapper the manifest publishes.
 
-`packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
-(`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`) and per axis (_use_ / _configure_). **A
-loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"
-means how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves,
-so any check reading a peer address, a `Host` header or a URL would hand a remote phone full control.
-Defaults are permissive and the **operator password** is the opt-in layer; a grant can only ever
-narrow what a credential could already do, and an undetermined document fails closed. The contract,
-the widen/narrow asymmetry and the declared GAPs are [docs/grants.md](docs/grants.md).
+`packages/daemon` also decides **what every caller but the owner may do**, per capability
+(`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`, `secrets`) and per axis (_use_ /
+_configure_), and **per device**: a governed device gets the daemon-wide grant AND its own record's, and a
+newly paired device holds every capability unless its code was minted `fy pair --limited` (`fleet.use` only). **Only
+the host's admin token over loopback is ungoverned** (`arrivedOnHost`): a browser on the host is an ordinary
+governed device, because a tunnel or proxy to `127.0.0.1` is indistinguishable from it. "Loopback" means
+how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves, so any check
+reading a peer address, a `Host` header or a URL would hand a remote phone full control. Every "at the
+machine" decision calls `arrivedOnHost`. **A governed device does nothing until it UNLOCKS the machine with a
+passkey** (owner decision 2026-10-14; on by default, 8 h per device), and while unlocked it may do anything
+its grants allow with no further prompt — the unlock is the step-up that guards configure and the
+terminal/browser/pairing/secrets uses, unless the owner turns on a per-act step-up. A grant can only
+ever narrow what a credential could already do, a device can only pass on what it holds, and an
+undetermined document fails closed. The contract, the widen/narrow asymmetry and the declared GAPs are
+[docs/grants.md](docs/grants.md).
 
 A browser can also drive **the harness's own sign-in**, and the daemon holds no token while it does: it
 launches the runtime's own wrapper with piped stdio and a sanitized environment, publishes a verification
@@ -177,13 +184,13 @@ no return trip, and a single parameterised flow would have needed both as option
 a Codex sign-in waiting for a paste. A login is a **declared** per-harness property, and whether one applies
 to a CREDENTIAL is decided by where it comes from: a token file or an environment variable means
 there is nothing to sign in to, so no control is offered and the surface says where the credential DOES come
-from instead. Every route that acts sits on `fleet.configure` with the existing per-change
-operator-password confirmation and **no second gate** — the remote risk is account substitution, not token
+from instead. Every route that acts sits on `fleet.configure` behind the same passkey step-up and
+**no second gate** — the remote risk is account substitution, not token
 theft. `--with-access-token` and `--with-api-key` stay host-and-CLI-only at every layer.
 
 How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code
 redeemed inside a session, which registers a **non-extractable device key** the browser generated; the
-daemon keeps only the public half, and the grant ends on revocation or after 30 days unused. **There is no
+daemon keeps only the public half, and the grant ends on revocation or after its idle period unused (30 days unless the owner changed it). **There is no
 device bearer value at all** — each session's own transcript is signed by the device key, so nothing on the
 wire replays — and the design and its threat model are [docs/design/zero-trust.md](docs/design/zero-trust.md).
 A **pairing code is a live credential**, so its QR is generated locally and never by an image service, never announced to a screen

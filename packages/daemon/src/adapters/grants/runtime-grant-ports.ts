@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import type { CapabilityGrants, DaemonCapability } from '@ferretry/protocol';
 import type {
   FileSystemPort,
@@ -8,7 +7,6 @@ import type {
   GrantClock,
   GrantDocumentPort,
   SerialExecutor,
-  UnlockTokenFactory,
 } from '../../lib/index.ts';
 
 /** The daemon configuration document, seen as the one thing the grant subsystem needs from it. */
@@ -24,8 +22,7 @@ export interface GrantConfigStore {
  * A THIN ADAPTER over the configuration store rather than a second file, because grants are exactly
  * the kind of thing `--print-config` exists to report with provenance: an operator asking what this
  * daemon believes it may do should read the answer beside `port` and `corsOrigins`, not hunt for a
- * separate document. The verifier that gates changing them is what lives elsewhere — see
- * `FoundationPaths.operatorPassword` for why those two belong apart.
+ * separate document.
  */
 export class ConfigGrantDocument implements GrantDocumentPort {
   constructor(
@@ -50,22 +47,6 @@ export class ConfigGrantDocument implements GrantDocumentPort {
   }
 }
 
-/**
- * Unlock identifiers.
- *
- * MINTED FROM REAL ENTROPY and never derived from the password, so an unlock that leaks says nothing
- * about the secret behind it. 128 bits, base64url, carrying the `fy_unlock_` prefix the protocol
- * grammar checks — a prefixed identifier is greppable in a support thread in a way an opaque blob is
- * not, and the prefix is not the secret.
- */
-export class RandomUnlockTokens implements UnlockTokenFactory {
-  constructor(private readonly random: (bytes: number) => Uint8Array = bytes => randomBytes(bytes)) {}
-
-  mint(): string {
-    return `fy_unlock_${Buffer.from(this.random(16)).toString('base64url')}`;
-  }
-}
-
 export class SystemGrantClock implements GrantClock {
   nowMs(): number {
     return Date.now();
@@ -81,8 +62,7 @@ export class SystemGrantClock implements GrantClock {
  * board permissions were made auditable rather than implicit.
  *
  * IT RECORDS THE ACTOR, NEVER A CREDENTIAL. `device:<id>` and `admin-ui` say who; a token would say
- * how, and putting that in an append-only file is how a durable record becomes a durable secret. The
- * password never appears, in any form, for the same reason.
+ * how, and putting that in an append-only file is how a durable record becomes a durable secret.
  *
  * IT LIVES IN THE STATE HOME, so it is keyed by daemon by construction: one daemon's record can never
  * be read as another's, because a state home has exactly one owner.
@@ -91,12 +71,18 @@ export class JournalGrantAudit implements GrantAuditPort {
   constructor(
     private readonly path: string,
     private readonly files: FileSystemPort,
+    /**
+     * The record kind this journal writes and reads back. The grant journal is `grant.changed`; the
+     * security settings journal is `security.changed` (`docs/design/zero-trust.md` B6). One kind per
+     * file, so a reader never mistakes one history for the other.
+     */
+    private readonly kind: string = 'grant.changed',
   ) {}
 
   async record(entry: GrantAuditEntry): Promise<void> {
     await this.files.appendLineDurable(
       this.path,
-      JSON.stringify({ kind: 'grant.changed', at: entry.at, actor: entry.actor, changes: entry.changes }),
+      JSON.stringify({ kind: entry.kind ?? this.kind, at: entry.at, actor: entry.actor, changes: entry.changes }),
     );
   }
 
@@ -128,7 +114,7 @@ export class JournalGrantAudit implements GrantAuditPort {
     const entries: GrantAuditEntry[] = [];
     for (const line of lines) {
       if (line.trim() === '') continue;
-      const parsed = readAuditLine(line);
+      const parsed = readAuditLine(line, this.kind);
       if (parsed === undefined) unreadable += 1;
       else entries.push(parsed);
     }
@@ -146,10 +132,10 @@ export class JournalGrantAudit implements GrantAuditPort {
 const AUDIT_WINDOW_BYTES = 64 * 1024;
 
 /** One journal line, or nothing when it is not a record this daemon wrote. */
-function readAuditLine(line: string): GrantAuditEntry | undefined {
+function readAuditLine(line: string, kind: string): GrantAuditEntry | undefined {
   try {
     const value = JSON.parse(line) as Record<string, unknown>;
-    if (value.kind !== 'grant.changed') return undefined;
+    if (value.kind !== kind) return undefined;
     const { at, actor, changes } = value;
     if (typeof at !== 'string' || typeof actor !== 'string' || !Array.isArray(changes)) return undefined;
     if (at === '' || actor === '' || !changes.every(change => typeof change === 'string')) return undefined;

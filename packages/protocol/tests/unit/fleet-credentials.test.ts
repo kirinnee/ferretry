@@ -80,7 +80,7 @@ const cases: readonly SchemaCase[] = [
   {
     name: 'FleetCredentialCheckRequestSchema',
     schema: credentials.FleetCredentialCheckRequestSchema,
-    value: { operatorPassword: 'the operator password' },
+    value: {},
   },
 ];
 
@@ -109,6 +109,9 @@ describe('the credential wire contract', () => {
       }),
       rejects('a check request carrying a refresh token', credentials.FleetCredentialCheckRequestSchema, {
         refreshToken: 'fake',
+      }),
+      rejects('a check request still carrying a confirmation', credentials.FleetCredentialCheckRequestSchema, {
+        operatorPassword: 'fake',
       }),
     ]);
   });

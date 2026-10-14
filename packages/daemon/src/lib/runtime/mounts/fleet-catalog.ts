@@ -10,11 +10,11 @@
  * reported as hidden.
  *
  * Staging a change is `fleet.configure` too, not `use`: a staged change holds a materialised plan for
- * this machine, and the design governs the whole proposal flow as configuration (§7). Applying one
- * adds the per-change operator password for a caller the boundary says owes it.
+ * this machine, and the design governs the whole proposal flow as configuration (§7). A caller off this
+ * host makes either only behind the passkey step-up.
  *
  * The machine read also says what THIS caller may do (its `authority`): it reads the caller's
- * governance, so a caller that sent its operator unlock reads its unlocked authority.
+ * governance, so a device that has stepped up reads the authority the step-up gives it.
  *
  * ## `noStore` on all eight
  *
@@ -148,9 +148,10 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {
-        const body = (await parseOptionalBody(context.request, FleetProposalApplyRequestSchema)) ?? {};
+        // An empty strict body: a field an older client still sends is refused, not ignored.
+        await parseOptionalBody(context.request, FleetProposalApplyRequestSchema);
         return await answer(FleetAccountChangeOutcomeSchema, () =>
-          subsystem.apply(proposalId(context), body, context.governance),
+          subsystem.apply(proposalId(context), context.governance),
         );
       },
     },

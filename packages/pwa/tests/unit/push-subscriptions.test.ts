@@ -35,7 +35,7 @@ const device = {
 
 const subscription = (over: Record<string, unknown> = {}): PushSubscriptionLike => ({
   toJSON: () => ({
-    endpoint: 'https://push.example.test/x',
+    endpoint: 'https://fcm.googleapis.com/x',
     expirationTime: null,
     keys: { p256dh: P256DH, auth: AUTH },
     ...over,
@@ -91,7 +91,7 @@ describe('daemon push enrolment', () => {
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       deviceName: 'kirin phone',
       subscription: {
-        endpoint: 'https://push.example.test/x',
+        endpoint: 'https://fcm.googleapis.com/x',
         expirationTime: null,
         keys: { p256dh: P256DH, auth: AUTH },
       },
@@ -110,8 +110,8 @@ describe('daemon push enrolment', () => {
 
   it('refuses an endpoint that is not an HTTPS URL without credentials', () => {
     expect(() => pushSubscriptionJson(subscription())).not.toThrow();
-    expect(() => pushSubscriptionJson(subscription({ endpoint: 'http://push.example.test/x' }))).toThrow();
-    expect(() => pushSubscriptionJson(subscription({ endpoint: 'https://a:b@push.example.test/x' }))).toThrow();
+    expect(() => pushSubscriptionJson(subscription({ endpoint: 'http://fcm.googleapis.com/x' }))).toThrow();
+    expect(() => pushSubscriptionJson(subscription({ endpoint: 'https://a:b@fcm.googleapis.com/x' }))).toThrow();
   });
 
   it('refuses an incomplete browser subscription rather than storing a dead endpoint', () => {

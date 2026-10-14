@@ -4,20 +4,20 @@
  * A companion to `grants-settings.tsx` rather than a replacement. That surface is for CHANGING the
  * operator's answers; this one is for READING them, and it answers two questions the switches cannot:
  *
- *  1. **Why is this open?** "Open because you are standing at the machine" and "open because it was
- *     granted" are different facts with different consequences, and a screen that renders both as a
- *     green tick teaches somebody that their phone will behave like their laptop. It will not.
+ *  1. **Why is this open?** "Open because the operator granted it" and "open after your passkey" are
+ *     different facts with different consequences, and a screen that renders both as a green tick
+ *     teaches somebody that nothing here ever asks anything of them. It does.
  *  2. **How much does it hand over?** Five rows that look alike make `filesystem` and `fleet` weigh the
  *     same. One reads files; the other writes executables into accounts.
  *
- * ## THE DIRECT-LOCAL MARK COMES FROM THE DAEMON, NEVER FROM THE PAGE
+ * ## THERE IS NO "DIRECT LOCAL" POSTURE, AND NOTHING MAY BRING ONE BACK
  *
- * This is the correctness rule the whole surface stands on. A browser on `http://127.0.0.1` can be
- * reaching the daemon through the relay, and a relayed hop is never loopback. So the posture arrives as
- * a value the DAEMON derived from the carrier; this component reads no hostname, no `location`, and no
- * `baseUrl`, and there is deliberately no code path here that could. `tests/…/capability-list.test.tsx`
- * renders this screen on a `127.0.0.1` page against a daemon that reported a governed connection and
- * asserts it does not claim direct local — that test is the point of the file.
+ * A browser is a paired device wherever it runs, so a page on `http://127.0.0.1` is governed exactly like
+ * a phone: only the host's admin token over loopback — the CLI — is the owner at the machine. The posture
+ * arrives as a value the DAEMON derived from the carrier; this component reads no hostname, no
+ * `location`, and no `baseUrl`, and there is deliberately no code path here that could.
+ * `tests/…/capability-list.test.tsx` renders this screen on a `127.0.0.1` page and asserts it never
+ * claims the limits do not apply — that test is the point of the file.
  *
  * ## A SIXTH CAPABILITY NEEDS NO CODE HERE
  *
@@ -32,7 +32,7 @@ import {
   type CapabilityGrantView,
   DAEMON_CAPABILITIES,
 } from '@ferretry/protocol';
-import { CircleHelp, Info, Laptop, Lock, ShieldCheck, Wifi } from 'lucide-react';
+import { CircleHelp, Info, ShieldCheck, Wifi } from 'lucide-react';
 import { useId } from 'react';
 
 import { cn } from '../../lib/class-names.ts';
@@ -47,14 +47,13 @@ import {
   capabilityReach,
   capabilityWeight,
   connectionPosture,
+  deviceGrantNote,
   grantOnlyAtMachine,
-  LOCAL_TWO_WAY_NOTE,
   mayGrantCapability,
   type OpenReason,
   openReason,
   openReasonLabel,
   postureCopy,
-  postureFromCapabilities,
   REMOTE_ONE_WAY_NOTE,
   weightCopy,
   weightPips,
@@ -69,9 +68,8 @@ const POSTURE_TONE: Readonly<Record<ReturnType<typeof postureCopy>['tone'], stri
 
 /** Colour AND shape per reason, so the mark survives a monochrome render. */
 const REASON_TONE: Readonly<Record<OpenReason, string>> = {
-  ungoverned: 'border-ok-border bg-ok-bg text-ok',
   granted: 'border-accent bg-accent-soft text-accent',
-  ungated: 'border-warn-border bg-warn-bg text-warn',
+  'step-up': 'border-warn-border bg-warn-bg text-warn',
   closed: 'border-border-strong bg-surface text-muted',
   unknown: 'border-err-border bg-err-bg text-err',
 };
@@ -189,6 +187,7 @@ function CapabilityRow({
   readonly posture: ConnectionPosture;
 }) {
   const headingId = useId();
+  const deviceNote = deviceGrantNote(entry);
   return (
     <li
       className="flex min-w-0 flex-col gap-1.5 border-t border-border-soft py-3 first:border-t-0 first:pt-0"
@@ -209,6 +208,14 @@ function CapabilityRow({
           <ReasonMark key={axis} entry={entry} axis={axis} posture={posture} />
         ))}
       </div>
+      {deviceNote === null ? null : (
+        <p
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+          data-capability-device-note={entry.capability}
+        >
+          {deviceNote}
+        </p>
+      )}
       {/* THE ONE-WAY DOOR, said where the switch would be. An off capability this caller may not turn
           on is not a control — it is a statement with a remedy, and the remedy is the machine itself.
           Rendering a toggle here would fail on press and teach somebody the product is broken rather
@@ -231,23 +238,11 @@ export interface CapabilityListProps {
   /**
    * Whether the operator's limits APPLY to this connection, as the daemon reported it.
    *
-   * NORMALLY SUPPLIED, from `GrantsView.governed` — the daemon's own `isGovernedCaller` answer and the
-   * only honest source, because a page on a loopback address can be reaching the daemon through the
-   * relay. Passing it means the screen reads the fact rather than inferring it, which is the point of the
-   * field existing at all.
-   *
-   * OMITTED, the posture falls back to `mayGrant` unanimity, which answers locality only. Never derived
-   * from the page: a `127.0.0.1` address bar does not mean a loopback connection.
+   * SUPPLIED from `GrantsView.governed` — the daemon's own `isGovernedCaller` answer and the only honest
+   * source. Omitted, the posture reads "cannot tell" rather than guessing, and the limits are treated as
+   * applying. Never derived from the page: a `127.0.0.1` address bar says nothing about the connection.
    */
   readonly governed?: boolean | undefined;
-  /**
-   * Whether the request ARRIVED on this host — the second, independent fact.
-   *
-   * It is not `!governed` any more: a browser on the machine is a paired device and is governed until it
-   * unlocks, so the two are both true at once for the connection this field was added for. Without it,
-   * that browser would be badged "Remote" while sitting on the machine.
-   */
-  readonly hostLocal?: boolean | undefined;
 }
 
 /**
@@ -257,27 +252,14 @@ export interface CapabilityListProps {
  * an answer nobody gave. Rows are ordered by the protocol's own declaration rather than by arrival, so
  * a person can build a habit around their position.
  */
-export function CapabilityList({ connection, capabilities, governed, hostLocal }: CapabilityListProps) {
+export function CapabilityList({ connection, capabilities, governed }: CapabilityListProps) {
   const headingId = useId();
-  // The capabilities carry locality (`mayGrant`), so an omitted prop is read from them rather than
-  // requested a second time. Explicit props win when a caller has the booleans independently. Neither
-  // path touches the page's address.
-  const posture =
-    governed === undefined ? postureFromCapabilities(capabilities) : connectionPosture(governed, hostLocal);
+  const posture = connectionPosture(governed);
   const copy = postureCopy(posture);
   const entries = DAEMON_CAPABILITIES.map(capability =>
     capabilities.find(candidate => candidate.capability === capability),
   ).filter((entry): entry is CapabilityGrantView => entry !== undefined);
-  // One glyph per posture, and `local-locked` gets the LOCK rather than the laptop: the reader is at the
-  // machine, and the fact worth a glyph is the gate, not the address.
-  const PostureIcon =
-    posture === 'direct-local'
-      ? Laptop
-      : posture === 'local-locked'
-        ? Lock
-        : posture === 'governed-remote'
-          ? Wifi
-          : CircleHelp;
+  const PostureIcon = posture === 'governed' ? Wifi : CircleHelp;
 
   return (
     <section
@@ -313,14 +295,10 @@ export function CapabilityList({ connection, capabilities, governed, hostLocal }
       <div className={cn('rounded-control border px-3 py-2', POSTURE_TONE[copy.tone])} data-capability-posture-copy="">
         <p className="m-0 text-ui font-semibold leading-base">{copy.headline}</p>
         <p className="m-0 mt-1 text-meta leading-base opacity-90">{copy.detail}</p>
-        {/* Which way the switches travel from HERE. It is the difference between the two postures that
-            a person can actually act on, so it is stated with them rather than left to be discovered by
-            pressing something. */}
-        {/* `local-locked` takes the LOCAL sentence: this browser is on the machine and its switches do
-            travel both ways once it unlocks. Printing the remote one-way note there would tell somebody
-            standing at the machine that a door they can reopen is shut for good. */}
+        {/* Which way the switches travel from HERE, stated rather than left to be discovered by pressing
+            something. */}
         <p className="m-0 mt-1 text-meta font-semibold leading-base" data-capability-direction={posture}>
-          {posture === 'direct-local' || posture === 'local-locked' ? LOCAL_TWO_WAY_NOTE : REMOTE_ONE_WAY_NOTE}
+          {REMOTE_ONE_WAY_NOTE}
         </p>
       </div>
 

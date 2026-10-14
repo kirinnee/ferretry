@@ -35,7 +35,7 @@ async function browser() {
   const publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
   const authSecret = crypto.getRandomValues(new Uint8Array(16));
   const subscription: BrowserPushSubscription = {
-    endpoint: 'https://push.example.test/send/abc',
+    endpoint: 'https://fcm.googleapis.com/send/abc',
     expirationTime: null,
     keys: {
       p256dh: Buffer.from(publicKey).toString('base64url'),
@@ -183,7 +183,7 @@ describe('WebPushFetchTransport', () => {
     should(JSON.parse(Buffer.from(claims ?? '', 'base64url').toString())).deepEqual({
       // The ORIGIN of the endpoint and nothing more: a token scoped to a path would be replayable by
       // another service on the same host.
-      aud: 'https://push.example.test',
+      aud: 'https://fcm.googleapis.com',
       exp: 1_780_000_000 + 12 * 60 * 60,
       sub: 'https://ferretry.pages.dev',
     });
@@ -243,7 +243,7 @@ describe('WebPushFetchTransport', () => {
     const reader = await browser();
     const identity = await signer();
     const subject = new WebPushFetchTransport(identity, async () => {
-      throw new Error('getaddrinfo ENOTFOUND push.example.test');
+      throw new Error('getaddrinfo ENOTFOUND fcm.googleapis.com');
     });
 
     should(await subject.deliver({ subscription: reader.subscription, payload: '{}' })).equal('failed');

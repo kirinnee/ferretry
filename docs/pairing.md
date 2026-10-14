@@ -9,7 +9,8 @@ against the code, and change it in the same commit as the behaviour.
 
 The machine mints a code that lives for **two minutes** and works **once**; the device that reads it
 registers a **key it generated and can never export**; the machine keeps only the public half, and the
-grant ends when it is revoked or goes unused for **30 days**. No bearer value exists anywhere — the
+grant ends when it is revoked or goes unused for its idle period — **30 days** unless the machine's owner
+changed it. No bearer value exists anywhere — the
 rationale and the threat model are [design/zero-trust.md](design/zero-trust.md) A1–A7.
 
 ## What travels, and what never does
@@ -96,6 +97,34 @@ and a daemon address is already known to whoever was authorised to pair. The dae
 secret in this subject and it is not on the list — the wire schema has no field for one. The full carrier
 contract is [relay-protocol.md](relay-protocol.md) §13.
 
+### What a new device may do
+
+**A newly paired device can do anything on this machine — once it unlocks it with its passkey**
+(owner decision 2026-10-14; [design/zero-trust.md](design/zero-trust.md) B1 and B5; [grants.md](grants.md)).
+Before its first unlock it can do nothing but unlock and register its first passkey. Every unlock lasts the
+machine's unlock period (8 hours unless the owner changed it), for every page of that device, and a revoke
+ends it at once.
+
+**`fy pair --limited`** mints a code whose redemption gives the device `fleet.use` only: it can read the
+fleet and chat with sessions, and terminals, files, the browser, secrets, the warden, pairing and every
+`configure` axis start off. A limited device is widened one capability at a time: by the owner with
+`fy device grant <device> <capability> --use` (the admin token, the only ungoverned caller — B4), or from
+any browser's Settings → Add a device toggles by a device that holds `pairing.configure` and the capability
+it is giving.
+
+- **A full code from another device is checked.** `POST /v1/pair/code` mints `full` by default; from a
+  paired device it is refused (`403 grant_forbidden`) unless that device holds every capability itself,
+  so no device can mint a code giving a new device more than it holds. At the machine anything goes. A
+  limited code, `{ "grants": "limited" }`, can be minted by any device allowed to pair.
+- **The code carries the choice, the link does not.** The daemon holds the grant set with the live code and
+  applies it at redemption; the QR stays the one-version `v1` fragment, so nothing about what a code grants
+  is visible to whoever reads it. A newer mint replaces the code and its choice together.
+- **It is not a bypass.** The daemon-wide document still narrows the device, and the device still has to
+  unlock before it can do anything. The mint answers `grants: "full" | "limited"`, so the host's screen says
+  which it drew; a daemon too old to know `limited` echoes nothing, read as `full`, and `fy pair --limited`
+  says it was not applied.
+- **`fy pair --full` is gone**: it is the default now.
+
 ### Asking again — `GET /v1/carriers`
 
 A set published only at pairing time goes stale while both halves stay healthy: an operator changes or
@@ -107,8 +136,8 @@ moment.
   that needs it and protect nothing.
 - **`no-store`**, because the entire value of the answer is that it is current. A cached copy re-serves
   the rendezvous the operator just switched off.
-- **Not `privilegedOnly`, and no capability demand.** A caller on the host already has the machine and
-  needs no list; the remote phone is the reader. And an operator who switches `pairing` off to stop **new**
+- **Not `privilegedOnly`, and no capability demand.** The owner's command line already has the machine
+  and needs no list; a paired device — a phone, or a browser on the host — is the reader. And an operator who switches `pairing` off to stop **new**
   devices being added must not thereby strand the devices already paired on a rendezvous this daemon no
   longer dials.
 - **Read-only.** There is no `POST`, `PUT` or `DELETE` here. A device may learn where this daemon can be
@@ -126,50 +155,37 @@ a phone that can never dial it directly.
 
 ### Who may mint
 
-Read [grants.md](grants.md) first: minting is governed by the `pairing` capability, so a caller **on the
-host** is ungoverned and a caller **off the host** mints while the operator leaves `pairing` on. The two
-facts a UI needs before it offers anything — whether this request arrived on the host, and which grant is
-the caller's own — are on `GET /v1/pair/devices` as `hostLocal` and `thisDeviceId`. Both are
+Read [grants.md](grants.md) first: minting is governed by the `pairing` capability, so only **the owner at
+the machine** — `fy pair` with the host's admin token — is ungoverned, and **every paired device**, a browser
+on the host included, mints while the operator leaves `pairing` on (B4: a tunnel to `127.0.0.1` is
+indistinguishable from a local browser). The two facts a UI needs before it offers anything — whether this
+caller is the owner at the machine, and which grant is the caller's own — are on `GET /v1/pair/devices` as
+`hostLocal` and `thisDeviceId`. `hostLocal` is `arrivedOnHost`, never the bare loopback flag, so a caller behind
+a local proxy is never told it is at the machine. Since B5 a paired device also needs `pairing.use` in its
+OWN grants, which a newly paired device holds unless it was paired `--limited`. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
-### Pairing requires an operator password, and the DAEMON is what requires it
+### Minting needs no password
 
-**`POST /v1/pair/code` refuses while no operator password exists.** Every caller meets it: a phone, a
-browser on the machine, and `fy pair` on the host — which mints through that same route. The refusal is
-one sentence, composed once, and it names the remedy (`fy daemon password set`, which never asks for an
-old password) at the point of decision.
+**`POST /v1/pair/code` asks for no secret.** The owner's `fy pair` mints freely. A **governed** caller — a
+paired phone, a browser across the network or on the host itself — mints only while the operator leaves `pairing`
+on **and** it holds a current passkey step-up — which its unlock is, unless the owner asked per act —
+because `pairing.use` is one of the `use` demands the step-up guards ([grants.md](grants.md)). The refusal is `step-up-required` and the app answers it by raising
+the passkey prompt and retrying once; a remote warden has no device and can never mint.
 
-The reason is `fleet.configure`, which is **on by default** for a governed caller. On a machine with no
-password, any device this exchange creates can therefore provision the host — writing runnable wrappers
-into the operator's accounts — with nothing to prove. Requiring the password at the one moment remote
-access is being created **deletes that state** rather than warning about it, and the safe configuration
-stops depending on somebody noticing a disclosure.
+There is no first-password requirement, because there is no password. What stops a stolen or unattended
+phone from handing out more access is the unlock, not a secret that had to exist before the first device
+did. An unlocked phone in the wrong hands can pair another device for the rest of its unlock period; the
+unlock period, the per-act step-up setting and revocation are the controls.
 
-**Why it is here and not in the browser.** It was in the browser first, and the guarantee that bought was
-"the browser will not create a passwordless remote device" — silent about the command line, which could
-still hand out a key before the lock existed. Below both doors there is one rule, so which door somebody
-walks through stops mattering, and there is no second copy to fall out of step.
+What this deliberately does **not** do:
 
-What it deliberately does **not** do:
-
-- **It is not a startup requirement, and it can never block a start.** `fy daemon start` OFFERS to set the
-  first password when there is a terminal and a person to answer; it asks nothing otherwise, and a failure
-  to ask or to store is a warning beside a daemon that is already serving. Service managers run the daemon
-  executable — never a CLI verb — so a systemd or launchd start cannot reach a prompt at all. A daemon
-  that refused to start without a password would silently stop running at boot, which is worse than the
-  problem being solved; that is exactly why the promise lives at pairing instead.
-- **It does not gate local use.** A passwordless machine starts, serves and configures itself exactly as
-  before. Nothing else in the daemon consults the requirement, and no other pairing route is affected —
-  the device list, both revocations, code status and redemption are all untouched.
-- **It does not migrate an existing install.** One that already has devices and no password is not nagged
-  and nothing is revoked; the requirement lands at its **next** pairing.
-
-**The browser explains it first rather than enforcing it.** The Add-a-device panel reads `GET /v1/grants`
-beside the device list and, while `passwordSet` is false, the requirement and the control that satisfies
-it stand where the button would be — a remote reader, who cannot set one from there, is told the two
-places that can. A browser that could not **read** the grant view offers the button and renders whatever
-the daemon answers: it has nothing to add by guessing, because the machine that knows refuses on its own
-account.
+- **It does not gate local use.** A machine nobody has paired starts, serves and configures itself with no
+  setup at all.
+- **It does not govern redemption.** The code is the credential, redeemed inside a sealed session; the
+  step-up guards the act of _creating_ a code, and the code's two-minute life bounds the rest.
+- **It does not migrate anything.** A `state/operator-password.json` left by an older build is deleted at
+  boot with one notice line, and nothing is revoked.
 
 ### Who may redeem
 
@@ -226,7 +242,7 @@ sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render tho
 Each remedy below answers **the direct address**, which is the only thing these reasons describe. A
 `local-only` daemon that also dials a discoverable rendezvous is already redeemable from another
 device, so its remedy is the upgrade to a connection with no third party on the path rather than the
-unlock it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
+remedy it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
 this table is the no-rendezvous wording:
 
 | reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -299,13 +315,34 @@ Two different things are revocable and they are not the same act:
   because a session is authorized once, at its proof, and would otherwise outlive the grant. A request
   already in flight on a closing session is refused at the request boundary too: the dispatcher re-asks
   whether the device is still paired, and an unanswerable question is a refusal.
-- **Idle expiry** — a device nobody has USED for **30 days** is removed the next time the daemon looks
+- **Idle expiry** — a device nobody has USED for the idle period is removed the next time the daemon looks
   (at boot, at a session's proof, at a device-list read) and must pair again. Use means a request the
   page marks `presence` — visible and touched within five minutes, by real input. A page that only
   loaded is not use, and neither is a proof or a silent renewal, so a tab left open on a forgotten
   laptop cannot keep the device paired.
   `lastSeenAt` reaches disk at most once an hour, so a busy phone is not a write per request;
-  `idleExpiresAt` on each row says when the grant ends.
+  `idleExpiresAt` on each row says when the grant ends. The period is the `idleExpiryDays` security
+  setting (1–90 days, default 30; [design/zero-trust.md](design/zero-trust.md) B6), read at every check, so
+  shortening it can unpair devices at once. The change's answer says how many (`devicesExpiring`), and the
+  redemption response's `idleExpiryDays` reports the value in force. Change it at the machine with
+  `fy daemon security set idleExpiryDays <days>`, or shorten it from a paired device in Settings.
+
+**At the machine: `fy device revoke <device>`.** This is THE way to remove a stolen phone without a
+browser. `<device>` is a paired device's id, or its name when exactly one device has that name (the same
+resolver as `fy passkey window`); it calls `DELETE /v1/pair/devices/:deviceId` with the host's admin token
+over loopback, which is ungoverned, so no step-up is asked. Revoking is the one change here that cannot be
+undone — the device must pair again — so it asks you to type `revoke` unless `--yes` waived it, and off a
+terminal it refuses without `--yes` rather than skip the question. It ends in one sentence: the device can
+no longer reach this machine, its open sessions were closed and its passkeys forgotten. An unknown name, two
+devices with one name, a daemon that is not running and a device already gone are each one plain sentence
+naming what to do, with exit code 1.
+
+**Every revocation somebody asked for is recorded.** The act is written to the owner's grant journal
+(`state/grant-audit.jsonl`, the one the grant changes and re-opened passkey windows already use) as
+`device.revoked=<deviceId>` beside the resolved actor — `admin-cli` for this command line, `device:<id>` for a
+governed device that asked — never a credential. The record is the LAST step, written only after the grant
+is gone and its sessions are closed, so a refused or unknown revocation leaves none; a journal that cannot be
+written does not undo the revocation, it surfaces as an error after the device is already gone.
 
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses
@@ -333,9 +370,12 @@ row states what its revoke will do before the press.
 - **A device cannot be renamed.** The name is whatever the device called itself when it redeemed, and it
   is attacker-influenced text bounded by `PairingDeviceNameSchema`. Two phones that both say "Chrome" are
   told apart only by when they were added.
-- **There is no pairing audit record.** A revoked device leaves no trace beyond its absence from
-  `devices.json`, so "when did this credential go away, and who ended it" is not answerable. The grant
-  layer has an audit journal; this does not.
+- **The pairing audit record is only the revocations somebody asked for.** `device.revoked=<deviceId>` is
+  recorded with its actor (above). Still NOT recorded: a pairing (a device redeeming a code), a minted or
+  revoked code, and **idle expiry** — a device removed because nobody used it for 30 days leaves no trace
+  beyond its absence from `devices.json`, since no actor asked for it. So "when did this credential go
+  away" is answerable for a revocation and not for an expiry, and "when did this device first join" is not
+  answerable at all.
 - **Code running in the paired page can USE the device key while the tab is open.** The key cannot be
   exported, so a cross-site script or a malicious deploy cannot carry it away, but it can sign sessions
   for as long as it runs. Signed PWA releases ([design/zero-trust.md](design/zero-trust.md) D) narrow
@@ -348,8 +388,25 @@ row states what its revoke will do before the press.
 - **Devices paired before device keys were deleted on upgrade.** A `devices.json` from before schema 2
   held only token digests, which no session can prove against, so the daemon drops those grants at boot
   and says so once. Each such device must pair again.
-- **There is no passkey step-up yet.** A paired device's session can do whatever its capabilities
-  allow without a second factor; [design/zero-trust.md](design/zero-trust.md) B adds one.
+- **A step-up bounds who acts, not what the act does.** A governed device holding a step-up may mint a code,
+  open a terminal or apply a fleet change for the length of the window; the step-up says the person holding
+  the device agreed recently, nothing about the act itself ([grants.md](grants.md)).
+- **A device's first passkey has a ten-minute window.** It can be added only in the ten minutes after
+  pairing (B2), so a newly paired device with no passkey for the machine sees one dismissible line
+  pointing at Settings → Daemons → Security → Add a passkey. A device that misses the window cannot step up
+  until the owner re-opens it at the machine (below) or it pairs again; until then it keeps only the uses
+  that need no step-up ([design/zero-trust.md](design/zero-trust.md) B2).
+
+**Recovering a device that cannot add a passkey: `fy passkey window <device>`.** A device that missed its
+first ten-minute window, or lost the authenticator that held its passkey, cannot step up again — and a
+browser cannot re-open its own window, because no browser is ever "at the machine". The owner does it at
+the machine: `fy passkey window <device>` takes a paired device's id, or its name when exactly one device
+has that name, and calls `POST /v1/passkeys/registration-window` with the host's admin token over loopback.
+Anybody else is refused (`403 step_up_not_at_machine`), an unknown device is `404 step_up_unknown_device`,
+and the window is ten minutes, admits ONE passkey and is audited. The device then opens Settings →
+Security → Add a passkey inside it. Nothing here pairs the device again, so its grant and its other
+sessions are untouched.
+
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first

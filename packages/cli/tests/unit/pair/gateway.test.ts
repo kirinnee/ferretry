@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { z } from 'zod';
-import { PAIRING_CODE_PATH, pairingCodePath, ProtocolPairingGateway } from '../../../src/lib/pair/gateway';
+import { PAIRING_CODE_PATH, ProtocolPairingGateway, pairingCodePath } from '../../../src/lib/pair/gateway';
 import type { PairingApiClient } from '../../../src/lib/pair/ports';
 import { CODE, MINT, PAIRING_ID, redeemed } from './fixtures';
 
@@ -41,7 +41,7 @@ describe('protocol pairing gateway', () => {
     const subject = new ProtocolPairingGateway(fakeClient(MINT, calls));
 
     // Act
-    const actual = await subject.mint();
+    const actual = await subject.mint('full');
 
     // Assert
     should(actual).eql(MINT);
@@ -73,7 +73,7 @@ describe('protocol pairing gateway', () => {
     const subject = new ProtocolPairingGateway(fakeClient({ error: 'host-local access required' }));
 
     // Act + Assert
-    await should(subject.mint()).be.rejected();
+    await should(subject.mint('full')).be.rejected();
   });
 
   it('should refuse a mint whose pairing URL does not match the code it came with', async () => {
@@ -84,7 +84,7 @@ describe('protocol pairing gateway', () => {
     );
 
     // Act + Assert
-    await should(subject.mint()).be.rejected();
+    await should(subject.mint('full')).be.rejected();
   });
 
   it('should refuse a status outside the three states the protocol defines', async () => {
@@ -93,5 +93,30 @@ describe('protocol pairing gateway', () => {
 
     // Act + Assert
     await should(subject.status(PAIRING_ID)).be.rejected();
+  });
+});
+
+describe('protocol pairing gateway, grant sets', () => {
+  it('should send an empty body for the full set, as an older daemon expects', async () => {
+    // Arrange
+    const calls: Call[] = [];
+
+    // Act
+    await new ProtocolPairingGateway(fakeClient(MINT, calls)).mint('full');
+
+    // Assert
+    should(body(calls[0]?.init)).eql({});
+  });
+
+  it('should name the limited set in the body, and nothing else', async () => {
+    // Arrange
+    const calls: Call[] = [];
+
+    // Act
+    const actual = await new ProtocolPairingGateway(fakeClient({ ...MINT, grants: 'limited' }, calls)).mint('limited');
+
+    // Assert
+    should(body(calls[0]?.init)).eql({ grants: 'limited' });
+    should(actual.grants).equal('limited');
   });
 });

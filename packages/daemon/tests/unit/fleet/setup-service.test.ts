@@ -10,8 +10,8 @@ import { describe, it } from 'bun:test';
 import {
   type AccountModel,
   buildCloneBundle,
-  type FleetApplyPlan,
   FleetApplyFailureError,
+  type FleetApplyPlan,
   type FleetDocumentWrite,
   type FleetLayout,
   type HostHarnessScan,
@@ -26,7 +26,7 @@ import {
   FleetToolInstallResultSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
+import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { type AccountDocumentReading, FleetCatalogRefusal } from '../../../src/lib/fleet/catalog-service.ts';
 import {
   CLONE_BUNDLE_MAX_BYTES,
@@ -143,7 +143,6 @@ interface World {
     secretNames: () => Promise<readonly string[]>;
     putSecret: (name: string, value: string) => Promise<void>;
     apply: () => Promise<unknown>;
-    confirmation: ChangeConfirmation;
     emails: () => Promise<FleetCredentialView[]>;
     plans: readonly ToolInstallPreview[];
     install: () => Promise<readonly ToolInstallOutcome[]>;
@@ -173,7 +172,6 @@ function world(options: { overrides?: Partial<FleetSetupServiceDeps> } = {}): Wo
       secrets.set(name, value);
     },
     apply: async () => RUN_RESULT,
-    confirmation: { kind: 'confirmed' },
     emails: async () => [credentialRow('claude-you', 'you@example.com')],
     plans: [
       { harness: 'claude', installed: true, path: '/usr/bin/claude' },
@@ -212,7 +210,6 @@ function world(options: { overrides?: Partial<FleetSetupServiceDeps> } = {}): Wo
           throw new Error('not used');
         },
       },
-      confirmChange: async () => state.confirmation,
       provisioner: {
         preview: async () => {
           throw new Error('not used');
@@ -254,8 +251,7 @@ function world(options: { overrides?: Partial<FleetSetupServiceDeps> } = {}): Wo
   };
 }
 
-const governance = (confirmChange: boolean): CallerGovernance =>
-  ({ governed: confirmChange, passwordSet: true, confirmChange }) as CallerGovernance;
+const governance = { governed: true } as CallerGovernance;
 
 async function thrown(work: Promise<unknown>): Promise<unknown> {
   return await work.then(
@@ -416,7 +412,7 @@ describe('installTools', () => {
       },
     ];
     const result = FleetToolInstallResultSchema.parse(
-      await service.installTools({ harnesses: ['claude', 'codex'] }, governance(false)),
+      await service.installTools({ harnesses: ['claude', 'codex'] }, governance),
     );
     should(result.outcomes).deepEqual([
       { harness: 'claude', outcome: 'already-installed' },
@@ -442,7 +438,7 @@ describe('installTools', () => {
       state.install = async () => {
         throw new ToolInstallRefusal(from, `refused: ${from}`);
       };
-      const refusal = await setupRefusal(service.installTools({ harnesses: ['codex'] }, governance(true)), to);
+      const refusal = await setupRefusal(service.installTools({ harnesses: ['codex'] }, governance), to);
       should(refusal.message).equal(`refused: ${from}`);
     }
     state.install = async () => {

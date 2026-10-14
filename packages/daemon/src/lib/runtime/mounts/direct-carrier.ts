@@ -137,8 +137,12 @@ export function directCarrierSocketRoute(deps: DirectCarrierDependencies): Socke
       // A peer with no address is keyed as one — never waved through as nobody.
       const peer = request.clientAddress ?? 'unknown-peer';
       // Every tab on the host shares one loopback address, so the per-address bound would refuse the
-      // host's own burst of reconnecting tabs. The host is still under the global bounds.
-      const bounded = !request.loopback;
+      // host's own burst of reconnecting tabs. The host is still under the global bounds. Exempt only on a
+      // HOST-PROVEN carrier (a loopback-only bind): on a wildcard bind a proxy (`tailscale serve`,
+      // `cloudflared`, `ssh -L`) forwards every remote caller from 127.0.0.1, and one of them could
+      // otherwise hold every unproven slot. A proxy in front of a loopback-only bind still shares the
+      // exemption; that deployment is declared DoS-exposed in zero-trust.md A3.
+      const bounded = request.privilegedLoopback !== true;
       const now = deps.clock.now();
       if (bounded && (unprovenByPeer.get(peer) ?? 0) >= MAX_DIRECT_UNPROVEN_PER_PEER)
         throw new ApiError(429, 'this address already has sessions waiting to prove a device', 'rendezvous_busy');

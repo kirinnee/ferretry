@@ -67,7 +67,7 @@ const cases: SchemaCase[] = [
   {
     name: 'FleetToolInstallRequestSchema',
     schema: setup.FleetToolInstallRequestSchema,
-    value: { harnesses: ['claude', 'codex'], operatorPassword: 'fake-password-123' },
+    value: { harnesses: ['claude', 'codex'] },
   },
   {
     name: 'FleetToolInstallOutcomeSchema',
@@ -175,9 +175,9 @@ describe('the machine setup wire contract', () => {
       rejects('an install request naming three harnesses', setup.FleetToolInstallRequestSchema, {
         harnesses: ['claude', 'codex', 'claude'],
       }),
-      rejects('an install request with a short password', setup.FleetToolInstallRequestSchema, {
+      rejects('an install request still carrying a confirmation', setup.FleetToolInstallRequestSchema, {
         harnesses: ['claude'],
-        operatorPassword: 'short',
+        operatorPassword: 'fake-password-123',
       }),
       rejects('an install outcome of an unknown kind', setup.FleetToolInstallOutcomeSchema, {
         harness: 'claude',

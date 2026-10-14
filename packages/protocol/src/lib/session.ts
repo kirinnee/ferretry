@@ -494,6 +494,29 @@ export const FyEventStreamFrameSchema = z.discriminatedUnion('kind', [
 export type FyEventStreamFrame = z.infer<typeof FyEventStreamFrameSchema>;
 export type FyEventStreamIdle = Extract<FyEventStreamFrame, { readonly kind: 'idle' }>;
 
+/**
+ * The most free-form harness flags one start may carry, and the longest one may be.
+ *
+ * Generous on purpose: a `--settings` overlay is JSON and can run to a few kilobytes. The bounds exist
+ * so a body cannot hand the launch argv an unbounded list, never to judge which flags are wise.
+ * Whether a caller may choose them at all is the device unlock's question
+ * (`docs/design/zero-trust.md` B1), not this schema's.
+ */
+const MAX_HARNESS_FLAGS = 64;
+const MAX_HARNESS_FLAG_LENGTH = 16_384;
+
+/**
+ * One caller-supplied harness flag, bounded and free of control characters.
+ *
+ * A control character has no business in an argv element a human typed: a newline or an escape in
+ * one is either a mistake or an attempt to make the recorded command read differently from the one
+ * that ran.
+ */
+const HarnessFlagSchema = z
+  .string()
+  .max(MAX_HARNESS_FLAG_LENGTH)
+  .refine(value => !/\p{Cc}/u.test(value), 'a harness flag may not contain a control character');
+
 const StartSessionBaseSchema = z.strictObject({
   agent: z.string().min(1),
   name: z.string().min(1).optional(),
@@ -504,7 +527,7 @@ const StartSessionBaseSchema = z.strictObject({
   boardAccess: TaskBoardAccessSchema.default('none'),
   cwd: z.string().min(1).optional(),
   remoteControl: z.boolean().optional(),
-  harnessFlags: z.array(z.string()).optional(),
+  harnessFlags: z.array(HarnessFlagSchema).max(MAX_HARNESS_FLAGS).optional(),
   model: z.string().min(1).optional(),
   /**
    * Opaque startup reasoning choice. The selected account's live runtime decision validates the

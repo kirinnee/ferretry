@@ -72,7 +72,7 @@ const memoryStorage = (over: { failRead?: boolean; failWrite?: boolean } = {}) =
 
 const subscriptionHandle = (unsubscribed: string[] = []): PushSubscriptionHandle => ({
   toJSON: () => ({
-    endpoint: 'https://push.example.test/x',
+    endpoint: 'https://fcm.googleapis.com/x',
     expirationTime: null,
     keys: { p256dh: 'B'.repeat(87), auth: 'C'.repeat(22) },
   }),

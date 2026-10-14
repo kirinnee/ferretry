@@ -1,30 +1,27 @@
 /**
  * CAPABILITY GRANTS — what the operator has decided the UI may do on THIS machine.
  *
- * ## THE HOST IS UNGOVERNED; A LOCAL BROWSER IS UNGOVERNED ONCE IT UNLOCKS
+ * ## THE OWNER AT THE MACHINE IS UNGOVERNED; EVERY OTHER CALLER IS GOVERNED
  *
- * The command line on the machine is subject to none of this: it authenticates with the admin token,
- * and reading that file already requires being on the host, so gating it would be friction with no
- * safety and would slam shut the one door a forgotten password can still be repaired through.
+ * The owner — the command line holding the admin token, over loopback — is subject to none of this. Reading the admin token
+ * already requires being on the host, so gating it would be friction with no safety, and it is the
+ * door a confused remote configuration is repaired through.
  *
- * A LOCAL BROWSER IS DIFFERENT, and this is the one place the model asks something of somebody who is
- * standing at the machine. A browser is a paired device wherever it runs; a tab left open on an
- * unattended desk is the accident this defends against. So a local browser holding a device credential
- * is governed by everything below UNTIL it presents an unlock, and ungoverned — fully, with no second
- * gate — after that. It is exactly what `sudo` provides, and exactly as bypassable: somebody at the
- * keyboard can open a terminal. It buys deliberateness, not a boundary, and no sentence in this
- * codebase may claim otherwise.
- *
- * A MACHINE WITH NO PASSWORD CANNOT ASK FOR ONE, so a local browser there is ungoverned as it always
- * was — a fresh install needs no setup to be useful, and the first password is set when the first
- * device is paired.
- *
- * Everything below still exists for the caller who is NOT on the host: a paired phone, a browser
- * across the network, a session carried over the rendezvous. That is where a boundary is real.
+ * Every other caller is governed: a paired phone, a browser across the network, a session carried over
+ * the rendezvous, and a browser on the host itself — a tunnel or proxy to 127.0.0.1 is indistinguishable
+ * from one (docs/design/zero-trust.md B4). That is where a boundary is real.
  *
  * "Loopback" means how the request ARRIVED, decided from the carrier — never a peer address, a `Host`
  * header, or a URL that happens to say `127.0.0.1`. The relay terminates on the host it serves, so a
  * naive check would hand a remote phone full control of the machine.
+ *
+ * ## THE STEP-UP IS THE CONFIRMATION
+ *
+ * A governed caller exercising a dangerous demand — any `configure`, or `use` of `terminal`, `browser`
+ * or `pairing` — must hold a recent passkey step-up for THIS device and THIS app session
+ * (`./step-up.ts`). The refusal is `step-up-required`, and its wire code is `STEP_UP_REQUIRED_CODE`, so
+ * the browser can ask for the passkey and retry once. There is no operator password: the step-up
+ * replaced it, and nothing here reads, stores or asks for one.
  *
  * ## TWO AXES, NOT ONE
  *
@@ -52,20 +49,14 @@
  * ## PERMISSIVE BY DEFAULT, RESTRICTIVE BY CHOICE
  *
  * Both axes default to ENABLED for every capability, `pairing` included. A person should be able to do
- * as much as possible from the UI, and the security model is a layer a cautious operator turns on
- * rather than a wall everyone starts behind. The layer is the OPERATOR PASSWORD: set one, and every
- * `configure` demand needs an unlock; set none, and nothing is obstructed.
+ * as much as possible from the UI; what stands between a paired device and a dangerous demand is the
+ * passkey step-up, which needs no setup beyond pairing.
  *
  * `pairing` DESERVES A SENTENCE BECAUSE IT IS THE ONE THAT PRODUCES CREDENTIALS. Exercising it hands
  * another device access to the machine, which is why the protection it relies on is not its default but
  * the one-way gate: a caller who is not on the host may turn a capability OFF and may never turn one
  * back ON. An operator who decides that only the machine itself hands out credentials therefore makes
  * a decision that sticks, and no device that has been shut out can restore itself.
- *
- * That direction has an honest cost, and it is named rather than hidden: with permissive defaults and
- * no password, anyone holding a pairing can change this machine's fleet and settings. It is stated in
- * one plain sentence wherever remote access is arranged or inspected — once, never as nagging, and
- * never as a question somebody has to answer to use their own machine over loopback.
  *
  * ## ABSENCE IS STILL DENIAL
  *
@@ -75,8 +66,8 @@
  * state is not empty state, and unknown is never permitted.
  *
  * The contract lives in the protocol package because four consumers must agree on it: the daemon
- * that enforces it, the command line that asks the operator for it, the configuration document that
- * records it, and the browser that has to explain a refusal instead of greying a control out.
+ * that enforces it, the command line that reports it, the configuration document that records it, and
+ * the browser that has to explain a refusal instead of greying a control out.
  */
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
@@ -84,7 +75,7 @@ import { InstantSchema } from './common.ts';
 /**
  * The capabilities an operator is asked about, in the order they are asked.
  *
- * SIX, and the list is closed. Every one of them either reaches out of the daemon's own state onto
+ * SEVEN, and the list is closed. Every one of them either reaches out of the daemon's own state onto
  * the host — spawning a shell, writing an account's wrapper, opening a browser the operator is
  * signed into, reading a working tree — or decides how much of the host the daemon may spend on its
  * own. Everything the daemon does *inside its own state home* (sessions, tasks, attention, pins) is
@@ -95,8 +86,21 @@ import { InstantSchema } from './common.ts';
  * order is the order an operator is asked and reads, so an existing report's rows must not reshuffle
  * because a sixth question exists. What it reaches is not the daemon's own state either — a pairing
  * code is a credential for the machine, redeemable by whoever holds it.
+ *
+ * `secrets` is appended after it for the same reason. Its `use` axis runs a command with a stored
+ * value in that child's environment — code execution on the host — and its `configure` axis sets and
+ * deletes stored values. Before it existed those routes carried no demand at all, so any paired device
+ * could run a command through them.
  */
-export const DAEMON_CAPABILITIES = ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing'] as const;
+export const DAEMON_CAPABILITIES = [
+  'fleet',
+  'terminal',
+  'browser',
+  'filesystem',
+  'warden',
+  'pairing',
+  'secrets',
+] as const;
 export type DaemonCapability = (typeof DAEMON_CAPABILITIES)[number];
 
 export const DaemonCapabilitySchema = z.enum(DAEMON_CAPABILITIES);
@@ -136,48 +140,18 @@ export const CapabilityGrantsSchema = z.strictObject(
 export type CapabilityGrants = z.infer<typeof CapabilityGrantsSchema>;
 
 /**
- * How long one successful unlock stays usable, how many wrong passwords a daemon tolerates, and how
- * long it then refuses to listen.
+ * What a device paired with a LIMITED code (`fy pair --limited`) is given: `fleet.use`, and nothing else.
  *
- * POLICY, not a daemon detail, for the reason the fleet approval's numbers are: the command line
- * prints them to the person typing, and the browser tells them how many tries are left. Three copies
- * of a number that must agree is three chances for it to stop agreeing.
- *
- * The window is SHORT. An unlock is held while a person changes a setting, not for a session: a
- * token that outlived the browser tab it was minted in is a standing configure grant nobody
- * re-consented to.
+ * The opt-in narrowing (`docs/design/zero-trust.md` B5): a phone that can read the fleet and chat with
+ * sessions, whose terminals, files, browser, secrets, warden, pairing and every `configure` axis stay
+ * off until somebody widens THIS device. It is also what a device record written before per-device
+ * grants reads as, because reading an absent field as the narrower answer is the safe direction.
  */
-export const GRANT_UNLOCK_TTL_SECONDS = 300 as const;
-export const GRANT_UNLOCK_MAX_ATTEMPTS = 5 as const;
-export const GRANT_UNLOCK_LOCKOUT_SECONDS = 900 as const;
-
-/**
- * The header a configure-axis request carries its unlock on.
- *
- * A HEADER, never a query parameter: a URL reaches every proxy's access log, and an unlock in a log
- * outlives its five minutes. This is the same reason the fleet approval code travels in a body.
- */
-export const OPERATOR_UNLOCK_HEADER = 'x-ferretry-operator-unlock';
-
-/** An opaque unlock, minted by the daemon. Never derived from the password. */
-export const OperatorUnlockTokenSchema = z.string().regex(/^fy_unlock_[A-Za-z0-9_-]{22,}$/u, 'invalid unlock token');
-export type OperatorUnlockToken = z.infer<typeof OperatorUnlockTokenSchema>;
-
-/**
- * The shortest password the daemon will accept.
- *
- * Modest on purpose. This gates a LOCAL privileged change behind a rate limiter, not an internet
- * login: the realistic attacker is somebody holding a paired device, and five attempts per fifteen
- * minutes does more work than length ever will. Refusing a person's choice with a character-class
- * lecture buys nothing here and reliably produces a password on a sticky note.
- */
-export const OPERATOR_PASSWORD_MIN_LENGTH = 8 as const;
-
-export const OperatorPasswordSchema = z
-  .string()
-  .min(OPERATOR_PASSWORD_MIN_LENGTH, `an operator password must be at least ${OPERATOR_PASSWORD_MIN_LENGTH} characters`)
-  .max(1024)
-  .refine(value => value.trim() !== '', 'an operator password must not be only whitespace');
+export const LIMITED_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: capability === 'fleet', configure: false }]),
+  ) as CapabilityGrants,
+);
 
 /**
  * WHY a capability is refused, in a vocabulary the UI can turn into a next step.
@@ -186,19 +160,23 @@ export const OperatorPasswordSchema = z
  * and a next step can only be composed by something that knows WHICH of these it is. A greyed
  * control with no explanation is the dead end this exists to remove.
  *
- * - `granted` — allowed, and the operator password stood behind it.
- * - `ungated` — allowed, and NOTHING stood behind it, because this machine has no operator password.
- *   It is a disclosure, not a refusal: the product is permissive by default and the password is the
- *   layer a cautious operator adds, so a UI showing this should say plainly that any paired browser
- *   can do this — once, where the control is, not as a recurring warning.
+ * - `granted` — allowed.
  * - `not-granted` — the operator turned this axis off. The next step is a host-side change.
- * - `locked` — an operator password exists and the caller has not presented a valid unlock.
- * - `rate-limited` — too many wrong passwords; the daemon is refusing to listen for a while.
+ * - `device-not-granted` — the machine allows it, but THIS device has not been given it. The next step
+ *   is widening this one device — at the machine, or from a device that holds it and `pairing.configure`.
+ * - `step-up-required` — the demand is dangerous and this device holds no recent passkey step-up for
+ *   this app session. The next step is a passkey confirmation on the same device, then the retry.
  * - `undetermined` — the grant document could not be read as a complete decision. Denied, loudly.
  *   Permissive DEFAULTS are a choice about what an operator who said nothing meant; they are not a
  *   choice about damaged state, and unknown is never permitted.
  */
-export const GRANT_REFUSALS = ['granted', 'ungated', 'not-granted', 'locked', 'rate-limited', 'undetermined'] as const;
+export const GRANT_REFUSALS = [
+  'granted',
+  'not-granted',
+  'device-not-granted',
+  'step-up-required',
+  'undetermined',
+] as const;
 export type GrantRefusal = (typeof GRANT_REFUSALS)[number];
 
 export const GrantRefusalSchema = z.enum(GRANT_REFUSALS);
@@ -208,10 +186,16 @@ export const CapabilityGrantViewSchema = z.strictObject({
   capability: DaemonCapabilitySchema,
   /** May this caller exercise the capability right now? */
   use: z.boolean(),
-  /** May this caller change the capability's host behaviour right now — unlock included? */
+  /** May this caller change the capability's host behaviour right now — step-up included? */
   configure: z.boolean(),
-  /** What the operator's document says, before an unlock or a password is considered. */
+  /** What the operator's document says, before a step-up is considered. */
   granted: CapabilityGrantSchema,
+  /**
+   * What THIS device has been granted, when the caller is a governed paired device — absent for a
+   * caller on the host (ungoverned) and for a credential that is not a device (a remote warden).
+   * The effective answer is `granted` AND this, axis by axis.
+   */
+  deviceGranted: CapabilityGrantSchema.optional(),
   /** Why `use` reads the way it does. */
   useRefusal: GrantRefusalSchema,
   /** Why `configure` reads the way it does. */
@@ -219,15 +203,10 @@ export const CapabilityGrantViewSchema = z.strictObject({
   /**
    * May THIS caller turn this capability on?
    *
-   * `false` for every remote caller, always — widening is a local act and no password buys it. It is
+   * `false` for every remote caller, always — widening is a local act and no step-up buys it. It is
    * on the wire so a UI is TOLD rather than left to infer it from a rule it would have to encode a
    * second time, and so an off capability can render as "only from the machine" instead of a dead
-   * toggle that fails when somebody presses it.
-   *
-   * IT FOLLOWS `hostLocal`, NOT `governed`. A local browser that has not unlocked yet is governed and
-   * still may widen — after it unlocks — so reporting `false` there would tell somebody standing at the
-   * machine that a switch can never come back, which is the one thing this field exists to get right.
-   * The remaining step is named by the `locked` refusal on the axis, where the password can be entered.
+   * toggle that fails when somebody presses it. It equals `hostLocal`.
    *
    * It is also the warning a remote caller needs BEFORE switching something off: this is a one-way
    * door, and the moment to say so is before it closes.
@@ -258,45 +237,39 @@ export const GrantsViewSchema = z.strictObject({
   /**
    * Whether the operator's grants GOVERN this caller at all.
    *
-   * NO LONGER THE INVERSE OF `hostLocal`, and the two fields are separate precisely because they came
-   * apart. A local browser is a paired device and is governed until it presents an unlock, so `governed`
-   * and `hostLocal` can both be true at once: at the machine, and still asked for the password. The
-   * host's own command line, and a local browser on a machine with no password at all, are ungoverned.
+   * The inverse of `hostLocal` today: the owner at the machine (the admin token over loopback) is
+   * ungoverned and every other caller, a browser on the host included, is governed. Both fields stay on the wire because they answer different
+   * questions — "do the grants apply to me" and "am I at the machine" — and a screen should read the
+   * one it means rather than a rule it would have to restate.
    *
    * SERVED RATHER THAN INFERRED, because the browser cannot work it out and the two ways it would try
    * are both wrong. A page loaded from a loopback address can be reaching this daemon through the relay,
    * whose tunnel sets `loopback: false` unconditionally, so anything derived from a URL or a hostname
    * would tell a remote phone it is standing at the machine — the exact inversion this whole layer
    * exists to prevent. Nor can it be read off the refusals: an ungoverned caller sees `granted` on every
-   * axis, and so does a remote caller holding a valid unlock on a fully granted machine.
+   * axis, and so does a remote caller holding a step-up on a fully granted machine.
    *
    * It is what lets a UI say WHICH sentence is true — "you have this because you are at the machine",
-   * "you have this because you unlocked", or "you have this because it was granted" — instead of picking
-   * one and being wrong for a real configuration.
+   * "you have this because you confirmed with your passkey", or "you have this because it was granted" —
+   * instead of picking one and being wrong for a real configuration.
    */
   governed: z.boolean(),
   /**
    * Whether this request ARRIVED on the machine the daemon runs on.
    *
-   * THE LOCALITY FACT, ON ITS OWN, because `governed` stopped carrying it. Widening is a local act and
-   * no password buys it, so this is what decides whether a switch can ever travel back — and it is what
-   * a screen reads to say "you are at this machine" rather than inferring locality from a gate that a
-   * local browser can also be sitting behind.
+   * THE LOCALITY FACT, ON ITS OWN. Widening is a local act and no step-up buys it, so this is what
+   * decides whether a switch can ever travel back — and it is what a screen reads to say "you are at
+   * this machine".
    *
    * It is the SAME carrier fact `PairedDevicesView.hostLocal` carries, spelled the same way, from one
    * source: `ApiRequest.loopback`. Neither view re-derives it, and no header can move it.
    */
   hostLocal: z.boolean(),
-  /** Whether an operator password exists at all. NEVER the password, its hash, or its length. */
-  passwordSet: z.boolean(),
-  /** Whether the caller currently holds a valid unlock. */
-  unlocked: z.boolean(),
-  /** When the held unlock expires, when one is held. */
-  unlockExpiresAt: InstantSchema.optional(),
-  /** Attempts left before the daemon stops listening. Absent when no password is set. */
-  attemptsRemaining: z.number().int().nonnegative().optional(),
-  /** When a rate-limited daemon will accept a password again. */
-  lockedUntil: InstantSchema.optional(),
+  /**
+   * Whether this caller's device holds a recent passkey step-up for this app session right now.
+   * Always `false` for a caller with no proven device; an ungoverned caller does not need one.
+   */
+  steppedUp: z.boolean(),
 });
 export type GrantsView = z.infer<typeof GrantsViewSchema>;
 
@@ -317,9 +290,12 @@ export const GrantAuditEntryViewSchema = z.strictObject({
    * record of who did something must not become a durable record of the credential they did it with.
    */
   actor: z.string().min(1).max(256),
-  /** Each axis that moved, as `capability.axis=on|off`. Empty is impossible — a patch that changed
-   *  nothing is not recorded. */
-  changes: z.array(z.string().min(1).max(64)).readonly(),
+  /**
+   * Each axis that moved, as `capability.axis=on|off` for the daemon-wide document, or
+   * `<deviceId>/capability.axis=on|off` for one device's own grant. Empty is impossible — a patch that
+   * changed nothing is not recorded.
+   */
+  changes: z.array(z.string().min(1).max(96)).readonly(),
 });
 export type GrantAuditEntryView = z.infer<typeof GrantAuditEntryViewSchema>;
 
@@ -342,30 +318,6 @@ export const GrantAuditViewSchema = z.strictObject({
 export type GrantAuditView = z.infer<typeof GrantAuditViewSchema>;
 
 /**
- * Setting or replacing the operator password from the host.
- *
- * THE `password` IS REQUIRED, AND ITS ABSENCE IS NOT A SECOND MEANING. This route once read an absent
- * field as "remove the password", which reopened from the wire the one state the rest of the design
- * calls unreachable: `PairingService.mint` refuses without a password, so a paired device only ever
- * exists on a machine that had one — and a removal that leaves those devices paired hands every one of
- * them an ungated machine. Setting a password is therefore ONE-WAY, and there is no request body that
- * says otherwise.
- */
-export const GrantPasswordRequestSchema = z.strictObject({ password: OperatorPasswordSchema });
-export type GrantPasswordRequest = z.infer<typeof GrantPasswordRequestSchema>;
-
-/** The unlock exchange. The password travels in a body, never in a path or a query. */
-export const GrantUnlockRequestSchema = z.strictObject({ password: z.string().min(1).max(1024) });
-export type GrantUnlockRequest = z.infer<typeof GrantUnlockRequestSchema>;
-
-export const GrantUnlockViewSchema = z.strictObject({
-  token: OperatorUnlockTokenSchema,
-  expiresAt: InstantSchema,
-  ttlSeconds: z.number().int().positive(),
-});
-export type GrantUnlockView = z.infer<typeof GrantUnlockViewSchema>;
-
-/**
  * A change to the grants themselves.
  *
  * PARTIAL, so a UI may change one answer without restating four it did not look at — restating them
@@ -376,10 +328,10 @@ export type GrantUnlockView = z.infer<typeof GrantUnlockViewSchema>;
  * meaningful for capabilities whose own settings do not yet have a route: an operator who says the UI
  * may not configure `terminal` is also saying the UI may not re-grant itself `terminal`.
  *
- * WIDENING NEEDS THE PASSWORD; NARROWING NEVER DOES. Turning an axis ON is the one change that gives
- * a remote browser more than it had, so it needs an unlock whenever a password exists. Turning one
- * OFF is the change somebody makes during an incident, and a password prompt between a person and
- * shutting a door is a liability — revoking must never be harder than granting.
+ * WIDENING IS HOST-ONLY; A GOVERNED CALLER MAY ONLY NARROW. Turning an axis ON is the one change that
+ * gives a remote browser more than it had, so only a caller on the host may make it. A governed caller
+ * may turn axes OFF, and because that is a `configure` act it needs the same passkey step-up as any
+ * other configure demand — one touch on the device already in hand, never a host-side change.
  */
 export const GrantsPatchSchema = z
   .strictObject(
@@ -396,3 +348,15 @@ export const GrantsPatchSchema = z
   )
   .refine(patch => Object.values(patch).some(value => value !== undefined), 'a grant patch must change something');
 export type GrantsPatch = z.infer<typeof GrantsPatchSchema>;
+
+/**
+ * Every capability on both axes — what a newly paired device is given by default (owner decision
+ * 2026-10-14). The UNLOCK is the gate: a device does nothing at all until it unlocks the machine with a
+ * passkey, and then may do anything for the unlock's validity. The daemon-wide document still applies on
+ * top, and narrowing one device stays available.
+ */
+export const FULL_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
+  Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }]),
+  ) as CapabilityGrants,
+);

@@ -41,6 +41,7 @@ import {
   relayCrypto,
   ScriptedDaemon,
   ScriptedSocket,
+  settle,
   testDevice,
   testSessionId,
 } from '../support/relay.ts';
@@ -92,6 +93,23 @@ const streaming = async (overrides: Partial<RelayClientSessionDependencies> = {}
   const ready = harness.session.ready();
   await harness.session.receiveBinary(
     await harness.daemon.record({ t: 'stream-opened', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS }),
+  );
+  await ready;
+  return harness;
+};
+
+/** A keyed stream accepted with extra fields on `stream-opened`. */
+const streamingWith = async (extra: Record<string, unknown>): Promise<Harness> => {
+  const harness = await opened({ mode: { kind: 'stream', device: device.claim, path: '/v1/events' } });
+  await harness.session.receiveBinary(await harness.daemon.answer(harness.socket.sent[0] as Uint8Array));
+  const ready = harness.session.ready();
+  await harness.session.receiveBinary(
+    await harness.daemon.record({
+      t: 'stream-opened',
+      protocol: SESSION_PROTOCOL_ID,
+      accessExpiresAt: LEASE_ENDS,
+      ...extra,
+    }),
   );
   await ready;
   return harness;
@@ -516,6 +534,53 @@ describe('a relay session proving its device', () => {
     const reason = await waiting;
     should(reason.code).equal(4441);
     should(reason.message).match(/access lease on this session ended/u);
+  });
+});
+
+describe('a relay session told to rotate its device key', () => {
+  const ROTATE_BY = '2026-10-01T00:00:00.000Z';
+
+  it('should remember the rotateBy a request session was accepted with, and none when not told', async () => {
+    const told = await opened();
+    await told.session.receiveBinary(await told.daemon.answer(told.socket.sent[0] as Uint8Array));
+    await told.session.receiveBinary(await told.daemon.record({ ...ACCEPTED, rotateBy: ROTATE_BY }));
+    should(told.session.rotateBy()).equal(ROTATE_BY);
+
+    const silent = await serving();
+    should(silent.session.rotateBy()).be.undefined();
+  });
+
+  it('should remember the rotateBy a stream was opened with', async () => {
+    const { session } = await streamingWith({ rotateBy: ROTATE_BY });
+    should(session.rotateBy()).equal(ROTATE_BY);
+  });
+
+  it('should sign the rotation with the NEW key over THIS session’s transcript, for this device only', async () => {
+    const { session, daemon } = await serving();
+    const replacement = await testDevice();
+
+    const rotation = await session.signRotation('fy_dev_session', replacement.claim.key, replacement.publicKey);
+
+    should(rotation.deviceKey).equal(replacement.publicKey);
+    should(await daemon.provesRotation(rotation, 'fy_dev_session')).be.true();
+    // Not valid for another device id, and not by the old key's say-so.
+    should(await daemon.provesRotation(rotation, 'fy_dev_other')).be.false();
+    should(await daemon.provesRotation({ ...rotation, deviceKey: device.publicKey }, 'fy_dev_session')).be.false();
+  });
+
+  it('should refuse to sign for a session that is not serving requests', async () => {
+    const before = await opened();
+    const replacement = await testDevice();
+    await should(
+      before.session.signRotation('fy_dev_session', replacement.claim.key, replacement.publicKey),
+    ).be.rejectedWith(/not serving requests/u);
+
+    const keyed = await opened();
+    await keyed.session.receiveBinary(await keyed.daemon.answer(keyed.socket.sent[0] as Uint8Array));
+    await settle();
+    await should(
+      keyed.session.signRotation('fy_dev_session', replacement.claim.key, replacement.publicKey),
+    ).be.rejectedWith(/not serving requests/u);
   });
 });
 

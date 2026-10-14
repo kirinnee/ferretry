@@ -12,7 +12,6 @@
  * every path is a string no test ever opens.
  */
 import { describe, it } from 'bun:test';
-import should from 'should';
 import {
   type AccountModel,
   type Credential,
@@ -26,7 +25,8 @@ import {
   resolveCredentialStore,
   type StoredCredentialResolution,
 } from '@ferretry/fleet';
-import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
+import should from 'should';
+import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import {
   attributedTranscripts,
   type CredentialEmailSource,
@@ -133,12 +133,10 @@ class FakeStatus implements CredentialStatusReader {
 
 interface ServiceOptions {
   readonly emails?: Readonly<Record<string, string>>;
-  readonly confirmation?: ChangeConfirmation;
   readonly binary?: string;
   readonly exitCode?: number;
   readonly runs?: CredentialHarnessRun[];
   readonly afterRun?: () => void;
-  readonly passwords?: string[];
 }
 
 const emailKey = (source: CredentialEmailSource): string =>
@@ -157,12 +155,7 @@ const serviceOf = (
       if (email === 'throw') throw new Error('unreadable');
       return email;
     },
-    confirmChange: async password => {
-      options.passwords?.push(password);
-      return options.confirmation ?? { kind: 'confirmed' };
-    },
     machineName: () => 'studio',
-    clientName: 'fy',
     locate: harness => (options.binary === undefined ? undefined : `${options.binary}/${harness}`),
     run: async spec => {
       options.runs?.push(spec);
@@ -172,8 +165,7 @@ const serviceOf = (
     baseEnvironment: () => ({ PATH: '/usr/bin' }),
   });
 
-const governed = (confirmChange: boolean): CallerGovernance =>
-  ({ governed: true, passwordSet: true, confirmChange }) as CallerGovernance;
+const governed = { governed: true } as CallerGovernance;
 
 const refusalOf = async (work: () => Promise<unknown>): Promise<FleetCredentialRefusal> => {
   try {
@@ -618,83 +610,38 @@ describe('Check now', () => {
 
   it('should refuse when nobody can say whether this caller may check', async () => {
     // Act
-    const actual = await refusalOf(async () => await serviceOf(work(), new FakeStatus()).check('work', {}, undefined));
+    const actual = await refusalOf(async () => await serviceOf(work(), new FakeStatus()).check('work', undefined));
 
     // Assert
     should(actual.code).equal('fleet_credential_unauthorized');
   });
 
-  it('should refuse an unknown login and one that cannot be checked, before any password is spent', async () => {
+  it('should refuse an unknown login and one that cannot be checked', async () => {
     // Arrange
-    const passwords: string[] = [];
     const fake = new FakeStatus();
-    const service = serviceOf(work(), fake, { passwords });
+    const service = serviceOf(work(), fake);
 
     // Act
-    const unknown = await refusalOf(
-      async () => await service.check('ghost', { operatorPassword: 'pw' }, governed(true)),
-    );
-    const keyed = await refusalOf(async () => await service.check('keyed', { operatorPassword: 'pw' }, governed(true)));
+    const unknown = await refusalOf(async () => await service.check('ghost', governed));
+    const keyed = await refusalOf(async () => await service.check('keyed', governed));
 
     // Assert
     should(unknown.code).equal('fleet_credential_unknown');
     should(keyed.code).equal('fleet_credential_unavailable');
     should(keyed.message).equal('This login comes from environment variables, so there is nothing to check.');
-    should(passwords).deepEqual([]);
     should(fake.calls).deepEqual([]);
   });
 
-  it('should check with no password for a caller that owes none', async () => {
+  it('should check a login for a caller the boundary let through', async () => {
     // Arrange
     const fake = new FakeStatus();
-    const passwords: string[] = [];
 
     // Act
-    const actual = await serviceOf(work(), fake, { passwords }).check('work', {}, governed(false));
+    const actual = await serviceOf(work(), fake).check('work', governed);
 
     // Assert
     should(actual.id).equal('work');
     should(fake.calls).deepEqual(['check:work']);
-    should(passwords).deepEqual([]);
-  });
-
-  it('should prove the operator password for a caller that owes one', async () => {
-    // Arrange
-    const fake = new FakeStatus();
-    const passwords: string[] = [];
-
-    // Act
-    await serviceOf(work(), fake, { passwords }).check('work', { operatorPassword: 'correct' }, governed(true));
-
-    // Assert
-    should(passwords).deepEqual(['correct']);
-    should(fake.calls).deepEqual(['check:work']);
-  });
-
-  it('should refuse each failed confirmation in words, and check nothing', async () => {
-    // Arrange
-    const cases: readonly [ChangeConfirmation | undefined, string | undefined, string][] = [
-      [undefined, undefined, 'checking "work" from off this machine needs its operator password'],
-      [{ kind: 'refused', reason: 'rate-limited' }, 'pw', '`fy daemon password set`'],
-      [{ kind: 'refused', reason: 'no-password' }, 'pw', 'this machine has no operator password'],
-      [{ kind: 'refused', reason: 'wrong-password' }, 'pw', "that is not this machine's operator password"],
-    ];
-
-    for (const [confirmation, password, expected] of cases) {
-      const fake = new FakeStatus();
-      const service = serviceOf(work(), fake, confirmation === undefined ? {} : { confirmation });
-
-      // Act
-      const actual = await refusalOf(
-        async () =>
-          await service.check('work', password === undefined ? {} : { operatorPassword: password }, governed(true)),
-      );
-
-      // Assert
-      should(actual.code).equal('fleet_credential_unauthorized');
-      should(actual.message).containEql(expected);
-      should(fake.calls).deepEqual([]);
-    }
   });
 });
 

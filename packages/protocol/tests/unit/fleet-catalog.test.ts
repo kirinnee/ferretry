@@ -147,13 +147,13 @@ const cases: readonly SchemaCase[] = [
       tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
       runtimeCount: 0,
       runningSessions: 2,
-      authority: { mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password' },
+      authority: { mayApply: false, applyRefusal: 'step-up-required' },
     },
   },
   {
     name: 'FleetMachineAuthoritySchema',
     schema: catalog.FleetMachineAuthoritySchema,
-    value: { mayApply: true, applyRefusal: 'granted', confirmation: 'none' },
+    value: { mayApply: true, applyRefusal: 'granted' },
   },
   { name: 'FleetEnvEntrySchema', schema: catalog.FleetEnvEntrySchema, value: { name: 'API_KEY', hidden: true } },
   { name: 'FleetComponentDetailSchema', schema: catalog.FleetComponentDetailSchema, value: component.detail },
@@ -341,6 +341,15 @@ describe('the account-model catalogue wire contract', () => {
         layers: Array.from({ length: 201 }, (_, index) => `mcp/m${String(index)}`),
       }),
       rejects('a refusal code nobody declared', catalog.FleetCatalogRefusalCodeSchema, 'fleet_change_bad'),
+      rejects('an authority that still announces a confirmation', catalog.FleetMachineAuthoritySchema, {
+        mayApply: true,
+        applyRefusal: 'granted',
+        confirmation: 'none',
+      }),
+      rejects('an authority refused for a lock that no longer exists', catalog.FleetMachineAuthoritySchema, {
+        mayApply: false,
+        applyRefusal: 'locked',
+      }),
     ]);
   });
 });

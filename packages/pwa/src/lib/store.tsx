@@ -41,6 +41,7 @@ import { DaemonEventTransport } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
+import type { CredentialsPort } from './passkeys.ts';
 import { DaemonPinClient } from './pin-client.ts';
 import { browserPresenceEnvironment, PresenceTracker } from './presence.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
@@ -52,9 +53,13 @@ import {
   isOutdatedDaemonRefusal,
   type RelayDial,
 } from './relay-carrier.ts';
+import { KeyRotation } from './key-rotation.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
+import { browserCredentials, describeStepUpFailure, unlockCeremony, stepUpCeremony } from './step-up-ceremony.ts';
+import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 
@@ -331,6 +336,16 @@ export interface AppStore {
    * the disclosure; call nothing else on it from a surface.
    */
   readonly carrier: DaemonCarrierRouter;
+  /**
+   * The passkey prompt every daemon request shares: a refusal for want of a step-up raises it once,
+   * and the request is sent again when the person has confirmed. Rendered by `StepUpDialog`.
+   */
+  readonly stepUp: StepUpGate;
+  /**
+   * The prompt a machine that wants a passkey on opening raises (`401 unlock_required`): the same
+   * gate, its own two routes. Rendered by a second `StepUpDialog` with the presence copy.
+   */
+  readonly unlockGate: StepUpGate;
   readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
   /**
    * Whether Ferretry's default relay is advertising itself right now.
@@ -354,6 +369,10 @@ export interface CreateAppStoreOptions {
   readonly deviceKeys?: DeviceKeyStore;
   /** The browser WebSocket by default. Injected so no suite opens one. */
   readonly relayDial?: RelayDial;
+  /** `navigator.credentials` by default: where a passkey step-up is asked of the person. */
+  readonly passkeyCredentials?: CredentialsPort;
+  /** `location.origin` by default: this copy of the app, which a passkey belongs to. */
+  readonly appOrigin?: string;
   /** The page's own attention signals by default. Injected so a suite decides who is present. */
   readonly presence?: Pick<PresenceTracker, 'present'>;
 }
@@ -407,10 +426,40 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // One tracker per document: whether a person is at this device, so only their requests keep it
   // from idling out on the daemon.
   const presence = options.presence ?? new PresenceTracker(browserPresenceEnvironment());
+  const appOrigin = options.appOrigin ?? globalThis.location?.origin ?? '';
+  const stepUp = new StepUpGate({
+    // The pool is built below and read only when a person presses the prompt's button.
+    ceremony: stepUpCeremony({
+      client: async daemon => await clients.client(daemon),
+      credentials: options.passkeyCredentials ?? browserCredentials(),
+      origin: appOrigin,
+    }),
+    describe: describeStepUpFailure(appOrigin),
+  });
+  const unlockGate = new StepUpGate({
+    ceremony: unlockCeremony({
+      client: async daemon => await clients.client(daemon),
+      credentials: options.passkeyCredentials ?? browserCredentials(),
+      origin: appOrigin,
+    }),
+    describe: describeStepUpFailure(appOrigin),
+    // The machine's own number, read once as the prompt opens (an exempt route, so it answers before an unlock).
+    scope: async daemon => {
+      try {
+        const view = await fetchSecuritySettings(await clients.client(daemon));
+        return unlockStaysSentence(view.settings.unlockValidityHours);
+      } catch {
+        return UNLOCK_STAYS_FALLBACK;
+      }
+    },
+  });
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
     presence: () => presence.present(),
+    stepUp: async (daemon, act) => await stepUp.require(daemon, act),
+    unlockRequired: async daemon => await unlockGate.require(daemon),
     crypto: relayCrypto,
+    rotation: new KeyRotation({ store: deviceKeys, crypto: relayCrypto }),
     // Read per session, never cached: a key the person removed by clearing site data must stop
     // opening sessions the moment it is gone.
     deviceKey: async daemonId => {
@@ -541,6 +590,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
 
   return {
     carrier,
+    stepUp,
+    unlockGate,
     connections,
     clients,
     fleet,
@@ -777,6 +828,24 @@ export function DaemonClientProvider({
   readonly children: ReactNode;
 }) {
   return <DaemonClientContext.Provider value={client}>{children}</DaemonClientContext.Provider>;
+}
+
+/**
+ * The app's ONE passkey prompt, as a function a screen can call BEFORE a press (`store.stepUp.require`).
+ *
+ * Outside a provider there is no prompt and the answer is `undefined`, so a screen rendered on its own
+ * offers no step-up control rather than one that can never be answered. It is the same gate the carrier
+ * asks on a refused request, so there is still exactly one prompt component.
+ */
+export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined {
+  const store = useContext(StoreContext);
+  return useMemo(
+    () =>
+      store === null
+        ? undefined
+        : async (daemon: DaemonConnection, act?: string) => await store.stepUp.require(daemon, act),
+    [store],
+  );
 }
 
 /**

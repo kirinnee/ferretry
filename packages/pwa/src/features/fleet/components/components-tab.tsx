@@ -491,8 +491,8 @@ function DeletePanel(
         busyLabel="Deleting…"
         variant="danger"
         disabled={!online}
-        onSubmit={operatorPassword =>
-          void changes.apply(change, operatorPassword).then(result => {
+        onSubmit={() =>
+          void changes.apply(change).then(result => {
             if (result.kind === 'applied') done(`Deleted ${component.name}.`, { kind: 'list', of: component.kind });
           })
         }
@@ -514,8 +514,8 @@ function FormPage(props: SharedProps & { kind: FleetComponentKind; component?: F
   const problem = draftProblem(draft, allComponents(catalog), editing ? component.name : undefined);
   const wide =
     component !== undefined && (component.usedBy.profiles.length > 1 || component.usedBy.runtimes.length > 1);
-  const submit = (operatorPassword: string | undefined) =>
-    void changes.apply(componentChange(draft, !editing), operatorPassword).then(result => {
+  const submit = () =>
+    void changes.apply(componentChange(draft, !editing)).then(result => {
       if (result.kind !== 'applied') return;
       const reference = `${kind}/${draft.name.trim()}`;
       done(editing ? 'Saved. New sessions use the new version.' : 'Saved. Add it to a profile to use it.', {

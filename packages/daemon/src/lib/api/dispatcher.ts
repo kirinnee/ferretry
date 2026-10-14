@@ -1,4 +1,9 @@
-import { OLDER_APP_SENTENCE } from '@ferretry/protocol';
+import {
+  OLDER_APP_SENTENCE,
+  UNLOCK_REQUIRED_CODE,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpRequiredBody,
+} from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import {
   type ApiCredentials,
@@ -7,17 +12,25 @@ import {
   bearerToken,
   isPreKeyDeviceToken,
 } from './authentication.ts';
-import { type CallerGovernance, type CapabilityGuard, grantRefusalCode } from './capability.ts';
+import {
+  type CallerGovernance,
+  type CapabilityGuard,
+  type CapabilityPresentation,
+  grantRefusalCode,
+  NO_STEP_UP_WITNESS,
+  type StepUpWitness,
+} from './capability.ts';
 import { ApiError } from './error.ts';
 import {
   type ApiRequest,
   type ApiResponse,
   arrivedOnHost,
+  arrivedPrivileged,
   headerValue,
   queryValue,
   type RouteParameters,
 } from './http.ts';
-import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
+import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
   RouteContext,
@@ -36,9 +49,6 @@ export const CLIENT_HEADER = 'x-ferretry-client';
 /** Query parameter carrying a token for WebSocket upgrades, which cannot set headers. Honoured for
  *  loopback peers only. */
 export const TOKEN_QUERY_PARAMETER = 'token';
-/** The unlock a `configure`-axis caller presents. A header, never a query parameter: a URL reaches
- *  every proxy's access log, and an unlock in a log outlives its five minutes. */
-export const OPERATOR_UNLOCK_HEADER = 'x-ferretry-operator-unlock';
 /**
  * The per-assignment capability a warden presents to exercise a remedy.
  *
@@ -111,6 +121,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
    * quietly acquiring a bypass — the same rule the capability guard already states for itself.
    */
   remedies?: WardenRemedyAuthorizer,
+  /** Whose passkey step-up is live. Absent means nobody holds one, which can only refuse more. */
+  stepUps: StepUpWitness = NO_STEP_UP_WITNESS,
 ): RouteAuthorization<TRoute> {
   const lookup = router.lookup(request.method, request.path);
   // The public shortcut answers before authentication is even attempted, which is the whole point of
@@ -172,13 +184,13 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: methodNotAllowedResponse(request.method, request.path, lookup.allowed),
     };
 
-  // Host arrival is PROVED, never inferred from a loopback peer: a remote caller forwarded through a
-  // locally bound proxy is a loopback peer too. Decided once so the privileged-arrival check and the
-  // grant presentation below cannot disagree about where the same request came from.
+  // The OWNER is the host's admin token over loopback, never a loopback peer on its own: a tunnel or
+  // proxy to 127.0.0.1 is a loopback peer too. A `privilegedOnly` route asks the separate question of
+  // where the request arrived, which a local browser on a loopback-only bind also answers.
   const onHost = arrivedOnHost(request, authentication.tokenClass === 'admin');
   if (
     !meetsMinimum(authentication.tokenClass, lookup.route.minimum) ||
-    (lookup.route.privilegedOnly === true && !onHost)
+    (lookup.route.privilegedOnly === true && !arrivedPrivileged(request, authentication.tokenClass === 'admin'))
   )
     return {
       kind: 'refused',
@@ -186,6 +198,26 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
         403,
         `the presented credential may not use ${request.method} ${request.path}`,
         'forbidden',
+      ),
+    };
+
+  // A MACHINE THAT WANTS A PERSON ON OPENING serves a device nothing until one has confirmed. The
+  // session is sound, so this is 401 rather than a refusal of the device, and the few routes a device
+  // needs to GIVE that confirmation are exempt. Asked only of a proven device: the CLI and a warden
+  // have no passkey to give. `onHost` is the owner's admin token over loopback, which no device holds,
+  // so every browser is asked — the machine itself, through `fy`, is the way back in (B4).
+  if (
+    device !== undefined &&
+    !onHost &&
+    lookup.route.unlockExempt !== true &&
+    stepUps.unlockRequired?.(device) === true
+  )
+    return {
+      kind: 'refused',
+      response: errorResponse(
+        401,
+        'this machine asks you to confirm it is you with a passkey before it shows anything',
+        UNLOCK_REQUIRED_CODE,
       ),
     };
 
@@ -215,30 +247,54 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
    */
   const demand = lookup.route.capability;
   let governance: CallerGovernance | undefined;
+  // Built for EVERY authenticated route, governed or not, so a handler that asks one more grant
+  // question (the grant and device-grant surfaces) reads the boundary's facts rather than re-deriving them.
+  const presentation: CapabilityPresentation = {
+    // The CARRIER's proof, never a header's. A relayed hop terminates on this very host and a
+    // locally bound proxy forwards from a loopback peer, so anything derived from an address would
+    // read as local and hand a remote caller the machine.
+    loopback: onHost,
+    // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
+    // headers and would make this decision movable by a header. Attribution only.
+    adminToken: authentication.tokenClass === 'admin',
+    actor,
+    // The SESSION's proven device, never a header's claim. No device — a bearer caller, a warden —
+    // holds no step-up and never can.
+    stepUp: request.device !== undefined && stepUps.held(request.device),
+    // The SESSION's proven device's own grants, from the live registry. `null` for a device that was
+    // admitted but is gone, so it is refused rather than served unnarrowed.
+    ...(authentication.tokenClass === 'device'
+      ? { deviceGrants: credentials.devices?.grants?.(authentication.deviceId) ?? null }
+      : {}),
+  };
   if (demand !== undefined) {
-    const presentation = {
-      // The CARRIER's proof, never a header's. A relayed hop terminates on this very host and a
-      // locally bound proxy forwards from a loopback peer, so anything derived from an address would
-      // read as local and hand a remote caller the machine.
-      loopback: onHost,
-      // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
-      // headers and would make this decision movable by a header. The host's command line holds this
-      // token and is ungoverned; a browser on the same machine does not and is gated until it unlocks.
-      adminToken: authentication.tokenClass === 'admin',
-      actor,
-      unlock: headerValue(request, OPERATOR_UNLOCK_HEADER),
-    };
     const decision = guard.decide(demand, presentation) ?? { allowed: false, refusal: 'undetermined' as const };
-    if (!decision.allowed)
+    if (!decision.allowed) {
+      const message =
+        guard.explain(demand, decision.refusal) ??
+        `this daemon cannot say whether the UI may use ${demand.capability}, so it is refusing`;
+      const code = grantRefusalCode(decision.refusal);
       return {
         kind: 'refused',
-        response: errorResponse(
-          403,
-          guard.explain(demand, decision.refusal) ??
-            `this daemon cannot say whether the UI may use ${demand.capability}, so it is refusing`,
-          grantRefusalCode(decision.refusal),
-        ),
+        // A step-up refusal ALSO names the demand, so the app can tell the person which act they are
+        // confirming. Only the closed pair: nothing taken from the request is ever echoed.
+        response:
+          decision.refusal === 'step-up-required'
+            ? jsonResponse(
+                {
+                  error: message,
+                  code: STEP_UP_REQUIRED_CODE,
+                  demand: { capability: demand.capability, axis: demand.axis },
+                } satisfies StepUpRequiredBody,
+                403,
+              )
+            : errorResponse(403, message, code),
       };
+    }
+
+    // A step-up the machine wants asked for every time is good for this one act and no other. Spent
+    // here, at the decision, so a second request cannot ride the confirmation the first one bought.
+    if (decision.steppedUp === true && request.device !== undefined) stepUps.spend?.(request.device);
     // Derived AFTER the refusal, so it can only ever describe a request this daemon is about to
     // serve. A handler is given where the caller stands so it can ask for one more thing; it is
     // never given a way to conclude that a refused caller was allowed.
@@ -260,6 +316,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       // Present only where the route named a capability, so its ABSENCE means "the operator was never
       // asked about this route" rather than "asked, and the answer was mislaid".
       ...(governance === undefined ? {} : { governance }),
+      presentation,
+      spendStepUp: () => {
+        if (request.device !== undefined) stepUps.spend?.(request.device);
+      },
     },
   };
 }
@@ -384,10 +444,19 @@ export class ApiDispatcher {
     /** The administrator's per-remedy decision. Absent while this table declares no remedy — and a
      *  table that declares one without it refuses every warden, rather than serving one unchecked. */
     private readonly remedies?: WardenRemedyAuthorizer,
+    /** Whose passkey step-up is live. Absent on a table that wires no step-up subsystem. */
+    private readonly stepUps?: StepUpWitness,
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies);
+    const authorized = authorizeRequest(
+      this.router,
+      this.credentials,
+      request,
+      this.guard,
+      this.remedies,
+      this.stepUps,
+    );
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
     if (authorized.kind === 'refused') return authorized.response;
     return await run(authorized.route, authorized.context);

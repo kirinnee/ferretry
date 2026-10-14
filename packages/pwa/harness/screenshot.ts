@@ -117,8 +117,10 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and twenty-one: forty-five MACHINES frames at each viewport, plus seventeen other frames at
- * `mobile` and fourteen at `desktop` (45 + 45 + 17 + 14).
+ * One hundred and thirty-one: forty-five MACHINES frames at each viewport, plus twenty-two other frames
+ * at `mobile` and nineteen at `desktop` (45 + 45 + 22 + 19). Of the extras at each viewport, one is the
+ * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
+ * shows, and two are the Security settings block's loosening sentence and out-of-bounds sentence.
  *
  * MACHINES, forty-five per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, ten Runtimes and
@@ -128,8 +130,8 @@ const WALKS_SETTINGS = !(
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
- * The rest, fourteen at both viewports: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its seven other panels, the unreachable daemon's Warden and Carrier, and the
+ * The rest, fifteen at both viewports plus the open device-capabilities disclosure and the unlock screen at both: three Settings sections (Appearance, Behaviour, Daemons), the
+ * healthy daemon's Warden and its eight other panels (Security, the passkey panel, among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -149,7 +151,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 121;
+const SETTINGS_SIDEWAYS_CHECKS = 131;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -1854,13 +1856,13 @@ try {
           // The fixture is only evidence about the real frame if it carries the
           // panels the composition root supplies. It once carried six of the
           // production eight, so the row that overflowed a desktop could not be
-          // seen here at all. Eight now: the app's nine less Model pricing, which
+          // seen here at all. Nine now: the app's ten less Model pricing, which
           // this fixture has never mounted. Count the
           // rail's rows, which exist in the document at both widths, rather than
           // the sheet's, which are rendered only once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 8)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 8 it mounts`);
+          if (daemonPanels !== 9)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the 9 it mounts`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -1875,8 +1877,8 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 8)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 8 it mounts`);
+            if (openPanelChoices !== 9)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the 9 it mounts`);
             // Eight rows is the longest list any sheet in Settings presents. If one of these sheets is
             // going to be the one that widens a phone, it is this one.
             await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
@@ -1912,6 +1914,9 @@ try {
             // Adding a device, in the frame, where a reader meets it. The gallery cards below prove the
             // individual states; this proves it is reachable, daemon-scoped and fits both widths.
             ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
+            // Passkeys, daemon-scoped like the panels around it. The fixture answers GET /v1/passkeys with two
+            // frozen entries, so the capture shows a real list and the Add control, never a prompt.
+            ['Security', 'security', '[data-security-card]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
@@ -1923,6 +1928,26 @@ try {
             // Every panel, at both widths, with its real values on it — this is the one check that
             // catches the widest value in a panel widening the whole page instead of scrolling itself.
             await assertNoSidewaysScroll(page, `the ${label} panel at ${viewport.name}`);
+            if (slug === 'security') {
+              // THE SETTINGS BLOCK'S TWO SENTENCES, DRIVEN: a loosening a remote phone may not make, and a number
+              // past its bounds. Each is the longest unbroken text the block can show, so each is measured.
+              const block = wardenFrame.locator('[data-security-settings]');
+              await block.scrollIntoViewIfNeeded();
+              for (const [field, value, sentence, slugPart] of [
+                ['idleExpiryDays', '60', 'Loosening this can only be done at the machine', 'loosen'],
+                ['idleExpiryDays', '999', 'Enter a whole number from 1 to 90.', 'bounds'],
+              ] as const) {
+                await block.locator(`[data-security-input="${field}"]`).fill(value);
+                await block.getByText(sentence, { exact: false }).first().waitFor({ state: 'visible' });
+                await assertNoSidewaysScroll(page, `the Security settings (${slugPart}) at ${viewport.name}`);
+                const settingsTarget = join(outDir, `settings-daemon-security-${slugPart}-${viewport.name}.png`);
+                await page.screenshot({ path: settingsTarget });
+                process.stdout.write(
+                  `📸 Settings daemon Security settings ${slugPart} ${viewport.name} -> ${settingsTarget}\n`,
+                );
+              }
+              await block.locator('[data-security-input="idleExpiryDays"]').fill('30');
+            }
             if (slug === 'resource-limits') {
               // Keep a top frame as navigation context, then compose the acceptance frame at the
               // native viewport. The compact two-column mobile editors leave enough room between
@@ -1954,6 +1979,23 @@ try {
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
+            if (slug === 'devices') {
+              // The per-device capability switches: seven rows by two axes, the longest block this panel
+              // can grow, with a blocked widen's reason and host command beside its switch. Opened on the
+              // first device (the browser doing the looking, holding fleet.use alone), because a closed
+              // disclosure hides exactly the content that could widen a phone.
+              const disclosure = readySurface.locator('[data-device-capabilities]').first();
+              await disclosure.locator('summary').click();
+              await disclosure.locator('[data-device-capability="secrets"]').waitFor({ state: 'visible' });
+              await disclosure.locator('[data-device-grant-reason]').first().waitFor({ state: 'visible' });
+              await assertNoSidewaysScroll(page, `the open device capabilities at ${viewport.name}`);
+              const capabilitiesTarget = join(outDir, `settings-daemon-devices-capabilities-${viewport.name}.png`);
+              await disclosure.scrollIntoViewIfNeeded();
+              await page.screenshot({ path: capabilitiesTarget });
+              process.stdout.write(
+                `📸 Settings daemon device capabilities ${viewport.name} -> ${capabilitiesTarget}\n`,
+              );
+            }
           }
 
           await selectDaemon('Travel laptop');
@@ -2322,6 +2364,18 @@ try {
           await page.screenshot({ path: oneDaemonTarget });
           process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);
 
+          // THE UNLOCK SCREEN, the first thing a locked machine shows: one sentence, one line on how long
+          // it stays, one button. It is a viewport shot because the dialog is fixed to the viewport.
+          const unlockPromptTarget = join(outDir, `unlock-prompt-${viewport.name}.png`);
+          await page.goto(`${server.url}?unlock-prompt`);
+          const unlockPrompt = page.getByRole('dialog', { name: 'Unlock' });
+          await unlockPrompt.getByText('It stays unlocked on this device for 8 hours.').waitFor({ state: 'visible' });
+          await unlockPrompt.getByRole('button', { name: 'Unlock' }).waitFor({ state: 'visible' });
+          await assertNoSidewaysScroll(page, `the unlock screen at ${viewport.name}`);
+          await page.screenshot({ path: unlockPromptTarget, animations: 'disabled' });
+          process.stdout.write(`📸 unlock screen ${viewport.name} -> ${unlockPromptTarget}\n`);
+          await page.goto(settingsUrl.toString());
+
           // The rest of this pass belongs to the full gallery.
           if (SETTINGS_ONLY) continue;
           await page.goto(server.url.toString());
@@ -2399,7 +2453,7 @@ try {
             await captureElement(page, page.locator(selector), target);
             process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
           }
-          // The operator's limits, in the five states a paired browser actually meets. Every one of
+          // The operator's limits, in the four states a paired browser actually meets. Every one of
           // them is a frame where a control is refused, so every one has to show the reason beside it
           // — that is the thing being reviewed, not the switches.
           //
@@ -2411,22 +2465,14 @@ try {
           // obviously short, which is the worse of the two failures.
           await page.setViewportSize({ width: viewport.width, height: 4_000 });
           for (const [name, selector] of [
-            [`grants-locked`, `[data-harness="grants-locked"]`],
-            [`grants-ungated`, `[data-harness="grants-ungated"]`],
-            // The two frames a browser ON the machine meets, before and after its one unlock. They are
-            // the states the badge, the switch reasons and the password control all read differently in,
-            // and the pair is what makes "friction, not a wall" something a reviewer can see rather than
-            // take on trust.
-            [`grants-local-locked`, `[data-harness="grants-local-locked"]`],
-            [`grants-local-unlocked`, `[data-harness="grants-local-unlocked"]`],
-            [`grants-rate-limited`, `[data-harness="grants-rate-limited"]`],
+            [`grants-step-up-needed`, `[data-harness="grants-step-up-needed"]`],
+            [`grants-step-up-held`, `[data-harness="grants-step-up-held"]`],
             [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
             [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
-            // The capability list in all three postures. The remote one is the frame that matters: the
-            // harness daemon's address is loopback, so a capture reading "Direct" there would be the
-            // URL-derived inversion, visible in a PNG.
-            [`capability-list-local`, `[data-harness="capability-list-local"]`],
-            [`capability-list-remote`, `[data-harness="capability-list-remote"]`],
+            // The capability list in both postures that exist. The governed one is the frame that matters:
+            // the harness daemon's address is loopback, so a capture claiming the limits do not apply
+            // there would be the old direct-local reading, visible in a PNG.
+            [`capability-list-governed`, `[data-harness="capability-list-governed"]`],
             [`capability-list-unknown`, `[data-harness="capability-list-unknown"]`],
           ] as const) {
             const frame = page.locator(selector);
@@ -2441,14 +2487,13 @@ try {
             await captureElement(page, frame, target);
             process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);
           }
-          // AND THE PASSWORD FRAMES IN LIGHT. This panel is the one control on the screen that can lock
-          // somebody out, so its warn and danger tones have to be legible in both themes rather than
-          // designed in dark and inverted — a hairline that vanishes on `surface-2` takes a boundary with
-          // it, and the locked panel's warn tone is the last place to lose contrast.
+          // AND THE PASSKEY FRAMES IN LIGHT. The warn tone of a row waiting on a confirmation is the last
+          // place to lose contrast, so it has to be legible in both themes rather than designed in dark and
+          // inverted — a hairline that vanishes on `surface-2` takes a boundary with it.
           await page.evaluate(() => {
             document.documentElement.dataset.theme = 'studio-light';
           });
-          for (const name of ['grants-local-locked', 'grants-local-unlocked'] as const) {
+          for (const name of ['grants-step-up-needed', 'grants-step-up-held'] as const) {
             const frame = page.locator(`[data-harness="${name}"]`);
             await frame.scrollIntoViewIfNeeded();
             const target = join(outDir, `${name}-light-${viewport.name}.png`);
@@ -2469,11 +2514,7 @@ try {
             [`pair-devices`, `[data-harness="pair-devices"]`],
             [`pair-invite`, `[data-harness="pair-invite"]`],
             [`pair-expired`, `[data-harness="pair-expired"]`],
-            // `pair-empty` is the FIRST-PAIRING frame: no password, so no button — the requirement and the
-            // control that satisfies it stand where it would have been. The remote twin is the reader who
-            // cannot satisfy it from where they are, and it must name the two places that can.
             [`pair-empty`, `[data-harness="pair-empty"]`],
-            [`pair-needs-password-remote`, `[data-harness="pair-needs-password-remote"]`],
             [`pair-refused`, `[data-harness="pair-refused"]`],
           ] as const) {
             const frame = page.locator(selector);

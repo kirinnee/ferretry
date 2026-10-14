@@ -30,8 +30,7 @@ const DEVICES_PATH = '/v1/pair/devices';
  * an error would make the recovery path depend on the thing being recovered from.
  *
  * Both routes need the host's admin credential. On loopback that is ungoverned — somebody at the
- * machine already has the machine — so no grant and no operator password stands between this and its
- * answer, which is required: the password being forgotten is one of the reasons to reset.
+ * machine already has the machine — so no grant stands between this and its answer.
  */
 export class ProtocolResetInventory implements IResetInventoryPort {
   constructor(private readonly client: ResetInventoryApiClient) {}

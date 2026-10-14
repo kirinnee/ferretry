@@ -234,13 +234,13 @@ describe('checkAccountPickerHealth', () => {
 
   it('keeps the listed status for a login whose check failed, and says why beside the rows', async () => {
     const fixture = clientFixture({
-      '/v1/fleet/credentials/login-codex-auto-b/check': new Error('the operator password is needed'),
+      '/v1/fleet/credentials/login-codex-auto-b/check': new Error('this machine refused the check'),
     });
     const result = await checkAccountPickerHealth(fixture.client);
 
     expect(result.health.get('login-claude-auto-a')?.word).toBe('ready');
     expect(result.health.get('login-codex-auto-b')?.word).toBe('needs_sign_in');
-    expect(result.error).toBe('the operator password is needed');
+    expect(result.error).toBe('this machine refused the check');
   });
 
   it('names a failure that is not an Error in words', async () => {

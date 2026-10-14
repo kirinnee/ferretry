@@ -4,7 +4,7 @@ import { FY_REQUEST_ID_HEADER, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import { knownLaunchRoots, sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
 import { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './support.ts';
@@ -18,9 +18,21 @@ import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './sup
 
 const REQUEST_ID = 'req-7f3c';
 
+describe('the folders a session may start in as an ordinary act', () => {
+  it('should be every registered project and the managed-worktree root, and only the projects without one', async () => {
+    const projects = { projects: async () => [{ path: '/work/app' }, { path: '/work/site' }] };
+    should(await knownLaunchRoots(projects, { list: async () => ({ managedRoot: '/work/.worktrees' }) })()).eql([
+      '/work/app',
+      '/work/site',
+      '/work/.worktrees',
+    ]);
+    should(await knownLaunchRoots(projects, { list: async () => ({}) })()).eql(['/work/app', '/work/site']);
+  });
+});
+
 function dispatcher(subsystem = new FakeSessionControl()): { readonly dispatch: ApiDispatcher['dispatch'] } {
   const instance = new ApiDispatcher(
-    new ApiRouter(sessionControlRoutes(subsystem)),
+    new ApiRouter(sessionControlRoutes(subsystem, { guard: NO_GOVERNED_ROUTES_GUARD, knownRoots: async () => [] })),
     CREDENTIALS,
     NO_GOVERNED_ROUTES_GUARD,
   );

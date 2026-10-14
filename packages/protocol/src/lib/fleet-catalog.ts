@@ -19,8 +19,8 @@
  * ## Changes
  *
  * `POST /v1/fleet/proposals` stages ONE change and writes nothing; `GET /v1/fleet/proposals/:id` reads
- * it back; `POST /v1/fleet/proposals/:id/apply` applies exactly what was previewed, with the operator
- * password for a caller off this machine. A caller never sends a configuration document: it names one
+ * it back; `POST /v1/fleet/proposals/:id/apply` applies exactly what was previewed; a caller off this
+ * machine confirms it with the passkey step-up. A caller never sends a configuration document: it names one
  * intent, and the daemon derives the next configuration from the current one.
  *
  * ## No credential travels
@@ -35,7 +35,6 @@ import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import {
   FleetApplyOutcomeSchema,
-  FleetChangeConfirmationSchema,
   FleetDocumentSummarySchema,
   FleetProposalIdSchema,
   FleetWriteOperationSchema,
@@ -96,21 +95,19 @@ export type FleetMachineTool = z.infer<typeof FleetMachineToolSchema>;
  *
  * IT IS THE CAPABILITY LAYER'S ANSWER, not a second one. `mayApply` is `fleet.configure` as the
  * operator's grants decided it for this request (reading the machine is itself `fleet.use`, so
- * inspecting and proposing are implied), and `confirmation` says whether applying will ask for the
- * operator password once more.
+ * inspecting and proposing are implied). A governed caller confirms an apply with the same passkey
+ * step-up `fleet.configure` already demands, so there is nothing further to announce.
  */
 export const FleetMachineAuthoritySchema = z.strictObject({
   /** `fleet.configure` for this caller, as the operator's grants decided it. */
   mayApply: z.boolean(),
   /**
    * WHY `mayApply` reads the way it does, in the SHARED grant vocabulary. Carried rather than left
-   * to be inferred, because `false` has four different remedies — `not-granted` is a decision
-   * somebody made, `locked` is a password the reader may already have, `rate-limited` is a wait,
-   * and `undetermined` is a broken document.
+   * to be inferred, because `false` has three different remedies — `not-granted` is a decision
+   * somebody made, `step-up-required` is a passkey touch on this device, and `undetermined` is a
+   * broken document.
    */
   applyRefusal: GrantRefusalSchema,
-  /** What applying will additionally ask for, so a panel can say so before somebody clicks. */
-  confirmation: FleetChangeConfirmationSchema,
 });
 export type FleetMachineAuthority = z.infer<typeof FleetMachineAuthoritySchema>;
 
@@ -123,7 +120,7 @@ export const FleetMachineViewSchema = z.strictObject({
   tools: z.array(FleetMachineToolSchema).readonly(),
   runtimeCount: NonNegativeIntegerSchema,
   runningSessions: NonNegativeIntegerSchema,
-  /** What this caller may do here. A caller that unlocked reads its unlocked authority. */
+  /** What this caller may do here, step-up included. */
   authority: FleetMachineAuthoritySchema,
 });
 export type FleetMachineView = z.infer<typeof FleetMachineViewSchema>;

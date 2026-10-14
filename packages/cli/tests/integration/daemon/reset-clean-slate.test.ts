@@ -116,9 +116,8 @@ async function installation(layout: DaemonLayout): Promise<void> {
   await startThroughTheClient(layout);
   await bootTheDaemon(layout.stateHome);
   await closeStores();
-  // Somebody's real data on the other end of a link inside the tree, and a password verifier and a
+  // Somebody's real data on the other end of a link inside the tree, and a
   // secret inside the home, so what a reset destroys is something this test can see going.
-  await writeFile(join(layout.stateHome, 'state', 'operator-password.json'), '{"digest":"argon2id"}');
   await writeFile(join(layout.stateHome, 'state', 'secrets.json'), '{"ciphertext":"x"}');
 
   const snapshot = join(layout.legacySnapshotRoot, 'snapshots', `sha256-${'a'.repeat(64)}`);
@@ -162,7 +161,6 @@ function deps(layout: DaemonLayout, out: string[], serving: HealthView | undefin
       error: message => out.push(message),
       setExitCode: () => {},
     },
-    firstPassword: { offer: () => Promise.resolve() },
     setupNotice: { say: () => Promise.resolve() },
   };
 }
@@ -200,7 +198,7 @@ describe('resetting an installation and starting again on the clean slate', () =
     // inside it.
     const layout = layoutFor(await createTemporaryRoot());
     await installation(layout);
-    should(await exists(join(layout.stateHome, 'state', 'operator-password.json'))).be.true();
+    should(await exists(join(layout.stateHome, 'state', 'secrets.json'))).be.true();
     should(await exists(layout.legacySnapshotRoot)).be.true();
 
     // Act
@@ -240,9 +238,8 @@ describe('resetting an installation and starting again on the clean slate', () =
     ]);
   });
 
-  it('should leave no operator password, so the first start offers to set one as a fresh install does', async () => {
-    // Arrange — this is the escape hatch working: somebody who has forgotten the password resets, and
-    // the machine comes back with no password at all rather than with one nobody can prove.
+  it('should leave no stored secret behind, so the machine comes back as a fresh install does', async () => {
+    // Arrange
     const layout = layoutFor(await createTemporaryRoot());
     await installation(layout);
 
@@ -251,9 +248,7 @@ describe('resetting an installation and starting again on the clean slate', () =
     await startThroughTheClient(layout);
     await bootTheDaemon(layout.stateHome);
 
-    // Assert — the verifier lives at `state/operator-password.json`, and a boot that found one would
-    // mean the reset had left the gate standing.
-    should(await exists(join(layout.stateHome, 'state', 'operator-password.json'))).be.false();
+    // Assert
     should(await exists(join(layout.stateHome, 'state', 'secrets.json'))).be.false();
   });
 

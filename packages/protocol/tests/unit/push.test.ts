@@ -7,7 +7,7 @@ import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCa
 /** A 65-byte P-256 point and a 16-byte auth secret at their fixed base64url widths (87 and 22). */
 const P256DH = `BN${'x-_9'.repeat(21)}A`;
 const AUTH = `${'ab-_'.repeat(5)}cd`;
-const ENDPOINT_PREFIX = 'https://push.example.test/send/';
+const ENDPOINT_PREFIX = 'https://fcm.googleapis.com/send/';
 const ENDPOINT = `${ENDPOINT_PREFIX}aBc-123`;
 const DEVICE_ID = 'push-3fa85f64-5717-4562-b3fc-2c963f66afa6';
 
@@ -103,9 +103,24 @@ describe('push schemas', () => {
         value: { ...subscription, endpoint: endpointOfLength(4_096) },
       },
       {
-        name: 'endpoint carrying a port, query, and fragment',
+        name: 'endpoint carrying a query and a fragment, on each push service',
         schema: push.BrowserPushSubscriptionSchema,
-        value: { ...subscription, endpoint: 'https://push.example.test:8443/send/abc?ttl=60#f' },
+        value: { ...subscription, endpoint: 'https://fcm.googleapis.com/send/abc?ttl=60#f' },
+      },
+      {
+        name: 'Apple push endpoint',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://web.push.apple.com/QW1h' },
+      },
+      {
+        name: 'Mozilla push endpoint',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://updates.push.services.mozilla.com/wpush/v2/abc' },
+      },
+      {
+        name: 'Windows push endpoint',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://wns2-par02p.notify.windows.com/w/?token=abc' },
       },
       {
         name: 'zero expiration',
@@ -157,22 +172,49 @@ describe('push schemas', () => {
       {
         name: 'plaintext scheme',
         schema: push.BrowserPushSubscriptionSchema,
-        value: { ...subscription, endpoint: 'http://push.example.test/send/abc' },
+        value: { ...subscription, endpoint: 'http://fcm.googleapis.com/send/abc' },
       },
       {
         name: 'non-web scheme',
         schema: push.BrowserPushSubscriptionSchema,
-        value: { ...subscription, endpoint: 'ftp://push.example.test/send/abc' },
+        value: { ...subscription, endpoint: 'ftp://fcm.googleapis.com/send/abc' },
       },
       {
         name: 'embedded credentials',
         schema: push.BrowserPushSubscriptionSchema,
-        value: { ...subscription, endpoint: 'https://user:secret@push.example.test/send/abc' },
+        value: { ...subscription, endpoint: 'https://user:secret@fcm.googleapis.com/send/abc' },
       },
       {
         name: 'username only',
         schema: push.BrowserPushSubscriptionSchema,
-        value: { ...subscription, endpoint: 'https://user@push.example.test/send/abc' },
+        value: { ...subscription, endpoint: 'https://user@fcm.googleapis.com/send/abc' },
+      },
+      // The daemon POSTs to the endpoint from the host, so anything but a browser push service would be a
+      // way to send requests to the host's own network.
+      {
+        name: 'a non-default port on a push service',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://fcm.googleapis.com:8443/send/abc' },
+      },
+      {
+        name: 'a private address',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://10.0.0.5/send/abc' },
+      },
+      {
+        name: 'a cloud metadata address',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://169.254.169.254/latest' },
+      },
+      {
+        name: 'a host that only ends like a push service',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://evilpush.apple.com.example/x' },
+      },
+      {
+        name: 'the bare suffix as a host',
+        schema: push.BrowserPushSubscriptionSchema,
+        value: { ...subscription, endpoint: 'https://push.apple.com/x' },
       },
       {
         name: 'endpoint one character past the ceiling',

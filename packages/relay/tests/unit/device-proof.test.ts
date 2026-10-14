@@ -7,6 +7,7 @@ import {
   deviceKeyBytes,
   devicePairMessage,
   deviceRenewMessage,
+  deviceRotateMessage,
   RenewNonceSchema,
   signDeviceProof,
   toBase64Url,
@@ -78,5 +79,21 @@ describe('device proof', () => {
     should(AppSessionSchema.safeParse(toBase64Url(new Uint8Array(17))).success).be.false();
     should(RenewNonceSchema.safeParse(toBase64Url(new Uint8Array(32))).success).be.true();
     should(RenewNonceSchema.safeParse('x').success).be.false();
+  });
+});
+
+describe('device key rotation proof', () => {
+  it('should verify only for the transcript, device and new key it signed, and never as another act', async () => {
+    const replacement = await deviceKey();
+    const message = deviceRotateMessage(transcript, 'fy_device_id_one', replacement.publicKey);
+    const proof = await signDeviceProof(relayCrypto, replacement.handle, message);
+    should(await verifyDeviceProof(relayCrypto, replacement.publicKey, proof, message)).be.true();
+    for (const other of [
+      deviceRotateMessage(otherTranscript, 'fy_device_id_one', replacement.publicKey),
+      deviceRotateMessage(transcript, 'fy_device_id_two', replacement.publicKey),
+      deviceRotateMessage(transcript, 'fy_device_id_one', (await deviceKey()).publicKey),
+      devicePairMessage(transcript, replacement.publicKey),
+    ])
+      should(await verifyDeviceProof(relayCrypto, replacement.publicKey, proof, other)).be.false();
   });
 });

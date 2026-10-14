@@ -84,6 +84,16 @@ export class PushService {
     return (await this.enrolments()).map(pushDeviceView);
   }
 
+  /** The enrolments ONE device filed — what a device may always see of its own notifications. */
+  async listFor(deviceId: string): Promise<readonly PushDeviceView[]> {
+    return (await this.enrolments()).filter(record => record.deviceId === deviceId).map(pushDeviceView);
+  }
+
+  /** Which device filed an enrolment, or nothing for an id that is not enrolled. */
+  async ownerOf(id: string): Promise<string | undefined> {
+    return (await this.enrolments()).find(record => record.id === id)?.deviceId;
+  }
+
   /**
    * Enrols one browser, on behalf of the paired device that asked.
    *
@@ -110,6 +120,10 @@ export class PushService {
     const existing = (await this.options.store.list()).find(
       record => record.subscription.endpoint === request.subscription.endpoint,
     );
+    // An endpoint is one browser's. Re-filing a row another device holds would let a device that learned
+    // that endpoint take the enrolment — and its alerts — over. Refused, never re-owned.
+    if (existing !== undefined && existing.deviceId !== deviceId)
+      throw new PushError('invalid', 'this browser subscription is enrolled for another device');
     const record: PushSubscriptionRecord = {
       id: existing?.id ?? `push-${this.options.ids.next()}`,
       // PARSED, not trusted. The owning id is derived from the caller's credential by the boundary
@@ -128,9 +142,10 @@ export class PushService {
     // rather than persisted and then failed on the way out.
     const view = pushDeviceView(record);
     await this.options.store.save(record);
+    // The confirmation is sent, and its fate is NOT reported: an answer that said whether the push service
+    // accepted it would be a reachability oracle. A subscription the service has discarded is dropped by
+    // the same delivery path every later notification uses.
     await this.notify({ payload: enrolmentConfirmation(record.deviceName) }, [record.id]);
-    if (!(await this.options.store.list()).some(entry => entry.id === record.id))
-      throw new PushError('invalid', 'the push service has already discarded this subscription');
     return view;
   }
 

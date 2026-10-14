@@ -15,35 +15,27 @@
  * is computed in this tab from that state, so the credential reaches no third party either. This is why
  * the harness screenshots use a fixed fake code: a committed PNG of a real one would be a real leak.
  *
- * ## THE FIRST DEVICE REQUIRES AN OPERATOR PASSWORD — AND THE DAEMON IS WHAT REQUIRES IT
+ * ## MINTING A CODE ASKS FOR A PASSKEY, NEVER A PASSWORD
  *
- * `POST /v1/pair/code` refuses while no operator password exists, whoever asks: this panel, a phone, or
- * `fy pair` on the host. `fleet.configure` is on by default for a governed caller, so a device paired to
- * a machine with no password can provision the host — writing runnable wrappers into the operator's
- * accounts — with nothing to prove. Requiring the password at the one moment remote access is being
- * created DELETES that state rather than warning about it.
- *
- * WHAT THIS PANEL DOES IS EXPLAIN IT FIRST, NOT ENFORCE IT. The requirement used to live here, which made
- * the guarantee "the browser will not create a passwordless remote device" — silent about the command
- * line, which mints through the same route. So this is a pre-check: where the grant view says there is no
- * password, the reason and the control that fixes it take the button's place; where this browser cannot
- * tell, the button is offered and the daemon's own refusal is what a person reads. One rule, one sentence.
- *
- * IT IS PAIRING'S REQUIREMENT, NEVER STARTUP'S AND NEVER LOCAL USE'S. A person setting up on their own
- * machine with nothing paired is asked for nothing, because there is no remote caller for a gate to stand
- * in front of. An install that already has devices and no password meets the requirement at its NEXT
- * pairing, which needs no separate nag and cannot lock anybody out.
+ * Handing another device access is a dangerous act, so a governed browser confirms it with its passkey.
+ * The carrier asks for that by itself when the daemon refuses and sends the mint again, so this panel
+ * has nothing to pre-check: it offers the button, and whatever the machine answers is rendered whole.
+ * A browser on the machine itself is asked like any other: only the CLI is the owner at the machine.
  *
  * ## A REFUSAL IS EXPLAINED, NEVER GREYED
  *
- * A caller who is not on the host and whose operator has switched `pairing` off cannot read this panel at
- * all — the routes are governed. That refusal is rendered as the daemon's own sentence, which names the
- * command that changes it, plus the one thing the daemon cannot know: pairing from the machine itself is
- * never restricted. A greyed button with no explanation is the dead end this product keeps removing.
+ * A browser whose operator has switched `pairing` off cannot read this panel at all — the routes are
+ * governed, a browser on the machine itself included. That refusal is rendered as the daemon's own
+ * sentence, which names the command that changes it. A greyed button with no explanation is the dead end
+ * this product keeps removing.
  */
 
 import {
-  type GrantsView,
+  CAPABILITY_AXES,
+  type CapabilityAxis,
+  DAEMON_CAPABILITIES,
+  type DaemonCapability,
+  type DeviceGrantsPatch,
   invitationRedeemableByAnotherDevice,
   localOnlyNotice,
   type PairedDevice,
@@ -53,20 +45,16 @@ import {
   pairingMintOutcome,
   refusalNotice,
 } from '@ferretry/protocol';
-import { Check, CircleAlert, MonitorSmartphone, Plus, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import { QrSymbol } from '../../components/qr-symbol.tsx';
-import { useDaemonClient } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { axisLabel, capabilityLabel } from '../../lib/grants.ts';
 import {
-  PAIRING_PASSWORD_REQUIREMENT,
-  PAIRING_PASSWORD_REQUIREMENT_REMOTE,
-  type PairingGate,
-  pairingGate,
-} from '../../lib/grants.ts';
-import {
+  deviceAxisControl,
+  deviceGrantPatch,
   isThisDevice,
   orderedPairedDevices,
   PAIRING_EXPIRED_NOTE,
@@ -80,9 +68,12 @@ import {
   pairingCountdown,
   pairingRefusal,
   revokeConsequence,
+  SELF_NARROW_NOTE,
 } from '../../lib/pairing-invite.ts';
 import { encodeQr, QrEncodeError, type QrMatrix } from '../../lib/qr-code.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import {
+  changeDeviceGrants,
   mintPairingCode,
   type PairingClient,
   type PairingFailure,
@@ -91,8 +82,6 @@ import {
   revokePairedDevice,
   revokePairingCode,
 } from './add-device-api.ts';
-import { readGrants, setOperatorPassword } from './grants-api.ts';
-import { OperatorPasswordCard } from './operator-password.tsx';
 
 /** The invite, as this screen holds it: the daemon it belongs to, and what the daemon answered. */
 interface HeldInvite {
@@ -257,20 +246,100 @@ function InviteOffer({ outcome }: { readonly outcome: PairingMintOutcome }) {
   );
 }
 
+/** One axis of one capability on one device: a switch, or a statement with its remedy. */
+function DeviceAxisSwitch({
+  device,
+  view,
+  capability,
+  axis,
+  busy,
+  clientName,
+  onChange,
+}: {
+  readonly device: PairedDevice;
+  readonly view: PairedDevicesView;
+  readonly capability: DaemonCapability;
+  readonly axis: CapabilityAxis;
+  readonly busy: boolean;
+  readonly clientName: string;
+  readonly onChange: (next: boolean) => void;
+}) {
+  const control = deviceAxisControl(view, device, capability, axis, clientName);
+  const reasonId = useId();
+  const disabled = busy || control.blocked;
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={control.checked}
+        aria-label={`${capabilityLabel(capability)} — ${axisLabel(axis)}`}
+        aria-describedby={control.reason === null ? undefined : reasonId}
+        disabled={disabled}
+        data-device-grant={`${device.id}:${capability}.${axis}`}
+        data-device-grant-blocked={control.blocked ? 'yes' : 'no'}
+        onClick={() => onChange(!control.checked)}
+        className={cn(
+          'flex min-h-[44px] w-full items-center justify-between gap-2 rounded-control border px-2 py-1 text-left transition-colors',
+          control.checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
+          disabled ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
+        )}
+      >
+        <span className={cn('text-meta font-semibold', control.checked ? 'text-accent' : 'text-fg')}>
+          {axisLabel(axis)}
+        </span>
+        <span
+          aria-hidden="true"
+          className={cn(
+            'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+            control.checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
+              control.checked ? 'translate-x-[18px]' : 'translate-x-[2px]',
+            )}
+          />
+        </span>
+      </button>
+      {control.reason === null ? null : (
+        <p
+          id={reasonId}
+          className="m-0 mt-1 break-words text-meta leading-base text-warn"
+          data-device-grant-reason={`${device.id}:${capability}.${axis}`}
+        >
+          {control.reason}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** One paired device: what it is, when it arrived, and the control that ends its access. */
 function PairedDeviceRow({
   device,
   view,
   busy,
+  clientName,
+  grantFailure,
+  initiallyOpen,
   onRevoke,
+  onChangeGrants,
 }: {
   readonly device: PairedDevice;
   readonly view: PairedDevicesView;
   readonly busy: boolean;
+  readonly clientName: string;
+  readonly grantFailure: PairingFailure | null;
+  readonly initiallyOpen: boolean;
   readonly onRevoke: () => void;
+  readonly onChangeGrants: (patch: DeviceGrantsPatch) => void;
 }) {
   const mine = isThisDevice(device, view);
   const describedBy = useId();
+  const [open, setOpen] = useState(initiallyOpen);
+  const held = DAEMON_CAPABILITIES.filter(capability => CAPABILITY_AXES.some(axis => device.grants[capability][axis]));
 
   return (
     <li
@@ -310,6 +379,69 @@ function PairedDeviceRow({
       <p id={describedBy} className="m-0 text-meta leading-base text-muted">
         {revokeConsequence(device, view)}
       </p>
+      <details
+        open={open}
+        onToggle={event => setOpen(event.currentTarget.open)}
+        className="min-w-0"
+        data-device-capabilities={device.id}
+      >
+        <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1.5 text-ui font-medium text-fg">
+          <ChevronRight
+            size={14}
+            className={cn('shrink-0 transition-transform', open && 'rotate-90')}
+            aria-hidden="true"
+          />
+          Capabilities
+          <span className="text-meta font-normal text-faint" data-device-capabilities-count="">
+            {held.length === 0 ? 'none' : `${String(held.length)} of ${String(DAEMON_CAPABILITIES.length)}`}
+          </span>
+        </summary>
+        <div className="flex min-w-0 flex-col gap-2 pb-2">
+          {mine ? (
+            <p
+              className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+              data-device-grant-self-note=""
+            >
+              {SELF_NARROW_NOTE}
+            </p>
+          ) : null}
+          <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label={`What ${device.name} may do`}>
+            {DAEMON_CAPABILITIES.map(capability => (
+              <li
+                key={capability}
+                className="flex min-w-0 flex-col gap-1 border-t border-border-soft pt-2 first:border-t-0 first:pt-0"
+                data-device-capability={capability}
+              >
+                <span className="text-meta font-semibold text-fg">{capabilityLabel(capability)}</span>
+                <div className="grid min-w-0 grid-cols-2 gap-2">
+                  {CAPABILITY_AXES.map(axis => (
+                    <DeviceAxisSwitch
+                      key={axis}
+                      device={device}
+                      view={view}
+                      capability={capability}
+                      axis={axis}
+                      busy={busy}
+                      clientName={clientName}
+                      onChange={next => onChangeGrants(deviceGrantPatch(capability, axis, next))}
+                    />
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {grantFailure === null ? null : (
+            <p
+              role="alert"
+              className="m-0 break-words rounded-control border border-err-border bg-err-bg px-3 py-2 text-ui leading-base text-err"
+              data-device-grant-failure={device.id}
+            >
+              <CircleAlert size={14} className="mr-1 inline" aria-hidden="true" />
+              {grantFailure.message}
+            </p>
+          )}
+        </div>
+      </details>
     </li>
   );
 }
@@ -317,32 +449,23 @@ function PairedDeviceRow({
 export interface AddDeviceCardProps {
   readonly connection: DaemonConnection;
   readonly view: PairedDevicesView;
-  /**
-   * Whether a code may be offered at all, and what to say when it may not.
-   *
-   * IT IS A PROP RATHER THAN A READ. This panel renders what it is given, so a test drives every branch
-   * of the requirement without a network, and the harness screenshots the same component.
-   */
-  readonly gate: PairingGate;
   /** The live invite, when one has been minted in this panel. */
   readonly invite: PairingCodeMintResponse | null;
   /** Now, supplied rather than read, so the countdown is deterministic in a test and a screenshot. */
   readonly nowMs: number;
   readonly busy?: boolean;
   readonly failure?: PairingFailure | null;
-  /** A refusal the daemon answered the password call with, rendered whole and kept apart from `failure`. */
-  readonly passwordFailure?: string | null;
-  /**
-   * Setting the FIRST password, which is the only password act this panel offers.
-   *
-   * There is deliberately no clear: this card exists here to satisfy a requirement, and putting the undo
-   * for the requirement beside the requirement would be a control that argues with the panel around it.
-   */
-  readonly onSetPassword: (password: string) => void;
+  /** A refusal of a per-device grant change, shown on the device it was for. */
+  readonly grantFailure?: { readonly deviceId: string; readonly failure: PairingFailure } | null;
+  /** The host's command name in remedies; the product's binary, threaded rather than spelled here. */
+  readonly clientName?: string;
+  /** Which device's capabilities start open — for a screenshot or a deep link, never persisted. */
+  readonly capabilitiesOpenFor?: string | undefined;
   readonly onMint: () => void;
   readonly onDiscardInvite: () => void;
   readonly onRevokeCode: () => void;
   readonly onRevokeDevice: (deviceId: string) => void;
+  readonly onChangeDeviceGrants: (deviceId: string, patch: DeviceGrantsPatch) => void;
 }
 
 /**
@@ -354,17 +477,18 @@ export interface AddDeviceCardProps {
 export function AddDeviceCard({
   connection,
   view,
-  gate,
   invite,
   nowMs,
   busy = false,
   failure = null,
-  passwordFailure = null,
-  onSetPassword,
+  grantFailure = null,
+  clientName = 'fy',
+  capabilitiesOpenFor,
   onMint,
   onDiscardInvite,
   onRevokeCode,
   onRevokeDevice,
+  onChangeDeviceGrants,
 }: AddDeviceCardProps) {
   const headingId = useId();
   const devices = orderedPairedDevices(view);
@@ -382,28 +506,12 @@ export function AddDeviceCard({
             <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
             Devices on this machine
           </h3>
-          <span
-            className="rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta text-faint"
-            data-pair-host-local={view.hostLocal ? 'yes' : 'no'}
-          >
-            {view.hostLocal ? 'you are at this machine' : 'you are away from this machine'}
-          </span>
         </div>
         <p className="m-0 text-cell leading-base text-muted">
           A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
           that reads it becomes a device you can see and revoke below.
         </p>
-        {/* THE PASSWORD IS REQUIRED BEFORE THE FIRST DEVICE, AND THE DAEMON IS WHAT REQUIRES IT.
-            `POST /v1/pair/code` refuses while no operator password exists, for every caller — this panel,
-            a phone, and `fy pair` on the host. What happens here is a PRE-CHECK: when this browser has
-            read the grant view and can see there is no password, it says so and offers the control that
-            fixes it, rather than presenting a button that would be refused. When it cannot tell, it offers
-            the button and renders whatever the machine answers.
-
-            The requirement lands at pairing and nowhere else: `fleet.configure` is on by default for a
-            governed caller, so a device paired to a passwordless machine can provision the host. Nothing
-            about using this machine locally is gated, and startup is never blocked. */}
-        {gate.kind === 'open' && invite === null ? (
+        {invite === null ? (
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -418,31 +526,7 @@ export function AddDeviceCard({
             <span className="text-meta leading-base text-faint">{PAIRING_EXPIRY_NOTE}</span>
           </div>
         ) : null}
-        {gate.kind === 'needs-password' ? (
-          <p
-            role="status"
-            className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
-            data-pair-needs-password={gate.local ? 'local' : 'remote'}
-          >
-            <ShieldAlert size={14} className="mr-1 inline" aria-hidden="true" />
-            {gate.local ? PAIRING_PASSWORD_REQUIREMENT : PAIRING_PASSWORD_REQUIREMENT_REMOTE}
-          </p>
-        ) : null}
       </section>
-
-      {/* The control that satisfies the requirement, in the flow that requires it, so nobody is sent to
-          another screen and back. It is the SAME component the grant settings render — one control, one
-          set of rules about where it can succeed. */}
-      {gate.kind === 'needs-password' && gate.local ? (
-        <OperatorPasswordCard
-          state={{ kind: 'ready', first: true }}
-          busy={busy}
-          failure={passwordFailure}
-          heading="Set the operator password"
-          intro="This is the gate every device you add will have to pass to change anything here. It is not your computer’s login, and nothing in Ferretry uses it to run anything as another user."
-          onSet={onSetPassword}
-        />
-      ) : null}
 
       {invite !== null && countdown !== null ? (
         <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-label="Pairing code" data-pair-invite="">
@@ -517,8 +601,8 @@ export function AddDeviceCard({
         </p>
         {devices.length === 0 ? (
           <p className="m-0 text-meta leading-base text-muted">
-            Nothing but this machine itself can reach this daemon yet. Adding a device is how that changes, and every
-            device you add appears here with its own revoke.
+            No paired device can reach this daemon yet. Adding a device is how that changes, and every device you add
+            appears here with its own revoke.
           </p>
         ) : (
           <ul className="m-0 list-none p-0">
@@ -528,7 +612,11 @@ export function AddDeviceCard({
                 device={device}
                 view={view}
                 busy={busy}
+                clientName={clientName}
+                grantFailure={grantFailure?.deviceId === device.id ? grantFailure.failure : null}
+                initiallyOpen={capabilitiesOpenFor === device.id}
                 onRevoke={() => onRevokeDevice(device.id)}
+                onChangeGrants={patch => onChangeDeviceGrants(device.id, patch)}
               />
             ))}
           </ul>
@@ -586,46 +674,27 @@ export function AddDeviceSurface({
   const [invite, setInvite] = useState<HeldInvite | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<PairingFailure | null>(null);
-  const [passwordFailure, setPasswordFailure] = useState<string | null>(null);
-  const [nowMs, setNowMs] = useState(() => now());
-  /**
-   * Whether this machine has an operator password — `null` when this browser could not find out.
-   *
-   * READ ALONGSIDE THE DEVICE LIST, not lazily when somebody presses the button, because the point of
-   * reading it is to explain BEFORE the press. It carries no failure reason any more: the requirement is
-   * the daemon's, so an unreadable view means this panel has nothing to say in advance rather than a
-   * refusal of its own to compose. Whatever the machine answers is rendered whole when somebody taps.
-   */
-  const [grants, setGrants] = useState<{
-    readonly daemonId: DaemonConnection['daemonId'];
-    readonly view: GrantsView | null;
+  const [grantFailure, setGrantFailure] = useState<{
+    readonly deviceId: string;
+    readonly failure: PairingFailure;
   } | null>(null);
-
+  const [nowMs, setNowMs] = useState(() => now());
   useEffect(() => {
     let current = true;
     setClient(null);
     setLoaded(null);
     setLoadFailure(null);
     setFailure(null);
-    setPasswordFailure(null);
-    setGrants(null);
+    setGrantFailure(null);
     // The code belongs to the daemon that minted it, so switching machines drops it rather than carrying a
     // live credential across the boundary everything else here is keyed by.
     setInvite(null);
     void createClient(connection)
       .then(async next => {
         const view = await readPairedDevices(next);
-        // Settled rather than awaited together: a grant view this browser could not read must not turn a
-        // working device list into a load failure. It becomes a null view, and the pre-check then says
-        // nothing in advance rather than pretending the panel is broken — the daemon still answers the tap.
-        const grant = await readGrants(next).then(
-          answer => answer,
-          () => null,
-        );
         if (!current) return;
         setClient(next);
         setLoaded({ daemonId: connection.daemonId, view });
-        setGrants({ daemonId: connection.daemonId, view: grant });
       })
       .catch((cause: unknown) => {
         if (current) setLoadFailure({ daemonId: connection.daemonId, failure: pairingFailure(cause) });
@@ -679,32 +748,6 @@ export function AddDeviceSurface({
     }
   }, [client, connection.daemonId, invite]);
 
-  /**
-   * Sets the FIRST operator password, from the flow that requires one.
-   *
-   * The value is an ARGUMENT and nothing else — never state here, never logged, never echoed. No unlock is
-   * sent because this can only run where none exists to prove: the panel offers this control exclusively
-   * for `needs-password`, and a machine with no password has nothing to unlock with. It takes a `string`
-   * rather than `string | undefined` for the same reason — there is no clearing here, and a parameter that
-   * could express one would be an undo for the requirement this panel exists to state.
-   */
-  const setFirstPassword = useCallback(
-    async (password: string) => {
-      if (client === null || loaded?.daemonId !== connection.daemonId) return;
-      setBusy(true);
-      setPasswordFailure(null);
-      try {
-        await setOperatorPassword(client, password);
-        setGrants({ daemonId: connection.daemonId, view: await readGrants(client) });
-      } catch (cause) {
-        setPasswordFailure(pairingFailure(cause).message);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [client, connection.daemonId, loaded?.daemonId],
-  );
-
   const revokeDevice = useCallback(
     async (deviceId: string) => {
       if (client === null || loaded?.daemonId !== connection.daemonId) return;
@@ -721,29 +764,40 @@ export function AddDeviceSurface({
     [client, connection.daemonId, loaded?.daemonId],
   );
 
+  const changeGrants = useCallback(
+    async (deviceId: string, patch: DeviceGrantsPatch) => {
+      if (client === null || loaded?.daemonId !== connection.daemonId) return;
+      setBusy(true);
+      setFailure(null);
+      setGrantFailure(null);
+      try {
+        // The view the daemon answers with is what gets rendered: a toggle that guessed the new state is
+        // how a refused widen reads as granted.
+        setLoaded({ daemonId: connection.daemonId, view: await changeDeviceGrants(client, deviceId, patch) });
+      } catch (cause) {
+        setGrantFailure({ deviceId, failure: pairingFailure(cause) });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, connection.daemonId, loaded?.daemonId],
+  );
+
   if (loaded?.daemonId === connection.daemonId)
     return (
       <AddDeviceCard
         connection={connection}
         view={loaded.view}
-        gate={
-          grants?.daemonId === connection.daemonId
-            ? pairingGate(grants.view)
-            : // Still reading, or an answer belonging to a daemon this panel has since switched away from.
-              // Either way this browser does not know yet — so it says nothing in advance and lets the
-              // daemon answer the tap. The requirement is enforced there, not here.
-              pairingGate(null)
-        }
         invite={invite?.daemonId === connection.daemonId ? invite.minted : null}
         nowMs={nowMs}
         busy={busy}
         failure={failure}
-        passwordFailure={passwordFailure}
-        onSetPassword={password => void setFirstPassword(password)}
+        grantFailure={grantFailure}
         onMint={() => void mint()}
         onDiscardInvite={() => setInvite(null)}
         onRevokeCode={() => void revokeCode()}
         onRevokeDevice={deviceId => void revokeDevice(deviceId)}
+        onChangeDeviceGrants={(deviceId, patch) => void changeGrants(deviceId, patch)}
       />
     );
   if (loadFailure?.daemonId === connection.daemonId)

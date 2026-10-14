@@ -27,7 +27,7 @@ import {
   type SessionStatus,
 } from '@ferretry/protocol';
 import should from 'should';
-import type { CallerGovernance, ChangeConfirmation } from '../../../src/lib/api/capability.ts';
+import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
 import {
   type AccountDocumentReading,
@@ -119,7 +119,6 @@ interface World {
   readonly state: {
     reading: AccountDocumentReading;
     statuses: SessionStatus[];
-    confirmation: ChangeConfirmation;
     credentials: () => Promise<FleetCredentialView[]>;
     signOut: (id: string) => Promise<Awaited<ReturnType<FleetCatalogServiceDeps['credentials']['signOut']>>>;
     preview: (plan: FleetApplyPlan) => Promise<unknown>;
@@ -134,7 +133,6 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
   const state: World['state'] = {
     reading: { format: 'version-2', model: MODEL(), revision: 'rev-1' },
     statuses: ['running', 'completed', 'thinking'],
-    confirmation: { kind: 'confirmed' },
     credentials: async () => [credentialRow('codex-slot')],
     signOut: async id => ({ outcome: 'signed-out', credential: credentialRow(id) }),
     preview: async plan => ({ ...plan, sharedHistory: [] }),
@@ -163,7 +161,6 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
       list: async () => ({ format: 2, machine: 'studio', credentials: await state.credentials() }),
       signOut: async id => await state.signOut(id),
     },
-    confirmChange: async () => state.confirmation,
     provisioner: {
       preview: async plan =>
         (await state.preview(plan)) as Awaited<ReturnType<FleetCatalogServiceDeps['provisioner']['preview']>>,
@@ -184,13 +181,10 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
   return { service: new FleetCatalogService(deps), applied, state };
 }
 
-const governance = (confirmChange: boolean): CallerGovernance =>
-  ({
-    governed: confirmChange,
-    passwordSet: true,
-    confirmChange,
-    decide: () => ({ allowed: true, refusal: 'granted' }),
-  }) as never;
+const governance: CallerGovernance = {
+  governed: true,
+  decide: () => ({ allowed: true, refusal: 'granted' }),
+} as never;
 
 const refusal = async (work: Promise<unknown>, code: string): Promise<FleetCatalogRefusal> => {
   const error = await work.then(
@@ -226,40 +220,29 @@ describe('the catalogue reads', () => {
     const { service } = world();
 
     // Act
-    const machine = FleetMachineViewSchema.parse(await service.machine(governance(false)));
+    const machine = FleetMachineViewSchema.parse(await service.machine(governance));
 
     // Assert
     should(machine.name).equal('studio');
     should(machine.format).equal('version-2');
     should(machine.runningSessions).equal(2);
-    should(machine.authority).deepEqual({ mayApply: true, applyRefusal: 'granted', confirmation: 'none' });
+    should(machine.authority).deepEqual({ mayApply: true, applyRefusal: 'granted' });
     should(machine.tools.map(tool => tool.installed)).deepEqual([true, false]);
   });
 
-  it('should say a locked caller may not apply, and that a confirming caller owes the operator password', async () => {
+  it('should say a caller who has not stepped up may not apply, and carry the refusal', async () => {
     // Arrange
     const { service } = world();
-    const locked = {
+    const unproved = {
       governed: true,
-      passwordSet: true,
-      confirmChange: true,
-      decide: () => ({ allowed: false, refusal: 'locked' }),
+      decide: () => ({ allowed: false, refusal: 'step-up-required' }),
     } as never as CallerGovernance;
 
     // Act
-    const [lockedView, confirming] = [await service.machine(locked), await service.machine(governance(true))];
+    const view = await service.machine(unproved);
 
-    // Assert — the confirmation is a fact about the machine, so it is reported even while locked.
-    should(lockedView.authority).deepEqual({
-      mayApply: false,
-      applyRefusal: 'locked',
-      confirmation: 'operator-password',
-    });
-    should(confirming.authority).deepEqual({
-      mayApply: true,
-      applyRefusal: 'granted',
-      confirmation: 'operator-password',
-    });
+    // Assert
+    should(view.authority).deepEqual({ mayApply: false, applyRefusal: 'step-up-required' });
   });
 
   it('should read the configure axis of fleet when it decides authority', () => {
@@ -267,8 +250,6 @@ describe('the catalogue reads', () => {
     const demands: unknown[] = [];
     const recording = {
       governed: true,
-      passwordSet: true,
-      confirmChange: false,
       decide: (demand: unknown) => {
         demands.push(demand);
         return { allowed: true, refusal: 'granted' };
@@ -290,7 +271,7 @@ describe('the catalogue reads', () => {
     const [direct, viaMachine] = [machineAuthority(undefined), (await service.machine(undefined)).authority];
 
     // Assert
-    should(direct).deepEqual({ mayApply: false, applyRefusal: 'undetermined', confirmation: 'none' });
+    should(direct).deepEqual({ mayApply: false, applyRefusal: 'undetermined' });
     should(viaMachine).deepEqual(direct);
   });
 
@@ -364,7 +345,7 @@ describe('the catalogue reads', () => {
 
     // Act
     const [machine, staged] = [
-      await refusal(service.machine(governance(false)), 'fleet_catalog_unreadable'),
+      await refusal(service.machine(governance), 'fleet_catalog_unreadable'),
       await refusal(service.propose(ADD_INSTRUCTIONS), 'fleet_catalog_unreadable'),
     ];
 
@@ -498,7 +479,7 @@ describe('applying a change', () => {
     const staged = await service.propose(ADD_INSTRUCTIONS);
 
     // Act
-    const error = await service.apply(staged.id, {}, undefined).then(
+    const error = await service.apply(staged.id, undefined).then(
       () => undefined,
       (thrown: unknown) => thrown,
     );
@@ -514,8 +495,8 @@ describe('applying a change', () => {
     const staged = await service.propose(ADD_INSTRUCTIONS);
 
     // Act
-    const outcome = FleetAccountChangeOutcomeSchema.parse(await service.apply(staged.id, {}, governance(false)));
-    const again = await refusal(service.apply(staged.id, {}, governance(false)), 'fleet_change_consumed');
+    const outcome = FleetAccountChangeOutcomeSchema.parse(await service.apply(staged.id, governance));
+    const again = await refusal(service.apply(staged.id, governance), 'fleet_change_consumed');
 
     // Assert
     should(outcome.outcome).equal('applied');
@@ -525,32 +506,6 @@ describe('applying a change', () => {
     should(again.code).equal('fleet_change_consumed');
   });
 
-  it('should ask a governed caller for the operator password and refuse each wrong answer in words', async () => {
-    // Arrange
-    const { service, state } = world();
-    const staged = await service.propose(ADD_INSTRUCTIONS);
-    const answers: [ChangeConfirmation, RegExp][] = [
-      [{ kind: 'refused', reason: 'rate-limited' }, /too many wrong operator passwords/u],
-      [{ kind: 'refused', reason: 'no-password' }, /has no operator password/u],
-      [{ kind: 'refused', reason: 'wrong-password' }, /not this machine's operator password/u],
-    ];
-
-    // Act & Assert
-    const missing = await refusal(service.apply(staged.id, {}, governance(true)), 'fleet_change_unauthorized');
-    should(missing.message).match(/needs its operator password/u);
-    for (const [answer, words] of answers) {
-      state.confirmation = answer;
-      const error = await refusal(
-        service.apply(staged.id, { operatorPassword: 'guess' }, governance(true)),
-        'fleet_change_unauthorized',
-      );
-      should(error.message).match(words);
-    }
-    state.confirmation = { kind: 'confirmed' };
-    const outcome = await service.apply(staged.id, { operatorPassword: 'right' }, governance(true));
-    should(outcome.outcome).equal('applied');
-  });
-
   it('should put a change back when the configuration moved after it was staged', async () => {
     // Arrange
     const { service, state, applied } = world();
@@ -558,7 +513,7 @@ describe('applying a change', () => {
 
     // Act & Assert
     state.reading = { ...state.reading, revision: 'rev-2' };
-    const stale = await refusal(service.apply(staged.id, {}, governance(false)), 'fleet_change_stale');
+    const stale = await refusal(service.apply(staged.id, governance), 'fleet_change_stale');
     should(stale.message).match(/changed on this machine after this change was previewed/u);
     should((await service.read(staged.id)).state).equal('pending');
     should(applied).have.length(0);
@@ -580,8 +535,8 @@ describe('applying a change', () => {
     ];
 
     // Act
-    const outcome = await failed.service.apply(one.id, {}, governance(false));
-    const error = await refusal(refused.service.apply(two.id, {}, governance(false)), 'fleet_change_failed');
+    const outcome = await failed.service.apply(one.id, governance);
+    const error = await refusal(refused.service.apply(two.id, governance), 'fleet_change_failed');
 
     // Assert
     should(outcome).deepEqual({
@@ -601,7 +556,7 @@ describe('signing a login out', () => {
     const view = FleetAccountChangeViewSchema.parse(
       await service.propose({ kind: 'credential.signout', id: 'codex-slot' }),
     );
-    const outcome = await service.apply(view.id, {}, governance(false));
+    const outcome = await service.apply(view.id, governance);
 
     // Assert
     should(view.summary).equal('Sign out of login codex-slot');
@@ -658,15 +613,15 @@ describe('signing a login out', () => {
       reason: 'the harness could not sign out',
       credential: credentialRow(id),
     });
-    const failed = await service.apply(failedId, {}, governance(false));
+    const failed = await service.apply(failedId, governance);
     state.signOut = async () => {
       throw new FleetCredentialRefusal('fleet_credential_unavailable', 'This login cannot be reached.');
     };
-    const refused = await refusal(service.apply(refusedId, {}, governance(false)), 'fleet_change_failed');
+    const refused = await refusal(service.apply(refusedId, governance), 'fleet_change_failed');
     state.signOut = async () => {
       throw new TypeError('a bug');
     };
-    const broken = await service.apply(brokenId, {}, governance(false)).then(
+    const broken = await service.apply(brokenId, governance).then(
       () => undefined,
       (thrown: unknown) => thrown,
     );
@@ -720,10 +675,7 @@ describe('first-run import and clone', () => {
     // Act
     const setup = await service.propose({ kind: 'setup.import' });
     const clone = await service.propose({ kind: 'clone.import', mode: 'replace', bundle: {} });
-    const outcomes = [
-      await service.apply(setup.id, {}, governance(false)),
-      await service.apply(clone.id, {}, governance(false)),
-    ];
+    const outcomes = [await service.apply(setup.id, governance), await service.apply(clone.id, governance)];
 
     // Assert
     should(setup.preview).deepEqual({ kind: 'executor', executor: 'setup', description: 'Adds 2 runtimes.' });

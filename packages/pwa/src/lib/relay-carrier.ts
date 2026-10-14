@@ -38,7 +38,14 @@
  *   show a fleet that does not exist.
  */
 
-import { OLDER_DAEMON_SENTENCE, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE } from '@ferretry/protocol';
+import {
+  OLDER_DAEMON_SENTENCE,
+  UNLOCK_REQUIRED_CODE,
+  RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpDemand,
+  StepUpRequiredBodySchema,
+} from '@ferretry/protocol';
 import {
   APP_SESSION_BYTES,
   type ConnectionChoice,
@@ -64,6 +71,8 @@ import {
   sameDaemonConnection,
 } from './daemon-connection.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
+import type { KeyRotation } from './key-rotation.ts';
+import { stepUpAct } from './grants.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -513,6 +522,13 @@ export interface DaemonCarrierRouterOptions {
   readonly dial?: RelayDial;
   readonly heartbeat?: RelayHeartbeatSchedule;
   /**
+   * Device-key rotation (`docs/design/zero-trust.md` B6). When present, a step-up sent once the daemon's
+   * `rotateBy` has passed carries a replacement key signed against the session that carries it, and a
+   * session the old key is refused on is tried once with the pending key. Absent means a router that
+   * never rotates — which is every router built before this existed.
+   */
+  readonly rotation?: KeyRotation;
+  /**
    * THE ONE ADVERTISEMENT READ THIS DOCUMENT PERFORMED, as a last-resort address and nothing else.
    *
    * A FUNCTION RATHER THAN A VALUE because the answer arrives after this router does, and a promise
@@ -524,6 +540,18 @@ export interface DaemonCarrierRouterOptions {
    * the directory at all. What comes back is dialled, never stored: see `hostedRelayFallbackCarrier`.
    */
   readonly hostedRelay?: () => Promise<string | undefined>;
+  /**
+   * Asked when the daemon refuses a request for want of a passkey step-up (`grant_step_up_required`):
+   * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
+   * nothing can ask, and the refusal is returned as it came.
+   */
+  readonly stepUp?: (daemon: DaemonConnection, act?: string) => Promise<boolean>;
+  /**
+   * Asked when the daemon answers `401 unlock_required`: this machine wants a passkey on opening and
+   * this device has not given one. `true` once the person has confirmed, and the request is then sent
+   * again ONCE. Absent means nothing can ask, and the refusal is returned as it came.
+   */
+  readonly unlockRequired?: (daemon: DaemonConnection) => Promise<boolean>;
   /**
    * Whether a person is at this device right now (`presence.ts`). A request sent while they are is
    * marked, and only marked requests keep the device from idling out on the daemon. Absent means
@@ -695,7 +723,10 @@ export class DaemonCarrierRouter {
   readonly #hostedRelay: () => Promise<string | undefined>;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
+  readonly #stepUp: ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined;
+  readonly #unlockRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
   readonly #presence: () => boolean;
+  readonly #rotation: KeyRotation | undefined;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
@@ -729,7 +760,10 @@ export class DaemonCarrierRouter {
     this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
+    this.#stepUp = options.stepUp;
+    this.#unlockRequired = options.unlockRequired;
     this.#presence = options.presence ?? (() => false);
+    this.#rotation = options.rotation;
   }
 
   /**
@@ -897,6 +931,33 @@ export class DaemonCarrierRouter {
    * behaviour that can ever recover.
    */
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
+    let response = await this.#sendOnce(daemon, url, init);
+    // PRESENCE COMES FIRST: while this machine wants a passkey on opening it answers every request `401
+    // unlock_required`, so nothing else it says can be read yet. One prompt, one resend; a dismissed
+    // prompt returns the refusal unchanged, and a second refusal is the answer.
+    const confirmUnlock = this.#unlockRequired;
+    if (
+      confirmUnlock !== undefined &&
+      response.status === 401 &&
+      (await answersWithCode(response, UNLOCK_REQUIRED_CODE))
+    ) {
+      if (!(await confirmUnlock(daemon))) return response;
+      response = await this.#sendOnce(daemon, url, init);
+    }
+    // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to
+    // confirm; once they have, the same request is sent again exactly once — its body is text, so it
+    // can be — and a dismissed prompt returns the refusal unchanged for the caller to say.
+    const ask = this.#stepUp;
+    if (ask === undefined || response.status !== 403) return response;
+    const demand = await stepUpDemand(response);
+    if (demand === undefined) return response;
+    // The act the daemon NAMED, or nothing: an unparseable demand still asks, and the prompt says "this change".
+    const act = demand === null ? undefined : stepUpAct(demand);
+    if (!(await ask(daemon, act))) return response;
+    return await this.#sendOnce(daemon, url, init);
+  }
+
+  async #sendOnce(daemon: DaemonConnection, url: string, init: RequestInit): Promise<Response> {
     const entry = this.#entry(daemon);
     const chosen = entry.choice;
     if (chosen?.ok === true) {
@@ -1086,9 +1147,20 @@ export class DaemonCarrierRouter {
     const session = await this.#session(entry, method).catch((reason: unknown) => {
       throw new RelayUnsentError(reason);
     });
-    const record = { ...relayTunnelRequest(url, init), ...(this.#presence() ? { presence: true as const } : {}) };
+    // AMENDED HERE, on the session that will carry the request, because the rotation proof signs THAT
+    // session's transcript and the daemon refuses it on any other. A session found dead below is
+    // replaced for a read only, and a step-up is a POST, so the proof is never carried to another.
+    const amended = (await this.#rotation?.amend(session, entry.connection, url, init)) ?? { init, rotated: false };
+    const record = {
+      ...relayTunnelRequest(url, amended.init),
+      ...(this.#presence() ? { presence: true as const } : {}),
+    };
     try {
-      return relayResponse(await session.request(record));
+      const response = relayResponse(await session.request(record));
+      // Only an ANSWER settles the pending key. A request that died without one leaves it pending,
+      // which is the recovery: the daemon may have swapped and the answer is what was lost.
+      if (amended.rotated) await this.#rotation?.settle(entry.connection.daemonId, response);
+      return response;
     } catch (reason) {
       // A LEASE THAT RAN OUT IS NOT A CARRIER THAT FAILED. The device slept through its renewal — a
       // frozen tab, a laptop lid — and the daemon ended the session; a read is simply asked again on a
@@ -1131,14 +1203,7 @@ export class DaemonCarrierRouter {
   async #session(entry: CarrierEntry, method: ConnectionMethod): Promise<RelayClientSession> {
     const address = carrierAddress(method);
     return await this.#hold(entry, requestSessionKey(address), address, async () =>
-      openRelaySession({
-        crypto: this.#crypto,
-        dial: this.#dial,
-        daemon: entry.connection,
-        method,
-        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-        mode: { kind: 'auth', device: await this.#claim(entry) },
-      }),
+      this.#openKeyed(entry, method, device => ({ kind: 'auth', device })),
     );
   }
 
@@ -1153,20 +1218,17 @@ export class DaemonCarrierRouter {
     this.#streams += 1;
     const key = streamSessionKey(address, request.path, query, this.#streams);
     const session = await this.#hold(entry, key, address, async () =>
-      openRelaySession({
-        crypto: this.#crypto,
-        dial: this.#dial,
-        daemon: entry.connection,
+      this.#openKeyed(
+        entry,
         method,
-        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-        mode: {
+        device => ({
           kind: 'stream',
-          device: await this.#claim(entry),
+          device,
           path: request.path,
           ...(query.length === 0 ? {} : { query }),
-        },
-        onData: request.onData,
-      }),
+        }),
+        request.onData,
+      ),
     );
     // EVICTED WHEN IT CONCLUDES, not when something happens to ask for the same key again — and with
     // a per-call key nothing ever does, so without this the map would gain one dead entry for every
@@ -1179,6 +1241,53 @@ export class DaemonCarrierRouter {
       if (held !== undefined && sessions?.get(key) === held) sessions.delete(key);
     });
     return session;
+  }
+
+  /**
+   * Opens one session with the device key, and with the PENDING key once if the daemon refuses the first.
+   *
+   * `4403` is the one code that means this device is not accepted — and after a rotation whose answer
+   * was lost it is also what an old key earns from a daemon that already swapped. So a refusal is
+   * followed by exactly one more attempt, with the replacement the browser kept before it sent it:
+   * accepted, and that key is promoted; refused as well, and the daemon never took it, so it is
+   * discarded. Any OTHER failure of the second attempt is a fact about the carrier, not about the key,
+   * so the pending key is kept for the next session and the failure is reported as it was.
+   */
+  async #openKeyed(
+    entry: CarrierEntry,
+    method: ConnectionMethod,
+    mode: (device: SessionDeviceClaim) => RelaySessionMode,
+    onData?: RelayStreamRequest['onData'],
+  ): Promise<RelayClientSession> {
+    const device = await this.#claim(entry);
+    const open = async (claim: SessionDeviceClaim): Promise<RelayClientSession> =>
+      await openRelaySession({
+        crypto: this.#crypto,
+        dial: this.#dial,
+        daemon: entry.connection,
+        method,
+        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
+        mode: mode(claim),
+        ...(onData === undefined ? {} : { onData }),
+      });
+    const refusedDevice = (reason: unknown): boolean =>
+      reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.authRejected;
+    try {
+      return await open(device);
+    } catch (refused) {
+      const rotation = this.#rotation;
+      const daemonId = entry.connection.daemonId;
+      const pending = refusedDevice(refused) ? await rotation?.pending(daemonId).catch(() => undefined) : undefined;
+      if (rotation === undefined || pending === undefined) throw refused;
+      try {
+        const session = await open({ ...device, key: pending });
+        await rotation.promote(daemonId);
+        return session;
+      } catch (again) {
+        if (refusedDevice(again)) await rotation.discard(daemonId);
+        throw refused;
+      }
+    }
   }
 
   /**
@@ -1256,6 +1365,36 @@ export class DaemonCarrierRouter {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/** Whether a refusal carries this `code`. Read from a copy; the body stays. */
+const answersWithCode = async (response: Response, code: string): Promise<boolean> => {
+  try {
+    const body = (await response.clone().json()) as { readonly code?: unknown } | null;
+    return body?.code === code;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Whether a refusal is the daemon asking for a passkey step-up, and for which demand. Read from a copy;
+ * the body stays.
+ *
+ * `undefined` is not a step-up at all; `null` is one whose demand did not parse (an older daemon names
+ * none), which still asks.
+ */
+const stepUpDemand = async (response: Response): Promise<StepUpDemand | null | undefined> => {
+  let body: unknown;
+  try {
+    body = await response.clone().json();
+  } catch {
+    return undefined;
+  }
+  const named = StepUpRequiredBodySchema.safeParse(body);
+  if (named.success) return named.data.demand;
+  const code = typeof body === 'object' && body !== null ? (body as { readonly code?: unknown }).code : undefined;
+  return code === STEP_UP_REQUIRED_CODE ? null : undefined;
+};
 
 /** Marks a failure to OPEN a session: nothing of the request left this browser, whatever it was. */
 class RelayUnsentError extends Error {

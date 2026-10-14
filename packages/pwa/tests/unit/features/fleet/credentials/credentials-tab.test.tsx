@@ -15,7 +15,6 @@ import {
   machine,
   machineWith,
   NOW,
-  PASSWORD,
   READS,
   STUDIO,
   scripted,
@@ -440,30 +439,24 @@ describe('CredentialsTab · Check now', () => {
     await view.unmount();
   });
 
-  it('sends the operator password with a check when this browser owes it', async () => {
+  it('checks with an empty body when this browser will be asked for its passkey', async () => {
     const { view, calls } = await open(
       {
-        'GET /v1/fleet/machine': machineWith({ confirmation: 'operator-password' }),
+        'GET /v1/fleet/machine': machineWith({ mayApply: false, applyRefusal: 'step-up-required' }),
         'POST /v1/fleet/credentials/claude-work/check': credential({ id: 'claude-work', label: 'work' }),
       },
       { hash: `${HASH}/claude-work` },
+    );
+    expect(text(view.container, '[data-credential-actions] [data-change-step-up]')).toBe(
+      'studio-mac will ask you to confirm with your passkey when you save.',
     );
     const submit = must(
       view.container.querySelector<HTMLButtonElement>('[data-credential-actions] [data-change-submit]'),
       'Check now',
     );
-    expect(submit.disabled).toBe(true);
-    await type(
-      must(
-        view.container.querySelector<HTMLInputElement>('[data-credential-actions] [data-change-password]'),
-        'password',
-      ),
-      PASSWORD,
-    );
+    expect(submit.disabled).toBe(false);
     await click(submit, 'Check now');
-    expect(only(calls, 'POST /v1/fleet/credentials/claude-work/check')[0]?.body).toEqual({
-      operatorPassword: PASSWORD,
-    });
+    expect(only(calls, 'POST /v1/fleet/credentials/claude-work/check')[0]?.body).toEqual({});
     expect(text(view.container, '[data-credential-notice]')).toBe('Checked. The login works.');
     await view.unmount();
   });
