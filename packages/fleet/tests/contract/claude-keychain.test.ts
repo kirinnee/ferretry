@@ -10,13 +10,22 @@
  *   is why the `host` store must export `""` and never the absolute `~/.claude`.
  *
  * Each claim is measured by planting a fake item under the computed name and asking Claude, and the
- * write path by letting a refresh rotate one. It writes the login keychain, so it runs only on the CI
+ * write path by letting a refresh rotate one. One claim is about FERRETRY's reader rather than
+ * Claude's: with a stale item of the same name under another `acct`, Ferretry's store reads the item
+ * Claude reads — the read a web sign-in's post-check makes. It writes the login keychain, so it runs only on the CI
  * runner (see `support/keychain.ts`) and removes every item it planted.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
+import {
+  harnessKeychainAccount,
+  PlatformFleetCredentialStore,
+  SpawnCredentialCommand,
+} from '../../src/adapters/credential-store.ts';
+import { resolveCredentialStore } from '../../src/lib/account/credentials.ts';
+import { CredentialSchema } from '../../src/lib/account/schema.ts';
 import { claudeCredential, claudeTokenAnswer } from './support/fixtures.ts';
 import { contract, harnessEnv, requireHarness, run, type Sandbox, sandbox, until } from './support/harness.ts';
 import {
@@ -24,6 +33,7 @@ import {
   keychainVisibleFrom,
   keychainWritable,
   plantKeychainItem,
+  plantKeychainItemAs,
   readKeychainItem,
   refreshTokenIn,
   removeKeychainItem,
@@ -123,6 +133,38 @@ describe.skipIf(!(contract.enabled && keychainWritable))(
         should(await loggedIn(w.env(''))).equal(true, 'an empty store variable did not select the bare keychain item');
       } finally {
         await removeKeychainItem(BARE_SERVICE);
+      }
+    });
+
+    it("reads the person's own login by Claude's acct, past a stale item of the same name", async () => {
+      // A Mac that ran an older Ferretry holds a second bare item under another `acct`. It is planted
+      // FIRST, so a read by service name alone meets it before the one Claude wrote under $USER.
+      const w = await world('stale-sibling');
+      const stale = 'fy-contract-stale-acct';
+      const dead = JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0 } });
+      await plantKeychainItemAs(stale, BARE_SERVICE, dead);
+      await plantKeychainItem(BARE_SERVICE, claudeCredential({ expired: false }));
+      try {
+        should(await loggedIn(w.env(''))).equal(true, 'claude did not read its own item under $USER');
+        const store = new PlatformFleetCredentialStore({
+          platform: process.platform,
+          command: new SpawnCredentialCommand(),
+          now: () => Date.now(),
+          keychainAccount: harnessKeychainAccount([process.env.USER]),
+        });
+        const resolution = resolveCredentialStore(
+          'claude-you',
+          CredentialSchema.parse({ harness: 'claude', store: 'host' }),
+          { fleetRoot: path.join(w.root, 'fleet'), userHome: path.join(w.root, 'home') },
+        );
+        if (resolution.store === 'environment' || 'unavailable' in resolution) throw new Error('fixture');
+        should((await store.readStored(resolution)).state).equal(
+          'valid',
+          'Ferretry read a different item than the one Claude reads',
+        );
+      } finally {
+        await removeKeychainItem(BARE_SERVICE);
+        await removeKeychainItem(BARE_SERVICE, stale);
       }
     });
 

@@ -28,14 +28,24 @@ export const serviceFor = (storeDirectory: string): string =>
 const security = (args: string[]) =>
   run(['/usr/bin/security', ...args], { env: { PATH: '/usr/bin:/bin', HOME: process.env.HOME ?? '' } });
 
-const planted = new Set<string>();
+/** Every (`acct`, `svce`) pair this process planted, so `afterAll` can remove each one. */
+const planted = new Map<string, { readonly account: string; readonly service: string }>();
+const plantedKey = (owner: string, service: string): string => `${owner}\u0000${service}`;
 
 export async function plantKeychainItem(service: string, secret: string): Promise<void> {
-  if (!keychainWritable) throw new Error('refusing to write the keychain outside the CI macOS runner');
   if (account === '') throw new Error('USER is unset, so the keychain account Claude uses cannot be named');
-  const done = await security(['add-generic-password', '-U', '-a', account, '-s', service, '-w', secret]);
+  await plantKeychainItemAs(account, service, secret);
+}
+
+/**
+ * Plant an item under an `acct` that is NOT Claude's — the stale copy an older Ferretry left beside
+ * the harness's own item under the same service name.
+ */
+export async function plantKeychainItemAs(owner: string, service: string, secret: string): Promise<void> {
+  if (!keychainWritable) throw new Error('refusing to write the keychain outside the CI macOS runner');
+  const done = await security(['add-generic-password', '-U', '-a', owner, '-s', service, '-w', secret]);
   if (done.code !== 0) throw new Error(`could not plant keychain item ${service}: ${done.stderr}`);
-  planted.add(service);
+  planted.set(plantedKey(owner, service), { account: owner, service });
 }
 
 export async function readKeychainItem(service: string): Promise<string | undefined> {
@@ -43,14 +53,14 @@ export async function readKeychainItem(service: string): Promise<string | undefi
   return found.code === 0 ? found.stdout.trim() : undefined;
 }
 
-export async function removeKeychainItem(service: string): Promise<void> {
-  await security(['delete-generic-password', '-a', account, '-s', service]);
-  planted.delete(service);
+export async function removeKeychainItem(service: string, owner: string = account): Promise<void> {
+  await security(['delete-generic-password', '-a', owner, '-s', service]);
+  planted.delete(plantedKey(owner, service));
 }
 
 /** Remove every item this process planted. Each suite calls it from `afterAll`. */
 export async function removePlantedKeychainItems(): Promise<void> {
-  for (const service of [...planted]) await removeKeychainItem(service);
+  for (const item of [...planted.values()]) await removeKeychainItem(item.service, item.account);
 }
 
 /** Put `credential` in the store at `storeDirectory` the way this platform's Claude reads it. */
