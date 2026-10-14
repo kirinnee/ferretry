@@ -74,6 +74,10 @@ pull requests that touch `packages/{pwa,daemon,relay,protocol,cli}` or the tier 
 - **Evidence is an artifact.** The `e2e-evidence-<attempt>` artifact (one per run attempt) uploads with `if: always()`. It holds every screen
   the journeys reached at 390 px and 1280 px in both colour schemes, the per-step journey log, and the relay
   ledger.
+- **Advisory, and visibly so.** The journeys step runs with `continue-on-error: true`, so a red run leaves the
+  check green. Its failures still land in three places: the job summary ("E2E: N pass / M fail" plus the
+  failing tests), a warning annotation, and the evidence artifact. When the job becomes required,
+  `continue-on-error` is removed in the same change.
 - **It is NOT a required check yet.** The tier drives a real browser through Bun, and Bun 1.3 occasionally
   drops a child's pipes. The harness retries those failures, or bounds them and names them, but the real
   flake rate on hosted runners is unmeasured. It becomes a required branch-protection check after **two

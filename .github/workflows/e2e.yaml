@@ -48,7 +48,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      # ADVISORY: `continue-on-error` on this STEP, not the job. On a job it still paints the job's check
+      # red; on the step the check stays green while the step's own result, the job summary line
+      # "E2E: N pass / M fail" and a warning annotation record every failure. Removed when the job
+      # becomes required (docs/standards/ci-cd/index.md, "E2E tier").
       - name: Run the e2e journeys
+        continue-on-error: true
         run: nix develop .#ci -c ./scripts/ci/e2e.sh
       # `always()` because a red run is the run whose evidence matters most: every screen the journeys
       # reached at phone and desktop width in both colour schemes, the per-step journey log naming the

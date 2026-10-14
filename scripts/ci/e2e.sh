@@ -43,4 +43,21 @@ export FY_E2E_RELAY_REPORT="${evidence}/relay-journey.md"
 export DEBUG="${DEBUG:-pw:browser}"
 
 echo "🧪 e2e tier — Chrome: $("${chrome}" --version), tmux: $(tmux -V), evidence: ${evidence}"
-./scripts/test/run-e2e.sh
+set +e
+./scripts/test/run-e2e.sh 2>&1 | tee "${evidence}/tier.log"
+status=${PIPESTATUS[0]}
+set -e
+
+# One line a reader sees without opening the log, and the tally the flake-rate window is measured by.
+passed="$(grep -Eo '^ *[0-9]+ pass$' "${evidence}/tier.log" | tail -1 | tr -dc '0-9')"
+failed="$(grep -Eo '^ *[0-9]+ fail$' "${evidence}/tier.log" | tail -1 | tr -dc '0-9')"
+summary="E2E: ${passed:-?} pass / ${failed:-?} fail (exit ${status})"
+echo "${summary}"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  {
+    echo "### ${summary}"
+    grep -E '^\(fail\)' "${evidence}/tier.log" | sort -u | sed 's/^/- /' || true
+  } >>"${GITHUB_STEP_SUMMARY}"
+fi
+[ "${status}" -ne 0 ] && [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=E2E (advisory)::${summary}"
+exit "${status}"
