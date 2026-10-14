@@ -27,7 +27,14 @@ import {
 import type { EnforcedGrants, GrantAuditPort, GrantClock, GrantDocumentPort } from './types.ts';
 
 /** A refusal the grant subsystem raises, in a taxonomy the mount turns into a status. */
-export type GrantFailure = 'invalid' | 'forbidden' | 'device-not-granted' | 'step-up-required' | 'unavailable';
+export type GrantFailure =
+  | 'invalid'
+  | 'forbidden'
+  | 'device-not-granted'
+  | 'step-up-required'
+  /** A legal widen of another device, without a passkey proved for it alone. */
+  | 'widen-step-up-required'
+  | 'unavailable';
 
 export class GrantError extends Error {
   constructor(

@@ -51,6 +51,7 @@ const REFUSALS: Readonly<Record<GrantFailure, { status: number; code: string }>>
   // The wire code every other device-narrowed refusal uses, so the app's guidance for it applies here too.
   'device-not-granted': { status: 403, code: grantRefusalCode('device-not-granted') },
   'step-up-required': { status: 403, code: STEP_UP_REQUIRED_CODE },
+  'widen-step-up-required': { status: 403, code: STEP_UP_REQUIRED_CODE },
   // 503 rather than 500: the daemon is working, it has lost the ANSWER, and the remedy is to repair
   // the document rather than to report a crash.
   unavailable: { status: 503, code: 'grants_undetermined' },

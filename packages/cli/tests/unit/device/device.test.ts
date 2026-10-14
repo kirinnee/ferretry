@@ -629,7 +629,10 @@ describe('the command surface', () => {
     // Assert
     expect(help()).toContain('ungoverned');
     expect(help()).toContain('admin token');
-    expect(help()).toContain('fleet.use only');
+    expect(help()).toContain('FULL grants');
+    expect(help()).toContain('unlocks with its passkey');
+    expect(help()).toContain('pair --limited');
+    expect(help()).not.toContain('starts with fleet.use only');
     expect(help()).toContain('AND the daemon-wide ones');
     expect(help()).toContain('pairing.configure');
     expect(help()).toContain('passkey step-up');

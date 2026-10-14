@@ -78,6 +78,27 @@ describe('bun daemon process', () => {
     should(written).containEql('warned');
   });
 
+  it('should start the daemon in its own session, so closing the terminal cannot hang it up', async () => {
+    // Arrange
+    const logFile = join(root, 'session.log');
+
+    // Act
+    const handle = await subject.spawnDetached({
+      argv: ['sh', '-c', 'sleep 30'],
+      environment: { PATH: process.env.PATH ?? '' },
+      logFile,
+    });
+    if (handle.pid === undefined) throw new Error('no pid');
+    spawned.push(handle.pid);
+
+    // Assert — a session leader leads its own process group; a child left in this one would share ours,
+    // and with it the terminal's SIGHUP.
+    const groupOf = async (pid: number): Promise<string> =>
+      (await subject.run(['ps', '-o', 'pgid=', '-p', String(pid)])).stdout.trim();
+    should(await groupOf(handle.pid)).equal(String(handle.pid));
+    should(await groupOf(handle.pid)).not.equal(await groupOf(process.pid));
+  });
+
   it('should append to an existing log rather than truncate the daemon history', async () => {
     // Arrange
     const logFile = join(root, 'fyd.log');

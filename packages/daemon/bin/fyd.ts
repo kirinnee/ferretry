@@ -6643,6 +6643,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
   // be released whether the boot completes or fails part-way.
   cleanups.push(() => world.browserLogin.close());
+  // A harness sign-in is a child this daemon launched, and a pending `codex login` holds this host's
+  // `localhost:1455` while it lives. It ends with the daemon, or the next Codex sign-in finds the port
+  // taken by a flow nobody can see any more.
+  cleanups.push(async () => await subsystems.harnessLogin.shutdown());
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
   // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens
   // must not be told "no self-check has ever run" by a daemon that is about to run one. It is also

@@ -13,7 +13,7 @@ import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { KeyRotation, type RotatingSession } from '../../src/lib/key-rotation.ts';
-import { DaemonCarrierRouter } from '../../src/lib/relay-carrier.ts';
+import { DaemonCarrierRouter, DeviceNotAcceptedError } from '../../src/lib/relay-carrier.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { newDaemonIdentity, relayCrypto, ScriptedSocket } from '../support/relay.ts';
 import { type RotatingRequest, rotatingDial } from '../support/rotating-daemon.ts';
@@ -384,7 +384,8 @@ describe('the router carrying a rotation', () => {
       (reason: unknown) => reason,
     );
 
-    should((refusal as Error).message).match(/4403/u);
+    // The refusal of the device itself (4403), said as the one sentence the router gives it.
+    should(refusal).be.instanceof(DeviceNotAcceptedError);
     should(test.store.pending.size).equal(0);
     // Exactly one retry with the pending key: two refused credentials, no more.
     should(test.credentials.length - sessionsBefore).equal(2);
@@ -399,7 +400,8 @@ describe('the router carrying a rotation', () => {
       () => undefined,
       (reason: unknown) => reason,
     );
-    should((refusal as Error).message).match(/4403/u);
+    // The refusal of the device itself (4403), said as the one sentence the router gives it.
+    should(refusal).be.instanceof(DeviceNotAcceptedError);
     should(test.credentials).have.length(1);
   });
 
@@ -433,6 +435,7 @@ describe('the router carrying a rotation', () => {
       () => undefined,
       (reason: unknown) => reason,
     );
-    should((refusal as Error).message).match(/4403/u);
+    // The refusal of the device itself (4403), said as the one sentence the router gives it.
+    should(refusal).be.instanceof(DeviceNotAcceptedError);
   });
 });

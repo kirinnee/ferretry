@@ -7,6 +7,7 @@ import {
   isGovernedCaller,
   judgeDeviceGrantChange,
   widenableBy,
+  widenedBy,
 } from './policy.ts';
 import { GrantError } from './service.ts';
 import type { EnforcedGrants, GrantAuditPort, GrantClock } from './types.ts';
@@ -30,8 +31,12 @@ export interface DeviceGrantDeps {
   readonly changed?: () => void;
 }
 
-/** What one change ended as. `not-found` is a device that is unknown or was revoked meanwhile. */
-export type DeviceGrantOutcome = 'changed' | 'not-found';
+/**
+ * What one change ended as. `widened` is a change that gave the device something it did not hold, and
+ * so spent the caller's fresh passkey proof; `not-found` is a device that is unknown or was revoked
+ * meanwhile.
+ */
+export type DeviceGrantOutcome = 'changed' | 'widened' | 'not-found';
 
 /**
  * Changing ONE paired device's grants (`docs/design/zero-trust.md` B5).
@@ -79,6 +84,7 @@ export class DeviceGrantService {
       next,
       hostLocal,
       stepUp: presentation.stepUp,
+      freshStepUp: presentation.freshStepUp === true,
       holder: hostLocal ? undefined : this.holder(presentation),
     });
     if (verdict.kind === 'forbidden') {
@@ -88,6 +94,11 @@ export class DeviceGrantService {
         `${verdict.widened.join(', ')} can only be given to a device from the machine itself, or by a device that holds it and may manage devices. Run \`${this.deps.clientName} device grant ${deviceId} ${capability ?? 'fleet'} --${axis ?? 'use'}\` on the host.`,
       );
     }
+    if (verdict.kind === 'widen-step-up-required')
+      throw new GrantError(
+        'widen-step-up-required',
+        'giving another device more access needs a passkey confirmation for it, from this device.',
+      );
     if (verdict.kind === 'step-up-required')
       throw new GrantError(
         'step-up-required',
@@ -104,7 +115,7 @@ export class DeviceGrantService {
       changes,
       at: new Date(this.deps.clock.nowMs()).toISOString(),
     });
-    return 'changed';
+    return widenedBy(current, next).length > 0 ? 'widened' : 'changed';
   }
 
   /**

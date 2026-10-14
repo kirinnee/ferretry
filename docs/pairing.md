@@ -169,14 +169,18 @@ carrier-derived and server-derived respectively; neither may be inferred in a br
 
 **`POST /v1/pair/code` asks for no secret.** The owner's `fy pair` mints freely. A **governed** caller — a
 paired phone, a browser across the network or on the host itself — mints only while the operator leaves `pairing`
-on **and** it holds a current passkey step-up — which its unlock is, unless the owner asked per act —
-because `pairing.use` is one of the `use` demands the step-up guards ([grants.md](grants.md)). The refusal is `step-up-required` and the app answers it by raising
-the passkey prompt and retrying once; a remote warden has no device and can never mint.
+on **and** it has just confirmed **this mint** with a passkey — a proof at most two minutes old, spent by
+the one code it buys. The unlock is NOT enough, and neither is a step-up merely inside its window, whatever
+`stepUpOnActions` says (owner decision 2026-10-14, [design/zero-trust.md](design/zero-trust.md) B6). The
+refusal is `403 grant_step_up_required` with `demand.act: "add-device"`, and the app answers it by raising
+the passkey prompt — "Confirm with your passkey to add a device on ‹machine›" — and retrying once; a remote
+warden has no device and can never mint. Widening another device's grants is held to the same rule
+(`act: "widen-device"`).
 
 There is no first-password requirement, because there is no password. What stops a stolen or unattended
-phone from handing out more access is the unlock, not a secret that had to exist before the first device
-did. An unlocked phone in the wrong hands can pair another device for the rest of its unlock period; the
-unlock period, the per-act step-up setting and revocation are the controls.
+phone from handing out more access is the passkey each mint asks for, not a secret that had to exist before
+the first device did. An unlocked phone in the wrong hands cannot pair another device without its owner's
+face, finger or PIN; revocation remains the control for everything else it can do inside its unlock.
 
 What this deliberately does **not** do:
 

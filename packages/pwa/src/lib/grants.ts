@@ -97,9 +97,26 @@ const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
   secrets: 'run a command with a stored secret',
 };
 
-/** The act a step-up demand stands for. A `configure` is always a change to that capability's settings. */
-export const stepUpAct = (demand: StepUpDemand): string =>
-  demand.axis === 'use' ? USE_ACTS[demand.capability] : `change the settings for ${capabilityNoun(demand.capability)}`;
+/**
+ * The acts that add access to a machine, which always ask for a passkey of their own (owner decision
+ * 2026-10-14). Named exactly, because "add or manage a paired device" is too vague a thing to confirm
+ * when what the person is approving is another device getting into this machine.
+ */
+const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = {
+  'add-device': 'add a device',
+  'widen-device': 'give another device more access',
+};
+
+/**
+ * The act a step-up demand stands for. An act the daemon named is said as itself; otherwise a `configure`
+ * is always a change to that capability's settings.
+ */
+export const stepUpAct = (demand: StepUpDemand): string => {
+  if (demand.act !== undefined) return ACCESS_ACTS[demand.act];
+  return demand.axis === 'use'
+    ? USE_ACTS[demand.capability]
+    : `change the settings for ${capabilityNoun(demand.capability)}`;
+};
 
 /** What a prompt says when the daemon named no act: the machine is still named, and the act is "this change". */
 export const STEP_UP_FALLBACK_ACT = 'make this change';

@@ -177,19 +177,15 @@ function runMarker(kind: string): string {
 }
 
 /**
- * What the browser calls itself when it redeems, and why it is a LITERAL here.
+ * What the browser calls itself when it redeems: its browser, its system and a four-character suffix
+ * (`packages/pwa/src/lib/device-name.ts`), e.g. `Chrome on Linux · K7Q2`.
  *
- * `packages/pwa/src/lib/store.tsx` sends the constant `Ferretry PWA`. It does not derive a name
- * from the user agent, so making the agent unique and then searching the relay's frames for that
- * marker would assert the absence of a string nothing ever sent — a privacy check that passes
- * because it tests nothing. Searching for the real value is the only version of this assertion that
- * can fail, and the product is deliberately not changed to make it prettier: a test-only seam that
- * made the device name unique would be a seam shipped for a test.
- *
- * Twelve bytes is short, but this is a search over ciphertext for an exact byte run — a false
- * positive would be a coincidence at roughly one in 2^96, and a real hit would be a real leak.
+ * READ BACK FROM THE DAEMON, never assumed. The leak search below must look for the value the exchange
+ * really carried — a string nothing sent would make a privacy check that passes because it tests
+ * nothing — so the name is the one the daemon recorded for this pairing. Its random suffix makes it a
+ * better marker than the old constant, not a worse one.
  */
-const PAIRED_DEVICE_NAME = 'Ferretry PWA';
+const PAIRED_DEVICE_NAME = /^Chrome on Linux · [2-9A-HJKMNP-Z]{4}$/u;
 
 /** Where the daemon lists the devices it has paired. Names, never tokens, never digests. */
 const PAIRED_DEVICES_PATH = '/v1/pair/devices';
@@ -1056,7 +1052,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * registry is non-empty" that exists so a surface can know a pairing happened without
          * touching a token. The daemon side is its own device list, which returns names and never a
          * token or a digest — and it is what makes the leak search below meaningful: it establishes
-         * that `Ferretry PWA` is the name that actually crossed, so asserting its absence from the
+         * which name actually crossed, so asserting its absence from the
          * relay's frames is a claim about a value the exchange really carried.
          */
         const persisted = await browser.page.evaluate<string | null>("localStorage.getItem('fy-has-pairings-v1')");
@@ -1066,16 +1062,19 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         const listed = await fetch(environment.httpUrl(PAIRED_DEVICES_PATH), {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const devices = JSON.stringify(await listed.json());
-        if (!devices.includes(PAIRED_DEVICE_NAME)) {
+        const listing = (await listed.json()) as { readonly devices?: readonly { readonly name?: string }[] };
+        const pairedName = listing.devices
+          ?.map(device => device.name ?? '')
+          .find(name => PAIRED_DEVICE_NAME.test(name));
+        if (pairedName === undefined) {
           ledger.fail(
             'pairing-persisted',
-            `the daemon lists no device named ${PAIRED_DEVICE_NAME} after a successful pairing: ${devices.slice(0, 400)}`,
+            `the daemon lists no device named like "Chrome on Linux · XXXX" after a successful pairing: ${JSON.stringify(listing).slice(0, 400)}`,
           );
         }
         ledger.prove(
           'pairing-persisted',
-          `localStorage fy-has-pairings-v1 === "1" and the daemon recorded a device named ${PAIRED_DEVICE_NAME}, with no credential read on either side`,
+          `localStorage fy-has-pairings-v1 === "1" and the daemon recorded a device named ${String(pairedName)}, with no credential read on either side`,
         );
 
         /**
@@ -1171,12 +1170,12 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         const leaks = plaintextLeaks(await rendezvous.observations(), {
           'the pairing code': code,
           'the minted device id': stored.deviceId,
-          'the device name the browser sent': PAIRED_DEVICE_NAME,
+          'the device name the browser sent': String(pairedName),
         });
         if (leaks.length !== 0) ledger.fail('relay-read-nothing', leaks.join('; '));
         ledger.prove(
           'relay-read-nothing',
-          `the pairing code, the minted device id and the device name ${PAIRED_DEVICE_NAME} are absent from all ` +
+          `the pairing code, the minted device id and the device name ${String(pairedName)} are absent from all ` +
             `${String((await rendezvous.observations()).length)} frames the rendezvous handled`,
         );
 

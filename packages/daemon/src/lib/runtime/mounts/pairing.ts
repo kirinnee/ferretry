@@ -60,10 +60,14 @@ import {
   type PairingGrantSet,
   type PairingId,
   PairingIdSchema,
+  STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
+  type StepUpDemand,
+  type StepUpRequiredBody,
 } from '@ferretry/protocol';
 import {
   ApiError,
+  type ApiResponse,
   type ApiRoute,
   arrivedOnHost,
   type CapabilityDemand,
@@ -76,7 +80,7 @@ import {
   parseOptionalBody,
   type RouteContext,
 } from '../../api/index.ts';
-import { GrantError } from '../../grants/index.ts';
+import { type DeviceGrantOutcome, GrantError, isGovernedCaller } from '../../grants/index.ts';
 
 export interface PairingSubsystem {
   /** A live code, replacing any code still outstanding, for a device that will hold `grants`. */
@@ -103,11 +107,7 @@ export interface PairingSubsystem {
  */
 export interface DeviceGrantSubsystem {
   mayWiden(presentation: CapabilityPresentation): CapabilityGrants;
-  change(
-    deviceId: string,
-    patch: DeviceGrantsPatch,
-    presentation: CapabilityPresentation,
-  ): Promise<'changed' | 'not-found'>;
+  change(deviceId: string, patch: DeviceGrantsPatch, presentation: CapabilityPresentation): Promise<DeviceGrantOutcome>;
 }
 
 /**
@@ -170,6 +170,17 @@ async function devicesView(
   });
 }
 
+/**
+ * The `403 grant_step_up_required` an act that adds access answers with: the demand AND the act, so the
+ * prompt the app raises names exactly what the person is confirming.
+ */
+function addsAccessRefusal(message: string, act: NonNullable<StepUpDemand['act']>): ApiResponse {
+  return jsonResponse(
+    { error: message, code: STEP_UP_REQUIRED_CODE, demand: { ...PAIRING_DEMAND, act } } satisfies StepUpRequiredBody,
+    403,
+  );
+}
+
 /** A device-grant refusal, as the status and code the grant surface already answers with. */
 function deviceGrantRefusal(error: unknown): never {
   if (error instanceof GrantError) {
@@ -194,13 +205,24 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
         // A `full` code — the default — gives the next device every capability. A device may pass on only
         // what it holds itself, by the same rule a device widen reads (`mayWiden`), so a remote device
         // that does not hold everything mints a `limited` code or none. At the machine anything goes.
-        if (grantSet === 'full' && !holdsEverything(grants.mayWiden(presentationIn(context))))
+        const presentation = presentationIn(context);
+        if (grantSet === 'full' && !holdsEverything(grants.mayWiden(presentation)))
           return errorResponse(
             403,
             'this device does not hold every capability, so it cannot pair a device with full access; pair it with limited access, or run `pair` at the machine',
             'grant_forbidden',
           );
-        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint(grantSet)), 201);
+        // ADDING A DEVICE ALWAYS WANTS A PASSKEY PROVED FOR IT, from any device — unlocked or not, and
+        // whatever `stepUpOnActions` says. The unlock alone must never be enough to put another device on
+        // this machine. At the machine nothing is asked: it already has the machine (B4).
+        if (isGovernedCaller({ loopback: presentation.loopback }) && presentation.freshStepUp !== true)
+          return addsAccessRefusal(
+            'adding a device to this machine needs a passkey confirmation for it, from this device',
+            STEP_UP_ACTS.addDevice,
+          );
+        const minted = subsystem.mint(grantSet);
+        context.spendFreshStepUp?.();
+        return jsonResponse(PairingCodeMintResponseSchema.parse(minted), 201);
       },
     },
     {
@@ -288,8 +310,17 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
         const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
         if (!deviceId.success) return errorResponse(404, 'device not found', 'pairing_device_not_found');
         const patch = await parseBody(context.request, DeviceGrantsPatchSchema);
-        const outcome = await grants.change(deviceId.data, patch, presentationIn(context)).catch(deviceGrantRefusal);
-        return outcome === 'changed'
+        let outcome: DeviceGrantOutcome;
+        try {
+          outcome = await grants.change(deviceId.data, patch, presentationIn(context));
+        } catch (error) {
+          // A WIDEN wants a passkey proved for it alone; say which act, so the prompt can name it.
+          if (error instanceof GrantError && error.failure === 'widen-step-up-required')
+            return addsAccessRefusal(error.message, STEP_UP_ACTS.widenDevice);
+          return deviceGrantRefusal(error);
+        }
+        if (outcome === 'widened') context.spendFreshStepUp?.();
+        return outcome !== 'not-found'
           ? jsonResponse(await devicesView(subsystem, grants, context))
           : errorResponse(404, 'device not found', 'pairing_device_not_found');
       },

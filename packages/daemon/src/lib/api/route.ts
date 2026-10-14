@@ -105,6 +105,11 @@ export interface RouteContext {
    * one act. A no-op for a caller with no proven device, and under any other window.
    */
   readonly spendStepUp?: () => void;
+  /**
+   * Spends this caller's FRESH proof, after an act that adds access (`CapabilityPresentation.freshStepUp`)
+   * succeeded, so one passkey confirmation adds one device. A no-op for a caller with no proven device.
+   */
+  readonly spendFreshStepUp?: () => void;
 }
 
 /**

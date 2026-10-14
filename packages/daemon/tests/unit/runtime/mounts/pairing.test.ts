@@ -115,8 +115,15 @@ const browser = { deviceId: deviceOneId, appSession: 'app-one' } as const;
  * over loopback is the owner.
  */
 const localBrowser = { device: browser, loopback: true, privilegedLoopback: true } as const;
+/**
+ * A device that has just confirmed WITH A PASSKEY: its step-up is held and the proof is fresh — what
+ * minting a code, an act that adds access, needs. The unlock alone is {@link UNLOCKED_ONLY}.
+ */
+const PASSKEY_CONFIRMED: StepUpWitness = { held: () => true, freshlyHeld: () => true };
+/** An unlocked device that has not confirmed THIS act: its step-up is held, no fresh proof is. */
+const UNLOCKED_ONLY: StepUpWitness = { held: () => true };
 /** A device holding a current passkey step-up, for the cases about what a route does, not who may ask. */
-const confirmedStepUp: StepUpWitness = { held: () => true };
+const confirmedStepUp: StepUpWitness = PASSKEY_CONFIRMED;
 
 /**
  * The mount over the REAL grant subsystem.
@@ -203,7 +210,7 @@ describe('pairing routes', () => {
 
     // Act
     const unconfirmed = await (await mount(subject)).dispatch(request(remote));
-    const confirmed = await (await mount(subject, true, { held: () => true })).dispatch(request(remote));
+    const confirmed = await (await mount(subject, true, PASSKEY_CONFIRMED)).dispatch(request(remote));
 
     // Assert
     should(unconfirmed.status).equal(403);
@@ -266,7 +273,7 @@ describe('pairing routes', () => {
     // Arrange
     const subject = new FakePairing();
     const remote = { method: 'POST' as const, path: '/v1/pair/code', device: browser, loopback: false };
-    const confirmed = { held: () => true };
+    const confirmed = PASSKEY_CONFIRMED;
 
     // Act
     const allowed = await (await mount(subject, true, confirmed)).dispatch(request(remote));
@@ -346,7 +353,7 @@ describe('pairing routes', () => {
     const fromBrowser = await surface.dispatch(request({ path: '/v1/pair/devices', ...localBrowser }));
     const fromHostCli = await surface.dispatch(request({ path: '/v1/pair/devices', headers: admin, loopback: true }));
     // A remote caller reads the list only once confirmed, and is told it is NOT on the host.
-    const confirmed = await mount(subject, true, { held: () => true });
+    const confirmed = await mount(subject, true, PASSKEY_CONFIRMED);
     const fromRemote = await confirmed.dispatch(
       request({ path: '/v1/pair/devices', device: browser, loopback: false }),
     );
@@ -372,7 +379,7 @@ describe('pairing routes', () => {
     // A remote caller forwarded by `tailscale serve`, `cloudflared` or `ssh -L` arrives from a loopback
     // peer on a bind that is not loopback-only. It used to read "you are at this machine".
     // Arrange
-    const confirmed = await mount(new FakePairing(), true, { held: () => true });
+    const confirmed = await mount(new FakePairing(), true, PASSKEY_CONFIRMED);
 
     // Act
     const proxied = await confirmed.dispatch(request({ path: '/v1/pair/devices', device: browser, loopback: true }));
@@ -474,7 +481,7 @@ describe('pairing routes', () => {
     // A new device is FULL by default (owner decision 2026-10-14), so the default mint is `full`.
     // Arrange
     const subject = new FakePairing();
-    const surface = await mount(subject, true, { held: () => true });
+    const surface = await mount(subject, true, PASSKEY_CONFIRMED);
 
     // Act
     const plain = await surface.dispatch(
@@ -498,7 +505,7 @@ describe('pairing routes', () => {
   it('should mint a full-access code at the machine whatever the grants say, and over a device that holds everything', async () => {
     // Arrange
     const subject = new FakePairing();
-    const surface = await mount(subject, true, { held: () => true }, FULL_DEVICE_GRANTS);
+    const surface = await mount(subject, true, PASSKEY_CONFIRMED, FULL_DEVICE_GRANTS);
     const full = JSON.stringify({ grants: 'full' });
 
     // Act
@@ -523,8 +530,8 @@ describe('pairing routes', () => {
       secrets: { use: true, configure: false },
     };
     const pairsOnly: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: true } };
-    const limitedDevice = await mount(subject, true, { held: () => true }, pairsOnly);
-    const almostEverything = await mount(subject, true, { held: () => true }, holdsMostButNotSecrets);
+    const limitedDevice = await mount(subject, true, PASSKEY_CONFIRMED, pairsOnly);
+    const almostEverything = await mount(subject, true, PASSKEY_CONFIRMED, holdsMostButNotSecrets);
     const full = JSON.stringify({ grants: 'full' });
     const ask = { method: 'POST' as const, path: '/v1/pair/code', body: full };
 
@@ -547,7 +554,7 @@ describe('pairing routes', () => {
     const subject = new FakePairing();
     const pairsOnly: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: true } };
     const asker = (ownGrants: CapabilityGrants) =>
-      mount(subject, true, { held: () => true }, ownGrants).then(surface =>
+      mount(subject, true, PASSKEY_CONFIRMED, ownGrants).then(surface =>
         surface.dispatch(
           request({
             method: 'POST',
@@ -567,5 +574,62 @@ describe('pairing routes', () => {
     should([pairer.status, fleetOnly.status]).deepEqual([201, 403]);
     should(jsonBody(fleetOnly).code).equal('grant_device_not_granted');
     should(subject.grantSets).deepEqual(['limited']);
+  });
+});
+
+describe('adding a device always wants a passkey proved for it', () => {
+  /*
+   * OWNER DECISION 2026-10-14: minting a pairing code needs a FRESH per-act step-up from a device — even
+   * an unlocked one, even with `stepUpOnActions` off. The unlock alone must never be enough to put
+   * another device on this machine. The machine itself (its admin token, on the host) is never asked.
+   */
+  const mint = { method: 'POST' as const, path: '/v1/pair/code', device: browser, loopback: false };
+
+  it('should refuse an unlocked device that has not confirmed THIS act, naming the act', async () => {
+    // Arrange
+    const subject = new FakePairing();
+
+    // Act
+    const response = await (await mount(subject, true, UNLOCKED_ONLY)).dispatch(request(mint));
+
+    // Assert
+    should(response.status).equal(403);
+    should(jsonBody(response).code).equal('grant_step_up_required');
+    should(jsonBody(response).demand).deepEqual({ capability: 'pairing', axis: 'use', act: 'add-device' });
+    should(subject.mints).equal(0);
+  });
+
+  it('should mint once the device has confirmed with a passkey, and spend that proof on the one code', async () => {
+    // Arrange
+    const subject = new FakePairing();
+    let spent = 0;
+    const witness: StepUpWitness = {
+      ...PASSKEY_CONFIRMED,
+      spendFresh: () => {
+        spent += 1;
+      },
+    };
+
+    // Act
+    const response = await (await mount(subject, true, witness)).dispatch(request(mint));
+
+    // Assert
+    should(response.status).equal(201);
+    should(subject.mints).equal(1);
+    should(spent).equal(1);
+  });
+
+  it('should never ask the machine itself', async () => {
+    // Arrange
+    const subject = new FakePairing();
+
+    // Act — the host's admin token, on loopback, with no step-up of any kind.
+    const response = await (
+      await mount(subject)
+    ).dispatch(request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }));
+
+    // Assert
+    should(response.status).equal(201);
+    should(subject.mints).equal(1);
   });
 });

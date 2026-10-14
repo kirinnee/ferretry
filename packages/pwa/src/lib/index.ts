@@ -251,6 +251,7 @@ export * from './controls.ts';
 export * from './daemon-connection.ts';
 export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
+export * from './device-name.ts';
 export * from './drafts.ts';
 export * from './event-transport.ts';
 export * from './fleet-grouping.ts';

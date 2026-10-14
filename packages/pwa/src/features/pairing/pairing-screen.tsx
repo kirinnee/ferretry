@@ -28,19 +28,29 @@
  */
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '@ferretry/protocol';
 
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
-import { DaemonOutdatedError } from '../../lib/relay-carrier.ts';
+import { defaultDeviceName, deviceNameSuffix, normalizedDeviceName } from '../../lib/device-name.ts';
+import { AppOutdatedError, DaemonOutdatedError } from '../../lib/relay-carrier.ts';
 import { RelayPairingRefusedError } from '../../lib/relay-session.ts';
 import { BrandMark } from '../../shell/brand-mark.tsx';
 import { daemonDisplayName } from '../settings/daemon-settings.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 
-export type PairingExchange = (seed: PairingSeed) => Promise<void>;
+/** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
+export type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<void>;
+
+/** What this browser is called before the person changes it: browser, system and a short suffix. */
+const browserDeviceName = (): string =>
+  defaultDeviceName(
+    typeof navigator === 'undefined' ? '' : navigator.userAgent,
+    deviceNameSuffix(length => crypto.getRandomValues(new Uint8Array(length))),
+  );
 
 export interface PairingScreenProps {
   /** Existing pairings from the host-owned, browser-local registry. */
@@ -59,6 +69,8 @@ export interface PairingScreenProps {
    * should now leave the address bar. Called once, on first render.
    */
   readonly onArrivalTaken?: () => void;
+  /** The name the confirm screen offers. The browser's own by default; a suite passes a fixed one. */
+  readonly defaultName?: () => string;
   /**
    * Opens the setup guide. Absent while this screen IS a step of that guide —
    * a link back into the stepper from inside the stepper is a loop.
@@ -119,7 +131,12 @@ export type PairingFailureCause = 'refusal' | 'transport' | 'stated';
 
 const failureCause = (reason: unknown): PairingFailureCause => {
   if (reason instanceof RelayPairingRefusedError) return 'refusal';
-  if (reason instanceof DaemonOutdatedError || reason instanceof DeviceKeyUnsupportedError) return 'stated';
+  if (
+    reason instanceof DaemonOutdatedError ||
+    reason instanceof AppOutdatedError ||
+    reason instanceof DeviceKeyUnsupportedError
+  )
+    return 'stated';
   return 'transport';
 };
 
@@ -146,8 +163,11 @@ export function PairingScreen({
   onArrivalTaken,
   onOpenSetup,
   embedded = false,
+  defaultName = browserDeviceName,
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
+  // Chosen once per screen, so a person editing it is never overwritten and two attempts send one name.
+  const [deviceName, setDeviceName] = useState(defaultName);
   const [pasting, setPasting] = useState(false);
   const [link, setLink] = useState('');
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -185,10 +205,10 @@ export function PairingScreen({
     setStage({ kind: 'confirm', seed });
   };
 
-  const pair = async (seed: PairingSeed): Promise<void> => {
+  const pair = async (seed: PairingSeed, name: string): Promise<void> => {
     setStage({ kind: 'pairing', seed });
     try {
-      await onPair(seed);
+      await onPair(seed, name);
       setStage({ kind: 'paired', host: pairingDaemonHost(seed) });
     } catch (reason) {
       setStage({
@@ -212,7 +232,9 @@ export function PairingScreen({
     return (
       <PairingFocus
         stage={stage}
-        onPair={seed => void pair(seed)}
+        onPair={(seed, name) => void pair(seed, name)}
+        deviceName={deviceName}
+        onDeviceName={setDeviceName}
         onCancel={startOver}
         paired={connections.length > 0}
         embedded={embedded}
@@ -417,8 +439,11 @@ function HowThisWorks() {
 
 interface PairingFocusProps {
   readonly stage: Exclude<Stage, { kind: 'browse' }>;
-  readonly onPair: (seed: PairingSeed) => void;
+  readonly onPair: (seed: PairingSeed, deviceName: string) => void;
   readonly onCancel: () => void;
+  /** What this device will be called at the machine, as the person has it in the field. */
+  readonly deviceName: string;
+  readonly onDeviceName: (name: string) => void;
   /** Whether anything is paired yet, so the cancel control names the right place. */
   readonly paired: boolean;
   readonly embedded: boolean;
@@ -431,7 +456,9 @@ interface PairingFocusProps {
  * from a QR has exactly one thing to decide, and every other control on the
  * page is a way to get that wrong.
  */
-function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocusProps) {
+function PairingFocus({ stage, onPair, onCancel, paired, embedded, deviceName, onDeviceName }: PairingFocusProps) {
+  // Whether the name is being edited. Above every early return: hooks run in the same order each render.
+  const [renaming, setRenaming] = useState(false);
   /*
    * Headings step DOWN when embedded, they do not repeat.
    * The setup stepper's stage heading is the `<h2>` above this component, so a
@@ -508,6 +535,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
 
   const { seed } = stage;
   const busy = stage.kind === 'pairing';
+  const sendableName = normalizedDeviceName(deviceName);
   return (
     <PairingFrame embedded={embedded} stage={stage.kind}>
       <header className="min-w-0">
@@ -534,6 +562,42 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
       </section>
 
       {/*
+        WHAT THE MACHINE WILL CALL THIS DEVICE, said before it is sent, and changeable. Every browser
+        used to pair as "Ferretry PWA", and a second one made every name at the machine ambiguous; the
+        default is now this browser and system plus a short suffix. A sentence with a quiet Rename
+        rather than a field, because this screen is still one decision for somebody who scanned a QR.
+      */}
+      {renaming ? (
+        <label className="flex min-w-0 flex-col gap-1 text-ui text-muted">
+          Name this device
+          <input
+            type="text"
+            className="kt-input min-h-[44px] min-w-0"
+            data-pair-device-name=""
+            value={deviceName}
+            maxLength={PAIRING_DEVICE_NAME_MAX_LENGTH}
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+            onChange={event => onDeviceName(event.target.value)}
+          />
+        </label>
+      ) : (
+        <p className="m-0 min-w-0 break-words text-ui leading-base text-muted" data-pair-device-label="">
+          This device will be called <span className="font-semibold text-fg">{deviceName}</span>.{' '}
+          <button
+            type="button"
+            className="min-h-[44px] bg-transparent p-0 font-medium text-accent underline"
+            data-pair-device-rename=""
+            onClick={() => setRenaming(true)}
+            disabled={busy}
+          >
+            Rename
+          </button>
+        </p>
+      )}
+
+      {/*
         `data-pair-confirm` names the one control that starts a redemption, so a harness presses it
         by identity rather than by position or by a design-system attribute. Both fallbacks are
         wrong for the same reason in different ways: the first structural button on this screen is a
@@ -545,8 +609,10 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
         className="kt-btn min-h-[64px] w-full text-title"
         data-variant="primary"
         data-pair-confirm=""
-        onClick={() => onPair(seed)}
-        disabled={busy}
+        onClick={() => {
+          if (sendableName !== undefined) onPair(seed, sendableName);
+        }}
+        disabled={busy || sendableName === undefined}
       >
         {busy ? 'Pairing…' : 'Pair this device'}
       </button>
