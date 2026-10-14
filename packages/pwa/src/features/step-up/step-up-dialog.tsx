@@ -26,26 +26,36 @@ export const STEP_UP_SCOPE_NOTE =
 /** Several acts waiting on one machine are named together: "open a terminal and add or manage a paired device". */
 const ACT_LIST = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
-/** How one passkey prompt names what it is for. Step-up names the acts waiting; presence names none. */
+/** How one passkey prompt names what it is for. Step-up names the acts waiting; unlock names none. */
 type PasskeyPromptKind = 'step-up' | 'unlock';
 
 /** The words one passkey prompt says: what it is for and what a confirmation buys. */
 export interface PasskeyPromptCopy {
   readonly kind: PasskeyPromptKind;
-  readonly scope: string;
+  readonly title: string;
+  /** What a confirmation buys, or `null` when only the machine can say (the unlock: its own number of hours). */
+  readonly scope: string | null;
+  readonly confirm: string;
 }
 
-const STEP_UP_COPY: PasskeyPromptCopy = { kind: 'step-up', scope: STEP_UP_SCOPE_NOTE };
+const STEP_UP_COPY: PasskeyPromptCopy = {
+  kind: 'step-up',
+  title: 'Confirm it\u2019s you',
+  scope: STEP_UP_SCOPE_NOTE,
+  confirm: 'Use passkey',
+};
 
-/** What one confirmation on opening buys, said where the person decides. */
-export const UNLOCK_SCOPE_NOTE =
-  'This covers opening this machine on this device, including after a reload. How long it lasts is the machine\u2019s setting. Changes still ask for their own confirmation.';
-
-export const UNLOCK_COPY: PasskeyPromptCopy = { kind: 'unlock', scope: UNLOCK_SCOPE_NOTE };
+/** The unlock that opens the app: one sentence, one line on how long it stays, one button. */
+export const UNLOCK_COPY: PasskeyPromptCopy = {
+  kind: 'unlock',
+  title: 'Unlock',
+  scope: null,
+  confirm: 'Unlock',
+};
 
 export interface StepUpDialogProps {
   readonly gate: StepUpGate;
-  /** The words to use. Defaults to the step-up prompt's; the presence prompt passes its own. */
+  /** The words to use. Defaults to the step-up prompt's; the unlock prompt passes its own. */
   readonly copy?: PasskeyPromptCopy;
   /** How the machine is named to a person: its label, or its address. */
   readonly machineName: (daemonId: string) => string;
@@ -65,6 +75,7 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
   if (prompt === null) return null;
   const machine = machineName(prompt.daemon.daemonId);
   const acts = ACT_LIST.format(prompt.acts);
+  const scope = prompt.scope ?? copy.scope;
 
   return (
     <div
@@ -91,15 +102,16 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
       >
         <h2 id={`${uid}-title`} className="m-0 flex min-w-0 items-center gap-2 text-title font-semibold text-fg">
           <ShieldCheck size={16} className="shrink-0 text-accent" aria-hidden="true" />
-          Confirm it’s you
+          {copy.title}
         </h2>
         <p id={`${uid}-purpose`} className="m-0 mt-2 text-ui leading-base text-muted">
           {copy.kind === 'unlock' ? (
             <>
+              Unlock{' '}
               <span className="font-semibold text-fg" data-step-up-machine="">
                 {machine}
               </span>{' '}
-              asks for your passkey before it shows anything.
+              with your passkey.
             </>
           ) : (
             <>
@@ -111,9 +123,11 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             </>
           )}
         </p>
-        <p className="m-0 mt-2 text-meta leading-base text-muted" data-step-up-scope="">
-          {copy.scope}
-        </p>
+        {scope === null ? null : (
+          <p className="m-0 mt-2 text-meta leading-base text-muted" data-step-up-scope="">
+            {scope}
+          </p>
+        )}
         {prompt.failure === undefined ? null : (
           <p
             role="alert"
@@ -134,7 +148,7 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             onClick={() => void gate.confirm()}
           >
             <Fingerprint size={15} aria-hidden="true" />
-            {prompt.busy ? 'Waiting for your passkey…' : 'Use passkey'}
+            {prompt.busy ? 'Waiting for your passkey…' : copy.confirm}
           </button>
           <button
             type="button"

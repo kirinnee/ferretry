@@ -1,6 +1,6 @@
 /**
- * THE SECURITY SETTINGS BLOCK: the five knobs one machine keeps for how long a passkey confirmation, a
- * device key and an unused device live (`docs/design/zero-trust.md` B6).
+ * THE SECURITY SETTINGS BLOCK: the six knobs one machine keeps for the unlock, the per-act passkey
+ * confirmation, a device key and an unused device (`docs/design/zero-trust.md` B6).
  *
  * ## EVERY SETTING SHOWS ITS VALUE AND ITS BOUNDS
  *
@@ -21,8 +21,10 @@
  */
 
 import {
+  isSecuritySwitch,
   SECURITY_SETTING_BOUNDS,
   type SecuritySettingField,
+  type SecuritySwitchField,
   type SecuritySettingsPatch,
   type SecuritySettingsView,
   widensSecurity,
@@ -50,28 +52,19 @@ import { cn } from '../../lib/class-names.ts';
 
 type SecuritySettingsClientFactory = (connection: DaemonConnection) => Promise<SecuritySettingsClient>;
 
-const NUMERIC_FIELDS: readonly NumericSecuritySetting[] = [
-  'stepUpWindowMinutes',
-  'deviceKeyRotationDays',
+/**
+ * The order the design lists them in: each switch is followed by the number it governs. The change
+ * confirmation window is shown only while the machine asks per act, because with it off the number
+ * governs nothing a person could see.
+ */
+const rowsFor = (view: SecuritySettingsView): readonly SecuritySettingField[] => [
+  'unlockOnOpen',
   'unlockValidityHours',
+  'stepUpOnActions',
+  ...(view.settings.stepUpOnActions ? (['stepUpWindowMinutes'] as const) : []),
+  'deviceKeyRotationDays',
   'idleExpiryDays',
 ];
-
-interface Row {
-  readonly field: SecuritySettingField;
-}
-
-/** The order the design lists them in: presence sits between the two numbers it governs. */
-const ROWS: readonly Row[] = [
-  { field: 'stepUpWindowMinutes' },
-  { field: 'deviceKeyRotationDays' },
-  { field: 'unlockOnOpen' },
-  { field: 'unlockValidityHours' },
-  { field: 'idleExpiryDays' },
-];
-
-const isNumeric = (field: SecuritySettingField): field is NumericSecuritySetting =>
-  (NUMERIC_FIELDS as readonly string[]).includes(field);
 
 const ERROR_TONE = 'rounded-control border border-err-border bg-err-bg px-2 py-1 text-err';
 const LIMIT_TONE = 'rounded-control border border-border bg-surface-2 px-2 py-1 text-muted';
@@ -156,27 +149,28 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
   );
 }
 
-interface PresenceRowProps {
+interface SwitchRowProps {
+  readonly field: SecuritySwitchField;
   readonly view: SecuritySettingsView;
   readonly busy: boolean;
   readonly onSave: (value: boolean) => void;
 }
 
-/** The one switch. Turning it on tightens; turning it off loosens, so it is dead without `mayWiden`. */
-function PresenceRow({ view, busy, onSave }: PresenceRowProps) {
+/** A switch. Turning it on tightens; turning it off loosens, so it is dead without `mayWiden`. */
+function SwitchRow({ field, view, busy, onSave }: SwitchRowProps) {
   const noteId = useId();
-  const copy = SECURITY_SETTING_COPY.unlockOnOpen;
-  const on = view.settings.unlockOnOpen;
+  const copy = SECURITY_SETTING_COPY[field];
+  const on = view.settings[field];
   const dead = on && !view.mayWiden;
   return (
-    <div className="min-w-0 border-t border-border-soft py-2" data-security-setting="unlockOnOpen">
+    <div className="min-w-0 border-t border-border-soft py-2 first:border-t-0" data-security-setting={field}>
       <button
         type="button"
         role="switch"
         aria-checked={on}
         aria-describedby={dead ? noteId : undefined}
         disabled={busy || dead}
-        data-security-switch="unlockOnOpen"
+        data-security-switch={field}
         onClick={() => onSave(!on)}
         className={cn(
           'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
@@ -188,16 +182,12 @@ function PresenceRow({ view, busy, onSave }: PresenceRowProps) {
           <span className={cn('block text-ui font-semibold', on ? 'text-accent' : 'text-fg')}>{copy.label}</span>
           <span className="block text-meta leading-base text-muted">{copy.explanation}</span>
         </span>
-        <span className="shrink-0 text-ui text-fg" data-security-value="unlockOnOpen">
+        <span className="shrink-0 text-ui text-fg" data-security-value={field}>
           {on ? 'On' : 'Off'}
         </span>
       </button>
       {dead ? (
-        <p
-          id={noteId}
-          className={cn('m-0 mt-1 text-meta leading-base', LIMIT_TONE)}
-          data-security-note="unlockOnOpen"
-        >
+        <p id={noteId} className={cn('m-0 mt-1 text-meta leading-base', LIMIT_TONE)} data-security-note={field}>
           {widenAtMachineSentence(view.widenCommand)}
         </p>
       ) : null}
@@ -304,8 +294,16 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
         </p>
       ) : null}
       <div className="flex min-w-0 flex-col">
-        {ROWS.map(({ field }) =>
-          isNumeric(field) ? (
+        {rowsFor(view).map(field =>
+          isSecuritySwitch(field) ? (
+            <SwitchRow
+              key={field}
+              field={field}
+              view={view}
+              busy={busy}
+              onSave={value => void save({ [field]: value }, field)}
+            />
+          ) : (
             <NumberRow
               key={field}
               field={field}
@@ -314,13 +312,6 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
               busy={busy}
               onDraft={draft => setDrafts(current => ({ ...current, [field]: draft }))}
               onSave={value => void save({ [field]: value }, field)}
-            />
-          ) : (
-            <PresenceRow
-              key={field}
-              view={view}
-              busy={busy}
-              onSave={value => void save({ unlockOnOpen: value }, 'unlockOnOpen')}
             />
           ),
         )}

@@ -4,14 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import {
-  UNLOCK_COPY,
-  UNLOCK_SCOPE_NOTE,
-  STEP_UP_SCOPE_NOTE,
-  StepUpDialog,
-} from '../../src/features/step-up/step-up-dialog.tsx';
+import { UNLOCK_COPY, STEP_UP_SCOPE_NOTE, StepUpDialog } from '../../src/features/step-up/step-up-dialog.tsx';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { StepUpGate } from '../../src/lib/step-up-gate.ts';
+import { StepUpGate, type StepUpGateDependencies } from '../../src/lib/step-up-gate.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
 const studio = daemonConnection({
@@ -251,24 +246,49 @@ describe('the passkey prompt', () => {
   });
 });
 
-describe('the passkey prompt in its presence wording', () => {
-  it('says what opening needs and what that confirmation buys, in place of the step-up words', async () => {
-    const { gate } = harness();
-    const mounted = await mount(<StepUpDialog gate={gate} copy={UNLOCK_COPY} machineName={id => `Name of ${id}`} />);
+describe('the unlock prompt', () => {
+  const unlockHarness = (scope?: StepUpGateDependencies['scope']) => {
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'unknown',
+      ...(scope === undefined ? {} : { scope }),
+    });
+    return gate;
+  };
+  const mountUnlock = async (gate: StepUpGate) =>
+    await mount(<StepUpDialog gate={gate} copy={UNLOCK_COPY} machineName={id => `Name of ${id}`} />);
+
+  it('says Unlock, one sentence naming the machine, the machine’s own hours, and an Unlock button', async () => {
+    const gate = unlockHarness(async () => 'It stays unlocked on this device for 8 hours.');
+    const mounted = await mountUnlock(gate);
     try {
-      // Act
+      await interact(() => void gate.require(studio));
+      await interact(async () => await Promise.resolve());
+
+      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
+      expect(must(dialog.querySelector('h2'), 'the title').textContent).toBe('Unlock');
+      expect(must(dialog.querySelector('[id$="-purpose"]'), 'the sentence').textContent).toBe(
+        'Unlock Name of daemon-studio with your passkey.',
+      );
+      expect(must(dialog.querySelector('[data-step-up-scope]'), 'the line').textContent).toBe(
+        'It stays unlocked on this device for 8 hours.',
+      );
+      expect(mounted.container.querySelector('[data-step-up-act]')).toBeNull();
+      expect(confirmButton(mounted.container).textContent).toContain('Unlock');
+      expect(dialog.textContent).not.toContain('15 minutes');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('shows no line at all until the machine has said its hours, and never blocks the button on it', async () => {
+    const gate = unlockHarness(() => new Promise<string>(() => undefined));
+    const mounted = await mountUnlock(gate);
+    try {
       await interact(() => void gate.require(studio));
 
-      // Assert
-      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
-      expect(dialog.textContent).toContain('Confirm it’s you');
-      expect(dialog.textContent).toContain('Name of daemon-studio');
-      expect(dialog.textContent).toContain('asks for your passkey before it shows anything.');
-      expect(mounted.container.querySelector('[data-step-up-act]')).toBeNull();
-      expect(must(mounted.container.querySelector('[data-step-up-scope]'), 'the scope note').textContent).toBe(
-        UNLOCK_SCOPE_NOTE,
-      );
-      expect(dialog.textContent).not.toContain('15 minutes');
+      expect(mounted.container.querySelector('[data-step-up-scope]')).toBeNull();
+      expect(confirmButton(mounted.container).disabled).toBe(false);
     } finally {
       await mounted.unmount();
     }

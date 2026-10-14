@@ -30,8 +30,9 @@ const COMMAND = 'fy daemon security set <field> <value>';
 const SETTINGS: SecuritySettings = {
   stepUpWindowMinutes: 15,
   deviceKeyRotationDays: 30,
-  unlockOnOpen: false,
+  unlockOnOpen: true,
   unlockValidityHours: 8,
+  stepUpOnActions: false,
   idleExpiryDays: 30,
 };
 const view = (
@@ -108,7 +109,7 @@ const saveButton = (block: ReactTestRenderer, field: string) => marked(block, 'd
 describe('SecuritySettingsBlock reading', () => {
   it('shows each setting with its value and its bounds, in plain units', async () => {
     // Arrange / Act
-    const block = await mountBlock(machine(view(), () => new Error('unused')));
+    const block = await mountBlock(machine(view({}, { stepUpOnActions: true }), () => new Error('unused')));
 
     // Assert
     expect(text(block)).toContain('15 minutes');
@@ -116,8 +117,28 @@ describe('SecuritySettingsBlock reading', () => {
     expect(text(block)).toContain('Allowed: 7 to 90 days.');
     expect(text(block)).toContain('Allowed: 1 to 24 hours.');
     expect(text(block)).toContain('30 days');
-    should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['Off']);
+    expect(text(block)).toContain('A change confirmation lasts');
+    should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['On']);
+    should(marked(block, 'data-security-value', 'stepUpOnActions')[0]?.children).eql(['On']);
     should(marked(block, 'data-security-damaged')).be.empty();
+    run(() => block.unmount());
+  });
+
+  it('says both switches in the owner’s words, and hides the change window while it asks for nothing', async () => {
+    // Arrange / Act
+    const block = await mountBlock(machine(view(), () => new Error('unused')));
+
+    // Assert
+    expect(text(block)).toContain('Unlock with a passkey on opening');
+    expect(text(block)).toContain('A device must unlock this machine with its passkey before it can do anything.');
+    expect(text(block)).toContain('An unlock lasts');
+    expect(text(block)).toContain('Ask again for each change');
+    expect(text(block)).toContain(
+      'Ask for a passkey again before changes, terminals and other sensitive acts, even while unlocked.',
+    );
+    should(marked(block, 'data-security-value', 'stepUpOnActions')[0]?.children).eql(['Off']);
+    should(marked(block, 'data-security-setting', 'stepUpWindowMinutes')).be.empty();
+    expect(text(block)).not.toContain('A change confirmation lasts');
     run(() => block.unmount());
   });
 
@@ -195,17 +216,19 @@ describe('SecuritySettingsBlock narrowing', () => {
     const block = await mountBlock(machine(view(), () => new Error('unused')));
 
     // Act
-    await typeInto(block, 'stepUpWindowMinutes', '15');
+    await typeInto(block, 'idleExpiryDays', '30');
 
     // Assert
-    should(saveButton(block, 'stepUpWindowMinutes')).be.undefined();
+    should(saveButton(block, 'idleExpiryDays')).be.undefined();
     run(() => block.unmount());
   });
 
-  it('turns presence on, which tightens, from a caller who may not loosen', async () => {
+  it('turns the unlock on, which tightens, from a caller who may not loosen', async () => {
     // Arrange
     const ledger: Ledger = { patches: [] };
-    const block = await mountBlock(machine(view(), patch => ({ view: view({}, patch), devicesExpiring: 0 }), ledger));
+    const block = await mountBlock(
+      machine(view({}, { unlockOnOpen: false }), patch => ({ view: view({}, patch), devicesExpiring: 0 }), ledger),
+    );
     should(marked(block, 'data-security-switch', 'unlockOnOpen')[0]?.props.disabled).equal(false);
 
     // Act
@@ -214,7 +237,26 @@ describe('SecuritySettingsBlock narrowing', () => {
     // Assert
     should(ledger.patches).eql([{ unlockOnOpen: true }]);
     should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['On']);
-    expect(text(block)).toContain('Passkey on opening: now on.');
+    expect(text(block)).toContain('Unlock with a passkey on opening: now on.');
+    run(() => block.unmount());
+  });
+
+  it('turns asking again on, which tightens, and then offers the change window', async () => {
+    // Arrange
+    const ledger: Ledger = { patches: [] };
+    const block = await mountBlock(
+      machine(view(), patch => ({ view: view({}, { ...patch }), devicesExpiring: 0 }), ledger),
+    );
+    should(marked(block, 'data-security-switch', 'stepUpOnActions')[0]?.props.disabled).equal(false);
+    should(marked(block, 'data-security-setting', 'stepUpWindowMinutes')).be.empty();
+
+    // Act
+    await press(block, 'data-security-switch', 'stepUpOnActions');
+
+    // Assert
+    should(ledger.patches).eql([{ stepUpOnActions: true }]);
+    expect(text(block)).toContain('Ask again for each change: now on.');
+    should(marked(block, 'data-security-setting', 'stepUpWindowMinutes')).have.length(1);
     run(() => block.unmount());
   });
 });
@@ -235,12 +277,15 @@ describe('SecuritySettingsBlock loosening', () => {
     run(() => block.unmount());
   });
 
-  it('switches presence off only at the machine, and says so in one sentence', async () => {
+  it('switches each switch off only at the machine, and says so in one sentence', async () => {
     // Arrange
-    const block = await mountBlock(machine(view({}, { unlockOnOpen: true }), () => new Error('unused')));
+    const block = await mountBlock(machine(view({}, { stepUpOnActions: true }), () => new Error('unused')));
 
     // Assert
-    should(marked(block, 'data-security-switch', 'unlockOnOpen')[0]?.props.disabled).equal(true);
+    for (const field of ['unlockOnOpen', 'stepUpOnActions'])
+      should(marked(block, 'data-security-switch', field)[0]?.props.disabled).equal(true);
+    should(marked(block, 'data-security-note', 'unlockOnOpen')).have.length(1);
+    should(marked(block, 'data-security-note', 'stepUpOnActions')).have.length(1);
     expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND}.`);
     run(() => block.unmount());
   });
@@ -288,7 +333,7 @@ describe('SecuritySettingsBlock refusals', () => {
   it('turns a machine refusal into one sentence, never its code, and keeps the draft', async () => {
     // Arrange
     const refusal = new FyHttpError('refused', 403, SECURITY_WIDEN_REFUSED_CODE);
-    const block = await mountBlock(machine(view({ mayWiden: true }), () => refusal));
+    const block = await mountBlock(machine(view({ mayWiden: true }, { stepUpOnActions: true }), () => refusal));
 
     // Act
     await typeInto(block, 'stepUpWindowMinutes', '5');
@@ -307,11 +352,11 @@ describe('SecuritySettingsBlock refusals', () => {
     const block = await mountBlock(machine(view(), () => new Error('offline')));
 
     // Act
-    await press(block, 'data-security-switch', 'unlockOnOpen');
+    await press(block, 'data-security-switch', 'stepUpOnActions');
 
     // Assert
     expect(text(block)).toContain('The setting was not changed. Try again.');
-    should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['Off']);
+    should(marked(block, 'data-security-value', 'stepUpOnActions')[0]?.children).eql(['Off']);
     run(() => block.unmount());
   });
 });

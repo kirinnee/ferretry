@@ -2,7 +2,8 @@
  * THE BROWSER'S HALF OF DEVICE-KEY ROTATION (`docs/design/zero-trust.md` B6).
  *
  * The daemon says when a device's key is due (`rotateBy`, on the record that accepted the session).
- * Once it has passed, the next step-up must carry a replacement key and that key's proof over the
+ * Once it has passed, the next passkey ceremony — the unlock that opens the app, or a step-up — must
+ * carry a replacement key and that key's proof over the
  * transcript of the session carrying the request — so the replacement can be minted, kept and signed
  * only here, where the session and the key store are both in reach, and never by the ceremony.
  *
@@ -15,12 +16,12 @@
  * - no answer at all → the pending key STAYS, and the carrier tries it once if the old key is refused.
  */
 
-import { type DeviceKeyRotation, StepUpGrantedSchema } from '@ferretry/protocol';
+import { type DeviceKeyRotation, StepUpGrantedSchema, UnlockGrantedSchema } from '@ferretry/protocol';
 import type { PrivateKeyHandle } from '@ferretry/relay';
 import { type DeviceKeyGenerator, type DeviceKeyStore, mintDeviceKey } from './device-keys.ts';
 
-/** The one route a rotation rides, because the daemon's refusal and its acceptance are both there. */
-const STEP_UP_PATH = '/v1/step-up';
+/** The routes a rotation rides: the two passkey ceremonies, because the daemon's refusal and acceptance are there. */
+const ROTATING_PATHS: readonly string[] = ['/v1/step-up', '/v1/unlock'];
 
 /** What a session must offer: when it was told to rotate, and a proof only it can make. */
 export interface RotatingSession {
@@ -58,7 +59,7 @@ export class KeyRotation {
   }
 
   /**
-   * Adds the replacement to a step-up request, when this is one and the session says it is due.
+   * Adds the replacement to an unlock or step-up request, when this is one and the session says it is due.
    *
    * Anything else is returned untouched — another route, a body that is not the JSON object the
    * ceremony wrote, a session that asked for nothing, a `rotateBy` still in the future. An
@@ -72,7 +73,8 @@ export class KeyRotation {
     init: RequestInit,
   ): Promise<AmendedRequest> {
     const unchanged = { init, rotated: false };
-    if ((init.method ?? 'GET').toUpperCase() !== 'POST' || new URL(url).pathname !== STEP_UP_PATH) return unchanged;
+    if ((init.method ?? 'GET').toUpperCase() !== 'POST' || !ROTATING_PATHS.includes(new URL(url).pathname))
+      return unchanged;
     if (!this.#due(session.rotateBy()) || typeof init.body !== 'string') return unchanged;
     let assertion: unknown;
     try {
@@ -92,7 +94,7 @@ export class KeyRotation {
     return { init: { ...init, body: JSON.stringify({ ...assertion, rotation }) }, rotated: true };
   }
 
-  /** Reads the daemon's answer to a step-up that carried a rotation, and settles the pending key. */
+  /** Reads the daemon's answer to an unlock or step-up that carried a rotation, and settles the pending key. */
   async settle(daemonId: string, response: Response): Promise<void> {
     if (response.ok && (await grantedRotation(response))) await this.#store.promotePending(daemonId);
     else await this.#store.discardPending(daemonId);
@@ -121,11 +123,14 @@ export class KeyRotation {
   }
 }
 
-/** Whether a granted step-up says the daemon swapped the key. Read from a copy; the body stays. */
+/** Whether a granted unlock or step-up says the daemon swapped the key. Read from a copy; the body stays. */
 const grantedRotation = async (response: Response): Promise<boolean> => {
   try {
-    const parsed = StepUpGrantedSchema.safeParse(await response.clone().json());
-    return parsed.success && parsed.data.keyRotated === true;
+    const body: unknown = await response.clone().json();
+    const parsed = StepUpGrantedSchema.safeParse(body);
+    if (parsed.success) return parsed.data.keyRotated === true;
+    const unlocked = UnlockGrantedSchema.safeParse(body);
+    return unlocked.success && unlocked.data.keyRotated === true;
   } catch {
     return false;
   }

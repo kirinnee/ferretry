@@ -1640,8 +1640,8 @@ describe('the carrier router meeting a presence requirement', () => {
     should(silent.attempts() + other.attempts()).equal(2);
   });
 
-  it('should still ask for a step-up on the resent request, after presence', async () => {
-    // Arrange — presence first, then the resent request needs a step-up, then it succeeds.
+  it('should still ask for a step-up on the resent request, after the unlock', async () => {
+    // Arrange — the unlock first, then the resent request needs a step-up, then it succeeds.
     const order: string[] = [];
     const { router, attempts } = await unlockRouter(
       attempt =>
@@ -1652,7 +1652,7 @@ describe('the carrier router meeting a presence requirement', () => {
             : { status: 200, body: { ok: true } },
       {
         unlockRequired: async () => {
-          order.push('presence');
+          order.push('unlock');
           return true;
         },
         stepUp: async () => {

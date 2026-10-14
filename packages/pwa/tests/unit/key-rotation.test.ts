@@ -25,6 +25,7 @@ const PAST = '2026-10-01T00:00:00.000Z';
 const FUTURE = '2026-11-01T00:00:00.000Z';
 const ASSERTION = JSON.stringify({ credentialId: 'c', clientDataJSON: 'd', authenticatorData: 'a', signature: 's' });
 const STEP_UP = `${URL_BASE}/v1/step-up`;
+const UNLOCK = `${URL_BASE}/v1/unlock`;
 const POST = { method: 'POST', body: ASSERTION } as const;
 
 const keyPair = async () => {
@@ -88,6 +89,19 @@ describe('amending a step-up with a rotation', () => {
     }
   });
 
+  it('should add the same rotation to an unlock, the first ceremony an overdue device meets', async () => {
+    const store = new MemoryDeviceKeyStore();
+    const session = fakeSession(PAST);
+
+    const amended = await newRotation(store).amend(session, daemon, UNLOCK, POST);
+
+    should(amended.rotated).be.true();
+    const body = JSON.parse(String(amended.init.body)) as Record<string, unknown>;
+    should(DeviceKeyRotationSchema.safeParse(body.rotation).success).be.true();
+    should(store.pending.size).equal(1);
+    should(session.signed).have.length(1);
+  });
+
   it('should treat the instant itself as due', async () => {
     const store = new MemoryDeviceKeyStore();
     const amended = await newRotation(store, Date.parse(PAST)).amend(fakeSession(PAST), daemon, STEP_UP, POST);
@@ -100,6 +114,7 @@ describe('amending a step-up with a rotation', () => {
     const rotation = newRotation(store);
     const cases: [string, RequestInit][] = [
       [`${URL_BASE}/v1/step-up/options`, POST],
+      [`${URL_BASE}/v1/unlock/options`, POST],
       [`${URL_BASE}/v1/passkeys`, POST],
       [STEP_UP, { method: 'GET' }],
       [STEP_UP, {}],
@@ -133,6 +148,20 @@ describe('settling the pending key from the daemon’s answer', () => {
     const { store, pending } = await stored();
     await newRotation(store).settle(daemon.daemonId, granted({ expiresAt: FUTURE, keyRotated: true }));
     should(store.keys.get(daemon.daemonId)).equal(pending.privateKey);
+    should(store.pending.size).equal(0);
+  });
+
+  it('should promote the pending key on an unlock answer that says keyRotated', async () => {
+    const { store, pending } = await stored();
+    await newRotation(store).settle(daemon.daemonId, granted({ unlockedUntil: FUTURE, keyRotated: true }));
+    should(store.keys.get(daemon.daemonId)).equal(pending.privateKey);
+    should(store.pending.size).equal(0);
+  });
+
+  it('should discard it when the unlock was granted without a swap', async () => {
+    const { store, current } = await stored();
+    await newRotation(store).settle(daemon.daemonId, granted({ unlockedUntil: FUTURE }));
+    should(store.keys.get(daemon.daemonId)).equal(current.privateKey);
     should(store.pending.size).equal(0);
   });
 
@@ -206,12 +235,15 @@ const rig = async (
       const rotation = DeviceKeyRotationSchema.safeParse(body?.rotation);
       const proven = rotation.success && (await session.daemon.provesRotation(rotation.data, session.deviceId));
       requests.push({ request, proven });
-      if (request.path !== '/v1/step-up') return { status: 200, body: {} };
+      if (request.path !== '/v1/step-up' && request.path !== '/v1/unlock') return { status: 200, body: {} };
       if (proven && rotation.success && options.swap !== false) accepted.keys = [rotation.data.deviceKey];
       if (options.dropAnswer === true) return 'drop';
       return {
         status: 200,
-        body: { expiresAt: FUTURE, ...(proven && options.swap !== false ? { keyRotated: true } : {}) },
+        body: {
+          ...(request.path === '/v1/unlock' ? { unlockedUntil: FUTURE } : { expiresAt: FUTURE }),
+          ...(proven && options.swap !== false ? { keyRotated: true } : {}),
+        },
       };
     },
   });
@@ -271,6 +303,18 @@ describe('the router carrying a rotation', () => {
     // The old key is gone for good: the NEW one is THE key and nothing is left pending.
     should(test.store.pending.size).equal(0);
     should(test.store.keys.get([...test.store.keys.keys()][0] ?? '')?.extractable).be.false();
+    should(test.accepted.keys).not.eql([test.oldKey.publicKey]);
+  });
+
+  it('should rotate on the unlock that opens the app and promote on its keyRotated', async () => {
+    const test = await rig({ rotateBy: PAST });
+    await test.router.fetch(`${URL_BASE}/v1/fleet`);
+
+    const response = await test.router.fetch(UNLOCK, POST);
+
+    should(await response.json()).match({ keyRotated: true });
+    should(test.requests[1]?.proven).be.true();
+    should(test.store.pending.size).equal(0);
     should(test.accepted.keys).not.eql([test.oldKey.publicKey]);
   });
 

@@ -57,6 +57,46 @@ describe('useStepUpRequest', () => {
     expect(await answer).toBe(false);
   });
 
+  it('says the machine’s own unlock hours on the unlock prompt, and a plain fallback when it cannot be read', async () => {
+    const answering = async (settings: unknown): Promise<string | undefined> => {
+      const store = await createAppStore({
+        repository: new MemoryRepository(),
+        connectClient: async () =>
+          ({
+            request: async (_path: string, schema: { parse: (value: unknown) => unknown }) => {
+              if (settings === undefined) throw new Error('unreadable');
+              return schema.parse(settings);
+            },
+          }) as unknown as FyApiClient,
+        fetcher: async () => Response.json({}),
+      });
+      void store.unlockGate.require(alpha);
+      for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+      const scope = store.unlockGate.snapshot()?.scope;
+      store.unlockGate.dismiss();
+      return scope;
+    };
+
+    expect(
+      await answering({
+        settings: {
+          unlockOnOpen: true,
+          unlockValidityHours: 12,
+          stepUpOnActions: false,
+          stepUpWindowMinutes: 15,
+          deviceKeyRotationDays: 30,
+          idleExpiryDays: 30,
+        },
+        source: 'document',
+        mayWiden: false,
+        widenCommand: 'x',
+      }),
+    ).toBe('It stays unlocked on this device for 12 hours.');
+    expect(await answering(undefined)).toBe(
+      'It stays unlocked on this device for a few hours, as this machine is set.',
+    );
+  });
+
   it('offers nothing outside the app store, so no control is rendered that could never be answered', async () => {
     let ask: Ask = async () => true;
     const view = await mount(<Probe onAsk={value => (ask = value)} />);

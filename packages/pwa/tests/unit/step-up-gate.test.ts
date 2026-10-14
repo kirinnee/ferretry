@@ -350,3 +350,57 @@ describe('naming the act', () => {
     should(gate.snapshot()).equal(before);
   });
 });
+
+describe('what a confirmation buys, read when the prompt opens', () => {
+  const withScope = (scope: (daemon: DaemonConnection) => Promise<string>, ceremony = manualCeremony().ceremony) =>
+    new StepUpGate({ ceremony, describe: reason => `described: ${String(reason)}`, scope });
+
+  it('should read it once for the prompt on screen and keep it through busy and a failure', async () => {
+    const { ceremony, pending } = manualCeremony();
+    const reads: string[] = [];
+    const gate = withScope(async daemon => {
+      reads.push(daemon.daemonId);
+      return 'It stays unlocked for 8 hours.';
+    }, ceremony);
+
+    void gate.require(first);
+    should(gate.snapshot()?.scope).be.undefined();
+    await flush();
+    should(gate.snapshot()?.scope).equal('It stays unlocked for 8 hours.');
+    void gate.confirm();
+    should(gate.snapshot()?.scope).equal('It stays unlocked for 8 hours.');
+    pending[0]?.reject(new Error('no'));
+    await flush();
+
+    should(gate.snapshot()?.failure).equal('described: Error: no');
+    should(gate.snapshot()?.scope).equal('It stays unlocked for 8 hours.');
+    should(reads).eql(['daemon-first']);
+  });
+
+  it('should leave the prompt without a scope when the read fails, and never block the confirmation on it', async () => {
+    const { ceremony, pending } = manualCeremony();
+    const gate = withScope(async () => {
+      throw new Error('offline');
+    }, ceremony);
+
+    const answer = gate.require(first);
+    await flush();
+    should(gate.snapshot()?.scope).be.undefined();
+    void gate.confirm();
+    pending[0]?.resolve();
+
+    should(await answer).be.true();
+  });
+
+  it('should drop a read that lands after the prompt was dismissed', async () => {
+    let release: (scope: string) => void = () => undefined;
+    const gate = withScope(() => new Promise<string>(resolve => (release = resolve)));
+
+    void gate.require(first);
+    gate.dismiss();
+    release('late');
+    await flush();
+
+    should(gate.snapshot()).be.null();
+  });
+});

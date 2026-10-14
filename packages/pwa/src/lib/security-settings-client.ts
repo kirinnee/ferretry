@@ -13,6 +13,7 @@ import {
   type IFyApiClient,
   SECURITY_SETTING_BOUNDS,
   SECURITY_WIDEN_REFUSED_CODE,
+  type SecurityNumberField,
   type SecuritySettingField,
   type SecuritySettingsChange,
   SecuritySettingsChangeSchema,
@@ -23,7 +24,7 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 
-export type NumericSecuritySetting = Exclude<SecuritySettingField, 'unlockOnOpen'>;
+export type NumericSecuritySetting = SecurityNumberField;
 
 /** The only client capability this surface uses. */
 export type SecuritySettingsClient = Pick<IFyApiClient, 'request'>;
@@ -45,6 +46,14 @@ export async function changeSecuritySettings(
   });
 }
 
+/** The line under an unlock prompt: how long the unlock lasts, in the machine's own number. */
+export function unlockStaysSentence(hours: number): string {
+  return `It stays unlocked on this device for ${hours} ${hours === 1 ? 'hour' : 'hours'}.`;
+}
+
+/** The same line when the machine's number could not be read. */
+export const UNLOCK_STAYS_FALLBACK = 'It stays unlocked on this device for a few hours, as this machine is set.';
+
 /** What one setting is called, what it does, and the unit its number is in. */
 export interface SecuritySettingCopy {
   readonly label: string;
@@ -55,7 +64,7 @@ export interface SecuritySettingCopy {
 
 export const SECURITY_SETTING_COPY: Readonly<Record<SecuritySettingField, SecuritySettingCopy>> = {
   stepUpWindowMinutes: {
-    label: 'Passkey confirmation lasts',
+    label: 'A change confirmation lasts',
     explanation: 'How long one passkey confirmation covers changes on this machine. 0 asks every time.',
     unit: { one: 'minute', many: 'minutes' },
   },
@@ -65,14 +74,19 @@ export const SECURITY_SETTING_COPY: Readonly<Record<SecuritySettingField, Securi
     unit: { one: 'day', many: 'days' },
   },
   unlockOnOpen: {
-    label: 'Passkey on opening',
-    explanation: 'Ask for a passkey before the app shows anything from this machine.',
+    label: 'Unlock with a passkey on opening',
+    explanation: 'A device must unlock this machine with its passkey before it can do anything.',
     unit: null,
   },
   unlockValidityHours: {
-    label: 'Opening confirmation lasts',
-    explanation: 'How long one passkey confirmation on opening lasts for a device, across page loads.',
+    label: 'An unlock lasts',
+    explanation: 'How long one unlock lasts for a device, across page loads.',
     unit: { one: 'hour', many: 'hours' },
+  },
+  stepUpOnActions: {
+    label: 'Ask again for each change',
+    explanation: 'Ask for a passkey again before changes, terminals and other sensitive acts, even while unlocked.',
+    unit: null,
   },
   idleExpiryDays: {
     label: 'Unused devices stay paired for',

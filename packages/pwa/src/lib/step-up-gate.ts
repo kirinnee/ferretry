@@ -25,6 +25,8 @@ export interface StepUpPrompt {
   readonly busy: boolean;
   /** One plain sentence for the person, or nothing. */
   readonly failure?: string;
+  /** What this confirmation buys, once the machine has said; until then the prompt's own words stand. */
+  readonly scope?: string;
 }
 
 export interface StepUpGateDependencies {
@@ -32,6 +34,11 @@ export interface StepUpGateDependencies {
   readonly ceremony: (daemon: DaemonConnection) => Promise<void>;
   /** The sentence a person is shown for a ceremony that failed. Never a raw exception. */
   readonly describe: (reason: unknown) => string;
+  /**
+   * What a confirmation on this machine buys, read ONCE when its prompt opens. A read that fails says
+   * nothing: the prompt keeps the words it already has, and a confirmation never waits on it.
+   */
+  readonly scope?: (daemon: DaemonConnection) => Promise<string>;
 }
 
 interface Waiting {
@@ -87,11 +94,12 @@ export class StepUpGate {
   async confirm(): Promise<void> {
     const prompt = this.#prompt;
     if (prompt === null || prompt.busy) return;
-    this.#set({ daemon: prompt.daemon, acts: prompt.acts, busy: true });
+    const { failure: _cleared, ...kept } = prompt;
+    this.#set({ ...kept, busy: true });
     try {
       await this.deps.ceremony(prompt.daemon);
     } catch (reason) {
-      this.#set({ daemon: prompt.daemon, acts: prompt.acts, busy: false, failure: this.deps.describe(reason) });
+      this.#set({ ...kept, busy: false, failure: this.deps.describe(reason) });
       return;
     }
     this.#settle(prompt.daemon.daemonId, true);
@@ -115,6 +123,19 @@ export class StepUpGate {
 
   #show(waiting: Waiting): void {
     this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false });
+    const read = this.deps.scope;
+    if (read === undefined) return;
+    void read(waiting.daemon).then(
+      scope => this.#adopt(waiting, scope),
+      () => undefined,
+    );
+  }
+
+  /** The machine's own words for what a confirmation buys, if its prompt is still the one on screen. */
+  #adopt(waiting: Waiting, scope: string): void {
+    const prompt = this.#prompt;
+    if (prompt === null || this.#waiting.get(waiting.daemon.daemonId) !== waiting) return;
+    this.#set({ ...prompt, scope });
   }
 
   /** A later request on the machine already on screen adds its act to the one prompt, keeping its state. */

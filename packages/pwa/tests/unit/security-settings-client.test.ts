@@ -13,6 +13,8 @@ import {
   changeSecuritySettings,
   DAMAGED_SETTINGS_SENTENCE,
   describeSettingValue,
+  UNLOCK_STAYS_FALLBACK,
+  unlockStaysSentence,
   devicesExpiringSentence,
   fetchSecuritySettings,
   parseSettingDraft,
@@ -25,8 +27,9 @@ import {
 const SETTINGS = {
   stepUpWindowMinutes: 15,
   deviceKeyRotationDays: 30,
-  unlockOnOpen: false,
+  unlockOnOpen: true,
   unlockValidityHours: 8,
+  stepUpOnActions: false,
   idleExpiryDays: 30,
 };
 const VIEW = {
@@ -83,6 +86,12 @@ describe('what a setting says', () => {
     should(describeSettingValue('unlockValidityHours', 1)).equal('1 hour');
   });
 
+  it('should say how long an unlock stays, in the machine’s own number, and when it cannot be read', () => {
+    should(unlockStaysSentence(8)).equal('It stays unlocked on this device for 8 hours.');
+    should(unlockStaysSentence(1)).equal('It stays unlocked on this device for 1 hour.');
+    should(UNLOCK_STAYS_FALLBACK).equal('It stays unlocked on this device for a few hours, as this machine is set.');
+  });
+
   it('should name the command at the machine in the one loosening sentence', () => {
     should(widenAtMachineSentence('fy daemon security set idleExpiryDays 60')).equal(
       'Loosening this can only be done at the machine: run fy daemon security set idleExpiryDays 60.',
@@ -99,6 +108,7 @@ describe('what a setting says', () => {
 
   it('should have copy for every setting and a unit for every number', () => {
     should(SECURITY_SETTING_COPY.unlockOnOpen.unit).be.null();
+    should(SECURITY_SETTING_COPY.stepUpOnActions.unit).be.null();
     should(DAMAGED_SETTINGS_SENTENCE).containEql('strictest');
   });
 });

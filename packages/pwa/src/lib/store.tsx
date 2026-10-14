@@ -57,6 +57,7 @@ import { KeyRotation } from './key-rotation.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
 import { browserCredentials, describeStepUpFailure, unlockCeremony, stepUpCeremony } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
@@ -442,6 +443,15 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       origin: appOrigin,
     }),
     describe: describeStepUpFailure(appOrigin),
+    // The machine's own number, read once as the prompt opens (an exempt route, so it answers before an unlock).
+    scope: async daemon => {
+      try {
+        const view = await fetchSecuritySettings(await clients.client(daemon));
+        return unlockStaysSentence(view.settings.unlockValidityHours);
+      } catch {
+        return UNLOCK_STAYS_FALLBACK;
+      }
+    },
   });
   const carrier = new DaemonCarrierRouter({
     network: fetcher,

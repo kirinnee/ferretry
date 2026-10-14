@@ -117,10 +117,10 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and twenty-seven: forty-four MACHINES frames at each viewport, plus twenty-one other frames
- * at `mobile` and eighteen at `desktop` (44 + 44 + 21 + 18). Of the extras at each viewport, one is the
- * open per-device capabilities disclosure inside Add a device, and two are the Security settings block's
- * loosening sentence and out-of-bounds sentence.
+ * One hundred and twenty-nine: forty-four MACHINES frames at each viewport, plus twenty-two other frames
+ * at `mobile` and nineteen at `desktop` (44 + 44 + 22 + 19). Of the extras at each viewport, one is the
+ * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
+ * shows, and two are the Security settings block's loosening sentence and out-of-bounds sentence.
  *
  * MACHINES, forty-four per viewport: its section, four tab switches, four Settings-tab flows (Import
  * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
@@ -130,7 +130,7 @@ const WALKS_SETTINGS = !(
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
- * The rest, fifteen at both viewports plus the open device-capabilities disclosure at both: three Settings sections (Appearance, Behaviour, Daemons), the
+ * The rest, fifteen at both viewports plus the open device-capabilities disclosure and the unlock screen at both: three Settings sections (Appearance, Behaviour, Daemons), the
  * healthy daemon's Warden and its eight other panels (Security, the passkey panel, among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
@@ -151,7 +151,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 127;
+const SETTINGS_SIDEWAYS_CHECKS = 129;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -2297,6 +2297,18 @@ try {
           const oneDaemonTarget = join(outDir, `settings-daemons-one-${viewport.name}.png`);
           await page.screenshot({ path: oneDaemonTarget });
           process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);
+
+          // THE UNLOCK SCREEN, the first thing a locked machine shows: one sentence, one line on how long
+          // it stays, one button. It is a viewport shot because the dialog is fixed to the viewport.
+          const unlockPromptTarget = join(outDir, `unlock-prompt-${viewport.name}.png`);
+          await page.goto(`${server.url}?unlock-prompt`);
+          const unlockPrompt = page.getByRole('dialog', { name: 'Unlock' });
+          await unlockPrompt.getByText('It stays unlocked on this device for 8 hours.').waitFor({ state: 'visible' });
+          await unlockPrompt.getByRole('button', { name: 'Unlock' }).waitFor({ state: 'visible' });
+          await assertNoSidewaysScroll(page, `the unlock screen at ${viewport.name}`);
+          await page.screenshot({ path: unlockPromptTarget, animations: 'disabled' });
+          process.stdout.write(`📸 unlock screen ${viewport.name} -> ${unlockPromptTarget}\n`);
+          await page.goto(settingsUrl.toString());
 
           // The rest of this pass belongs to the full gallery.
           if (SETTINGS_ONLY) continue;

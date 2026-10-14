@@ -56,6 +56,8 @@ import {
   TranscriptAttachmentGallery,
 } from '../src/components/attachment-gallery.tsx';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
+import { UNLOCK_COPY, StepUpDialog } from '../src/features/step-up/step-up-dialog.tsx';
+import { StepUpGate } from '../src/lib/step-up-gate.ts';
 import { Composer } from '../src/components/composer.tsx';
 import {
   type AccountUsageRow,
@@ -203,6 +205,7 @@ import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore 
 import { DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
+import { unlockStaysSentence } from '../src/lib/security-settings-client.ts';
 import type { StepUpClient } from '../src/lib/step-up-client.ts';
 import { DaemonClientProvider } from '../src/lib/store.tsx';
 import {
@@ -1334,12 +1337,24 @@ const HARNESS_SECURITY: SecuritySettingsView = {
     deviceKeyRotationDays: 30,
     unlockOnOpen: true,
     unlockValidityHours: 8,
+    stepUpOnActions: true,
     idleExpiryDays: 30,
   },
   source: 'document',
   mayWiden: false,
   widenCommand: 'fy daemon security set <field> <value>',
 };
+
+/**
+ * THE UNLOCK PROMPT, as a machine that is locked meets it. Opened only under `?unlock-prompt`, so every
+ * other frame is unchanged; its line reads the hours the way the app does, from the machine's own number.
+ */
+const HARNESS_UNLOCK_GATE = new StepUpGate({
+  ceremony: async () => {},
+  describe: () => 'The passkey did not check out.',
+  scope: async () => unlockStaysSentence(HARNESS_SECURITY.settings.unlockValidityHours),
+});
+if (window.location.search === '?unlock-prompt') void HARNESS_UNLOCK_GATE.require(daemon);
 
 /** The secret store's client: answers the one list the panel reads, and no write. */
 const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
@@ -6180,6 +6195,7 @@ function Shell() {
           onUnlock={async () => {}}
           open={window.location.search === '?attachment-unlock'}
         />
+        <StepUpDialog gate={HARNESS_UNLOCK_GATE} copy={UNLOCK_COPY} machineName={() => 'Studio workstation'} />
       </div>
     </div>
   );

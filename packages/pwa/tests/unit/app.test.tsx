@@ -906,8 +906,9 @@ describe('AppShell', () => {
         settings: {
           stepUpWindowMinutes: 15,
           deviceKeyRotationDays: 30,
-          unlockOnOpen: false,
+          unlockOnOpen: true,
           unlockValidityHours: 8,
+          stepUpOnActions: false,
           idleExpiryDays: 30,
         },
         source: 'defaults',
