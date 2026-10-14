@@ -99,6 +99,8 @@ export interface MachinesSurfaceProps {
    * that it is not set up — so nobody has to hunt for a button (docs/design/account-model.md §4.3).
    */
   readonly onSetUp?: (daemonId: DaemonId) => void;
+  /** It answered with the name it goes by. A pairing made before that name was kept learns it here. */
+  readonly onNamed?: (daemonId: DaemonId, name: string) => void;
   readonly createClient: FleetClientFactory;
   readonly tabs?: MachineTabSurfaces;
 }
@@ -111,19 +113,24 @@ export function MachinesSurface({
   onOpen,
   onAddMachine,
   onSetUp,
+  onNamed,
   createClient,
   tabs = {},
 }: MachinesSurfaceProps) {
   const [reach, setReach] = useState<ReadonlyMap<DaemonId, MachineReach>>(new Map());
   const [listing, setListing] = useState(false);
   const record = connections.find(candidate => candidate.daemonId === daemonId);
+  // Held in a ref so learning a name — which republishes the connections — never restarts a read.
+  const named = useRef(onNamed);
+  named.current = onNamed;
 
   const check = useCallback(
     (connection: DaemonConnectionRecord): void => {
       setReach(current => new Map(current).set(connection.daemonId, { kind: 'checking' }));
-      void readMachineReach(() => createClient(connection)).then(next =>
-        setReach(current => new Map(current).set(connection.daemonId, next)),
-      );
+      void readMachineReach(() => createClient(connection)).then(next => {
+        setReach(current => new Map(current).set(connection.daemonId, next));
+        if (next.kind === 'online') named.current?.(connection.daemonId, next.machine.name);
+      });
     },
     [createClient],
   );

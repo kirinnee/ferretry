@@ -250,16 +250,19 @@ const daemon = daemonConnection({
   daemonId: 'harness-daemon',
   baseUrl: 'https://daemon.invalid/',
   deviceId: 'harness-token',
+  daemonName: 'studio-mac',
 });
 const unreachableDaemon = daemonConnection({
   daemonId: 'unreachable-daemon',
   baseUrl: 'https://offline.example.test',
   deviceId: 'offline-harness-token',
+  daemonName: 'travel-laptop',
 });
 const checkingDaemon = daemonConnection({
   daemonId: 'checking-daemon',
   baseUrl: 'https://checking.example.test',
   deviceId: 'checking-harness-token',
+  daemonName: 'build-runner',
 });
 const HARNESS_SETTINGS_CONNECTIONS = [
   { ...daemon, label: 'Studio workstation', pairedAt: 1, lastSelectedAt: 3 },

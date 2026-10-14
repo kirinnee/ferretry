@@ -49,6 +49,7 @@ interface SurfaceOptions {
   readonly added?: string[];
   readonly tabs?: Parameters<typeof MachinesSurface>[0]['tabs'];
   readonly setUp?: string[];
+  readonly named?: string[];
 }
 
 const surface = (options: SurfaceOptions = {}) => (
@@ -60,6 +61,9 @@ const surface = (options: SurfaceOptions = {}) => (
     onOpen={(id, tab) => options.opened?.push(`${id}:${tab}`)}
     onAddMachine={() => options.added?.push('add')}
     {...(options.setUp === undefined ? {} : { onSetUp: (id: DaemonId) => options.setUp?.push(String(id)) })}
+    {...(options.named === undefined
+      ? {}
+      : { onNamed: (id: DaemonId, name: string) => options.named?.push(`${String(id)}=${name}`) })}
     createClient={options.createClient ?? factory({ studio: machineView() })}
     {...(options.tabs === undefined ? {} : { tabs: options.tabs })}
   />
@@ -289,5 +293,35 @@ describe('MachinesSurface: a machine that is not set up', () => {
     await settle();
     expect(view.container.querySelector('[data-machine-tabs]')).not.toBeNull();
     await view.unmount();
+  });
+});
+
+describe('MachinesSurface learning a machine name', () => {
+  it('reports the name each machine answers with, and nothing for one that does not answer', async () => {
+    // Arrange — the name in `GET /v1/fleet/machine` is the host name, the same one pairing reports.
+    const named: string[] = [];
+    const createClient = factory({
+      studio: machineView({ name: 'studio-host' }),
+      work: machineView({ name: 'work-host' }),
+    });
+
+    // Act
+    const view = await mount(surface({ createClient, named, connections: [studio, work, fresh] }));
+    await settle();
+    await click(view.container, '[data-machine-switcher]');
+    await settle();
+
+    // Assert
+    expect(named.sort()).toEqual(['studio=studio-host', 'work=work-host']);
+  });
+
+  it('reads the machine without anywhere to report the name to', async () => {
+    // Act
+    const asked: string[] = [];
+    await mount(surface({ createClient: factory({ studio: machineView() }, asked) }));
+    await settle();
+
+    // Assert
+    expect(asked).toEqual(['studio']);
   });
 });

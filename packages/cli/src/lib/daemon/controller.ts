@@ -529,6 +529,8 @@ export class DaemonController {
               this.deps.out.warn(
                 `${this.#name} ${verb} is waiting up to ${String(Math.round(waitMs / 1_000))}s for another lifecycle command to finish (${holder})`,
               ),
+            reclaimed: holder =>
+              this.deps.out.warn(`${this.#name} ${verb} removed a lifecycle claim left behind by ${holder}`),
           }),
         );
       }

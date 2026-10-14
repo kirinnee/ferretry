@@ -305,12 +305,15 @@ export class FakeLifecycleLock implements IDaemonLifecycleLockPort {
   residue: string | undefined;
   /** Announced through the caller's own notice, the way a contended first attempt does. */
   holder: string | undefined;
+  /** Announced as removed, the way a claim left by a holder that provably exited is. */
+  abandoned: string | undefined;
 
   acquire(request: DaemonLifecycleClaimRequest): Promise<IDaemonLifecycleClaim> {
     this.requests.push(request);
     if (this.refusal !== undefined && this.requests.length === this.refusalAt) return Promise.reject(this.refusal);
     this.trail.push(`acquire:${request.verb}`);
     if (this.holder !== undefined) request.waiting(this.holder);
+    if (this.abandoned !== undefined) request.reclaimed(this.abandoned);
     return Promise.resolve({
       release: () => {
         this.releasedPaths.push(request.lockPath);

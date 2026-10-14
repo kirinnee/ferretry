@@ -27,6 +27,8 @@ export interface PairingSeed {
 
 export interface PairingResult {
   readonly daemonId: string;
+  /** What the daemon calls its machine — its host name. The name every screen shows, unless the owner relabels it. */
+  readonly daemonName?: string;
   /** Which grant this browser now holds. An identity, not a credential: the device KEY proves it. */
   readonly deviceId: string;
   readonly carriers: readonly DaemonCarrier[];
@@ -193,6 +195,7 @@ export const pairedDaemonConnection = (
     daemonId: actualDaemonId,
     baseUrl: seed.daemonUrl,
     deviceId: result.deviceId,
+    ...(result.daemonName === undefined ? {} : { daemonName: result.daemonName }),
     carriers: published.length === 0 ? [{ kind: 'direct', daemonUrl: seed.daemonUrl }] : published,
   });
 };

@@ -143,6 +143,12 @@ export interface DaemonLifecycleClaimRequest {
   readonly waitMs: number;
   /** Called once when a peer holds the claim, so a wait of that length is visible rather than a hang. */
   readonly waiting: (holder: string) => void;
+  /**
+   * Called when the claim on the name was left by a holder that has PROVABLY exited — killed, crashed
+   * or out of memory — and was removed so this command could run. Said out loud because a claim that
+   * vanished silently would read, to the next person debugging a lifecycle, as one that never existed.
+   */
+  readonly reclaimed: (holder: string) => void;
 }
 
 /** A held lifecycle claim. Released exactly once, by the holder that took it. */

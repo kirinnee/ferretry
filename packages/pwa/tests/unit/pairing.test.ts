@@ -196,6 +196,25 @@ describe('paired daemon connection', () => {
     should(mismatch).throw('pairing response daemon ID does not match its fingerprint');
   });
 
+  it('should keep the name the daemon gave its machine', () => {
+    // Arrange — the response's `daemonName` is the host name; screens show it instead of the address.
+    const seed = pairingSeedFromUrl(
+      'https://app.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A40245;code=7F3K-Q2ND;fp=fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    );
+
+    // Act
+    const actual = pairedDaemonConnection(seed, {
+      daemonId: 'fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+      daemonName: 'workstation',
+      deviceId: 'device-token',
+      carriers: [],
+    });
+
+    // Assert
+    should(actual.daemonName).equal('workstation');
+    should(actual.baseUrl).equal('http://127.0.0.1:40245');
+  });
+
   it('should drop an undialable published carrier rather than fail the whole pairing', () => {
     // Arrange
     const seed = pairingSeedFromUrl(

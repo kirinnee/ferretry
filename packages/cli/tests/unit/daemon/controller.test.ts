@@ -1594,6 +1594,20 @@ describe('daemon lifecycle serialization', () => {
     should(subject.out.text).containEql('owner 4242');
   });
 
+  it('should say so when it removed a claim whose holder had exited', async () => {
+    // Arrange — the e2e case: a `fy daemon start` killed mid-flight left its claim behind.
+    const lifecycle = new FakeLifecycleLock();
+    lifecycle.abandoned = 'start (owner 4242, since 2026-08-06T00:00:00.000Z), which is no longer running';
+    const subject = harness({ lifecycle, probes: [health()] });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(subject.out.text).containEql('fyd start removed a lifecycle claim left behind by start (owner 4242');
+    should(subject.out.text).containEql('which is no longer running');
+  });
+
   it('should name a claim it could not give up, because the next command will be blocked by it', async () => {
     // Arrange
     const lifecycle = new FakeLifecycleLock();

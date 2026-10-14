@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
+import { FY_DEFAULT_DAEMON_PORT, recordedBindAddress } from '@ferretry/protocol';
 import { DISCOVERED_RELAY_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
@@ -482,6 +482,44 @@ describe('the document a settled port is written into', () => {
       carriers: [null, 'bind'],
       port: 9_800,
     });
+  });
+});
+
+describe('where this daemon listens, as the command-line client reads it', () => {
+  it.each([
+    { name: 'the legacy keys', document: { host: '127.0.0.1', port: 9_200 } },
+    { name: 'a bind carrier alone', document: { carriers: [{ kind: 'bind', host: '127.0.0.1', port: 9_201 }] } },
+    {
+      name: 'a bind carrier superseding the legacy keys',
+      document: { host: '127.0.0.2', port: 9_202, carriers: [{ kind: 'bind', host: '127.0.0.3', port: 9_203 }] },
+    },
+    {
+      name: 'a relay-only list beside the legacy keys',
+      document: { port: 9_204, carriers: [{ kind: 'relay', source: 'discovery' }] },
+    },
+    { name: 'an IPv6 bind carrier', document: { carriers: [{ kind: 'bind', host: '::1', port: 9_205 }] } },
+  ])('should agree with the client on $name', ({ document }) => {
+    // THE FACT HAS TWO READERS: this parse decides the socket and the client's tolerant read decides
+    // where every `fy` verb dials. They once disagreed on `carriers` documents and each passed its own
+    // tests, so this asserts the two answers against each other rather than each against a literal.
+    // Act
+    const listens = parseDaemonConfig(document).bindUrl;
+    const dialled = recordedBindAddress(document);
+
+    // Assert
+    should(dialled).equal(listens);
+  });
+
+  it('should agree once a first boot has written its chosen port back', () => {
+    // Arrange — a portless bind carrier: the boot chooses, records, and the client must follow.
+    const document = { port: 7_431, carriers: [{ kind: 'bind', host: '127.0.0.1' }] };
+
+    // Act
+    const recorded = recordedPortDocument(document, 9_300);
+
+    // Assert
+    should(recordedBindAddress(recorded)).equal(parseDaemonConfig(recorded).bindUrl);
+    should(recordedBindAddress(recorded)).equal('http://127.0.0.1:9300');
   });
 });
 

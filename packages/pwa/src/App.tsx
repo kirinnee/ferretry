@@ -564,7 +564,7 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
     <NewSessionPage
       accounts={store.accountPicker}
       connection={connection}
-      machineName={record === undefined ? connection.baseUrl : daemonDisplayName(record)}
+      machineName={daemonDisplayName(record ?? connection)}
       fleet={store.fleet}
       projects={store.projects}
       startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
@@ -1043,6 +1043,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       onRenameDaemon={(daemonId, label) => {
         store.connections.rename(daemonId, label);
       }}
+      onMachineNamed={(daemonId, name) => store.connections.learnDaemonName(daemonId, name)}
       onRemoveDaemon={daemonId => {
         const removedActiveDaemon = daemonId === connection.daemonId;
         store.connections.remove(daemonId);

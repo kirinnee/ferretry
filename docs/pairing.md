@@ -244,8 +244,10 @@ Because the wildcard-plus-`publicUrl` pair is the documented answer rather than 
 `publicUrl` which "is not deliberate" must never fire at the operator who just deliberately added it.
 
 Where a client on the machine **dials** the daemon is a different fact and is read from the recorded
-bind (`recordedBindAddress`), never from `publicUrl`. A wildcard bind resolves to loopback at the
-recorded port. Reading the advertisement there made an operator who followed the remedy unable to run
+bind (`recordedBindAddress`), never from `publicUrl`. "The recorded bind" is the one `declaredBind` names —
+the `carriers` bind entry when there is one, the top-level `host`/`port` otherwise — and the daemon
+asks the same function, so the two ends cannot disagree about which port a `carriers` document means.
+A wildcard bind resolves to loopback at the recorded port. Reading the advertisement there made an operator who followed the remedy unable to run
 `fy pair` at all — the local client classified the daemon on its own desk as remote and refused to send
 the owner-only token, which is the rule working correctly on the wrong input. `FY_URL` still wins
 outright, and a genuinely remote daemon still requires its own `FY_TOKEN`.

@@ -15,10 +15,18 @@ const alpha = daemonConnection({
   baseUrl: 'https://alpha.example.test',
   deviceId: 'alpha-secret',
 });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'beta-secret' });
+const beta = daemonConnection({
+  daemonId: 'beta',
+  baseUrl: 'https://beta.example.test',
+  deviceId: 'beta-secret',
+  daemonName: 'beta-host',
+});
+/** Paired before the daemon's own name was kept: its address is all this browser has. */
+const gamma = daemonConnection({ daemonId: 'gamma', baseUrl: 'https://gamma.example.test', deviceId: 'gamma-secret' });
 const records = [
   { ...alpha, label: 'Studio daemon', pairedAt: 1, lastSelectedAt: 2 },
   { ...beta, pairedAt: 1, lastSelectedAt: 1 },
+  { ...gamma, pairedAt: 1, lastSelectedAt: 0 },
 ] as const;
 
 const LINK =
@@ -116,13 +124,18 @@ describe('PairingScreen with daemons already paired', () => {
 
     expect(screen.container.textContent).toContain('Your daemons');
     expect(screen.container.textContent).toContain('Studio daemon');
+    // An unlabelled machine is named by what it calls itself, with its address beneath — never by its
+    // fingerprint, and never by its address alone when it has said its name.
+    expect(screen.container.textContent).toContain('beta-host');
     expect(screen.container.textContent).toContain('https://beta.example.test');
+    // A pairing with nothing but its address shows that address once, not twice.
+    expect(screen.container.textContent?.split('https://gamma.example.test')).toHaveLength(2);
     expect(screen.container.textContent).not.toContain('alpha-secret');
     expect(screen.container.textContent).not.toContain('beta-secret');
     expect(buttonNamed(screen.container, 'Pair another daemon')).toBeDefined();
 
     const chosen = must(screen.container.querySelector('button[aria-current="true"]'), 'the selected daemon');
-    const forget = must(screen.container.querySelector('button[aria-label="Forget beta"]'), 'the forget control');
+    const forget = must(screen.container.querySelector('button[aria-label="Forget beta-host"]'), 'the forget control');
     await interact(() => (chosen as HTMLButtonElement).click());
     await interact(() => (forget as HTMLButtonElement).click());
     expect(selected).toEqual(['alpha']);

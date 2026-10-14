@@ -9,7 +9,7 @@ import { SettingsPage } from '../../../../src/features/settings/settings-page.ts
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/controls.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { type DaemonId, daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
 import { UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
@@ -43,6 +43,7 @@ interface Callbacks {
   readonly removed: string[];
   readonly added: string[];
   readonly navigated: string[];
+  readonly named?: string[];
 }
 
 const calls = (): Callbacks => ({ selected: [], renamed: [], removed: [], added: [], navigated: [] });
@@ -81,6 +82,9 @@ const page = (options: PageOptions = {}) => {
       createWardenClient={unavailableWardenClient}
       onSelectDaemon={id => callbacks.selected.push(id)}
       onRenameDaemon={(id, label) => callbacks.renamed.push({ id, label })}
+      {...(callbacks.named === undefined
+        ? {}
+        : { onMachineNamed: (id: DaemonId, name: string) => callbacks.named?.push(`${String(id)}=${name}`) })}
       onRemoveDaemon={id => callbacks.removed.push(id)}
       onAddDaemon={() => callbacks.added.push('add')}
       {...(options.routerless === true ? {} : { onNavigate: (to: string) => callbacks.navigated.push(to) })}
@@ -1015,6 +1019,32 @@ describe('SettingsPage Machines section', () => {
     );
     await settle();
     expect(callbacks.navigated).toEqual(['/d/daemon-beta/settings#machines/Beta%20box/runtimes']);
+    await view.unmount();
+  });
+
+  it('passes the name a machine answers with up to the page, so an older pairing learns it', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/runtimes');
+    const callbacks = { ...calls(), named: [] as string[] };
+    const view = await mount(page({ connections: [alpha], createMachineClient: machines, calls: callbacks }));
+    await settle();
+    expect(callbacks.named).toEqual(['daemon-alpha=alpha-host']);
+    await view.unmount();
+  });
+
+  it('still finds a machine a link names by its address, written before it learned its name', async () => {
+    // A pairing that predates keeping the daemon's name was shown, and linked, by its address.
+    window.history.replaceState(
+      {},
+      '',
+      `/d/daemon-alpha/settings#machines/${encodeURIComponent(beta.baseUrl)}/runtimes`,
+    );
+    const callbacks = calls();
+    const view = await mount(
+      page({ connections: [alpha, labelledBeta], createMachineClient: machines, calls: callbacks }),
+    );
+    await settle();
+    expect(callbacks.navigated).toEqual(['/d/daemon-beta/settings#machines/Beta%20box/runtimes']);
+    expect(view.container.querySelector('[data-machine-unknown]')).toBeNull();
     await view.unmount();
   });
 

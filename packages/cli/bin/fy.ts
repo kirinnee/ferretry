@@ -20,6 +20,7 @@ import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
+import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnation';
 import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
@@ -448,7 +449,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     nix: new NixStoreGcRoot(processes),
     // The claim reads the same clock the readiness and shutdown waits do, so the bound a caller waits
     // and the bound a peer may legitimately hold are measured against one source of time.
-    lifecycle: new FileDaemonLifecycleLock(processes, clock),
+    lifecycle: new FileDaemonLifecycleLock(processes, new HostProcessIncarnations(processes), clock),
     installedDaemon: () => resolveDaemonBinary(environment, daemonName),
     retired: new FileRetiredArtifacts(),
     resetTrees: new FileResetTrees(),

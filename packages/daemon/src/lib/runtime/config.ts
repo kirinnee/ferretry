@@ -6,6 +6,7 @@ import {
   ConfiguredAnalyticsPricingSourcesSchema,
   type DaemonCapability,
   daemonAddress,
+  declaredBind,
   decideAdvertisement,
   FY_DEFAULT_DAEMON_PORT,
   isLoopbackHost,
@@ -442,11 +443,6 @@ export function defaultDaemonConfig(): DaemonConfig {
   return parseDaemonConfig({});
 }
 
-/** A raw entry that says it is the listener, read from JSON with no schema anywhere near it. */
-function isWrittenBindCarrier(entry: unknown): entry is Record<string, unknown> {
-  return typeof entry === 'object' && entry !== null && (entry as { readonly kind?: unknown }).kind === 'bind';
-}
-
 /**
  * The document to write when a boot has settled on a port, with that port in the key that DECIDES it.
  *
@@ -480,11 +476,14 @@ export function recordedPortDocument(
   rawDocument: Readonly<Record<string, unknown>>,
   port: number,
 ): Record<string, unknown> {
-  const carriers = rawDocument.carriers;
-  if (!Array.isArray(carriers) || !carriers.some(isWrittenBindCarrier)) return { ...rawDocument, port };
+  // The same rule the reader follows, from the one place both ends ask: see `declaredBind`.
+  const listener = declaredBind(rawDocument);
+  if (listener === rawDocument) return { ...rawDocument, port };
   return {
     ...rawDocument,
-    carriers: carriers.map(entry => (isWrittenBindCarrier(entry) ? { ...entry, port } : entry)),
+    carriers: (rawDocument.carriers as readonly unknown[]).map(entry =>
+      entry === listener ? { ...listener, port } : entry,
+    ),
   };
 }
 

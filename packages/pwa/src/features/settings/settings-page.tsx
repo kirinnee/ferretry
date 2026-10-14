@@ -282,6 +282,8 @@ export interface SettingsPageProps {
   readonly machineTabs?: MachineTabSurfaces;
   readonly onSelectDaemon: (daemonId: DaemonId) => void;
   readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
+  /** A machine answered with the name it goes by, so a pairing that predates keeping it can learn it. */
+  readonly onMachineNamed?: (daemonId: DaemonId, name: string) => void;
   readonly onRemoveDaemon: (daemonId: DaemonId) => void;
   /** Opens the app's existing connection picker and pairing flow. */
   readonly onAddDaemon: () => void;
@@ -322,6 +324,7 @@ export function SettingsPage({
   machineTabs,
   onSelectDaemon,
   onRenameDaemon,
+  onMachineNamed,
   onRemoveDaemon,
   onAddDaemon,
   carrier,
@@ -476,9 +479,15 @@ export function SettingsPage({
    * daemon answers, so a link naming another paired machine is a request to go there — never a way
    * to show this daemon's setup under that name. Two pairings can share a name, so a name this daemon
    * carries is always "here" and cannot bounce between them.
+   *
+   * The machine's ADDRESS still answers for it. A pairing made before the daemon's own name was kept
+   * was shown, and linked, by its address; the moment it learns its name, a link written with the old
+   * spelling would otherwise land on "not paired with this browser" for a machine that is.
    */
   const named =
-    machineRoute.machine === undefined ? [] : connections.filter(c => daemonDisplayName(c) === machineRoute.machine);
+    machineRoute.machine === undefined
+      ? []
+      : connections.filter(c => daemonDisplayName(c) === machineRoute.machine || c.baseUrl === machineRoute.machine);
   const switchTo = named.some(candidate => candidate.daemonId === daemonId) ? undefined : named[0];
   const unknownMachine = machineRoute.machine !== undefined && named.length === 0 ? machineRoute.machine : undefined;
   const go = useCallback(
@@ -659,6 +668,7 @@ export function SettingsPage({
                       onOpen={openMachine}
                       onAddMachine={onAddDaemon}
                       onSetUp={openSetup}
+                      {...(onMachineNamed === undefined ? {} : { onNamed: onMachineNamed })}
                       createClient={createMachineClient}
                       {...(machineTabs ? { tabs: machineTabs } : {})}
                     />

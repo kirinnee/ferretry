@@ -244,3 +244,84 @@ describe('DaemonConnectionStore', () => {
     should(() => store.rename(daemonId('missing'), 'name')).throw('daemon missing is not paired');
   });
 });
+
+describe('the name a paired machine goes by', () => {
+  const named = (id: string, daemonName?: string) =>
+    daemonConnection({
+      daemonId: id,
+      baseUrl: `http://127.0.0.1:4024${id.length}`,
+      deviceId: `token-${id}`,
+      ...(daemonName === undefined ? {} : { daemonName }),
+    });
+
+  it('should keep the name the pairing response carried, and read it back from storage', async () => {
+    // Arrange — the e2e defect: the daemon said its host name at pairing and nothing kept it, so every
+    // screen called the machine "http://127.0.0.1:40245".
+    const repository = new MemoryRepository();
+    const store = new DaemonConnectionStore(undefined, { repository });
+
+    // Act
+    const record = store.add(named('a', '  workstation  '));
+    await store.flush();
+    const reloaded = parseDaemonConnections(repository.writes.at(-1)?.value ?? null);
+
+    // Assert
+    should(record.daemonName).equal('workstation');
+    should(reloaded.connections[0]?.daemonName).equal('workstation');
+    should(
+      parseDaemonConnections(persisted([row('b', 1, { daemonName: '   ' })])).connections[0]?.daemonName,
+    ).be.undefined();
+  });
+
+  it('should keep a learned name across a re-pair that carries none, and take a new one that does', () => {
+    // Arrange
+    const store = new DaemonConnectionStore(undefined, { repository: new MemoryRepository() });
+    store.add(named('a', 'workstation'));
+
+    // Act + Assert
+    should(store.add(named('a')).daemonName).equal('workstation');
+    should(store.add(named('a', 'renamed-host')).daemonName).equal('renamed-host');
+  });
+
+  it('should learn a name from an answer without touching the owner label', async () => {
+    // Arrange — a pairing made before the name was kept.
+    const repository = new MemoryRepository();
+    const store = new DaemonConnectionStore(undefined, { repository });
+    store.add(named('a'), { label: 'Desk' });
+    store.add(named('b'));
+    let notifications = 0;
+    store.subscribe(() => {
+      notifications += 1;
+    });
+
+    // Act
+    const learned = store.learnDaemonName(daemonId('a'), ' workstation ');
+    const again = store.learnDaemonName(daemonId('a'), 'workstation');
+    const blank = store.learnDaemonName(daemonId('b'), '   ');
+    const missing = store.learnDaemonName(daemonId('missing'), 'nowhere');
+    await store.flush();
+
+    // Assert — one change, and only the one field.
+    should(learned?.daemonName).equal('workstation');
+    should(learned?.label).equal('Desk');
+    should(again).equal(learned);
+    should(blank?.daemonName).be.undefined();
+    should(missing).be.undefined();
+    should(notifications).equal(1);
+    should(store.getSnapshot().selectedDaemonId).equal('b');
+    const saved = parseDaemonConnections(repository.writes.at(-1)?.value ?? null);
+    should(saved.connections.find(record => record.daemonId === daemonId('a'))?.daemonName).equal('workstation');
+  });
+
+  it('should keep the name when the daemon replaces its carriers', () => {
+    // Arrange
+    const store = new DaemonConnectionStore(undefined, { repository: new MemoryRepository() });
+    const record = store.add(named('a', 'workstation'));
+
+    // Act
+    const replaced = store.replaceCarriers(record, [{ kind: 'direct', daemonUrl: 'http://127.0.0.1:40249' }]);
+
+    // Assert
+    should(replaced?.daemonName).equal('workstation');
+  });
+});
