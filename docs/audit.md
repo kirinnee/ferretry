@@ -9,12 +9,27 @@ design (`docs/design/zero-trust.md` on `feat/zero-trust`). The wire contract is
 - Two stores under `<FY_HOME>/state/`, each rotated to a `.1.jsonl` sibling when the next record
   would carry it past 1 MiB, so the log is bounded at 4 MiB. Rotation is a rename; nothing is ever
   rewritten in place.
-  - `audit-kept.jsonl` — the **kept** store: only the successes a reader must never lose
-    (`AUDIT_KEPT_EVENTS`: pairings, revocations, key rotations, grant, fleet, secret and security
-    changes, secrets used, terminals opened and typed into).
-  - `audit.jsonl` — the **general** store: everything else, refusals and failures included.
-    A stranger who can only produce refusals therefore can only rotate the general store; the history
-    of who was paired and what changed survives in the kept one.
+  - `audit-kept.jsonl` — the **kept** store: only the successes of a change to who may reach this
+    machine and what they may do there (`AUDIT_KEPT_EVENTS`: pairings, revocations, idle expiries, key
+    rotations, passkeys added, grant changes, secret changes, security-setting changes, warden
+    reconfiguration). Never activity.
+  - `audit.jsonl` — the **general** store: everything else — refusals, failures, and all ACTIVITY
+    (terminal attaches and input, secrets used, agents started or prompted, codes minted, step-ups).
+- **Nothing a paired device does can take a kept record off the disk.** Three rules, together:
+  1. Activity never goes to the kept store, so the cheap things a device repeats at will — re-attaching
+     to a terminal 15,000 times — land in the general store, folded.
+  2. Every caller who is not this machine shares ONE allowance of 50 kept records per UTC day
+     (`AUDIT_KEPT_DAILY_ALLOWANCE`) — one shared allowance, because a device can pair new devices. Past
+     it, the first of each event and actor kind is still kept with `detail.keptAllowanceSpent`, the rest
+     are counted into one kept line when the day ends, and every overspent record is written in full to
+     the general store.
+  3. A device's kept record is written **never-rotating**: if the kept store is full it is refused
+     (and written to the general store, with the operator told in the boot journal) rather than renaming
+     the oldest kept file away. Only this machine's own records rotate the kept store.
+  The flood test (`tests/integration/audit/file-audit-journal.test.ts`, "a flood by a paired device")
+  drives every audited route and socket as a paired device for a simulated week, plus the review's
+  15,000-attach probe, and asserts `device.paired` is still on disk and on the reader's page. Both
+  tests fail against the round-1 code.
 - One `O_APPEND` write per record, synced, mode `0600`. Every open is `O_NOFOLLOW | O_NONBLOCK` and is
   followed by an `fstat` of the handle: anything but a regular file with exactly one link is refused,
   so a FIFO cannot hang the daemon and a hard link cannot redirect the log.
@@ -24,9 +39,12 @@ design (`docs/design/zero-trust.md` on `feat/zero-trust`). The wire contract is
 
 ## Repeats are folded
 
-A refused or failed record, and every `terminal.input` record, opens a 60-second window keyed by
-actor, event and outcome (input: per terminal). The first is written; the rest inside the window are
-counted and written as ONE record with `detail.repeats` when the window closes. A timer in `fyd`
+A refused or failed record opens a 60-second window keyed by actor, event, outcome and carrier — not
+subject, so a flood of random ids is one flood. A SUCCESS of activity opens one keyed by actor, event,
+subject and every detail, so "this phone attached to that terminal" is one line a minute with a count,
+and two acts that differ in anything a reader cares about stay apart. A kept event is never folded.
+The first record of a window is written; the rest are counted and written as ONE record with
+`detail.repeats` when the window closes. A timer in `fyd`
 flushes windows that ran their length, so a burst that stops is still reported, and shutdown flushes
 everything. A flood therefore costs about one line a minute and cannot write its way through the
 bound.
@@ -62,8 +80,14 @@ actor phrases (`this computer`, `a supervising agent`, …).
 | `pairing.code-revoked` | `DELETE /v1/pair/code/:pairingId`                                                 |
 | `device.revoked`       | `DELETE /v1/pair/devices/:deviceId`                                               |
 | `push.changed`         | push subscription enrol and remove                                                |
-| `grants.changed`       | `PATCH /v1/grants`                                                                |
-| `security.changed`     | operator password set, operator unlock                                            |
+| `grants.changed`       | `PATCH /v1/grants`, one device's grants (`PATCH /v1/pair/devices/:deviceId/grants`) |
+| `security.changed`     | `PATCH /v1/security`, an owner re-opening a passkey window                         |
+| `passkey.registered`   | `POST /v1/passkeys`                                                               |
+| `step-up.succeeded`    | a passed step-up or unlock (`detail.action`); `step-up.failed` when refused       |
+| `device.key-rotated`   | `AuditedPairingService.rotateDeviceKey`, inside a step-up                         |
+| `device.expired`       | `AuditedPairingService.revokeDevice` with no actor — the daemon's own idle expiry   |
+| `session.opened`       | `POST /v1/sessions` and a fork — an agent started, folded per device              |
+| `agent.prompted`       | `POST /v1/sessions/:sessionId/send` and `/answer` — folded per device per session  |
 | `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install |
 | `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                |
 | `terminal.input`       | keystroke frames on a terminal stream — counted, never their bytes                |
@@ -76,9 +100,13 @@ actor phrases (`this computer`, `a supervising agent`, …).
 
 Routes are recorded by decorating the finished route and socket tables (`auditedRoutes` and
 `auditedSocketRoutes` in `packages/daemon/src/lib/audit/routes.ts`), so a relayed request is recorded
-exactly like a direct one. `device.expired`, `device.key-rotated`, `session.opened`,
-`step-up.succeeded`, `step-up.failed` and `passkey.registered` are declared in the schema and emitted
-by nothing yet. A step-up is a passkey ceremony, so every reader calls it "Passkey confirmation".
+exactly like a direct one. A step-up is a passkey ceremony, so every reader calls it "Passkey
+confirmation".
+
+**One place for every change.** `state/security-audit.jsonl` and the grant journal (from #464) still
+exist and are still written, but nothing they record is missing here: grant changes, security
+settings, re-opened passkey windows, passkeys added, key rotations, revocations and idle expiries all
+reach this log too. The one exception is declared below.
 
 **Nothing that changes state goes unreviewed.** `tests/unit/runtime/mounts/surface.test.ts` fails when
 a mounted non-`GET` route or a socket is neither audited nor on the reviewed list in
@@ -87,21 +115,35 @@ a mounted non-`GET` route or a socket is neither audited nor on the reviewed lis
 ## GAPs — declared
 
 - A request the authorization boundary refuses **before** its handler runs (missing credential,
-  switched-off grant, wrong credential class) is not recorded.
+  switched-off grant, wrong credential class, a step-up that is required and absent) is not recorded.
+- A passkey assertion whose signature counter did not move (`passkey.counter-refused`, a sign of a
+  cloned authenticator) is written only to the grant journal; it reaches this log only as the
+  `step-up.failed` of the request that carried it.
+- The kept allowance is held in memory, so a daemon restart resets it. Restarting the daemon remotely
+  takes a terminal, and a device with a terminal can already reach the files directly.
+- The `keptOffset` page counts from the newest record, so a change recorded while somebody pages back
+  can repeat one row at a page boundary. It never skips one.
 - `grant-audit.jsonl` and `GET /v1/grants/audit` still exist beside this log; folding them in is
   later work.
 
 ## Reading it
 
-- `GET /v1/audit?limit=N` — newest first, `N` at most 200 (default 50), `operator` minimum and the
-  `pairing.configure` capability. Lines that do not parse are counted in `unreadable`, never dropped.
+- `GET /v1/audit?limit=N&keptOffset=K` — TWO lists, newest first: `kept` (the never-lose records,
+  `N` of them from offset `K`, with `keptTotal`) and `records` (the newest `N` of everything else).
+  They are never interleaved, so no amount of activity pushes a pairing off the page. `N` at most 200
+  (default 50), `operator` minimum and the `pairing.configure` capability. Lines that do not parse are
+  counted in `unreadable`, never dropped.
 - **Why `configure` and not `use`.** The log holds more than the device list — secrets used and
   stored, terminals typed into, settings changed, failed pairings and where they came from. Every
   paired phone needs `pairing.use` to enrol for push, so gating the log there would hand that history
   to any device allowed to manage pairing. Filtering records to what the caller may see was rejected:
   a filtered log reads as a complete one, and the reader could not tell what was withheld.
-- `fy daemon audit [--limit N] [--json]`.
-- The app: Settings › Security, per machine.
+- `fy daemon audit [--limit N] [--kept-skip K] [--json]` — "Security changes" first, with how many
+  older ones there are and the flag that shows them, then "Recent activity".
+- The app: Settings › Security log, per machine — "Security changes" first with "Show older" until every
+  one has been shown, then "Recent activity". Opening it marks a device as seen by the new-device notice
+  only when that device's `device.paired` record was actually rendered; a refused or failed read marks
+  nothing.
 
 ## New-device alerts
 

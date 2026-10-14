@@ -30,6 +30,11 @@ export interface PairingAuditOptions {
  *
  * REFUSALS ARE FOLDED BY `AuditLog`, per carrier per window (see `auditFoldKey`), so a stranger
  * guessing badly on purpose writes one line a minute and cannot rotate the real history away.
+ *
+ * THE TWO CHANGES NO ROUTE MAKES are recorded here too, so the log is the one place every change to who
+ * may reach this machine shows: a device's key replaced inside a step-up (`device.key-rotated`), and a
+ * device the daemon revoked itself for going idle (`device.expired`), which nobody asked for and the
+ * grant journal therefore never records.
  */
 export class AuditedPairingService extends PairingService {
   readonly #audit: PairingAuditOptions;
@@ -49,6 +54,29 @@ export class AuditedPairingService extends PairingService {
         detail: { carrier: carrier.kind },
       });
     return result;
+  }
+
+  override async rotateDeviceKey(id: string, publicKey: string): Promise<boolean> {
+    const rotated = await super.rotateDeviceKey(id, publicKey);
+    if (rotated)
+      await this.#audit.log.record({
+        event: 'device.key-rotated',
+        actor: { kind: 'device', deviceId: id },
+        subject: id,
+        outcome: 'succeeded',
+      });
+    return rotated;
+  }
+
+  /**
+   * A revocation with NO actor is the daemon's own idle expiry — every route names the caller — and
+   * is recorded as `device.expired`. A route's revocation is recorded by the route table instead.
+   */
+  override async revokeDevice(id: string, actor?: string): Promise<boolean> {
+    const removed = await super.revokeDevice(id, actor);
+    if (removed && actor === undefined)
+      await this.#audit.log.record({ event: 'device.expired', actor: { kind: 'host' }, subject: id, outcome: 'succeeded' });
+    return removed;
   }
 }
 

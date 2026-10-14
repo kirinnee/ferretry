@@ -31,9 +31,10 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * `terminal.input` is keystrokes reaching a terminal, FOLDED: one record per terminal per window
  * carrying how many frames arrived, never what they said. The rest name the act on the route that
  * performs it — a secret put or deleted, a pairing code withdrawn, a push enrolment added or removed,
- * the warden reconfigured or run, a browser opened or attached, a worktree removed. `agent.started` is
- * an agent session started or forked and `agent.prompted` a message or an answer handed to one: an
- * agent in auto mode runs commands, so "which device told it what to do" belongs to this history.
+ * the warden reconfigured or run, a browser opened or attached, a worktree removed. `session.opened` is
+ * an agent session started or forked, and `agent.prompted` a message or an answer handed to one: an
+ * agent in auto mode runs commands, so "which device told it what to do" belongs to this history. Both
+ * are activity, folded per device and session per window.
  */
 export const AUDIT_EVENTS = [
   'device.paired',
@@ -59,7 +60,6 @@ export const AUDIT_EVENTS = [
   'warden.ran',
   'browser.opened',
   'worktree.removed',
-  'agent.started',
   'agent.prompted',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);

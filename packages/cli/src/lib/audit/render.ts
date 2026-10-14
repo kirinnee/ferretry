@@ -9,7 +9,7 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'pairing.code-minted': 'A pairing code was made',
   'pairing.code-revoked': 'A pairing code was withdrawn',
   'pairing.refused': 'A pairing attempt was refused',
-  'session.opened': 'A device connected',
+  'session.opened': 'An agent session was started',
   // A step-up is a passkey ceremony, not a password: "Password confirmation" told a reader the wrong
   // thing had been tried.
   'step-up.succeeded': 'Passkey confirmation passed',
@@ -27,7 +27,6 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'warden.ran': 'The supervisor was run',
   'browser.opened': 'A browser was opened',
   'worktree.removed': 'A worktree was removed',
-  'agent.started': 'An agent was started',
   'agent.prompted': 'An agent was given a message',
 };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { AUDIT_EVENTS, type PairedDevice, type PairedDevicesView } from '@ferretry/protocol';
+import { AUDIT_EVENTS, FULL_DEVICE_GRANTS, type PairedDevice, type PairedDevicesView } from '@ferretry/protocol';
 import {
   AUDIT_EVENT_WORDS,
   absoluteWords,
@@ -29,6 +29,7 @@ const device = (id: string, createdAt: string, name = id): PairedDevice => ({
   createdAt,
   lastSeenAt: createdAt,
   idleExpiresAt: createdAt,
+  grants: FULL_DEVICE_GRANTS,
 });
 
 describe('security log words', () => {
@@ -107,6 +108,7 @@ describe('devices this browser has not seen', () => {
     ],
     hostLocal: false,
     thisDeviceId: 'me',
+    mayWiden: FULL_DEVICE_GRANTS,
   };
 
   it('lists only unseen devices, newest first, never this one', () => {

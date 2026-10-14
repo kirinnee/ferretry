@@ -25,6 +25,8 @@ export interface AuditedRouteRule {
   readonly method: string;
   readonly path: string;
   readonly event: AuditEvent;
+  /** The event a refused or failed request is recorded as, when it is not `event` — a failed step-up. */
+  readonly refusedEvent?: AuditEvent;
   /** The path parameter that names what the request acted on. */
   readonly subject?: string;
   /** A subject that is the same for every request — the name of the setting a `security.changed` changed. */
@@ -58,9 +60,39 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'pushId',
     detail: { action: 'remove' },
   },
-  { method: 'POST', path: '/v1/grants/unlock', event: 'security.changed', fixedSubject: 'operator-unlock' },
   { method: 'PATCH', path: '/v1/grants', event: 'grants.changed' },
-  { method: 'PUT', path: '/v1/grants/password', event: 'security.changed', fixedSubject: 'operator-password' },
+  {
+    method: 'PATCH',
+    path: '/v1/pair/devices/:deviceId/grants',
+    event: 'grants.changed',
+    subject: 'deviceId',
+    subjectIsDevice: true,
+    detail: { scope: 'device' },
+  },
+  { method: 'PATCH', path: '/v1/security', event: 'security.changed', fixedSubject: 'security-settings' },
+  { method: 'POST', path: '/v1/passkeys', event: 'passkey.registered' },
+  {
+    method: 'POST',
+    path: '/v1/passkeys/registration-window',
+    event: 'security.changed',
+    fixedSubject: 'passkey-registration-window',
+  },
+  // A confirmation and an unlock are ACTIVITY, not changes: each is a person proving it is them, and a
+  // device can repeat them, so they fold. A refused one is a failed guess and folds like every refusal.
+  {
+    method: 'POST',
+    path: '/v1/step-up',
+    event: 'step-up.succeeded',
+    refusedEvent: 'step-up.failed',
+    detail: { action: 'step-up' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/unlock',
+    event: 'step-up.succeeded',
+    refusedEvent: 'step-up.failed',
+    detail: { action: 'unlock' },
+  },
   { method: 'POST', path: '/v1/fleet/proposals', event: 'fleet.configured', detail: { action: 'propose' } },
   {
     method: 'POST',
@@ -115,11 +147,11 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { action: 'control' },
   },
-  { method: 'POST', path: '/v1/sessions', event: 'agent.started', detail: { action: 'start' } },
+  { method: 'POST', path: '/v1/sessions', event: 'session.opened', detail: { action: 'start' } },
   {
     method: 'POST',
     path: '/v1/sessions/:sessionId/fork',
-    event: 'agent.started',
+    event: 'session.opened',
     subject: 'sessionId',
     detail: { action: 'fork' },
   },
@@ -218,7 +250,7 @@ async function record(
     ...(answer.status === undefined ? {} : { status: answer.status }),
   };
   await subsystem.log.record({
-    event: rule.event,
+    event: outcome === 'succeeded' ? rule.event : (rule.refusedEvent ?? rule.event),
     actor: auditActorOf(credential, actorName),
     ...(answer.subject === undefined || answer.subject === '' ? {} : { subject: answer.subject }),
     outcome,

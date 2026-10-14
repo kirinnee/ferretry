@@ -7,7 +7,7 @@ import {
   type SecurityLogClient,
 } from '../../../../src/features/settings/security-api.ts';
 
-const view: AuditView = { records: [], unreadable: 0 };
+const view: AuditView = { records: [], kept: [], keptTotal: 0, unreadable: 0 };
 
 const recording = () => {
   const paths: string[] = [];
@@ -25,7 +25,8 @@ describe('reading the security log', () => {
     const { client, paths } = recording();
     expect(await readSecurityLog(client)).toBe(view);
     expect(await readSecurityLog(client, 7)).toBe(view);
+    expect(await readSecurityLog(client, 7, 30)).toBe(view);
     expect(SECURITY_LOG_LIMIT).toBe(100);
-    expect(paths).toEqual([`${AUDIT_PATH}?limit=100`, '/v1/audit?limit=7']);
+    expect(paths).toEqual([`${AUDIT_PATH}?limit=100`, '/v1/audit?limit=7', '/v1/audit?limit=7&keptOffset=30']);
   });
 });

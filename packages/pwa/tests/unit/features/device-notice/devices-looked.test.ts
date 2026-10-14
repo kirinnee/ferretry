@@ -71,14 +71,17 @@ describe('which devices this browser has already seen', () => {
     expect(() => rememberDevicesSeen(undefined, ALPHA, new Set(['a']))).not.toThrow();
   });
 
-  it('tells this page about a look, naming only the machine', () => {
+  it('tells this page about a look, naming the machine and the devices shown', () => {
     const seen: DevicesLookedDetail[] = [];
     const listener = (event: Event): void => void seen.push((event as CustomEvent<DevicesLookedDetail>).detail);
     window.addEventListener(DEVICES_LOOKED_EVENT, listener);
-    announceDevicesLooked(ALPHA);
-    announceDevicesLooked(BETA);
+    announceDevicesLooked(ALPHA, ['a']);
+    announceDevicesLooked(BETA, []);
     window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
-    expect(seen).toEqual([{ daemonId: ALPHA }, { daemonId: BETA }]);
+    expect(seen).toEqual([
+      { daemonId: ALPHA, deviceIds: ['a'] },
+      { daemonId: BETA, deviceIds: [] },
+    ]);
   });
 
   it('finds the browser store, or nothing when the property itself throws', () => {

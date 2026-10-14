@@ -562,11 +562,11 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    await api.dispatch(request({ method: 'POST', path: '/v1/pair/code', headers: ADMIN }));
+    await api.dispatch(request({ method: 'POST', path: '/v1/pair/code', headers: ADMIN, loopback: true }));
     await api.dispatch(request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, device: DEVICE }));
-    await api.dispatch(request({ method: 'POST', path: '/v1/sessions/s-1/terminals', headers: ADMIN }));
-    await api.dispatch(request({ method: 'POST', path: '/v1/fleet/proposals/p-1/apply', headers: ADMIN }));
-    await api.dispatch(request({ method: 'GET', path: '/v1/unaudited', headers: ADMIN }));
+    await api.dispatch(request({ method: 'POST', path: '/v1/sessions/s-1/terminals', headers: ADMIN, loopback: true }));
+    await api.dispatch(request({ method: 'POST', path: '/v1/fleet/proposals/p-1/apply', headers: ADMIN, loopback: true }));
+    await api.dispatch(request({ method: 'GET', path: '/v1/unaudited', headers: ADMIN, loopback: true }));
 
     // Assert
     should(records(journal)).deepEqual([
@@ -614,9 +614,9 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    const refused = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, body: '{}' }));
-    const failed = await api.dispatch(request({ method: 'POST', path: '/v1/fleet/login', headers: ADMIN }));
-    await api.dispatch(request({ method: 'POST', path: '/v1/fleet/machine/tools/install', headers: ADMIN }));
+    const refused = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, loopback: true, body: '{}' }));
+    const failed = await api.dispatch(request({ method: 'POST', path: '/v1/fleet/login', headers: ADMIN, loopback: true }));
+    await api.dispatch(request({ method: 'POST', path: '/v1/fleet/machine/tools/install', headers: ADMIN, loopback: true }));
 
     // Assert
     should(refused.status).equal(403);
@@ -636,7 +636,7 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
     const use = async () =>
       await api.dispatch(
-        request({ method: 'POST', path: '/v1/secrets/use', headers: ADMIN, body: '{"command":["echo","hunter2"]}' }),
+        request({ method: 'POST', path: '/v1/secrets/use', headers: ADMIN, loopback: true, body: '{"command":["echo","hunter2"]}' }),
       );
 
     // Act
@@ -689,7 +689,7 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    const changed = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, body: '{}' }));
+    const changed = await api.dispatch(request({ method: 'PATCH', path: '/v1/grants', headers: ADMIN, loopback: true, body: '{}' }));
     const revoked = await api.dispatch(
       request({ method: 'DELETE', path: `/v1/pair/devices/${OTHER_DEVICE_ID}`, device: DEVICE }),
     );
@@ -710,17 +710,36 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    await api.dispatch(request({ method: 'POST', path: '/v1/secrets', headers: ADMIN, body: '{"value":"hunter2"}' }));
-    await api.dispatch(request({ method: 'PUT', path: '/v1/grants/password', headers: ADMIN, body: '{}' }));
-    await api.dispatch(request({ method: 'DELETE', path: '/v1/secrets/API_KEY', headers: ADMIN }));
+    await api.dispatch(request({ method: 'POST', path: '/v1/secrets', headers: ADMIN, loopback: true, body: '{"value":"hunter2"}' }));
+    await api.dispatch(request({ method: 'PATCH', path: '/v1/security', headers: ADMIN, loopback: true, body: '{}' }));
+    await api.dispatch(request({ method: 'DELETE', path: '/v1/secrets/API_KEY', headers: ADMIN, loopback: true }));
 
     // Assert
     should(records(journal).map(record => [record.event, record.subject, record.detail])).deepEqual([
       ['secrets.changed', undefined, { action: 'put', name: 'API_KEY', status: 200 }],
-      ['security.changed', 'operator-password', { status: 200 }],
+      ['security.changed', 'security-settings', { status: 200 }],
       ['secrets.changed', 'API_KEY', { action: 'delete', status: 200 }],
     ]);
     should(journal.lines.join('\n')).not.containEql('hunter2');
+  });
+
+  it('should record a refused step-up or unlock as a failed step-up, and a passed one as passed', async () => {
+    // Arrange
+    let status = 200;
+    const answer: ApiRoute['handle'] = async () => ({ ...jsonResponse({}), status });
+    const { journal, routes } = decorated({ 'POST /v1/step-up': answer, 'POST /v1/unlock': answer });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(request({ method: 'POST', path: '/v1/unlock', device: DEVICE }));
+    status = 403;
+    await api.dispatch(request({ method: 'POST', path: '/v1/step-up', device: DEVICE }));
+
+    // Assert
+    should(records(journal).map(record => [record.event, record.outcome, record.detail?.action])).deepEqual([
+      ['step-up.succeeded', 'succeeded', 'unlock'],
+      ['step-up.failed', 'refused', 'step-up'],
+    ]);
   });
 
   it('should keep a non-JSON body out of the names', async () => {
@@ -731,7 +750,7 @@ describe('auditedRoutes', () => {
     const api = await dispatcher(routes);
 
     // Act
-    await api.dispatch(request({ method: 'POST', path: '/v1/secrets/use', headers: ADMIN }));
+    await api.dispatch(request({ method: 'POST', path: '/v1/secrets/use', headers: ADMIN, loopback: true }));
 
     // Assert
     should(records(journal)[0]?.detail).deepEqual({ status: 200 });
@@ -749,9 +768,9 @@ describe('GET /v1/audit', () => {
     );
 
     // Act
-    const page = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '2']], headers: ADMIN }));
-    const fallback = await api.dispatch(request({ path: '/v1/audit', headers: ADMIN }));
-    const tooMany = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '201']], headers: ADMIN }));
+    const page = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '2']], headers: ADMIN, loopback: true }));
+    const fallback = await api.dispatch(request({ path: '/v1/audit', headers: ADMIN, loopback: true }));
+    const tooMany = await api.dispatch(request({ path: '/v1/audit', query: [['limit', '201']], headers: ADMIN, loopback: true }));
     const warden = await api.dispatch(request({ path: '/v1/audit', headers: WARDEN }));
 
     // Assert
@@ -780,11 +799,11 @@ describe('GET /v1/audit', () => {
 
     // Act
     const first = jsonBody(
-      await api.dispatch(request({ path: '/v1/audit', query: [['limit', '200']], headers: ADMIN })),
+      await api.dispatch(request({ path: '/v1/audit', query: [['limit', '200']], headers: ADMIN, loopback: true })),
     ) as { records: AuditRecord[]; kept: AuditRecord[]; keptTotal: number };
     const paged = jsonBody(
       await api.dispatch(
-        request({ path: '/v1/audit', query: [['limit', '2'], ['keptOffset', '2']], headers: ADMIN }),
+        request({ path: '/v1/audit', query: [['limit', '2'], ['keptOffset', '2']], headers: ADMIN, loopback: true }),
       ),
     ) as { kept: AuditRecord[]; keptTotal: number };
 
@@ -850,12 +869,14 @@ class Devices implements PairingDeviceStore {
   async list(): Promise<readonly PairingDeviceRecord[]> {
     return this.records;
   }
-  async remove(): Promise<boolean> {
-    return false;
+  async remove(id: string): Promise<boolean> {
+    const before = this.records.length;
+    this.records = this.records.filter(record => record.id !== id);
+    return this.records.length < before;
   }
   async touch(): Promise<void> {}
-  async rotateKey(): Promise<boolean> {
-    return false;
+  async rotateKey(id: string): Promise<boolean> {
+    return this.records.some(record => record.id === id);
   }
   async setGrants(): Promise<boolean> {
     return false;
@@ -932,6 +953,29 @@ function relayed(service: AuditedPairingService, attempt: Attempt) {
 }
 
 describe('AuditedPairingService', () => {
+  it('should record a replaced key and an idle expiry, the two changes no route makes', async () => {
+    // Arrange
+    const { journal, service, tick } = pairing();
+    service.mint();
+    await direct(service, { code: CODE, deviceName: 'Pixel 8' }, 'peer');
+
+    // Act
+    const rotated = await service.rotateDeviceKey(FIRST_DEVICE, DEVICE_KEY);
+    const unknown = await service.rotateDeviceKey('fy_device_id_nobody', DEVICE_KEY);
+    const none = await service.expireIdleDevices();
+    tick(400 * 86_400_000);
+    const expired = await service.expireIdleDevices();
+
+    // Assert
+    should([rotated, unknown, none, expired]).deepEqual([true, false, 0, 1]);
+    should(records(journal).map(record => [record.event, record.actor.kind, record.subject])).deepEqual([
+      ['device.paired', 'device', FIRST_DEVICE],
+      ['device.key-rotated', 'device', FIRST_DEVICE],
+      ['device.expired', 'host', FIRST_DEVICE],
+    ]);
+    should(journal.stores).deepEqual(['kept', 'kept', 'kept']);
+  });
+
   it('should record a direct pairing by id and name, and alert the others', async () => {
     // Arrange
     const { journal, alerts, service } = pairing();

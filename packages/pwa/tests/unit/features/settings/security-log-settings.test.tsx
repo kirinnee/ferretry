@@ -15,7 +15,7 @@ import {
 } from '../../../../src/features/settings/security-log-settings.tsx';
 import { SETTINGS_LINKS, settingsPaletteEntries } from '../../../../src/features/settings/settings-catalog.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { mount, must } from '../../../support/dom.ts';
+import { interact, mount, must } from '../../../support/dom.ts';
 import { settleUntil } from '../../../support/settle.ts';
 import { runAsync } from '../../../support/react.ts';
 
@@ -58,7 +58,15 @@ class HttpRefusal extends Error {
   }
 }
 
-describe('Settings › Security', () => {
+const empty = (overrides: Partial<AuditView> = {}): AuditView => ({
+  records: [],
+  kept: [],
+  keptTotal: 0,
+  unreadable: 0,
+  ...overrides,
+});
+
+describe('Settings › Security log', () => {
   it('lists the log newest first, in words, with a badge only where something was refused', async () => {
     const view: AuditView = {
       records: [
@@ -70,6 +78,8 @@ describe('Settings › Security', () => {
         }),
         record({ event: 'grants.changed', actor: { kind: 'warden' }, outcome: 'failed', at: 'garbled' }),
       ],
+      kept: [],
+      keptTotal: 0,
       unreadable: 0,
     };
     const shown = await mount(
@@ -92,11 +102,103 @@ describe('Settings › Security', () => {
     await shown.unmount();
   });
 
+  it('shows the security changes first, apart from the activity, and pages back through older ones', async () => {
+    const paired = (id: string) =>
+      record({ event: 'device.paired', subject: id, actor: { kind: 'device', deviceId: id, deviceName: id } });
+    const offsets: string[] = [];
+    let olderFails = true;
+    const createClient: SecurityLogClientFactory = async () => ({
+      request: (async (path: string) => {
+        offsets.push(path);
+        if (!path.includes('keptOffset')) return empty({
+          kept: [paired('fy_device_id_new000'), record({ event: 'grants.changed', outcome: 'succeeded' })],
+          keptTotal: 3,
+          records: Array.from({ length: 3 }, () => record({ event: 'pairing.code-minted' })),
+        });
+        if (olderFails) throw new Error('');
+        return empty({ kept: [paired('fy_device_id_old000')], keptTotal: 3 });
+      }) as SecurityLogClient['request'],
+    });
+    const seen: DevicesLookedDetail[] = [];
+    const listener = (event: Event): void => void seen.push((event as CustomEvent<DevicesLookedDetail>).detail);
+    window.addEventListener(DEVICES_LOOKED_EVENT, listener);
+    const shown = await mount(<SecurityLogSurface connection={alpha} createClient={createClient} now={now} />);
+    await settled(shown.container, '[data-security-log-panel]');
+
+    const sections = [...shown.container.querySelectorAll('[data-security-log-section]')];
+    expect(sections.map(section => section.getAttribute('data-security-log-section'))).toEqual(['kept', 'activity']);
+    const rows = () => [...shown.container.querySelectorAll('[data-security-log-event]')].map(row => row.getAttribute('data-security-log-event'));
+    expect(rows()).toEqual(['device.paired', 'grants.changed', 'pairing.code-minted', 'pairing.code-minted', 'pairing.code-minted']);
+    const older = must(shown.container.querySelector<HTMLButtonElement>('[data-security-log-older]'), 'show older');
+    expect(older.textContent).toBe('Show older (1 more)');
+
+    // A page that fails says so, keeps the button, and marks nothing.
+    await interact(() => older.click());
+    await settled(shown.container, '[data-security-log-older-failed]');
+    expect(shown.container.querySelector('[data-security-log-older-failed]')?.textContent).toBe(
+      'The older changes could not be read.',
+    );
+    olderFails = false;
+    await interact(() => must(shown.container.querySelector<HTMLButtonElement>('[data-security-log-older]'), 'retry').click());
+    await settleUntil(() => shown.container.querySelector('[data-security-log-older]') === null, 'every change shown', runAsync);
+    expect(rows().slice(0, 3)).toEqual(['device.paired', 'grants.changed', 'device.paired']);
+    expect(offsets).toEqual(['/v1/audit?limit=100', '/v1/audit?limit=100&keptOffset=2', '/v1/audit?limit=100&keptOffset=2']);
+    window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
+    // Each look names exactly the pairings that page put on screen.
+    expect(seen).toEqual([
+      { daemonId: alpha.daemonId, deviceIds: ['fy_device_id_new000'] },
+      { daemonId: alpha.daemonId, deviceIds: ['fy_device_id_old000'] },
+    ]);
+    await shown.unmount();
+  });
+
+  it('marks nothing as looked when the read is refused', async () => {
+    const seen: DevicesLookedDetail[] = [];
+    const listener = (event: Event): void => void seen.push((event as CustomEvent<DevicesLookedDetail>).detail);
+    window.addEventListener(DEVICES_LOOKED_EVENT, listener);
+    const shown = await mount(
+      <SecurityLogSurface
+        connection={alpha}
+        createClient={answering(async () => {
+          throw new HttpRefusal('no', 403);
+        })}
+        now={now}
+      />,
+    );
+    await settled(shown.container, '[data-security-log-refused]');
+    window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
+    expect(seen).toEqual([]);
+    await shown.unmount();
+  });
+
+  it('shows an empty section in words when only the other one has records', async () => {
+    const onlyKept = await mount(
+      <SecurityLogSurface
+        connection={alpha}
+        createClient={answering(async () => empty({ kept: [record()], keptTotal: 1 }))}
+        now={now}
+      />,
+    );
+    await settled(onlyKept.container, '[data-security-log-panel]');
+    expect(onlyKept.container.textContent).toContain('Recent activityNone yet.');
+    await onlyKept.unmount();
+    const onlyActivity = await mount(
+      <SecurityLogSurface
+        connection={alpha}
+        createClient={answering(async () => empty({ records: [record({ event: 'terminal.opened' })] }))}
+        now={now}
+      />,
+    );
+    await settled(onlyActivity.container, '[data-security-log-panel]');
+    expect(onlyActivity.container.textContent).toContain('Security changesNone yet.');
+    await onlyActivity.unmount();
+  });
+
   it('says the history has gaps, and says an empty log is empty', async () => {
     const shown = await mount(
       <SecurityLogSurface
         connection={alpha}
-        createClient={answering(async () => ({ records: [], unreadable: 2 }))}
+        createClient={answering(async () => empty({ unreadable: 2 }))}
         now={now}
       />,
     );
@@ -171,7 +273,7 @@ describe('Settings › Security', () => {
     await silent.unmount();
   });
 
-  it('marks the devices looked at for this machine on open, and never shows another machine’s log', async () => {
+  it('marks nothing as looked until a log loads, and never shows another machine’s log', async () => {
     const seen: DevicesLookedDetail[] = [];
     const listener = (event: Event): void => void seen.push((event as CustomEvent<DevicesLookedDetail>).detail);
     window.addEventListener(DEVICES_LOOKED_EVENT, listener);
@@ -181,19 +283,20 @@ describe('Settings › Security', () => {
         ? await new Promise<AuditView>(resolve => {
             releaseAlpha = resolve;
           })
-        : { records: [record({ event: 'terminal.opened' })], unreadable: 0 },
+        : empty({ records: [record({ event: 'terminal.opened' })] }),
     );
     const shown = await mount(<SecurityLogSurface connection={alpha} createClient={createClient} now={now} />);
     expect(shown.container.textContent).toContain('Reading this machine’s security log');
     await shown.render(<SecurityLogSurface connection={beta} createClient={createClient} now={now} />);
     await settled(shown.container, '[data-security-log-panel]');
     // Alpha's answer arrives late, after the reader moved to beta, and is dropped.
-    await runAsync(async () => releaseAlpha({ records: [record({ event: 'secrets.used' })], unreadable: 0 }));
+    await runAsync(async () => releaseAlpha(empty({ records: [record({ event: 'secrets.used' })] })));
     expect(shown.container.querySelector('[data-security-log-event]')?.getAttribute('data-security-log-event')).toBe(
       'terminal.opened',
     );
     window.removeEventListener(DEVICES_LOOKED_EVENT, listener);
-    expect(seen).toEqual([{ daemonId: alpha.daemonId }, { daemonId: beta.daemonId }]);
+    // Only beta's log loaded while it was shown, and it held no pairing: nothing is marked seen.
+    expect(seen).toEqual([{ daemonId: beta.daemonId, deviceIds: [] }]);
     await shown.unmount();
   });
 
@@ -204,7 +307,7 @@ describe('Settings › Security', () => {
         ? await new Promise<SecurityLogClient>((_, reject) => {
             failAlpha = reject;
           })
-        : { request: (async () => ({ records: [], unreadable: 0 })) as SecurityLogClient['request'] };
+        : { request: (async () => empty()) as SecurityLogClient['request'] };
     const shown = await mount(<SecurityLogSurface connection={alpha} createClient={createClient} now={now} />);
     await shown.render(<SecurityLogSurface connection={beta} createClient={createClient} now={now} />);
     await settled(shown.container, '[data-security-log-panel]');
@@ -214,7 +317,7 @@ describe('Settings › Security', () => {
   });
 
   it('is offered as a daemon panel and in the palette', async () => {
-    const tab = securityLogSettingsTab(answering(async () => ({ records: [], unreadable: 0 })));
+    const tab = securityLogSettingsTab(answering(async () => empty()));
     expect(tab.id).toBe('security-log');
     expect(tab.label).toBe('Security log');
     const shown = await mount(<tab.Surface connection={alpha} />);

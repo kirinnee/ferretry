@@ -1,6 +1,6 @@
 import '../../../support/dom.ts';
 import { describe, expect, it } from 'bun:test';
-import { auditShortId, type PairedDevice, type PairedDevicesView } from '@ferretry/protocol';
+import { auditShortId, FULL_DEVICE_GRANTS, type PairedDevice, type PairedDevicesView } from '@ferretry/protocol';
 import {
   announceDevicesLooked,
   type DevicesLookedStorage,
@@ -47,6 +47,7 @@ const device = (key: string, createdAt: string, name = key): PairedDevice => ({
   createdAt,
   lastSeenAt: createdAt,
   idleExpiresAt: createdAt,
+  grants: FULL_DEVICE_GRANTS,
 });
 
 const memory = (
@@ -90,7 +91,7 @@ const pool = (machines: Record<string, Machine | 'unreachable'>): NewDeviceNotic
 });
 
 const machine = (devices: PairedDevice[], thisDeviceId = did('me')): Machine => ({
-  view: { devices, hostLocal: false, thisDeviceId },
+  view: { devices, hostLocal: false, thisDeviceId, mayWiden: FULL_DEVICE_GRANTS },
   revoked: [],
   reads: { count: 0 },
 });
@@ -162,7 +163,7 @@ describe('the new-device notice', () => {
     const shown = await mount(
       <NewDeviceNotices connections={[alpha]} clients={pool({ alpha: 'unreachable' })} storage={storage} now={now} />,
     );
-    await interact(() => announceDevicesLooked(alpha.daemonId));
+    await interact(() => announceDevicesLooked(alpha.daemonId, [did('phone')]));
     expect(storedAlpha(storage)).toEqual([]);
     await shown.unmount();
   });
@@ -328,24 +329,28 @@ describe('the new-device notice', () => {
     await shown.unmount();
   });
 
-  it('hides a machine’s notice when Security marks it looked, and leaves other machines alone', async () => {
+  it('hides only the devices Security actually showed, and leaves other machines alone', async () => {
     const storage = memory({ ...seenAlpha(), [devicesLookedKey(beta.daemonId)]: '[]' });
     const shown = await mount(
       <NewDeviceNotices
         connections={[alpha, beta]}
         clients={pool({
-          alpha: machine([device('phone', ago(5 * MINUTE))]),
+          alpha: machine([device('phone', ago(5 * MINUTE)), device('stranger', ago(6 * MINUTE))]),
           beta: machine([device('laptop', ago(5 * MINUTE))]),
         })}
         storage={storage}
         now={now}
       />,
     );
-    await until(() => shown.container.querySelectorAll('[data-new-device]').length === 2, 'both notices');
+    await until(() => shown.container.querySelectorAll('[data-new-device]').length === 3, 'every notice');
     expect(shown.container.textContent).toContain('was paired with https://beta.example.test');
-    await interact(() => announceDevicesLooked(alpha.daemonId));
+    // A look that showed nothing marks nothing; one that showed the phone's pairing — and an id the
+    // notice never read — marks the phone alone. The stranger, whose pairing was not shown, stays news.
+    await interact(() => announceDevicesLooked(alpha.daemonId, []));
+    expect(shown.container.querySelectorAll('[data-new-device]')).toHaveLength(3);
+    await interact(() => announceDevicesLooked(alpha.daemonId, [did('phone'), did('never-listed')]));
     const left = [...shown.container.querySelectorAll('[data-new-device]')].map(n => n.getAttribute('data-new-device'));
-    expect(left).toEqual([did('laptop')]);
+    expect(left).toEqual([did('stranger'), did('laptop')]);
     expect(storedAlpha(storage)).toEqual([did('phone')]);
     await shown.unmount();
   });
