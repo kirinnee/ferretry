@@ -516,3 +516,110 @@ describe('useReleaseIntegrity', () => {
     probe.unmount();
   });
 });
+
+describe('startReleaseIntegrity · every machine’s push worker is audited too', () => {
+  const ORIGIN = 'https://app.example.test';
+  const pushRegistration = (daemon: string, parts: Parameters<typeof registration>[0]) => {
+    const made = registration(parts);
+    return { ...made, registration: { ...made.registration, scope: `${ORIGIN}/push/${daemon}/` } };
+  };
+
+  const begin = (registrations: unknown[] | (() => Promise<readonly unknown[]>), answer: Answer) => {
+    const root = registration({ active: worker(`${ORIGIN}/sw.verified.js`) });
+    const container: ReleaseContainerLike = {
+      controller: {},
+      ready: Promise.resolve(root.registration),
+      getRegistrations: typeof registrations === 'function' ? registrations : async () => registrations,
+    };
+    const page = doc();
+    const asking = asker(answer);
+    const notices: ReleaseNotice[] = [];
+    const stop = startReleaseIntegrity({
+      container,
+      doc: page.doc,
+      ask: asking.ask,
+      onNotice: notice => notices.push(notice),
+      onUpdateReady: () => undefined,
+    });
+    return { page, asking, notices, stop };
+  };
+
+  const audits = (asked: { worker: string; message: ReleaseRequestMessage }[]) =>
+    asked.filter(entry => entry.message.type === 'fy-release-audit-worker').map(entry => entry.message);
+
+  it('audits each push worker’s scripts, alarms on an unsigned one, and skips the app-wide registration', async () => {
+    const work = pushRegistration('work', { active: worker(`${ORIGIN}/sw.verified.js?machine=Work`) });
+    const home = pushRegistration('home', { waiting: worker(`${ORIGIN}/evil.js?machine=Home`) });
+    const app = { ...registration({ active: worker(`${ORIGIN}/sw.verified.js`) }).registration, scope: `${ORIGIN}/` };
+    const subject = begin([work.registration, home.registration, app, 'nonsense', null], (_worker, message) =>
+      message.type === 'fy-release-audit-worker'
+        ? { type: 'fy-release-worker-audit', signed: !message.scriptUrl.includes('evil') }
+        : null,
+    );
+    await settle();
+
+    should(audits(subject.asking.asked)).eql([
+      { type: 'fy-release-audit-worker', scriptUrl: `${ORIGIN}/sw.verified.js?machine=Work` },
+      { type: 'fy-release-audit-worker', scriptUrl: `${ORIGIN}/evil.js?machine=Home` },
+    ]);
+    should(subject.notices).eql([{ kind: 'unsigned-worker' }]);
+    should(work.count('updatefound')).equal(1);
+
+    // A new install in a machine's worker is audited the moment it starts.
+    work.registration.installing = worker(`${ORIGIN}/sw.verified.js?machine=Work%202`);
+    work.fire('updatefound');
+    await settle();
+    should(audits(subject.asking.asked).at(-1)).eql({
+      type: 'fy-release-audit-worker',
+      scriptUrl: `${ORIGIN}/sw.verified.js?machine=Work%202`,
+    });
+
+    // Seen again when the tab returns: audited, not listened to twice.
+    subject.page.fire('visibilitychange');
+    await settle();
+    should(work.count('updatefound')).equal(1);
+
+    subject.stop();
+    should(work.count('updatefound')).equal(0);
+  });
+
+  it('carries on when the browser will not list its registrations, or has no such call', async () => {
+    const refusing = begin(
+      async () => {
+        throw new Error('denied');
+      },
+      () => null,
+    );
+    await settle();
+    should(refusing.notices).eql([]);
+    refusing.stop();
+
+    const root = registration({ active: worker(`${ORIGIN}/sw.verified.js`) });
+    const stop = startReleaseIntegrity({
+      container: { controller: {}, ready: Promise.resolve(root.registration) },
+      doc: doc().doc,
+      ask: async () => null,
+      onNotice: () => undefined,
+      onUpdateReady: () => undefined,
+    });
+    await settle();
+    stop();
+  });
+
+  it('stops listing once it is stopped', async () => {
+    let release: (value: readonly unknown[]) => void = () => undefined;
+    const work = pushRegistration('work', { active: worker(`${ORIGIN}/sw.verified.js?machine=Work`) });
+    const subject = begin(
+      () =>
+        new Promise(resolve => {
+          release = resolve;
+        }),
+      () => null,
+    );
+    await settle();
+    subject.stop();
+    release([work.registration]);
+    await settle();
+    should(work.count('updatefound')).equal(0);
+  });
+});

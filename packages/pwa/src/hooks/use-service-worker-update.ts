@@ -31,6 +31,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { trustedWorkerUrl } from '../lib/trusted-types.ts';
 import type { UpdateReason } from '../shell/app-bar.tsx';
 
 /** Releases name a static asset, so the shape is checked before it becomes a URL. */
@@ -250,7 +251,7 @@ export const startWorkerLifecycle = (deps: WorkerLifecycleDeps): (() => void) =>
   };
 
   void container
-    .register(workerUrl(release, basePath), { scope: workerScope(basePath) })
+    .register(trustedWorkerUrl(workerUrl(release, basePath)), { scope: workerScope(basePath) })
     .then(registered => {
       // Unmounted while registration was in flight: attaching listeners now would
       // leak them, because the cleanup has already run.

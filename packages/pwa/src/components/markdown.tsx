@@ -42,6 +42,7 @@ import remarkGfm from 'remark-gfm';
 import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.ts';
 import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender, remarkFyRenderFences } from '../lib/fy-render.ts';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
+import { trustedHighlight } from '../lib/trusted-types.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
   type AgentReferenceResolver,
@@ -429,8 +430,11 @@ export const Markdown = memo(function Markdown({
               // IT registered — which escapes the source it tokenizes — or null,
               // and the branch above covers every input it refused. Fence text is
               // never forwarded as markup.
-              // biome-ignore lint/security/noDangerouslySetInnerHtml: highlighted output is the registry's own escaped markup; every refusal is handled above
-              <code className={`hljs language-${language}`} dangerouslySetInnerHTML={{ __html: html }} />
+              <code
+                className={`hljs language-${language}`}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: highlighted output is the registry's own escaped markup, through the fy-highlight Trusted Types policy; every refusal is handled above
+                dangerouslySetInnerHTML={{ __html: trustedHighlight(html) }}
+              />
             );
           },
           // THE ONE PLACE AN ILLUSTRATION CAN APPEAR, and it is a replacement

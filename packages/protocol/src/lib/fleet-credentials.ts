@@ -126,8 +126,10 @@ export const FleetCredentialViewSchema = z.strictObject({
    * labels (E26). A surface asks for a label rather than showing two identical rows.
    */
   needsLabel: z.boolean(),
-  /** Set by Clone on an empty slot: the machine it was copied from. */
+  /** Set by Clone on an empty slot: the machine it was copied from, by the name it gave itself. */
   clonedFrom: NonEmptyStringSchema.optional(),
+  /** That machine's daemon id as the copying browser reported it, so a surface can name it by its own label. */
+  clonedFromDaemon: NonEmptyStringSchema.optional(),
   /** `store: host`: "Shared with claude in your terminal" (C4). */
   sharedWithTerminal: z.boolean(),
   status: FleetCredentialStatusSchema,

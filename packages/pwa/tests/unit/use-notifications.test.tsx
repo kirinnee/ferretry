@@ -25,7 +25,7 @@ import {
   PUSH_INACTIVE_MESSAGE,
   PUSH_UNSUPPORTED_MESSAGE,
   type PushEnrolment,
-  type PushRegistrationLike,
+  type MachinePushRegistrationLike,
   type PushSubscriptionHandle,
 } from '../../src/lib/push-enrolment.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -108,13 +108,19 @@ const subscriptionHandle = (): PushSubscriptionHandle => ({
 });
 
 const enrolment = (): PushEnrolment => {
-  const registration: PushRegistrationLike = {
+  const registration: MachinePushRegistrationLike = {
     pushManager: {
       getSubscription: async () => subscriptionHandle(),
       subscribe: async () => subscriptionHandle(),
     },
+    unregister: async () => true,
   };
-  return { registration: async () => registration, deviceName: () => 'this browser' };
+  return {
+    register: async () => registration,
+    existing: async () => registration,
+    shared: async () => null,
+    deviceName: () => 'this browser',
+  };
 };
 
 /** What reached the OS: the title and the presentation data a click resolves. */

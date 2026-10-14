@@ -16,12 +16,19 @@
  * (`docs/pwa-release-signing.md`). `onUnsignedWorker` is the seam the daemon's audit log attaches
  * to; nothing records it yet.
  *
+ * EVERY COPY OF THE WORKER, NOT ONLY THE PAGE'S. Each paired machine has its own registration of the
+ * same signed file for its push subscription (`lib/push-scope.ts`). Those copies show notifications and
+ * open pages, so a replaced one is as bad as a replaced app-wide one: each is audited the same way —
+ * its active, waiting and installing scripts when the tab starts or becomes visible, and every new
+ * install as it begins.
+ *
  * Every browser surface is injected, exactly as in `use-service-worker-update.ts`, so each branch is
  * provable without a browser.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ReleaseOutcome, ReleaseReplyMessage, ReleaseRequestMessage } from '../lib/release-keeper.ts';
+import { isPushScope } from '../lib/push-scope.ts';
 import { parseReleaseReply } from '../lib/release-keeper.ts';
 import type { ReleaseRefusal } from '../lib/release-verification.ts';
 import type { UpdateReason } from '../shell/app-bar.tsx';
@@ -47,7 +54,16 @@ export interface ReleaseRegistrationLike extends ListenerTarget {
 export interface ReleaseContainerLike {
   readonly controller: unknown;
   readonly ready: Promise<ReleaseRegistrationLike>;
+  /** Every registration on this origin, so each machine's push worker is audited too. */
+  readonly getRegistrations?: () => Promise<readonly unknown[]>;
 }
+
+const isPushRegistration = (value: unknown): value is ReleaseRegistrationLike & { readonly scope: string } =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as { scope?: unknown }).scope === 'string' &&
+  isPushScope((value as { scope: string }).scope) &&
+  typeof (value as { addEventListener?: unknown }).addEventListener === 'function';
 
 /** One port pair, as `MessageChannel` makes it. */
 export interface ReleaseChannelLike {
@@ -137,6 +153,22 @@ export const startReleaseIntegrity = (deps: ReleaseIntegrityDeps): (() => void) 
     onUnsignedWorker?.({ scriptUrl: candidate.scriptURL });
   };
 
+  const watched = new Set<unknown>();
+  const watchPushWorkers = async (): Promise<void> => {
+    const all = (await container.getRegistrations?.().catch(() => [])) ?? [];
+    for (const push of all) {
+      if (cancelled || !isPushRegistration(push)) continue;
+      void audit(push.active);
+      void audit(push.waiting);
+      void audit(push.installing);
+      if (watched.has(push)) continue;
+      watched.add(push);
+      const onPushUpdateFound = (): void => void audit(push.installing);
+      push.addEventListener('updatefound', onPushUpdateFound);
+      cleanups.push(() => push.removeEventListener('updatefound', onPushUpdateFound));
+    }
+  };
+
   void container.ready.then(ready => {
     if (cancelled) return;
     registration = ready;
@@ -146,10 +178,13 @@ export const startReleaseIntegrity = (deps: ReleaseIntegrityDeps): (() => void) 
     void audit(ready.installing);
     void audit(ready.waiting);
     void check();
+    void watchPushWorkers();
   });
 
   const onVisibility = (): void => {
-    if (doc.visibilityState === 'visible') void check();
+    if (doc.visibilityState !== 'visible') return;
+    void check();
+    void watchPushWorkers();
   };
   doc.addEventListener('visibilitychange', onVisibility);
   cleanups.push(() => doc.removeEventListener('visibilitychange', onVisibility));

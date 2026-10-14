@@ -214,6 +214,10 @@ export const FleetComponentViewSchema = z.strictObject({
   content: FleetComponentContentSchema.optional(),
   /** E30: a path under somebody else's home that this component names, to check on this machine. */
   checkPath: NonEmptyStringSchema.optional(),
+  /** Set by Clone: the machine it was copied from, by the name that machine gave itself. */
+  clonedFrom: NonEmptyStringSchema.optional(),
+  /** That machine's daemon id as the copying browser reported it, so a surface can name it by its own label. */
+  clonedFromDaemon: NonEmptyStringSchema.optional(),
 });
 export type FleetComponentView = z.infer<typeof FleetComponentViewSchema>;
 
@@ -514,6 +518,16 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     mode: z.enum(['alongside', 'replace']),
     /** The source machine's export, read by the browser and handed over as data. */
     bundle: z.record(z.string(), z.unknown()),
+    /**
+     * Components the person chose NOT to copy (`mcp/notes`, `hooks/guard`), from the review that lists
+     * everything a copy would run (`cloneRunnables`). Each is left out, and so is every layer naming it.
+     */
+    skip: z.array(NonEmptyStringSchema).max(512).optional(),
+    /**
+     * The source as THIS browser knows it: the daemon id it paired with, as the browser reports it
+     * (the target cannot check it). The bundle's own `machine` is only the name the source gave itself.
+     */
+    source: z.strictObject({ daemonId: NonEmptyStringSchema }).optional(),
   }),
 ]);
 export type FleetAccountChange = z.infer<typeof FleetAccountChangeSchema>;

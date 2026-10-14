@@ -81,12 +81,22 @@ export function syncPortraitGate(doc: Document = document, view: Window = window
   gate.id = GATE_ID;
   gate.setAttribute('role', 'alertdialog');
   gate.setAttribute('aria-label', 'Rotate your device to portrait');
-  gate.innerHTML =
-    '<div class="fy-portrait-gate__inner">' +
-    '<div class="fy-portrait-gate__icon" aria-hidden="true">&#x21bb;</div>' +
-    '<p class="fy-portrait-gate__title">Turn your phone upright</p>' +
-    '<p class="fy-portrait-gate__body">Ferretry is portrait-only on phones.</p>' +
-    '</div>';
+  // Built node by node: `innerHTML` is a Trusted Types sink, and this text needs no markup.
+  const part = (tag: string, className: string, text: string): HTMLElement => {
+    const element = doc.createElement(tag);
+    element.className = className;
+    element.textContent = text;
+    return element;
+  };
+  const inner = part('div', 'fy-portrait-gate__inner', '');
+  const icon = part('div', 'fy-portrait-gate__icon', '\u21bb');
+  icon.setAttribute('aria-hidden', 'true');
+  inner.append(
+    icon,
+    part('p', 'fy-portrait-gate__title', 'Turn your phone upright'),
+    part('p', 'fy-portrait-gate__body', 'Ferretry is portrait-only on phones.'),
+  );
+  gate.append(inner);
   doc.body.appendChild(gate);
 }
 
