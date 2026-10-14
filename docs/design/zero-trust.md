@@ -18,17 +18,21 @@ fingerprint in the pairing QR, and the device proves possession of its key by si
 handshake transcript. There is no bearer credential anywhere — nothing stored, nothing on the wire,
 nothing in a header — so a copied browser profile, a backup or a sniffed LAN is worth nothing. A
 session's authority is a **15-minute lease** the device renews silently by signing a daemon
-challenge, and a device unused for **30 days** must pair again. Dangerous acts (a terminal, a
-filesystem write, using a secret, changing the machine, grants, adding or removing devices) also need
-a **passkey step-up** — Face ID / Touch ID / a PIN on the phone — that the **daemon** verifies, valid
-for 15 minutes. A newly paired device can read and chat and nothing else until the owner grants more,
-**at the machine** or from an already-privileged device with a step-up. Everything is recorded in an
-append-only **audit log**, a new device is announced to the other devices, and the app itself is a
-**signed release** its service worker verifies before it updates.
+challenge, and a device unused for **30 days** must pair again. Before it may do anything at all, a
+device **unlocks** the machine with a **passkey** — Face ID / Touch ID / a PIN on the phone — that the
+**daemon** verifies; the unlock lasts **8 hours** by default (1–24) across page loads, and inside it
+the device may do everything its grants allow with no further prompt (B1). **Adding access always asks
+again**: minting a pairing code or widening another device needs a passkey proved for that one act.
+The owner can turn a per-act step-up back on (`stepUpOnActions`). A newly paired device holds every
+capability behind its unlock, or `fleet.use` only when its code was minted `fy pair --limited`; a
+remote device may only narrow a grant or a security setting, and widening is **at the machine**, with
+`fy`. Everything is recorded in an append-only **audit log**, a new device or passkey is announced to
+the other devices, and the app itself is a **signed release** its service worker verifies before it
+updates.
 
 No identity provider exists anywhere in this design, and there are no repeated sign-ins: the device
-key does the authenticating, silently; the passkey is asked for only before a dangerous act, at most
-once per 15 minutes.
+key does the authenticating, silently; the passkey is asked for once per machine per unlock period,
+and again only to add a device or widen one (or per act, if the owner asks for that).
 
 ## What this is compared against
 
@@ -38,16 +42,16 @@ sensitive applications, (4) per-device, per-application policy with least privil
 did what, (6) an encrypted tunnel end to end. This design supplies each one, in the same order, with
 mechanisms that need no identity provider and run on a machine with no inbound route:
 
-| Zero Trust feature            | Ferretry mechanism                                                   | PR  |
-| ----------------------------- | -------------------------------------------------------------------- | --- |
-| WARP device certificate       | non-extractable Ed25519 device key, public half only on the daemon   | A   |
-| tunnel (WireGuard / MASQUE)   | `ferretry-relay/2` session on **both** carriers, direct included     | A   |
-| short access token + renewal  | 15-minute session lease, renewed by a signed daemon challenge        | A   |
-| session / device expiry       | 30-day idle expiry; instant revocation that closes live sockets      | A   |
-| re-auth for sensitive apps    | WebAuthn passkey step-up, verified by the daemon, 15 minutes         | B   |
-| per-device policy             | per-device grants, default read + chat, widened at the machine       | B   |
-| logs and alerts               | append-only bounded audit log, new-device alert to the other devices | C   |
-| (a managed client, not a web) | signed PWA release manifest, pinned key in the service worker (TOFU) | D   |
+| Zero Trust feature            | Ferretry mechanism                                                                                 | PR  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- | --- |
+| WARP device certificate       | non-extractable Ed25519 device key, public half only on the daemon                                 | A   |
+| tunnel (WireGuard / MASQUE)   | `ferretry-relay/2` session on **both** carriers, direct included                                   | A   |
+| short access token + renewal  | 15-minute session lease, renewed by a signed daemon challenge                                      | A   |
+| session / device expiry       | 30-day idle expiry; instant revocation that closes live sockets                                    | A   |
+| re-auth for sensitive apps    | WebAuthn passkey unlock, verified by the daemon, 8 hours by default; fresh passkey to add a device | B   |
+| per-device policy             | per-device grants, full behind the unlock or `--limited`, widened at the machine                   | B   |
+| logs and alerts               | append-only bounded audit log, new-device alert to the other devices                               | C   |
+| (a managed client, not a web) | signed PWA release manifest, pinned key in the service worker (TOFU)                               | D   |
 
 The last row is the one place a web app is structurally weaker than WARP, and it is the subject of
 the honest section at the end.
@@ -577,7 +581,7 @@ was kept.
 - **Widening is host-only.** A governed caller may only narrow, and a narrowing needs a step-up. A remote
   warden is governed and can never step up, because it has no device.
 - **The cost, stated:** the per-change confirmation's "bound to one diff" property becomes "bound to a
-  biometric check in the last 15 minutes", which is weaker against a replayed request and stronger against
+  biometric check within the current unlock" (B1), which is weaker against a replayed request and stronger against
   a known password — and replay is no longer possible inside a sealed session anyway.
 - ~~**A declared GAP:** `pairing.use` also guarded the four `/v1/push/*` enrolment routes.~~ **Closed by B5:**
   a device enrolling itself needs no capability. It does need a step-up (review M2, below).
@@ -901,10 +905,10 @@ Said plainly, because the useful property is narrower than "zero trust" sounds:
   different script to the browser’s install request bypasses the alarm.
 - **Code running in the open app rewriting the pinned release key** in IndexedDB. The pin is only as
   strong as the app that holds it.
-- **An unlocked phone in a thief's hand with the app open**, for everything that needs no step-up:
-  reading the fleet and chatting. Chatting with an agent that has tool permissions is **code
-  execution by proxy**; least privilege does not change what an agent already allowed to act will do
-  when asked. Revoke the device first.
+- **An unlocked phone in a thief's hand with a machine unlocked**, for everything but adding access,
+  until the unlock period ends (B1): terminals, secrets, files, starting agents. Chatting with an agent that
+  has tool permissions is **code execution by proxy** too; least privilege does not change what an agent already allowed to act will do when asked.
+  Revoke the device first.
 - **The 30-day idle window.** A device used at least once a month never expires; revocation is the
   control for a lost device, and the new-device alert is the control for an added one.
 - **Somebody at the machine.** The host's admin token is ungoverned by design (B4), so anybody who can

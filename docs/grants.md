@@ -107,9 +107,11 @@ unavailable to a remote caller, so starting open costs much less than it would o
 closed would make a fresh remote session useless until somebody walked to the machine.
 
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
-step-up is the **second layer**, over every remote `configure` and the remote `use` of `terminal`,
-`browser` and `pairing`; it needs no setup beyond pairing, because the passkey is the one the person
-already holds.
+**unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
+and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
+`browser`, `pairing` and `secrets` — except minting a code or widening a device, which always want a
+passkey for that act ([design/zero-trust.md](design/zero-trust.md) B1). It needs no setup beyond pairing,
+because the passkey is the one the person already holds.
 
 **What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
 _grant_, and says nothing about what an already-granted capability may _do_. `terminal.use` is

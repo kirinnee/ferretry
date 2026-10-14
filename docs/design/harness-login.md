@@ -455,9 +455,10 @@ not the risk people look for:
 That is a change to how the host behaves, so:
 
 - **Put both routes on `fleet.configure`, not `fleet.use`.** Both axes default to enabled for every
-  capability, so this is not a default change — it is which lock the passkey step-up reaches. A governed
-  caller with `use` of the fleet alone is never asked for anything; `configure` needs a step-up, and a
-  refusal without one is `step-up-required`. `configure` implies `use`, so nothing needs a second
+  capability, so this is not a default change — it is which lock the passkey step-up reaches. Every
+  governed caller first unlocks the machine ([design/zero-trust.md](zero-trust.md) B1), and the unlock is
+  the step-up `configure` needs unless the owner turned on a per-act step-up; a refusal without one is
+  `step-up-required`. `configure` implies `use`, so nothing needs a second
   declaration.
 - **The step-up is the only gate, and the start is not asked twice.** There is no per-change confirmation:
   the route's `fleet.configure` demand is what a governed caller meets, and the request body carries
