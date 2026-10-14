@@ -327,16 +327,7 @@ export async function screenshotMatrix(
       if (waitFor !== undefined) await page.waitForSelector(waitFor, { timeout: 30_000 });
       await Bun.sleep(300);
     }
-    for (const [label, width, height] of [
-      ['390', 390, 844],
-      ['1280', 1_280, 900],
-    ] as const) {
-      await page.setViewportSize({ width, height });
-      await Bun.sleep(200);
-      const path = join(directory, `${name}-${label}-${scheme}.png`);
-      await page.screenshot({ path });
-      paths.push(path);
-    }
+    paths.push(...(await screenshotWidths(page, directory, name, scheme)));
   }
   await page.setViewportSize({ width: 1_280, height: 900 });
   // One line per state, beside the shots, so a reviewer can see which screens repainted live.
@@ -364,4 +355,32 @@ export async function waitInPage(page: ReleasePage, expression: string, timeoutM
     await Bun.sleep(100);
   }
   throw new Error(`timed out after ${String(timeoutMs)}ms waiting for ${expression}`, { cause: last });
+}
+
+/**
+ * The 390px and 1280px shots of whatever is on screen now, named for `scheme`.
+ *
+ * For a state that cannot be reached again by reloading — a failed pairing is one — the caller sets
+ * the colour scheme BEFORE driving to the state and calls this once per scheme.
+ */
+export async function screenshotWidths(
+  page: ReleasePage,
+  directory: string,
+  name: string,
+  scheme: 'light' | 'dark',
+): Promise<readonly string[]> {
+  await mkdir(directory, { recursive: true });
+  const paths: string[] = [];
+  for (const [label, width, height] of [
+    ['390', 390, 844],
+    ['1280', 1_280, 900],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await Bun.sleep(200);
+    const path = join(directory, `${name}-${label}-${scheme}.png`);
+    await page.screenshot({ path });
+    paths.push(path);
+  }
+  await page.setViewportSize({ width: 1_280, height: 900 });
+  return paths;
 }
