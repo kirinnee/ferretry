@@ -22,6 +22,7 @@ import {
   type FleetEnvInput,
   type FleetLayeredProfileView,
 } from '@ferretry/protocol';
+import { cloneOriginName } from '../setup/clone-model.ts';
 
 export type CatalogHarness = 'claude' | 'codex';
 
@@ -81,13 +82,23 @@ const storedSecrets = (env: readonly FleetEnvEntry[]): number =>
 const detailEnv = (component: FleetComponentView): readonly FleetEnvEntry[] =>
   component.detail.kind === 'mcp' || component.detail.kind === 'settings' ? component.detail.env : [];
 
-/** The prototype's `compBadges`: harness scope, partial support, warnings, a path to check, stored secrets. */
-export function componentBadges(component: FleetComponentView, machineName: string): readonly ComponentBadge[] {
+/**
+ * The prototype's `compBadges`: harness scope, where a copy came from, partial support, warnings, a path
+ * to check, stored secrets. `machineNames` is this browser's own label for each machine it paired, by
+ * daemon id, so a copied component names its source the way the reader does.
+ */
+export function componentBadges(
+  component: FleetComponentView,
+  machineName: string,
+  machineNames: ReadonlyMap<string, string> = new Map(),
+): readonly ComponentBadge[] {
   const badges: ComponentBadge[] = [
     component.harness === undefined
       ? { text: 'Claude Code and Codex', tone: 'pend' }
       : { text: `${HARNESS_NAMES[component.harness]} only`, tone: 'accent' },
   ];
+  const origin = cloneOriginName(component, machineNames);
+  if (origin !== undefined) badges.push({ text: `Copied from ${origin}`, tone: 'pend' });
   for (const partial of component.partial)
     badges.push({ text: `Partly supported on ${HARNESS_NAMES[partial.harness]}`, tone: 'warn' });
   for (const warning of component.warnings) badges.push({ text: warning, tone: 'warn', warn: true });

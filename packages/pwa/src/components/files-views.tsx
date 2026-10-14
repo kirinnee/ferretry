@@ -17,6 +17,7 @@
 import { CornerLeftUp, FileText, Folder, Link2Off, Loader2, Lock, RefreshCw, X } from 'lucide-react';
 import { useMemo, type ReactNode, type RefObject } from 'react';
 import { highlightToHtml } from '../lib/highlight.ts';
+import { trustedHighlight } from '../lib/trusted-types.ts';
 import { langFromPath } from '../lib/tool-extract.ts';
 import type { FsChange, FsFile, FsListing } from './files-api.ts';
 import {
@@ -347,7 +348,7 @@ export const SourceLines = ({ content, html, lang, selection, targetLineRef }: S
                     // Safe: Highlight.js escaped the source, and
                     // splitHighlightedLines only balances the spans it emitted.
                     // biome-ignore lint/security/noDangerouslySetInnerHtml: highlighted output is the registry's own escaped markup, re-split line by line
-                    dangerouslySetInnerHTML={{ __html: lineHtml || ' ' }}
+                    dangerouslySetInnerHTML={{ __html: trustedHighlight(lineHtml || ' ') }}
                   />
                 )}
               </span>
@@ -442,7 +443,7 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
         ) : (
           <pre className="kt-fs-pre">
             {/* biome-ignore lint/security/noDangerouslySetInnerHtml: highlighted output is the registry's own escaped markup; the raw branch above never forwards caller text */}
-            <code className={`hljs language-${lang}`} dangerouslySetInnerHTML={{ __html: html }} />
+            <code className={`hljs language-${lang}`} dangerouslySetInnerHTML={{ __html: trustedHighlight(html) }} />
           </pre>
         )}
       </div>

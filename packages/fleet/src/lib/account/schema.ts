@@ -104,6 +104,20 @@ export const CredentialStoreSchema = z.enum(['host', 'ferretry', 'environment'])
 export type CredentialStore = z.infer<typeof CredentialStoreSchema>;
 
 /**
+ * Set by Clone (C8, L2) on everything it copies: where it came from. Display only.
+ *
+ * - `clonedFrom` — the source machine by the name it gave ITSELF, so never proof of anything.
+ * - `clonedFromDaemon` — the source's daemon id AS THE COPYING BROWSER REPORTED IT: the fingerprint it
+ *   paired with, which a surface turns into the reader's own label for that machine. The target cannot
+ *   check it, so it is exactly as true as the browser that staged the copy, which already holds this
+ *   machine's `fleet.configure`.
+ */
+const CLONE_ORIGIN_SHAPE = {
+  clonedFrom: NonEmptyString.optional(),
+  clonedFromDaemon: NonEmptyString.optional(),
+};
+
+/**
  * One login to one harness on this machine (C1, C2). Stored exactly once; every runtime that names it
  * reads that one store.
  */
@@ -113,8 +127,7 @@ export const CredentialSchema = z
     store: CredentialStoreSchema.default('ferretry'),
     /** Display only (C9): what tells two logins with one email apart. */
     label: NonEmptyString.optional(),
-    /** Set by Clone on an empty slot (C8, L2): the machine it was copied from. Display only. */
-    clonedFrom: NonEmptyString.optional(),
+    ...CLONE_ORIGIN_SHAPE,
     /** `store: environment` only. A secret travels as a `${secret:NAME}` reference, never a value. */
     env: EnvSchema.optional(),
   })
@@ -159,6 +172,7 @@ const ComponentFileSchema = NonEmptyString;
 export const InstructionsComponentSchema = z.strictObject({
   file: ComponentFileSchema,
   harness: HarnessKindSchema.optional(),
+  ...CLONE_ORIGIN_SHAPE,
 });
 export type InstructionsComponent = z.infer<typeof InstructionsComponentSchema>;
 
@@ -174,6 +188,7 @@ export const McpComponentSchema = z
     env: EnvSchema.optional(),
     url: z.url().optional(),
     harness: HarnessKindSchema.optional(),
+    ...CLONE_ORIGIN_SHAPE,
   })
   .check(ctx => {
     const server = ctx.value;
@@ -202,6 +217,7 @@ export const SkillsComponentSchema = z
   .strictObject({
     items: z.array(SafeNameSchema).min(1),
     harness: HarnessKindSchema.optional(),
+    ...CLONE_ORIGIN_SHAPE,
   })
   .check(ctx => {
     const seen = new Set<string>();
@@ -238,6 +254,7 @@ export const SettingsComponentSchema = z
     file: ComponentFileSchema.optional(),
     flags: z.array(NonEmptyString).min(1).optional(),
     env: EnvSchema.optional(),
+    ...CLONE_ORIGIN_SHAPE,
   })
   .check(ctx => {
     const settings = ctx.value;
@@ -261,6 +278,7 @@ export const HooksComponentSchema = z
     harness: HarnessKindSchema,
     file: ComponentFileSchema.optional(),
     directory: ComponentFileSchema.optional(),
+    ...CLONE_ORIGIN_SHAPE,
   })
   .check(ctx => {
     const hooks = ctx.value;
@@ -280,6 +298,7 @@ export const ModelSetComponentSchema = z
   .strictObject({
     models: z.array(NonEmptyString).min(1),
     default: NonEmptyString,
+    ...CLONE_ORIGIN_SHAPE,
   })
   .check(ctx => {
     const set = ctx.value;

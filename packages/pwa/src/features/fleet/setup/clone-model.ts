@@ -10,9 +10,21 @@
  * sign-in; history stays behind; a path under `/Users/` or `/home/` is flagged to check (E30); and a
  * runtime whose tool is missing on the target is copied and waits (E29). The daemon describes the
  * same copy again when it is staged, and that description is what the apply runs.
+ *
+ * WHAT RUNS IS LISTED, NOT COUNTED. MCP servers, hooks and settings start programs on the target, so
+ * the preview lists every command, variable, runnable setting and document they bring — from
+ * `cloneRunnables`, the one the target's own description reads — and each can be left out. A copy
+ * from a machine that was broken into is how a command gets planted on the others.
  */
 
-import type { FleetCloneBundle, FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
+import {
+  type CloneRunnable,
+  cloneBundleProblem,
+  cloneRunnables,
+  type FleetCloneBundle,
+  type FleetCredentialView,
+  type FleetMachineView,
+} from '@ferretry/protocol';
 import type { MachineReach } from '../shell/machine-reach.ts';
 import type { StepperStep } from '../shell/stepper-model.ts';
 import { countWords, SETUP_HARNESSES, type SetupHarness } from './setup-words.ts';
@@ -30,6 +42,13 @@ export const cloneSteps = (targetHasSetup: boolean): StepperStep[] => [
 ];
 
 // ── Source ───────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What copying shows the source's reader: the copy goes both ways in trust, because the target sees
+ * everything that is copied INTO it (docs/cross-daemon.md §3d).
+ */
+export const cloneSharesSentence = (target: string): string =>
+  `${target} receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for ${target} to see. Logins and secret values never leave it.`;
 
 export type CloneSourceState =
   | { readonly kind: 'checking' }
@@ -70,6 +89,15 @@ export interface ClonePreview {
   readonly missingTools: readonly SetupHarness[];
   /** Documents the source could not carry, with the reason. */
   readonly notCopied: readonly { readonly path: string; readonly reason: string }[];
+  /** Every component that would run something on the target, chosen or not. */
+  readonly runnables: readonly CloneRunnable[];
+  /**
+   * Why the target will refuse this bundle (`cloneBundleProblem`), or `null`. A refused bundle is never
+   * offered for copying: its review could not be trusted to list everything it would write.
+   */
+  readonly problem: string | null;
+  /** The components the person chose not to copy. */
+  readonly skipped: number;
 }
 
 const KIND_TITLES: Readonly<Record<string, string>> = {
@@ -90,14 +118,23 @@ const componentFile = (component: unknown): string | undefined => {
   return typeof file === 'string' ? file : undefined;
 };
 
-/** Counts the bundle the source exported, against the target it would land on. */
-export const clonePreview = (bundle: FleetCloneBundle, target: FleetMachineView | null): ClonePreview => {
+/** Counts the bundle the source exported, against the target it would land on, without what is skipped. */
+export const clonePreview = (
+  bundle: FleetCloneBundle,
+  target: FleetMachineView | null,
+  skip: readonly string[] = [],
+): ClonePreview => {
   let components = 0;
   let modelSets = 0;
+  let skipped = 0;
   const checkPaths: ClonePath[] = [];
   const contents = new Map(bundle.files.map(file => [file.path, file.content]));
   for (const [kind, entries] of Object.entries(bundle.components)) {
     for (const [name, component] of Object.entries(entries)) {
+      if (skip.includes(`${kind}/${name}`)) {
+        skipped += 1;
+        continue;
+      }
       if (kind === 'modelSets') modelSets += 1;
       else components += 1;
       const file = componentFile(component);
@@ -121,7 +158,30 @@ export const clonePreview = (bundle: FleetCloneBundle, target: FleetMachineView 
     checkPaths,
     missingTools: SETUP_HARNESSES.filter(harness => neededTools.has(harness) && !installed.has(harness)),
     notCopied: bundle.notCopied,
+    runnables: cloneRunnables(bundle),
+    problem: cloneBundleProblem(bundle),
+    skipped,
   };
+};
+
+/** "MCP server · notes": a runnable's title on the review. */
+export const runnableTitle = (runnable: CloneRunnable): string => `${KIND_TITLES[runnable.kind]} · ${runnable.name}`;
+
+/** "12 lines", for a document a runnable brings. */
+export const documentSize = (text: string): string => countWords(text.replace(/\n$/u, '').split('\n').length, 'line');
+
+/**
+ * Where a copied item came from, as THIS reader would name it: their own label for the machine the
+ * copying browser verified, when this browser knows it; otherwise the name the source gave itself,
+ * said to be only that. `undefined` for an item that was not copied.
+ */
+export const cloneOriginName = (
+  item: { readonly clonedFrom?: string; readonly clonedFromDaemon?: string },
+  names: ReadonlyMap<string, string>,
+): string | undefined => {
+  const known = item.clonedFromDaemon === undefined ? undefined : names.get(item.clonedFromDaemon);
+  if (known !== undefined) return known;
+  return item.clonedFrom === undefined ? undefined : `${item.clonedFrom} (the name it gave itself)`;
 };
 
 /** "3 components" on the Copies list, and what each row covers. */

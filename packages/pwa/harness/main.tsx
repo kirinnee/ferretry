@@ -43,6 +43,7 @@ import {
   DAEMON_CAPABILITIES,
   matchesSessionSearchQuery,
   SECRET_SCHEMA_VERSION,
+  secretReference,
   SESSION_FILE_INDEX_VERSION,
   sessionSearchTaskHaystack,
   TASK_SCHEMA_VERSION,
@@ -282,6 +283,16 @@ const HARNESS_SETTINGS_CONNECTIONS = [
   { ...unreachableDaemon, label: 'Travel laptop', pairedAt: 1, lastSelectedAt: 2 },
   { ...checkingDaemon, pairedAt: 1, lastSelectedAt: 1 },
 ] as const satisfies readonly DaemonConnectionRecord[];
+/**
+ * A set-up machine Clone can copy FROM, so the preview's "Runs on" review is walkable. Offered to Clone
+ * only: the Daemons section keeps its three-daemon fixture.
+ */
+const cloneSourceDaemon = daemonConnection({
+  daemonId: 'clone-source-daemon',
+  baseUrl: 'https://work.example.test',
+  deviceId: 'clone-source-harness-token',
+});
+const HARNESS_CLONE_SOURCE = { ...cloneSourceDaemon, label: 'Work laptop', pairedAt: 1, lastSelectedAt: 0 };
 
 type SettingsDaemonScenario = 'one' | 'many';
 
@@ -863,7 +874,10 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         return (
           <MachineSettingsTab
             {...props}
-            sources={connections.filter(candidate => candidate.daemonId !== props.connection.daemonId)}
+            sources={[
+              ...connections.filter(candidate => candidate.daemonId !== props.connection.daemonId),
+              HARNESS_CLONE_SOURCE,
+            ]}
           />
         );
       },
@@ -1549,8 +1563,9 @@ const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
  */
 const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-  const setUp = connection.daemonId === daemon.daemonId;
+  const setUp = connection.daemonId === daemon.daemonId || connection.daemonId === cloneSourceDaemon.daemonId;
   const answer = (path: string, init?: RequestInit): unknown => {
+    if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
     if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
     if (path !== '/v1/fleet/machine') return harnessCatalogAnswer(path, init);
     return {
@@ -1569,6 +1584,59 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
     request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
       schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
+};
+
+/**
+ * What "Work laptop" exports for Clone: everything the preview has to spell out before it may copy —
+ * an MCP server's command line and variables, a hook script, and a settings file with a status-line
+ * command and a permission rule — next to plain instructions that run nothing.
+ */
+const HARNESS_CLONE_EXPORT = {
+  format: 'ferretry-clone',
+  version: 1,
+  machine: 'work-mac',
+  exportedAt: '2026-10-13T09:00:00.000Z',
+  credentials: [{ id: 'claude-work', harness: 'claude', email: 'someone.with.a.long.address@example.com' }],
+  components: {
+    instructions: { main: { file: 'components/instructions/main.md' } },
+    mcp: {
+      notes: {
+        command: 'npx',
+        args: ['-y', '@acme/notes-mcp', '--vault', '/Users/kirin-on-a-long-machine-name/Documents/Notes'],
+        env: { NOTES_TOKEN: secretReference('NOTES_TOKEN'), NODE_OPTIONS: '--max-old-space-size=4096' },
+      },
+    },
+    hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } },
+    settings: {
+      claude: {
+        harness: 'claude',
+        file: 'components/settings/claude.json',
+        flags: ['--permission-mode', 'acceptEdits'],
+      },
+    },
+  },
+  profiles: { default: { layers: ['instructions/main', 'mcp/notes', 'hooks/guard', 'settings/claude'] } },
+  runtimes: { 'claude-work': { credential: 'claude-work', profile: 'default', agent: false } },
+  files: [
+    { path: 'components/instructions/main.md', content: '# Work rules\n' },
+    {
+      path: 'components/hooks/guard/pre-tool-use.sh',
+      content: '#!/bin/sh\n# Refuse a push straight to main.\ngrep -q "git push origin main" && exit 2\nexit 0\n',
+    },
+    {
+      path: 'components/settings/claude.json',
+      content: JSON.stringify(
+        {
+          statusLine: { type: 'command', command: '~/.claude/statusline.sh' },
+          permissions: { allow: ['Bash(npm test:*)', 'Bash(git status)'] },
+          theme: 'dark',
+        },
+        null,
+        2,
+      ),
+    },
+  ],
+  notCopied: [],
 };
 
 /**

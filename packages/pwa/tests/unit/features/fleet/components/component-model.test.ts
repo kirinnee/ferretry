@@ -255,3 +255,17 @@ describe('componentChange', () => {
     ).toEqual({ kind: 'modelSets', models: ['a', 'b'], default: 'b' });
   });
 });
+
+describe('componentBadges · where a copy came from', () => {
+  it('names a cloned component’s source by the reader’s label, else by the name it gave itself', () => {
+    const copied = { ...instructions, clonedFrom: 'work-mac', clonedFromDaemon: 'sha256:work' };
+    expect(componentBadges(copied, 'studio-mac', new Map([['sha256:work', 'Work laptop']]))).toContainEqual({
+      text: 'Copied from Work laptop',
+      tone: 'pend',
+    });
+    expect(componentBadges(copied, 'studio-mac')).toContainEqual({
+      text: 'Copied from work-mac (the name it gave itself)',
+      tone: 'pend',
+    });
+  });
+});

@@ -1,0 +1,138 @@
+/**
+ * One push worker per machine: which machine a registration serves, and what its notifications may
+ * say and open (docs/cross-daemon.md §4a–§4c).
+ */
+import { describe, expect, it } from 'bun:test';
+import type { PushNotificationPayload } from '@ferretry/protocol';
+import { daemonId } from '../../src/lib/daemon-connection.ts';
+import {
+  isPushScope,
+  machineNotification,
+  notificationUrl,
+  PUSH_SCOPE_ROOT,
+  pushMachineOf,
+  pushScopePath,
+  pushWorkerUrl,
+  unreadablePushTitle,
+  unverifiedNotification,
+} from '../../src/lib/push-scope.ts';
+
+const ORIGIN = 'https://ferretry.example.test';
+const WORK = { daemonId: 'sha256:work/one', label: 'Work laptop' };
+
+const payload: PushNotificationPayload = {
+  version: 1,
+  eventKey: 'e1',
+  title: 'A new device was paired',
+  body: 'Pixel 9 can now reach this machine.',
+  tag: 'pairing',
+  url: '/',
+  count: 1,
+};
+
+describe('the per-machine scope and worker address', () => {
+  it('puts each machine under its own escaped scope, never a page the app serves', () => {
+    expect(PUSH_SCOPE_ROOT).toBe('/push/');
+    expect(pushScopePath(daemonId('sha256:work/one'))).toBe('/push/sha256%3Awork%2Fone/');
+  });
+
+  it('registers the signed worker file itself, with the reader’s label as its only addition', () => {
+    expect(pushWorkerUrl('/sw.verified.js', 'Work & play')).toBe('/sw.verified.js?machine=Work%20%26%20play');
+  });
+});
+
+describe('pushMachineOf', () => {
+  it('reads the machine from the scope and the reader’s label from the script', () => {
+    expect(
+      pushMachineOf(`${ORIGIN}/push/sha256%3Awork%2Fone/`, `${ORIGIN}/sw.verified.js?machine=Work%20laptop`),
+    ).toEqual(WORK);
+  });
+
+  it('falls back to the daemon id when the script names no label', () => {
+    expect(pushMachineOf(`${ORIGIN}/push/abc/`, `${ORIGIN}/sw.verified.js?machine=%20`)).toEqual({
+      daemonId: 'abc',
+      label: 'abc',
+    });
+    expect(pushMachineOf(`${ORIGIN}/push/abc/`, 'not a url')).toEqual({ daemonId: 'abc', label: 'abc' });
+  });
+
+  it('is null for the app-wide registration and anything that is not exactly one machine', () => {
+    for (const scope of [
+      `${ORIGIN}/`,
+      `${ORIGIN}/push/`,
+      `${ORIGIN}/push/a/b/`,
+      `${ORIGIN}/push/%E0%A4%A/`,
+      `${ORIGIN}/app/`,
+      'not a url',
+    ]) {
+      expect(pushMachineOf(scope, `${ORIGIN}/sw.verified.js`)).toBeNull();
+    }
+    expect(isPushScope(`${ORIGIN}/push/abc/`)).toBe(true);
+    expect(isPushScope(`${ORIGIN}/`)).toBe(false);
+  });
+});
+
+describe('machineNotification', () => {
+  it('titles it with the reader’s label, keeps its tag in the machine’s namespace and its link at home', () => {
+    expect(machineNotification({ ...payload, url: 'https://evil.test/' }, WORK, ORIGIN)).toEqual({
+      ...payload,
+      title: 'Work laptop · A new device was paired',
+      tag: 'fy-push:sha256%3Awork%2Fone:pairing',
+      url: `${ORIGIN}/d/sha256%3Awork%2Fone`,
+    });
+  });
+
+  it('keeps a link that is already one of the machine’s own pages', () => {
+    const own = `/d/${encodeURIComponent(WORK.daemonId)}/session/s1`;
+    expect(machineNotification({ ...payload, url: own }, WORK, ORIGIN).url).toBe(`${ORIGIN}${own}`);
+  });
+
+  it('cannot reuse another machine’s tag, so it can never replace that machine’s notification', () => {
+    const other = { daemonId: 'sha256:home', label: 'Home' };
+    expect(machineNotification(payload, WORK, ORIGIN).tag).not.toBe(machineNotification(payload, other, ORIGIN).tag);
+  });
+
+  it('titles a push nobody composed by the machine it came through', () => {
+    expect(unreadablePushTitle(WORK)).toBe('Work laptop · Ferretry');
+    expect(unreadablePushTitle(null)).toBe('Unverified · Ferretry');
+  });
+});
+
+describe('notificationUrl (§4a: only this site; §4c: only this machine)', () => {
+  it('opens this site’s own page, and the app for anything off this site', () => {
+    expect(notificationUrl('/d/x/session/1', ORIGIN, null)).toBe(`${ORIGIN}/d/x/session/1`);
+    expect(notificationUrl('https://evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+    expect(notificationUrl('//evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+    expect(notificationUrl('javascript:alert(1)', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+    expect(notificationUrl(undefined, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+    expect(notificationUrl(42, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
+  it('keeps a machine inside its own pages, even through a climbing or look-alike path', () => {
+    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+    expect(notificationUrl(`${home}/session/s1`, ORIGIN, WORK)).toBe(`${home}/session/s1`);
+    expect(notificationUrl(home, ORIGIN, WORK)).toBe(home);
+    for (const elsewhere of [
+      '/d/sha256%3Ahome/settings',
+      `/d/sha256%3Awork%2Fone/../../d/other`,
+      '/d/sha256%3Awork%2Fone-evil/x',
+      '/',
+      'https://evil.test/',
+    ]) {
+      expect(notificationUrl(elsewhere, ORIGIN, WORK)).toBe(home);
+    }
+  });
+});
+
+describe('unverifiedNotification (review M3)', () => {
+  it('titles a push to the app-wide registration Unverified, keeps it out of every machine’s tags, opens the app', () => {
+    const shown = unverifiedNotification({ ...payload, url: '/d/sha256%3Ahome/settings' }, ORIGIN);
+    expect(shown).toEqual({
+      ...payload,
+      title: 'Unverified · A new device was paired',
+      tag: 'fy-push-unverified:pairing',
+      url: `${ORIGIN}/app/`,
+    });
+    expect(shown.tag.startsWith('fy-push:')).toBe(false);
+  });
+});

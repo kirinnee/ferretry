@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { FleetComponentCatalogSchema } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { ComponentsTab } from '../../../../../src/features/fleet/components/components-tab.tsx';
+import { ComponentsSurface, ComponentsTab } from '../../../../../src/features/fleet/components/components-tab.tsx';
+import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
+import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../../../support/dom.ts';
 import {
   claudeSettings,
@@ -364,5 +367,33 @@ describe('ComponentsTab — edit and new (E20)', () => {
     await toDetail(root, 'mcp', 'mcp/notes');
     await click(root, '[data-component-edit]');
     expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(true);
+  });
+});
+
+describe('ComponentsSurface — where a copy came from', () => {
+  it('names a cloned component’s source by the label this browser gave that machine', async () => {
+    const work = daemonConnection({ daemonId: 'sha256:work', baseUrl: 'https://work.example.test', deviceId: 'd' });
+    const connections = new DaemonConnectionStore({
+      connections: [{ ...work, label: 'Work laptop', pairedAt: 1, lastSelectedAt: 1 }],
+      selectedDaemonId: work.daemonId,
+    });
+    const copied = component({
+      ...notes,
+      reference: 'mcp/copied',
+      name: 'copied',
+      clonedFrom: 'work-mac',
+      clonedFromDaemon: 'sha256:work',
+    });
+    const machine = scriptedMachine({
+      catalog: studioCatalog({ components: componentCatalog({ mcp: [copied] }) }),
+    });
+    mounted = await mountSettled(
+      <StoreProvider store={{ connections } as unknown as AppStore}>
+        <ComponentsSurface {...tabProps(machine)} />
+      </StoreProvider>,
+    );
+    const root = mounted.container;
+    await toDetail(root, 'mcp', 'mcp/copied');
+    expect(root.textContent).toContain('Copied from Work laptop');
   });
 });

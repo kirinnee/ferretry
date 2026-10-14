@@ -499,3 +499,217 @@ describe('the signed-release service worker', () => {
     await context.close();
   }, 120_000);
 });
+
+/**
+ * ONE PUSH WORKER PER MACHINE (docs/cross-daemon.md §4b, §4c), through the same built worker.
+ *
+ * Each machine is a registration of the SIGNED `sw.verified.js` at its own scope, labelled in the
+ * script's query — exactly what `containerPushEnrolment` registers. A push is delivered straight to
+ * one registration over the DevTools protocol (`ServiceWorker.deliverPushMessage`), which is the event
+ * a push service would raise, so no real push service is needed. A real subscription per VAPID key
+ * needs one, and is the part this cannot show.
+ */
+describe('per-machine push workers', () => {
+  interface RegistrationSeen {
+    readonly registrationId: string;
+    readonly scopeURL: string;
+    readonly isDeleted?: boolean;
+  }
+
+  const machines = async (context: BrowserContext, page: Page) => {
+    await context.grantPermissions(['notifications'], { origin: origin() });
+    const cdp = await context.newCDPSession(page);
+    const seen = new Map<string, string>();
+    cdp.on('ServiceWorker.workerRegistrationUpdated', (event: { registrations: RegistrationSeen[] }) => {
+      for (const registration of event.registrations) {
+        if (registration.isDeleted === true) seen.delete(registration.scopeURL);
+        else seen.set(registration.scopeURL, registration.registrationId);
+      }
+    });
+    await cdp.send('ServiceWorker.enable');
+    await page.evaluate(async () => {
+      // The page enforces Trusted Types (`public/_headers`): a registration takes only what the app's
+      // `fy-worker` policy made, exactly as `lib/trusted-types.ts` makes it.
+      const policy = (
+        globalThis as unknown as {
+          trustedTypes: { createPolicy(name: string, rules: object): { createScriptURL(url: string): string } };
+        }
+      ).trustedTypes.createPolicy('fy-worker', { createScriptURL: (url: string) => url });
+      const activate = async (script: string, scope: string): Promise<void> => {
+        const registration = await navigator.serviceWorker.register(policy.createScriptURL(script), { scope });
+        const worker = registration.installing ?? registration.waiting ?? registration.active;
+        if (worker === null || worker.state === 'activated') return;
+        await new Promise<void>(resolveActive => {
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'activated') resolveActive();
+          });
+        });
+      };
+      await activate('/sw.verified.js?machine=Work%20laptop', '/push/work/');
+      await activate('/sw.verified.js?machine=Home', '/push/home/');
+    });
+    // Deadlines, not attempt counts: the whole integration tier shares one machine, and a worker or a
+    // notification that lands late under that load is still a pass.
+    const idOf = async (path: string): Promise<string> => {
+      const deadline = Date.now() + 15_000;
+      while (!seen.has(`${origin()}${path}`) && Date.now() < deadline) {
+        await new Promise(resolveTick => setTimeout(resolveTick, 50));
+      }
+      const id = seen.get(`${origin()}${path}`);
+      if (id === undefined) throw new Error(`DevTools never reported the registration at ${path}`);
+      return id;
+    };
+    const sent = new Map<string, Record<string, unknown>>();
+    const push = async (path: string, payload: Record<string, unknown>): Promise<void> => {
+      sent.set(path, payload);
+      await cdp.send('ServiceWorker.deliverPushMessage', {
+        origin: origin(),
+        registrationId: await idOf(path),
+        data: JSON.stringify({ version: 1, eventKey: `e-${Math.random()}`, body: 'b', count: 1, ...payload }),
+      });
+    };
+    // A DevTools delivery is occasionally dropped (measured: 1 run in 9), so an unseen push is sent again.
+    // It carries the same tag, so a late first copy REPLACES the second rather than adding to the list.
+    const shown = async (path: string) => {
+      const deadline = Date.now() + 15_000;
+      let resendAt = Date.now() + 3_000;
+      while (Date.now() < deadline) {
+        const again = sent.get(path);
+        if (Date.now() >= resendAt && again !== undefined) {
+          resendAt = Date.now() + 3_000;
+          await push(path, again);
+        }
+        const list = await page.evaluate(async scope => {
+          const registration = await navigator.serviceWorker.getRegistration(scope);
+          return (await registration?.getNotifications())?.map(notification => ({
+            title: notification.title,
+            tag: notification.tag,
+            url: (notification.data as { url?: string } | null)?.url,
+          }));
+        }, path);
+        if (list !== undefined && list.length > 0) return list;
+        await new Promise(resolveTick => setTimeout(resolveTick, 50));
+      }
+      return [];
+    };
+    return { push, shown };
+  };
+
+  test('titles each machine’s push with the reader’s label, in its own namespace, opening only its pages', async () => {
+    const { context, page } = await installed(first);
+    const { push, shown } = await machines(context, page);
+
+    await push('/push/work/', { title: 'A new device was paired', tag: 'pairing', url: 'https://evil.test/' });
+    await push('/push/home/', { title: 'Needs you', tag: 'pairing', url: '/d/work/settings' });
+
+    expect(await shown('/push/work/')).toEqual([
+      { title: 'Work laptop · A new device was paired', tag: 'fy-push:work:pairing', url: `${origin()}/d/work` },
+    ]);
+    // Home reused Work's tag and pointed at Work's settings: it replaced nothing and opens only Home.
+    expect(await shown('/push/home/')).toEqual([
+      { title: 'Home · Needs you', tag: 'fy-push:home:pairing', url: `${origin()}/d/home` },
+    ]);
+    await context.close();
+  }, 120_000);
+
+  test('turning one machine off leaves the others delivering', async () => {
+    const { context, page } = await installed(first);
+    const { push, shown } = await machines(context, page);
+
+    const removed = await page.evaluate(
+      async () => (await navigator.serviceWorker.getRegistration('/push/work/'))?.unregister() ?? false,
+    );
+    await push('/push/home/', { title: 'Still here', tag: 't', url: '/' });
+
+    expect(removed).toBe(true);
+    expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length)).toBe(2);
+    expect((await shown('/push/home/')).map(notification => notification.title)).toEqual(['Home · Still here']);
+    await context.close();
+  }, 120_000);
+
+  test('a push that reaches the app-wide registration is Unverified and opens only the app', async () => {
+    const { context, page } = await installed(first);
+    const { push, shown } = await machines(context, page);
+
+    await push('/', { title: 'A new device was paired with Home', tag: 'pairing', url: '/d/home/settings' });
+
+    expect(await shown('/')).toEqual([
+      {
+        title: 'Unverified · A new device was paired with Home',
+        tag: 'fy-push-unverified:pairing',
+        url: `${origin()}/app/`,
+      },
+    ]);
+    await context.close();
+  }, 120_000);
+
+  test('a machine’s worker still answers navigations under its scope from the verified release', async () => {
+    const { context, page } = await installed(first);
+    await machines(context, page);
+    served.set('push/work/x.html', encoded(HOSTILE_PAGE));
+    requests.length = 0;
+
+    await page.goto(`${origin()}/push/work/x.html`);
+
+    expect(await label(page)).toBe('first');
+    expect(requests).not.toContain('navigate /push/work/x.html');
+    await context.close();
+  }, 120_000);
+});
+
+/**
+ * TRUSTED TYPES (docs/cross-daemon.md §2b), as an installed page gets them: the policy is the one the
+ * signed worker compiled from `public/_headers`, so this is the shipped rule, not a copy of it.
+ */
+describe('Trusted Types on the installed app', () => {
+  test('refuses plain markup and plain worker URLs, and every policy but the two the app names', async () => {
+    const { context, page } = await installed(first);
+
+    const outcome = await page.evaluate(async () => {
+      const factory = (
+        globalThis as unknown as {
+          trustedTypes: {
+            createPolicy(
+              name: string,
+              rules: object,
+            ): { createHTML(html: string): string; createScriptURL(url: string): string };
+          };
+        }
+      ).trustedTypes;
+      const attempt = async (act: () => unknown): Promise<string> => {
+        try {
+          await act();
+          return 'allowed';
+        } catch (error) {
+          return (error as Error).name;
+        }
+      };
+      const target = document.createElement('div');
+      const plainMarkup = await attempt(() => {
+        target.innerHTML = '<img src=x onerror=alert(1)>';
+      });
+      const plainWorker = await attempt(() =>
+        navigator.serviceWorker.register('/sw.verified.js', { scope: '/push/x/' }),
+      );
+      const strangerPolicy = await attempt(() =>
+        factory.createPolicy('stranger', { createHTML: (html: string) => html }),
+      );
+      const highlight = factory.createPolicy('fy-highlight', { createHTML: (html: string) => html });
+      const viaPolicy = await attempt(() => {
+        target.innerHTML = highlight.createHTML('<span class="hljs-keyword">const</span>');
+      });
+      const twice = await attempt(() => factory.createPolicy('fy-highlight', { createHTML: (html: string) => html }));
+      return { plainMarkup, plainWorker, strangerPolicy, viaPolicy, twice, rendered: target.innerHTML };
+    });
+
+    expect(outcome).toEqual({
+      plainMarkup: 'TypeError',
+      plainWorker: 'TypeError',
+      strangerPolicy: 'TypeError',
+      viaPolicy: 'allowed',
+      twice: 'TypeError',
+      rendered: '<span class="hljs-keyword">const</span>',
+    });
+    await context.close();
+  }, 120_000);
+});

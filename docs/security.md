@@ -107,13 +107,13 @@ Say machine **A** is taken over, and you also use machines **B** and **C** from 
 - Do anything on **itself**: read its sessions, run commands, read its own secrets.
 - See whatever **you send to it**: chats, files, and any setup you clone **into** it.
 - **Lie to you** about its own content: fake transcripts, fake names, fake messages.
-- **Plant commands on B if you clone from A to B.** Clone copies hooks, MCP servers and settings,
-  which run on B. Today the preview shows only counts, so you can't see the commands. **Don't clone
-  from a machine you don't trust.** (A fix is proposed.)
-- **Fake notifications**, in one case: all your machines share one notification subscription on the
-  phone, and only the first machine you turned notifications on for can send to it. If that is A, it
-  can show any text, including a fake "new device paired with B", and B's real alerts don't arrive.
-  (A fix is proposed.)
+- **Offer commands to B if you clone from A to B.** Clone copies hooks, MCP servers and settings,
+  which run on B. The Clone preview lists every command, setting and script they bring, in full, and
+  you can untick any of them; B still asks for its own passkey before it copies. **Read that list,
+  and don't clone from a machine you don't trust.**
+- **Write any words in its OWN notifications.** Each machine has its own notification subscription,
+  and every notification starts with your name for the machine it came from. A can't send as B, can't
+  replace B's notifications, and a tap on A's notification only opens A's pages.
 
 **A hacked machine CANNOT:**
 
@@ -126,7 +126,9 @@ Say machine **A** is taken over, and you also use machines **B** and **C** from 
   can't fake.
 - **Read your B or C traffic on the relay.** It's encrypted end to end.
 - **Run code in the app** with the data it sends. The app blocks inline scripts, shows text as text,
-  and runs drawings and HTML previews in locked-down frames. No path was found.
+  and runs drawings and HTML previews in locked-down frames. No path was found. On Chrome and Edge,
+  Trusted Types also make the browser refuse any markup the app's one highlighter didn't write.
+- **Send notifications as B, or hide B's.** Each machine has its own subscription on your phone.
 
 **Why the last point matters:** the app is one website for all your machines. If code ever did run
 inside the open app (a poisoned deploy, or a bug), it could use **every** machine's key while the tab
@@ -165,10 +167,10 @@ minutes. It still can't copy the keys, and it loses everything when the page clo
 1. **Stop using it from the app** and take it offline.
 2. On your phone, **remove that machine** from the app (Settings › Daemons). This deletes its device
    key from the phone.
-3. **Turn off notifications** for it. Because the phone has one shared notification subscription,
-   this turns them off for every machine. Turn them back on from a machine you trust.
+3. **Turn off notifications** for it. Only that machine's notifications stop; removing the machine
+   in step 2 also removes its notification subscription.
 4. **Don't clone from it.** If you already cloned from it to another machine, check that machine's
-   hooks, MCP servers and settings by hand.
+   hooks, MCP servers and settings: each one it copied says **Copied from** it on the Components tab.
 5. Rotate any secrets and accounts that machine held. Treat everything on it as exposed.
 6. Rebuild it, install Ferretry fresh, and pair again.
 
@@ -201,15 +203,15 @@ Said plainly, because "zero trust" sounds like more than it is:
 - **Relay metadata.** The relay sees your machine's fingerprint, IP addresses, timing and sizes.
 - **Being cut off.** A relay or network can drop your traffic.
 - **Device health.** Nothing checks your phone's OS version, screen lock or disk encryption.
-- **Clone from a machine you don't trust** — see above.
+- **Clone from a machine you don't trust** — the preview shows every command, but only you can
+  decide to untick one.
 
 ## Known gaps
 
+How one hacked machine could reach the others, path by path, is [cross-daemon.md](cross-daemon.md).
+
 | Gap                                                                                      | State            |
 | ---------------------------------------------------------------------------------------- | ---------------- |
-| Clone preview doesn't show the hook / MCP / settings commands it will copy               | fix proposed     |
-| All machines share one notification subscription; only the first machine can deliver     | fix proposed     |
-| Turning notifications off for one machine turns them off for every machine               | fix proposed     |
 | The passkey prompt names the machine but not the action                                  | fix proposed     |
 | No `fy` command removes a device at the machine                                          | fix proposed     |
 | Per-machine security settings (passkey window, key rotation, idle days)                  | (planned)        |

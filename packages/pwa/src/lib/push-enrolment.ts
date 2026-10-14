@@ -19,6 +19,13 @@
  * The reason this is domain-tier code rather than hook code is testability: the
  * enable, disable, preference-sync and revoke sequences each have a failure path
  * that a reader sees as different wording, and none of them needs React.
+ *
+ * ONE SUBSCRIPTION PER DAEMON, TOO. A browser subscription is bound to the VAPID
+ * key of the daemon that created it, so one shared subscription let only the
+ * first daemon deliver, made it the voice of every daemon's alerts, and let one
+ * daemon's "off" switch silence the rest (docs/cross-daemon.md §4b). Each daemon
+ * now enrols through its own service-worker registration (`push-scope.ts`), and
+ * the old shared subscription is dropped the first time any daemon moves over.
  */
 
 import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
@@ -33,7 +40,9 @@ import {
   revokeDaemonPushDevice,
   type PushSubscriptionLike,
 } from './push-subscriptions.ts';
+import { pushMachineOf, pushScopePath, pushWorkerUrl } from './push-scope.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { trustedWorkerUrl } from './trusted-types.ts';
 
 /* ---------- capability ----------------------------------------------------- */
 
@@ -181,10 +190,22 @@ export interface PushRegistrationLike {
   readonly pushManager: PushManagerLike;
 }
 
+/** A daemon's own push registration, which turning delivery off removes outright. */
+export interface MachinePushRegistrationLike extends PushRegistrationLike {
+  unregister(): Promise<boolean>;
+}
+
 /** The browser half of enrolment, injected so no global is read in here. */
 export interface PushEnrolment {
-  /** Resolves the ready registration, or rejects where there is none. */
-  readonly registration: () => Promise<PushRegistrationLike>;
+  /**
+   * This daemon's own registration, registered now (or re-labelled) and active, so it can subscribe.
+   * Rejects where the browser has none to give.
+   */
+  readonly register: (daemon: DaemonId) => Promise<MachinePushRegistrationLike>;
+  /** This daemon's own registration if it already exists. Never registers one. */
+  readonly existing: (daemon: DaemonId) => Promise<MachinePushRegistrationLike | null>;
+  /** The app-wide registration, whose ONE subscription every daemon shared before. */
+  readonly shared: () => Promise<PushRegistrationLike | null>;
   /** The reader-facing name this browser enrols under. */
   readonly deviceName: () => string;
 }
@@ -221,21 +242,76 @@ const subscribeForPush = async (
 export const enrolDaemonPushDevice = async (
   context: PushEnrolmentContext,
   create: boolean,
+  moving = false,
 ): Promise<PushDeviceView> => {
   const { enrolment } = context;
   if (enrolment === null) throw new Error('this browser cannot register for Web Push');
-  const registration = await enrolment.registration();
-  const existing = await registration.pushManager.getSubscription();
-  const subscription = existing ?? (create ? await subscribeForPush(registration, context) : null);
-  if (subscription === null) throw new Error('this browser has no push subscription for this daemon');
-  const device = await context.service.register(
-    context.connection,
-    subscription,
-    enrolment.deviceName(),
-    context.preferences.get(context.connection.daemonId),
-  );
-  context.devices.remember(context.connection.daemonId, device.id);
-  return device;
+  const daemon = context.connection.daemonId;
+  // A subscription every daemon shared, from before each had its own: moving THIS daemon over is the
+  // reader's earlier "on", so it may mint a subscription even on a refresh, and the shared one goes.
+  const shared = await sharedSubscription(enrolment);
+  try {
+    const found = await enrolment.existing(daemon);
+    const mayCreate = create || moving || shared !== null;
+    if (found === null && !mayCreate) throw new Error('this browser has no push subscription for this daemon');
+    const registration = await enrolment.register(daemon);
+    const existing = await registration.pushManager.getSubscription();
+    if (existing === null && !mayCreate) throw new Error('this browser has no push subscription for this daemon');
+    const subscription = existing ?? (await subscribeForPush(registration, context));
+    const previous = context.devices.get(daemon);
+    const device = await context.service.register(
+      context.connection,
+      subscription,
+      enrolment.deviceName(),
+      context.preferences.get(daemon),
+    );
+    context.devices.remember(daemon, device.id);
+    // The daemon still lists the device it issued for the shared endpoint; it is this browser's old
+    // self, so it is revoked rather than left to deliver into a subscription that is about to vanish.
+    if (previous !== null && previous !== device.id)
+      await context.service.revoke(context.connection, previous).catch(() => null);
+    return device;
+  } finally {
+    // FAIL CLOSED: the shared subscription is the one voice a broken-into daemon could keep for every
+    // machine, so it goes even when this move-over failed. The reader's "on" is still stored, and the
+    // next refresh enrols this daemon on its own registration.
+    if (shared !== null) await shared.unsubscribe().catch(() => false);
+  }
+};
+
+/**
+ * Moves EVERY paired daemon off the shared subscription, at app start (docs/cross-daemon.md §4b). Waiting
+ * for each machine's notification settings to be opened left the first-enrolled machine the voice of
+ * every other machine's alerts until somebody did. A daemon whose delivery is on is enrolled on its own
+ * registration; one whose delivery is off only has the device it issued for the shared endpoint revoked.
+ * The shared subscription is dropped whatever happens, and nothing here throws.
+ */
+export const moveOffSharedPush = async (contexts: readonly PushEnrolmentContext[]): Promise<void> => {
+  const enrolment = contexts.find(context => context.enrolment !== null)?.enrolment ?? null;
+  if (enrolment === null) return;
+  const shared = await sharedSubscription(enrolment);
+  if (shared === null) return;
+  for (const context of contexts) {
+    const daemon = context.connection.daemonId;
+    if (context.preferences.get(daemon).enabled) {
+      await enrolDaemonPushDevice(context, false, true).catch(() => null);
+      continue;
+    }
+    const previous = context.devices.get(daemon);
+    if (previous === null) continue;
+    context.devices.remember(daemon, null);
+    await context.service.revoke(context.connection, previous).catch(() => null);
+  }
+  await shared.unsubscribe().catch(() => false);
+};
+
+/** The app-wide registration's subscription, if one survives from before per-daemon registrations. */
+const sharedSubscription = async (enrolment: PushEnrolment): Promise<PushSubscriptionHandle | null> => {
+  try {
+    return (await (await enrolment.shared())?.pushManager.getSubscription()) ?? null;
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -243,12 +319,15 @@ export const enrolDaemonPushDevice = async (
  * or browser-refused subscription is not a failure the reader can act on, and
  * the daemon-side copy is removed by the push service's next 404/410 anyway.
  */
-export const unsubscribeLocalPush = async (enrolment: PushEnrolment): Promise<boolean> => {
+export const unsubscribeLocalPush = async (enrolment: PushEnrolment, daemon: DaemonId): Promise<boolean> => {
   try {
-    const registration = await enrolment.registration();
+    const registration = await enrolment.existing(daemon);
+    if (registration === null) return false;
     const subscription = await registration.pushManager.getSubscription();
-    if (subscription === null) return false;
-    return await subscription.unsubscribe();
+    const dropped = subscription === null ? false : await subscription.unsubscribe();
+    // Only THIS daemon's registration goes. Every other daemon keeps its own subscription.
+    await registration.unregister();
+    return dropped;
   } catch {
     return false;
   }
@@ -352,7 +431,7 @@ export const disablePushDelivery = async (context: PushEnrolmentContext): Promis
   // removes on its next rejected delivery. Unsubscribing locally is what stops
   // this browser receiving anything in the meantime.
   if (deviceId !== null) await context.service.revoke(context.connection, deviceId).catch(() => null);
-  if (context.enrolment !== null) await unsubscribeLocalPush(context.enrolment);
+  if (context.enrolment !== null) await unsubscribeLocalPush(context.enrolment, daemon);
   return await readPushDelivery(context);
 };
 
@@ -396,7 +475,122 @@ export const revokePushDevice = async (
   if (deviceId === context.devices.get(daemon)) {
     context.devices.remember(daemon, null);
     context.preferences.set(daemon, { enabled: false });
-    if (context.enrolment !== null) await unsubscribeLocalPush(context.enrolment);
+    if (context.enrolment !== null) await unsubscribeLocalPush(context.enrolment, daemon);
   }
   return await readPushDelivery(context);
+};
+
+/* ---------- the browser binding -------------------------------------------- */
+
+/** The slice of `navigator.serviceWorker` per-daemon registration needs. */
+export interface PushContainerLike {
+  register(scriptUrl: string, options: { readonly scope: string }): Promise<unknown>;
+  getRegistrations(): Promise<readonly unknown[]>;
+}
+
+interface WorkerStateLike {
+  readonly state: string;
+  readonly scriptURL: string;
+  addEventListener(type: 'statechange', listener: () => void): void;
+  removeEventListener(type: 'statechange', listener: () => void): void;
+}
+
+interface RegistrationShape extends MachinePushRegistrationLike {
+  readonly scope: string;
+  readonly active: WorkerStateLike | null;
+  readonly installing: WorkerStateLike | null;
+  readonly waiting: WorkerStateLike | null;
+}
+
+const isRegistration = (value: unknown): value is RegistrationShape =>
+  typeof value === 'object' && value !== null && 'pushManager' in value && 'unregister' in value && 'scope' in value;
+
+/** Resolves once the registration has an active worker: a push subscription needs one. */
+const whenActive = async (registration: RegistrationShape): Promise<RegistrationShape> => {
+  if (registration.active !== null) return registration;
+  const worker = registration.installing ?? registration.waiting;
+  if (worker === null) throw new Error('this daemon’s push worker did not start');
+  await new Promise<void>((resolve, reject) => {
+    const onState = (): void => {
+      if (worker.state === 'activated') {
+        worker.removeEventListener('statechange', onState);
+        resolve();
+      } else if (worker.state === 'redundant') {
+        worker.removeEventListener('statechange', onState);
+        reject(new Error('this daemon’s push worker did not start'));
+      }
+    };
+    worker.addEventListener('statechange', onState);
+    onState();
+  });
+  return registration;
+};
+
+export interface ContainerPushEnrolmentDeps {
+  readonly container: PushContainerLike;
+  /** This page's origin: a registration scope is compared as a full URL. */
+  readonly origin: string;
+  /** The signed worker's own address (`/sw.verified.js`); every daemon registers that same file. */
+  readonly workerUrl: string;
+  /** The reader's label for a daemon, which the worker puts in front of each of its titles. */
+  readonly label: (daemon: DaemonId) => string;
+  readonly deviceName: string;
+}
+
+/** A daemon this browser is still paired with, by the label the reader gave it. */
+export interface PairedPushMachine {
+  readonly daemonId: DaemonId;
+  readonly label: string;
+}
+
+/** {@link PushEnrolment} over a real service-worker container, plus the reconcile the app runs. */
+export interface ContainerPushEnrolment extends PushEnrolment {
+  /**
+   * Drops the push registration of every daemon this browser is no longer paired with, and re-labels
+   * one whose label the reader changed. Best effort: a failure here leaves delivery as it was.
+   */
+  readonly reconcile: (paired: readonly PairedPushMachine[]) => Promise<void>;
+}
+
+export const containerPushEnrolment = (deps: ContainerPushEnrolmentDeps): ContainerPushEnrolment => {
+  const scopeOf = (daemon: DaemonId): string => new URL(pushScopePath(daemon), deps.origin).href;
+  const registrations = async (): Promise<RegistrationShape[]> =>
+    (await deps.container.getRegistrations()).filter(isRegistration);
+  const register = async (daemon: DaemonId): Promise<RegistrationShape> => {
+    const registered = await deps.container.register(
+      trustedWorkerUrl(pushWorkerUrl(deps.workerUrl, deps.label(daemon))),
+      {
+        scope: pushScopePath(daemon),
+      },
+    );
+    if (!isRegistration(registered)) throw new Error('this browser cannot hold a push subscription for this daemon');
+    return await whenActive(registered);
+  };
+  return {
+    register,
+    existing: async daemon => (await registrations()).find(candidate => candidate.scope === scopeOf(daemon)) ?? null,
+    shared: async () =>
+      (await registrations()).find(candidate => candidate.scope === new URL('/', deps.origin).href) ?? null,
+    deviceName: () => deps.deviceName,
+    reconcile: async paired => {
+      try {
+        const labels = new Map(paired.map(machine => [String(machine.daemonId), machine.label]));
+        for (const registration of await registrations()) {
+          const worker = registration.active ?? registration.waiting ?? registration.installing;
+          const machine = pushMachineOf(registration.scope, worker?.scriptURL ?? '');
+          if (machine === null) continue;
+          const label = labels.get(machine.daemonId);
+          if (label === undefined) {
+            // Unpaired: its daemon must not keep a way to put words on this screen.
+            await (await registration.pushManager.getSubscription())?.unsubscribe();
+            await registration.unregister();
+          } else if (label !== machine.label) {
+            await register(machine.daemonId as DaemonId);
+          }
+        }
+      } catch {
+        // Nothing the reader can act on; the next reconcile tries again.
+      }
+    },
+  };
 };

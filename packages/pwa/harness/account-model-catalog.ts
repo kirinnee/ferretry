@@ -98,6 +98,9 @@ const COMPONENTS = {
           },
           warnings: ['Command not found: uvx'],
           checkPath: '/Users/kirin-on-a-long-machine-name/Documents/Notes',
+          // Copied by Clone from the harness's "Work laptop" pairing, so the badge names it by that label.
+          clonedFrom: 'work-mac',
+          clonedFromDaemon: 'clone-source-daemon',
           usedBy: { profiles: ['Default'], runtimes: ['claude-default', 'codex-default'] },
         }),
       ],

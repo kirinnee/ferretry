@@ -14,6 +14,7 @@
 import { memo, useMemo, useState } from 'react';
 import { cn } from '../lib/class-names.ts';
 import { escapeHtml, highlightToHtml } from '../lib/highlight.ts';
+import { trustedHighlight } from '../lib/trusted-types.ts';
 
 /** A long body opens as a preview: the reader asked to see the call, not to
  *  scroll a file. */
@@ -52,7 +53,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, tone = 'default' 
             through `escapeHtml`. Caller text is never forwarded as markup on
             either path, and both are asserted in code-block.test.tsx. */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: highlighted output is the registry's own escaped markup; the fallback is escapeHtml */}
-        <code dangerouslySetInnerHTML={{ __html: html }} />
+        <code dangerouslySetInnerHTML={{ __html: trustedHighlight(html) }} />
       </pre>
       {tooMany ? (
         <button

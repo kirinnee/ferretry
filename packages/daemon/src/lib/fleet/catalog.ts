@@ -390,6 +390,8 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
             ),
             ...(content === undefined ? {} : { content }),
             ...(checkPath === undefined ? {} : { checkPath }),
+            ...(typeof component.clonedFrom === 'string' ? { clonedFrom: component.clonedFrom } : {}),
+            ...(typeof component.clonedFromDaemon === 'string' ? { clonedFromDaemon: component.clonedFromDaemon } : {}),
           };
         }),
     })),
