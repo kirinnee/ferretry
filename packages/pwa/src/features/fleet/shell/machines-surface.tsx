@@ -16,7 +16,7 @@
 
 import type { FleetMachineView } from '@ferretry/protocol';
 import { Boxes, KeyRound, Layers, Play, SlidersHorizontal } from 'lucide-react';
-import { type ComponentType, type ReactNode, useEffect, useRef } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
 import { Button } from '../../../shell/primitives.tsx';
@@ -50,6 +50,8 @@ export interface MachineTabProps {
   readonly createClient: FleetClientFactory;
   /** The daemon's connection and security panels, for the Machine tab. */
   readonly daemonPanels?: DaemonPanelsRenderer;
+  /** Open this machine's full-screen first run. */
+  readonly onSetUp?: () => void;
 }
 
 export type MachineTabSurfaces = Readonly<Partial<Record<MachineTabId, ComponentType<MachineTabProps>>>>;
@@ -105,10 +107,7 @@ export interface MachinesSurfaceProps {
   readonly unknownMachine?: string;
   /** Go to a machine's tab. The page turns this into an address. */
   readonly onOpen: (daemonId: DaemonId, tab: MachineTabId) => void;
-  /**
-   * Open this machine's first run. Called by itself, once per visit, the first time the machine answers
-   * that it is not set up — so nobody has to hunt for a button (docs/design/account-model.md §4.3).
-   */
+  /** Open this machine's full-screen first run, from the "Finish setting up" banner and the tabs. */
   readonly onSetUp?: (daemonId: DaemonId) => void;
   readonly createClient: FleetClientFactory;
   readonly tabs?: MachineTabSurfaces;
@@ -130,16 +129,7 @@ export function MachinesSurface({
 }: MachinesSurfaceProps) {
   const record = connections.find(candidate => candidate.daemonId === daemonId);
 
-  // A machine that is not set up opens its first run by itself — ONCE per visit, so leaving the flow, or
-  // finishing it with nothing chosen, lands on the tabs instead of going round again. Landing on
-  // Machines again later offers it again.
-  const offered = useRef(false);
   const notSetUp = reach.kind === 'online' && reach.machine.setUp === false;
-  useEffect(() => {
-    if (!notSetUp || offered.current || onSetUp === undefined) return;
-    offered.current = true;
-    onSetUp(daemonId);
-  }, [daemonId, notSetUp, onSetUp]);
 
   if (record === undefined)
     return (
@@ -166,6 +156,22 @@ export function MachinesSurface({
           <span className="min-w-0 truncate">{shownReachSummary(reach)}</span>
         </span>
       </header>
+
+      {/* A machine whose setup was left for later — or never started — says so above everything else, with
+          the one button that resumes it. Setup itself is a full screen of its own, never a tab here. */}
+      {notSetUp && onSetUp !== undefined ? (
+        <div className="kt-panel flex flex-wrap items-center justify-between gap-3 p-panel" data-machine-finish-setup="">
+          <div className="min-w-0">
+            <p className="m-0 text-row font-semibold text-fg">Finish setting up {name}</p>
+            <p className="mb-0 mt-1 text-cell leading-base text-muted">
+              It has no runtimes yet. Setup finds Claude Code and Codex on {name} and brings in what they have.
+            </p>
+          </div>
+          <Button type="button" variant="primary" data-machine-finish-setup-open="" onClick={() => onSetUp(daemonId)}>
+            Finish setting up
+          </Button>
+        </div>
+      ) : null}
 
       {unknownMachine === undefined ? null : (
         <p className="m-0 text-cell leading-base text-warn" role="status" data-machine-unknown="">
@@ -210,6 +216,7 @@ export function MachinesSurface({
             onRetry={onRetry}
             createClient={createClient}
             {...(daemonPanels === undefined ? {} : { daemonPanels })}
+            {...(onSetUp === undefined ? {} : { onSetUp: () => onSetUp(daemonId) })}
           />
         ) : (
           <EmptyMachineTab tab={tab} machineName={name} />

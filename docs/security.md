@@ -74,7 +74,7 @@ The owner chose friendliness here: **"once we unlock the app with a passkey, fee
   loads and tabs on this device. A daemon restart, a revoke or the period ending locks it again.
 - **Except adding access.** Pairing a new device, or giving a device more, always asks for a fresh
   passkey for that act.
-- **Want more prompts?** In Settings › Security for that machine, turn on **ask again for each
+- **Want more prompts?** In Settings › ‹machine› › Machine › Security, turn on **ask again for each
   change**. Then terminals, file writes, secrets, fleet changes, permission changes, removing devices,
   browser control and warden changes each ask again, for a window you choose (0 means every time).
 
@@ -85,7 +85,7 @@ device.
 
 ### Security settings
 
-One **Security** section per machine, in the app (Settings › Security) or at the machine
+One **Security** section per machine, in the app (Settings › ‹machine› › Machine › Security) or at the machine
 (`fy daemon security`).
 
 | Setting                      | Default | Range                 |
@@ -165,10 +165,10 @@ keys or add a device.
 ### Lost or stolen phone
 
 1. **Revoke the device.** At the machine: `fy device ls`, then `fy device revoke <device>`. Or from
-   another device: Settings › Daemons, open the machine, find the device and tap **Revoke**. This
+   another device: Settings, open the machine and its **Machine** tab, then **Add a device**, find the device and tap **Revoke**. This
    closes its connections, ends its unlock and forgets its passkeys, at once.
 2. Do this on **every** machine that phone was paired with.
-3. Check the audit log for what it did: Settings › Security log, or `fy daemon audit` at the machine.
+3. Check the audit log for what it did: Settings › ‹machine› › Machine › Security log, or `fy daemon audit` at the machine.
 4. If it could have reached an unlocked machine, assume it could do anything there: check sessions,
    terminals and secrets used in the log, and rotate secrets if in doubt.
 
@@ -183,12 +183,12 @@ keys or add a device.
 
 1. At the machine, run `fy passkey window <device>`. This re-opens that device's passkey sign-up for
    **10 minutes, for one passkey**.
-2. On the device, open Settings › Security for that machine and tap **Add a passkey**.
+2. On the device, open Settings › ‹machine› › Machine › Security and tap **Add a passkey**.
 
 ### One machine was hacked
 
 1. **Stop using it from the app** and take it offline.
-2. On your phone, **remove that machine** from the app (Settings › Daemons). This deletes its device
+2. On your phone, **remove that machine** from the app (Settings, open the machine, its **Machine** tab › **Host checks**). This deletes its device
    key and its notification subscription from the phone.
 3. **Don't clone from it.** If you already cloned from it, check the other machine's Components tab:
    everything it copied says **Copied from** it.

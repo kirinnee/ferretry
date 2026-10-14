@@ -1407,6 +1407,11 @@ body {
   color: var(--tab-sel-fg, var(--accent));
   font-weight: var(--weight-strong);
 }
+/* The same underline as every other "you are here", on the edge the bar shares with the page, so a
+   family whose selected ink IS its body ink still marks the current place. */
+.kt-tabbar__item[aria-current='page'] {
+  box-shadow: inset 0 var(--tab-underline-width, 2px) 0 var(--tab-underline, var(--accent));
+}
 
 /* ---- L2: section list --------------------------------------------------- */
 .kt-navgroup__title {
@@ -1636,6 +1641,39 @@ body {
   color: var(--muted);
   font-size: var(--text-xs);
 }
+/* The same steps as one row above an inline flow, joined by short rules instead of a rail. */
+.kt-steps--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm) var(--gap-md);
+}
+.kt-steps--row .kt-step {
+  align-items: center;
+  padding-bottom: 0;
+}
+.kt-steps--row .kt-step__name {
+  padding-top: 0;
+}
+.kt-steps--row .kt-step:not(:last-child)::after {
+  position: static;
+  display: none;
+}
+.kt-steps--row .kt-step:not(:last-child) {
+  grid-template-columns: 28px auto 24px;
+}
+.kt-steps--row .kt-step:not(:last-child)::before {
+  content: '';
+  grid-column: 3;
+  grid-row: 1;
+  align-self: center;
+  height: 2px;
+  background: var(--step-rail, var(--border-strong));
+}
+.kt-steps--row .kt-step[data-state='done']:not(:last-child)::before {
+  background: var(--step-rail-done, var(--accent));
+}
+
 .kt-stepsegs {
   display: flex;
   gap: 6px;

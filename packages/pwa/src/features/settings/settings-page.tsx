@@ -22,12 +22,12 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
-import { daemonSettingsPath } from '../../lib/pages/routes.ts';
+import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
-import { machineItemHash, settingsFlowFromHash } from '../fleet/setup/settings-route.ts';
+import { machineItemHash } from '../fleet/setup/settings-route.ts';
 import { DEFAULT_MACHINE_TAB, type MachineRoute, machineHash, parseMachineHash } from '../fleet/shell/machine-route.ts';
 import {
   type DaemonPanelsRenderer,
@@ -453,20 +453,8 @@ export function SettingsPage({
   const openSection = (id: Exclude<SettingsSectionId, 'machines'>): void => go(`${daemonSettingsPath(daemonId)}#${id}`);
   /** Back to Settings' first screen — on a phone, the grouped cards. */
   const home = (): void => go(daemonSettingsPath(daemonId));
-  /**
-   * A machine that is not set up opens its first run by itself. A flow the address already names — Clone
-   * from another machine, installing a tool, the first run itself — is left alone: that is somebody's
-   * own choice of how to set it up. It is always THIS page's machine, so only the hash moves — the way
-   * the Machine tab opens its own flows, which is the event that tab follows.
-   */
-  const openSetup = useCallback(
-    (target: DaemonId): void => {
-      const record = connections.find(candidate => candidate.daemonId === target);
-      if (record === undefined || settingsFlowFromHash(window.location.hash) !== null) return;
-      window.location.hash = machineItemHash(daemonDisplayName(record), 'machine', 'setup');
-    },
-    [connections],
-  );
+  /** A machine's first run is a full screen of its own, outside Settings. */
+  const openSetup = useCallback((target: DaemonId): void => go(daemonMachineSetupPath(target)), [go]);
   const switchToId = activeSection === 'machines' ? switchTo?.daemonId : undefined;
   useEffect(() => {
     if (switchToId !== undefined) openMachine(switchToId, machineRoute.tab);

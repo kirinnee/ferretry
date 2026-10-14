@@ -872,6 +872,55 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
   process.stdout.write(`📐 one left edge${hovered === null ? '' : ', tab bar fits'}: ${where}\n`);
 };
 
+/**
+ * THE FULL-SCREEN SETUP'S CONTRACT, measured (the approved usability proposal): no app chrome at all;
+ * a real stepper — the numbered rail on a desktop, segments with names on a phone — with exactly one
+ * current step and every step before it done; and ‹ Back with the step's actions in ONE footer pinned
+ * inside the viewport, above a phone's home indicator, on every step. Counted with the Machines frames.
+ */
+const assertSetupGeometry = async (page: Page, where: string): Promise<void> => {
+  await settleTransitions(page);
+  const problems = await page.evaluate(() => {
+    const found: string[] = [];
+    if (document.querySelector('[data-density-region="app-bar"], [data-app-tab-bar]') !== null)
+      found.push('app chrome is on screen around the setup');
+    const stepper = document.querySelector<HTMLElement>('[data-machine-stepper][data-presentation="screen"]');
+    if (stepper === null) return [...found, 'the full-screen stepper is not on screen'];
+    const final = stepper.getAttribute('data-step') === 'done';
+    const steps = [...stepper.querySelectorAll('[data-stepper-steps] [data-stepper-step]')];
+    const current = steps.findIndex(step => step.getAttribute('aria-current') === 'step');
+    if (final ? current !== -1 : current === -1) found.push(`the stepper marks ${current === -1 ? 'no' : 'a'} current step`);
+    steps.forEach((step, index) => {
+      const expected = final || index < current ? 'done' : index === current ? 'now' : 'todo';
+      if (step.getAttribute('data-state') !== expected)
+        found.push(`step ${index + 1} reads ${step.getAttribute('data-state')} instead of ${expected}`);
+    });
+    const shown = (selector: string): boolean => {
+      const element = stepper.querySelector<HTMLElement>(selector);
+      return element !== null && element.getBoundingClientRect().width > 0;
+    };
+    const wide = window.innerWidth >= 768;
+    if (wide && !shown('[data-stepper-rail]')) found.push('the numbered step rail is not shown on a desktop');
+    if (!wide && !shown('[data-stepper-progress]')) found.push('the step segments are not shown on a phone');
+    const foot = stepper.querySelector<HTMLElement>('[data-stepper-foot]');
+    if (foot === null) return [...found, 'there is no pinned footer'];
+    const box = foot.getBoundingClientRect();
+    if (box.top < 0 || box.bottom > window.innerHeight + 0.5)
+      found.push(`the footer (${box.top.toFixed(0)}–${box.bottom.toFixed(0)}px) is not inside the ${window.innerHeight}px viewport`);
+    const buttons = [...foot.querySelectorAll('button')];
+    if (buttons.length === 0) found.push('the footer holds no Back and no action');
+    for (const button of buttons) {
+      const rect = button.getBoundingClientRect();
+      if (rect.left < -0.5 || rect.right > window.innerWidth + 0.5)
+        found.push(`the footer's "${button.textContent?.trim()}" sits outside the viewport`);
+    }
+    return found;
+  });
+  if (problems.length > 0) fail(`${where}: the setup layout is off\n${problems.map(p => `   ${p}`).join('\n')}`);
+  machinesGeometryChecks += 1;
+  process.stdout.write(`📐 full-screen setup, stepper and pinned footer: ${where}\n`);
+};
+
 function run(command: string, args: readonly string[]): void {
   const result = spawnSync(command, [...args], { cwd: packageDir, stdio: 'inherit' });
   if (result.error) fail(`${command} could not be started: ${result.error.message}`);
@@ -2132,6 +2181,14 @@ try {
           // reorder list, a component's badges and a path long enough to wrap. Every one has to fit 390px.
           // `framed` runs after the checks and before the capture: the geometry check hovers a tab, which
           // scrolls the page back to it, so a frame that needs a lower part of the page in view says so here.
+          /** One full-screen setup frame: it fits, its stepper and its pinned footer are where they belong. */
+          const setupShot = async (name: string, label: string): Promise<void> => {
+            await assertNoSidewaysScroll(page, `the setup ${label} at ${viewport.name}`);
+            await assertSetupGeometry(page, `the setup ${label} at ${viewport.name}`);
+            const target = join(outDir, `setup-${name}-${viewport.name}.png`);
+            await settledShot(target);
+            process.stdout.write(`📸 Setup ${label} ${viewport.name} -> ${target}\n`);
+          };
           const accountShot = async (name: string, label: string, framed?: () => Promise<void>): Promise<void> => {
             await assertNoSidewaysScroll(page, `the Machines ${label} at ${viewport.name}`);
             await assertMachinesGeometry(page, `the Machines ${label} at ${viewport.name}`);
@@ -2288,31 +2345,39 @@ try {
           const offlineSurface = await openMachine('unreachable-daemon');
           await offlineSurface.locator('[data-machine-offline]').waitFor({ state: 'visible' });
           await accountShot('offline', 'offline machine');
-          // A machine that is not set up OPENS ITS FIRST RUN BY ITSELF (S1): nobody hunts for a button.
+          // A machine that is not set up SAYS SO above its tabs, with the one button that resumes it; the
+          // first run itself is a FULL SCREEN of its own, outside Settings and with no app chrome.
+          const newMachine = await openMachine('checking-daemon');
+          await newMachine.locator('[data-machine-finish-setup]').waitFor({ state: 'visible' });
+          await accountShot('not-set-up', 'machine not set up');
+          await newMachine.locator('[data-machine-finish-setup-open]').click();
           // One question per screen — the tools, then each tool's "Use your login and setup?", a tool
           // that is installed but not signed in with Sign in now in place, and the "nothing set up yet"
-          // ending — and leaving it lands on the Runtimes card that keeps the way back.
-          const newMachine = await openMachine('checking-daemon');
-          await newMachine.locator('[data-first-run-step="tools"]').waitFor({ state: 'visible' });
-          await accountShot('first-run', 'first run');
-          await newMachine.locator('[data-step-next]').click();
-          await newMachine.locator('[data-first-run-step="claude"]').waitFor({ state: 'visible' });
-          await accountShot('first-run-claude', 'first run Claude Code question');
-          await newMachine.locator('[data-harness-skip]').click();
-          await newMachine.locator('[data-first-run-step="codex"] [data-setup-note="sign-in-now"]').waitFor({
+          // ending — with the named stepper beside (or, on a phone, above) every one of them.
+          const setupScreen = page.locator('#harness-machine-setup [data-machine-stepper="first-run"]');
+          await setupScreen.locator('[data-first-run-step="tools"]').waitFor({ state: 'visible' });
+          await setupShot('first-run', 'first run');
+          await setupScreen.locator('[data-step-next]').click();
+          await setupScreen.locator('[data-first-run-step="claude"]').waitFor({ state: 'visible' });
+          await setupShot('first-run-claude', 'first run Claude Code question');
+          await setupScreen.locator('[data-harness-skip]').click();
+          await setupScreen.locator('[data-first-run-step="codex"] [data-setup-note="sign-in-now"]').waitFor({
             state: 'visible',
           });
-          await accountShot('first-run-codex', 'first run Codex not signed in');
-          await newMachine.locator('[data-harness-sign-in]').click();
-          await newMachine.locator('[data-first-run-sign-in="codex"]').waitFor({ state: 'visible' });
-          await accountShot('first-run-sign-in', 'first run Sign in now');
-          await newMachine.locator('[data-first-run-sign-in-close]').click();
-          await newMachine.locator('[data-harness-skip]').click();
-          await newMachine.locator('[data-first-run-result="nothing"]').waitFor({ state: 'visible' });
-          await accountShot('first-run-nothing', 'first run with nothing set up');
-          await newMachine.locator('[data-first-run-finish]').click();
-          await newMachine.locator('[data-runtimes-not-set-up]').waitFor({ state: 'visible' });
-          await accountShot('not-set-up', 'machine not set up');
+          await setupShot('first-run-codex', 'first run Codex not signed in');
+          await setupScreen.locator('[data-harness-sign-in]').click();
+          await setupScreen.locator('[data-first-run-sign-in="codex"]').waitFor({ state: 'visible' });
+          await setupShot('first-run-sign-in', 'first run Sign in now');
+          await setupScreen.locator('[data-first-run-sign-in-close]').click();
+          await setupScreen.locator('[data-harness-skip]').click();
+          await setupScreen.locator('[data-first-run-result="nothing"]').waitFor({ state: 'visible' });
+          await setupShot('first-run-nothing', 'first run with nothing set up');
+          // Leaving lands back on the machine in Settings, banner and all.
+          await setupScreen.locator('[data-first-run-finish]').click();
+          await page
+            .locator('[data-machines-surface="checking-daemon"] [data-machine-finish-setup]')
+            .waitFor({ state: 'visible' });
+          settingsPage = page.getByLabel('Settings page preview', { exact: true });
 
           // The compact registry is a separate deterministic route rather than a
           // DOM mutation: it remounts the reachability hooks exactly as a fresh

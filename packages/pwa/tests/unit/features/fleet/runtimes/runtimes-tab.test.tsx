@@ -156,16 +156,13 @@ describe('Runtimes tab list', () => {
     await view.unmount();
   });
 
-  it('M3: a machine that is not set up offers only the link to set it up', async () => {
+  it('M3: a machine that is not set up says it has no runtimes, and offers nothing to add yet', async () => {
     const view = await open({ machine: machine({ setUp: false }) });
     const note = must(view.container.querySelector('[data-runtimes-not-set-up]'), 'not set up');
-    expect(text(note, 'h3')).toBe('studio-mac isn’t set up yet');
-    expect(note.textContent).toContain(
-      'Setting it up finds Claude Code and Codex on studio-mac and brings in what they already have.',
-    );
-    const link = must(note.querySelector('a'), 'set up link');
-    expect(link.textContent).toBe('Set up studio-mac');
-    expect(link.getAttribute('href')).toBe('#machines/studio-mac/machine/setup');
+    expect(text(note, 'h3')).toBe('No runtimes on studio-mac yet');
+    // The way into setup is the banner above the tabs, so this card carries no second copy of it.
+    expect(note.textContent).toContain('Finish setting it up above to bring in your Claude Code and Codex setup.');
+    expect(note.querySelector('a, button')).toBeNull();
     expect(view.container.querySelector('[data-runtimes-tab]')).toBeNull();
     expect(view.container.querySelector('[data-add-runtime]')).toBeNull();
     await view.unmount();

@@ -1173,7 +1173,7 @@ outstanding:
      is mounted again — a declared GAP, not a working path.
 4. **Active-carrier disclosure on screen** — DONE. `ActiveCarrierCard` renders
    `chooseConnection().reason` and the `describeConnectionMethod` observer list for whichever
-   carrier a live session won on, from `DaemonCarrierRouter.choice`, in Settings › Daemons. A
+   carrier a live session won on, from `DaemonCarrierRouter.choice`, on the machine’s Machine tab in Settings (Carrier). A
    carrier nothing has measured yet says so rather than defaulting to "direct".
 5. **Removal of the interim carrier chooser and self-hosting setup route** — DONE. First run asks
    no carrier question: the `connect` step, the `own-relay` answer and the four self-hosting steps

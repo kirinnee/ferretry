@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { useState } from 'react';
 import { MachineStepper } from '../../../../../src/features/fleet/shell/machine-stepper.tsx';
+import { StepperFoot } from '../../../../../src/features/fleet/shell/stepper-foot.tsx';
 import {
   currentFlow,
   openSubStepper,
@@ -62,21 +63,35 @@ const click = async (container: HTMLElement, selector: string): Promise<void> =>
   await interact(() => element.click());
 };
 
+/** Each named step and the state it is drawn in, from the desktop row. */
+const states = (container: HTMLElement): string[] =>
+  [...container.querySelectorAll('[data-stepper-steps] [data-stepper-step]')].map(
+    step => `${step.getAttribute('data-stepper-step')}:${step.getAttribute('data-state')}`,
+  );
+
 const text = (container: HTMLElement, selector: string): string | null | undefined =>
   container.querySelector(selector)?.textContent;
 
 describe('MachineStepper', () => {
   it('shows the step, its position, the progress and the title, and focuses the title on each step', async () => {
     const view = await mount(<Host initial={startStepper(flow)} />);
-    expect(text(view.container, '[data-stepper-position]')).toBe('Credential · 1 of 3');
-    expect(view.container.querySelectorAll('[data-stepper-progress] span')).toHaveLength(3);
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2 · Credential');
+    // A NAMED, NUMBERED stepper: the final Done is where the walk ends, not one of its steps.
+    expect(view.container.querySelectorAll('[data-stepper-progress] .kt-stepsegs span')).toHaveLength(2);
+    expect(states(view.container)).toEqual(['credential:now', 'profile:todo']);
+    expect(view.container.querySelector('[aria-current="step"]')?.getAttribute('data-stepper-step')).toBe('credential');
     expect(document.activeElement?.id).toBe('machine-stepper-title');
     expect(text(view.container, '#machine-stepper-title')).toBe('Add a runtime');
     await click(view.container, '[data-body]');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Profile · 2 of 3');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 2 · Profile');
     expect(view.container.querySelector('[data-step]')?.getAttribute('data-step')).toBe('profile');
+    expect(states(view.container)).toEqual(['credential:done', 'profile:now']);
+    // Done shows a check, not its number.
+    expect(text(view.container, '[data-stepper-step="credential"] .kt-step__num')).toBe('');
+    expect(view.container.querySelector('[data-stepper-step="credential"] .kt-step__num svg')).not.toBeNull();
+    expect(text(view.container, '[data-stepper-segment-name="credential"]')).toBe('Credential ✓');
     await click(view.container, '[data-stepper-back]');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Credential · 1 of 3');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2 · Credential');
     await view.unmount();
   });
 
@@ -126,7 +141,8 @@ describe('MachineStepper', () => {
 
   it('a final step hides Back and Cancel', async () => {
     const view = await mount(<Host initial={stepForward(stepForward(startStepper(flow)))} />);
-    expect(text(view.container, '[data-stepper-position]')).toBe('Done · 3 of 3');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Add a runtime · done');
+    expect(states(view.container)).toEqual(['credential:done', 'profile:done']);
     expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
     expect(view.container.querySelector('[data-stepper-cancel]')).toBeNull();
     await view.unmount();
@@ -137,7 +153,7 @@ describe('MachineStepper', () => {
     const view = await mount(<Host initial={stepForward(startStepper(flow))} online={false} retries={retries} />);
     expect(view.container.querySelector('[data-body]')).toBeNull();
     expect(text(view.container, '[data-stepper-paused]')).toContain('studio-mac is asleep or offline');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Profile · 2 of 3');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 2 · Profile');
     await click(view.container, '[data-stepper-retry]');
     expect(retries).toEqual(['retry']);
     await view.unmount();
@@ -147,5 +163,77 @@ describe('MachineStepper', () => {
     expect(retry.disabled).toBe(true);
     expect(retry.textContent).toBe('Checking…');
     await busy.unmount();
+  });
+});
+
+function ScreenHost({ initial, left = [] }: { readonly initial: StepperState; readonly left?: string[] }) {
+  const [state, setState] = useState<StepperState | null>(initial);
+  if (state === null) return <p data-left="">left</p>;
+  return (
+    <MachineStepper
+      state={state}
+      presentation="screen"
+      onChange={next => {
+        if (next === null) left.push('left');
+        setState(next);
+      }}
+      machineName="studio-mac"
+      online
+      onRetry={() => undefined}
+    >
+      <p data-body="">body of {currentFlow(state).at}</p>
+      <StepperFoot>
+        <button type="button" data-next="" onClick={() => setState(stepForward(state))}>
+          Next
+        </button>
+      </StepperFoot>
+    </MachineStepper>
+  );
+}
+
+describe('MachineStepper as a full screen', () => {
+  it('draws the numbered rail and the phone segments, pins the step actions to the footer, and Finish later leaves', async () => {
+    const left: string[] = [];
+    const view = await mount(<ScreenHost initial={startStepper(flow)} left={left} />);
+    const section = must(view.container.querySelector('[data-machine-stepper]'), 'stepper');
+    expect(section.getAttribute('data-presentation')).toBe('screen');
+    expect(view.container.querySelector('[data-stepper-rail] [data-stepper-steps="column"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-stepper-progress]')).not.toBeNull();
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2');
+    expect(view.container.querySelector('h1#machine-stepper-title')?.textContent).toBe('Add a runtime');
+    // The step's own action lands in the pinned footer, still inside the stepper's section.
+    const foot = must(view.container.querySelector('[data-stepper-foot]'), 'footer');
+    expect(foot.querySelector('[data-next]')).not.toBeNull();
+    expect(section.contains(foot)).toBe(true);
+    // Step 1 has nowhere to go back to.
+    expect(foot.querySelector('[data-stepper-back]')).toBeNull();
+    await click(view.container, '[data-next]');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 2');
+    await click(view.container, '[data-stepper-back]');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2');
+    // Finish later leaves at once: nothing was sent, and the progress is the caller's to keep.
+    await click(view.container, '[data-stepper-finish-later]');
+    expect(left).toEqual(['left']);
+    await view.unmount();
+  });
+
+  it('on the final step offers neither Back nor Finish later', async () => {
+    const view = await mount(<ScreenHost initial={stepForward(stepForward(startStepper(flow)))} />);
+    expect(text(view.container, '[data-stepper-position]')).toBe('Done');
+    expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
+    expect(view.container.querySelector('[data-stepper-finish-later]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('StepperFoot', () => {
+  it('renders a step’s actions under it when no stepper offers a footer', async () => {
+    const view = await mount(
+      <StepperFoot>
+        <button type="button">Skip</button>
+      </StepperFoot>,
+    );
+    expect(view.container.querySelector('div > button')?.textContent).toBe('Skip');
+    await view.unmount();
   });
 });

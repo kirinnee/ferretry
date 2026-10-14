@@ -147,7 +147,7 @@ a mounted non-`GET` route or a socket is neither audited nor on the reviewed lis
   a filtered log reads as a complete one, and the reader could not tell what was withheld.
 - `fy daemon audit [--limit N] [--kept-skip K] [--json]` — "Security changes" first, with how many
   older ones there are and the flag that shows them, then "Recent activity".
-- The app: Settings › Security log, per machine — "Security changes" first with "Show older" until every
+- The app: Settings › ‹machine› › Machine › Security log, per machine — "Security changes" first with "Show older" until every
   one has been shown, then "Recent activity". Opening it marks a device as seen by the new-device notice
   only when that device's `device.paired` record was actually rendered; a refused or failed read marks
   nothing.

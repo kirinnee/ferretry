@@ -235,7 +235,8 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
             name="setup"
             title={`Set up ${machineName}`}
             detail="Check the tools, then bring in your Claude Code and Codex setup."
-            onClick={() => route.open('setup')}
+            // The first run is a full screen of its own; the in-tab flow is kept only for an old link.
+            onClick={() => (props.onSetUp === undefined ? route.open('setup') : props.onSetUp())}
           />
         )}
         <NavRow

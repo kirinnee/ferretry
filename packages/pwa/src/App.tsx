@@ -38,6 +38,8 @@ import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
+import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
+import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -327,6 +329,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: 'Learning' }];
     case 'imported-history':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Imported history' }];
+    case 'machine-setup':
+      return [{ href: daemonSettingsPath(route.daemonId), label: 'Settings' }, { label: 'Set up a machine' }];
   }
 };
 
@@ -1263,6 +1267,28 @@ function ImportedHistoryRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** One machine's full-screen first run: no app chrome, only its own stepper. */
+function MachineSetupRoute({ connection }: DaemonPageProps) {
+  const store = useAppStore();
+  const { connections } = useConnectionSnapshot();
+  const { navigate } = useRouter();
+  const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
+  const createClient = useCallback(
+    async (daemon: DaemonConnection) => await store.clients.client(daemon),
+    [store.clients],
+  );
+  if (record === undefined) return null;
+  return (
+    <MachineSetupScreen
+      connection={record}
+      connections={connections}
+      createClient={createClient}
+      onNavigate={navigate}
+      storage={browserSetupStorage()}
+    />
+  );
+}
+
 function ProjectsRoute({ connection }: DaemonPageProps) {
   return <ProjectsPage connection={connection} />;
 }
@@ -1284,6 +1310,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
   ImportedHistory: ImportedHistoryRoute,
+  MachineSetup: MachineSetupRoute,
 };
 
 /**
@@ -1624,6 +1651,18 @@ export function AppShell() {
           That daemon is not paired in this browser. Choose an existing pairing or add it again.
         </p>
         <ConnectionPicker />
+      </div>
+    );
+  } else if (pageRoute.kind === 'machine-setup') {
+    // A ONE-TIME GUIDED JOB, so it gets the whole screen: no app bar, no bottom bar, no sidebar — only the
+    // setup's own named stepper, with its way out ("Finish later") inside it.
+    content = (
+      <div className="kt-shell flex flex-col overflow-hidden">
+        <DeviceRefusedGate connection={connection}>
+          <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
+            <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+          </ChunkErrorBoundary>
+        </DeviceRefusedGate>
       </div>
     );
   } else {

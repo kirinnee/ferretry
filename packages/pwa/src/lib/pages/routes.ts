@@ -85,6 +85,15 @@ export interface DaemonImportedHistoryRoute {
   readonly daemonId: DaemonId;
 }
 
+/**
+ * One machine's first run, full screen and outside Settings: what pairing a machine that is not set up
+ * yet opens. It is a one-time guided job, so it gets no app chrome — only its own named stepper.
+ */
+export interface DaemonMachineSetupRoute {
+  readonly kind: 'machine-setup';
+  readonly daemonId: DaemonId;
+}
+
 export type DaemonPageRoute =
   | DaemonSessionsRoute
   | DaemonNewSessionRoute
@@ -95,7 +104,8 @@ export type DaemonPageRoute =
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
   | DaemonLearningRoute
-  | DaemonImportedHistoryRoute;
+  | DaemonImportedHistoryRoute
+  | DaemonMachineSetupRoute;
 
 export type PageRoute = ConnectionPickerRoute | SetupRoute | DaemonPageRoute;
 
@@ -182,6 +192,9 @@ export const daemonLearningPath = (id: DaemonId): string => `${daemonSessionsPat
 /** Builds the canonical history-import pathname for one daemon. */
 export const daemonImportedHistoryPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/history`;
 
+/** Builds one machine's full-screen first run: `/d/<id>/setup`. */
+export const daemonMachineSetupPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/setup`;
+
 /** Resolves a browser pathname to the page model, without consulting browser globals. */
 export const parseRoute = (pathname: string): Route => {
   const [first, daemonSegment, destination, sessionSegment, ...remainder] = pathname.split('/').filter(Boolean);
@@ -199,6 +212,7 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
     if (destination === 'history') return { kind: 'imported-history', daemonId: id };
+    if (destination === 'setup') return { kind: 'machine-setup', daemonId: id };
     if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: id } };
   }
 
@@ -248,6 +262,8 @@ export const routePath = (route: Route): string => {
       return daemonLearningPath(route.daemonId);
     case 'imported-history':
       return daemonImportedHistoryPath(route.daemonId);
+    case 'machine-setup':
+      return daemonMachineSetupPath(route.daemonId);
     case 'legacy-tasks-redirect':
       return routePath(route.to);
   }
