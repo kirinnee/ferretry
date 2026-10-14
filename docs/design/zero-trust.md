@@ -60,17 +60,17 @@ when, from where).
 
 Adversaries, and what each must be denied:
 
-| adversary                                      | must NOT be able to                                                                                                                                                                                                     |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **stolen phone, locked**                       | anything: the app's key is usable only by code running in the unlocked browser                                                                                                                                          |
-| **stolen phone, unlocked, app open**           | anything before the device unlocks the machine; outlast a revoke; register its own passkey. INSIDE an unlock period it can do what the owner could (B1) — the period, `stepUpOnActions` and revocation are the controls |
-| **copied storage** (backup, profile copy, IDB) | authenticate at all: the private key is non-extractable and never serialised as bytes                                                                                                                                   |
-| **malicious relay / Cloudflare**               | read, alter, inject, replay or impersonate either end; learn the device id or any credential                                                                                                                            |
-| **LAN attacker** (same Wi-Fi as the daemon)    | read or alter direct traffic, learn a credential, impersonate the daemon to a pairing device                                                                                                                            |
-| **compromised Pages deploy**                   | silently replace an installed app (detected and refused by D, within the TOFU limits below)                                                                                                                             |
-| **XSS in the app**                             | carry the key away; act after the tab closes or before the owner unlocks. Inside an unlock it can act as the owner (B1)                                                                                                 |
-| **replay** of any captured frame or assertion  | have it accepted in any other session, or twice in the same one                                                                                                                                                         |
-| **downgrade** to an older protocol or path     | reach any path that is weaker: none exists — the bearer path, `POST /v1/pair` and `/1` are gone                                                                                                                         |
+| adversary                                      | must NOT be able to                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **stolen phone, locked**                       | anything: the app's key is usable only by code running in the unlocked browser                                                                                                                                                                                                                                                                                  |
+| **stolen phone, unlocked, app open**           | anything before the device unlocks the machine; register its own passkey on THIS device. INSIDE an unlock period it can do what the owner could (B1), including pair a device of its own, which then outlasts revoking the phone (R2-M2) — the period, `stepUpOnActions`, the `passkey-added` push and revoking EVERY device it may have added are the controls |
+| **copied storage** (backup, profile copy, IDB) | authenticate at all: the private key is non-extractable and never serialised as bytes                                                                                                                                                                                                                                                                           |
+| **malicious relay / Cloudflare**               | read, alter, inject, replay or impersonate either end; learn the device id or any credential                                                                                                                                                                                                                                                                    |
+| **LAN attacker** (same Wi-Fi as the daemon)    | read or alter direct traffic, learn a credential, impersonate the daemon to a pairing device                                                                                                                                                                                                                                                                    |
+| **compromised Pages deploy**                   | silently replace an installed app (detected and refused by D, within the TOFU limits below)                                                                                                                                                                                                                                                                     |
+| **XSS in the app**                             | carry the key away; act before the owner unlocks. Inside an unlock it can act as the owner (B1) — on ANY page load of that device for the unlock's validity, not only the tab that unlocked (the unlock is the device's, by decision; R2-M1)                                                                                                                    |
+| **replay** of any captured frame or assertion  | have it accepted in any other session, or twice in the same one                                                                                                                                                                                                                                                                                                 |
+| **downgrade** to an older protocol or path     | reach any path that is weaker: none exists — the bearer path, `POST /v1/pair` and `/1` are gone                                                                                                                                                                                                                                                                 |
 
 Out of scope by decision, not oversight: device posture (needs a native client), an attacker with the
 owner's user account on the host, a malicious agent the owner chats with (see the end), and Cloudflare
@@ -411,6 +411,12 @@ secret, start agents, pair another device. The per-act model stopped such a phon
 act; this one does not. The controls are: the unlock period (shorten it), `stepUpOnActions` (turn the
 per-act prompt back on), and **revocation** — revoking the device ends every session it holds and every
 unlock at once, from the machine or from any other device.
+
+- **A start that is a terminal in disguise is decided as one** (review R2-H1). `POST /v1/sessions` with
+  harness flags of its own, or with a working directory outside every registered project and the
+  managed-worktree root, is a `terminal.use` act: covered by the unlock under the defaults, and asked
+  per act when `stepUpOnActions` is on or the unlock is off — exactly as opening a terminal is. A plain
+  start in a known project asks for nothing more. The prompt names it ("open a terminal").
 
 ### B2. The ceremony, and who verifies it
 
@@ -870,7 +876,17 @@ Said plainly, because the useful property is narrower than "zero trust" sounds:
   daemon's state, the admin token and the secrets key.
 - **Code running in the open app.** XSS or a malicious deploy can _use_ the device key while the tab
   is open (it cannot copy it) and can raise a passkey prompt — the owner's biometric is the last
-  line, so a prompt nobody asked for must be refused. Its authority ends when the tab closes.
+  line, so a prompt nobody asked for must be refused. Its authority does NOT end when the tab closes: the
+  unlock is held per device across page loads (owner decision), so a malicious deploy or XSS on any
+  later load within `unlockValidityHours` acts with full access and no new biometric. This is the cost
+  of "unlock once": shorten the validity, turn `stepUpOnActions` on, or revoke the device (R2-M1).
+- **A first passkey is unattested.** In a new device's ten-minute first window, page code could register
+  a software credential (`fmt: none`, user verification claimed by software) and unlock with it from
+  then on, with no real biometric. This is inherent to an unattested web passkey; the `passkey-added`
+  push tells the owner's other devices (R2-L1).
+- **A dispatcher built without the step-up service is open on the unlock** (`NO_STEP_UP_WITNESS`). It
+  is for surfaces that serve no device; the mounted dispatchers are given the real service, by type
+  (R2-L2).
 - **A compromised Pages deploy, on first install or via a new service worker** — see D. A deploy is
   trusted the way any website is, once.
 - **A host that answers the browser’s own worker-install request differently from a plain fetch.**

@@ -84,6 +84,9 @@ const verifier: PasskeyVerifierPort = {
   },
 };
 
+/** The one registered project in this machine. */
+const PROJECT = '/home/owner/projects/app';
+
 const json = (value: unknown): string => JSON.stringify(value);
 const originBody = json({ origin: ORIGIN });
 const assertionBody = json({
@@ -138,7 +141,7 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
       ...stepUpRoutes(service),
       ...securityRoutes(security),
       ...terminalRoutes(terminals),
-      ...sessionControlRoutes(control),
+      ...sessionControlRoutes(control, { guard: grants, knownRoots: async () => [PROJECT] }),
     ]),
     credentials,
     grants,
@@ -171,6 +174,13 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
       [FY_REQUEST_ID_HEADER]: `req-${sessionsStarted}`,
     });
   };
+  /** A start that picks the harness's own flags, or a folder outside every project: terminal access. */
+  const startWith = (extra: Record<string, unknown>) => {
+    sessionsStarted += 1;
+    return ask('POST', '/v1/sessions', json({ agent: 'claude-auto-loge', mode: 'auto', prompt: 'go', ...extra }), {
+      [FY_REQUEST_ID_HEADER]: `req-${sessionsStarted}`,
+    });
+  };
   const openTerminal = () => ask('POST', '/v1/sessions/s1/terminals', json({}));
   const upgrade = (terminalId: string) =>
     sockets.upgrade(
@@ -185,6 +195,7 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     ask,
     unlock,
     startSession,
+    startWith,
     openTerminal,
     upgrade,
     sockets,
@@ -405,6 +416,44 @@ describe('a confirmation per act inside the unlock (stepUpOnActions)', () => {
     // Assert
     should(within.status).equal(201);
     refusedAs(after, 403, STEP_UP_REQUIRED_CODE);
+  });
+
+  it('should ask for a step-up for a start with its own flags, or outside every project, as for a terminal', async () => {
+    // Review R2-H1: `--settings` with a hook runs any host command, so per-act settings must cover it.
+    // Arrange
+    const world = await machine({ stepUpOnActions: true });
+    await world.unlock();
+    world.registry.forgetDevice(deviceId);
+
+    // Act
+    const flagged = await world.startWith({ harnessFlags: ['--settings', '{"hooks":{}}'] });
+    const elsewhere = await world.startWith({ cwd: '/etc' });
+    const climbedOut = await world.startWith({ cwd: `${PROJECT}/../../etc` });
+    const lookalike = await world.startWith({ cwd: `${PROJECT}-evil` });
+    const inProject = await world.startWith({ cwd: `${PROJECT}/packages/app` });
+
+    // Assert — each terminal-class start names the terminal on its prompt; a project start is ordinary
+    for (const response of [flagged, elsewhere, climbedOut, lookalike]) {
+      refusedAs(response, 403, STEP_UP_REQUIRED_CODE);
+      should(JSON.parse(response.body)).containDeep({ demand: { capability: 'terminal', axis: 'use' } });
+    }
+    should(inProject.status).equal(201);
+    should(world.control.starts).have.length(1);
+  });
+
+  it('should ask for a step-up for a flagged start with the unlock off, and serve it once confirmed', async () => {
+    // Arrange — no unlock at all: every device holds full grants, so this was round-1 H1 exactly
+    const world = await machine({ unlockOnOpen: false, stepUpOnActions: false, stepUpWindowMinutes: 10 });
+
+    // Act
+    const refused = await world.startWith({ harnessFlags: ['--dangerously-skip-permissions'] });
+    await world.ask('POST', '/v1/step-up/options', originBody);
+    await world.ask('POST', '/v1/step-up', assertionBody);
+    const served = await world.startWith({ harnessFlags: ['--dangerously-skip-permissions'] });
+
+    // Assert
+    refusedAs(refused, 403, STEP_UP_REQUIRED_CODE);
+    should(served.status).equal(201);
   });
 
   it('should ask for a step-up per act with the unlock off even though stepUpOnActions is off', async () => {

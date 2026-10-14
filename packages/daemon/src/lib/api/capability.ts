@@ -217,5 +217,12 @@ export interface StepUpWitness {
   unlockRequired?(subject: SessionDevice): boolean;
 }
 
-/** The witness for a dispatcher with no step-up subsystem wired: nobody holds one. */
+/**
+ * The witness for a dispatcher with no step-up subsystem wired: nobody holds a step-up, and nobody is
+ * asked to unlock. FOR A SURFACE THAT SERVES NO DEVICE ONLY (a host-only table, a suite). It is open on
+ * the unlock by construction (review R2-L2), so a dispatcher that serves paired devices must be given the
+ * real step-up service. The mounted dispatchers are, by type: `MountedSubsystems.stepUp` is a
+ * `StepUpService`, whose `unlockRequired` always exists, and `unlock-gate.test.ts` proves the mounted
+ * route tables refuse a device before its unlock.
+ */
 export const NO_STEP_UP_WITNESS: StepUpWitness = { held: () => false };

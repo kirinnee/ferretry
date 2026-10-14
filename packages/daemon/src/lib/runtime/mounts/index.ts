@@ -47,7 +47,7 @@ import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
-import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
+import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
@@ -369,7 +369,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The write surface registers AFTER the read for the same reason the read comes first: `POST
     // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
     // other and both sit above every per-session subsystem that follows.
-    ...sessionControlRoutes(subsystems.sessionControl),
+    ...sessionControlRoutes(subsystems.sessionControl, {
+      guard: subsystems.grants,
+      knownRoots: knownLaunchRoots(subsystems.catalogs, subsystems.worktrees),
+    }),
     // The revive registers with the rest of the write surface, above every per-session subsystem, so
     // its one-segment pattern sits beside the stop it is the counterpart of rather than below the
     // deeper patterns. Neither can shadow the other: they differ in their final literal segment.

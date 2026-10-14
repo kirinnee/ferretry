@@ -1,13 +1,17 @@
 import {
   FY_REQUEST_ID_HEADER,
+  STEP_UP_REQUIRED_CODE,
   StartSessionRequestSchema,
+  type StepUpRequiredBody,
   StopSessionRequestSchema,
   type SessionView,
   type StartSessionRequest,
 } from '@ferretry/protocol';
+import { posix } from 'node:path';
+import { type CapabilityDemand, type CapabilityGuard, grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
+import { errorResponse, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError } from './task-boards.ts';
 
@@ -251,12 +255,88 @@ function requestId(request: ApiRequest): string {
 }
 
 /** Starts a session, or answers with the one this request id already started. */
-async function start(subsystem: SessionControlSubsystem, context: RouteContext): Promise<ApiResponse> {
+/**
+ * What a start needs to decide whether it is a TERMINAL in disguise.
+ *
+ * A start that chooses the harness's own flags, or a working directory outside every project this
+ * daemon knows, can run any command on the host — `--settings` with a hook, for one. So for a governed
+ * caller it is decided as `terminal.use` (review R2-H1): under the default settings the unlock already
+ * covers it; with `stepUpOnActions` on, or the unlock off, it asks for a passkey like a terminal does.
+ * A plain start in a known project is an ordinary act and asks for nothing more.
+ */
+export interface SessionLaunchGate {
+  readonly guard: CapabilityGuard;
+  /** The folders a session may start in as an ordinary act: registered projects and the worktree root. */
+  readonly knownRoots: () => Promise<readonly string[]>;
+}
+
+const TERMINAL_USE: CapabilityDemand = { capability: 'terminal', axis: 'use' };
+
+/**
+ * Registered projects, and the managed-worktree root every worktree session runs under. Read per start,
+ * so a project registered a moment ago is known at once.
+ */
+export const knownLaunchRoots =
+  (
+    catalogs: { projects(): Promise<readonly { readonly path: string }[]> },
+    worktrees: { list(): Promise<{ readonly managedRoot?: string | undefined }> },
+  ) =>
+  async (): Promise<readonly string[]> => {
+    const [projects, managed] = await Promise.all([catalogs.projects(), worktrees.list()]);
+    return [
+      ...projects.map(project => project.path),
+      ...(managed.managedRoot === undefined ? [] : [managed.managedRoot]),
+    ];
+  };
+
+/** Whether `path` is `root` or inside it, lexically. Both are absolute (the start schema requires it). */
+const within = (path: string, root: string): boolean => {
+  const target = posix.normalize(path);
+  const base = posix.normalize(root).replace(/\/+$/u, '');
+  return target === base || target.startsWith(`${base}/`);
+};
+
+/** The refusal a terminal-class start gets from a governed caller, or nothing when it may proceed. */
+async function launchRefusal(
+  gate: SessionLaunchGate,
+  context: RouteContext,
+  request: StartSessionRequest,
+): Promise<ApiResponse | undefined> {
+  const presentation = context.presentation;
+  if (presentation === undefined || presentation.loopback) return undefined;
+  const flagged = (request.harnessFlags ?? []).length > 0;
+  const cwd = request.cwd;
+  const outside = cwd !== undefined && !(await gate.knownRoots()).some(root => within(cwd, root));
+  if (!flagged && !outside) return undefined;
+  const decision = gate.guard.decide(TERMINAL_USE, presentation);
+  if (decision.allowed) {
+    // A single-use step-up (window 0) is spent by the act it allowed, exactly as the boundary spends one.
+    context.spendStepUp?.();
+    return undefined;
+  }
+  const message =
+    gate.guard.explain(TERMINAL_USE, decision.refusal) ??
+    'starting an agent with its own flags, or outside every project, is terminal access';
+  return decision.refusal === 'step-up-required'
+    ? jsonResponse(
+        { error: message, code: STEP_UP_REQUIRED_CODE, demand: TERMINAL_USE } satisfies StepUpRequiredBody,
+        403,
+      )
+    : errorResponse(403, message, grantRefusalCode(decision.refusal));
+}
+
+async function start(
+  subsystem: SessionControlSubsystem,
+  gate: SessionLaunchGate,
+  context: RouteContext,
+): Promise<ApiResponse> {
   // The BYTES, kept as well as the request they parse into: the recovery route below addresses a
   // start by the digest of exactly what was sent, so a re-serialization of the parsed value would
   // not necessarily hash to the same thing the client hashed.
   const payload = await bodyText(context.request);
   const request = parseStart(payload);
+  const refused = await launchRefusal(gate, context, request);
+  if (refused !== undefined) return refused;
   const capability = boardCapability(context.request, request);
   const id = requestId(context.request);
   const view = await subsystem.start(request, id, payload, capability).catch(refuse);
@@ -320,14 +400,14 @@ async function stop(subsystem: SessionControlSubsystem, context: RouteContext): 
  * is a GET: an intermediary that cached it would keep answering for a request id after the session it
  * names has stopped.
  */
-export function sessionControlRoutes(subsystem: SessionControlSubsystem): readonly ApiRoute[] {
+export function sessionControlRoutes(subsystem: SessionControlSubsystem, gate: SessionLaunchGate): readonly ApiRoute[] {
   return [
     {
       method: 'POST',
       path: '/v1/sessions',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await start(subsystem, context),
+      handle: async context => await start(subsystem, gate, context),
     },
     {
       method: 'POST',
