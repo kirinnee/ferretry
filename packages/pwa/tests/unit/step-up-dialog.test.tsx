@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from 'bun:test';
 import {
-  PRESENCE_COPY,
-  PRESENCE_SCOPE_NOTE,
+  UNLOCK_COPY,
+  UNLOCK_SCOPE_NOTE,
   STEP_UP_SCOPE_NOTE,
   StepUpDialog,
 } from '../../src/features/step-up/step-up-dialog.tsx';
@@ -254,7 +254,7 @@ describe('the passkey prompt', () => {
 describe('the passkey prompt in its presence wording', () => {
   it('says what opening needs and what that confirmation buys, in place of the step-up words', async () => {
     const { gate } = harness();
-    const mounted = await mount(<StepUpDialog gate={gate} copy={PRESENCE_COPY} machineName={id => `Name of ${id}`} />);
+    const mounted = await mount(<StepUpDialog gate={gate} copy={UNLOCK_COPY} machineName={id => `Name of ${id}`} />);
     try {
       // Act
       await interact(() => void gate.require(studio));
@@ -266,7 +266,7 @@ describe('the passkey prompt in its presence wording', () => {
       expect(dialog.textContent).toContain('asks for your passkey before it shows anything.');
       expect(mounted.container.querySelector('[data-step-up-act]')).toBeNull();
       expect(must(mounted.container.querySelector('[data-step-up-scope]'), 'the scope note').textContent).toBe(
-        PRESENCE_SCOPE_NOTE,
+        UNLOCK_SCOPE_NOTE,
       );
       expect(dialog.textContent).not.toContain('15 minutes');
     } finally {

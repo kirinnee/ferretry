@@ -40,7 +40,7 @@
 
 import {
   OLDER_DAEMON_SENTENCE,
-  PRESENCE_REQUIRED_CODE,
+  UNLOCK_REQUIRED_CODE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   STEP_UP_REQUIRED_CODE,
   type StepUpDemand,
@@ -547,11 +547,11 @@ export interface DaemonCarrierRouterOptions {
    */
   readonly stepUp?: (daemon: DaemonConnection, act?: string) => Promise<boolean>;
   /**
-   * Asked when the daemon answers `401 presence_required`: this machine wants a passkey on opening and
+   * Asked when the daemon answers `401 unlock_required`: this machine wants a passkey on opening and
    * this device has not given one. `true` once the person has confirmed, and the request is then sent
    * again ONCE. Absent means nothing can ask, and the refusal is returned as it came.
    */
-  readonly presenceRequired?: (daemon: DaemonConnection) => Promise<boolean>;
+  readonly unlockRequired?: (daemon: DaemonConnection) => Promise<boolean>;
   /**
    * Whether a person is at this device right now (`presence.ts`). A request sent while they are is
    * marked, and only marked requests keep the device from idling out on the daemon. Absent means
@@ -724,7 +724,7 @@ export class DaemonCarrierRouter {
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
   readonly #stepUp: ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined;
-  readonly #presenceRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
+  readonly #unlockRequired: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
   readonly #presence: () => boolean;
   readonly #rotation: KeyRotation | undefined;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
@@ -761,7 +761,7 @@ export class DaemonCarrierRouter {
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
     this.#stepUp = options.stepUp;
-    this.#presenceRequired = options.presenceRequired;
+    this.#unlockRequired = options.unlockRequired;
     this.#presence = options.presence ?? (() => false);
     this.#rotation = options.rotation;
   }
@@ -933,15 +933,15 @@ export class DaemonCarrierRouter {
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
     let response = await this.#sendOnce(daemon, url, init);
     // PRESENCE COMES FIRST: while this machine wants a passkey on opening it answers every request `401
-    // presence_required`, so nothing else it says can be read yet. One prompt, one resend; a dismissed
+    // unlock_required`, so nothing else it says can be read yet. One prompt, one resend; a dismissed
     // prompt returns the refusal unchanged, and a second refusal is the answer.
-    const confirmPresence = this.#presenceRequired;
+    const confirmUnlock = this.#unlockRequired;
     if (
-      confirmPresence !== undefined &&
+      confirmUnlock !== undefined &&
       response.status === 401 &&
-      (await answersWithCode(response, PRESENCE_REQUIRED_CODE))
+      (await answersWithCode(response, UNLOCK_REQUIRED_CODE))
     ) {
-      if (!(await confirmPresence(daemon))) return response;
+      if (!(await confirmUnlock(daemon))) return response;
       response = await this.#sendOnce(daemon, url, init);
     }
     // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to

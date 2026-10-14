@@ -53,7 +53,7 @@ type SecuritySettingsClientFactory = (connection: DaemonConnection) => Promise<S
 const NUMERIC_FIELDS: readonly NumericSecuritySetting[] = [
   'stepUpWindowMinutes',
   'deviceKeyRotationDays',
-  'presenceValidityHours',
+  'unlockValidityHours',
   'idleExpiryDays',
 ];
 
@@ -65,8 +65,8 @@ interface Row {
 const ROWS: readonly Row[] = [
   { field: 'stepUpWindowMinutes' },
   { field: 'deviceKeyRotationDays' },
-  { field: 'presenceOnOpen' },
-  { field: 'presenceValidityHours' },
+  { field: 'unlockOnOpen' },
+  { field: 'unlockValidityHours' },
   { field: 'idleExpiryDays' },
 ];
 
@@ -165,18 +165,18 @@ interface PresenceRowProps {
 /** The one switch. Turning it on tightens; turning it off loosens, so it is dead without `mayWiden`. */
 function PresenceRow({ view, busy, onSave }: PresenceRowProps) {
   const noteId = useId();
-  const copy = SECURITY_SETTING_COPY.presenceOnOpen;
-  const on = view.settings.presenceOnOpen;
+  const copy = SECURITY_SETTING_COPY.unlockOnOpen;
+  const on = view.settings.unlockOnOpen;
   const dead = on && !view.mayWiden;
   return (
-    <div className="min-w-0 border-t border-border-soft py-2" data-security-setting="presenceOnOpen">
+    <div className="min-w-0 border-t border-border-soft py-2" data-security-setting="unlockOnOpen">
       <button
         type="button"
         role="switch"
         aria-checked={on}
         aria-describedby={dead ? noteId : undefined}
         disabled={busy || dead}
-        data-security-switch="presenceOnOpen"
+        data-security-switch="unlockOnOpen"
         onClick={() => onSave(!on)}
         className={cn(
           'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
@@ -188,7 +188,7 @@ function PresenceRow({ view, busy, onSave }: PresenceRowProps) {
           <span className={cn('block text-ui font-semibold', on ? 'text-accent' : 'text-fg')}>{copy.label}</span>
           <span className="block text-meta leading-base text-muted">{copy.explanation}</span>
         </span>
-        <span className="shrink-0 text-ui text-fg" data-security-value="presenceOnOpen">
+        <span className="shrink-0 text-ui text-fg" data-security-value="unlockOnOpen">
           {on ? 'On' : 'Off'}
         </span>
       </button>
@@ -196,7 +196,7 @@ function PresenceRow({ view, busy, onSave }: PresenceRowProps) {
         <p
           id={noteId}
           className={cn('m-0 mt-1 text-meta leading-base', LIMIT_TONE)}
-          data-security-note="presenceOnOpen"
+          data-security-note="unlockOnOpen"
         >
           {widenAtMachineSentence(view.widenCommand)}
         </p>
@@ -320,7 +320,7 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
               key={field}
               view={view}
               busy={busy}
-              onSave={value => void save({ presenceOnOpen: value }, 'presenceOnOpen')}
+              onSave={value => void save({ unlockOnOpen: value }, 'unlockOnOpen')}
             />
           ),
         )}

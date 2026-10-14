@@ -27,7 +27,7 @@ export const STEP_UP_SCOPE_NOTE =
 const ACT_LIST = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
 /** How one passkey prompt names what it is for. Step-up names the acts waiting; presence names none. */
-type PasskeyPromptKind = 'step-up' | 'presence';
+type PasskeyPromptKind = 'step-up' | 'unlock';
 
 /** The words one passkey prompt says: what it is for and what a confirmation buys. */
 export interface PasskeyPromptCopy {
@@ -38,10 +38,10 @@ export interface PasskeyPromptCopy {
 const STEP_UP_COPY: PasskeyPromptCopy = { kind: 'step-up', scope: STEP_UP_SCOPE_NOTE };
 
 /** What one confirmation on opening buys, said where the person decides. */
-export const PRESENCE_SCOPE_NOTE =
+export const UNLOCK_SCOPE_NOTE =
   'This covers opening this machine on this device, including after a reload. How long it lasts is the machine\u2019s setting. Changes still ask for their own confirmation.';
 
-export const PRESENCE_COPY: PasskeyPromptCopy = { kind: 'presence', scope: PRESENCE_SCOPE_NOTE };
+export const UNLOCK_COPY: PasskeyPromptCopy = { kind: 'unlock', scope: UNLOCK_SCOPE_NOTE };
 
 export interface StepUpDialogProps {
   readonly gate: StepUpGate;
@@ -94,7 +94,7 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
           Confirm it’s you
         </h2>
         <p id={`${uid}-purpose`} className="m-0 mt-2 text-ui leading-base text-muted">
-          {copy.kind === 'presence' ? (
+          {copy.kind === 'unlock' ? (
             <>
               <span className="font-semibold text-fg" data-step-up-machine="">
                 {machine}

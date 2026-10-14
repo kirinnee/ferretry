@@ -146,7 +146,7 @@ export class StepUpRegistry {
 }
 
 /** What a challenge was issued for. A registration challenge answers no assertion, and back. */
-export type ChallengePurpose = 'register' | 'step-up' | 'presence';
+export type ChallengePurpose = 'register' | 'step-up' | 'unlock';
 
 interface IssuedChallenge {
   readonly bytes: Uint8Array;

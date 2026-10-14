@@ -78,7 +78,7 @@ describe('the security report', () => {
     expect(rendered).toContain('stepUpWindowMinutes');
     for (const [field, { min, max }] of Object.entries(SECURITY_SETTING_BOUNDS))
       expect(rendered).toMatch(new RegExp(`${field}\\s+\\d+\\s+\\(${String(min)}-${String(max)}\\)`, 'u'));
-    expect(rendered).toMatch(/presenceOnOpen\s+off\s+\(on \| off\)/u);
+    expect(rendered).toMatch(/unlockOnOpen\s+off\s+\(on \| off\)/u);
     expect(rendered).toContain('fy daemon security set <field> <value>');
   });
 
@@ -92,17 +92,17 @@ describe('the security report', () => {
 
   it('should say a damaged document is damaged rather than present the fail-closed values as chosen', () => {
     // Act
-    const rendered = renderSecurity(view({ source: 'damaged' }, { presenceOnOpen: true }), 'fy');
+    const rendered = renderSecurity(view({ source: 'damaged' }, { unlockOnOpen: true }), 'fy');
 
     // Assert
     expect(rendered).toContain('DAMAGED');
-    expect(rendered).toMatch(/presenceOnOpen\s+on/u);
+    expect(rendered).toMatch(/unlockOnOpen\s+on/u);
   });
 
   it('should format the switch as on/off and numbers as themselves', () => {
     // Act + Assert
-    expect(formatSettingValue('presenceOnOpen', view().settings)).toBe('off');
-    expect(formatSettingValue('presenceOnOpen', view({}, { presenceOnOpen: true }).settings)).toBe('on');
+    expect(formatSettingValue('unlockOnOpen', view().settings)).toBe('off');
+    expect(formatSettingValue('unlockOnOpen', view({}, { unlockOnOpen: true }).settings)).toBe('on');
     expect(formatSettingValue('idleExpiryDays', view().settings)).toBe('30');
   });
 });
@@ -151,12 +151,12 @@ describe('changing a setting', () => {
   it.each([
     ['stepUpWindowMinutes', '0', { stepUpWindowMinutes: 0 }],
     ['deviceKeyRotationDays', '45', { deviceKeyRotationDays: 45 }],
-    ['presenceValidityHours', '+12', { presenceValidityHours: 12 }],
+    ['unlockValidityHours', '+12', { unlockValidityHours: 12 }],
     ['idleExpiryDays', ' 7 ', { idleExpiryDays: 7 }],
-    ['presenceOnOpen', 'on', { presenceOnOpen: true }],
-    ['presenceOnOpen', 'TRUE', { presenceOnOpen: true }],
-    ['presenceOnOpen', 'off', { presenceOnOpen: false }],
-    ['presenceOnOpen', 'False', { presenceOnOpen: false }],
+    ['unlockOnOpen', 'on', { unlockOnOpen: true }],
+    ['unlockOnOpen', 'TRUE', { unlockOnOpen: true }],
+    ['unlockOnOpen', 'off', { unlockOnOpen: false }],
+    ['unlockOnOpen', 'False', { unlockOnOpen: false }],
   ])('should send %s=%s as %j', async (field, value, expected) => {
     // Arrange
     const gateway = new FakeGateway();
@@ -217,7 +217,7 @@ describe('changing a setting', () => {
     const { instance, out } = controller(gateway);
 
     // Act
-    await instance.set('presenceOnOpen', 'maybe');
+    await instance.set('unlockOnOpen', 'maybe');
 
     // Assert
     expect(out.errors[0]).toContain('takes on, off, true or false');
@@ -283,10 +283,10 @@ describe('the verbs', () => {
     const { program } = mounted(gateway);
 
     // Act
-    await program.parseAsync(['daemon', 'security', 'set', 'presenceOnOpen', 'on'], { from: 'user' });
+    await program.parseAsync(['daemon', 'security', 'set', 'unlockOnOpen', 'on'], { from: 'user' });
 
     // Assert
-    expect(gateway.patch).toEqual({ presenceOnOpen: true });
+    expect(gateway.patch).toEqual({ unlockOnOpen: true });
   });
 
   it('should show examples in the set help', () => {
@@ -302,7 +302,7 @@ describe('the verbs', () => {
     set?.outputHelp();
 
     // Assert
-    expect(help).toContain('daemon security set presenceOnOpen on');
+    expect(help).toContain('daemon security set unlockOnOpen on');
   });
 });
 

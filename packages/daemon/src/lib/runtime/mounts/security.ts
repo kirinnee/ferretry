@@ -30,7 +30,7 @@ export function securityRoutes(service: SecuritySettingsService): readonly ApiRo
       minimum: 'operator',
       noStore: true,
       // How strict the machine is, readable before a confirmation on opening, so the app can say why.
-      presenceExempt: true,
+      unlockExempt: true,
       handle: async context => jsonResponse(SecuritySettingsViewSchema.parse(service.view(callerOf(context)))),
     },
     {

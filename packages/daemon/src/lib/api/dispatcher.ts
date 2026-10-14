@@ -1,6 +1,6 @@
 import {
   OLDER_APP_SENTENCE,
-  PRESENCE_REQUIRED_CODE,
+  UNLOCK_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
 } from '@ferretry/protocol';
@@ -209,15 +209,15 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   if (
     device !== undefined &&
     !onHost &&
-    lookup.route.presenceExempt !== true &&
-    stepUps.presenceRequired?.(device) === true
+    lookup.route.unlockExempt !== true &&
+    stepUps.unlockRequired?.(device) === true
   )
     return {
       kind: 'refused',
       response: errorResponse(
         401,
         'this machine asks you to confirm it is you with a passkey before it shows anything',
-        PRESENCE_REQUIRED_CODE,
+        UNLOCK_REQUIRED_CODE,
       ),
     };
 

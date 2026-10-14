@@ -19,8 +19,8 @@ import {
   PasskeysViewSchema,
   type PasskeyView,
   PasskeyViewSchema,
-  type PresenceGranted,
-  PresenceGrantedSchema,
+  type UnlockGranted,
+  UnlockGrantedSchema,
   type StepUpAssertion,
   type StepUpGranted,
   StepUpGrantedSchema,
@@ -61,12 +61,12 @@ export async function submitStepUp(client: StepUpClient, assertion: StepUpAssert
   return await client.request('/v1/step-up', StepUpGrantedSchema, json(assertion));
 }
 
-/** Options for the passkey confirmation that opens the app (`presenceOnOpen`): same shape as a step-up's. */
-export async function presenceOptions(client: StepUpClient, origin: string): Promise<StepUpOptions> {
-  return await client.request('/v1/presence/options', StepUpOptionsSchema, json({ origin }));
+/** Options for the passkey confirmation that opens the app (`unlockOnOpen`): same shape as a step-up's. */
+export async function unlockOptions(client: StepUpClient, origin: string): Promise<StepUpOptions> {
+  return await client.request('/v1/unlock/options', StepUpOptionsSchema, json({ origin }));
 }
 
 /** Submits that confirmation. It is never a step-up: the acts that need one still ask for their own. */
-export async function submitPresence(client: StepUpClient, assertion: StepUpAssertion): Promise<PresenceGranted> {
-  return await client.request('/v1/presence', PresenceGrantedSchema, json(assertion));
+export async function submitUnlock(client: StepUpClient, assertion: StepUpAssertion): Promise<UnlockGranted> {
+  return await client.request('/v1/unlock', UnlockGrantedSchema, json(assertion));
 }

@@ -1,4 +1,9 @@
-import { SECURITY_SETTING_FIELDS, type SecuritySettingField, type SecuritySettingsPatch } from '@ferretry/protocol';
+import {
+  isSecuritySwitch,
+  SECURITY_SETTING_FIELDS,
+  type SecuritySettingField,
+  type SecuritySettingsPatch,
+} from '@ferretry/protocol';
 import type { ISecurityGateway, ISecurityOutput } from './ports.ts';
 import { renderSecurity, renderSecurityChange } from './render.ts';
 
@@ -57,7 +62,7 @@ export class SecurityController {
 
 /** The patch for one field, or the sentence saying why the value cannot be one. */
 function parseValue(field: SecuritySettingField, value: string): SecuritySettingsPatch | string {
-  if (field === 'presenceOnOpen') {
+  if (isSecuritySwitch(field)) {
     const word = SWITCH_WORDS[value.trim().toLowerCase()];
     return word === undefined
       ? `${field} takes on, off, true or false, not ${JSON.stringify(value)}`

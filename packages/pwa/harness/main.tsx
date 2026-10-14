@@ -1332,8 +1332,8 @@ const HARNESS_SECURITY: SecuritySettingsView = {
   settings: {
     stepUpWindowMinutes: 15,
     deviceKeyRotationDays: 30,
-    presenceOnOpen: true,
-    presenceValidityHours: 8,
+    unlockOnOpen: true,
+    unlockValidityHours: 8,
     idleExpiryDays: 30,
   },
   source: 'document',

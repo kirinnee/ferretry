@@ -1,4 +1,5 @@
 import {
+  asksStepUpPerAction,
   MAX_PASSKEYS_PER_DEVICE,
   PASSKEY_ALGORITHMS,
   PASSKEY_CHALLENGE_TTL_SECONDS,
@@ -7,7 +8,7 @@ import {
   type PasskeyRegistrationOptions,
   type PasskeysView,
   type PasskeyView,
-  type PresenceGranted,
+  type UnlockGranted,
   type SecuritySettings,
   type PasskeyWindowOpened,
   type StepUpAssertion,
@@ -90,10 +91,10 @@ export const relyingPartyIdFor = (origin: string): string => new URL(origin).hos
  */
 export class StepUpService {
   /**
-   * When each DEVICE last confirmed a person on opening (`presenceOnOpen`). Per device rather than per
+   * When each DEVICE last confirmed a person on opening (`unlockOnOpen`). Per device rather than per
    * copy of the app, so it holds across page loads; in memory, so a restart asks again.
    */
-  readonly #present = new Map<string, number>();
+  readonly #unlockedAt = new Map<string, number>();
   /** Registration windows the owner re-opened, by device: when each closes. Spent by one passkey. */
   readonly #reopened = new Map<string, number>();
 
@@ -103,10 +104,10 @@ export class StepUpService {
    * Whether this device must confirm a person is present before it is served at all: the machine asks
    * for it on opening and the device's last confirmation is older than the validity period in force.
    */
-  presenceRequired(subject: StepUpSubject): boolean {
+  unlockRequired(subject: StepUpSubject): boolean {
     const settings = this.deps.settings?.();
-    if (settings?.presenceOnOpen !== true) return false;
-    return this.#presentUntil(subject.deviceId, settings) <= this.deps.clock.nowMs();
+    if (settings?.unlockOnOpen !== true) return false;
+    return this.#unlockedUntil(subject.deviceId, settings) <= this.deps.clock.nowMs();
   }
 
   /** When a key opened by this device is due for replacement, or nothing when no rotation is asked for. */
@@ -136,13 +137,30 @@ export class StepUpService {
     return { ok: true, value: { deviceId, deviceName: record.name, closesAt: instant(closesAtMs) } };
   }
 
-  /** Whether this copy of the app holds a current step-up. The authorization boundary's one question. */
+  /**
+   * Whether this copy of the app may do an act that needs a step-up. The authorization boundary's one
+   * question.
+   *
+   * THE UNLOCK IS THE STEP-UP (owner decision 2026-10-14, `docs/design/zero-trust.md` B6): on a machine
+   * that unlocks on opening and does not ask again per act, a device holding a current unlock may do
+   * every act its grants allow, with no further prompt. Otherwise — the owner asked per act too, or
+   * there is no unlock — a per-act step-up for this copy of the app is what counts.
+   */
   held(subject: StepUpSubject): boolean {
-    return this.deps.registry.held(subject, this.deps.clock.nowMs());
+    const now = this.deps.clock.nowMs();
+    const settings = this.deps.settings?.();
+    if (settings !== undefined && !asksStepUpPerAction(settings) && this.#unlockedUntil(subject.deviceId, settings) > now)
+      return true;
+    return this.deps.registry.held(subject, now);
   }
 
-  /** One act this copy's step-up admitted. Spends it when the machine asks every time. */
+  /**
+   * One act this copy's step-up admitted. Spends a single-use per-act step-up; an unlock is never
+   * spent by an act — it is good for its whole validity.
+   */
   spend(subject: StepUpSubject): void {
+    const settings = this.deps.settings?.();
+    if (settings !== undefined && !asksStepUpPerAction(settings)) return;
     this.deps.registry.spend(subject);
   }
 
@@ -243,7 +261,7 @@ export class StepUpService {
     this.deps.registry.grant(device, now);
     // A confirmation on opening for the same reason: the first passkey is how a device on a machine
     // that asks for one gets in at all.
-    this.#present.set(device.deviceId, now);
+    this.#unlockedAt.set(device.deviceId, now);
     return { ok: true, value: passkeyView(stored) };
   }
 
@@ -252,35 +270,36 @@ export class StepUpService {
   }
 
   /** Options for a confirmation on opening: the same ceremony, its own challenge. */
-  async presenceOptions(caller: StepUpCaller, origin: string): Promise<StepUpOutcome<StepUpOptions>> {
-    return await this.#assertionOptions(caller, origin, 'presence');
+  async unlockOptions(caller: StepUpCaller, origin: string): Promise<StepUpOutcome<StepUpOptions>> {
+    return await this.#assertionOptions(caller, origin, 'unlock');
   }
 
   /**
-   * A confirmation on opening (`presenceOnOpen`). Good for the validity period for the whole DEVICE,
-   * and NEVER a step-up: the acts that need one still ask for their own.
+   * The UNLOCK (`unlockOnOpen`, owner decision 2026-10-14): one passkey assertion that opens this
+   * machine to this DEVICE for the validity period, across page loads — and, unless the owner asked for
+   * a confirmation per act as well, IS the step-up for every act inside it (see {@link held}).
+   *
+   * It is the passkey ceremony a device meets first, so an overdue key is replaced here exactly as in a
+   * step-up ({@link #ceremony}). An unlock also grants a per-act step-up for this copy of the app, so a
+   * machine that asks per act does not ask again for the first act right after unlocking.
    */
-  async presence(caller: StepUpCaller, assertion: StepUpAssertion): Promise<StepUpOutcome<PresenceGranted>> {
+  async unlock(caller: StepUpCaller, assertion: StepUpAssertion): Promise<StepUpOutcome<UnlockGranted>> {
     const device = caller.device;
     if (device === undefined) return refuse('not-a-device');
-    // A key is replaced only inside a step-up, where the browser knows to send one; a rotation here is
-    // a client that has confused the two ceremonies.
-    if (assertion.rotation !== undefined) return refuse('not-verified');
     const now = this.deps.clock.nowMs();
-    const verified = await this.#verify(device, 'presence', assertion, now);
-    if (!verified.ok) return verified;
-    this.#present.set(device.deviceId, now);
+    const done = await this.#ceremony(caller, device, 'unlock', assertion, now);
+    if (!done.ok) return done;
+    this.#unlockedAt.set(device.deviceId, now);
+    this.deps.registry.grant(device, now);
     const settings = this.deps.settings?.();
-    return {
-      ok: true,
-      value: { presentUntil: instant(settings === undefined ? now : this.#presentUntil(device.deviceId, settings)) },
-    };
+    const unlockedUntil = instant(settings === undefined ? now : this.#unlockedUntil(device.deviceId, settings));
+    return { ok: true, value: done.rotated ? { unlockedUntil, keyRotated: true } : { unlockedUntil } };
   }
 
   async #assertionOptions(
     caller: StepUpCaller,
     origin: string,
-    purpose: 'step-up' | 'presence',
+    purpose: 'step-up' | 'unlock',
   ): Promise<StepUpOutcome<StepUpOptions>> {
     const device = caller.device;
     if (device === undefined) return refuse('not-a-device');
@@ -319,15 +338,38 @@ export class StepUpService {
     const device = caller.device;
     if (device === undefined) return refuse('not-a-device');
     const now = this.deps.clock.nowMs();
+    const done = await this.#ceremony(caller, device, 'step-up', assertion, now);
+    if (!done.ok) return done;
+    const expiresAt = instant(this.deps.registry.grant(device, now));
+    return { ok: true, value: done.rotated ? { expiresAt, keyRotated: true } : { expiresAt } };
+  }
+
+  /**
+   * One verified passkey ceremony — and, once the device's key is due for replacement, the replacement.
+   *
+   * AN OVERDUE DEVICE MUST ROTATE TO FINISH IT (`docs/design/zero-trust.md` B6): the assertion is refused
+   * as `rotation-required` unless it carries the new key. The challenge is NOT spent by that refusal, so
+   * the browser answers it again with a rotation, without a second passkey sheet.
+   *
+   * THE NEW KEY'S PROOF IS CHECKED AGAINST THIS SESSION'S TRANSCRIPT, a session the OLD key opened, so a
+   * replacement made for one session can never be presented in another, and the person's passkey
+   * vouches for the swap in the same ceremony. The swap happens only after the assertion verifies.
+   */
+  async #ceremony(
+    caller: StepUpCaller,
+    device: StepUpSubject,
+    purpose: 'step-up' | 'unlock',
+    assertion: StepUpAssertion,
+    now: number,
+  ): Promise<{ readonly ok: true; readonly rotated: boolean } | { readonly ok: false; readonly refusal: StepUpRefusal }> {
     const rotateBy = this.rotateBy(device.deviceId);
-    const due = rotateBy !== undefined && rotateBy <= now;
-    if (due && assertion.rotation === undefined) return refuse('rotation-required');
+    if (rotateBy !== undefined && rotateBy <= now && assertion.rotation === undefined) return refuse('rotation-required');
     const rotation = assertion.rotation;
     // Checked BEFORE the assertion spends the challenge: a forged or mismatched rotation must not cost
     // the person their confirmation, and must never reach the swap.
+    const transcriptHash = caller.transcriptHash;
     if (rotation !== undefined) {
       const rotator = this.deps.rotation;
-      const transcriptHash = caller.transcriptHash;
       if (
         rotator === undefined ||
         transcriptHash === undefined ||
@@ -335,20 +377,14 @@ export class StepUpService {
       )
         return refuse('not-verified');
     }
-    const verified = await this.#verify(device, 'step-up', assertion, now);
+    const verified = await this.#verify(device, purpose, assertion, now);
     if (!verified.ok) return verified;
-    let rotated = false;
-    if (rotation !== undefined && this.deps.rotation !== undefined && caller.transcriptHash !== undefined) {
-      rotated = await this.deps.rotation.rotate({
-        deviceId: device.deviceId,
-        deviceKey: rotation.deviceKey,
-        transcriptHash: caller.transcriptHash,
-      });
-      // The device was revoked between the assertion and the swap: nothing to step up any more.
-      if (!rotated) return refuse('not-a-device');
-    }
-    const expiresAt = instant(this.deps.registry.grant(device, now));
-    return { ok: true, value: rotated ? { expiresAt, keyRotated: true } : { expiresAt } };
+    if (rotation === undefined || this.deps.rotation === undefined || transcriptHash === undefined)
+      return { ok: true, rotated: false };
+    // The device was revoked between the assertion and the swap: nothing to step up any more.
+    if (!(await this.deps.rotation.rotate({ deviceId: device.deviceId, deviceKey: rotation.deviceKey, transcriptHash })))
+      return refuse('not-a-device');
+    return { ok: true, rotated: true };
   }
 
   /**
@@ -357,7 +393,7 @@ export class StepUpService {
    */
   async #verify(
     device: StepUpSubject,
-    purpose: 'step-up' | 'presence',
+    purpose: 'step-up' | 'unlock',
     assertion: StepUpAssertion,
     now: number,
   ): Promise<{ readonly ok: true } | { readonly ok: false; readonly refusal: StepUpRefusal }> {
@@ -387,16 +423,16 @@ export class StepUpService {
     return { ok: true };
   }
 
-  #presentUntil(deviceId: string, settings: SecuritySettings): number {
-    const at = this.#present.get(deviceId);
-    return at === undefined ? 0 : at + settings.presenceValidityHours * HOUR_MS;
+  #unlockedUntil(deviceId: string, settings: SecuritySettings): number {
+    const at = this.#unlockedAt.get(deviceId);
+    return at === undefined ? 0 : at + settings.unlockValidityHours * HOUR_MS;
   }
 
-  /** Revoking a device forgets its passkeys, its step-ups, its presence and its outstanding challenges. */
+  /** Revoking a device forgets its passkeys, its step-ups, its unlock and its outstanding challenges. */
   async forgetDevice(deviceId: string): Promise<void> {
     this.#reopened.delete(deviceId);
     this.deps.registry.forgetDevice(deviceId);
-    this.#present.delete(deviceId);
+    this.#unlockedAt.delete(deviceId);
     this.deps.challenges.forgetDevice(deviceId);
     await this.deps.store.forgetDevice(deviceId);
   }

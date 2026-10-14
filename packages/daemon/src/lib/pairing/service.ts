@@ -1,7 +1,6 @@
 import {
   type Advertisement,
   type CapabilityGrants,
-  DEFAULT_DEVICE_GRANTS,
   type AdvertisementRefusal,
   type DaemonCarrier,
   type DaemonId,
@@ -9,6 +8,7 @@ import {
   DaemonNameSchema,
   DEVICE_IDLE_EXPIRY_DAYS,
   FULL_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   type PairedDevice,
@@ -73,7 +73,8 @@ export interface PairingDeviceRecord {
   readonly publicKey: string;
   /**
    * What THIS device may do when it is governed, before the daemon-wide document is applied
-   * (`docs/grants.md`, "Per-device grants"). A new device holds `DEFAULT_DEVICE_GRANTS`: `fleet.use` only.
+   * (`docs/grants.md`, "Per-device grants"). A new device holds `FULL_DEVICE_GRANTS` behind the unlock,
+   * or `LIMITED_DEVICE_GRANTS` (`fleet.use` only) when its code was minted `--limited`.
    */
   readonly grants: CapabilityGrants;
   /**
@@ -404,7 +405,7 @@ export class PairingService {
    * device already paired. The code itself is single-use and
    * short-lived, so there is no machine-level precondition left for this method to check.
    */
-  mint(grants: PairingGrantSet = 'default'): PairingCodeMintResponse {
+  mint(grants: PairingGrantSet = 'full'): PairingCodeMintResponse {
     if (this.active !== undefined) this.expire(this.active);
     while (this.observations.size >= OBSERVATION_LIMIT) {
       const oldest = this.observations.keys().next().value;
@@ -780,9 +781,9 @@ export class PairingService {
       createdAt,
       lastSeenAt: createdAt,
       publicKey,
-      // Least privilege: a device starts able to read the fleet and chat, and nothing more (B5) — unless
-      // the code was minted `--full` at the machine.
-      grants: active.grants === 'full' ? FULL_DEVICE_GRANTS : DEFAULT_DEVICE_GRANTS,
+      // Full access behind the unlock, by default (owner decision 2026-10-14): the device can do nothing
+      // until it unlocks, and then anything its grants allow. A `--limited` code narrows it to the fleet.
+      grants: active.grants === 'limited' ? LIMITED_DEVICE_GRANTS : FULL_DEVICE_GRANTS,
     };
 
     try {

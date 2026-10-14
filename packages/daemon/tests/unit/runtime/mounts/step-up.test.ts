@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import {
   DEFAULT_SECURITY_SETTINGS,
   MAX_PASSKEYS_PER_DEVICE,
-  PRESENCE_REQUIRED_CODE,
+  UNLOCK_REQUIRED_CODE,
   type SecuritySettings,
   STEP_UP_TTL_SECONDS,
   stepUpRefusalCode,
@@ -185,8 +185,8 @@ const ROUTES = [
   { method: 'POST', path: '/v1/passkeys', body: registrationBody },
   { method: 'POST', path: '/v1/step-up/options', body: originBody },
   { method: 'POST', path: '/v1/step-up', body: assertionBody },
-  { method: 'POST', path: '/v1/presence/options', body: originBody },
-  { method: 'POST', path: '/v1/presence', body: assertionBody },
+  { method: 'POST', path: '/v1/unlock/options', body: originBody },
+  { method: 'POST', path: '/v1/unlock', body: assertionBody },
 ] as const;
 
 describe('step-up routes', () => {
@@ -508,7 +508,7 @@ describe('step-up routes', () => {
 });
 
 describe('step-up routes: presence on opening (B6)', () => {
-  const ask = { settings: { presenceOnOpen: true } } as const;
+  const ask = { settings: { unlockOnOpen: true } } as const;
   const post = (path: string, body: string) => request({ method: 'POST', path, body, ...asDevice });
 
   it('should exempt exactly the passkey panel and the two presence routes from the presence demand', () => {
@@ -516,10 +516,10 @@ describe('step-up routes: presence on opening (B6)', () => {
     const routes = stepUpRoutes(mount().service);
 
     // Act
-    const exempt = routes.filter(route => route.presenceExempt === true).map(route => `${route.method} ${route.path}`);
+    const exempt = routes.filter(route => route.unlockExempt === true).map(route => `${route.method} ${route.path}`);
 
     // Assert
-    should(exempt).deepEqual(['GET /v1/passkeys', 'POST /v1/presence/options', 'POST /v1/presence']);
+    should(exempt).deepEqual(['GET /v1/passkeys', 'POST /v1/unlock/options', 'POST /v1/unlock']);
   });
 
   it('should serve the presence routes with no capability demand, never cached, to operators only', () => {
@@ -527,7 +527,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     const routes = stepUpRoutes(mount().service);
 
     // Act
-    const presence = routes.filter(route => route.path.startsWith('/v1/presence'));
+    const presence = routes.filter(route => route.path.startsWith('/v1/unlock'));
 
     // Assert
     should(presence).have.length(2);
@@ -541,11 +541,11 @@ describe('step-up routes: presence on opening (B6)', () => {
     }
   });
 
-  it('should answer 401 presence_required to every other route until the device confirms', async () => {
+  it('should answer 401 unlock_required to every other route until the device confirms', async () => {
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
     const refused = ROUTES.filter(route => route.path !== '/v1/passkeys' || route.method !== 'GET').filter(
-      route => !route.path.startsWith('/v1/presence'),
+      route => !route.path.startsWith('/v1/unlock'),
     );
 
     for (const route of refused) {
@@ -558,7 +558,7 @@ describe('step-up routes: presence on opening (B6)', () => {
       should([route.path, response.status, jsonBody(response).code]).deepEqual([
         route.path,
         401,
-        PRESENCE_REQUIRED_CODE,
+        UNLOCK_REQUIRED_CODE,
       ]);
     }
   });
@@ -569,8 +569,8 @@ describe('step-up routes: presence on opening (B6)', () => {
 
     // Act
     const panel = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
-    const options = await dispatcher.dispatch(post('/v1/presence/options', originBody));
-    const confirmed = await dispatcher.dispatch(post('/v1/presence', assertionBody));
+    const options = await dispatcher.dispatch(post('/v1/unlock/options', originBody));
+    const confirmed = await dispatcher.dispatch(post('/v1/unlock', assertionBody));
 
     // Assert
     should(panel.status).equal(200);
@@ -582,27 +582,27 @@ describe('step-up routes: presence on opening (B6)', () => {
   it('should answer a confirmation with when presence lapses, and then serve every route', async () => {
     // Arrange
     const dispatcher = await mount({
-      settings: { presenceOnOpen: true, presenceValidityHours: 2 },
+      settings: { unlockOnOpen: true, unlockValidityHours: 2 },
       store: new MemoryStore([stored(CREDENTIAL_ID)]),
     }).surface;
     const blocked = await dispatcher.dispatch(post('/v1/step-up/options', originBody));
-    await dispatcher.dispatch(post('/v1/presence/options', originBody));
+    await dispatcher.dispatch(post('/v1/unlock/options', originBody));
 
     // Act
-    const confirmed = await dispatcher.dispatch(post('/v1/presence', assertionBody));
+    const confirmed = await dispatcher.dispatch(post('/v1/unlock', assertionBody));
     const served = await dispatcher.dispatch(post('/v1/step-up/options', originBody));
 
     // Assert
     should(blocked.status).equal(401);
-    should(jsonBody(confirmed)).deepEqual({ presentUntil: new Date(NOW + 2 * 3_600_000).toISOString() });
+    should(jsonBody(confirmed)).deepEqual({ unlockedUntil: new Date(NOW + 2 * 3_600_000).toISOString() });
     should(served.status).equal(200);
   });
 
   it('should not count a confirmation on opening as a step-up', async () => {
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
-    await dispatcher.dispatch(post('/v1/presence/options', originBody));
-    await dispatcher.dispatch(post('/v1/presence', assertionBody));
+    await dispatcher.dispatch(post('/v1/unlock/options', originBody));
+    await dispatcher.dispatch(post('/v1/unlock', assertionBody));
 
     // Act
     const view = await dispatcher.dispatch(request({ path: '/v1/passkeys', ...asDevice }));
@@ -616,7 +616,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
 
     // Act
-    const response = await dispatcher.dispatch(post('/v1/presence', assertionBody));
+    const response = await dispatcher.dispatch(post('/v1/unlock', assertionBody));
 
     // Assert
     should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
@@ -625,11 +625,11 @@ describe('step-up routes: presence on opening (B6)', () => {
   it('should refuse a confirmation that carries a rotation: 401 step_up_not_verified', async () => {
     // Arrange
     const dispatcher = await mount({ ...ask, store: new MemoryStore([stored(CREDENTIAL_ID)]) }).surface;
-    await dispatcher.dispatch(post('/v1/presence/options', originBody));
+    await dispatcher.dispatch(post('/v1/unlock/options', originBody));
     const body = json({ ...JSON.parse(assertionBody), rotation: { deviceKey: 'bmV3', proof: 'cHJvb2Y' } });
 
     // Act
-    const response = await dispatcher.dispatch(post('/v1/presence', body));
+    const response = await dispatcher.dispatch(post('/v1/unlock', body));
 
     // Assert
     should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
@@ -649,7 +649,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     );
 
     // Assert
-    should([onHost.status, jsonBody(onHost).code]).deepEqual([401, PRESENCE_REQUIRED_CODE]);
+    should([onHost.status, jsonBody(onHost).code]).deepEqual([401, UNLOCK_REQUIRED_CODE]);
     should([noDevice.status, jsonBody(noDevice).code]).deepEqual([400, stepUpRefusalCode('not-a-device')]);
   });
 
@@ -657,7 +657,7 @@ describe('step-up routes: presence on opening (B6)', () => {
     // Arrange
     const dispatcher = await mount(ask).surface;
 
-    for (const route of ROUTES.filter(entry => entry.path.startsWith('/v1/presence'))) {
+    for (const route of ROUTES.filter(entry => entry.path.startsWith('/v1/unlock'))) {
       // Act
       const response = await dispatcher.dispatch(
         request({ method: route.method, path: route.path, body: route.body, ...asAdminNoDevice }),
@@ -678,7 +678,7 @@ describe('step-up routes: presence on opening (B6)', () => {
 
     // Act
     const response = await dispatcher.dispatch(
-      post('/v1/presence/options', json({ origin: 'https://elsewhere.example.test' })),
+      post('/v1/unlock/options', json({ origin: 'https://elsewhere.example.test' })),
     );
 
     // Assert

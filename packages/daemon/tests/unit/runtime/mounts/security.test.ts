@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   DEFAULT_SECURITY_SETTINGS,
-  PRESENCE_REQUIRED_CODE,
+  UNLOCK_REQUIRED_CODE,
   SECURITY_SETTING_BOUNDS,
   SECURITY_WIDEN_REFUSED_CODE,
   type SecuritySettings,
@@ -34,8 +34,8 @@ const witnessFor = (...held: readonly SessionDevice[]): StepUpWitness => ({
 const MIDDLE: SecuritySettings = {
   stepUpWindowMinutes: 30,
   deviceKeyRotationDays: 40,
-  presenceOnOpen: true,
-  presenceValidityHours: 12,
+  unlockOnOpen: true,
+  unlockValidityHours: 12,
   idleExpiryDays: 40,
 };
 
@@ -117,9 +117,9 @@ describe('the routes this mount serves', () => {
     // Assert
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual(['GET /v1/security', 'PATCH /v1/security']);
     should(routes[0]?.capability).be.undefined();
-    should(routes[0]?.presenceExempt).be.true();
+    should(routes[0]?.unlockExempt).be.true();
     should(routes[1]?.capability).deepEqual({ capability: 'pairing', axis: 'configure' });
-    should(routes[1]?.presenceExempt).be.undefined();
+    should(routes[1]?.unlockExempt).be.undefined();
   });
 });
 
@@ -189,7 +189,7 @@ describe('the read', () => {
   it('should be served to a device that has not confirmed its presence, while a change is not', async () => {
     // The one read a device needs BEFORE it can say why the machine is asking.
     // Arrange
-    const { dispatcher } = await mount({ stepUps: { held: () => true, presenceRequired: () => true } });
+    const { dispatcher } = await mount({ stepUps: { held: () => true, unlockRequired: () => true } });
 
     // Act
     const read = await dispatcher.dispatch(fromDevice('GET'));
@@ -198,7 +198,7 @@ describe('the read', () => {
     // Assert
     should(read.status).equal(200);
     should(change.status).equal(401);
-    should(jsonBody(change)).have.property('code', PRESENCE_REQUIRED_CODE);
+    should(jsonBody(change)).have.property('code', UNLOCK_REQUIRED_CODE);
   });
 
   it('should report a damaged document as damaged, with the strict settings in force', async () => {
@@ -243,7 +243,7 @@ describe('the bounds, over the route', () => {
 
     // Act
     const refusals = await Promise.all(
-      [{}, { retention: 1 }, { idleExpiryDays: 1.5 }, { presenceOnOpen: 'yes' }].map(
+      [{}, { retention: 1 }, { idleExpiryDays: 1.5 }, { unlockOnOpen: 'yes' }].map(
         async value => await dispatcher.dispatch(fromHost('PATCH', value)),
       ),
     );
@@ -333,13 +333,13 @@ describe('who may change what, over the route', () => {
 
     // Act
     const answered = await dispatcher.dispatch(
-      fromDevice('PATCH', { idleExpiryDays: 10, presenceOnOpen: false, presenceValidityHours: 24 }),
+      fromDevice('PATCH', { idleExpiryDays: 10, unlockOnOpen: false, unlockValidityHours: 24 }),
     );
 
     // Assert
     should(answered.status).equal(403);
     should(jsonBody(answered)).have.property('code', SECURITY_WIDEN_REFUSED_CODE);
-    should(answered.body).match(/presenceValidityHours, presenceOnOpen|presenceOnOpen, presenceValidityHours/u);
+    should(answered.body).match(/unlockValidityHours, unlockOnOpen|unlockOnOpen, unlockValidityHours/u);
     should(service.current()).deepEqual(MIDDLE);
     should(writes).be.empty();
     should(audited).be.empty();
@@ -350,12 +350,12 @@ describe('who may change what, over the route', () => {
     const { dispatcher, service, audited } = await mount();
 
     // Act
-    const answered = await dispatcher.dispatch(fromHost('PATCH', { idleExpiryDays: 90, presenceOnOpen: false }));
+    const answered = await dispatcher.dispatch(fromHost('PATCH', { idleExpiryDays: 90, unlockOnOpen: false }));
 
     // Assert
     should(answered.status).equal(200);
     should(SecuritySettingsChangeSchema.parse(jsonBody(answered)).view.mayWiden).be.true();
-    should(service.current()).containDeep({ idleExpiryDays: 90, presenceOnOpen: false });
+    should(service.current()).containDeep({ idleExpiryDays: 90, unlockOnOpen: false });
     should(audited[0]?.actor).equal('admin-cli');
   });
 
@@ -364,11 +364,11 @@ describe('who may change what, over the route', () => {
     const { dispatcher, service } = await mount({ stepUps: witnessFor(PHONE) });
 
     // Act
-    const answered = await dispatcher.dispatch(fromHostBrowser('PATCH', { presenceValidityHours: 24 }));
+    const answered = await dispatcher.dispatch(fromHostBrowser('PATCH', { unlockValidityHours: 24 }));
 
     // Assert
     should([answered.status, jsonBody(answered).code]).deepEqual([403, SECURITY_WIDEN_REFUSED_CODE]);
-    should(service.current().presenceValidityHours).equal(12);
+    should(service.current().unlockValidityHours).equal(12);
   });
 
   it('should not let a merely loopback peer loosen, however stepped up', async () => {
@@ -452,14 +452,14 @@ describe('a damaged document, over the route', () => {
     const { dispatcher, writes } = await mount({ settings: 'damaged' });
 
     // Act
-    const answered = await dispatcher.dispatch(fromHost('PATCH', { presenceOnOpen: false }));
+    const answered = await dispatcher.dispatch(fromHost('PATCH', { unlockOnOpen: false }));
     const read = SecuritySettingsViewSchema.parse(jsonBody(await dispatcher.dispatch(fromHost('GET'))));
 
     // Assert
     should(answered.status).equal(200);
     should(writes).have.length(1);
     should(read.source).equal('document');
-    should(read.settings).deepEqual({ ...DAMAGED_SECURITY_SETTINGS, presenceOnOpen: false });
+    should(read.settings).deepEqual({ ...DAMAGED_SECURITY_SETTINGS, unlockOnOpen: false });
   });
 });
 

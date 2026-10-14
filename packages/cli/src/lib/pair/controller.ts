@@ -61,8 +61,8 @@ export interface PairOptions {
    * operator to photograph their own screen.
    */
   readonly open?: boolean;
-  /** Mint a code whose device holds every capability — `fy pair --full`. */
-  readonly full?: boolean;
+  /** Mint a code whose device can only read the fleet and chat — `fy pair --limited`. */
+  readonly limited?: boolean;
 }
 
 export interface PairDeps {
@@ -99,7 +99,7 @@ export class PairController {
   constructor(private readonly deps: PairDeps) {}
 
   async pair(options: PairOptions): Promise<void> {
-    const requestedGrants = options.full === true ? 'full' : 'default';
+    const requestedGrants = options.limited === true ? 'limited' : 'full';
     const mint = await this.deps.gateway.mint(requestedGrants);
     const remainingMs = this.#lifespan(mint);
     const outcome = pairingMintOutcome(mint);

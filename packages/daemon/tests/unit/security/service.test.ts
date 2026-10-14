@@ -32,8 +32,8 @@ const HOST: SecurityCaller = { hostLocal: true, actor: 'admin-cli' };
 const MIDDLE: SecuritySettings = {
   stepUpWindowMinutes: 30,
   deviceKeyRotationDays: 40,
-  presenceOnOpen: true,
-  presenceValidityHours: 12,
+  unlockOnOpen: true,
+  unlockValidityHours: 12,
   idleExpiryDays: 40,
 };
 
@@ -183,8 +183,8 @@ describe('a damaged settings document', () => {
     should(DAMAGED_SECURITY_SETTINGS).deepEqual({
       stepUpWindowMinutes: 0,
       deviceKeyRotationDays: SECURITY_SETTING_BOUNDS.deviceKeyRotationDays.min,
-      presenceOnOpen: true,
-      presenceValidityHours: SECURITY_SETTING_BOUNDS.presenceValidityHours.min,
+      unlockOnOpen: true,
+      unlockValidityHours: SECURITY_SETTING_BOUNDS.unlockValidityHours.min,
       idleExpiryDays: DEFAULT_SECURITY_SETTINGS.idleExpiryDays,
     });
   });
@@ -210,12 +210,12 @@ describe('a damaged settings document', () => {
     await service.refresh();
 
     // Act
-    const outcome = await service.patch({ presenceOnOpen: false }, HOST);
+    const outcome = await service.patch({ unlockOnOpen: false }, HOST);
 
     // Assert — the host's loosening is judged against the strict reading it replaces.
     should(outcome.ok).be.true();
     should(writes).have.length(1);
-    should(writes[0]?.settings).deepEqual({ ...DAMAGED_SECURITY_SETTINGS, presenceOnOpen: false });
+    should(writes[0]?.settings).deepEqual({ ...DAMAGED_SECURITY_SETTINGS, unlockOnOpen: false });
     should(service.view(HOST).source).equal('document');
     should(audited).have.length(1);
   });
@@ -251,8 +251,8 @@ describe('loosening, field by field', () => {
   const WIDENING: readonly SecuritySettingsPatch[] = [
     { stepUpWindowMinutes: 31 },
     { deviceKeyRotationDays: 41 },
-    { presenceOnOpen: false },
-    { presenceValidityHours: 13 },
+    { unlockOnOpen: false },
+    { unlockValidityHours: 13 },
     { idleExpiryDays: 41 },
   ];
 
@@ -303,7 +303,7 @@ describe('tightening', () => {
   const NARROWING: readonly SecuritySettingsPatch[] = [
     { stepUpWindowMinutes: 0 },
     { deviceKeyRotationDays: 7 },
-    { presenceValidityHours: 1 },
+    { unlockValidityHours: 1 },
     { idleExpiryDays: 1 },
   ];
 
@@ -323,14 +323,14 @@ describe('tightening', () => {
 
   it('should accept turning the passkey on opening ON from a device', async () => {
     // Arrange
-    const { service } = await ready({ stored: { settings: { ...MIDDLE, presenceOnOpen: false }, updatedAt: AT } });
+    const { service } = await ready({ stored: { settings: { ...MIDDLE, unlockOnOpen: false }, updatedAt: AT } });
 
     // Act
-    const outcome = await service.patch({ presenceOnOpen: true }, REMOTE);
+    const outcome = await service.patch({ unlockOnOpen: true }, REMOTE);
 
     // Assert
     should(outcome.ok).be.true();
-    should(service.current().presenceOnOpen).be.true();
+    should(service.current().unlockOnOpen).be.true();
   });
 
   it('should accept restating the current value from a device, as nothing widens', async () => {
@@ -355,12 +355,12 @@ describe('a mixed request', () => {
 
     // Act
     const outcome = await service.patch(
-      { idleExpiryDays: 5, presenceValidityHours: 24, stepUpWindowMinutes: 0 },
+      { idleExpiryDays: 5, unlockValidityHours: 24, stepUpWindowMinutes: 0 },
       REMOTE,
     );
 
     // Assert
-    should(outcome).deepEqual({ ok: false, refusal: 'widen-remote', fields: ['presenceValidityHours'] });
+    should(outcome).deepEqual({ ok: false, refusal: 'widen-remote', fields: ['unlockValidityHours'] });
     should(service.current()).deepEqual(MIDDLE);
     should(writes).be.empty();
     should(audited).be.empty();
@@ -387,11 +387,11 @@ describe('a mixed request', () => {
     const { service } = await ready();
 
     // Act
-    const outcome = await service.patch({ idleExpiryDays: 5, presenceValidityHours: 24 }, HOST);
+    const outcome = await service.patch({ idleExpiryDays: 5, unlockValidityHours: 24 }, HOST);
 
     // Assert
     should(outcome.ok).be.true();
-    should(service.current()).deepEqual({ ...MIDDLE, idleExpiryDays: 5, presenceValidityHours: 24 });
+    should(service.current()).deepEqual({ ...MIDDLE, idleExpiryDays: 5, unlockValidityHours: 24 });
   });
 });
 
@@ -401,7 +401,7 @@ describe('the record of a change', () => {
     const { service, audited, writes } = await ready();
 
     // Act
-    await service.patch({ idleExpiryDays: 10, presenceOnOpen: true, stepUpWindowMinutes: 0 }, REMOTE);
+    await service.patch({ idleExpiryDays: 10, unlockOnOpen: true, stepUpWindowMinutes: 0 }, REMOTE);
 
     // Assert
     should(audited).deepEqual([
@@ -419,10 +419,10 @@ describe('the record of a change', () => {
     const { service, audited } = await ready();
 
     // Act
-    await service.patch({ presenceOnOpen: false }, HOST);
+    await service.patch({ unlockOnOpen: false }, HOST);
 
     // Assert
-    should(audited[0]?.changes).deepEqual(['security.presenceOnOpen=true->false']);
+    should(audited[0]?.changes).deepEqual(['security.unlockOnOpen=true->false']);
     should(audited[0]?.actor).equal('admin-cli');
   });
 
@@ -480,7 +480,7 @@ describe('what enforces a setting hears about it', () => {
     // Act
     await service.patch({ idleExpiryDays: 10 }, REMOTE);
     await service.patch({ idleExpiryDays: 10 }, REMOTE);
-    await service.patch({ presenceOnOpen: false }, REMOTE);
+    await service.patch({ unlockOnOpen: false }, REMOTE);
 
     // Assert — the second request changed nothing, and the third was refused.
     should(announced).deepEqual([{ ...MIDDLE, idleExpiryDays: 10 }]);

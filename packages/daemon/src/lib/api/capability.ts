@@ -210,11 +210,11 @@ export interface StepUpWitness {
   spend?(subject: SessionDevice): void;
   /**
    * Whether this device must confirm a person is present before it is served at all, on a machine that
-   * asks for that on opening (`presenceOnOpen`, `docs/design/zero-trust.md` B6). Absent means it never
+   * asks for that on opening (`unlockOnOpen`, `docs/design/zero-trust.md` B6). Absent means it never
    * must. Asked of the same witness because a confirmation on opening is the same passkey ceremony,
    * verified by the same subsystem — and it never counts as a step-up.
    */
-  presenceRequired?(subject: SessionDevice): boolean;
+  unlockRequired?(subject: SessionDevice): boolean;
 }
 
 /** The witness for a dispatcher with no step-up subsystem wired: nobody holds one. */

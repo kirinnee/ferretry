@@ -37,8 +37,9 @@ export function registerSecurityCommands(program: Command, controller: () => Sec
       'after',
       [
         '',
-        `  ${bin} daemon security set stepUpWindowMinutes 5`,
-        `  ${bin} daemon security set presenceOnOpen on`,
+        `  ${bin} daemon security set unlockValidityHours 4`,
+        `  ${bin} daemon security set stepUpOnActions on`,
+        `  ${bin} daemon security set unlockOnOpen off`,
         `  ${bin} daemon security set idleExpiryDays 14`,
       ].join('\n'),
     )

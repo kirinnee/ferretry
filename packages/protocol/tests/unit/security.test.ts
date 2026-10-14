@@ -16,7 +16,7 @@ const view = {
 
 const securityCases: SchemaCase[] = [
   { name: 'settings', schema: security.SecuritySettingsSchema, value: defaults },
-  { name: 'a one-field patch', schema: security.SecuritySettingsPatchSchema, value: { presenceOnOpen: true } },
+  { name: 'a one-field patch', schema: security.SecuritySettingsPatchSchema, value: { unlockOnOpen: true } },
   { name: 'a settings source', schema: security.SecuritySettingsSourceSchema, value: 'damaged' },
   { name: 'view', schema: security.SecuritySettingsViewSchema, value: view },
   {
@@ -25,7 +25,7 @@ const securityCases: SchemaCase[] = [
     value: { ...view, updatedAt: undefined },
   },
   { name: 'change', schema: security.SecuritySettingsChangeSchema, value: { view, devicesExpiring: 2 } },
-  { name: 'presence granted', schema: security.PresenceGrantedSchema, value: { presentUntil: LATER_INSTANT } },
+  { name: 'presence granted', schema: security.UnlockGrantedSchema, value: { unlockedUntil: LATER_INSTANT } },
 ];
 
 describe('the security settings wire', () => {
@@ -66,8 +66,8 @@ describe('the security settings wire', () => {
     should([...security.SECURITY_SETTING_FIELDS]).deepEqual([
       'stepUpWindowMinutes',
       'deviceKeyRotationDays',
-      'presenceOnOpen',
-      'presenceValidityHours',
+      'unlockOnOpen',
+      'unlockValidityHours',
       'idleExpiryDays',
     ]);
     for (const [field, { min, max }] of Object.entries(bounds)) {
@@ -80,7 +80,7 @@ describe('the security settings wire', () => {
     for (const field of [
       'stepUpWindowMinutes',
       'deviceKeyRotationDays',
-      'presenceValidityHours',
+      'unlockValidityHours',
       'idleExpiryDays',
     ] as const) {
       should(security.widensSecurity(field, 10, 11)).be.true();
@@ -90,14 +90,14 @@ describe('the security settings wire', () => {
   });
 
   it('should call turning the passkey on opening off a loosening, and nothing else about it one', () => {
-    should(security.widensSecurity('presenceOnOpen', true, false)).be.true();
-    should(security.widensSecurity('presenceOnOpen', false, true)).be.false();
-    should(security.widensSecurity('presenceOnOpen', true, true)).be.false();
-    should(security.widensSecurity('presenceOnOpen', false, false)).be.false();
+    should(security.widensSecurity('unlockOnOpen', true, false)).be.true();
+    should(security.widensSecurity('unlockOnOpen', false, true)).be.false();
+    should(security.widensSecurity('unlockOnOpen', true, true)).be.false();
+    should(security.widensSecurity('unlockOnOpen', false, false)).be.false();
   });
 
   it('should spell the two codes a client branches on', () => {
     should(security.SECURITY_WIDEN_REFUSED_CODE).equal('security_widen_at_machine');
-    should(security.PRESENCE_REQUIRED_CODE).equal('presence_required');
+    should(security.UNLOCK_REQUIRED_CODE).equal('unlock_required');
   });
 });

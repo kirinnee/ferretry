@@ -45,6 +45,7 @@
 
 import {
   type CapabilityGrants,
+  DAEMON_CAPABILITIES,
   type DeviceGrantsPatch,
   DeviceGrantsPatchSchema,
   type PairedDevice,
@@ -141,6 +142,10 @@ function callerDeviceId(actor: string | undefined): string | undefined {
  * The caller as the boundary described it. Every pairing route names a demand, so the dispatcher always
  * hands one over; its absence is a wiring mistake and refuses rather than guessing a caller.
  */
+/** Whether a grant set holds every capability on both axes. */
+const holdsEverything = (grants: CapabilityGrants): boolean =>
+  DAEMON_CAPABILITIES.every(capability => grants[capability].use && grants[capability].configure);
+
 function presentationIn(context: RouteContext): CapabilityPresentation {
   if (context.presentation === undefined)
     throw new ApiError(500, 'this daemon cannot say who is asking, so it is refusing', 'internal_error');
@@ -185,16 +190,17 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       noStore: true,
       handle: async context => {
         const body = await parseOptionalBody(context.request, PairingCodeMintRequestSchema);
-        const grants = body?.grants ?? 'default';
-        // A `full` code gives the next device every capability, which no remote device holds to give —
-        // so it is minted only AT THE MACHINE, by the one rule every host-locality decision reads.
-        if (grants === 'full' && !arrivedOnHost(context.request, context.credential?.tokenClass === 'admin'))
+        const grantSet = body?.grants ?? 'full';
+        // A `full` code — the default — gives the next device every capability. A device may pass on only
+        // what it holds itself, by the same rule a device widen reads (`mayWiden`), so a remote device
+        // that does not hold everything mints a `limited` code or none. At the machine anything goes.
+        if (grantSet === 'full' && !holdsEverything(grants.mayWiden(presentationIn(context))))
           return errorResponse(
             403,
-            'a code that gives a new device every capability can only be minted at the machine itself — run `pair --full` there',
+            'this device does not hold every capability, so it cannot pair a device with full access; pair it with limited access, or run `pair` at the machine',
             'grant_forbidden',
           );
-        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint(grants)), 201);
+        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint(grantSet)), 201);
       },
     },
     {

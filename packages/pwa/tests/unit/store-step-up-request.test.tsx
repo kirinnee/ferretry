@@ -50,10 +50,10 @@ describe('useStepUpRequest', () => {
       connectClient: async () => ({}) as unknown as FyApiClient,
       fetcher: async () => Response.json({}),
     });
-    const answer = store.presenceGate.require(alpha);
-    expect(store.presenceGate.snapshot()?.daemon.daemonId).toBe(alpha.daemonId);
+    const answer = store.unlockGate.require(alpha);
+    expect(store.unlockGate.snapshot()?.daemon.daemonId).toBe(alpha.daemonId);
     expect(store.stepUp.snapshot()).toBeNull();
-    store.presenceGate.dismiss();
+    store.unlockGate.dismiss();
     expect(await answer).toBe(false);
   });
 

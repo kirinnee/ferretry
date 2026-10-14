@@ -23,7 +23,7 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 
-export type NumericSecuritySetting = Exclude<SecuritySettingField, 'presenceOnOpen'>;
+export type NumericSecuritySetting = Exclude<SecuritySettingField, 'unlockOnOpen'>;
 
 /** The only client capability this surface uses. */
 export type SecuritySettingsClient = Pick<IFyApiClient, 'request'>;
@@ -64,12 +64,12 @@ export const SECURITY_SETTING_COPY: Readonly<Record<SecuritySettingField, Securi
     explanation: 'Once this long has passed, a device’s key is replaced at its next passkey confirmation.',
     unit: { one: 'day', many: 'days' },
   },
-  presenceOnOpen: {
+  unlockOnOpen: {
     label: 'Passkey on opening',
     explanation: 'Ask for a passkey before the app shows anything from this machine.',
     unit: null,
   },
-  presenceValidityHours: {
+  unlockValidityHours: {
     label: 'Opening confirmation lasts',
     explanation: 'How long one passkey confirmation on opening lasts for a device, across page loads.',
     unit: { one: 'hour', many: 'hours' },

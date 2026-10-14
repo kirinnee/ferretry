@@ -216,16 +216,16 @@ export type PairingResponse = z.infer<typeof PairingResponseSchema>;
 /**
  * What a device that redeems this code will hold (`docs/pairing.md`, "What a new device may do").
  *
- * - `default` — `DEFAULT_DEVICE_GRANTS`, `fleet.use` only: least privilege, widened later per device.
- * - `full` — every capability on both axes (`fy pair --full`), for the owner's own browser, which would
- *   otherwise need a grant per capability. The daemon-wide document still applies on top, and every
- *   dangerous act still needs the passkey step-up. Minting one is HOST-ONLY (`arrivedOnHost`): a remote
- *   device could otherwise mint a code that gives a new device more than it holds itself.
+ * - `full` — the DEFAULT (owner decision 2026-10-14): every capability on both axes, behind the unlock,
+ *   which a device needs before it can do anything. The daemon-wide document still applies on top.
+ *   Minting one remotely needs a device that holds every capability itself, so no device can mint a
+ *   code that gives a new device more than it holds.
+ * - `limited` — `LIMITED_DEVICE_GRANTS`, `fleet.use` only (`fy pair --limited`), widened later per device.
  *
  * It travels with the CODE, held by the daemon. The QR and the link carry nothing extra, so the fragment
  * stays the one-version `v1` shape and a code says nothing about what it grants to whoever reads it.
  */
-export const PAIRING_GRANT_SETS = ['default', 'full'] as const;
+export const PAIRING_GRANT_SETS = ['full', 'limited'] as const;
 export type PairingGrantSet = (typeof PAIRING_GRANT_SETS)[number];
 export const PairingGrantSetSchema = z.enum(PAIRING_GRANT_SETS);
 
@@ -316,8 +316,7 @@ const mintedFields = z.strictObject({
   discoveredRelayUrl: SocketEndpointSchema.optional(),
   /**
    * What the device that redeems this code will hold. Host-facing, like the field above, so a screen
-   * can say "this code gives full access" beside it; absent from a daemon that predates the choice,
-   * which is read as `default`.
+   * can say "this code gives a limited device" beside it. Absent means `full`, the default.
    */
   grants: PairingGrantSetSchema.optional(),
 });
@@ -527,8 +526,8 @@ export const PairedDeviceSchema = z.strictObject({
    * What THIS device has been granted, before the daemon-wide document is applied.
    *
    * The effective answer for a governed caller is this AND the daemon-wide grant, axis by axis
-   * (`docs/grants.md`, "Per-device grants"). A newly paired device holds `DEFAULT_DEVICE_GRANTS` —
-   * `fleet.use` only. A caller on the host is ungoverned, so none of this narrows it.
+   * (`docs/grants.md`, "Per-device grants"). A newly paired device holds `FULL_DEVICE_GRANTS`, behind the
+   * unlock, unless its code was minted `--limited`. The owner's admin token at the machine is ungoverned.
    */
   grants: CapabilityGrantsSchema,
 });

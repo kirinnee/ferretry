@@ -3,7 +3,7 @@ import {
   type CapabilityGrants,
   CapabilityGrantsSchema,
   type DaemonId,
-  DEFAULT_DEVICE_GRANTS,
+  LIMITED_DEVICE_GRANTS,
   DaemonIdSchema,
   DaemonNameSchema,
   InstantSchema,
@@ -30,9 +30,9 @@ const DeviceRecordSchema = z.strictObject({
   createdAt: InstantSchema,
   lastSeenAt: InstantSchema,
   publicKey: DeviceKeySchema,
-  // A record written before per-device grants reads as the DEFAULT, which is a narrowing (fleet.use
-  // only) and therefore safe — so the document stays at schema 2. Every write carries the field.
-  grants: CapabilityGrantsSchema.default(DEFAULT_DEVICE_GRANTS),
+  // A record written before per-device grants reads as LIMITED (fleet.use only), a narrowing and
+  // therefore safe — so the document stays at schema 2. Every write carries the field.
+  grants: CapabilityGrantsSchema.default(LIMITED_DEVICE_GRANTS),
   /** When `publicKey` last replaced an earlier one. Absent until a first rotation. */
   keyRotatedAt: InstantSchema.optional(),
 });

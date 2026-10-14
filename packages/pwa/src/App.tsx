@@ -60,7 +60,7 @@ import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
-import { PRESENCE_COPY, StepUpDialog } from './features/step-up/step-up-dialog.tsx';
+import { UNLOCK_COPY, StepUpDialog } from './features/step-up/step-up-dialog.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
@@ -1566,8 +1566,8 @@ export function AppShell() {
       {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
           it, and it names which machine is asking. */}
       <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
-      {/* The same prompt, for a machine that asks for a passkey on opening (`presence_required`). */}
-      <StepUpDialog gate={store.presenceGate} copy={PRESENCE_COPY} machineName={promptMachineName} />
+      {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
+      <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
     </NotificationControlsContext.Provider>
   );
 }

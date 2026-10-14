@@ -28,8 +28,8 @@ const SECURITY_VIEW = {
   settings: {
     stepUpWindowMinutes: 15,
     deviceKeyRotationDays: 30,
-    presenceOnOpen: false,
-    presenceValidityHours: 8,
+    unlockOnOpen: false,
+    unlockValidityHours: 8,
     idleExpiryDays: 30,
   },
   source: 'defaults',

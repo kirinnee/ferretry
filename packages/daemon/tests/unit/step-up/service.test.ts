@@ -842,59 +842,59 @@ describe('StepUpService presence on opening (B6)', () => {
     const { service } = fixture();
 
     // Act / Assert
-    should(service.presenceRequired(phone)).be.false();
+    should(service.unlockRequired(phone)).be.false();
   });
 
   it('should ask nobody for presence when the machine does not ask for it on opening', async () => {
     // Arrange
-    const { service } = fixture({ settings: { presenceOnOpen: false } });
+    const { service } = fixture({ settings: { unlockOnOpen: false } });
 
     // Act / Assert
-    should(service.presenceRequired(phone)).be.false();
+    should(service.unlockRequired(phone)).be.false();
   });
 
   it('should ask a device that has never confirmed, until it does', async () => {
     // Arrange
-    const { service, authenticator } = await enrolled({ settings: { presenceOnOpen: true } });
-    should(service.presenceRequired(phone)).be.true();
-    await service.presenceOptions(remote(), ORIGIN);
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
+    should(service.unlockRequired(phone)).be.true();
+    await service.unlockOptions(remote(), ORIGIN);
 
     // Act
-    const granted = await service.presence(remote(), await nextAssertion(authenticator, 1));
+    const granted = await service.unlock(remote(), await nextAssertion(authenticator, 1));
 
     // Assert
     should(granted.ok).be.true();
-    should(service.presenceRequired(phone)).be.false();
+    should(service.unlockRequired(phone)).be.false();
   });
 
   it('should be present until the validity period lapses, and ask again at the instant it does', async () => {
     // Arrange
     const { clock, service, authenticator } = await enrolled({
-      settings: { presenceOnOpen: true, presenceValidityHours: 2 },
+      settings: { unlockOnOpen: true, unlockValidityHours: 2 },
     });
-    await service.presenceOptions(remote(), ORIGIN);
+    await service.unlockOptions(remote(), ORIGIN);
     const confirmedAt = clock.now;
-    await service.presence(remote(), await nextAssertion(authenticator, 1));
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
 
     // Act / Assert
     clock.now = confirmedAt + 2 * HOUR_MS - 1;
-    should(service.presenceRequired(phone)).be.false();
+    should(service.unlockRequired(phone)).be.false();
     clock.now = confirmedAt + 2 * HOUR_MS;
-    should(service.presenceRequired(phone)).be.true();
+    should(service.unlockRequired(phone)).be.true();
   });
 
   it('should answer a confirmation with when it lapses for the device', async () => {
     // Arrange
     const { clock, service, authenticator } = await enrolled({
-      settings: { presenceOnOpen: true, presenceValidityHours: 3 },
+      settings: { unlockOnOpen: true, unlockValidityHours: 3 },
     });
-    await service.presenceOptions(remote(), ORIGIN);
+    await service.unlockOptions(remote(), ORIGIN);
 
     // Act
-    const granted = await service.presence(remote(), await nextAssertion(authenticator, 1));
+    const granted = await service.unlock(remote(), await nextAssertion(authenticator, 1));
 
     // Assert
-    should(granted).eql({ ok: true, value: { presentUntil: new Date(clock.now + 3 * HOUR_MS).toISOString() } });
+    should(granted).eql({ ok: true, value: { unlockedUntil: new Date(clock.now + 3 * HOUR_MS).toISOString() } });
   });
 
   it('should answer a confirmation with the present instant when the service has no settings', async () => {
@@ -902,39 +902,39 @@ describe('StepUpService presence on opening (B6)', () => {
     const { clock, service } = fixture();
     const authenticator = await es256Authenticator();
     await enrol(service, authenticator);
-    await service.presenceOptions(remote(), ORIGIN);
+    await service.unlockOptions(remote(), ORIGIN);
 
     // Act
-    const granted = await service.presence(remote(), await nextAssertion(authenticator, 1));
+    const granted = await service.unlock(remote(), await nextAssertion(authenticator, 1));
 
     // Assert
-    should(granted).eql({ ok: true, value: { presentUntil: new Date(clock.now).toISOString() } });
+    should(granted).eql({ ok: true, value: { unlockedUntil: new Date(clock.now).toISOString() } });
   });
 
   it('should hold a confirmation for the whole device, across its app sessions', async () => {
     // Arrange
-    const { service, authenticator } = await enrolled({ settings: { presenceOnOpen: true } });
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
     const otherTab = { ...phone, appSession: 'tab-two' };
-    should(service.presenceRequired(otherTab)).be.true();
-    await service.presenceOptions(remote(), ORIGIN);
+    should(service.unlockRequired(otherTab)).be.true();
+    await service.unlockOptions(remote(), ORIGIN);
 
     // Act
-    await service.presence(remote(), await nextAssertion(authenticator, 1));
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
 
     // Assert
-    should(service.presenceRequired(phone)).be.false();
-    should(service.presenceRequired(otherTab)).be.false();
-    should(service.presenceRequired({ deviceId: deviceId('b'), appSession: 'tab-one' })).be.true();
+    should(service.unlockRequired(phone)).be.false();
+    should(service.unlockRequired(otherTab)).be.false();
+    should(service.unlockRequired({ deviceId: deviceId('b'), appSession: 'tab-one' })).be.true();
   });
 
   it('should never count a confirmation on opening as a step-up', async () => {
     // Arrange
-    const { service, authenticator, registry, clock } = await enrolled({ settings: { presenceOnOpen: true } });
+    const { service, authenticator, registry, clock } = await enrolled({ settings: { unlockOnOpen: true } });
     registry.forgetDevice(phone.deviceId);
-    await service.presenceOptions(remote(), ORIGIN);
+    await service.unlockOptions(remote(), ORIGIN);
 
     // Act
-    await service.presence(remote(), await nextAssertion(authenticator, 1));
+    await service.unlock(remote(), await nextAssertion(authenticator, 1));
 
     // Assert
     should(service.held(phone)).be.false();
@@ -943,50 +943,50 @@ describe('StepUpService presence on opening (B6)', () => {
 
   it('should count registering a passkey as a confirmation on opening', async () => {
     // Arrange
-    const { service } = fixture({ settings: { presenceOnOpen: true } });
-    should(service.presenceRequired(phone)).be.true();
+    const { service } = fixture({ settings: { unlockOnOpen: true } });
+    should(service.unlockRequired(phone)).be.true();
 
     // Act
     await enrol(service, await es256Authenticator());
 
     // Assert
-    should(service.presenceRequired(phone)).be.false();
+    should(service.unlockRequired(phone)).be.false();
   });
 
   it('should forget a revoked device’s confirmation', async () => {
     // Arrange
-    const { service } = fixture({ settings: { presenceOnOpen: true } });
+    const { service } = fixture({ settings: { unlockOnOpen: true } });
     await enrol(service, await es256Authenticator());
-    should(service.presenceRequired(phone)).be.false();
+    should(service.unlockRequired(phone)).be.false();
 
     // Act
     await service.forgetDevice(phone.deviceId);
 
     // Assert
-    should(service.presenceRequired(phone)).be.true();
+    should(service.unlockRequired(phone)).be.true();
   });
 
   it('should refuse a confirmation that carries a rotation, and keep the device unconfirmed', async () => {
     // Arrange
-    const { service, authenticator } = await enrolled({ settings: { presenceOnOpen: true } });
-    await service.presenceOptions(remote(), ORIGIN);
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
+    await service.unlockOptions(remote(), ORIGIN);
     const body = await nextAssertion(authenticator, 1);
 
     // Act
-    const refused = await service.presence(remote(), { ...body, rotation: { deviceKey: NEW_KEY, proof: PROOF } });
+    const refused = await service.unlock(remote(), { ...body, rotation: { deviceKey: NEW_KEY, proof: PROOF } });
 
     // Assert
     should(refused).eql({ ok: false, refusal: 'not-verified' });
-    should(service.presenceRequired(phone)).be.true();
+    should(service.unlockRequired(phone)).be.true();
   });
 
   it('should refuse a confirmation from a caller that is not a device', async () => {
     // Arrange
-    const { service, authenticator } = await enrolled({ settings: { presenceOnOpen: true } });
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
 
     // Act / Assert
-    should(await service.presenceOptions({ hostLocal: true }, ORIGIN)).eql({ ok: false, refusal: 'not-a-device' });
-    should(await service.presence({ hostLocal: true }, await nextAssertion(authenticator, 1))).eql({
+    should(await service.unlockOptions({ hostLocal: true }, ORIGIN)).eql({ ok: false, refusal: 'not-a-device' });
+    should(await service.unlock({ hostLocal: true }, await nextAssertion(authenticator, 1))).eql({
       ok: false,
       refusal: 'not-a-device',
     });
@@ -994,24 +994,24 @@ describe('StepUpService presence on opening (B6)', () => {
 
   it('should refuse presence options for an origin the machine does not serve or a device with no passkey', async () => {
     // Arrange
-    const { service } = fixture({ origins: [ORIGIN], settings: { presenceOnOpen: true } });
+    const { service } = fixture({ origins: [ORIGIN], settings: { unlockOnOpen: true } });
 
     // Act / Assert
-    should(await service.presenceOptions(remote(), OTHER_ORIGIN)).eql({ ok: false, refusal: 'origin-not-allowed' });
-    should(await service.presenceOptions(remote(), ORIGIN)).eql({ ok: false, refusal: 'no-passkey' });
+    should(await service.unlockOptions(remote(), OTHER_ORIGIN)).eql({ ok: false, refusal: 'origin-not-allowed' });
+    should(await service.unlockOptions(remote(), ORIGIN)).eql({ ok: false, refusal: 'no-passkey' });
   });
 
   it('should answer a confirmation only with a challenge issued for presence, spending it either way', async () => {
     // Arrange
-    const { service, authenticator } = await enrolled({ settings: { presenceOnOpen: true } });
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
     const body = await nextAssertion(authenticator, 1);
 
     // Act — a step-up challenge answers no presence, and a presence challenge answers once
     await service.stepUpOptions(remote(), ORIGIN);
-    const crossed = await service.presence(remote(), body);
-    await service.presenceOptions(remote(), ORIGIN);
-    const first = await service.presence(remote(), body);
-    const replay = await service.presence(remote(), body);
+    const crossed = await service.unlock(remote(), body);
+    await service.unlockOptions(remote(), ORIGIN);
+    const first = await service.unlock(remote(), body);
+    const replay = await service.unlock(remote(), body);
 
     // Assert
     should(crossed).eql({ ok: false, refusal: 'not-verified' });
@@ -1021,16 +1021,16 @@ describe('StepUpService presence on opening (B6)', () => {
 
   it('should not confirm a device whose passkey answer does not check out', async () => {
     // Arrange
-    const { service, authenticator } = await enrolled({ settings: { presenceOnOpen: true } });
-    await service.presenceOptions(remote(), ORIGIN);
+    const { service, authenticator } = await enrolled({ settings: { unlockOnOpen: true } });
+    await service.unlockOptions(remote(), ORIGIN);
     const body = await nextAssertion(authenticator, 1);
 
     // Act
-    const refused = await service.presence(remote(), { ...body, signature: 'A' });
+    const refused = await service.unlock(remote(), { ...body, signature: 'A' });
 
     // Assert
     should(refused).eql({ ok: false, refusal: 'not-verified' });
-    should(service.presenceRequired(phone)).be.true();
+    should(service.unlockRequired(phone)).be.true();
   });
 });
 

@@ -1357,18 +1357,18 @@ describe('the explicit guard for a table that names no capability', () => {
 });
 
 describe('presence on opening', () => {
-  const route = (path: string, presenceExempt?: true): ApiRoute => ({
+  const route = (path: string, unlockExempt?: true): ApiRoute => ({
     method: 'GET',
     path,
     minimum: 'operator',
-    ...(presenceExempt === true ? { presenceExempt: true } : {}),
+    ...(unlockExempt === true ? { unlockExempt: true } : {}),
     handle: async () => jsonResponse({ served: path }),
   });
 
   /** A witness that wants presence from the named device only, recording every question. */
   const wanting = (deviceId: string, asked: string[] = []): StepUpWitness => ({
     held: () => false,
-    presenceRequired: subject => {
+    unlockRequired: subject => {
       asked.push(subject.deviceId);
       return subject.deviceId === deviceId;
     },
@@ -1383,13 +1383,13 @@ describe('presence on opening', () => {
       witness,
     );
 
-  it('should answer 401 presence_required to a governed device before it is served anything', async () => {
+  it('should answer 401 unlock_required to a governed device before it is served anything', async () => {
     const answered = await dispatcherWith(wanting(DEVICE.deviceId)).dispatch(
       request({ path: '/v1/sessions', device: DEVICE }),
     );
 
     should(answered.status).equal(401);
-    should(jsonBody(answered)).containDeep({ code: 'presence_required' });
+    should(jsonBody(answered)).containDeep({ code: 'unlock_required' });
     should(answered.body).match(/confirm it is you with a passkey/u);
   });
 
@@ -1474,11 +1474,11 @@ describe('presence on opening', () => {
     );
 
     should(served.status).equal(200);
-    should(NO_STEP_UP_WITNESS.presenceRequired?.(DEVICE)).be.undefined();
+    should(NO_STEP_UP_WITNESS.unlockRequired?.(DEVICE)).be.undefined();
   });
 
   it('should serve a device the witness says needs nothing', async () => {
-    const served = await dispatcherWith({ held: () => false, presenceRequired: () => false }).dispatch(
+    const served = await dispatcherWith({ held: () => false, unlockRequired: () => false }).dispatch(
       request({ path: '/v1/sessions', device: DEVICE }),
     );
 

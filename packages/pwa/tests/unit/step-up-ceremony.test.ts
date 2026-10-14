@@ -13,7 +13,7 @@ import { type CredentialsPort, PasskeyCeremonyError, passkeySentence } from '../
 import {
   browserCredentials,
   describeStepUpFailure,
-  presenceCeremony,
+  unlockCeremony,
   stepUpCeremony,
 } from '../../src/lib/step-up-ceremony.ts';
 import type { StepUpClient } from '../../src/lib/step-up-client.ts';
@@ -183,14 +183,14 @@ describe('running the presence ceremony', () => {
       request: async <T>(path: string, schema: z.ZodType<T>): Promise<T> => {
         paths.push(path);
         return schema.parse(
-          path === '/v1/presence/options'
+          path === '/v1/unlock/options'
             ? {
                 challenge: toBase64Url(Uint8Array.of(5, 6, 7)),
                 rpId: 'ferretry.pages.dev',
                 allowCredentials: [{ type: 'public-key', id: toBase64Url(Uint8Array.of(0xaa, 0xbb)) }],
                 timeout: 60_000,
               }
-            : { presentUntil: INSTANT },
+            : { unlockedUntil: INSTANT },
         );
       },
     };
@@ -205,9 +205,9 @@ describe('running the presence ceremony', () => {
     };
 
     // Act
-    await presenceCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon);
+    await unlockCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon);
 
     // Assert
-    should(paths).eql(['/v1/presence/options', '/v1/presence']);
+    should(paths).eql(['/v1/unlock/options', '/v1/unlock']);
   });
 });

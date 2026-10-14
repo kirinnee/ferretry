@@ -1551,13 +1551,13 @@ describe('the carrier router meeting a passkey step-up', () => {
 });
 
 describe('the carrier router meeting a presence requirement', () => {
-  const PRESENCE = { code: 'presence_required', message: 'Confirm it is you.' };
+  const PRESENCE = { code: 'unlock_required', message: 'Confirm it is you.' };
   const STEP_UP = { code: 'grant_step_up_required', message: 'Confirm with your passkey.' };
 
-  const presenceRouter = async (
+  const unlockRouter = async (
     respond: (attempt: number) => { status: number; body: unknown },
     handlers: {
-      readonly presenceRequired?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>;
+      readonly unlockRequired?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>;
       readonly stepUp?: (daemon: ReturnType<typeof daemonConnection>) => Promise<boolean>;
     } = {},
   ) => {
@@ -1585,10 +1585,10 @@ describe('the carrier router meeting a presence requirement', () => {
   it('should ask once and send the request again after the person confirms', async () => {
     // Arrange
     const asked: string[] = [];
-    const { router, daemon, attempts } = await presenceRouter(
+    const { router, daemon, attempts } = await unlockRouter(
       attempt => (attempt === 1 ? { status: 401, body: PRESENCE } : { status: 200, body: { ok: true } }),
       {
-        presenceRequired: async connection => {
+        unlockRequired: async connection => {
           asked.push(connection.daemonId);
           return true;
         },
@@ -1606,8 +1606,8 @@ describe('the carrier router meeting a presence requirement', () => {
 
   it('should return the refusal unchanged when the prompt is dismissed', async () => {
     // Arrange
-    const { router, attempts } = await presenceRouter(() => ({ status: 401, body: PRESENCE }), {
-      presenceRequired: async () => false,
+    const { router, attempts } = await unlockRouter(() => ({ status: 401, body: PRESENCE }), {
+      unlockRequired: async () => false,
     });
 
     // Act
@@ -1622,9 +1622,9 @@ describe('the carrier router meeting a presence requirement', () => {
   it('should hand the refusal back when nothing is able to ask, or when it is some other 401', async () => {
     // Arrange
     let asked = 0;
-    const silent = await presenceRouter(() => ({ status: 401, body: PRESENCE }));
-    const other = await presenceRouter(() => ({ status: 401, body: { code: 'something_else' } }), {
-      presenceRequired: async () => {
+    const silent = await unlockRouter(() => ({ status: 401, body: PRESENCE }));
+    const other = await unlockRouter(() => ({ status: 401, body: { code: 'something_else' } }), {
+      unlockRequired: async () => {
         asked += 1;
         return true;
       },
@@ -1643,7 +1643,7 @@ describe('the carrier router meeting a presence requirement', () => {
   it('should still ask for a step-up on the resent request, after presence', async () => {
     // Arrange — presence first, then the resent request needs a step-up, then it succeeds.
     const order: string[] = [];
-    const { router, attempts } = await presenceRouter(
+    const { router, attempts } = await unlockRouter(
       attempt =>
         attempt === 1
           ? { status: 401, body: PRESENCE }
@@ -1651,7 +1651,7 @@ describe('the carrier router meeting a presence requirement', () => {
             ? { status: 403, body: STEP_UP }
             : { status: 200, body: { ok: true } },
       {
-        presenceRequired: async () => {
+        unlockRequired: async () => {
           order.push('presence');
           return true;
         },
@@ -1667,7 +1667,7 @@ describe('the carrier router meeting a presence requirement', () => {
 
     // Assert
     should(response.status).equal(200);
-    should(order).eql(['presence', 'step-up']);
+    should(order).eql(['unlock', 'step-up']);
     should(attempts()).equal(3);
   });
 });

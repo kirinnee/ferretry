@@ -20,8 +20,8 @@ afterAll(async () => {
 const SETTINGS: SecuritySettings = {
   stepUpWindowMinutes: 5,
   deviceKeyRotationDays: 14,
-  presenceOnOpen: true,
-  presenceValidityHours: 2,
+  unlockOnOpen: true,
+  unlockValidityHours: 2,
   idleExpiryDays: 9,
 };
 const UPDATED_AT = '2026-10-01T12:00:00.000Z';
@@ -78,7 +78,7 @@ describe('reading', () => {
       {},
       { schemaVersion: 2, settings: SETTINGS, updatedAt: UPDATED_AT },
       { schemaVersion: 1, settings: { ...SETTINGS, idleExpiryDays: 91 }, updatedAt: UPDATED_AT },
-      { schemaVersion: 1, settings: { ...SETTINGS, presenceOnOpen: 'yes' }, updatedAt: UPDATED_AT },
+      { schemaVersion: 1, settings: { ...SETTINGS, unlockOnOpen: 'yes' }, updatedAt: UPDATED_AT },
       { schemaVersion: 1, settings: { idleExpiryDays: 9 }, updatedAt: UPDATED_AT },
       { schemaVersion: 1, settings: SETTINGS },
       { schemaVersion: 1, settings: SETTINGS, updatedAt: 'yesterday' },

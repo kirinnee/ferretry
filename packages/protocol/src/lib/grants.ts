@@ -140,15 +140,14 @@ export const CapabilityGrantsSchema = z.strictObject(
 export type CapabilityGrants = z.infer<typeof CapabilityGrantsSchema>;
 
 /**
- * What a newly paired device is given: `fleet.use`, and nothing else.
+ * What a device paired with a LIMITED code (`fy pair --limited`) is given: `fleet.use`, and nothing else.
  *
- * LEAST PRIVILEGE PER DEVICE, on top of the daemon-wide document (`docs/design/zero-trust.md` B5). A
- * fresh phone can read the fleet and chat with sessions; terminals, files, the browser, secrets, the
- * warden, pairing and every `configure` axis start off until somebody widens THIS device. The
- * daemon-wide document stays permissive by default, because it answers a different question — what any
- * remote caller may ever do on this machine — and the effective answer is both of them at once.
+ * The opt-in narrowing (`docs/design/zero-trust.md` B5): a phone that can read the fleet and chat with
+ * sessions, whose terminals, files, browser, secrets, warden, pairing and every `configure` axis stay
+ * off until somebody widens THIS device. It is also what a device record written before per-device
+ * grants reads as, because reading an absent field as the narrower answer is the safe direction.
  */
-export const DEFAULT_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
+export const LIMITED_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
   Object.fromEntries(
     DAEMON_CAPABILITIES.map(capability => [capability, { use: capability === 'fleet', configure: false }]),
   ) as CapabilityGrants,
@@ -350,7 +349,12 @@ export const GrantsPatchSchema = z
   .refine(patch => Object.values(patch).some(value => value !== undefined), 'a grant patch must change something');
 export type GrantsPatch = z.infer<typeof GrantsPatchSchema>;
 
-/** Every capability on both axes — what a `fy pair --full` code gives the device that redeems it. */
+/**
+ * Every capability on both axes — what a newly paired device is given by default (owner decision
+ * 2026-10-14). The UNLOCK is the gate: a device does nothing at all until it unlocks the machine with a
+ * passkey, and then may do anything for the unlock's validity. The daemon-wide document still applies on
+ * top, and narrowing one device stays available.
+ */
 export const FULL_DEVICE_GRANTS: CapabilityGrants = Object.freeze(
   Object.fromEntries(
     DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }]),

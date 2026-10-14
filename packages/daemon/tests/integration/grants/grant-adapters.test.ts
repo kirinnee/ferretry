@@ -330,7 +330,7 @@ describe('the journal kind', () => {
     });
     await audit.record({
       actor: 'admin-cli',
-      changes: ['security.presenceOnOpen=true->false'],
+      changes: ['security.unlockOnOpen=true->false'],
       at: '2026-10-01T11:00:00.000Z',
     });
 

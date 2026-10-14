@@ -536,8 +536,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/step-up/options',
       'POST /v1/step-up',
       // A confirmation on opening (zero-trust B6).
-      'POST /v1/presence/options',
-      'POST /v1/presence',
+      'POST /v1/unlock/options',
+      'POST /v1/unlock',
       // The owner's recovery path: a browser is never at the machine (B4), so only `fy passkey window`
       // can re-open a device's passkey window. Without it a device past its first window is locked out.
       'POST /v1/passkeys/registration-window',

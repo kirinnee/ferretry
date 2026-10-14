@@ -129,10 +129,10 @@ export interface ScopedRoute extends RoutePattern {
   readonly privilegedOnly?: true;
   /**
    * Served to a device that has not confirmed its presence yet, on a machine that asks for it on
-   * opening (`presenceOnOpen`, `docs/design/zero-trust.md` B6). Only the routes a device needs to GIVE
+   * opening (`unlockOnOpen`, `docs/design/zero-trust.md` B6). Only the routes a device needs to GIVE
    * that confirmation, and the read that says the machine wants one, carry it.
    */
-  readonly presenceExempt?: true;
+  readonly unlockExempt?: true;
   /**
    * What the OPERATOR must additionally have agreed to, when this route is one of the five things
    * they are asked about.

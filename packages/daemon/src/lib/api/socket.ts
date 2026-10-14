@@ -182,12 +182,16 @@ export class ApiSocketDispatcher {
    *
    * The step-up is counted as STANDING here: it was spent on the upgrade that opened this stream, so a
    * stream outlives the confirmation that admitted it. Asking for a live one again would end every
-   * remote terminal at the first renewal after its step-up lapsed. Everything else is re-decided.
+   * remote terminal at the first renewal after its step-up lapsed. Everything else is re-decided —
+   * the UNLOCK included: a stream whose device's unlock has lapsed ends at its next renewal, because
+   * the unlock is what lets a device do anything at all (`docs/design/zero-trust.md` B6).
    */
   reauthorize(request: ApiRequest): boolean {
+    const unlock = this.stepUps?.unlockRequired;
+    const standing: StepUpWitness =
+      unlock === undefined ? STANDING_STEP_UP : { held: () => true, unlockRequired: subject => unlock.call(this.stepUps, subject) };
     return (
-      authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies, STANDING_STEP_UP).kind ===
-      'authorized'
+      authorizeRequest(this.router, this.credentials, request, this.guard, this.remedies, standing).kind === 'authorized'
     );
   }
 

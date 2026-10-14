@@ -1,4 +1,5 @@
 import {
+  isSecuritySwitch,
   SECURITY_SETTING_BOUNDS,
   SECURITY_SETTING_FIELDS,
   type SecuritySettingField,
@@ -9,12 +10,12 @@ import {
 
 /** One setting's value as a person types it back: `on`/`off` for the switch, the number otherwise. */
 export function formatSettingValue(field: SecuritySettingField, settings: SecuritySettings): string {
-  if (field === 'presenceOnOpen') return settings.presenceOnOpen ? 'on' : 'off';
+  if (isSecuritySwitch(field)) return settings[field] ? 'on' : 'off';
   return String(settings[field]);
 }
 
 function boundsOf(field: SecuritySettingField): string {
-  if (field === 'presenceOnOpen') return 'on | off';
+  if (isSecuritySwitch(field)) return 'on | off';
   const { min, max } = SECURITY_SETTING_BOUNDS[field];
   return `${String(min)}-${String(max)}`;
 }

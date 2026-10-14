@@ -54,7 +54,7 @@ export class ProtocolPairingGateway implements IPairGateway {
     return await this.client.request(PAIRING_CODE_PATH, PairingCodeMintResponseSchema, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(grants === 'default' ? {} : { grants }),
+      body: JSON.stringify(grants === 'full' ? {} : { grants }),
     });
   }
 

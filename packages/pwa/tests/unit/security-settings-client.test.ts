@@ -25,8 +25,8 @@ import {
 const SETTINGS = {
   stepUpWindowMinutes: 15,
   deviceKeyRotationDays: 30,
-  presenceOnOpen: false,
-  presenceValidityHours: 8,
+  unlockOnOpen: false,
+  unlockValidityHours: 8,
   idleExpiryDays: 30,
 };
 const VIEW = {
@@ -80,7 +80,7 @@ describe('what a setting says', () => {
     should(describeSettingValue('stepUpWindowMinutes', 1)).equal('1 minute');
     should(describeSettingValue('stepUpWindowMinutes', 0)).equal('0 minutes');
     should(describeSettingValue('idleExpiryDays', 30)).equal('30 days');
-    should(describeSettingValue('presenceValidityHours', 1)).equal('1 hour');
+    should(describeSettingValue('unlockValidityHours', 1)).equal('1 hour');
   });
 
   it('should name the command at the machine in the one loosening sentence', () => {
@@ -98,7 +98,7 @@ describe('what a setting says', () => {
   });
 
   it('should have copy for every setting and a unit for every number', () => {
-    should(SECURITY_SETTING_COPY.presenceOnOpen.unit).be.null();
+    should(SECURITY_SETTING_COPY.unlockOnOpen.unit).be.null();
     should(DAMAGED_SETTINGS_SENTENCE).containEql('strictest');
   });
 });

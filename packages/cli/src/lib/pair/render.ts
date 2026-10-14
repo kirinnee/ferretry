@@ -176,23 +176,22 @@ function qrBlock(invitation: PairingInvitation, qr: string): string {
  *
  * AN OPERATOR WHO SCANS BEFORE READING HAS ALREADY MADE THE DECISION this line is for, so it sits above
  * the QR. It is decided by the daemon's ECHO of the grant set, never by the flag alone: a daemon older
- * than `--full` ignores the request and mints an ordinary code, and a screen that claimed full access
- * on the strength of what was asked for would be reporting a decision nobody made.
+ * than `--limited` ignores the request, and a screen that claimed a limited device on the strength of
+ * what was asked for would be reporting a decision nobody made.
  */
 function grantsNotice(invitation: PairingInvitation): string {
   const bin = invitation.binaryName;
-  const granted = invitation.mint.grants ?? 'default';
-  if (granted === 'full')
+  const granted = invitation.mint.grants ?? 'full';
+  if (granted === 'limited')
     return (
-      'FULL ACCESS: the device that scans this gets every capability on this machine. Anything dangerous ' +
-      'still asks for its passkey first.'
+      'LIMITED: a device paired with this code can only read the fleet and chat with sessions until you ' +
+      `widen it with \`${bin} device grant\`.`
     );
-  const limited =
-    'A device paired with this code can only read the fleet and chat with sessions until you widen it ' +
-    `with \`${bin} device grant\`.`;
-  if (invitation.requestedGrants === 'full')
-    return `--full was NOT applied: this daemon is older than that flag and minted an ordinary code. ${limited}`;
-  return `${limited} To give your own browser full access instead, run \`${bin} pair --full\`.`;
+  const full =
+    'The device that scans this can do anything on this machine once it unlocks it with its passkey. ' +
+    `To pair a device that can only read and chat, run \`${bin} pair --limited\`.`;
+  if (invitation.requestedGrants === 'limited') return `--limited was NOT applied: this daemon is older than that flag. ${full}`;
+  return full;
 }
 
 /**

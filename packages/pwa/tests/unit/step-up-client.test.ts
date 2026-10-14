@@ -10,11 +10,11 @@ import type { z } from 'zod';
 import {
   fetchPasskeys,
   passkeyRegistrationOptions,
-  presenceOptions,
+  unlockOptions,
   registerPasskey,
   type StepUpClient,
   stepUpOptions,
-  submitPresence,
+  submitUnlock,
   submitStepUp,
 } from '../../src/lib/step-up-client.ts';
 
@@ -162,15 +162,15 @@ describe('the presence routes', () => {
       timeout: 60_000,
     });
 
-    await presenceOptions(client, ORIGIN);
+    await unlockOptions(client, ORIGIN);
 
-    should(client.calls[0]?.path).equal('/v1/presence/options');
+    should(client.calls[0]?.path).equal('/v1/unlock/options');
     should(client.calls[0]?.init?.method).equal('POST');
     should(bodyOf(client.calls[0])).eql({ origin: ORIGIN });
   });
 
   it('should submit the assertion on its own route and read when it lapses', async () => {
-    const client = clientAnswering({ presentUntil: INSTANT });
+    const client = clientAnswering({ unlockedUntil: INSTANT });
     const assertion: StepUpAssertion = {
       credentialId: 'AQID',
       clientDataJSON: 'BA',
@@ -178,10 +178,10 @@ describe('the presence routes', () => {
       signature: 'Bg',
     };
 
-    const granted = await submitPresence(client, assertion);
+    const granted = await submitUnlock(client, assertion);
 
-    should(granted.presentUntil).equal(INSTANT);
-    should(client.calls[0]?.path).equal('/v1/presence');
+    should(granted.unlockedUntil).equal(INSTANT);
+    should(client.calls[0]?.path).equal('/v1/unlock');
     should(bodyOf(client.calls[0])).eql(assertion);
   });
 });

@@ -30,8 +30,8 @@ const COMMAND = 'fy daemon security set <field> <value>';
 const SETTINGS: SecuritySettings = {
   stepUpWindowMinutes: 15,
   deviceKeyRotationDays: 30,
-  presenceOnOpen: false,
-  presenceValidityHours: 8,
+  unlockOnOpen: false,
+  unlockValidityHours: 8,
   idleExpiryDays: 30,
 };
 const view = (
@@ -116,7 +116,7 @@ describe('SecuritySettingsBlock reading', () => {
     expect(text(block)).toContain('Allowed: 7 to 90 days.');
     expect(text(block)).toContain('Allowed: 1 to 24 hours.');
     expect(text(block)).toContain('30 days');
-    should(marked(block, 'data-security-value', 'presenceOnOpen')[0]?.children).eql(['Off']);
+    should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['Off']);
     should(marked(block, 'data-security-damaged')).be.empty();
     run(() => block.unmount());
   });
@@ -206,14 +206,14 @@ describe('SecuritySettingsBlock narrowing', () => {
     // Arrange
     const ledger: Ledger = { patches: [] };
     const block = await mountBlock(machine(view(), patch => ({ view: view({}, patch), devicesExpiring: 0 }), ledger));
-    should(marked(block, 'data-security-switch', 'presenceOnOpen')[0]?.props.disabled).equal(false);
+    should(marked(block, 'data-security-switch', 'unlockOnOpen')[0]?.props.disabled).equal(false);
 
     // Act
-    await press(block, 'data-security-switch', 'presenceOnOpen');
+    await press(block, 'data-security-switch', 'unlockOnOpen');
 
     // Assert
-    should(ledger.patches).eql([{ presenceOnOpen: true }]);
-    should(marked(block, 'data-security-value', 'presenceOnOpen')[0]?.children).eql(['On']);
+    should(ledger.patches).eql([{ unlockOnOpen: true }]);
+    should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['On']);
     expect(text(block)).toContain('Passkey on opening: now on.');
     run(() => block.unmount());
   });
@@ -237,10 +237,10 @@ describe('SecuritySettingsBlock loosening', () => {
 
   it('switches presence off only at the machine, and says so in one sentence', async () => {
     // Arrange
-    const block = await mountBlock(machine(view({}, { presenceOnOpen: true }), () => new Error('unused')));
+    const block = await mountBlock(machine(view({}, { unlockOnOpen: true }), () => new Error('unused')));
 
     // Assert
-    should(marked(block, 'data-security-switch', 'presenceOnOpen')[0]?.props.disabled).equal(true);
+    should(marked(block, 'data-security-switch', 'unlockOnOpen')[0]?.props.disabled).equal(true);
     expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND}.`);
     run(() => block.unmount());
   });
@@ -250,8 +250,8 @@ describe('SecuritySettingsBlock loosening', () => {
     const ledger: Ledger = { patches: [] };
     const block = await mountBlock(
       machine(
-        view({ mayWiden: true }, { presenceOnOpen: true }),
-        patch => ({ view: view({ mayWiden: true }, { presenceOnOpen: true, ...patch }), devicesExpiring: 0 }),
+        view({ mayWiden: true }, { unlockOnOpen: true }),
+        patch => ({ view: view({ mayWiden: true }, { unlockOnOpen: true, ...patch }), devicesExpiring: 0 }),
         ledger,
       ),
     );
@@ -260,10 +260,10 @@ describe('SecuritySettingsBlock loosening', () => {
     await typeInto(block, 'idleExpiryDays', '60');
     should(saveButton(block, 'idleExpiryDays')?.props.disabled).equal(false);
     await press(block, 'data-security-save', 'idleExpiryDays');
-    await press(block, 'data-security-switch', 'presenceOnOpen');
+    await press(block, 'data-security-switch', 'unlockOnOpen');
 
     // Assert
-    should(ledger.patches).eql([{ idleExpiryDays: 60 }, { presenceOnOpen: false }]);
+    should(ledger.patches).eql([{ idleExpiryDays: 60 }, { unlockOnOpen: false }]);
     expect(text(block)).not.toContain('Loosening this');
     run(() => block.unmount());
   });
@@ -307,11 +307,11 @@ describe('SecuritySettingsBlock refusals', () => {
     const block = await mountBlock(machine(view(), () => new Error('offline')));
 
     // Act
-    await press(block, 'data-security-switch', 'presenceOnOpen');
+    await press(block, 'data-security-switch', 'unlockOnOpen');
 
     // Assert
     expect(text(block)).toContain('The setting was not changed. Try again.');
-    should(marked(block, 'data-security-value', 'presenceOnOpen')[0]?.children).eql(['Off']);
+    should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['Off']);
     run(() => block.unmount());
   });
 });

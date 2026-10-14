@@ -24,18 +24,19 @@ import type { GrantAuditPort } from '../grants/types.ts';
  *
  * ## A DAMAGED DOCUMENT FAILS CLOSED
  *
- * An unreadable document is read as {@link DAMAGED_SECURITY_SETTINGS}: a confirmation every time, the
- * app behind a passkey on opening, the shortest rotation and presence periods. It is NOT read as the
+ * An unreadable document is read as {@link DAMAGED_SECURITY_SETTINGS}: an unlock on opening for the
+ * shortest period, a confirmation per act on top of it every time, and the shortest rotation. It is NOT read as the
  * shortest idle expiry, deliberately: that would unpair every device a day after somebody's editor
  * corrupted a file, and an unpairing cannot be taken back. The idle period stays at the default.
  */
 
 /** What a damaged settings document is read as. See the class comment for the one exception. */
 export const DAMAGED_SECURITY_SETTINGS: SecuritySettings = {
+  unlockOnOpen: true,
+  unlockValidityHours: 1,
+  stepUpOnActions: true,
   stepUpWindowMinutes: 0,
   deviceKeyRotationDays: 7,
-  presenceOnOpen: true,
-  presenceValidityHours: 1,
   idleExpiryDays: DEFAULT_SECURITY_SETTINGS.idleExpiryDays,
 };
 

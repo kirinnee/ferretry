@@ -22,7 +22,7 @@ import {
   PasskeyRegistrationSchema,
   PasskeysViewSchema,
   PasskeyViewSchema,
-  PresenceGrantedSchema,
+  UnlockGrantedSchema,
   PasskeyWindowOpenedSchema,
   PasskeyWindowRequestSchema,
   StepUpAssertionSchema,
@@ -92,7 +92,7 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       minimum: 'operator',
       noStore: true,
       // The panel that offers the first passkey must load on a machine that asks for one on opening.
-      presenceExempt: true,
+      unlockExempt: true,
       handle: async context => answer(await service.view(caller(context)), value => PasskeysViewSchema.parse(value)),
     },
     {
@@ -139,30 +139,30 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
         return answer(await service.stepUp(caller(context), body), value => StepUpGrantedSchema.parse(value));
       },
     },
-    // A CONFIRMATION ON OPENING (`presenceOnOpen`): the same ceremony on its own challenge, served to a
+    // A CONFIRMATION ON OPENING (`unlockOnOpen`): the same ceremony on its own challenge, served to a
     // device the machine is otherwise refusing, so these two are the way in. Never a step-up.
     {
       method: 'POST',
-      path: '/v1/presence/options',
+      path: '/v1/unlock/options',
       minimum: 'operator',
       noStore: true,
-      presenceExempt: true,
+      unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyOptionsRequestSchema);
-        return answer(await service.presenceOptions(caller(context), body.origin), value =>
+        return answer(await service.unlockOptions(caller(context), body.origin), value =>
           StepUpOptionsSchema.parse(value),
         );
       },
     },
     {
       method: 'POST',
-      path: '/v1/presence',
+      path: '/v1/unlock',
       minimum: 'operator',
       noStore: true,
-      presenceExempt: true,
+      unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, StepUpAssertionSchema);
-        return answer(await service.presence(caller(context), body), value => PresenceGrantedSchema.parse(value));
+        return answer(await service.unlock(caller(context), body), value => UnlockGrantedSchema.parse(value));
       },
     },
     {
