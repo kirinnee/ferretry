@@ -11,6 +11,7 @@ import type { RegisteredTerminalPane } from '../../../lib/session/reap.ts';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import {
   hasSessionArguments,
+  isTmuxServerAbsent,
   paneIdentityArguments,
   parsePaneIdentity,
   sessionTarget,
@@ -25,11 +26,12 @@ export interface SessionLaunchesInFlight {
 }
 
 /**
- * The refusals by which tmux says a session is not there at all — as opposed to a command that
- * failed for some other reason, which proves nothing. The server-down pair is the whole private
- * server being gone, which takes every pane it held with it.
+ * Whether tmux says a session is not there at all — as opposed to a command that failed for some
+ * other reason, which proves nothing. A server that is not running is the whole private server being
+ * gone, which takes every pane it held with it; which refusals mean THAT is `isTmuxServerAbsent`'s
+ * measured list, so a socket this daemon may not open is not mistaken for an exit.
  */
-const ABSENT_SESSION = /can't find session|no server running|error connecting to/iu;
+const isAbsentSession = (stderr: string): boolean => /can't find session/iu.test(stderr) || isTmuxServerAbsent(stderr);
 
 /**
  * How many consecutive self-check ticks a dead pane may go without an exit status before the
@@ -193,7 +195,7 @@ export class TmuxSessionExitObserver implements SessionExitPort {
   /** How the registered pane ended, or `undefined` when it is live or nothing could be proven. */
   private async exitOf(registration: RegisteredTerminalPane): Promise<SessionPaneExit | undefined> {
     const present = await this.tmux.execute(hasSessionArguments(registration.tmuxSession));
-    if (present.code !== 0) return ABSENT_SESSION.test(present.stderr) ? { kind: 'gone' } : undefined;
+    if (present.code !== 0) return isAbsentSession(present.stderr) ? { kind: 'gone' } : undefined;
     const identityResult = await this.tmux.execute(paneIdentityArguments(registration.tmuxSession));
     if (identityResult.code !== 0) return undefined;
     const identity = parsePaneIdentity(identityResult.stdout);

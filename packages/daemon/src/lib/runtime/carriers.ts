@@ -49,7 +49,7 @@
  * refusal built on that difference would refuse boots nobody misconfigured.
  */
 
-import { SocketEndpointSchema } from '@ferretry/protocol';
+import { declaredBind, SocketEndpointSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 
 /** A host as an operator writes one: a name or an address, never empty. */
@@ -203,17 +203,21 @@ export interface DaemonCarrierSet {
  * read, which is the only reading that does not silently change where their daemon listens.
  */
 export function resolveDaemonCarriers(input: DaemonCarrierDocumentInput): DaemonCarrierSet {
-  const declaredBind = input.carriers.find((carrier): carrier is DaemonBindCarrier => carrier.kind === 'bind');
+  // WHICH spelling is the listener is the protocol's rule, not this file's: the command-line client
+  // reads the same document to find this daemon, and a second copy of the rule is how the two once
+  // disagreed about which port a `carriers` document named.
+  const listener = declaredBind(input);
   const declaredRelays = input.carriers.filter(
     (carrier): carrier is DaemonRelayCarrierEntry => carrier.kind === 'relay',
   );
   const bind =
-    declaredBind ??
-    DaemonBindCarrierSchema.parse({
-      kind: 'bind',
-      host: input.host,
-      ...(input.port === undefined ? {} : { port: input.port }),
-    });
+    listener === input
+      ? DaemonBindCarrierSchema.parse({
+          kind: 'bind',
+          host: input.host,
+          ...(input.port === undefined ? {} : { port: input.port }),
+        })
+      : DaemonBindCarrierSchema.parse(listener);
   if (declaredRelays.length > 0) return { bind, relays: declaredRelays };
   const legacy = input.relay;
   const relay =

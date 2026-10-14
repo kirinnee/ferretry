@@ -188,6 +188,9 @@ export class DaemonController {
   }
 
   async install(): Promise<void> {
+    // Before the claim: a host with no daemon executable cannot install one, and learning that
+    // after waiting out another invocation's claim is up to 140 seconds spent on a foregone refusal.
+    this.deps.installedDaemon();
     await this.#serialized('install', () => this.#install());
   }
 
@@ -202,6 +205,7 @@ export class DaemonController {
    * on this host. A FAILED START SAYS NOTHING, because `#serialized` throws before this line.
    */
   async start(): Promise<void> {
+    await this.#requireDaemonUnlessServing();
     await this.#serialized('start', () => this.#start());
     await this.deps.setupNotice.say();
   }
@@ -211,6 +215,7 @@ export class DaemonController {
   }
 
   async restart(): Promise<void> {
+    this.deps.installedDaemon();
     await this.#serialized('restart', () => this.#restart());
   }
 
@@ -509,6 +514,8 @@ export class DaemonController {
               this.deps.out.warn(
                 `${this.#name} ${verb} is waiting up to ${String(Math.round(waitMs / 1_000))}s for another lifecycle command to finish (${holder})`,
               ),
+            reclaimed: holder =>
+              this.deps.out.warn(`${this.#name} ${verb} removed a lifecycle claim left behind by ${holder}`),
           }),
         );
       }
@@ -617,6 +624,23 @@ export class DaemonController {
     const service = this.deps.service;
     if (service === undefined) throw new UnsupportedServiceManagerError();
     return service;
+  }
+
+  /**
+   * Refuse a `start` that cannot launch anything BEFORE taking the host-wide claim.
+   *
+   * The claim is host-wide, so waiting for it can cost the whole 140-second budget behind somebody
+   * else's restart — and on a host with no daemon executable that wait used to end in "cannot find
+   * fyd", which was knowable before it began. A daemon already serving needs no executable, so it is
+   * asked first and a start against it still succeeds; the probe is read-only, and `#start` asks again
+   * inside the claim because the answer can change while it waits.
+   */
+  async #requireDaemonUnlessServing(): Promise<void> {
+    try {
+      this.deps.installedDaemon();
+    } catch (error: unknown) {
+      if ((await this.deps.health.probe()) === undefined) throw error;
+    }
   }
 
   /** The installed daemon, or why this host has none — for the verbs that only REPORT. */

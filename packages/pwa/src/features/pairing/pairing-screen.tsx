@@ -37,6 +37,7 @@ import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { DaemonOutdatedError } from '../../lib/relay-carrier.ts';
 import { RelayPairingRefusedError } from '../../lib/relay-session.ts';
 import { BrandMark } from '../../shell/brand-mark.tsx';
+import { daemonDisplayName } from '../settings/daemon-settings.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 
 export type PairingExchange = (seed: PairingSeed) => Promise<void>;
@@ -123,8 +124,6 @@ const failureCause = (reason: unknown): PairingFailureCause => {
 };
 
 const BROWSE: Stage = { kind: 'browse' };
-
-const connectionName = (connection: DaemonConnectionRecord): string => connection.label ?? String(connection.daemonId);
 
 /** The stage a fresh mount starts in, decided entirely by how the tab was opened. */
 const initialStage = (arrival: PairingArrival): Stage => {
@@ -249,7 +248,7 @@ export function PairingScreen({
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paired daemons">
           {connections.map(connection => {
             const selected = connection.daemonId === selectedDaemonId;
-            const name = connectionName(connection);
+            const name = daemonDisplayName(connection);
             return (
               <li
                 key={connection.daemonId}
@@ -269,7 +268,9 @@ export function PairingScreen({
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-ui font-semibold text-fg">{name}</span>
-                    <span className="block truncate font-mono text-meta text-faint">{connection.baseUrl}</span>
+                    {name === connection.baseUrl ? null : (
+                      <span className="block truncate font-mono text-meta text-faint">{connection.baseUrl}</span>
+                    )}
                   </span>
                   <ChevronRight size={16} className="shrink-0 text-faint" aria-hidden="true" />
                 </button>

@@ -274,6 +274,13 @@ export const IMPORT_NAMES = {
 
 const harnessNamed = (harness: HarnessKind, what: string): string => `${harness}-${what}`;
 
+/**
+ * The runtime an import makes for one harness on one profile — `claude-default` on a machine whose
+ * setup was found, before any `-2` a clash adds. Exported because help text names it as the example,
+ * and an example spelled by hand drifted to a name no import ever created.
+ */
+export const importedRuntimeName = (harness: HarnessKind, profile: string): string => harnessNamed(harness, profile);
+
 /** The asset-tree path of a component's file (§5.3). */
 export const componentFilePath = (kind: ComponentKind, name: string, extension: string): string =>
   `components/${kind}/${name}.${extension}`;
@@ -1167,7 +1174,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     if (reuse === undefined) credentials[credentialId] = wanted;
     if (profileName === undefined) continue;
     const suggested = freeName(
-      harnessNamed(harness, profileName),
+      importedRuntimeName(harness, profileName),
       candidate => existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined,
     );
     const twin = Object.entries(existing?.runtimes ?? {}).find(
