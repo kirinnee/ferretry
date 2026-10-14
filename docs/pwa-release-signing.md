@@ -38,6 +38,11 @@ and what to do when something goes wrong.
   nothing.
 - **A failed check changes nothing.** The installed version keeps running, and the app says, in one
   sentence, that an update was blocked and why.
+- **Every machine's push worker is the same signed file.** Each paired machine gets its own
+  registration of `sw.verified.js` at `/push/<daemonId>/` for its own push subscription
+  ([cross-daemon.md](cross-daemon.md) §4b). Those copies run the same release check over the same
+  storage, so a page under a push scope is still answered from the verified release, and the page
+  audits each copy's script exactly as it audits the app-wide one.
 - **A replaced checker is sometimes reported.** If the browser starts installing a new worker script
   while a verified tab is open, that tab asks the running worker to compare the script with the signed
   list, and warns the reader if it is not the signed worker. This only **sometimes** works. See

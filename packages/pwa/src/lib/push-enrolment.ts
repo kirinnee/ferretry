@@ -42,6 +42,7 @@ import {
 } from './push-subscriptions.ts';
 import { pushMachineOf, pushScopePath, pushWorkerUrl } from './push-scope.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { trustedWorkerUrl } from './trusted-types.ts';
 
 /* ---------- capability ----------------------------------------------------- */
 
@@ -523,9 +524,12 @@ export const containerPushEnrolment = (deps: ContainerPushEnrolmentDeps): Contai
   const registrations = async (): Promise<RegistrationShape[]> =>
     (await deps.container.getRegistrations()).filter(isRegistration);
   const register = async (daemon: DaemonId): Promise<RegistrationShape> => {
-    const registered = await deps.container.register(pushWorkerUrl(deps.workerUrl, deps.label(daemon)), {
-      scope: pushScopePath(daemon),
-    });
+    const registered = await deps.container.register(
+      trustedWorkerUrl(pushWorkerUrl(deps.workerUrl, deps.label(daemon))),
+      {
+        scope: pushScopePath(daemon),
+      },
+    );
     if (!isRegistration(registered)) throw new Error('this browser cannot hold a push subscription for this daemon');
     return await whenActive(registered);
   };

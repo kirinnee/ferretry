@@ -528,8 +528,15 @@ describe('per-machine push workers', () => {
     });
     await cdp.send('ServiceWorker.enable');
     await page.evaluate(async () => {
+      // The page enforces Trusted Types (`public/_headers`): a registration takes only what the app's
+      // `fy-worker` policy made, exactly as `lib/trusted-types.ts` makes it.
+      const policy = (
+        globalThis as unknown as {
+          trustedTypes: { createPolicy(name: string, rules: object): { createScriptURL(url: string): string } };
+        }
+      ).trustedTypes.createPolicy('fy-worker', { createScriptURL: (url: string) => url });
       const activate = async (script: string, scope: string): Promise<void> => {
-        const registration = await navigator.serviceWorker.register(script, { scope });
+        const registration = await navigator.serviceWorker.register(policy.createScriptURL(script), { scope });
         const worker = registration.installing ?? registration.waiting ?? registration.active;
         if (worker === null || worker.state === 'activated') return;
         await new Promise<void>(resolveActive => {
@@ -614,6 +621,63 @@ describe('per-machine push workers', () => {
 
     expect(await label(page)).toBe('first');
     expect(requests).not.toContain('navigate /push/work/x.html');
+    await context.close();
+  }, 120_000);
+});
+
+/**
+ * TRUSTED TYPES (docs/cross-daemon.md §2b), as an installed page gets them: the policy is the one the
+ * signed worker compiled from `public/_headers`, so this is the shipped rule, not a copy of it.
+ */
+describe('Trusted Types on the installed app', () => {
+  test('refuses plain markup and plain worker URLs, and every policy but the two the app names', async () => {
+    const { context, page } = await installed(first);
+
+    const outcome = await page.evaluate(async () => {
+      const factory = (
+        globalThis as unknown as {
+          trustedTypes: {
+            createPolicy(
+              name: string,
+              rules: object,
+            ): { createHTML(html: string): string; createScriptURL(url: string): string };
+          };
+        }
+      ).trustedTypes;
+      const attempt = async (act: () => unknown): Promise<string> => {
+        try {
+          await act();
+          return 'allowed';
+        } catch (error) {
+          return (error as Error).name;
+        }
+      };
+      const target = document.createElement('div');
+      const plainMarkup = await attempt(() => {
+        target.innerHTML = '<img src=x onerror=alert(1)>';
+      });
+      const plainWorker = await attempt(() =>
+        navigator.serviceWorker.register('/sw.verified.js', { scope: '/push/x/' }),
+      );
+      const strangerPolicy = await attempt(() =>
+        factory.createPolicy('stranger', { createHTML: (html: string) => html }),
+      );
+      const highlight = factory.createPolicy('fy-highlight', { createHTML: (html: string) => html });
+      const viaPolicy = await attempt(() => {
+        target.innerHTML = highlight.createHTML('<span class="hljs-keyword">const</span>');
+      });
+      const twice = await attempt(() => factory.createPolicy('fy-highlight', { createHTML: (html: string) => html }));
+      return { plainMarkup, plainWorker, strangerPolicy, viaPolicy, twice, rendered: target.innerHTML };
+    });
+
+    expect(outcome).toEqual({
+      plainMarkup: 'TypeError',
+      plainWorker: 'TypeError',
+      strangerPolicy: 'TypeError',
+      viaPolicy: 'allowed',
+      twice: 'TypeError',
+      rendered: '<span class="hljs-keyword">const</span>',
+    });
     await context.close();
   }, 120_000);
 });

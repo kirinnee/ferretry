@@ -35,7 +35,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from 'playwright-core';
@@ -117,11 +117,11 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and nineteen: forty-four MACHINES frames at each viewport, plus seventeen other frames at
- * `mobile` and fourteen at `desktop` (44 + 44 + 17 + 14).
+ * One hundred and twenty-one: forty-five MACHINES frames at each viewport, plus seventeen other frames at
+ * `mobile` and fourteen at `desktop` (45 + 45 + 17 + 14).
  *
- * MACHINES, forty-four per viewport: its section, four tab switches, four Settings-tab flows (Import
- * again found + names, Clone source, Install), the Machines list the switcher opens, ten Runtimes and
+ * MACHINES, forty-five per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, ten Runtimes and
  * Credentials pages, three Codex sign-in screens (device code, link, finishing), two Add a login steps,
  * twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps, a component with
  * every badge, two edit forms), and seven other-machine states (offline; the first run that opens by
@@ -149,16 +149,16 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 119;
+const SETTINGS_SIDEWAYS_CHECKS = 121;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — the same forty-four as above (the section itself is measured once
- * its Runtimes tab has loaded), so 44 + 44. Same tripwire as the number above, for the same reason — a check
+ * Machines frame, at each viewport — the same forty-five as above (the section itself is measured once
+ * its Runtimes tab has loaded), so 45 + 45. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 88;
+const MACHINES_GEOMETRY_CHECKS = 90;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1313,12 +1313,51 @@ run('./node_modules/.bin/tailwindcss', [
   'harness/out/app.css',
 ]);
 
+/**
+ * THE GALLERY RUNS UNDER THE SHIPPED TRUSTED TYPES RULE (docs/cross-daemon.md §2b). The two directives
+ * are read out of `public/_headers`'s app-wide policy rather than restated, and served on the page, so
+ * every surface this walk renders writes its markup and registers its workers exactly as the app must
+ * under that rule. A violation fails the run below; the rest of the policy is the release worker's and
+ * the integration tests', because this harness is not the app's own document.
+ */
+const TRUSTED_TYPES_POLICY = (() => {
+  const policy = /Content-Security-Policy: ([^\n]+)/u.exec(
+    readFileSync(join(packageDir, 'public/_headers'), 'utf8'),
+  )?.[1];
+  const directives = (policy ?? '')
+    .split(';')
+    .map(directive => directive.trim())
+    .filter(directive => directive.startsWith('require-trusted-types-for') || directive.startsWith('trusted-types'));
+  if (directives.length !== 2)
+    fail('public/_headers no longer names its Trusted Types rule; the harness cannot enforce it');
+  return directives.join('; ');
+})();
+const trustedTypesViolations: string[] = [];
+const watchTrustedTypes = (page: Page): void => {
+  page.on('console', message => {
+    if (message.type() === 'error' && /Trusted ?Type|TrustedHTML|TrustedScriptURL/u.test(message.text())) {
+      trustedTypesViolations.push(message.text());
+      process.stderr.write(`⛔ Trusted Types: ${message.text()}\n`);
+    }
+  });
+  page.on('pageerror', error => {
+    if (/Trusted ?Type|TrustedHTML|TrustedScriptURL/u.test(error.message)) {
+      trustedTypesViolations.push(error.message);
+      process.stderr.write(`⛔ Trusted Types: ${error.message}\n`);
+    }
+  });
+};
+
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
   fetch(request) {
     const path = new URL(request.url).pathname;
-    return new Response(Bun.file(path === '/' ? join(harnessDir, 'index.html') : join(outDir, path)));
+    if (path === '/')
+      return new Response(Bun.file(join(harnessDir, 'index.html')), {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': TRUSTED_TYPES_POLICY },
+      });
+    return new Response(Bun.file(join(outDir, path)));
   },
 });
 
@@ -1354,6 +1393,7 @@ try {
           await route.continue();
         });
         const page = await context.newPage();
+        watchTrustedTypes(page);
         try {
           await page.goto(server.url.toString());
           if (SEARCH_ONLY) {
@@ -1982,9 +2022,10 @@ try {
           await settledShot(machinesTarget);
           process.stdout.write(`📸 Settings Machines ${viewport.name} -> ${machinesTarget}\n`);
 
-          // THE SETTINGS TAB'S FLOWS (U19): four more checks per viewport, one per layout that differs —
+          // THE SETTINGS TAB'S FLOWS (U19): five more checks per viewport, one per layout that differs —
           // Import again's "Found on" list with its long values, its Name step with a duplicate card, the
-          // Clone source list with both disabled reasons (E27), and Install with its exact command.
+          // Clone source list with both disabled reasons (E27), the Clone preview's "Runs on" review, and
+          // Install with its exact command.
           const machineFrame = async (what: string, file: string): Promise<void> => {
             await assertMachinesGeometry(page, `the Machines ${what} at ${viewport.name}`);
             const target = join(outDir, `settings-machines-${file}-${viewport.name}.png`);
@@ -2010,6 +2051,31 @@ try {
           await machinesSurface.locator('[data-settings-action="clone"]').click();
           await machinesSurface.locator('[data-clone-source-reason]').nth(1).waitFor({ state: 'visible' });
           await machineFrame('Clone source', 'clone-source');
+          {
+            const target = join(outDir, `settings-machines-clone-source-step-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, machinesSurface.locator('[data-clone-step="source"]'), target);
+            process.stdout.write(`📸 Settings Machines clone source step ${viewport.name} -> ${target}\n`);
+          }
+          // The Preview from a machine that can be copied: every command the copy would run here, in words,
+          // each with its box (docs/cross-daemon.md §3a). Its long command lines are the 390px risk.
+          await machinesSurface.locator('[data-setup-choice="clone-source-daemon"]').click();
+          await machinesSurface.locator('[data-clone-step="source"] [data-step-next]').click();
+          await machinesSurface.locator('[data-setup-section="runs"]').waitFor({ state: 'visible' });
+          await machineFrame('Clone preview', 'clone-preview');
+          // The "Runs on" review and the source step's sentence, as elements: both run below the fold.
+          // One panel at a time: the whole review is taller than a phone screen.
+          for (const [selector, file] of [
+            ['[data-setup-note="runs-warning"]', 'clone-runs-warning'],
+            ['[data-clone-runnable="mcp/notes"]', 'clone-runs-mcp'],
+            ['[data-clone-runnable="hooks/guard"]', 'clone-runs-hook'],
+            ['[data-clone-runnable="settings/claude"]', 'clone-runs-settings'],
+          ] as const) {
+            const element = machinesSurface.locator(selector);
+            if (selector.includes('hooks/guard')) await element.locator('summary').click();
+            const target = join(outDir, `settings-machines-${file}-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, element, target);
+            process.stdout.write(`📸 Settings Machines ${file} ${viewport.name} -> ${target}\n`);
+          }
           await backToSettingsTab();
           // By its address: the shared machine data lists only Claude Code, and the flow is linkable anyway.
           await page.evaluate(() => {
@@ -3105,6 +3171,9 @@ try {
       process.stdout.write(
         `✅ machines geometry checks: ${machinesGeometryChecks}/${MACHINES_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
+    if (trustedTypesViolations.length > 0)
+      fail(`Trusted Types refused ${trustedTypesViolations.length} write(s):\n${trustedTypesViolations.join('\n')}`);
+    process.stdout.write(`✅ no Trusted Types violation under "${TRUSTED_TYPES_POLICY}"\n`);
   } finally {
     await browser.close();
   }
