@@ -27,7 +27,7 @@ export const STEP_UP_SCOPE_NOTE =
 const ACT_LIST = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
 /** How one passkey prompt names what it is for. Step-up names the acts waiting; presence names none. */
-export type PasskeyPromptKind = 'step-up' | 'presence';
+type PasskeyPromptKind = 'step-up' | 'presence';
 
 /** The words one passkey prompt says: what it is for and what a confirmation buys. */
 export interface PasskeyPromptCopy {
