@@ -398,7 +398,7 @@ that only listens on loopback and lists only your relay, `fy pair` draws no QR a
 nothing off that machine could redeem it.
 
 **4. Use it from anywhere.** Once paired, the device holds the daemon's published set and walks it:
-every direct address first, then every relay, in the daemon's order. Settings › Daemons names the
+every direct address first, then every relay, in the daemon's order. the Carrier panel on the machine’s Machine tab in Settings names the
 carrier the live session is actually on and why the others were passed over.
 
 ### End-to-end verification
@@ -406,7 +406,7 @@ carrier the live session is actually on and why the others were passed over.
 1. Pair the device as in step 3 above.
 2. Move the device to a network where the daemon's address is genuinely unreachable — a different
    network, no VPN. Testing on one LAN proves nothing, because direct would win.
-3. Open the app. **Confirm Settings › Daemons names the relay as the carrier** and says why direct was
+3. Open the app. **Confirm the Carrier panel on the machine’s Machine tab in Settings names the relay as the carrier** and says why direct was
    passed over. A session that connects without naming its carrier is the failure mode this design
    guards against — report it rather than accepting it.
 4. On the host, `cd packages/relay && wrangler tail` should show the two socket arrivals (`/daemon`

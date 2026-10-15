@@ -38,6 +38,8 @@ import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
+import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
+import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -136,7 +138,7 @@ import {
 } from './lib/push-enrolment.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
-import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
+import { AppBar, AppTabBar, appBarDestinationForRoute, type Crumb, showsTabBar } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { paletteSessionEntries } from './shell/palette-model.ts';
@@ -327,6 +329,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: 'Learning' }];
     case 'imported-history':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Imported history' }];
+    case 'machine-setup':
+      return [{ href: daemonSettingsPath(route.daemonId), label: 'Settings' }, { label: 'Set up a machine' }];
   }
 };
 
@@ -1009,7 +1013,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsSurface,
-  settings: MachineSettingsSurface,
+  machine: MachineSettingsSurface,
 };
 
 function SettingsRoute({ connection }: DaemonPageProps) {
@@ -1080,10 +1084,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       createMachineClient={createDaemonClient}
       lockedMachines={lockedMachines}
       machineTabs={MACHINE_TAB_SURFACES}
-      onSelectDaemon={daemonId => {
-        store.connections.select(daemonId);
-        navigate(`${daemonSettingsPath(daemonId)}#daemons`);
-      }}
       onRenameDaemon={(daemonId, label) => {
         store.connections.rename(daemonId, label);
       }}
@@ -1093,7 +1093,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         store.connections.remove(daemonId);
         if (!removedActiveDaemon) return;
         const fallback = store.connections.getSnapshot().selectedDaemonId;
-        navigate(fallback === null ? connectionPickerPath() : `${daemonSettingsPath(fallback)}#daemons`);
+        navigate(fallback === null ? connectionPickerPath() : `${daemonSettingsPath(fallback)}#machines`);
       }}
       onAddDaemon={() => navigate(connectionPickerPath())}
       carrier={carrier}
@@ -1267,6 +1267,28 @@ function ImportedHistoryRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** One machine's full-screen first run: no app chrome, only its own stepper. */
+function MachineSetupRoute({ connection }: DaemonPageProps) {
+  const store = useAppStore();
+  const { connections } = useConnectionSnapshot();
+  const { navigate } = useRouter();
+  const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
+  const createClient = useCallback(
+    async (daemon: DaemonConnection) => await store.clients.client(daemon),
+    [store.clients],
+  );
+  if (record === undefined) return null;
+  return (
+    <MachineSetupScreen
+      connection={record}
+      connections={connections}
+      createClient={createClient}
+      onNavigate={navigate}
+      storage={browserSetupStorage()}
+    />
+  );
+}
+
 function ProjectsRoute({ connection }: DaemonPageProps) {
   return <ProjectsPage connection={connection} />;
 }
@@ -1288,6 +1310,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
   ImportedHistory: ImportedHistoryRoute,
+  MachineSetup: MachineSetupRoute,
 };
 
 /**
@@ -1321,6 +1344,7 @@ function DeviceRefusedGate({
 
 /** The mounted shell; exported so render tests can inject the router and store providers. */
 export function AppShell() {
+  const layout = useLayoutMode();
   useAppViewport();
   const store = useAppStore();
   const connectionSnapshot = useConnectionSnapshot();
@@ -1629,6 +1653,18 @@ export function AppShell() {
         <ConnectionPicker />
       </div>
     );
+  } else if (pageRoute.kind === 'machine-setup') {
+    // A ONE-TIME GUIDED JOB, so it gets the whole screen: no app bar, no bottom bar, no sidebar — only the
+    // setup's own named stepper, with its way out ("Finish later") inside it.
+    content = (
+      <div className="kt-shell flex flex-col overflow-hidden">
+        <DeviceRefusedGate connection={connection}>
+          <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
+            <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+          </ChunkErrorBoundary>
+        </DeviceRefusedGate>
+      </div>
+    );
   } else {
     const sessions = fleet.daemons.get(connection.daemonId)?.sessions ?? [];
     content = (
@@ -1644,6 +1680,7 @@ export function AppShell() {
             active={appBarDestinationForRoute(pageRoute)}
             onNavigate={navigate}
             themeToggle={<ThemeToggle />}
+            tabBarShown={layout === 'drawer' && showsTabBar(pageRoute)}
             {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
           />
           <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
@@ -1673,6 +1710,15 @@ export function AppShell() {
               </ChunkErrorBoundary>
             </DeviceRefusedGate>
           </PullToPaletteRegion>
+          {/* The phone's level one sits under the page, above the home indicator. */}
+          {layout === 'drawer' && showsTabBar(pageRoute) ? (
+            <AppTabBar
+              daemon={connection.daemonId}
+              active={appBarDestinationForRoute(pageRoute)}
+              onNavigate={navigate}
+              onOpenPalette={openPalette}
+            />
+          ) : null}
           <CommandPalette
             open={palette.open}
             focusSignal={palette.focusSignal}

@@ -235,19 +235,22 @@ mapping.
 
 ### 4.2 Information architecture
 
-A **Machines switcher** sits at the top (the machine name with a caret). It opens **Machines**: every
-paired daemon with Online/Offline, its system, its runtime count or "Not set up yet", and **Add
-machine** (the existing `fy pair` flow).
+**Which machine** is chosen one level up (usability redesign, 2026-10-14): the Settings sidebar on a
+desktop and the Machines card on a phone list every paired daemon by name with a status line (Online ·
+_n_ runtimes, Not set up yet, Offline, Locked) and **Add a machine** (the existing `fy pair` flow). The
+old Daemons section is merged in: each machine is ONE place, its connection and security panels on its
+**Machine** tab. A machine that is not set up shows a **Finish setting up _machine_** banner above its tabs.
 
-Each machine has five tabs:
+Each machine has five views, drawn as underlined tabs in sentence case (they scroll sideways on a
+phone, keeping the current one centred):
 
-| Tab             | Shows                                                                                                                                             | Primary action               |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| **Runtimes**    | each runtime: status shape, name, credential email (+ label), profile, default model, **Agent** badge; a missing-harness note with Install        | **+ Add runtime**            |
-| **Credentials** | grouped by harness: email, label, "Shared with claude in your terminal", "Copied slot from _machine_", status, "Used by _n_ runtimes", usage bars | **+ Add a login**            |
-| **Profiles**    | name, layer count, "used by _n_ runtimes", "base for _n_ profiles"                                                                                | **+ Build a new profile**    |
-| **Components**  | the six kinds with a one-line description and a count; each opens its list                                                                        | **+ New _kind_** (in a list) |
-| **Settings**    | Agent permissions; Tools on _machine_ (installed + version, or Install); Setup (**Clone from another machine**, **Import again**); Machine facts  | —                            |
+| Tab             | Shows                                                                                                                                                                                                                                                            | Primary action               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| **Runtimes**    | each runtime: status shape, name, credential email (+ label), profile, default model, **Agent** badge; a missing-harness note with Install                                                                                                                       | **+ Add runtime**            |
+| **Credentials** | grouped by harness: email, label, "Shared with claude in your terminal", "Copied slot from _machine_", status, "Used by _n_ runtimes", usage bars                                                                                                                | **+ Add a login**            |
+| **Profiles**    | name, layer count, "used by _n_ runtimes", "base for _n_ profiles"                                                                                                                                                                                               | **+ Build a new profile**    |
+| **Components**  | the six kinds with a one-line description and a count; each opens its list                                                                                                                                                                                       | **+ New _kind_** (in a list) |
+| **Machine**     | Agent permissions; Tools on _machine_ (installed + version, or Install); Setup (**Clone from another machine**, **Import again**); Connection and security (Warden, Secrets, devices, grants, Security, Security log, Carrier, Host checks…); About this machine | —                            |
 
 Detail pages (one concept each):
 
@@ -265,7 +268,10 @@ Where this surface mounts (open question O1, now resolved, §14): the PWA Settin
 
 ### 4.3 First run (per machine)
 
-Shown BY ITSELF when a machine is selected that is not set up: right after pairing, and whenever
+A FULL SCREEN OF ITS OWN, outside Settings and with no app chrome (`/d/<id>/setup`, usability redesign
+2026-10-14): it opens by itself right after pairing a machine that is not set up, and from the
+"Finish setting up" banner — "Finish later" keeps the answers and the step in this browser. Earlier
+wording, kept for the decision record: shown BY ITSELF when a machine is selected that is not set up: right after pairing, and whenever
 Settings › Machines lands on it (owner decision, 2026-10-13: "ask the user on the screen"). Starting
 a daemon never imports anything, so a fresh machine is not set up until somebody chooses. Five steps,
 each one decision.

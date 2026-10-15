@@ -215,7 +215,7 @@ describe('AddLoginStep · Choose tool', () => {
     );
     expect(step(view.container)).toBe('tool');
     expect(text(view.container, 'p')).toBe('Which tool do you want to sign in to on studio-mac?');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Choose tool · 1 of 2');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2 · Choose tool');
     expect(text(view.container, '[data-add-login-tool="claude"]')).toContain('Claude Code');
     expect(text(view.container, '[data-add-login-tool="claude"]')).toContain('Installed');
     expect(text(view.container, '[data-add-login-tool="codex"]')).toContain(
@@ -230,7 +230,7 @@ describe('AddLoginStep · Choose tool', () => {
     expect(next(view.container).disabled).toBe(false);
     await click(next(view.container), 'Next');
     expect(step(view.container)).toBe('start');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Sign in · 2 of 2');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 2 · Sign in');
     expect(text(view.container, '[data-add-login-step="start"] p')).toBe(
       'Sign in to Claude Code. The login is kept on studio-mac.',
     );
@@ -328,7 +328,7 @@ describe('AddLoginStep · Sign in', () => {
       { initial, harness: 'codex', pollMs: 5 },
     );
     expect(step(view.container)).toBe('start');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Sign in · 1 of 1');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 1 · Sign in');
     expect(submit(view.container).textContent).toBe('Sign in to Codex');
     await click(submit(view.container), 'Sign in to Codex');
     expect(changeBodies(calls)).toEqual([{ kind: 'credential.add', id: 'codex-2', harness: 'codex' }]);
@@ -369,7 +369,7 @@ describe('AddLoginStep · Sign in', () => {
     );
     expect(only(calls, APPLY)).toHaveLength(0);
     expect(only(calls, LOGIN)).toHaveLength(0);
-    expect(text(view.container, '[data-stepper-position]')).toBe('Sign in · 1 of 1');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 1 · Sign in');
     await view.unmount();
   });
 
@@ -434,7 +434,7 @@ describe('AddLoginStep · Label (E26)', () => {
     await click(next(view.container), 'Next');
 
     expect(step(view.container)).toBe('label');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Label · 2 of 2');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 2 · Label');
     expect(text(view.container, '[data-add-login-step="label"] > p')).toBe(
       'You already have a Claude Code login for you@example.com. Label both so you can tell them apart.',
     );

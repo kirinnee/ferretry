@@ -3,8 +3,10 @@ import type { ConnectionChoice } from '@ferretry/relay';
 import { useLayoutEffect, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-client.ts';
-import type { MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
+import { useSettingsFlow } from '../../../../src/features/fleet/setup/settings-route.ts';
+import type { MachineTabProps, MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
+import type { DaemonSettingsTabDefinition } from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
@@ -37,8 +39,29 @@ const beta = daemon('daemon-beta', 'https://beta.example.test', 'beta-secret');
 const originalFetch = globalThis.fetch;
 const unavailableDaemonFetch = (async () => Response.json({}, { status: 503 })) as unknown as typeof fetch;
 
+/** A machine that answers with its setup, so the Machines section has something to show. */
+const answering: FleetClientFactory = async () => machineClient(machineView({ name: 'alpha-host' }));
+
+/**
+ * The Machine tab as far as this page is concerned: the daemon's panels, opened by the address.
+ *
+ * The real tab (`settings-tab.tsx`) is tested on its own; here it is the narrowest surface that reads
+ * the panel word from the address the way the real one does, so these tests are about what the PAGE
+ * hands the tab — the routed daemon's frame and its pairing record — and not about the tab's sections.
+ */
+const PanelsTab = ({ machineName, daemonPanels }: MachineTabProps) => {
+  const route = useSettingsFlow(machineName);
+  return <>{daemonPanels?.(route.panel ?? undefined, route.openPanel)}</>;
+};
+const PANEL_TABS: MachineTabSurfaces = { machine: PanelsTab };
+
+/**
+ * Stable, as the composition root's memoised list is: the frame defaults a missing list to a fresh `[]`
+ * on every render, which would remount every panel — and re-run its probe — each time the page re-renders.
+ */
+const NO_EXTRA_PANELS: readonly DaemonSettingsTabDefinition[] = [];
+
 interface Callbacks {
-  readonly selected: string[];
   readonly renamed: Array<{ id: string; label: string | undefined }>;
   readonly removed: string[];
   readonly added: string[];
@@ -46,7 +69,7 @@ interface Callbacks {
   readonly named?: string[];
 }
 
-const calls = (): Callbacks => ({ selected: [], renamed: [], removed: [], added: [], navigated: [] });
+const calls = (): Callbacks => ({ renamed: [], removed: [], added: [], navigated: [] });
 
 interface PageOptions {
   readonly current?: DaemonConnectionRecord;
@@ -57,6 +80,7 @@ interface PageOptions {
   readonly calls?: Callbacks;
   readonly createMachineClient?: FleetClientFactory;
   readonly machineTabs?: MachineTabSurfaces;
+  readonly lockedMachines?: readonly DaemonId[];
   /** Leave out onNavigate, as a page composed without a router would. */
   readonly routerless?: boolean;
 }
@@ -80,7 +104,7 @@ const page = (options: PageOptions = {}) => {
       probeDaemon={options.probe ?? pendingProbe}
       {...(options.carrier === undefined ? {} : { carrier: options.carrier })}
       createWardenClient={unavailableWardenClient}
-      onSelectDaemon={id => callbacks.selected.push(id)}
+      daemonSettingsTabs={NO_EXTRA_PANELS}
       onRenameDaemon={(id, label) => callbacks.renamed.push({ id, label })}
       {...(callbacks.named === undefined
         ? {}
@@ -90,41 +114,39 @@ const page = (options: PageOptions = {}) => {
       {...(options.routerless === true ? {} : { onNavigate: (to: string) => callbacks.navigated.push(to) })}
       {...(options.createMachineClient === undefined ? {} : { createMachineClient: options.createMachineClient })}
       {...(options.machineTabs === undefined ? {} : { machineTabs: options.machineTabs })}
+      {...(options.lockedMachines === undefined ? {} : { lockedMachines: options.lockedMachines })}
     />
   );
 };
+
+/** A page whose Machine tab shows the routed daemon's panels, opened at one of them. */
+const panelsPage = (options: PageOptions = {}) =>
+  page({ createMachineClient: answering, machineTabs: PANEL_TABS, ...options });
+
+const ALPHA_MACHINE = '#machines/Alpha%20workstation/machine';
 
 const settingIds = (view: ReactTestRenderer): string[] =>
   view.root
     .findAll(node => node.props['data-setting-id'] !== undefined)
     .map(section => String(section.props['data-setting-id']));
 
-/**
- * One `ChoiceRail` row's visible label.
- *
- * By the class the rail styles the label with, NOT by span position: the row also holds a fixed icon
- * slot and, when the rail is showing them, a second line, so "the second span" is a fact about today's
- * markup rather than about which row this is.
- */
-const railRowLabel = (row: {
-  findAll: (predicate: (node: { props: Record<string, unknown> }) => boolean) => unknown[];
-}) =>
-  (
-    row.findAll(
-      node => typeof node.props.className === 'string' && node.props.className.includes('text-ui font-semibold'),
-    )[0] as { children: unknown[] } | undefined
-  )?.children.join('');
-
 /** Every switch inside one setting's own panel, in rendered order. */
 const settingSwitches = (view: ReactTestRenderer, id: string) =>
   view.root.findByProps({ 'data-setting-id': id }).findAllByProps({ role: 'switch' });
 
-const selectDesktopSection = (view: ReactTestRenderer, section: string): void => {
-  run(() => view.root.findByProps({ 'data-settings-section-choice': section }).props.onClick());
-};
+const sidebar = (container: HTMLElement): HTMLElement =>
+  must(container.querySelector<HTMLElement>('[data-settings-sidebar]'), 'the desktop sidebar');
 
-const daemonSubtab = (container: HTMLElement, id: string): HTMLButtonElement =>
-  must(container.querySelector<HTMLButtonElement>(`[data-daemon-subtab="${id}"]`), `${id} daemon sub-tab`);
+const shownSection = (container: HTMLElement): string | null =>
+  container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section') ?? null;
+
+/** Moves the address the way a link or the back button does, and lets the page follow it. */
+const visit = async (hash: string, event: 'hashchange' | 'popstate' = 'hashchange'): Promise<void> => {
+  window.history.replaceState({}, '', `${window.location.pathname}${hash}`);
+  await interact(() =>
+    window.dispatchEvent(event === 'hashchange' ? new Event('hashchange') : new PopStateEvent('popstate')),
+  );
+};
 
 const hostChecks = (container: HTMLElement, id: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(`[data-daemon-host-checks="${id}"]`), `${id} host checks`);
@@ -166,8 +188,8 @@ const settle = async (): Promise<void> => {
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/d/daemon-alpha/settings');
-  // These page-routing assertions mount daemon-owned tabs but do not exercise
-  // their transports. Keep each optional tab on an explicit unavailable fixture.
+  // These page-routing assertions mount daemon-owned panels but do not exercise
+  // their transports. Keep each optional panel on an explicit unavailable fixture.
   globalThis.fetch = unavailableDaemonFetch;
 });
 
@@ -179,48 +201,59 @@ describe('SettingsPage sections', () => {
   it('owns one scroll region and starts with the four Appearance settings in stable order', () => {
     const view = render(page());
     const scroller = view.root.findByProps({ 'data-settings-scroller': true });
-    const tabs = view.root.findAll(node => node.props['data-settings-section-choice'] !== undefined);
+    const sidebarChoices = view.root
+      .findByProps({ 'data-settings-sidebar': '' })
+      .findAll(node => node.props['data-settings-section-choice'] !== undefined && node.type === 'button');
 
     expect(scroller.props.className).toContain('overflow-y-auto');
-    // The LABEL, found by the class the rail gives it, rather than by counting spans. The row's spans
-    // are an implementation detail — adding the fixed icon slot that straightens the rail's left edge
-    // renumbered them — and a positional read of them silently asserted layout, not order.
-    expect(tabs.map(tab => railRowLabel(tab))).toEqual(['Appearance', 'Behaviour', 'Daemons', 'Machines']);
-    expect(tabs.map(tab => tab.props['aria-current'])).toEqual(['page', undefined, undefined, undefined]);
+    // Daemons is no longer a section: the browser's own two sections, and then each machine by name.
+    expect(sidebarChoices.map(choice => choice.props['data-settings-section-choice'])).toEqual([
+      'appearance',
+      'behaviour',
+    ]);
+    expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined]);
     expect(settingIds(view)).toEqual(['text-size', 'theme', 'density', 'chat-width']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
     run(() => view.unmount());
   });
 
-  it('switches one panel between Behaviour and Daemons without rendering controls from another section', () => {
-    const view = render(page({ connections: [alpha, beta] }));
+  it('opens a section by moving the address, and shows only the section the address names', async () => {
+    const callbacks = calls();
+    const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
 
-    selectDesktopSection(view, 'behaviour');
-    expect(settingIds(view)).toEqual([
-      'composer-markdown',
-      'composer-enter-key',
-      'composer-suggestions',
-      'dictation',
-      'notifications',
-    ]);
-    expect(view.root.findAllByProps({ 'data-settings-section': 'appearance' })).toHaveLength(0);
-    expect(view.root.findByProps({ 'data-settings-section': 'behaviour' }).props.id).toBe('settings-section-panel');
+    // A section is an address: choosing one asks the router, rather than holding it as private state.
+    await interact(() =>
+      must(
+        sidebar(view.container).querySelector<HTMLButtonElement>('[data-settings-section-choice="behaviour"]'),
+        'the Behaviour choice',
+      ).click(),
+    );
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/settings#behaviour']);
 
-    selectDesktopSection(view, 'daemons');
-    expect(settingIds(view)).toEqual([]);
-    expect(view.root.findByProps({ 'aria-label': 'Connected daemons' })).toBeDefined();
-    expect(view.root.findAllByProps({ 'data-settings-section': 'behaviour' })).toHaveLength(0);
-
-    run(() => view.unmount());
+    await visit('#behaviour');
+    expect(shownSection(view.container)).toBe('behaviour');
+    expect(
+      [...view.container.querySelectorAll('[data-setting-id]')].map(node => node.getAttribute('data-setting-id')),
+    ).toEqual(['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications']);
+    expect(view.container.querySelector('[data-settings-section="appearance"]')).toBeNull();
+    expect(
+      sidebar(view.container).querySelector('[data-settings-section-choice="behaviour"]')?.getAttribute('aria-current'),
+    ).toBe('page');
+    expect(
+      sidebar(view.container)
+        .querySelector('[data-settings-section-choice="appearance"]')
+        ?.getAttribute('aria-current'),
+    ).toBeNull();
+    await view.unmount();
   });
 
   it('persists the composer suggestion families and Vim keys as shared device controls', () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#behaviour');
     const storage = memoryStorage();
     const controls = new DaemonControlsStore(storage);
     const view = render(page({ controls }));
 
-    selectDesktopSection(view, 'behaviour');
     const suggestions = settingSwitches(view, 'composer-suggestions');
     expect(suggestions.map(control => control.props['aria-checked'])).toEqual([true, true, true]);
 
@@ -253,84 +286,213 @@ describe('SettingsPage sections', () => {
     run(() => view.unmount());
   });
 
-  it('uses the shared BottomSheet as the mobile section picker and closes it after a choice', async () => {
-    const view = await mount(page());
-    const trigger = must(
-      view.container.querySelector<HTMLButtonElement>('[data-settings-section-trigger]'),
-      'mobile section trigger',
-    );
-    const desktop = must(
-      view.container.querySelector<HTMLElement>('nav[aria-label="Settings sections"]'),
-      'desktop nav',
-    );
-
-    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(trigger.className).toContain('min-h-control');
-    expect(trigger.parentElement?.className).toContain('md:hidden');
-    expect(desktop.className).toContain('hidden');
-    expect(desktop.className).toContain('md:block');
-    expect(view.container.querySelector('[data-bottom-sheet]')).toBeNull();
-
-    await interact(() => trigger.click());
-    const dialog = must(view.container.querySelector<HTMLElement>('#settings-section-picker'), 'section picker dialog');
-    expect(dialog.getAttribute('role')).toBe('dialog');
-    expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(view.container.querySelector('[data-bottom-sheet="settings-section-picker"]')).not.toBeNull();
-    expect(view.container.querySelector('[data-sheet-swipe="supported"]')).not.toBeNull();
-
-    await interact(() =>
-      must(
-        dialog.querySelector<HTMLButtonElement>('[data-settings-section-choice="behaviour"]'),
-        'mobile Behaviour choice',
-      ).click(),
-    );
-
-    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
-      'behaviour',
-    );
-    expect(trigger.textContent).toContain('Behaviour');
-    expect(view.container.querySelector('[data-bottom-sheet]')?.getAttribute('aria-hidden')).toBe('true');
-    await view.unmount();
-  });
-
   it('follows setting and section hashes, while ignoring an unknown hash', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#dictation');
     const view = await mount(page());
 
-    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
-      'behaviour',
-    );
+    expect(shownSection(view.container)).toBe('behaviour');
 
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#density');
-    await interact(() => window.dispatchEvent(new Event('hashchange')));
-    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
-      'appearance',
-    );
+    await visit('#density');
+    expect(shownSection(view.container)).toBe('appearance');
     expect(document.activeElement?.id).toBe('settings-density');
 
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    await interact(() => window.dispatchEvent(new PopStateEvent('popstate')));
-    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
-      'daemons',
-    );
+    await visit('#behaviour', 'popstate');
+    expect(shownSection(view.container)).toBe('behaviour');
 
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#security');
-    await interact(() => window.dispatchEvent(new Event('hashchange')));
-    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
-      'daemons',
-    );
-    expect(view.container.querySelector('[data-daemon-panel="security"]')?.getAttribute('aria-selected')).toBe('true');
-
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#not-a-setting');
-    await interact(() => window.dispatchEvent(new Event('hashchange')));
-    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
-      'daemons',
-    );
+    // An unknown word is Settings' own first screen, never another section's controls.
+    await visit('#not-a-setting');
+    expect(view.container.querySelector('main')?.getAttribute('data-settings-at-home')).toBe('true');
+    expect(shownSection(view.container)).toBe('appearance');
     await view.unmount();
   });
 });
 
-describe('SettingsPage controls and daemon-qualified links', () => {
+describe('SettingsPage on a phone: one level per screen', () => {
+  it('opens on the grouped cards, with the section beside them hidden on a phone', async () => {
+    const callbacks = calls();
+    const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
+    const main = must(view.container.querySelector<HTMLElement>('main'), 'the page');
+    const home = must(view.container.querySelector<HTMLElement>('[data-settings-home]'), 'the phone home');
+    const section = must(view.container.querySelector<HTMLElement>('#settings-section-panel'), 'the section');
+
+    expect(main.getAttribute('data-settings-at-home')).toBe('true');
+    // The phone's first screen sits on the recessed ground; the desktop never does.
+    expect(main.className).toContain('max-md:bg-ground');
+    expect(must(home.parentElement, 'the home column').className).toContain('md:hidden');
+    // The open section is still what a desktop shows beside the sidebar, and nothing on a phone.
+    expect(must(section.parentElement, 'the section column').className).toContain('hidden md:block');
+
+    expect(home.textContent).toContain('This phone');
+    expect(home.textContent).toContain('Machines · 2');
+    expect(
+      [...home.querySelectorAll('[data-settings-machine]')].map(row => row.getAttribute('data-settings-machine')),
+    ).toEqual(['daemon-alpha', 'daemon-beta']);
+
+    // Each card row is an address, like the sidebar's.
+    await interact(() =>
+      must(home.querySelector<HTMLButtonElement>('[data-settings-section-choice="appearance"]'), 'Appearance').click(),
+    );
+    await interact(() =>
+      must(home.querySelector<HTMLButtonElement>('[data-settings-machine="daemon-beta"]'), 'Beta').click(),
+    );
+    await interact(() => must(home.querySelector<HTMLButtonElement>('[data-machine-add]'), 'Add a machine').click());
+    expect(callbacks.navigated).toEqual([
+      '/d/daemon-alpha/settings#appearance',
+      `/d/daemon-beta/settings#machines/${encodeURIComponent(beta.baseUrl)}/runtimes`,
+    ]);
+    expect(callbacks.added).toEqual(['add']);
+    await view.unmount();
+  });
+
+  it('shows one section on its own screen with “‹ Settings” back to the cards', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#behaviour');
+    const callbacks = calls();
+    const view = await mount(page({ calls: callbacks }));
+    const main = must(view.container.querySelector<HTMLElement>('main'), 'the page');
+    const back = must(view.container.querySelector<HTMLButtonElement>('[data-settings-back]'), 'the back button');
+
+    expect(main.getAttribute('data-settings-at-home')).toBe('false');
+    expect(main.className).not.toContain('max-md:bg-ground');
+    expect(view.container.querySelector('[data-settings-home]')).toBeNull();
+    expect(back.textContent).toBe('Settings');
+    expect(must(back.parentElement, 'the back row').className).toContain('md:hidden');
+
+    await interact(() => back.click());
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/settings']);
+    await view.unmount();
+  });
+});
+
+describe('SettingsPage legacy Daemons addresses', () => {
+  it('rewrites #daemons in place to this machine’s Machine tab', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    const length = window.history.length;
+    const view = await mount(panelsPage());
+    await settle();
+
+    expect(window.location.hash).toBe(ALPHA_MACHINE);
+    // Replaced, never pushed: Back must not return to the address that no longer exists.
+    expect(window.history.length).toBe(length);
+    expect(shownSection(view.container)).toBe('machines');
+    expect(view.container.querySelector('[data-machine-tab="machine"]')?.getAttribute('aria-current')).toBe('page');
+    expect(view.container.querySelector('[data-daemon-panel="warden"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it.each([
+    'warden',
+    'secrets',
+    'devices',
+    'grants',
+    'security',
+    'resource-limits',
+    'doctor',
+    'model-pricing',
+    'security-log',
+    'carrier',
+    'host-checks',
+  ])('rewrites the old #%s panel anchor to that panel on the Machine tab', async panel => {
+    const view = await mount(panelsPage());
+    await visit(`#${panel}`);
+    expect(window.location.hash).toBe(`${ALPHA_MACHINE}/${panel}`);
+    expect(shownSection(view.container)).toBe('machines');
+    await view.unmount();
+  });
+
+  it('opens the panel a rewritten anchor names', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#carrier');
+    const view = await mount(panelsPage());
+    await settle();
+    expect(view.container.querySelector('[data-daemon-panel-open]')?.getAttribute('data-daemon-panel-open')).toBe(
+      'carrier',
+    );
+    expect(view.container.querySelector('[data-active-carrier]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('leaves a legacy anchor alone when the routed daemon is not paired, since there is no machine to name', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    const view = await mount(page({ current: alpha, connections: [beta] }));
+    expect(window.location.hash).toBe('#daemons');
+    expect(view.container.querySelector('main')?.getAttribute('data-settings-at-home')).toBe('true');
+    await view.unmount();
+  });
+});
+
+describe('SettingsPage machine navigation', () => {
+  it('lists every paired machine by its distinct name, marking the routed one only on Machines', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/runtimes');
+    const view = await mount(page({ connections: [alpha, beta], createMachineClient: answering }));
+    await settle();
+    const rows = [...sidebar(view.container).querySelectorAll<HTMLButtonElement>('[data-settings-machine]')];
+
+    expect(rows.map(row => row.getAttribute('data-settings-machine'))).toEqual(['daemon-alpha', 'daemon-beta']);
+    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual(['page', null]);
+    expect(rows[0]?.textContent).toContain('Alpha workstation');
+    // An unnamed pairing is listed by its address, never by its fingerprint or its credential.
+    expect(rows[1]?.textContent).toContain('https://beta.example.test');
+    expect(rows[1]?.textContent).not.toContain('daemon-beta');
+    expect(view.container.textContent).not.toContain('alpha-secret');
+    expect(view.container.textContent).not.toContain('beta-secret');
+    expect(sidebar(view.container).querySelector('[data-settings-section-choice][aria-current="page"]')).toBeNull();
+
+    // On a browser section no machine is "the page".
+    await visit('#appearance');
+    expect(sidebar(view.container).querySelector('[data-settings-machine][aria-current="page"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('says under each machine whether it answers, read once for the whole page', async () => {
+    const asked: string[] = [];
+    const reach: FleetClientFactory = async connection => {
+      asked.push(String(connection.daemonId));
+      if (connection.daemonId === beta.daemonId) throw new Error('offline');
+      return machineClient(machineView({ name: 'alpha-host', runtimeCount: 2 }));
+    };
+    const gamma = daemon('daemon-gamma', 'https://gamma.example.test', 'gamma-secret', 'Gamma');
+    const view = await mount(
+      page({ connections: [beta, alpha, gamma], createMachineClient: reach, lockedMachines: [gamma.daemonId] }),
+    );
+    await settle();
+    const summary = (id: string): string | null | undefined =>
+      sidebar(view.container).querySelector(`[data-settings-machine="${id}"] .kt-navpill__sub`)?.textContent;
+
+    // The page's own machine first, because its tabs are waiting on the answer.
+    expect(asked[0]).toBe('daemon-alpha');
+    expect(summary('daemon-alpha')).toBe('Online · 2 runtimes');
+    expect(summary('daemon-beta')).toBe('Offline');
+    expect(summary('daemon-gamma')).toBe('Locked · Open it to unlock');
+    await view.unmount();
+  });
+
+  it('says every machine is checking while there is no way to ask one', async () => {
+    const view = await mount(page({ connections: [alpha, beta] }));
+    for (const id of ['daemon-alpha', 'daemon-beta'])
+      expect(
+        sidebar(view.container).querySelector(`[data-settings-machine="${id}"] .kt-navpill__sub`)?.textContent,
+      ).toBe('Checking');
+    await view.unmount();
+  });
+
+  it('opens a machine from the sidebar on its default tab, and Add a machine opens pairing', async () => {
+    const callbacks = calls();
+    const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
+    await interact(() =>
+      must(
+        sidebar(view.container).querySelector<HTMLButtonElement>('[data-settings-machine="daemon-alpha"]'),
+        'Alpha',
+      ).click(),
+    );
+    await interact(() =>
+      must(sidebar(view.container).querySelector<HTMLButtonElement>('[data-machine-add]'), 'Add a machine').click(),
+    );
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/settings#machines/Alpha%20workstation/runtimes']);
+    expect(callbacks.added).toEqual(['add']);
+    await view.unmount();
+  });
+});
+
+describe('SettingsPage controls', () => {
   it('keeps controls at the touch-target floor and persists density only as a device preference', () => {
     const controls = new DaemonControlsStore(memoryStorage());
     const view = render(page({ controls }));
@@ -346,71 +508,6 @@ describe('SettingsPage controls and daemon-qualified links', () => {
     run(() => compact?.props.onChange());
     expect(controls.snapshot().device.density).toBe('compact');
     expect(controls.snapshot().scopes).toEqual(Object.create(null));
-    run(() => view.unmount());
-  });
-
-  it('keeps Back navigation on the routed daemon and mounts that daemon’s Warden frame', () => {
-    const callbacks = calls();
-    const current = daemon('daemon beta', 'https://beta.example.test', 'secret');
-    const view = render(page({ current, connections: [current], calls: callbacks }));
-
-    selectDesktopSection(view, 'daemons');
-    const anchors = view.root.findAllByType('a');
-    const back = anchors.find(anchor => anchor.props['aria-label'] === 'Back to sessions');
-    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon beta' });
-    run(() => back?.props.onClick({ button: 0, preventDefault: () => {} }));
-
-    expect(frame.findByProps({ role: 'tab', 'aria-selected': true }).props['aria-controls']).toBe(
-      'daemon-settings-tab-warden',
-    );
-    expect(callbacks.navigated).toEqual(['/d/daemon%20beta']);
-    run(() => view.unmount());
-  });
-
-  it('mounts the same daemon’s Secrets tab when the reader selects it', () => {
-    // Arrange — the tab is the only way the secret surface is reachable, so a tab that renders
-    // nothing is a capability the product does not have.
-    const current = daemon('daemon beta', 'https://beta.example.test', 'secret');
-    const view = render(page({ current, connections: [current], calls: calls() }));
-    selectDesktopSection(view, 'daemons');
-    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon beta' });
-
-    // Act
-    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-secrets' }).props.onClick());
-
-    // Assert — without a client the surface states that it could not read, which is exactly what it
-    // must do rather than rendering an empty store.
-    expect(frame.findByProps({ role: 'tab', 'aria-selected': true }).props['aria-controls']).toBe(
-      'daemon-settings-tab-secrets',
-    );
-    expect(
-      frame.findAllByProps({ 'aria-label': 'Loading secrets' }).length +
-        frame.findAllByProps({ 'aria-label': 'Secrets unavailable' }).length,
-    ).toBeGreaterThan(0);
-    run(() => view.unmount());
-  });
-
-  /**
-   * The panel a refused control sends somebody to. A tab that renders nothing is a capability the
-   * product does not have, and this is the panel that explains every other panel's refusals.
-   */
-  it('mounts the same daemon’s capability-limits panel when the reader selects it', () => {
-    const current = daemon('daemon beta', 'https://beta.example.test', 'secret');
-    const view = render(page({ current, connections: [current], calls: calls() }));
-    selectDesktopSection(view, 'daemons');
-    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon beta' });
-
-    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-grants' }).props.onClick());
-
-    expect(frame.findByProps({ role: 'tab', 'aria-selected': true }).props['aria-controls']).toBe(
-      'daemon-settings-tab-grants',
-    );
-    // With no client supplied the surface says it is reading or that it could not — never five allowed
-    // rows, which over an unread daemon is the opposite of the truth.
-    expect(
-      frame.findAllByProps({ 'aria-label': 'Loading capability grants' }).length +
-        frame.findAllByProps({ 'aria-label': 'Capability grants unavailable' }).length,
-    ).toBeGreaterThan(0);
     run(() => view.unmount());
   });
 
@@ -430,79 +527,102 @@ describe('SettingsPage controls and daemon-qualified links', () => {
   });
 });
 
-describe('daemon settings', () => {
-  it('uses named daemon sub-tabs, falls back to the address, and delegates switch and add', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    const callbacks = calls();
-    const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
-    const alphaTab = daemonSubtab(view.container, 'daemon-alpha');
-    const betaTab = daemonSubtab(view.container, 'daemon-beta');
+/**
+ * The paired daemon's own panels, which used to be the Daemons section. They live on each machine's
+ * Machine tab now; the page's part is to hand that tab the ROUTED daemon's frame and pairing record.
+ */
+describe('SettingsPage daemon panels on the Machine tab', () => {
+  it('lists the routed daemon’s panels, and opens one by moving the address', async () => {
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}`);
+    const view = await mount(panelsPage({ connections: [alpha, beta] }));
+    await settle();
+    const frame = must(view.container.querySelector<HTMLElement>('[data-daemon-settings-frame]'), 'the frame');
 
-    expect(alphaTab.getAttribute('role')).toBe('tab');
-    expect(alphaTab.getAttribute('aria-selected')).toBe('true');
-    expect(betaTab.getAttribute('aria-selected')).toBe('false');
-    expect(alphaTab.textContent).toContain('Alpha workstation');
-    expect(betaTab.textContent).toContain('https://beta.example.test');
-    expect(betaTab.textContent).not.toContain('daemon-beta');
-    expect(view.container.textContent).not.toContain('alpha-secret');
-    expect(view.container.textContent).not.toContain('beta-secret');
+    expect(frame.getAttribute('data-daemon-settings-frame')).toBe('daemon-alpha');
+    expect(
+      [...frame.querySelectorAll('[data-daemon-panel]')].map(row => row.getAttribute('data-daemon-panel')),
+    ).toEqual(['warden', 'secrets', 'devices', 'grants', 'security', 'carrier', 'host-checks']);
 
-    await interact(() => betaTab.click());
     await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),
+      must(frame.querySelector<HTMLButtonElement>('[data-daemon-panel="carrier"]'), 'Carrier').click(),
     );
-    expect(callbacks.selected).toEqual(['daemon-beta']);
-    expect(callbacks.added).toEqual(['add']);
+    expect(window.location.hash).toBe(`${ALPHA_MACHINE}/carrier`);
+    expect(view.container.querySelector('[data-active-carrier]')).not.toBeNull();
+
+    // Back from an open panel is the list again, on the same machine.
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-daemon-panel-back]'), 'the panel back').click(),
+    );
+    expect(window.location.hash).toBe(ALPHA_MACHINE);
+    expect(view.container.querySelector('[data-active-carrier]')).toBeNull();
     await view.unmount();
   });
 
-  it('uses the shared BottomSheet for daemon selection on a phone instead of rendering a narrow name strip', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    const callbacks = calls();
-    const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
-    const trigger = must(
-      view.container.querySelector<HTMLButtonElement>('[data-daemon-subtab-trigger]'),
-      'daemon picker trigger',
+  it('mounts the same daemon’s Secrets panel when the address names it', async () => {
+    // The panel is the only way the secret surface is reachable, so one that renders nothing is a
+    // capability the product does not have.
+    const current = daemon('daemon beta', 'https://beta.example.test', 'secret');
+    window.history.replaceState(
+      {},
+      '',
+      '/d/daemon%20beta/settings#machines/https%3A%2F%2Fbeta.example.test/machine/secrets',
     );
+    const view = await mount(panelsPage({ current, connections: [current] }));
+    await settle();
 
-    expect(trigger.parentElement?.getAttribute('data-daemon-subtabs')).toBe('mobile');
-    expect(view.container.querySelector('[data-bottom-sheet="daemon-subtab-picker"]')).toBeNull();
-    await interact(() => trigger.click());
-
-    const picker = must(view.container.querySelector<HTMLElement>('#daemon-subtab-picker'), 'daemon picker dialog');
-    expect(picker.getAttribute('role')).toBe('dialog');
-    await interact(() =>
-      must(picker.querySelector<HTMLButtonElement>('[data-daemon-subtab="daemon-beta"]'), 'Beta daemon choice').click(),
+    expect(
+      view.container.querySelector('[data-daemon-settings-frame]')?.getAttribute('data-daemon-settings-frame'),
+    ).toBe('daemon beta');
+    expect(view.container.querySelector('[data-daemon-panel-open]')?.getAttribute('data-daemon-panel-open')).toBe(
+      'secrets',
     );
-
-    expect(callbacks.selected).toEqual(['daemon-beta']);
-    expect(view.container.querySelector('[data-bottom-sheet]')?.getAttribute('aria-hidden')).toBe('true');
+    // Without a client the surface states that it could not read, which is exactly what it must do
+    // rather than rendering an empty store.
+    expect(
+      view.container.querySelectorAll('[aria-label="Loading secrets"], [aria-label="Secrets unavailable"]').length,
+    ).toBeGreaterThan(0);
     await view.unmount();
   });
 
-  it('keeps Carrier and host controls inside the selected daemon frame', () => {
-    const view = render(page({ connections: [alpha] }));
-    selectDesktopSection(view, 'daemons');
-    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon-alpha' });
+  /**
+   * The panel a refused control sends somebody to. A panel that renders nothing is a capability the
+   * product does not have, and this is the panel that explains every other panel's refusals.
+   */
+  it('mounts the same daemon’s capability-limits panel when the address names it', async () => {
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/grants`);
+    const view = await mount(panelsPage());
+    await settle();
 
-    expect(view.root.findAll(node => node.props['data-active-carrier'] !== undefined)).toHaveLength(0);
-    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-carrier' }).props.onClick());
-    expect(frame.findAll(node => node.props['data-active-carrier'] !== undefined)).toHaveLength(1);
-    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-host-checks' }).props.onClick());
-    expect(frame.findByProps({ 'data-daemon-host-checks': 'daemon-alpha' })).toBeDefined();
-    run(() => view.unmount());
+    // With no client supplied the surface says it is reading or that it could not — never five allowed
+    // rows, which over an unread daemon is the opposite of the truth.
+    expect(
+      view.container.querySelectorAll(
+        '[aria-label="Loading capability grants"], [aria-label="Capability grants unavailable"]',
+      ).length,
+    ).toBeGreaterThan(0);
+    await view.unmount();
+  });
+
+  it('keeps Carrier and host controls inside the routed daemon’s frame', async () => {
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}`);
+    const view = await mount(panelsPage());
+    await settle();
+
+    expect(view.container.querySelector('[data-active-carrier]')).toBeNull();
+    await visit(`${ALPHA_MACHINE}/carrier`);
+    expect(
+      view.container.querySelectorAll('[data-daemon-settings-frame="daemon-alpha"] [data-active-carrier]'),
+    ).toHaveLength(1);
+    await visit(`${ALPHA_MACHINE}/host-checks`);
+    expect(hostChecks(view.container, 'daemon-alpha')).toBeDefined();
+    await view.unmount();
   });
 
   it('keeps rename and removal behind the row disclosure and targets only that daemon', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
     const callbacks = calls();
-    const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    const view = await mount(panelsPage({ connections: [alpha, beta], calls: callbacks }));
+    await settle();
     const alphaHostChecks = hostChecks(view.container, 'daemon-alpha');
     const details = must(
       [...alphaHostChecks.querySelectorAll<HTMLDetailsElement>('details')].find(
@@ -536,15 +656,10 @@ describe('daemon settings', () => {
   });
 
   it('validates display names without issuing a stale rename', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
     const callbacks = calls();
-    const view = await mount(page({ connections: [alpha], calls: callbacks }));
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    const view = await mount(panelsPage({ calls: callbacks }));
+    await settle();
     const input = must(
       hostChecks(view.container, 'daemon-alpha').querySelector<HTMLInputElement>('input'),
       'display name',
@@ -566,20 +681,14 @@ describe('daemon settings', () => {
   });
 
   it('fails closed while probing, then distinguishes a valid response from a rejection', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
     const alphaHealth = deferred<unknown>();
     const probed: string[] = [];
     const probe: DaemonReachabilityProbe = connection => {
       probed.push(`${connection.daemonId}:${connection.deviceId}`);
       return alphaHealth.promise;
     };
-    const view = await mount(page({ connections: [alpha, beta], probe }));
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    const view = await mount(panelsPage({ connections: [alpha, beta], probe }));
 
     expect(probed).toEqual(['daemon-alpha:alpha-secret']);
     expect(reachability(view.container, 'daemon-alpha')).toBe('checking');
@@ -605,16 +714,10 @@ describe('daemon settings', () => {
    * live carrier refusal outranks a poll that may be most of a minute old.
    */
   it('never shows a daemon as reachable while its carrier says nothing worked', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
     const health = deferred<unknown>();
     const controls = new DaemonControlsStore(memoryStorage());
-    const view = await mount(page({ connections: [alpha, beta], controls, probe: () => health.promise }));
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    const view = await mount(panelsPage({ connections: [alpha, beta], controls, probe: () => health.promise }));
 
     health.resolve({});
     await settle();
@@ -625,31 +728,23 @@ describe('daemon settings', () => {
       reason: 'No configured connection worked: direct was not reachable (Failed to fetch).',
       passedOver: [{ method: { kind: 'direct', daemonUrl: 'https://alpha.example.test' }, detail: 'Failed to fetch' }],
     };
-    await view.render(page({ connections: [alpha, beta], controls, probe: () => health.promise, carrier: refused }));
+    await view.render(
+      panelsPage({ connections: [alpha, beta], controls, probe: () => health.promise, carrier: refused }),
+    );
     await settle();
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-carrier"]'),
-        'carrier tab',
-      ).click(),
-    );
+    await visit(`${ALPHA_MACHINE}/carrier`);
     expect(view.container.textContent).toContain('No configured connection worked');
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    await visit(`${ALPHA_MACHINE}/host-checks`);
 
     expect(reachability(view.container, 'daemon-alpha')).toBe('unreachable');
-    // A machine's status is mounted only inside its own selected sub-tab. There
-    // is no second daemon row here that could borrow alpha's carrier result.
+    // A machine's status is mounted only inside its own open panel. There is no
+    // second daemon row here that could borrow alpha's carrier result.
     expect(view.container.querySelector('[data-daemon-host-checks="daemon-beta"]')).toBeNull();
     await view.unmount();
   });
 
   it('lets a carrier that has carried something leave the probe alone', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
     const health = deferred<unknown>();
     const carried: ConnectionChoice = {
       ok: true,
@@ -657,13 +752,7 @@ describe('daemon settings', () => {
       reason: 'Connected over direct.',
       passedOver: [],
     };
-    const view = await mount(page({ connections: [alpha], probe: () => health.promise, carrier: carried }));
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    const view = await mount(panelsPage({ probe: () => health.promise, carrier: carried }));
 
     // A carrier that worked is not permission to skip the probe: this badge is about
     // the daemon answering, and it says `checking` until one does.
@@ -675,26 +764,20 @@ describe('daemon settings', () => {
   });
 
   it('resets and fences health when the same daemon is re-paired with a rotated credential', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
     const oldHealth = deferred<unknown>();
     const newHealth = deferred<unknown>();
     const rotated = daemon('daemon-alpha', 'https://alpha.example.test', 'alpha-rotated', 'Alpha workstation');
     const probe: DaemonReachabilityProbe = connection =>
       connection.deviceId === 'alpha-secret' ? oldHealth.promise : newHealth.promise;
     const controls = new DaemonControlsStore(memoryStorage());
-    const view = await mount(page({ current: alpha, connections: [alpha], controls, probe }));
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    const view = await mount(panelsPage({ current: alpha, connections: [alpha], controls, probe }));
 
     oldHealth.resolve({});
     await settle();
     expect(reachability(view.container, 'daemon-alpha')).toBe('reachable');
 
-    await view.render(page({ current: rotated, connections: [rotated], controls, probe }));
+    await view.render(panelsPage({ current: rotated, connections: [rotated], controls, probe }));
     expect(reachability(view.container, 'daemon-alpha')).toBe('checking');
 
     // This is a second old-pairing request kept pending across the re-pair. Its
@@ -703,8 +786,8 @@ describe('daemon settings', () => {
     const fresh = deferred<unknown>();
     const lateProbe: DaemonReachabilityProbe = connection =>
       connection.deviceId === 'alpha-secret' ? stale.promise : fresh.promise;
-    await view.render(page({ current: alpha, connections: [alpha], controls, probe: lateProbe }));
-    await view.render(page({ current: rotated, connections: [rotated], controls, probe: lateProbe }));
+    await view.render(panelsPage({ current: alpha, connections: [alpha], controls, probe: lateProbe }));
+    await view.render(panelsPage({ current: rotated, connections: [rotated], controls, probe: lateProbe }));
     stale.resolve({});
     await settle();
     expect(reachability(view.container, 'daemon-alpha')).toBe('checking');
@@ -738,21 +821,10 @@ describe('daemon settings', () => {
   });
 
   it('runs a manual reachability retry against the exact row', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
     const attempts = [deferred<unknown>(), deferred<unknown>()];
     let reads = 0;
-    const view = await mount(
-      page({
-        connections: [alpha],
-        probe: () => must(attempts[reads++]?.promise, 'probe attempt'),
-      }),
-    );
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
+    const view = await mount(panelsPage({ probe: () => must(attempts[reads++]?.promise, 'probe attempt') }));
     attempts[0]?.resolve({});
     await settle();
     expect(reachability(view.container, 'daemon-alpha')).toBe('reachable');
@@ -771,80 +843,16 @@ describe('daemon settings', () => {
     await view.unmount();
   });
 
-  it('gives the daemon panels a vertical rail beside the panel, with nothing left to scroll sideways', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    const view = await mount(page({ connections: [alpha] }));
-    const rail = must(
-      view.container.querySelector<HTMLElement>('[data-daemon-settings-tabs="desktop"]'),
-      'the desktop panel rail',
-    );
-    const tablist = must(rail.querySelector<HTMLElement>('[role="tablist"]'), 'the panel tablist');
+  it('names the machine in its header without promoting the fingerprint', async () => {
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}/host-checks`);
+    const view = await mount(panelsPage({ connections: [alpha, beta] }));
+    await settle();
+    const header = must(view.container.querySelector<HTMLElement>('[data-machine-header]'), 'the machine header');
 
-    expect(tablist.getAttribute('aria-orientation')).toBe('vertical');
-    expect(tablist.getAttribute('aria-label')).toBe('Alpha workstation settings panels');
-    // A vertical rail has no sideways overflow to hide, and no scroller of its own.
-    expect(rail.className).not.toContain('overflow-x-auto');
-    expect(tablist.className).not.toContain('overflow-x-auto');
-    expect(rail.className).toContain('md:sticky');
-
-    // Every panel is a visible row, not something to be scrolled into view.
-    const panels = [...rail.querySelectorAll<HTMLButtonElement>('[data-daemon-panel]')];
-    expect(panels.map(panel => panel.getAttribute('data-daemon-panel'))).toEqual([
-      'warden',
-      'secrets',
-      'devices',
-      'grants',
-      'security',
-      'carrier',
-      'host-checks',
-    ]);
-    for (const panel of panels) {
-      expect(panel.getAttribute('role')).toBe('tab');
-      expect(panel.className).toContain('min-h-row');
-      // EVERY ROW HAS AN ICON, which is the whole of the defect this rail was reported for: three of
-      // them had one, so the labels indented to two different x positions down the column and the list
-      // read as unfinished. All of them or none of them — never some.
-      expect(panel.querySelector('svg')).not.toBeNull();
-    }
-    // ONE LINE PER ROW beside the panel, so the rows share one height and one rhythm. The description
-    // is not lost — the panel one column right opens with its own, the phone sheet below still lists
-    // them, and Cmd/Ctrl+K searches them — but it is not repeated in a row a reader has already left.
-    expect(panels.map(panel => panel.textContent)).toEqual([
-      'Warden',
-      'Secrets',
-      'Add a device',
-      'What devices may do',
-      'Security',
-      'Carrier',
-      'Host checks',
-    ]);
-
-    // The rail comes before the phone trigger, and the panel after both.
-    expect(
-      rail.compareDocumentPosition(
-        must(view.container.querySelector('[data-daemon-panel-trigger]'), 'the phone trigger'),
-      ) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeGreaterThan(0);
-    await view.unmount();
-  });
-
-  it('keeps the daemon name and address readable in the header without promoting the fingerprint', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    const view = await mount(page({ connections: [alpha, beta] }));
-    const heading = must(view.container.querySelector<HTMLElement>('#daemon-settings-heading'), 'the daemon heading');
-    const header = must(heading.parentElement, 'the identity card');
-
-    expect(heading.textContent).toBe('Alpha workstation');
-    expect(header.textContent).toContain('https://alpha.example.test');
+    expect(header.querySelector('#settings-machine-heading')?.textContent).toBe('Alpha workstation');
     // The fingerprint belongs to Host checks' technical-identity disclosure.
     expect(header.textContent).not.toContain('daemon-alpha');
 
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
-        'host checks tab',
-      ).click(),
-    );
     const disclosure = must(
       [...hostChecks(view.container, 'daemon-alpha').querySelectorAll<HTMLDetailsElement>('details')].find(
         candidate => candidate.querySelector('summary')?.textContent === 'Technical identity',
@@ -857,167 +865,73 @@ describe('daemon settings', () => {
   });
 
   it('shows an unnamed daemon’s address once, as the name, and never twice', async () => {
-    window.history.replaceState({}, '', '/d/daemon-beta/settings#daemons');
-    const view = await mount(page({ current: beta, connections: [beta] }));
-    const header = must(
-      must(view.container.querySelector<HTMLElement>('#daemon-settings-heading'), 'the daemon heading').parentElement,
-      'the identity card',
-    );
+    window.history.replaceState({}, '', '/d/daemon-beta/settings#machines/https%3A%2F%2Fbeta.example.test/machine');
+    const view = await mount(panelsPage({ current: beta, connections: [beta] }));
+    await settle();
+    const header = must(view.container.querySelector<HTMLElement>('[data-machine-header]'), 'the machine header');
 
     expect(header.textContent?.match(/https:\/\/beta\.example\.test/g)).toHaveLength(1);
     await view.unmount();
   });
 
-  it('replaces the panel tablist on a phone with one trigger over the shared BottomSheet', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    const view = await mount(page({ connections: [alpha] }));
-    const triggers = [...view.container.querySelectorAll<HTMLButtonElement>('[data-daemon-panel-trigger]')];
-    const trigger = must(triggers[0], 'the phone panel trigger');
-
-    expect(triggers).toHaveLength(1);
-    expect(trigger.parentElement?.getAttribute('data-daemon-settings-tabs')).toBe('mobile');
-    expect(trigger.className).toContain('min-h-control');
-    expect(trigger.textContent).toContain('Daemon panel');
-    expect(trigger.textContent).toContain('Warden');
-    expect(view.container.querySelector('[data-bottom-sheet="daemon-panel-picker"]')).toBeNull();
-
-    await interact(() => trigger.click());
-    const sheet = must(view.container.querySelector<HTMLElement>('#daemon-panel-picker'), 'the panel picker dialog');
-
-    expect(sheet.getAttribute('role')).toBe('dialog');
-    expect(sheet.getAttribute('aria-modal')).toBe('true');
-    expect(view.container.querySelector('[data-sheet-swipe="supported"]')).not.toBeNull();
-    expect(sheet.textContent).toContain('Choose a panel');
-    expect(sheet.textContent).toContain('Every setting below belongs to Alpha workstation.');
-
-    // The sheet lists every panel as a choice, and NOT as a tab: it controls no
-    // panel of its own, and the rail beside the panel is the only tablist.
-    const choices = [...sheet.querySelectorAll<HTMLButtonElement>('[data-daemon-panel-choice]')];
-    expect(choices.map(choice => choice.getAttribute('data-daemon-panel-choice'))).toEqual([
-      'warden',
-      'secrets',
-      'devices',
-      'grants',
-      'security',
-      'carrier',
-      'host-checks',
-    ]);
-    expect(sheet.querySelectorAll('[role="tab"]')).toHaveLength(0);
-    expect(sheet.querySelectorAll('[role="tablist"]')).toHaveLength(0);
-
-    // THE DESCRIPTION THE DESKTOP RAIL STOPPED REPEATING IS STILL HERE, and this is where it is load
-    // bearing: a sheet row is chosen with the panel hidden behind the sheet, so the label alone would
-    // leave a reader picking between ten names blind. The desktop rail may drop it because the panel is
-    // beside the row, already explaining itself; the sheet may not.
-    for (const choice of choices) {
-      expect(choice.querySelector('svg')).not.toBeNull();
-      expect(must(choice.textContent, 'a sheet row with no text').length).toBeGreaterThan(
-        must(choice.getAttribute('data-daemon-panel-choice'), 'a sheet row with no id').length,
-      );
-    }
-    expect(must(choices[0], 'the Warden choice').textContent).toBe(
-      'WardenSupervision, account failover, and policy for this daemon.',
-    );
-    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual([
-      'page',
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-    ]);
-
-    await interact(() =>
-      must(
-        sheet.querySelector<HTMLButtonElement>('[data-daemon-panel-choice="carrier"]'),
-        'the Carrier choice',
-      ).click(),
-    );
-
-    // The chosen panel is mounted, the sheet is dismissed, and the desktop rail
-    // agrees with the trigger about what is open.
-    expect(view.container.querySelector('[data-active-carrier]')).not.toBeNull();
-    expect(view.container.querySelector('[data-bottom-sheet]')?.getAttribute('aria-hidden')).toBe('true');
-    expect(trigger.textContent).toContain('Carrier');
-    expect(
-      must(view.container.querySelector('[data-daemon-panel="carrier"]'), 'the Carrier tab').getAttribute(
-        'aria-selected',
-      ),
-    ).toBe('true');
-    await view.unmount();
-  });
-
-  it('resets to Warden when the reader switches daemons instead of leaking the other daemon’s panel', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+  it('remounts the panels for the newly routed daemon instead of leaking the other daemon’s panel', async () => {
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}`);
     const controls = new DaemonControlsStore(memoryStorage());
-    const view = await mount(page({ current: alpha, connections: [alpha, beta], controls }));
-
-    await interact(() =>
-      must(
-        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-carrier"]'),
-        'carrier tab',
-      ).click(),
-    );
-    expect(view.container.querySelector('[data-active-carrier]')).not.toBeNull();
-
-    await view.render(page({ current: beta, connections: [alpha, beta], controls }));
-
-    expect(view.container.querySelector('[data-active-carrier]')).toBeNull();
+    const view = await mount(panelsPage({ current: alpha, connections: [alpha], controls }));
+    await settle();
     expect(
-      must(view.container.querySelector('[data-daemon-panel="warden"]'), 'the Warden tab').getAttribute(
-        'aria-selected',
-      ),
-    ).toBe('true');
+      view.container.querySelector('[data-daemon-settings-frame]')?.getAttribute('data-daemon-settings-frame'),
+    ).toBe('daemon-alpha');
+
+    window.history.replaceState({}, '', '/d/daemon-beta/settings#machines/https%3A%2F%2Fbeta.example.test/machine');
+    await view.render(panelsPage({ current: beta, connections: [beta], controls }));
+    await settle();
+    expect(view.container.querySelectorAll('[data-daemon-settings-frame]')).toHaveLength(1);
+    expect(
+      view.container.querySelector('[data-daemon-settings-frame]')?.getAttribute('data-daemon-settings-frame'),
+    ).toBe('daemon-beta');
     await view.unmount();
   });
 
-  it('renders no panel rail at all when the routed daemon is absent from the registry', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    const view = await mount(page({ current: alpha, connections: [beta] }));
+  it('draws no panels at all when the routed daemon is absent from the registry, and says so', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines');
+    const view = await mount(panelsPage({ current: alpha, connections: [beta] }));
+    await settle();
 
-    // An empty rail beside a warning reads as an empty state; the damaged state
-    // has to replace the whole frame.
-    expect(view.container.querySelector('[data-daemon-settings-tabs="desktop"]')).toBeNull();
-    expect(view.container.querySelector('[data-daemon-panel-trigger]')).toBeNull();
+    // An empty list beside a warning reads as an empty state; the damaged state has to replace the
+    // whole frame — and showing beta's settings under alpha's route would be the wrong daemon.
     expect(view.container.querySelector('[data-daemon-settings-frame]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('says so when the routed daemon is not in the pairing registry, rather than borrowing another', async () => {
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
-    const view = await mount(page({ current: alpha, connections: [beta] }));
-    const alert = must(view.container.querySelector<HTMLElement>('[role="alert"]'), 'the missing-daemon notice');
-    expect(alert.textContent).toContain('not present in the browser’s pairing registry');
-    // Showing beta's settings under alpha's route would be the wrong daemon.
-    expect(view.container.textContent).not.toContain('Alpha workstation');
+    expect(view.container.querySelector('[data-settings-section="machines"] [role="alert"]')?.textContent).toBe(
+      'This machine is not paired with this browser, so its setup cannot be shown.',
+    );
+    expect(view.container.querySelector('#settings-section-panel')?.textContent).not.toContain('Alpha workstation');
     await view.unmount();
   });
 });
 
 describe('SettingsPage Machines section', () => {
-  const machines: FleetClientFactory = async () => machineClient(machineView({ name: 'alpha-host' }));
+  const machines: FleetClientFactory = answering;
   const labelledBeta = { ...beta, label: 'Beta box' };
 
   const machinesSurface = (container: HTMLElement): HTMLElement | null =>
     container.querySelector<HTMLElement>('[data-machines-surface]');
 
-  it('opens from a Machines link on the named tab, beside Daemons, and follows a later link', async () => {
+  it('opens from a Machines link on the named tab, and follows a later link', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/profiles');
     const callbacks = calls();
     const view = await mount(
       page({ connections: [alpha, labelledBeta], createMachineClient: machines, calls: callbacks }),
     );
     await settle();
-    expect(view.container.querySelector('[data-settings-section]')?.getAttribute('data-settings-section')).toBe(
-      'machines',
+    expect(shownSection(view.container)).toBe('machines');
+    expect(view.container.querySelector('#settings-section-panel')?.getAttribute('aria-labelledby')).toBe(
+      'settings-machine-heading',
     );
     expect(machinesSurface(view.container)?.getAttribute('data-machines-surface')).toBe('daemon-alpha');
     expect(view.container.querySelector('[data-machine-tab="profiles"]')?.getAttribute('aria-current')).toBe('page');
     expect(view.container.querySelector('[data-machine-unknown]')).toBeNull();
 
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/components');
-    await interact(() => window.dispatchEvent(new Event('hashchange')));
+    await visit('#machines/Alpha%20workstation/components');
     expect(view.container.querySelector('[data-machine-tab="components"]')?.getAttribute('aria-current')).toBe('page');
 
     // A tab is an address: the page navigates to it rather than holding it as private state.
@@ -1025,7 +939,6 @@ describe('SettingsPage Machines section', () => {
       must(view.container.querySelector<HTMLElement>('[data-machine-tab="credentials"]'), 'credentials tab').click(),
     );
     expect(callbacks.navigated).toEqual(['/d/daemon-alpha/settings#machines/Alpha%20workstation/credentials']);
-    expect(callbacks.selected).toEqual([]);
     await view.unmount();
   });
 
@@ -1098,31 +1011,52 @@ describe('SettingsPage Machines section', () => {
     await settle();
     expect(view.container.querySelector('[data-runtimes-tab]')?.textContent).toBe('Alpha workstation');
     await interact(() =>
-      must(view.container.querySelector<HTMLElement>('[data-machine-tab="settings"]'), 'settings tab').click(),
+      must(view.container.querySelector<HTMLElement>('[data-machine-tab="machine"]'), 'Machine tab').click(),
     );
-    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings');
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/machine');
     await view.unmount();
   });
 
-  it('opens the first run by itself for a machine that is not set up, and leaves a flow the link already names', async () => {
+  it('never opens the first run by itself: a machine that is not set up offers it, on a screen of its own', async () => {
     const fresh: FleetClientFactory = async () =>
       machineClient(machineView({ name: 'alpha-host', setUp: false, runtimeCount: 0 }));
-
-    // A plain Machines link: the first run opens, on this page's own machine, by moving only the hash.
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/runtimes');
     const callbacks = calls();
     const view = await mount(page({ createMachineClient: fresh, calls: callbacks }));
     await settle();
-    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings/setup');
-    expect(callbacks.navigated).toEqual([]);
-    await view.unmount();
 
-    // A link that already names a way to set it up (Clone) is somebody's own choice: left alone.
-    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/settings/clone');
-    const cloning = await mount(page({ createMachineClient: fresh }));
+    // The address is left where the reader put it.
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/runtimes');
+    expect(callbacks.navigated).toEqual([]);
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[data-machine-finish-setup-open]'),
+        'Finish setting up',
+      ).click(),
+    );
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/setup']);
+    await view.unmount();
+  });
+
+  it('asks the open machine again when the reader says Check again', async () => {
+    let reads = 0;
+    const flaky: FleetClientFactory = async () => {
+      reads += 1;
+      if (reads === 1) throw new Error('asleep');
+      return machineClient(machineView({ name: 'alpha-host' }));
+    };
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/runtimes');
+    const view = await mount(page({ createMachineClient: flaky }));
     await settle();
-    expect(window.location.hash).toBe('#machines/Alpha%20workstation/settings/clone');
-    await cloning.unmount();
+    expect(view.container.querySelector('[data-machine-status]')?.getAttribute('data-machine-status')).toBe('offline');
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-machine-retry]'), 'Check again').click(),
+    );
+    await settle();
+    expect(reads).toBe(2);
+    expect(view.container.querySelector('[data-machine-status]')?.getAttribute('data-machine-status')).toBe('online');
+    await view.unmount();
   });
 
   it('says it cannot show machines when the page has no way to reach them', async () => {

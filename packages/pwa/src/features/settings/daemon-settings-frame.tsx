@@ -1,5 +1,5 @@
 /**
- * Settings owned by one paired daemon.
+ * Settings owned by one paired daemon, shown inside that machine's Machine tab.
  *
  * Browser settings deliberately do not enter this frame.  Every child receives
  * the selected connection, so a request for one host cannot be reused after a
@@ -10,6 +10,8 @@
 
 import type { ConnectionChoice } from '@ferretry/relay';
 import {
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Fingerprint,
   Gauge,
@@ -23,15 +25,11 @@ import {
   Smartphone,
   Stethoscope,
 } from 'lucide-react';
-import { type ComponentType, type ReactNode, useEffect, useId, useMemo, useState } from 'react';
+import { type ComponentType, type ReactNode, useMemo } from 'react';
 import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
-import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
-import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
-import { PickerTrigger } from '../../shell/picker-trigger.tsx';
+import { Button } from '../../shell/primitives.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
@@ -51,13 +49,6 @@ export interface DaemonSettingsTabDefinition {
   readonly description: string;
   readonly Surface: ComponentType<DaemonSettingsTabProps>;
 }
-
-/** The panel each desktop tab controls; unchanged, because the harness, the app suite and the docs all name it. */
-const DAEMON_PANEL_ID = 'daemon-settings-tab-';
-/** Each desktop tab's own id, so the open panel can point its `aria-labelledby` back at it. */
-const DAEMON_PANEL_TAB_ID = 'daemon-panel-tab-';
-/** The same ceiling the two sibling Settings pickers use: keyboard-safe, never taller than 72dvh. */
-const PANEL_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
 
 /**
  * ONE ICON PER PANEL — EVERY panel, from one set, at one size.
@@ -107,6 +98,9 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
  * the composition root actually mounts has a real entry — so this is a safety net, not a licence.
  */
 const FALLBACK_PANEL_ICON: ReactNode = <SlidersHorizontal size={16} aria-hidden="true" />;
+
+/** One empty list for every render, so a frame given no extra panels does not rebuild (and remount) its own. */
+const NO_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [];
 
 const unavailableWardenStatus: WardenStatusReader = async () => {
   throw new Error('No Warden status reader was supplied.');
@@ -184,8 +178,12 @@ export interface DaemonSettingsFrameProps {
   readonly createPairingClient?: PairingClientFactory;
   /** And for the passkey list, so no harness reads or registers a real credential. */
   readonly createPasskeyClient?: PasskeyClientFactory;
-  /** A panel id the address asked for (`#security`); opens that panel, and again if it changes. */
-  readonly requestedPanel?: string | undefined;
+  /** The panel the address opens (`#machines/<machine>/machine/<panel>`); absent shows the list. */
+  readonly panel?: string | undefined;
+  /** Open a panel, or go back to the list (`null`). The page turns this into an address. */
+  readonly onOpenPanel: (panel: string | null) => void;
+  /** The words on the way back from an open panel. */
+  readonly backLabel?: string;
   /** Fleet and later host-owned settings are supplied here, after Warden. */
   readonly additionalTabs?: readonly DaemonSettingsTabDefinition[];
   /** Measured for this exact daemon connection, never inferred from a preference. */
@@ -211,8 +209,10 @@ export function DaemonSettingsFrame({
   createGrantClient,
   createPairingClient,
   createPasskeyClient,
-  requestedPanel,
-  additionalTabs = [],
+  panel,
+  onOpenPanel,
+  backLabel = 'Machine',
+  additionalTabs = NO_ADDITIONAL_TABS,
   carrier,
   relayAdvertised = false,
   probeDaemon,
@@ -347,161 +347,74 @@ export function DaemonSettingsFrame({
       relayAdvertised,
     ],
   );
-  // The selection lives HERE, inside the frame the caller keys by daemon id, so
-  // switching hosts remounts it. Hoisting it beside the rail would survive that
-  // remount and show daemon B under daemon A's panel name.
-  const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? 'warden');
-  const [panelPickerOpen, setPanelPickerOpen] = useState(false);
-  useEffect(() => {
-    if (requestedPanel !== undefined && tabs.some(tab => tab.id === requestedPanel)) setActiveTab(requestedPanel);
-  }, [requestedPanel, tabs]);
-  const pickerTitleId = useId();
-
   /**
-   * A dynamically supplied panel can disappear between renders. The fallback is
-   * resolved at render time and deliberately fail-closed: the reader lands on a
-   * panel that exists rather than on a blank frame, and the choice is always the
-   * first one, so it is predictable rather than positional guesswork.
-   *
-   * `activeTab` itself is left alone. If that panel is supplied again it becomes
-   * selected again, which is the behaviour a reader who never chose to leave it
-   * would expect; nothing else reads the id, so a selection with no panel is
-   * inert rather than wrong.
+   * A dynamically supplied panel can disappear between renders, and a link can name one that never
+   * existed. Either way the reader lands on the list of panels that DO exist, never on a blank frame.
    */
-  const active = tabs.find(tab => tab.id === activeTab) ?? tabs[0];
-  if (!active) return null;
-  const Surface = active.Surface;
-  const items: readonly ChoiceRailItem[] = tabs.map(tab => ({
-    id: tab.id,
-    label: tab.label,
-    detail: tab.description,
-    icon: PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON,
-  }));
-  const activeIcon = PANEL_ICONS[active.id] ?? FALLBACK_PANEL_ICON;
+  const active = panel === undefined ? undefined : tabs.find(tab => tab.id === panel);
+
+  if (active !== undefined) {
+    const Surface = active.Surface;
+    return (
+      <section
+        className="flex min-w-0 flex-col gap-3"
+        data-daemon-settings-frame={String(connection.daemonId)}
+        aria-label={`${active.label} on ${name}`}
+      >
+        <div>
+          <Button
+            type="button"
+            variant="ghost"
+            className="kt-btn--flush-start"
+            data-daemon-panel-back=""
+            onClick={() => onOpenPanel(null)}
+          >
+            <ChevronLeft size={16} aria-hidden="true" />
+            {backLabel}
+          </Button>
+        </div>
+        <div className="min-w-0" data-daemon-panel-open={active.id}>
+          <Surface connection={connection} />
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
-      className="min-w-0"
+      className="flex min-w-0 flex-col gap-2"
       data-daemon-settings-frame={String(connection.daemonId)}
-      id={`daemon-subtab-panel-${String(connection.daemonId)}`}
       aria-labelledby="daemon-settings-heading"
     >
-      {/* ONE LEVEL OF CONTAINMENT. This was a bordered card, and everything it introduces — the rail
-          beside it and every panel below it — is also a bordered card, so three of them competed at the
-          same depth. It is now separated by TONE and a single rule instead, which is what a header at
-          the top of a column is: the panels keep the borders, because they are the things being read. */}
-      <header className="mb-3 border-b border-border pb-3">
-        <p className={cn(EYEBROW, 'text-accent')}>This daemon</p>
-        {/* The machine's name stays at SECTION level. Every card below it stepped down to `text-row`,
-            and this heading is one rung above them: it names the thing all ten panels belong to. */}
-        <h3 id="daemon-settings-heading" className="mt-1 text-title font-semibold text-fg">
-          {name}
-        </h3>
-        {/* The saved name identifies the machine; the address disambiguates it.
-            An unnamed daemon already shows its address as the name, so it is not
-            repeated. The fingerprint stays inside Host checks' disclosure.
-
-            An address is ONE TOKEN: `break-all` tore it into a stack of fragments
-            that reads as a corrupted value rather than a wrapped one. */}
-        {name === connection.baseUrl ? null : (
-          <PanelPath value={connection.baseUrl} className="mt-0.5 text-meta leading-tight text-faint" />
-        )}
-        <p className="mb-0 mt-2 text-cell leading-base text-muted">
-          These settings change only this machine. They are shared by browsers paired to it, not this browser’s
-          appearance or behaviour preferences.
+      <div>
+        <h4 id="daemon-settings-heading" className="m-0 text-meta font-semibold uppercase text-muted">
+          Connection and security
+        </h4>
+        <p className="mb-0 mt-0.5 text-meta leading-base text-muted">
+          Shared by every browser paired to {name}; your appearance and behaviour choices stay on this browser.
         </p>
-      </header>
-
-      <div className="md:grid md:grid-cols-[13rem_minmax(0,1fr)] md:items-start md:gap-md">
-        {/* The tablist precedes the trigger that replaces it on a narrow screen,
-            so document order is reading order: the control that owns the panel
-            comes before its alternative, and before the panel itself.
-
-            NO CARD AROUND IT, for the same reason the header above lost its own: a
-            bordered box of rows beside a bordered panel of content is two cards at
-            one depth, and the rail is navigation rather than a thing being read. */}
-        <div data-daemon-settings-tabs="desktop" className="hidden md:sticky md:top-2 md:block">
-          <p className={cn(EYEBROW, 'mb-1 px-control-x')}>Panels</p>
-          <ChoiceRail
-            presentation="tabs"
-            items={items}
-            activeId={active.id}
-            onSelect={setActiveTab}
-            marker="data-daemon-panel"
-            label={`${name} settings panels`}
-            tabIdPrefix={DAEMON_PANEL_TAB_ID}
-            panelIdPrefix={DAEMON_PANEL_ID}
-            // SINGLE LINE beside the panel. Ten two-line rows made this rail 900px tall next to a 250px
-            // panel — the rail was the tallest thing on the page — and the descriptions ran to two, three
-            // and four lines, so there was no shared row height to have a rhythm with. The sentence is not
-            // lost: the panel one column to the right opens with its own heading and its own explanation,
-            // the sheet on a phone still carries it, and Cmd/Ctrl+K searches all ten by description.
-            rows="single-line"
-          />
-        </div>
-
-        {/* A phone gets no tablist at all: one touch-safe trigger names the open
-            panel and opens the app's shared sheet to change it. */}
-        <div className="md:hidden" data-daemon-settings-tabs="mobile">
-          <PickerTrigger
-            eyebrow="Daemon panel"
-            value={active.label}
-            icon={activeIcon}
-            open={panelPickerOpen}
-            controls="daemon-panel-picker"
-            marker="data-daemon-panel-trigger"
-            onOpen={() => setPanelPickerOpen(true)}
-          />
-          <BottomSheet
-            id="daemon-panel-picker"
-            open={panelPickerOpen}
-            onClose={() => setPanelPickerOpen(false)}
-            labelledBy={pickerTitleId}
-            closeLabel="Close daemon panel picker"
-            panelClassName="bg-surface"
-            maxHeight={PANEL_PICKER_HEIGHT}
-            zIndexClass="z-50"
-          >
-            <div className="min-h-0 overflow-y-auto px-panel pb-4">
-              <h2 id={pickerTitleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
-                Choose a panel
-              </h2>
-              <p className="mb-3 mt-1 text-cell leading-base text-muted">Every setting below belongs to {name}.</p>
-              <nav aria-label={`${name} settings panels`}>
-                {/* Two-line rows HERE, unlike the desktop rail: a sheet row is being chosen blind, so
-                    the description is the only thing telling ten rows apart behind a closed sheet. */}
-                <ChoiceRail
-                  items={items}
-                  activeId={active.id}
-                  marker="data-daemon-panel-choice"
-                  onSelect={id => {
-                    setActiveTab(id);
-                    setPanelPickerOpen(false);
-                  }}
-                />
-              </nav>
-            </div>
-          </BottomSheet>
-        </div>
-
-        <div
-          id={`${DAEMON_PANEL_ID}${active.id}`}
-          role="tabpanel"
-          aria-labelledby={`${DAEMON_PANEL_TAB_ID}${active.id}`}
-          className="mt-3 min-w-0 md:mt-0"
-        >
-          {/* NO PANEL HEADER HERE, and that was tried first.
-              Repeating the rail row's label and description above the surface looked like the honest way
-              to pay for the desktop rail going single-line. It is not: every one of these ten surfaces
-              already opens with its own heading and its own sentence, so the header made a THIRD title
-              for the same panel and added height to a page whose complaint was clutter — the harness's
-              own "does the resource-limit evidence still fit one screen" check failed on it, which is how
-              it got caught. The rail's second line is redundant on desktop rather than missing: the panel
-              is beside the row, already explaining itself. On a phone it is not redundant, because the
-              sheet is chosen with the panel hidden behind it, so the sheet keeps it. */}
-          <Surface connection={connection} />
-        </div>
       </div>
+      <ul className="kt-groupcard m-0 list-none p-0" aria-label={`${name} connection and security`}>
+        {tabs.map(tab => (
+          <li key={tab.id}>
+            <button
+              type="button"
+              className="kt-grouprow"
+              data-daemon-panel={tab.id}
+              onClick={() => onOpenPanel(tab.id)}
+            >
+              <span className="flex w-5 shrink-0 justify-center text-muted" aria-hidden="true">
+                {PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-ui font-semibold text-fg">{tab.label}</span>
+                <span className="text-meta leading-tight text-muted">{tab.description}</span>
+              </span>
+              <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

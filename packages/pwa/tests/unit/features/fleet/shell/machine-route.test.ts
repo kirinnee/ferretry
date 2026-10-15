@@ -14,7 +14,7 @@ describe('machine route', () => {
       'Credentials',
       'Profiles',
       'Components',
-      'Settings',
+      'Machine',
     ]);
     expect(DEFAULT_MACHINE_TAB).toBe('runtimes');
     expect(isMachineTabId('profiles')).toBe(true);

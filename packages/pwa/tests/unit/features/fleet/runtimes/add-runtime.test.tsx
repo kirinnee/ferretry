@@ -179,7 +179,7 @@ describe('Add runtime: the flow', () => {
     expect(addRuntimeFlowInput().steps.map(step => step.label)).toEqual(['Credential', 'Profile', 'Name', 'Done']);
     const view = await mountHost();
     expect(text(view.container, '#machine-stepper-title')).toBe('Add a runtime');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Credential · 1 of 4');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 3 · Credential');
     await click(view.container, '[data-stepper-cancel]');
     expect(text(view.container, '[data-stepper-confirm]')).toContain('Stop adding a runtime?');
     expect(text(view.container, '[data-stepper-confirm]')).toContain('No runtime is created.');
@@ -220,7 +220,7 @@ describe('Add runtime: Credential', () => {
     expect(draftOf(view.container).credentialId).toBe('claude-personal');
     expect(next.disabled).toBe(false);
     await click(view.container, '[data-step-next]');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Profile · 2 of 4');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 3 · Profile');
     await view.unmount();
   });
 
@@ -394,7 +394,7 @@ describe('Add runtime: Profile', () => {
     expect(next.disabled).toBe(false);
     await click(view.container, '[data-step-next]');
     expect(draftOf(view.container).name).toBe('claude-claude-hooks');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Name · 3 of 4');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Step 3 of 3 · Name');
     await view.unmount();
   });
 
@@ -624,7 +624,7 @@ describe('Add runtime: Name', () => {
     });
     expect(reloads).toEqual(['reload']);
     expect(draftOf(view.container).made).toBe('claude-claude-hooks');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Done · 4 of 4');
+    expect(text(view.container, '[data-stepper-position]')).toBe('Add a runtime · done');
     await view.unmount();
   });
 

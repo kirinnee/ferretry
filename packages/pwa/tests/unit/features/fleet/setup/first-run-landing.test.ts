@@ -1,23 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { firstRunPath, landingAfterPairing } from '../../../../../src/features/fleet/setup/first-run-landing.ts';
+import { landingAfterPairing } from '../../../../../src/features/fleet/setup/first-run-landing.ts';
 import { machineClient, machineView, pairing } from '../shell/machine-support.ts';
 
 const studio = pairing('studio', 'studio mac');
 
-describe('firstRunPath', () => {
-  it('names the first run on one machine, by the name this browser shows for it', () => {
-    expect(firstRunPath(studio.daemonId, 'studio mac')).toBe('/d/studio/settings#machines/studio%20mac/settings/setup');
-  });
-});
-
 describe('landingAfterPairing', () => {
-  it('opens the first run of a machine that is not set up', async () => {
+  it('opens the full-screen first run of a machine that is not set up, outside Settings', async () => {
     const paths: string[] = [];
     const landing = await landingAfterPairing(studio, async () =>
       machineClient(machineView({ setUp: false, runtimeCount: 0 }), paths),
     );
-    expect(landing).toBe('/d/studio/settings#machines/studio%20mac/settings/setup');
+    expect(landing).toBe('/d/studio/setup');
     expect(paths).toEqual(['/v1/fleet/machine']);
   });
 

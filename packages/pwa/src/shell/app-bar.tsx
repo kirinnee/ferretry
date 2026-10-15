@@ -1,7 +1,12 @@
 /**
- * Top bar — breadcrumb, quiet connection state, app destinations, the command
- * palette entry and the update/recovery chip. Ported from kteam
- * `ui/src/components/AppBar.tsx`.
+ * Top bar — breadcrumb, quiet connection state, app navigation, the Find box and the update/recovery
+ * chip — and, on a phone, the bottom app bar. Ported from kteam `ui/src/components/AppBar.tsx`.
+ *
+ * LEVEL ONE OF THE APP'S NAVIGATION HAS ITS OWN LOOK (the approved usability proposal): plain text
+ * links with the current page underlined, never the outlined capital-letter buttons it used to be —
+ * those looked exactly like the actions on every page under them. Find is a search box, because it
+ * searches. On a phone the same places are a bottom bar — Sessions, Projects, Find, Settings and More
+ * — above the home indicator, so the top of a phone screen is the page's own.
  *
  * Three deliberate departures from kteam, all forced by this app's shape:
  *
@@ -23,9 +28,10 @@
 
 import {
   ChartNoAxesCombined,
+  Ellipsis,
   FolderKanban,
   GraduationCap,
-  LayoutGrid,
+  LayoutList,
   RefreshCw,
   Search,
   Settings,
@@ -39,6 +45,7 @@ import {
   daemonAnalyticsPath,
   daemonLearningPath,
   daemonProjectsPath,
+  daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
   type Route,
@@ -111,13 +118,43 @@ export const APP_BAR_DESTINATIONS = [
   { id: 'settings', ...SETTINGS_ENTRY, path: daemonSettingsPath, Icon: Settings },
 ] as const;
 
-type AppBarDestination = (typeof APP_BAR_DESTINATIONS)[number];
-export type AppBarDestinationId = AppBarDestination['id'];
+/**
+ * The sessions dashboard, which the bar now names as the first place in the app. It is not one of
+ * {@link APP_BAR_DESTINATIONS} because the palette already offers it from its own shell list, and the
+ * same row twice would read as two different places.
+ */
+export const SESSIONS_ENTRY = {
+  id: 'sessions',
+  label: 'Sessions',
+  title: 'Every session on this machine, grouped by project',
+  path: daemonSessionsPath,
+  Icon: LayoutList,
+} as const;
 
-/** Which destination, if any, the reader is currently on. */
+/** Every place the app bar links to, in the order it shows them. */
+export const APP_NAVIGATION = [SESSIONS_ENTRY, ...APP_BAR_DESTINATIONS] as const;
+
+type AppNavigationEntry = (typeof APP_NAVIGATION)[number];
+export type AppBarDestinationId = AppNavigationEntry['id'];
+
+/** The phone's bottom bar: the most-used places, with everything else under More. */
+const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'projects'];
+const TAB_BAR_TAIL: readonly AppBarDestinationId[] = ['settings'];
+export const MORE_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
+
+const entry = (id: AppBarDestinationId): AppNavigationEntry =>
+  APP_NAVIGATION.find(candidate => candidate.id === id) ?? SESSIONS_ENTRY;
+
+/** Which destination, if any, the reader is currently on. A session belongs to Sessions. */
 export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | null => {
   switch (route.kind) {
+    case 'sessions':
+    case 'session':
+    case 'new-session':
+      return 'sessions';
     case 'projects':
+    case 'project-detail':
+      return 'projects';
     case 'analytics':
     case 'warden':
     case 'learning':
@@ -127,6 +164,12 @@ export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | n
       return null;
   }
 };
+
+/**
+ * Where the phone's bottom bar is shown. Inside a session the composer owns the bottom of the screen,
+ * exactly as a messaging app hides its tab bar inside a conversation; everywhere else it is there.
+ */
+export const showsTabBar = (route: Route): boolean => route.kind !== 'session' && route.kind !== 'new-session';
 
 type MobileDestinationMenuAction = 'open' | 'dismiss' | 'select';
 
@@ -191,43 +234,37 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
   );
 }
 
-function DestinationLink({
+function AppNavLink({
   destination,
   daemon,
   active,
   onNavigate,
-  onSelect,
 }: {
-  destination: AppBarDestination;
+  destination: AppNavigationEntry;
   daemon: DaemonId;
   active: boolean;
   onNavigate?: (to: string) => void;
-  onSelect?: () => void;
 }) {
-  const { Icon } = destination;
   return (
     <RouteLink
       to={destination.path(daemon)}
       {...(onNavigate ? { onNavigate } : {})}
       aria-current={active ? 'page' : undefined}
-      aria-label={destination.label}
       title={destination.title}
-      {...(onSelect ? { onClick: onSelect } : {})}
-      className="kt-btn kt-btn--sm shrink-0 items-center gap-xs"
+      data-app-nav={destination.id}
+      className="kt-appnav__link"
     >
-      <Icon size={14} aria-hidden="true" />
-      <span className="text-meta font-medium">{destination.label}</span>
+      {destination.label}
     </RouteLink>
   );
 }
 
-function DestinationFinderButton({
+/** Find, drawn as what it is — a search box — that opens the palette. */
+function FindBox({
   onOpen,
-  roomy = false,
   shortcutAvailable = true,
 }: {
   onOpen: () => void;
-  roomy?: boolean;
   /** False when Cmd/Ctrl+K belongs to the mounted current-session search. */
   shortcutAvailable?: boolean;
 }) {
@@ -236,28 +273,14 @@ function DestinationFinderButton({
       type="button"
       onClick={onOpen}
       aria-keyshortcuts={shortcutAvailable ? PALETTE_KEYSHORTCUTS : undefined}
-      aria-label={roomy ? 'Search app, settings & sessions' : 'Find app destinations, settings & sessions'}
+      aria-label="Find app destinations, settings & sessions"
       title="Find an app destination, setting, or session"
-      className={
-        roomy
-          ? 'kt-btn w-full items-center justify-start gap-sm px-control-x'
-          : 'kt-btn kt-btn--sm shrink-0 items-center gap-xs'
-      }
+      className="kt-findbox"
       data-app-bar-destination-search=""
     >
-      <Search size={roomy ? 16 : 14} aria-hidden="true" />
-      <span className={roomy ? 'text-ui font-semibold' : 'text-meta font-medium'}>
-        {roomy ? 'Search app, settings & sessions' : 'Find'}
-      </span>
-      {shortcutAvailable ? (
-        <span
-          className={
-            roomy ? 'mono ml-auto hidden text-meta text-muted min-[440px]:inline' : 'mono ml-auto text-meta text-muted'
-          }
-        >
-          {paletteShortcutLabel()}
-        </span>
-      ) : null}
+      <Search size={14} aria-hidden="true" />
+      <span>Search</span>
+      {shortcutAvailable ? <kbd>{paletteShortcutLabel()}</kbd> : null}
     </button>
   );
 }
@@ -337,6 +360,11 @@ export interface AppBarProps {
    * slot, never a disabled or decorative fake search.
    */
   readonly currentSessionSearch?: ReactNode;
+  /**
+   * Whether the phone's bottom bar is on screen under this page. Where it is not — inside a session —
+   * the bar keeps a Find button of its own, so the app's search is never more than one tap away.
+   */
+  readonly tabBarShown?: boolean;
 }
 
 export function AppBar({
@@ -352,18 +380,9 @@ export function AppBar({
   onNavigate,
   themeToggle,
   currentSessionSearch,
+  tabBarShown = false,
 }: AppBarProps) {
   const layout = useLayoutMode();
-  const [mobileDestinationsOpen, setMobileDestinationsOpen] = useState(false);
-  const destinationDialogId = useId();
-  const dismissMobileDestinations = () =>
-    setMobileDestinationsOpen(current => mobileDestinationMenuOpen(current, 'dismiss'));
-  const selectMobileDestination = () =>
-    setMobileDestinationsOpen(current => mobileDestinationMenuOpen(current, 'select'));
-  const openPaletteFromMobileDestinations = () => {
-    selectMobileDestination();
-    onOpenPalette();
-  };
   const statusVisible = connectionStatus !== 'open' || updateReady !== null;
 
   return (
@@ -371,13 +390,12 @@ export function AppBar({
     // of a flex column that fills the viewport. Full bleed — no centred wrapper.
     // Do not add filter/backdrop-filter/transform here: BottomSheet is a child,
     // and a new stacking context would trap its fixed overlay under page content.
-    <header data-density-region="app-bar" className="shrink-0 border-b border-border bg-[var(--bar-bg)]">
+    <header data-density-region="app-bar" className="shrink-0 border-b border-border-strong bg-[var(--bar-bg)]">
       <div
         className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-md font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md"
         data-app-bar-primary=""
       >
-        {/* Identity stays together at the start. Destinations have their own
-            group below on wider layouts and their own picker on phones. */}
+        {/* Identity stays together at the start. */}
         <div className="flex min-w-0 items-center justify-self-start gap-md">
           {onOpenSidebar && <SidebarDrawerTrigger onOpen={onOpenSidebar} sessionCount={sessionCount} />}
           <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-md text-muted min-[480px]:flex">
@@ -419,40 +437,29 @@ export function AppBar({
               only theme control is Settings, so hidden chrome does not mount a
               second theme instance behind the sheet. */}
           {layout !== 'drawer' && themeToggle}
-          {/* Phone navigation is a real modal selector, not a horizontally
-              scrollable tab strip. It stays at the right edge while search owns
-              the centre column. */}
-          {layout === 'drawer' && (
+          {layout === 'drawer' && !tabBarShown && (
             <button
               type="button"
-              onClick={() => setMobileDestinationsOpen(current => mobileDestinationMenuOpen(current, 'open'))}
-              aria-label="Choose destination"
-              aria-haspopup="dialog"
-              aria-expanded={mobileDestinationsOpen}
-              aria-controls={destinationDialogId}
-              title="Choose destination"
+              onClick={onOpenPalette}
+              aria-label="Find app destinations, settings & sessions"
+              title="Find an app destination, setting, or session"
               className="kt-btn kt-btn--sm shrink-0 items-center justify-center"
+              data-variant="ghost"
+              data-app-bar-destination-search=""
             >
-              <LayoutGrid size={18} aria-hidden="true" />
+              <Search size={18} aria-hidden="true" />
             </button>
           )}
         </div>
       </div>
 
-      {/* Desktop/tablet destinations form one explicit group on their own row.
-          The global palette belongs with app navigation; it no longer poses as
-          the current-session search in the centre slot. Phones get the modal
-          destination picker below, never a horizontal strip. */}
+      {/* LEVEL ONE: the app's places as plain text, the current one underlined ON the bar's own bottom
+          edge, and Find as a search box at the end of the same row. A phone has the bottom bar instead. */}
       {layout !== 'drawer' && (
-        <div className="px-panel pb-sm font-ui text-ui" data-app-bar-destination-row="">
-          <nav
-            aria-label="Destinations"
-            className="mx-auto flex w-fit max-w-full items-center gap-xs rounded-panel border border-border-soft bg-surface px-sm py-xs"
-          >
-            <DestinationFinderButton onOpen={onOpenPalette} shortcutAvailable={currentSessionSearch === undefined} />
-            <span aria-hidden="true" className="mx-xs h-control-sm w-px shrink-0 bg-border-soft" />
-            {APP_BAR_DESTINATIONS.map(destination => (
-              <DestinationLink
+        <div className="flex min-w-0 items-end justify-between gap-md px-panel font-ui" data-app-bar-destination-row="">
+          <nav aria-label="Destinations" className="kt-appnav scroll-thin overflow-x-auto">
+            {APP_NAVIGATION.map(destination => (
+              <AppNavLink
                 key={destination.id}
                 destination={destination}
                 daemon={daemon}
@@ -461,11 +468,14 @@ export function AppBar({
               />
             ))}
           </nav>
+          <div className="flex shrink-0 items-center self-center pb-xs">
+            <FindBox onOpen={onOpenPalette} shortcutAvailable={currentSessionSearch === undefined} />
+          </div>
         </div>
       )}
 
       {/* Transient phone state gets a full-width second row rather than being
-          wedged between the centred seam and destination trigger. */}
+          wedged between the centred seam and the sidebar opener. */}
       {layout === 'drawer' && statusVisible && (
         <div
           className="flex min-h-control items-center justify-center gap-md border-t border-border-soft px-panel py-xs font-ui"
@@ -478,42 +488,116 @@ export function AppBar({
           />
         </div>
       )}
+    </header>
+  );
+}
 
+export interface AppTabBarProps {
+  readonly daemon: DaemonId;
+  readonly active?: AppBarDestinationId | null;
+  readonly onNavigate?: (to: string) => void;
+  /** Find opens the same palette as the desktop's search box. */
+  readonly onOpenPalette: () => void;
+}
+
+const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
+  sessions: <LayoutList size={20} aria-hidden="true" />,
+  projects: <FolderKanban size={20} aria-hidden="true" />,
+  analytics: <ChartNoAxesCombined size={20} aria-hidden="true" />,
+  warden: <ShieldCheck size={20} aria-hidden="true" />,
+  learning: <GraduationCap size={20} aria-hidden="true" />,
+  settings: <Settings size={20} aria-hidden="true" />,
+};
+
+/**
+ * The phone's level one: a bottom bar with the four most-used places plus More (Analytics, Warden,
+ * Learning), safe-area aware so it sits above the home indicator. Rendered by the shell only at drawer
+ * widths, and not inside a session ({@link showsTabBar}).
+ */
+export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette }: AppTabBarProps) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreId = useId();
+  const select = (): void => setMoreOpen(current => mobileDestinationMenuOpen(current, 'select'));
+  const place = (id: AppBarDestinationId) => {
+    const destination = entry(id);
+    return (
+      <RouteLink
+        key={id}
+        to={destination.path(daemon)}
+        {...(onNavigate ? { onNavigate } : {})}
+        aria-current={active === id ? 'page' : undefined}
+        data-app-tab={id}
+        className="kt-tabbar__item"
+      >
+        {TAB_ICONS[id]}
+        <span>{destination.label}</span>
+      </RouteLink>
+    );
+  };
+  const inMore = active !== null && MORE_PLACES.includes(active);
+  return (
+    <>
+      <nav aria-label="App" className="kt-tabbar" data-app-tab-bar="">
+        {TAB_BAR_PLACES.map(place)}
+        <button
+          type="button"
+          className="kt-tabbar__item"
+          onClick={onOpenPalette}
+          data-app-tab="find"
+          aria-label="Find app destinations, settings & sessions"
+        >
+          <Search size={20} aria-hidden="true" />
+          <span>Find</span>
+        </button>
+        {TAB_BAR_TAIL.map(place)}
+        <button
+          type="button"
+          className="kt-tabbar__item"
+          onClick={() => setMoreOpen(current => mobileDestinationMenuOpen(current, 'open'))}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          aria-controls={moreId}
+          aria-current={inMore ? 'page' : undefined}
+          data-app-tab="more"
+        >
+          <Ellipsis size={20} aria-hidden="true" />
+          <span>More</span>
+        </button>
+      </nav>
       <BottomSheet
-        id={destinationDialogId}
-        open={mobileDestinationsOpen}
-        onClose={dismissMobileDestinations}
-        ariaLabel="Choose destination"
-        closeLabel="Dismiss destination picker"
+        id={moreId}
+        open={moreOpen}
+        onClose={() => setMoreOpen(current => mobileDestinationMenuOpen(current, 'dismiss'))}
+        ariaLabel="More places"
+        closeLabel="Dismiss more places"
         panelClassName="px-panel pb-panel"
       >
-        <div className="grid gap-md pb-md">
-          <div className="grid gap-xs">
-            <h2 className="m-0 text-title font-semibold text-fg">Choose destination</h2>
-            <p className="m-0 text-ui text-muted">Select a destination, search the app, or dismiss this menu.</p>
-          </div>
-          <DestinationFinderButton
-            onOpen={openPaletteFromMobileDestinations}
-            roomy
-            shortcutAvailable={currentSessionSearch === undefined}
-          />
-          <nav aria-label="Destinations" className="grid gap-sm border-t border-border-soft pt-md">
-            {APP_BAR_DESTINATIONS.map(destination => (
-              <DestinationLink
-                key={destination.id}
-                destination={destination}
-                daemon={daemon}
+        <nav aria-label="More places" className="flex flex-col gap-xs pb-md">
+          <h2 className="m-0 mb-sm text-title font-semibold text-fg">More</h2>
+          {MORE_PLACES.map(id => {
+            const destination = entry(id);
+            return (
+              <RouteLink
+                key={id}
+                to={destination.path(daemon)}
                 {...(onNavigate ? { onNavigate } : {})}
-                active={active === destination.id}
-                onSelect={selectMobileDestination}
-              />
-            ))}
-          </nav>
-          <button type="button" onClick={dismissMobileDestinations} className="kt-btn justify-center">
-            Dismiss
-          </button>
-        </div>
+                aria-current={active === id ? 'page' : undefined}
+                onClick={select}
+                data-app-more={id}
+                className="kt-navpill min-h-[48px]"
+              >
+                <span className="flex w-5 shrink-0 justify-center" aria-hidden="true">
+                  {TAB_ICONS[id]}
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-semibold">{destination.label}</span>
+                  <span className="kt-navpill__sub">{destination.title}</span>
+                </span>
+              </RouteLink>
+            );
+          })}
+        </nav>
       </BottomSheet>
-    </header>
+    </>
   );
 }

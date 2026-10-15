@@ -25,6 +25,7 @@ import { readFleetRuntimes } from '../catalog-api.ts';
 import { readFleetSetupScan } from '../setup-api.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
+import { StepperFoot } from '../shell/stepper-foot.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import {
   currentFlow,
@@ -63,6 +64,7 @@ import {
 import { FirstRunSignIn } from './first-run-sign-in.tsx';
 import type { InstallPhase } from './install-model.ts';
 import { machineItemHash } from './settings-route.ts';
+import type { FirstRunProgressPort } from './setup-progress.ts';
 import { useSetupAccess } from './setup-access.ts';
 import { CheckChoices, SetupBadges, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
 import { countWords, listWords, SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
@@ -75,9 +77,12 @@ export interface MachineFirstRunProps extends MachineTabProps {
   readonly onDone: () => void;
   /** The person left the flow. */
   readonly onLeave: () => void;
-  /** Supplied in tests. */
   /** How often a waiting sign-in is re-read. Supplied in tests. */
   readonly pollMs?: number;
+  /** Inside Settings (Import again), or the full-screen first run. */
+  readonly presentation?: 'inline' | 'screen';
+  /** Where "Finish later" keeps the answers and the step, so coming back resumes there. */
+  readonly progress?: FirstRunProgressPort;
 }
 
 interface ImportResult {
@@ -103,9 +108,11 @@ const flowInput = (mode: FirstRunMode, machineName: string, scan: FleetSetupScan
   ...(mode === 'import' ? { leaveWithoutConfirm: true } : {}),
 });
 
-function Foot({ children }: { readonly children: ReactNode }) {
-  return <div className="mt-4 flex flex-wrap gap-2">{children}</div>;
-}
+/** A step's own actions: under the step inline, pinned to the bottom of the screen on the full-screen run. */
+const Foot = StepperFoot;
+
+/** The step every first run ends on before Done, once there is something to name. */
+const NAMES_UPCOMING: readonly StepperStep[] = [{ id: 'names', label: 'Name runtimes' }];
 
 function ContinueButton({ onClick, disabled = false }: { readonly onClick: () => void; readonly disabled?: boolean }) {
   return (
@@ -146,7 +153,20 @@ function ScanGate({
 }
 
 export function MachineFirstRun(props: MachineFirstRunProps) {
-  const { mode, machineName, connection, createClient, online, checking, onRetry, onDone, onLeave, pollMs } = props;
+  const {
+    mode,
+    machineName,
+    connection,
+    createClient,
+    online,
+    checking,
+    onRetry,
+    onDone,
+    onLeave,
+    pollMs,
+    presentation = 'inline',
+    progress,
+  } = props;
   const access = useSetupAccess({ connection, createClient });
   const { changes } = access;
   const [scan, setScan] = useState<FleetSetupScan | null>(null);
@@ -154,7 +174,9 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
   const [signingIn, setSigningIn] = useState<SetupHarness | null>(null);
   const [issue, setIssue] = useState<string | null>(null);
   const [taken, setTaken] = useState<ReadonlySet<string>>(new Set());
-  const [answers, setAnswers] = useState<FirstRunAnswers>(NO_ANSWERS);
+  const [answers, setAnswers] = useState<FirstRunAnswers>(() => progress?.saved?.answers ?? NO_ANSWERS);
+  // The step "Finish later" left on. It is taken once the scan is in, because which steps exist depends on it.
+  const resumeAt = useRef(progress?.saved?.at);
   const [install, setInstall] = useState<InstallPhase>({ kind: 'choose' });
   const [installSkipped, setInstallSkipped] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -185,6 +207,25 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
   const state = withSteps(stepper, steps);
   const at = currentFlow(state).at;
   const next = (): void => setStepper(stepForward(state));
+
+  // RESUME where "Finish later" left, once the scan says which steps there are; a step that no longer
+  // exists (the tool was uninstalled since) starts from the top instead.
+  useEffect(() => {
+    const target = resumeAt.current;
+    if (scan === null || target === undefined) return;
+    resumeAt.current = undefined;
+    const available = firstRunSteps(mode, scan, answers);
+    if (available.some(candidate => candidate.id === target && candidate.final !== true))
+      setStepper(current => goToStep(withSteps(current, available), target));
+  }, [answers, mode, scan]);
+
+  // KEEP the answers and the step on every move, so leaving is never losing. Done clears it: there is
+  // nothing left to come back to.
+  const save = progress?.save;
+  useEffect(() => {
+    if (save === undefined || resumeAt.current !== undefined) return;
+    save(at === 'done' ? null : { at, answers });
+  }, [answers, at, save]);
   const answer = (patch: Partial<FirstRunAnswers>): void => setAnswers(current => ({ ...current, ...patch }));
   const choose = (harness: SetupHarness, choice: 'import' | 'skip'): void =>
     setAnswers(current => ({ ...current, choices: { ...current.choices, [harness]: choice } }));
@@ -525,6 +566,10 @@ export function MachineFirstRun(props: MachineFirstRunProps) {
       online={online}
       checking={checking}
       onRetry={onRetry}
+      presentation={presentation}
+      // Name runtimes joins the flow only once something is chosen to import; the stepper names it from
+      // the first screen so the whole job is visible, the way the approved design draws it.
+      upcoming={NAMES_UPCOMING}
     >
       {body()}
     </MachineStepper>

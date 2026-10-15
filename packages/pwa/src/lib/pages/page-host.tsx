@@ -31,6 +31,8 @@ export interface PageHostSlots {
   readonly Analytics: ComponentType<DaemonPageProps>;
   readonly Learning: ComponentType<DaemonPageProps>;
   readonly ImportedHistory?: ComponentType<DaemonPageProps>;
+  /** One machine's full-screen first run. */
+  readonly MachineSetup?: ComponentType<DaemonPageProps>;
 }
 
 export interface PageHostProps {
@@ -87,5 +89,8 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
     case 'imported-history':
       if (slots.ImportedHistory === undefined) throw new Error('the imported-history route is not mounted');
       return <slots.ImportedHistory connection={matchedConnection} />;
+    case 'machine-setup':
+      if (slots.MachineSetup === undefined) throw new Error('the machine setup route is not mounted');
+      return <slots.MachineSetup connection={matchedConnection} />;
   }
 }

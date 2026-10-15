@@ -218,7 +218,7 @@ describe('activeCarrierStatus', () => {
     const status = activeCarrierStatus();
     expect(status).toContain('Not measured yet');
     expect(status).toContain('tried directly first, then the hosted relay');
-    expect(status).toContain('Settings › Daemons');
+    expect(status).toContain('Carrier panel');
     expect(status).not.toContain('nothing dials a relay yet');
     // The retired claims, each named so neither can come back by a rewording.
     expect(status).not.toContain('pairing is always direct');

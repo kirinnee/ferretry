@@ -5,6 +5,7 @@ import {
   connectionPickerPath,
   daemonAnalyticsPath,
   daemonImportedHistoryPath,
+  daemonMachineSetupPath,
   daemonLearningPath,
   daemonNewSessionPath,
   daemonProjectPath,
@@ -38,6 +39,7 @@ describe('route path builders', () => {
       daemonAnalyticsPath(daemonA),
       daemonLearningPath(daemonA),
       daemonImportedHistoryPath(daemonA),
+      daemonMachineSetupPath(daemonA),
     ];
 
     // Assert
@@ -53,6 +55,7 @@ describe('route path builders', () => {
       '/d/daemon%2Fa/analytics',
       '/d/daemon%2Fa/learning',
       '/d/daemon%2Fa/history',
+      '/d/daemon%2Fa/setup',
     ]);
   });
 
@@ -102,6 +105,7 @@ describe('route parsing', () => {
       parseRoute('/d/daemon%2Fa/analytics'),
       parseRoute('/d/daemon%2Fa/learning'),
       parseRoute('/d/daemon%2Fa/history'),
+      parseRoute('/d/daemon%2Fa/setup'),
     ];
 
     // Assert
@@ -116,6 +120,7 @@ describe('route parsing', () => {
       { kind: 'analytics', daemonId: daemonA },
       { kind: 'learning', daemonId: daemonA },
       { kind: 'imported-history', daemonId: daemonA },
+      { kind: 'machine-setup', daemonId: daemonA },
     ]);
   });
 
@@ -250,6 +255,7 @@ describe('route identity', () => {
       parseRoute('/d/daemon-b/analytics'),
       parseRoute('/d/daemon-b/learning'),
       parseRoute('/d/daemon-b/history'),
+      parseRoute('/d/daemon-b/setup'),
     ];
 
     // Act
@@ -272,6 +278,7 @@ describe('route identity', () => {
       ['/d/daemon-b/analytics', 'analytics:"daemon-b"'],
       ['/d/daemon-b/learning', 'learning:"daemon-b"'],
       ['/d/daemon-b/history', 'imported-history:"daemon-b"'],
+      ['/d/daemon-b/setup', 'machine-setup:"daemon-b"'],
     ]);
     should(routePageKey(daemonBSession)).not.equal(routePageKey(daemonASession));
   });

@@ -210,7 +210,7 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     const root = await open(machine);
     await click(root, '[data-profile-build]');
     expect(text(root, '#machine-stepper-title')).toBe('Build a profile');
-    expect(text(root, '[data-stepper-position]')).toBe('Start from · 1 of 8');
+    expect(text(root, '[data-stepper-position]')).toBe('Step 1 of 8 · Start from');
     await tick(root, '[data-build-base="Review"]');
     await tick(root, '[data-build-base="Default"]');
     expect(text(root, '[data-build-order]')).toContain('Default · wins');
@@ -221,7 +221,7 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     await tick(root, '[data-build-base="Agent work"]');
     await click(root, '[data-build-next]');
 
-    expect(text(root, '[data-stepper-position]')).toBe('Instructions · 2 of 8');
+    expect(text(root, '[data-stepper-position]')).toBe('Step 2 of 8 · Instructions');
     expect(text(root, '[data-build-next]')).toBe('Skip, add no instructions');
     await tick(root, '[data-build-pick="instructions/Main instructions"]');
     expect(text(root, '[data-build-next]')).toBe('Next');
@@ -231,13 +231,13 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     await click(root, '[data-build-next]');
     await click(root, '[data-build-next]');
     await click(root, '[data-build-next]');
-    expect(text(root, '[data-stepper-position]')).toBe('Model set · 6 of 8');
+    expect(text(root, '[data-stepper-position]')).toBe('Step 6 of 8 · Model set');
     expect(root.querySelector<HTMLInputElement>('[data-build-pick=""] input')?.checked).toBe(true);
     await tick(root, '[data-build-pick="modelSets/Claude models"]');
     await tick(root, '[data-build-pick=""]');
     await click(root, '[data-build-next]');
 
-    expect(text(root, '[data-stepper-position]')).toBe('Review layers · 7 of 8');
+    expect(text(root, '[data-stepper-position]')).toBe('Step 7 of 8 · Review layers');
     const layers = [...root.querySelectorAll('[data-layer]')].map(layer => layer.getAttribute('data-layer'));
     expect(layers).toEqual(['instructions/Main instructions', 'profile/Agent work', 'profile/Default']);
     expect(text(root, '[data-conflicts]')).toContain('permissions.defaultMode');
@@ -248,7 +248,7 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     });
     await click(root, '[data-build-next]');
 
-    expect(text(root, '[data-stepper-position]')).toBe('Name · 8 of 8');
+    expect(text(root, '[data-stepper-position]')).toBe('Step 8 of 8 · Name');
     expect(root.textContent).toContain('3 layers.');
     expect(root.textContent).not.toContain('You go back to choosing a profile');
     await typeName(root, 'Default');
@@ -317,7 +317,7 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     await click(root, '[data-stepper-cancel]');
     expect(text(root, '[data-stepper-saved]')).toBe('Instructions Team rules');
     await click(root, '[data-stepper-keep]');
-    expect(text(root, '[data-stepper-position]')).toBe('Instructions · 2 of 8');
+    expect(text(root, '[data-stepper-position]')).toBe('Step 2 of 8 · Instructions');
   });
 
   it('edits a profile’s layers: itself and what includes it would include itself, and it saves under its name', async () => {

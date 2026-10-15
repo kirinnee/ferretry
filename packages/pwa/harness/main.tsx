@@ -123,6 +123,7 @@ import {
 } from '../src/features/browser/unified-browser-surface.tsx';
 import type { FleetClientFactory } from '../src/features/fleet/fleet-client.ts';
 import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
+import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx';
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
@@ -225,7 +226,7 @@ import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-setti
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
-import { AppBar } from '../src/shell/app-bar.tsx';
+import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BrandMark } from '../src/shell/brand-mark.tsx';
 import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
@@ -865,12 +866,12 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   // Measured for the daemon on screen, never carried over from the last one.
   const activeCarrier = harnessSettingsCarrier(activeDaemonId);
 
-  // The Settings tab reads the OTHER paired machines from the app store; the harness has none, so it
+  // The Machine tab reads the OTHER paired machines from the app store; the harness has none, so it
   // hands them over itself. The other tabs are the harness map's.
   const machineTabs = useMemo<MachineTabSurfaces>(
     () => ({
       ...HARNESS_MACHINE_TABS,
-      settings: function HarnessMachineSettings(props: MachineTabProps) {
+      machine: function HarnessMachineSettings(props: MachineTabProps) {
         return (
           <MachineSettingsTab
             {...props}
@@ -931,12 +932,16 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       onNavigate={to => {
         const target = new URL(to, window.location.href);
         const id = decodeURIComponent(target.pathname.split('/')[2] ?? '');
+        // The full-screen setup is a route of its own; the preview opens its own page for it.
+        if (target.pathname.endsWith('/setup')) {
+          window.location.assign(`${window.location.pathname}?machine-setup=${encodeURIComponent(id)}`);
+          return;
+        }
         const next = connections.find(connection => String(connection.daemonId) === id);
         if (next) setActiveDaemonId(next.daemonId);
         window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${target.hash}`);
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       }}
-      onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
         setConnections(current =>
           current.map(connection =>
@@ -1000,9 +1005,74 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   );
 }
 
+/**
+ * `?app-chrome=<destination>`: the app's level-one navigation as a page — the top bar's text links and
+ * Find box on a desktop, the bottom bar on a phone — around an empty page, for review captures.
+ */
+function AppChromeHarness({ active }: { readonly active: string }) {
+  useAppViewport();
+  const phone = useLayoutMode() === 'drawer';
+  const destination = (['sessions', 'projects', 'analytics', 'warden', 'learning', 'settings'] as const).find(
+    candidate => candidate === active,
+  );
+  return (
+    <div className="kt-shell flex flex-col overflow-hidden" id="harness-app-chrome">
+      <AppBar
+        crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'Settings' }]}
+        daemon={daemon.daemonId}
+        onOpenPalette={() => {}}
+        sessionCount={7}
+        active={destination ?? 'settings'}
+        tabBarShown={phone}
+        themeToggle={<Button size="sm">Theme</Button>}
+      />
+      <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
+      {phone ? (
+        <AppTabBar daemon={daemon.daemonId} active={destination ?? 'settings'} onOpenPalette={() => {}} />
+      ) : null}
+    </div>
+  );
+}
 function StandaloneSettingsPageHarness() {
   useAppViewport();
   return <SettingsPageHarness standalone />;
+}
+
+/** Setup progress for the harness: in memory, so a capture never reads or leaves a real browser's state. */
+const harnessSetupStorage = (): Pick<Storage, 'getItem' | 'setItem'> => {
+  const values = new Map<string, string>();
+  return { getItem: key => values.get(key) ?? null, setItem: (key, value) => void values.set(key, value) };
+};
+
+/**
+ * `?machine-setup=<daemon>`: one machine's full-screen first run, as the app shows it after pairing a
+ * machine that is not set up — no app chrome, only its own stepper. Leaving it returns to the Settings
+ * preview on that machine.
+ */
+function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string }) {
+  useAppViewport();
+  const connections = settingsConnections('many');
+  const record =
+    connections.find(connection => String(connection.daemonId) === daemonId) ?? HARNESS_SETTINGS_CONNECTIONS[0];
+  const storage = useMemo(harnessSetupStorage, []);
+  return (
+    <section
+      id="harness-machine-setup"
+      aria-label="Machine setup preview"
+      className="kt-shell h-dvh overflow-hidden bg-bg"
+    >
+      <MachineSetupScreen
+        connection={record}
+        connections={connections}
+        createClient={HARNESS_MACHINE_CLIENT}
+        storage={storage}
+        onNavigate={to => {
+          const target = new URL(to, window.location.href);
+          window.location.assign(`${window.location.pathname}?settings-harness=1${target.hash}`);
+        }}
+      />
+    </section>
+  );
 }
 
 /**
@@ -6883,12 +6953,18 @@ if (host) {
   const pickerFrame = PICKER_FRAGMENTS[window.location.hash];
   const projectsFrame = PROJECTS_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
+  const machineSetupHarness = new URLSearchParams(window.location.search).get('machine-setup');
+  const appChromeHarness = new URLSearchParams(window.location.search).get('app-chrome');
   createRoot(host).render(
     // The harness answers its daemon inside the page, on the plain network, so every surface is handed
     // a client over it; the app itself only ever has the store's session-routed pool.
     <DaemonClientProvider client={harnessDaemonClient}>
       <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
-        {settingsHarness ? (
+        {appChromeHarness !== null ? (
+          <AppChromeHarness active={appChromeHarness} />
+        ) : machineSetupHarness !== null ? (
+          <StandaloneMachineSetupHarness daemonId={machineSetupHarness} />
+        ) : settingsHarness ? (
           <StandaloneSettingsPageHarness />
         ) : window.location.hash === '#session-workspace' ? (
           <SessionWorkspaceHarness />

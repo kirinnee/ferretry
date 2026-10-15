@@ -59,6 +59,7 @@ describe('PageHost', () => {
       Analytics: daemonPage('analytics'),
       Learning: daemonPage('learning'),
       ImportedHistory: daemonPage('imported-history'),
+      MachineSetup: daemonPage('machine-setup'),
     };
     const paths = [
       '/d/daemon-a',
@@ -71,6 +72,7 @@ describe('PageHost', () => {
       '/d/daemon-a/analytics',
       '/d/daemon-a/learning',
       '/d/daemon-a/history',
+      '/d/daemon-a/setup',
     ];
 
     // Act
@@ -90,6 +92,7 @@ describe('PageHost', () => {
       '<div data-page="analytics">analytics</div>',
       '<div data-page="learning">learning</div>',
       '<div data-page="imported-history">imported-history</div>',
+      '<div data-page="machine-setup">machine-setup</div>',
     ]);
     should(received).have.length(paths.length);
     for (const actual of received) should(actual).equal(connection);
@@ -132,6 +135,9 @@ describe('PageHost', () => {
 
     // Assert
     should(unmounted).throw('the project detail route is not mounted');
+    should(() =>
+      renderToStaticMarkup(<PageHost route={pageRoute('/d/daemon-a/setup')} connection={connection} slots={slots} />),
+    ).throw('the machine setup route is not mounted');
   });
 
   it('should render the connection picker without inventing a default daemon', () => {

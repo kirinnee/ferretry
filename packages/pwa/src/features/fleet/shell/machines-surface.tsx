@@ -1,35 +1,42 @@
 /**
- * The Machines surface: one Settings section for the account model (docs/design/account-model.md §4.2).
+ * One machine in Settings: its name and status, then its five views as underlined tabs —
+ * Runtimes, Credentials, Profiles, Components and Machine (docs/design/account-model.md §4.2).
  *
- * A **switcher** at the top names the machine with a caret. It opens **Machines** — every paired
- * daemon with Online/Offline, its runtime count or "Not set up yet", and **Add machine** (the existing
- * pairing flow). Under it sit the five tabs: Runtimes, Credentials, Profiles, Components, Settings.
+ * WHICH machine is open is chosen one level up: the Settings sidebar on a desktop and the Machines card
+ * on a phone both list every paired machine with its status. This surface used to carry its own
+ * switcher too, which was a fourth kind of navigation on one screen.
  *
  * The shell owns the frame and nothing inside a tab. Each tab's surface is supplied by the composition
  * root (`machineTabs`), and until a unit fills one the tab is an honest empty frame — routable, so a
- * link to it works today, but saying it shows nothing yet. It is the ONE Settings entry for the account model (O1).
+ * link to it works today, but saying it shows nothing yet.
  *
- * Which daemon answers is the page's, never this surface's: picking another machine asks the page to
- * go to that daemon's Settings, so no read for one host can be shown under another host's name.
+ * Which daemon answers is the page's, never this surface's: picking another tab asks the page to move
+ * the address, so no read for one host can be shown under another host's name.
  */
 
 import type { FleetMachineView } from '@ferretry/protocol';
-import { Boxes, ChevronDown, ChevronRight, KeyRound, Layers, Play, Plus, SlidersHorizontal } from 'lucide-react';
-import { type ComponentType, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { Boxes, KeyRound, Layers, Play, SlidersHorizontal } from 'lucide-react';
+import type { ComponentType, ReactNode } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
-import { Badge, Button } from '../../../shell/primitives.tsx';
+import { Button } from '../../../shell/primitives.tsx';
+import { UnderlineTabs } from '../../../shell/underline-tabs.tsx';
 import { distinctDaemonName } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
-import { AccountStatus, type AccountStatusProps } from './account-status.tsx';
-import { type MachineReach, machineReachSummary, readMachineReach } from './machine-reach.ts';
+import { AccountStatus } from './account-status.tsx';
+import { reachLabel, reachWord, type ShownReach, shownReachSummary } from './machine-reach.ts';
 import { MACHINE_TABS, type MachineTabId } from './machine-route.ts';
+
+/**
+ * The paired daemon's own panels — Warden, Secrets, devices, security and the rest — drawn inside the
+ * Machine tab. `panel` is the one the address opens, or `undefined` for the list of them.
+ */
+export type DaemonPanelsRenderer = (panel: string | undefined, onOpen: (panel: string | null) => void) => ReactNode;
 
 /** What every tab surface is handed: the machine, whether it answers, and the way to ask it things. */
 export interface MachineTabProps {
   readonly connection: DaemonConnection;
-  /** The name the switcher shows. */
+  /** The name the machine is listed by. */
   readonly machineName: string;
   /** `null` until the machine has answered with its setup. */
   readonly machine: FleetMachineView | null;
@@ -41,18 +48,28 @@ export interface MachineTabProps {
   readonly onRetry: () => void;
   /** Through the app's client pool, so every call rides the measured carrier. */
   readonly createClient: FleetClientFactory;
+  /** The daemon's connection and security panels, for the Machine tab. */
+  readonly daemonPanels?: DaemonPanelsRenderer;
+  /** Open this machine's full-screen first run. */
+  readonly onSetUp?: () => void;
 }
 
 export type MachineTabSurfaces = Readonly<Partial<Record<MachineTabId, ComponentType<MachineTabProps>>>>;
 
 /** One glyph per tab, from the set the rest of Settings draws from. */
 const TAB_ICONS: Readonly<Record<MachineTabId, ReactNode>> = {
-  runtimes: <Play size={16} aria-hidden="true" />,
-  credentials: <KeyRound size={16} aria-hidden="true" />,
-  profiles: <Layers size={16} aria-hidden="true" />,
-  components: <Boxes size={16} aria-hidden="true" />,
-  settings: <SlidersHorizontal size={16} aria-hidden="true" />,
+  runtimes: <Play size={15} aria-hidden="true" />,
+  credentials: <KeyRound size={15} aria-hidden="true" />,
+  profiles: <Layers size={15} aria-hidden="true" />,
+  components: <Boxes size={15} aria-hidden="true" />,
+  machine: <SlidersHorizontal size={15} aria-hidden="true" />,
 };
+
+const TAB_ITEMS = MACHINE_TABS.map(definition => ({
+  id: definition.id,
+  label: definition.label,
+  icon: TAB_ICONS[definition.id],
+}));
 
 /** A tab no unit has filled yet. Routable, and honest that it shows nothing. */
 export function EmptyMachineTab({ tab, machineName }: { readonly tab: MachineTabId; readonly machineName: string }) {
@@ -77,112 +94,42 @@ export const emptyMachineTab = (tab: MachineTabId): ComponentType<MachineTabProp
     return <EmptyMachineTab tab={tab} machineName={machineName} />;
   };
 
-/**
- * What a row shows: the machine's answer, or LOCKED — it wants a passkey before it says anything, and its
- * prompt waits until it is on screen. Locked is the gate's fact, never the read's.
- */
-type ShownReach = MachineReach | { readonly kind: 'locked' };
-
-const LOCKED_SUMMARY = 'Locked · Open it to unlock';
-
-const REACH_WORDS: Readonly<Record<ShownReach['kind'], AccountStatusProps['word']>> = {
-  checking: 'checking',
-  offline: 'needs_sign_in',
-  locked: 'refresh_due',
-  online: 'ready',
-  unreadable: 'ready',
-};
-
-const reachWord = (reach: ShownReach): AccountStatusProps['word'] => REACH_WORDS[reach.kind];
-
-const REACH_LABELS: Readonly<Record<ShownReach['kind'], string>> = {
-  checking: 'Checking',
-  offline: 'Offline',
-  locked: 'Locked',
-  online: 'Online',
-  unreadable: 'Online',
-};
-
-const reachLabel = (reach: ShownReach): string => REACH_LABELS[reach.kind];
-
 export interface MachinesSurfaceProps {
   /** The daemon this Settings page is for. */
   readonly daemonId: DaemonId;
   readonly connections: readonly DaemonConnectionRecord[];
   readonly tab: MachineTabId;
+  /** What the page's reach read says about this machine. */
+  readonly reach: ShownReach;
+  /** Ask this machine again. */
+  readonly onRetry: () => void;
   /** A link named a machine this browser has not paired, so the page fell back to this one. */
   readonly unknownMachine?: string;
   /** Go to a machine's tab. The page turns this into an address. */
   readonly onOpen: (daemonId: DaemonId, tab: MachineTabId) => void;
-  /** The existing pairing flow. */
-  readonly onAddMachine: () => void;
-  /**
-   * Open this machine's first run. Called by itself, once per visit, the first time the machine answers
-   * that it is not set up — so nobody has to hunt for a button (docs/design/account-model.md §4.3).
-   */
+  /** Open this machine's full-screen first run, from the "Finish setting up" banner and the tabs. */
   readonly onSetUp?: (daemonId: DaemonId) => void;
-  /** It answered with the name it goes by. A pairing made before that name was kept learns it here. */
-  readonly onNamed?: (daemonId: DaemonId, name: string) => void;
   readonly createClient: FleetClientFactory;
   readonly tabs?: MachineTabSurfaces;
-  /**
-   * Machines whose reads wait on an unlock. Each shows as locked rather than checking for ever: its
-   * prompt waits until it is on screen, so opening it is how it unlocks.
-   */
-  readonly locked?: readonly DaemonId[];
+  readonly daemonPanels?: DaemonPanelsRenderer;
 }
 
 export function MachinesSurface({
   daemonId,
   connections,
   tab,
+  reach,
+  onRetry,
   unknownMachine,
   onOpen,
-  onAddMachine,
   onSetUp,
-  onNamed,
   createClient,
   tabs = {},
-  locked = [],
+  daemonPanels,
 }: MachinesSurfaceProps) {
-  const [reach, setReach] = useState<ReadonlyMap<DaemonId, MachineReach>>(new Map());
-  const [listing, setListing] = useState(false);
   const record = connections.find(candidate => candidate.daemonId === daemonId);
-  // Held in a ref so learning a name — which republishes the connections — never restarts a read.
-  const named = useRef(onNamed);
-  named.current = onNamed;
 
-  const check = useCallback(
-    (connection: DaemonConnectionRecord): void => {
-      setReach(current => new Map(current).set(connection.daemonId, { kind: 'checking' }));
-      void readMachineReach(() => createClient(connection)).then(next => {
-        setReach(current => new Map(current).set(connection.daemonId, next));
-        if (next.kind === 'online') named.current?.(connection.daemonId, next.machine.name);
-      });
-    },
-    [createClient],
-  );
-
-  // Keyed by the daemon, not by the record object: a new connections array with the same pairing must
-  // not start a second read of a machine that is already being asked.
-  const latest = useRef(connections);
-  latest.current = connections;
-  useEffect(() => {
-    const pairing = latest.current.find(candidate => candidate.daemonId === daemonId);
-    if (pairing) check(pairing);
-  }, [check, daemonId]);
-
-  // A machine that is not set up opens its first run by itself — ONCE per visit, so leaving the flow, or
-  // finishing it with nothing chosen, lands on the tabs instead of going round again. Landing on
-  // Machines again later offers it again.
-  const offered = useRef(false);
-  const answered = reach.get(daemonId);
-  const notSetUp = answered?.kind === 'online' && answered.machine.setUp === false;
-  useEffect(() => {
-    if (!notSetUp || offered.current || onSetUp === undefined) return;
-    offered.current = true;
-    onSetUp(daemonId);
-  }, [daemonId, notSetUp, onSetUp]);
+  const notSetUp = reach.kind === 'online' && reach.machine.setUp === false;
 
   if (record === undefined)
     return (
@@ -192,41 +139,42 @@ export function MachinesSurface({
     );
 
   const name = distinctDaemonName(record, connections);
-  const lockedNow = new Set(locked);
-  const reachOf = (id: DaemonId): ShownReach =>
-    lockedNow.has(id) ? { kind: 'locked' } : (reach.get(id) ?? { kind: 'checking' });
-  const current = reachOf(daemonId);
-  const machine = current.kind === 'online' ? current.machine : null;
+  const machine = reach.kind === 'online' ? reach.machine : null;
   const Surface = tabs[tab];
-
-  const openList = (): void => {
-    setListing(true);
-    for (const connection of connections) if (connection.daemonId !== daemonId) check(connection);
-  };
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-machines-surface={String(daemonId)}>
-      <header className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-        {listing ? (
-          <span className="inline-flex min-h-control min-w-0 items-center gap-2 text-row font-semibold text-fg">
-            <AccountStatus word={reachWord(current)} label={reachLabel(current)} />
-            <span className="min-w-0 truncate">{name}</span>
-          </span>
-        ) : (
-          <button
-            type="button"
-            data-machine-switcher=""
-            aria-label={`Machine: ${name}. Switch machine`}
-            onClick={openList}
-            className="inline-flex min-h-control min-w-0 max-w-full items-center gap-2 rounded-control text-row font-semibold text-fg transition-colors hover:text-accent"
-          >
-            <AccountStatus word={reachWord(current)} label={reachLabel(current)} />
-            <span className="min-w-0 truncate">{name}</span>
-            <ChevronDown size={14} aria-hidden="true" className="shrink-0 text-muted" />
-          </button>
-        )}
-        <span className="text-meta text-muted">{listing ? 'All machines' : reachLabel(current)}</span>
+      <header className="flex min-w-0 flex-col gap-0.5" data-machine-header="">
+        <h2
+          id="settings-machine-heading"
+          className="m-0 min-w-0 [overflow-wrap:anywhere] font-display text-title font-bold tracking-display text-fg"
+        >
+          {name}
+        </h2>
+        <span className="inline-flex min-w-0 items-center gap-2 text-cell text-muted" data-machine-status={reach.kind}>
+          <AccountStatus word={reachWord(reach)} label={reachLabel(reach)} />
+          <span className="min-w-0 truncate">{shownReachSummary(reach)}</span>
+        </span>
       </header>
+
+      {/* A machine whose setup was left for later — or never started — says so above everything else, with
+          the one button that resumes it. Setup itself is a full screen of its own, never a tab here. */}
+      {notSetUp && onSetUp !== undefined ? (
+        <div
+          className="kt-panel flex flex-wrap items-center justify-between gap-3 p-panel"
+          data-machine-finish-setup=""
+        >
+          <div className="min-w-0">
+            <p className="m-0 text-row font-semibold text-fg">Finish setting up {name}</p>
+            <p className="mb-0 mt-1 text-cell leading-base text-muted">
+              It has no runtimes yet. Setup finds Claude Code and Codex on {name} and brings in what they have.
+            </p>
+          </div>
+          <Button type="button" variant="primary" data-machine-finish-setup-open="" onClick={() => onSetUp(daemonId)}>
+            Finish setting up
+          </Button>
+        </div>
+      ) : null}
 
       {unknownMachine === undefined ? null : (
         <p className="m-0 text-cell leading-base text-warn" role="status" data-machine-unknown="">
@@ -234,134 +182,49 @@ export function MachinesSurface({
         </p>
       )}
 
-      {listing ? (
-        <section aria-labelledby="machines-list-heading" data-machines-list="">
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <h3 id="machines-list-heading" className="m-0 font-display text-title font-semibold tracking-display">
-              Machines
-            </h3>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setListing(false)}>
-              Close
+      <UnderlineTabs
+        tabs={TAB_ITEMS}
+        current={tab}
+        onSelect={next => onOpen(daemonId, next)}
+        label={`${name} views`}
+        marker="data-machine-tab"
+      />
+
+      {reach.kind === 'offline' ? (
+        <div role="status" className="kt-panel p-panel" data-machine-offline="">
+          <p className="m-0 text-row font-semibold text-fg">{name} is asleep or offline</p>
+          <p className="mb-0 mt-1 text-cell leading-base text-muted">
+            You’re seeing what Ferretry last saw. A change needs {name} awake.
+          </p>
+          <div className="mt-3">
+            <Button type="button" data-machine-retry="" onClick={onRetry}>
+              Check again
             </Button>
           </div>
-          <ul className="m-0 mt-3 flex list-none flex-col gap-2 p-0">
-            {connections.map(connection => {
-              const state = reachOf(connection.daemonId);
-              const here = connection.daemonId === daemonId;
-              return (
-                <li key={connection.daemonId}>
-                  <button
-                    type="button"
-                    data-machine-choice={String(connection.daemonId)}
-                    aria-current={here ? 'true' : undefined}
-                    onClick={() => {
-                      setListing(false);
-                      if (!here) onOpen(connection.daemonId, 'runtimes');
-                    }}
-                    className="kt-panel flex min-h-control w-full min-w-0 items-center gap-3 p-panel text-left transition-colors hover:border-accent"
-                  >
-                    <AccountStatus word={reachWord(state)} label={reachLabel(state)} />
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-row font-semibold text-fg">
-                        {distinctDaemonName(connection, connections)}
-                      </span>
-                      <span className="text-cell text-muted">
-                        {state.kind === 'locked' ? LOCKED_SUMMARY : machineReachSummary(state)}
-                      </span>
-                    </span>
-                    {here ? (
-                      <Badge tone="accent">Current</Badge>
-                    ) : (
-                      <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-            <li>
-              <button
-                type="button"
-                data-machine-add=""
-                onClick={onAddMachine}
-                className="kt-panel flex min-h-control w-full min-w-0 items-center gap-3 p-panel text-left text-row font-semibold text-fg transition-colors hover:border-accent"
-              >
-                <Plus size={16} aria-hidden="true" className="shrink-0 text-accent" />
-                <span className="min-w-0 flex-1">Add machine</span>
-                <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
-              </button>
-            </li>
-          </ul>
-          <p className="mb-0 mt-2 text-cell leading-base text-muted">
-            Each machine keeps its own credentials, components, profiles and runtimes.
-          </p>
-        </section>
-      ) : (
-        <>
-          <nav aria-label={`${name} tabs`} data-machine-tabs="">
-            {/* EQUAL COLUMNS THAT NEVER CUT A WORD. Every cell grows from the same zero basis but never below its
-                own label, so at the default size five labels fit a 390px phone side by side, and at a larger
-                text size or a wider theme the ROW scrolls inside itself — never the page, and never as "Creden…". */}
-            <ul className="scroll-thin m-0 flex list-none gap-xs overflow-x-auto p-0 md:gap-sm">
-              {MACHINE_TABS.map(definition => {
-                const selected = definition.id === tab;
-                return (
-                  <li key={definition.id} className="flex-1">
-                    <button
-                      type="button"
-                      data-machine-tab={definition.id}
-                      aria-current={selected ? 'page' : undefined}
-                      onClick={() => onOpen(daemonId, definition.id)}
-                      className={cn(
-                        'flex min-h-control w-full flex-col items-center justify-center gap-xs rounded-control border whitespace-nowrap px-xs py-xs text-2xs md:px-control-x transition-colors md:flex-row md:gap-sm md:text-ui',
-                        selected
-                          ? 'border-accent bg-accent-soft text-accent'
-                          : 'border-border bg-surface-2 text-fg [@media(hover:hover)]:hover:bg-surface-3',
-                      )}
-                    >
-                      {TAB_ICONS[definition.id]}
-                      <span>{definition.label}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </nav>
+        </div>
+      ) : reach.kind === 'unreadable' ? (
+        <p role="status" className="m-0 text-cell leading-base text-warn" data-machine-unreadable="">
+          {reach.reason}
+        </p>
+      ) : null}
 
-          {current.kind === 'offline' ? (
-            <div role="status" className="kt-panel p-panel" data-machine-offline="">
-              <p className="m-0 text-row font-semibold text-fg">{name} is asleep or offline</p>
-              <p className="mb-0 mt-1 text-cell leading-base text-muted">
-                You’re seeing what Ferretry last saw. A change needs {name} awake.
-              </p>
-              <div className="mt-3">
-                <Button type="button" size="sm" data-machine-retry="" onClick={() => check(record)}>
-                  Check again
-                </Button>
-              </div>
-            </div>
-          ) : current.kind === 'unreadable' ? (
-            <p role="status" className="m-0 text-cell leading-base text-warn" data-machine-unreadable="">
-              {current.reason}
-            </p>
-          ) : null}
-
-          <div data-machine-tab-panel={tab} className="min-w-0">
-            {Surface ? (
-              <Surface
-                connection={record}
-                machineName={name}
-                machine={machine}
-                online={current.kind !== 'offline'}
-                checking={current.kind === 'checking'}
-                onRetry={() => check(record)}
-                createClient={createClient}
-              />
-            ) : (
-              <EmptyMachineTab tab={tab} machineName={name} />
-            )}
-          </div>
-        </>
-      )}
+      <div data-machine-tab-panel={tab} className="min-w-0">
+        {Surface ? (
+          <Surface
+            connection={record}
+            machineName={name}
+            machine={machine}
+            online={reach.kind !== 'offline'}
+            checking={reach.kind === 'checking'}
+            onRetry={onRetry}
+            createClient={createClient}
+            {...(daemonPanels === undefined ? {} : { daemonPanels })}
+            {...(onSetUp === undefined ? {} : { onSetUp: () => onSetUp(daemonId) })}
+          />
+        ) : (
+          <EmptyMachineTab tab={tab} machineName={name} />
+        )}
+      </div>
     </div>
   );
 }

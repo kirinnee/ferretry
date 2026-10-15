@@ -527,17 +527,17 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
     if (landed) {
       // Already there.
     } else if (open) await page.click('[data-onboarding-open-fleet]');
-    // Under the unlock model the guide's last screen was left to unlock; the documented trigger is
-    // Settings › Machines on a machine that is not set up.
+    // Under the unlock model the guide's last screen was left to unlock; the documented trigger is the
+    // machine's own full-screen setup, which Settings' "Finish setting up" banner also opens.
     else
-      await page.goto(`${product.origin.origin}/d/${daemonId}/settings#machines`, {
+      await page.goto(`${product.origin.origin}/d/${daemonId}/setup`, {
         waitUntil: 'load',
         timeout: 30_000,
       });
     await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
     return {
       value: undefined,
-      evidence: `the first-run stepper opened at ${page.url()} (${landed ? 'by itself, straight after the unlock' : open ? 'via Open my fleet' : 'on opening Settings › Machines'})`,
+      evidence: `the first-run stepper opened at ${page.url()} (${landed ? 'by itself, straight after the unlock' : open ? 'via Open my fleet' : 'on opening the full-screen setup'})`,
     };
   });
   await captureScreens(page, journey, '02-first-run-start');
@@ -945,7 +945,7 @@ describe('signing a harness in from the first run', () => {
       } else if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
         await page.click('[data-onboarding-open-fleet]');
       else
-        await page.goto(`${product.origin.origin}/d/${daemonId}/settings#machines`, {
+        await page.goto(`${product.origin.origin}/d/${daemonId}/setup`, {
           waitUntil: 'load',
           timeout: 30_000,
         });

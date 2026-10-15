@@ -8,13 +8,23 @@
  * machine is a request to switch to it, never a way to read one daemon's setup under another's name.
  */
 
-/** The five tabs, in the prototype's order. The ids are the words in the link. */
+/**
+ * The five tabs, in the prototype's order. The ids are the words in the link.
+ *
+ * THIS IS THE ONE PLACE A TAB IS NAMED: every label a reader sees for a machine view comes from here, so
+ * renaming one is a one-line change. The last tab was "Settings" — a Settings inside Settings — and is
+ * now "Machine", which is also where the paired daemon's connection and security panels live.
+ */
 export const MACHINE_TABS = [
   { id: 'runtimes', label: 'Runtimes', description: 'What you launch: a login plus a profile.' },
   { id: 'credentials', label: 'Credentials', description: 'The logins kept on this machine.' },
   { id: 'profiles', label: 'Profiles', description: 'Layered setups a runtime uses.' },
   { id: 'components', label: 'Components', description: 'The pieces profiles are built from.' },
-  { id: 'settings', label: 'Settings', description: 'Agent permissions, tools and setup for this machine.' },
+  {
+    id: 'machine',
+    label: 'Machine',
+    description: 'Connection, security, agent permissions, tools and setup for this machine.',
+  },
 ] as const;
 
 export type MachineTabId = (typeof MACHINE_TABS)[number]['id'];

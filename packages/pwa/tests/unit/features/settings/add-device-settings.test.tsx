@@ -797,22 +797,47 @@ describe('AddDeviceSurface', () => {
     // The panel is reached through the frame in production, and the frame is what supplies the
     // connection. A panel that fetched from anywhere else would not be daemon-scoped at all.
     //
-    // A REAL DOM here, unlike every test above: the frame renders the shared BottomSheet, whose reduced-
-    // motion effect reads `window`. That is a document fact rather than a tree fact, so it needs the
-    // environment the sibling frame suites use.
+    // A REAL DOM here, unlike every test above, as in the sibling frame suites. The frame is a list of
+    // panel rows; a row asks the page to move the address, and the address names the panel it opens.
+    // Arrange
+    const opened: (string | null)[] = [];
+    const list = await mount(
+      <DaemonSettingsFrame
+        connection={connection()}
+        name="Studio workstation"
+        createPairingClient={fakeClient({})}
+        onOpenPanel={panel => opened.push(panel)}
+      />,
+    );
+    try {
+      const row = must(
+        list.container.querySelector<HTMLButtonElement>('[data-daemon-panel="devices"]'),
+        'the Add a device row',
+      );
+      // Act
+      await interact(() => row.click());
+      // Assert
+      should(opened).eql(['devices']);
+    } finally {
+      await list.unmount();
+    }
+
     // Arrange, Act
     const view = await mount(
-      <DaemonSettingsFrame connection={connection()} name="Studio workstation" createPairingClient={fakeClient({})} />,
+      <DaemonSettingsFrame
+        connection={connection()}
+        name="Studio workstation"
+        createPairingClient={fakeClient({})}
+        panel="devices"
+        onOpenPanel={() => undefined}
+      />,
     );
-    const tab = must(
-      view.container.querySelector<HTMLButtonElement>('[data-daemon-panel="devices"]'),
-      'the Add a device tab',
-    );
-    await interact(() => tab.click());
-
-    // Assert
-    should(view.container.querySelectorAll(`[data-add-device-surface="${DAEMON_ID}"]`)).have.length(1);
-    await view.unmount();
+    try {
+      // Assert
+      should(view.container.querySelectorAll(`[data-add-device-surface="${DAEMON_ID}"]`)).have.length(1);
+    } finally {
+      await view.unmount();
+    }
   });
 
   it('sends the partial patch through the client, renders the view the daemon answered with, and not its own guess', async () => {

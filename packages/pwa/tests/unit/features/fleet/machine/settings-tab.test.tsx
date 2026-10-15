@@ -55,6 +55,8 @@ interface Setup {
   readonly hash?: string;
   readonly answers?: Parameters<typeof scriptedClient>[0];
   readonly sources?: readonly DaemonConnectionRecord[];
+  readonly daemonPanels?: MachineSettingsTabProps['daemonPanels'];
+  readonly onSetUp?: () => void;
 }
 
 const props = (
@@ -74,7 +76,9 @@ const props = (
     },
     createClient: async () => client,
     sources: setup.sources ?? [record(WORK, 1)],
-    browser: fakeWindow(setup.hash ?? '#machines/studio-mac/settings'),
+    browser: fakeWindow(setup.hash ?? '#machines/studio-mac/machine'),
+    ...(setup.daemonPanels === undefined ? {} : { daemonPanels: setup.daemonPanels }),
+    ...(setup.onSetUp === undefined ? {} : { onSetUp: setup.onSetUp }),
   };
 };
 
@@ -224,7 +228,7 @@ describe('MachineSettingsTab', () => {
       expect(install?.textContent).toBe('Install');
       expect(install?.disabled).toBe(false);
       await click(install, 'install codex');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/install-codex');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/install-codex');
     });
   });
 
@@ -239,7 +243,7 @@ describe('MachineSettingsTab', () => {
       { machine, answers: { '/v1/fleet/setup/scan': NOTHING_INSTALLED } },
       async ({ q, browser, container }) => {
         await click(q('[data-tool-install="claude"]'), 'install claude');
-        expect(browser.location.hash).toBe('#machines/studio-mac/settings/install-claude');
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine/install-claude');
         expect(q('[data-install-flow="claude"]')).not.toBeNull();
         expect(container.textContent).toContain('Claude Code isn’t installed on studio-mac. Ferretry can install it.');
       },
@@ -265,7 +269,7 @@ describe('MachineSettingsTab', () => {
         'Logins and history stay behind.',
       );
       await click(setup.querySelector('[data-settings-action="clone"]'), 'clone');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/clone');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/clone');
     });
   });
 
@@ -275,7 +279,7 @@ describe('MachineSettingsTab', () => {
       expect(setup.querySelector('[data-settings-action="setup"]')).toBeNull();
       expect(setup.querySelector('[data-settings-action="import"]')?.textContent).toContain('Import again');
       await click(setup.querySelector('[data-settings-action="import"]'), 'import');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/import');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/import');
       expect(q('[data-first-run-step]')).not.toBeNull();
     });
   });
@@ -283,15 +287,102 @@ describe('MachineSettingsTab', () => {
   it('Set up opens the first run', async () => {
     await withTab({ machine: FRESH_MACHINE, answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
       await click(q('[data-settings-action="setup"]'), 'set up');
-      expect(browser.location.hash).toBe('#machines/studio-mac/settings/setup');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/setup');
       expect(q('[data-first-run-step="tools"]')).not.toBeNull();
+    });
+  });
+
+  it('a not-set-up machine’s Set up opens the full-screen first run when the shell offers one', async () => {
+    let opened = 0;
+    await withTab(
+      {
+        machine: FRESH_MACHINE,
+        onSetUp: () => {
+          opened += 1;
+        },
+      },
+      async ({ q, browser }) => {
+        await click(q('[data-settings-action="setup"]'), 'set up');
+        expect(opened).toBe(1);
+        // The address is left alone: the first run is a screen of its own, not a flow inside this tab.
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+        expect(q('[data-first-run-step]')).toBeNull();
+        expect(q('[data-machine-settings]')).not.toBeNull();
+      },
+    );
+  });
+
+  describe('the paired daemon’s connection and security panels', () => {
+    /** Records every call the tab makes, and draws a marker for the list or the open panel. */
+    const panelsSpy = () => {
+      const asked: (string | undefined)[] = [];
+      let open: ((panel: string | null) => void) | undefined;
+      const daemonPanels: NonNullable<MachineSettingsTabProps['daemonPanels']> = (panel, onOpen) => {
+        asked.push(panel);
+        open = onOpen;
+        return panel === undefined ? <ul data-panels-list="" /> : <section data-panel-shown={panel} />;
+      };
+      return { asked, daemonPanels, open: (panel: string | null) => must(open, 'the open callback')(panel) };
+    };
+
+    it('lists them between Setup and About this machine once the machine answers', async () => {
+      const spy = panelsSpy();
+      await withTab({ daemonPanels: spy.daemonPanels }, async ({ q }) => {
+        const list = must(q('[data-machine-settings] [data-panels-list]'), 'the panel list');
+        const setup = must(q('[data-setup-section="setup"]'), 'setup');
+        const facts = must(q('[data-setup-section="facts"]'), 'facts');
+        expect(setup.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+        expect(list.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+        expect(spy.asked.every(panel => panel === undefined)).toBe(true);
+      });
+    });
+
+    it('still lists them while the machine has not answered, because Host checks matter most then', async () => {
+      const spy = panelsSpy();
+      await withTab({ machine: null, checking: true, daemonPanels: spy.daemonPanels }, async ({ q }) => {
+        expect(q('[data-machine-settings-waiting]')).not.toBeNull();
+        expect(q('[data-panels-list]')).not.toBeNull();
+      });
+    });
+
+    it('opens one by moving the address, and shows a panel the address names even with no answer', async () => {
+      const spy = panelsSpy();
+      await withTab({ daemonPanels: spy.daemonPanels }, async ({ q, browser }) => {
+        await interact(() => spy.open('warden'));
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine/warden');
+        expect(q('[data-panel-shown="warden"]')).not.toBeNull();
+        expect(q('[data-machine-settings]')).toBeNull();
+        await interact(() => spy.open(null));
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+        expect(q('[data-machine-settings]')).not.toBeNull();
+      });
+      const offline = panelsSpy();
+      await withTab(
+        {
+          machine: null,
+          online: false,
+          hash: '#machines/studio-mac/machine/host-checks',
+          daemonPanels: offline.daemonPanels,
+        },
+        async ({ q }) => {
+          expect(q('[data-panel-shown="host-checks"]')).not.toBeNull();
+          expect(q('[data-machine-settings-waiting]')).toBeNull();
+          expect(offline.asked).toContain('host-checks');
+        },
+      );
+    });
+
+    it('treats a panel word as nothing to show when the shell supplies no panels', async () => {
+      await withTab({ hash: '#machines/studio-mac/machine/warden' }, async ({ q }) => {
+        expect(q('[data-machine-settings]')).not.toBeNull();
+      });
     });
   });
 
   it('states the machine facts', async () => {
     await withTab({}, async ({ q }) => {
       const facts = must(q('[data-setup-section="facts"]'), 'facts');
-      expect(facts.querySelector('h4')?.textContent).toBe('Machine');
+      expect(facts.querySelector('h4')?.textContent).toBe('About this machine');
       expect(facts.textContent).toContain('Namestudio-mac');
       expect(facts.textContent).toContain('StatusOnline');
       expect(facts.textContent).toContain('Runtimes2');
@@ -318,11 +409,11 @@ describe('MachineSettingsTab', () => {
       ['install-codex', '[data-install-flow="codex"]'],
     ];
     for (const [flow, marker] of flows)
-      await withTab({ hash: `#machines/studio-mac/settings/${flow}`, answers }, async ({ q }) => {
+      await withTab({ hash: `#machines/studio-mac/machine/${flow}`, answers }, async ({ q }) => {
         expect(q(marker)).not.toBeNull();
         expect(q('[data-machine-settings]')).toBeNull();
       });
-    await withTab({ hash: '#machines/studio-mac/settings/nonsense', answers }, async ({ q }) => {
+    await withTab({ hash: '#machines/studio-mac/machine/nonsense', answers }, async ({ q }) => {
       expect(q('[data-machine-settings]')).not.toBeNull();
     });
   });
@@ -337,7 +428,7 @@ describe('MachineSettingsSurface', () => {
     const store = { connections } as unknown as AppStore;
     const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const saved = window.location.hash;
-    window.location.hash = '#machines/studio-mac/settings/clone';
+    window.location.hash = '#machines/studio-mac/machine/clone';
     const view = await mount(
       <StoreProvider store={store}>
         <MachineSettingsSurface
@@ -364,7 +455,7 @@ describe('MachineSettingsSurface', () => {
     }
   });
 
-  it('shows the Settings tab itself when no flow is in the address', async () => {
+  it('shows the Machine tab itself when no flow is in the address', async () => {
     const connections = new DaemonConnectionStore({
       connections: [record(STUDIO, 1)],
       selectedDaemonId: STUDIO.daemonId,
@@ -372,7 +463,7 @@ describe('MachineSettingsSurface', () => {
     const store = { connections } as unknown as AppStore;
     const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
     const saved = window.location.hash;
-    window.location.hash = '#machines/studio-mac/settings';
+    window.location.hash = '#machines/studio-mac/machine';
     const view = await mount(
       <StoreProvider store={store}>
         <MachineSettingsSurface

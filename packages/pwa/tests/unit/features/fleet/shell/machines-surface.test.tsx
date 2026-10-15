@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
+import type { ShownReach } from '../../../../../src/features/fleet/shell/machine-reach.ts';
 import type { MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
 import {
+  type DaemonPanelsRenderer,
+  EmptyMachineTab,
   emptyMachineTab,
   MachinesSurface,
   type MachineTabProps,
@@ -16,41 +18,24 @@ const studio = pairing('studio', 'studio-mac');
 const work = pairing('work', 'work-linux');
 const fresh = pairing('fresh');
 
-interface Deferred {
-  readonly release: () => void;
-  readonly promise: Promise<void>;
-}
-const gate = (): Deferred => {
-  let release = (): void => undefined;
-  const promise = new Promise<void>(resolve => {
-    release = resolve;
-  });
-  return { release, promise };
-};
+const online = (overrides: Parameters<typeof machineView>[0] = {}): ShownReach => ({
+  kind: 'online',
+  machine: machineView(overrides),
+});
 
-/** Each daemon answers what this map says; a daemon it does not name is offline. */
-const factory =
-  (
-    answers: Readonly<Record<string, ReturnType<typeof machineView> | Error>>,
-    asked: string[] = [],
-  ): FleetClientFactory =>
-  async connection => {
-    asked.push(String(connection.daemonId));
-    return machineClient(answers[String(connection.daemonId)] ?? new Error('unreachable'));
-  };
+const answering: FleetClientFactory = async () => machineClient(machineView());
 
 interface SurfaceOptions {
   readonly daemonId?: DaemonId;
   readonly connections?: readonly DaemonConnectionRecord[];
   readonly tab?: MachineTabId;
+  readonly reach?: ShownReach;
   readonly unknownMachine?: string;
-  readonly createClient?: FleetClientFactory;
   readonly opened?: string[];
-  readonly added?: string[];
+  readonly retried?: string[];
   readonly tabs?: Parameters<typeof MachinesSurface>[0]['tabs'];
   readonly setUp?: string[];
-  readonly named?: string[];
-  readonly locked?: readonly DaemonId[];
+  readonly daemonPanels?: DaemonPanelsRenderer;
 }
 
 const surface = (options: SurfaceOptions = {}) => (
@@ -58,24 +43,16 @@ const surface = (options: SurfaceOptions = {}) => (
     daemonId={options.daemonId ?? studio.daemonId}
     connections={options.connections ?? [studio, work, fresh]}
     tab={options.tab ?? 'runtimes'}
+    reach={options.reach ?? online()}
+    onRetry={() => options.retried?.push('retry')}
     {...(options.unknownMachine === undefined ? {} : { unknownMachine: options.unknownMachine })}
     onOpen={(id, tab) => options.opened?.push(`${id}:${tab}`)}
-    onAddMachine={() => options.added?.push('add')}
     {...(options.setUp === undefined ? {} : { onSetUp: (id: DaemonId) => options.setUp?.push(String(id)) })}
-    {...(options.named === undefined
-      ? {}
-      : { onNamed: (id: DaemonId, name: string) => options.named?.push(`${String(id)}=${name}`) })}
-    createClient={options.createClient ?? factory({ studio: machineView() })}
+    createClient={answering}
     {...(options.tabs === undefined ? {} : { tabs: options.tabs })}
-    {...(options.locked === undefined ? {} : { locked: options.locked })}
+    {...(options.daemonPanels === undefined ? {} : { daemonPanels: options.daemonPanels })}
   />
 );
-
-const settle = async (): Promise<void> => {
-  await interact(async () => {
-    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
-  });
-};
 
 const click = async (container: HTMLElement, selector: string): Promise<void> => {
   const element = must(container.querySelector<HTMLElement>(selector), selector);
@@ -83,27 +60,34 @@ const click = async (container: HTMLElement, selector: string): Promise<void> =>
 };
 
 describe('MachinesSurface', () => {
-  it('names the machine on the switcher, checks it once, and shows the five tabs with the active one current', async () => {
-    const asked: string[] = [];
-    const createClient = factory({ studio: machineView() }, asked);
-    const view = await mount(surface({ createClient, tab: 'profiles' }));
-    await settle();
-    const switcher = must(view.container.querySelector('[data-machine-switcher]'), 'switcher');
-    expect(switcher.getAttribute('aria-label')).toBe('Machine: studio-mac. Switch machine');
-    expect(switcher.querySelector('[data-status-shape]')?.getAttribute('data-status-shape')).toBe('ready');
-    expect(asked).toEqual(['studio']);
+  it('names the machine in its header with its status, and shows the five tabs with the active one current', async () => {
+    const view = await mount(surface({ tab: 'profiles' }));
+    const header = must(view.container.querySelector<HTMLElement>('[data-machine-header]'), 'header');
+    expect(header.querySelector('h2#settings-machine-heading')?.textContent).toBe('studio-mac');
+    const status = must(header.querySelector('[data-machine-status]'), 'status');
+    expect(status.getAttribute('data-machine-status')).toBe('online');
+    expect(status.querySelector('[data-status-shape]')?.getAttribute('data-status-shape')).toBe('ready');
+    expect(status.textContent).toContain('Online · 2 runtimes');
+
+    // No switcher, no list of machines and no Add machine: Settings' own navigation chooses the machine.
+    expect(view.container.querySelector('[data-machine-switcher]')).toBeNull();
+    expect(view.container.querySelector('[data-machine-choice]')).toBeNull();
+    expect(view.container.querySelector('[data-machine-add]')).toBeNull();
+
+    const nav = must(view.container.querySelector('nav[data-underline-tabs]'), 'tab strip');
+    expect(nav.getAttribute('aria-label')).toBe('studio-mac views');
     const tabs = Array.from(view.container.querySelectorAll('[data-machine-tab]'));
-    expect(tabs.map(tab => tab.textContent)).toEqual(['Runtimes', 'Credentials', 'Profiles', 'Components', 'Settings']);
+    expect(tabs.map(tab => tab.textContent)).toEqual(['Runtimes', 'Credentials', 'Profiles', 'Components', 'Machine']);
     expect(tabs.map(tab => tab.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
+    for (const tab of tabs) expect(tab.querySelector('svg')).not.toBeNull();
+    expect(view.container.querySelector('[data-machine-tab-panel]')?.getAttribute('data-machine-tab-panel')).toBe(
+      'profiles',
+    );
     expect(view.container.querySelector('[data-machine-tab-empty]')?.getAttribute('data-machine-tab-empty')).toBe(
       'profiles',
     );
     expect(view.container.querySelector('[data-machine-offline]')).toBeNull();
-
-    // Re-rendering with an equal-but-new connections array is not a reason to ask again.
-    await view.render(surface({ createClient, tab: 'profiles', connections: [studio, work, fresh] }));
-    await settle();
-    expect(asked).toEqual(['studio']);
+    expect(view.container.querySelector('[data-machine-unreadable]')).toBeNull();
     await view.unmount();
   });
 
@@ -115,44 +99,36 @@ describe('MachinesSurface', () => {
     await view.unmount();
   });
 
-  it('hands a supplied tab surface the machine, its reach and the client', async () => {
+  it('hands a supplied tab surface the machine, its reach, the client, the panels and the first run', async () => {
     const seen: MachineTabProps[] = [];
     const Runtimes = (props: MachineTabProps) => {
       seen.push(props);
       return <p data-runtimes-surface="">{props.machineName}</p>;
     };
-    const asked: string[] = [];
-    const view = await mount(
-      surface({ tabs: { runtimes: Runtimes }, createClient: factory({ studio: machineView() }, asked) }),
-    );
-    await settle();
+    const retried: string[] = [];
+    const setUp: string[] = [];
+    const daemonPanels: DaemonPanelsRenderer = () => null;
+    const view = await mount(surface({ tabs: { runtimes: Runtimes }, retried, setUp, daemonPanels }));
     expect(view.container.querySelector('[data-runtimes-surface]')?.textContent).toBe('studio-mac');
     const last = must(seen.at(-1), 'tab props');
     expect(last.machine).toEqual(machineView());
     expect(last.online).toBe(true);
     expect(last.checking).toBe(false);
     expect(String(last.connection.daemonId)).toBe('studio');
-    expect(seen[0]?.checking).toBe(true);
-    await interact(() => last.onRetry());
-    await settle();
-    expect(asked).toEqual(['studio', 'studio']);
+    expect(last.createClient).toBe(answering);
+    expect(last.daemonPanels).toBe(daemonPanels);
+    last.onRetry();
+    expect(retried).toEqual(['retry']);
+    must(last.onSetUp, 'onSetUp')();
+    expect(setUp).toEqual(['studio']);
     await view.unmount();
   });
 
-  it('the empty frame factory renders the honest empty tab', async () => {
-    const Settings = emptyMachineTab('settings');
-    const view = await mount(surface({ tab: 'settings', tabs: { settings: Settings } }));
-    expect(view.container.querySelector('[data-machine-tab-empty="settings"] h3')?.textContent).toBe('Settings');
-    expect(view.container.textContent).toContain('Nothing is shown here yet for studio-mac.');
-    await view.unmount();
-  });
-
-  it('says a machine is offline, keeps the tabs, and checks again on request', async () => {
-    const asked: string[] = [];
+  it('hands no panels or first run to a tab when the page offers none, and says checking while it is', async () => {
     const seen: MachineTabProps[] = [];
     const view = await mount(
       surface({
-        createClient: factory({}, asked),
+        reach: { kind: 'checking' },
         tabs: {
           runtimes: props => {
             seen.push(props);
@@ -161,27 +137,95 @@ describe('MachinesSurface', () => {
         },
       }),
     );
-    await settle();
+    const last = must(seen.at(-1), 'tab props');
+    expect(last.checking).toBe(true);
+    expect(last.online).toBe(true);
+    expect(last.machine).toBeNull();
+    expect('daemonPanels' in last).toBe(false);
+    expect('onSetUp' in last).toBe(false);
+    expect(view.container.querySelector('[data-machine-status]')?.textContent).toContain('Checking');
+    await view.unmount();
+  });
+
+  it('the empty frame factory renders the honest empty tab', async () => {
+    const Settings = emptyMachineTab('machine');
+    const view = await mount(surface({ tab: 'machine', tabs: { machine: Settings } }));
+    expect(view.container.querySelector('[data-machine-tab-empty="machine"] h3')?.textContent).toBe('Machine');
+    expect(view.container.textContent).toContain('Nothing is shown here yet for studio-mac.');
+    await view.unmount();
+  });
+
+  it('an empty frame for a tab id it does not know falls back to the first tab’s words', async () => {
+    const view = await mount(<EmptyMachineTab tab={'nonsense' as MachineTabId} machineName="studio-mac" />);
+    expect(view.container.querySelector('h3')?.textContent).toBe('Runtimes');
+    await view.unmount();
+  });
+
+  it('says a machine is offline, keeps the tabs, and checks again on request', async () => {
+    const retried: string[] = [];
+    const seen: MachineTabProps[] = [];
+    const view = await mount(
+      surface({
+        reach: { kind: 'offline' },
+        retried,
+        tabs: {
+          runtimes: props => {
+            seen.push(props);
+            return null;
+          },
+        },
+      }),
+    );
     expect(view.container.querySelector('[data-machine-offline]')?.textContent).toContain(
       'studio-mac is asleep or offline',
     );
+    expect(view.container.querySelectorAll('[data-machine-tab]')).toHaveLength(5);
     expect(must(seen.at(-1), 'props').online).toBe(false);
     expect(must(seen.at(-1), 'props').machine).toBeNull();
     expect(
-      view.container.querySelector('[data-machine-switcher] [data-status-shape]')?.getAttribute('data-status-shape'),
+      view.container.querySelector('[data-machine-status] [data-status-shape]')?.getAttribute('data-status-shape'),
     ).toBe('needs_sign_in');
     await click(view.container, '[data-machine-retry]');
-    await settle();
-    expect(asked).toEqual(['studio', 'studio']);
+    expect(retried).toEqual(['retry']);
     await view.unmount();
   });
 
   it('shows why a reachable machine did not share its setup', async () => {
-    const view = await mount(surface({ createClient: factory({ studio: new FyHttpError('gone', 404, undefined) }) }));
-    await settle();
+    const view = await mount(
+      surface({
+        reach: {
+          kind: 'unreadable',
+          reason: 'This machine runs an older Ferretry that cannot show its setup here yet.',
+        },
+      }),
+    );
     expect(view.container.querySelector('[data-machine-unreadable]')?.textContent).toBe(
       'This machine runs an older Ferretry that cannot show its setup here yet.',
     );
+    expect(view.container.querySelector('[data-machine-status]')?.textContent).toContain('Online · Setup not shown');
+    await view.unmount();
+  });
+
+  it('shows a machine waiting on an unlock as locked', async () => {
+    const view = await mount(surface({ reach: { kind: 'locked' } }));
+    const status = must(view.container.querySelector('[data-machine-status]'), 'status');
+    expect(status.getAttribute('data-machine-status')).toBe('locked');
+    expect(status.textContent).toContain('Locked · Open it to unlock');
+    expect(status.querySelector('[data-status-shape]')?.getAttribute('data-status-shape')).toBe('refresh_due');
+    await view.unmount();
+  });
+
+  it('tells machines that share a name apart in its header', async () => {
+    const box = pairing('studio', 'box');
+    const twin = pairing('twin', 'box');
+    const view = await mount(surface({ connections: [box, twin] }));
+    expect(view.container.querySelector('#settings-machine-heading')?.textContent).toBe('box (studio.example.test)');
+    await view.unmount();
+  });
+
+  it('names an unnamed pairing by its address', async () => {
+    const view = await mount(surface({ daemonId: fresh.daemonId }));
+    expect(view.container.querySelector('#settings-machine-heading')?.textContent).toBe('https://fresh.example.test');
     await view.unmount();
   });
 
@@ -193,164 +237,56 @@ describe('MachinesSurface', () => {
     await view.unmount();
   });
 
-  it('lists every paired machine with its state, switches to another, and offers Add machine', async () => {
-    const opened: string[] = [];
-    const added: string[] = [];
-    const slow = gate();
-    const asked: string[] = [];
-    const answers = factory(
-      { studio: machineView(), work: machineView({ name: 'work-linux', setUp: false, runtimeCount: 0 }) },
-      asked,
-    );
-    const createClient: FleetClientFactory = async connection => {
-      if (String(connection.daemonId) === 'work') await slow.promise;
-      return await answers(connection);
-    };
-    const view = await mount(surface({ opened, added, createClient }));
-    await settle();
-    await click(view.container, '[data-machine-switcher]');
-    expect(view.container.querySelector('[data-machine-tabs]')).toBeNull();
-    expect(view.container.textContent).toContain('All machines');
-    const summary = (id: string) =>
-      view.container.querySelector(`[data-machine-choice="${id}"] .text-cell`)?.textContent;
-    expect(summary('studio')).toBe('Online · 2 runtimes');
-    expect(summary('work')).toBe('Checking');
-    slow.release();
-    await settle();
-    expect(summary('work')).toBe('Online · Not set up yet');
-    expect(summary('fresh')).toBe('Offline');
-    expect(view.container.querySelector('[data-machine-choice="fresh"] .truncate')?.textContent).toBe(
-      'https://fresh.example.test',
-    );
-    expect(view.container.querySelector('[data-machine-choice="studio"]')?.getAttribute('aria-current')).toBe('true');
-    expect(view.container.querySelector('[data-machine-choice="studio"]')?.textContent).toContain('Current');
-
-    // Picking the machine you are on just closes the list.
-    await click(view.container, '[data-machine-choice="studio"]');
-    expect(opened).toEqual([]);
-    expect(view.container.querySelector('[data-machine-tabs]')).not.toBeNull();
-
-    await click(view.container, '[data-machine-switcher]');
-    await click(view.container, '[data-machine-choice="work"]');
-    expect(opened).toEqual(['work:runtimes']);
-
-    await click(view.container, '[data-machine-switcher]');
-    await click(view.container, '[data-machine-add]');
-    expect(added).toEqual(['add']);
-    const close = must(
-      Array.from(view.container.querySelectorAll('button')).find(button => button.textContent === 'Close'),
-      'close',
-    );
-    await interact(() => close.click());
-    expect(view.container.querySelector('[data-machines-list]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('shows a machine waiting on an unlock as locked, and tells machines that share a name apart', async () => {
-    // B19: a locked machine's reads wait for it to come on screen, so its row must not say "Checking" for
-    // ever; and two machines on one host both answer to its name.
-    const box = pairing('studio', 'box');
-    const twin = pairing('twin', 'box');
-    const clone = { ...pairing('clone', 'box'), baseUrl: twin.baseUrl };
-    const view = await mount(
-      surface({
-        connections: [box, twin, clone],
-        locked: [twin.daemonId],
-        createClient: factory({ studio: machineView(), clone: machineView() }),
-      }),
-    );
-    await settle();
-    const switcher = must(view.container.querySelector('[data-machine-switcher]'), 'switcher');
-    expect(switcher.getAttribute('aria-label')).toBe('Machine: box (studio.example.test). Switch machine');
-    await click(view.container, '[data-machine-switcher]');
-    await settle();
-    const row = (id: string) => view.container.querySelector(`[data-machine-choice="${id}"]`);
-    expect(row('twin')?.querySelector('.truncate')?.textContent).toBe('box (twin)');
-    expect(row('clone')?.querySelector('.truncate')?.textContent).toBe('box (clone)');
-    expect(row('twin')?.querySelector('.text-cell')?.textContent).toBe('Locked · Open it to unlock');
-    expect(row('twin')?.querySelector('[data-status-shape]')?.textContent).toContain('Locked');
-    expect(row('clone')?.querySelector('.text-cell')?.textContent).toBe('Online · 2 runtimes');
-    await view.unmount();
-  });
-
   it('refuses to show a daemon this browser is not paired with', async () => {
     const view = await mount(surface({ daemonId: 'stranger' as DaemonId }));
     expect(view.container.querySelector('[role="alert"]')?.textContent).toBe(
       'This machine is not paired with this browser, so its setup cannot be shown.',
     );
+    expect(view.container.querySelector('[data-machines-surface]')).toBeNull();
     await view.unmount();
   });
 });
 
 describe('MachinesSurface: a machine that is not set up', () => {
-  it('opens its first run by itself, once per visit', async () => {
-    // Arrange
+  it('never opens its first run by itself, and offers “Finish setting up” above everything else', async () => {
     const setUp: string[] = [];
-    const notSetUp = factory({ studio: machineView({ setUp: false, runtimeCount: 0 }) });
-    const view = await mount(surface({ setUp, createClient: notSetUp }));
-    await settle();
+    const view = await mount(surface({ setUp, reach: online({ setUp: false, runtimeCount: 0 }) }));
 
-    // Assert — asked for straight away, so nobody has to find a button.
-    expect(setUp).toEqual(['studio']);
+    // Nothing is asked for on arrival: the first run is a full screen the reader chooses.
+    expect(setUp).toEqual([]);
+    const banner = must(view.container.querySelector<HTMLElement>('[data-machine-finish-setup]'), 'banner');
+    expect(banner.textContent).toContain('Finish setting up studio-mac');
+    expect(view.container.querySelector('[data-machine-status]')?.textContent).toContain('Online · Not set up yet');
+    // Above the tabs.
+    expect(
+      banner.compareDocumentPosition(must(view.container.querySelector('nav[data-underline-tabs]'), 'tabs')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeGreaterThan(0);
 
-    // Coming back to the tabs in the same visit (Leave setup, or Done with nothing) does not go round again.
-    await click(view.container, '[data-machine-tab="settings"]');
-    await view.render(surface({ setUp, createClient: notSetUp, tab: 'settings' }));
-    await settle();
+    await click(view.container, '[data-machine-finish-setup-open]');
     expect(setUp).toEqual(['studio']);
     await view.unmount();
-
-    // A new visit offers it again.
-    const again = await mount(surface({ setUp, createClient: notSetUp }));
-    await settle();
-    expect(setUp).toEqual(['studio', 'studio']);
-    await again.unmount();
   });
 
-  it('leaves a machine that is set up, offline or unreadable alone', async () => {
-    const setUp: string[] = [];
-    for (const answer of [machineView(), new Error('unreachable'), new FyHttpError('no', 404, 'not_found')]) {
-      const view = await mount(surface({ setUp, createClient: factory({ studio: answer }) }));
-      await settle();
+  it('offers no banner for a machine that is set up, checking, offline, unreadable or locked', async () => {
+    const reaches: ShownReach[] = [
+      online(),
+      { kind: 'checking' },
+      { kind: 'offline' },
+      { kind: 'unreadable', reason: 'no' },
+      { kind: 'locked' },
+    ];
+    for (const reach of reaches) {
+      const view = await mount(surface({ setUp: [], reach }));
+      expect(view.container.querySelector('[data-machine-finish-setup]')).toBeNull();
       await view.unmount();
     }
-    expect(setUp).toEqual([]);
   });
 
-  it('does nothing when the page offers no first run', async () => {
-    const view = await mount(surface({ createClient: factory({ studio: machineView({ setUp: false }) }) }));
-    await settle();
-    expect(view.container.querySelector('[data-machine-tabs]')).not.toBeNull();
+  it('offers no banner when the page has no first run to open', async () => {
+    const view = await mount(surface({ reach: online({ setUp: false }) }));
+    expect(view.container.querySelector('[data-machine-finish-setup]')).toBeNull();
+    expect(view.container.querySelectorAll('[data-machine-tab]')).toHaveLength(5);
     await view.unmount();
-  });
-});
-
-describe('MachinesSurface learning a machine name', () => {
-  it('reports the name each machine answers with, and nothing for one that does not answer', async () => {
-    // Arrange — the name in `GET /v1/fleet/machine` is the host name, the same one pairing reports.
-    const named: string[] = [];
-    const createClient = factory({
-      studio: machineView({ name: 'studio-host' }),
-      work: machineView({ name: 'work-host' }),
-    });
-
-    // Act
-    const view = await mount(surface({ createClient, named, connections: [studio, work, fresh] }));
-    await settle();
-    await click(view.container, '[data-machine-switcher]');
-    await settle();
-
-    // Assert
-    expect(named.sort()).toEqual(['studio=studio-host', 'work=work-host']);
-  });
-
-  it('reads the machine without anywhere to report the name to', async () => {
-    // Act
-    const asked: string[] = [];
-    await mount(surface({ createClient: factory({ studio: machineView() }, asked) }));
-    await settle();
-
-    // Assert
-    expect(asked).toEqual(['studio']);
   });
 });

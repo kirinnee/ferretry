@@ -70,7 +70,7 @@ function MissingHarness({
     <p className="m-0 flex flex-wrap items-center gap-1 text-cell text-warn" data-runtime-missing-harness="">
       <TriangleAlert size={14} aria-hidden="true" />
       <span>{HARNESS_NAMES[runtime.harness]} isn’t installed here</span> ·{' '}
-      <a href={machineDetailHash(machineName, 'settings')} className="font-semibold text-accent underline">
+      <a href={machineDetailHash(machineName, 'machine')} className="font-semibold text-accent underline">
         Install
       </a>
     </p>
@@ -128,10 +128,7 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
           <p className="m-0 text-row font-semibold text-fg">{HARNESS_NAMES[runtime.harness]} isn’t installed here</p>
           <p className="m-0 text-cell text-muted">Install it on {machineName} to launch this runtime.</p>
-          <a
-            href={machineDetailHash(machineName, 'settings')}
-            className="text-cell font-semibold text-accent underline"
-          >
+          <a href={machineDetailHash(machineName, 'machine')} className="text-cell font-semibold text-accent underline">
             Install {HARNESS_NAMES[runtime.harness]}
           </a>
         </div>
@@ -371,22 +368,14 @@ export function RuntimesTab({
   const [flow, setFlow] = useState<StepperState | null>(null);
   const [draft, setDraft] = useState<AddRuntimeDraft>(EMPTY_ADD_RUNTIME);
 
-  // M3: a machine that is not set up opens the first run, which the Settings tab owns.
+  // M3: a machine that is not set up has no runtimes; the banner above the tabs resumes its setup.
   if (machine !== null && !machine.setUp)
     return (
-      <div className="kt-panel flex flex-col items-start gap-2 p-panel" data-runtimes-not-set-up="">
-        <h3 className="m-0 text-row font-semibold text-fg">{machineName} isn’t set up yet</h3>
+      <div className="kt-panel flex flex-col items-start gap-1 p-panel" data-runtimes-not-set-up="">
+        <h3 className="m-0 text-row font-semibold text-fg">No runtimes on {machineName} yet</h3>
         <p className="m-0 text-cell leading-base text-muted">
-          Setting it up finds Claude Code and Codex on {machineName} and brings in what they already have.
+          Finish setting it up above to bring in your Claude Code and Codex setup.
         </p>
-        <a
-          href={`${machineDetailHash(machineName, 'settings')}/setup`}
-          className="kt-btn max-w-full no-underline hover:no-underline"
-          data-variant="primary"
-        >
-          {/* A machine named by its address is longer than a phone: the label truncates inside the button. */}
-          <span className="min-w-0 truncate">Set up {machineName}</span>
-        </a>
       </div>
     );
 

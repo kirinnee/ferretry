@@ -22,5 +22,5 @@ export const HARNESS_MACHINE_TABS: MachineTabSurfaces = {
   // The reader's own labels, as `ComponentsSurface` reads them from the store in the app.
   components: props => <ComponentsTab {...props} machineNames={HARNESS_MACHINE_NAMES} />,
   // main.tsx mounts the Settings tab itself, because it needs the harness's other pairings for Clone.
-  settings: emptyMachineTab('settings'),
+  machine: emptyMachineTab('machine'),
 };
