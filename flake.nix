@@ -3,8 +3,8 @@
     flake-utils.url = "github:numtide/flake-utils";
     treefmt-nix.url = "github:numtide/treefmt-nix";
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
-    # pre-commit-hooks builds the `pre-commit` binary from ITS OWN nixpkgs, so an override applied to
-    # ours never reached the package that actually runs. Following ours makes one overlay govern both.
+    # pre-commit-hooks resolves the `pre-commit` binary from ITS OWN nixpkgs. Following ours keeps one
+    # pin for both, so the devshell and the hook runner share one cache.nixos.org-substituted package.
     pre-commit-hooks.inputs.nixpkgs.follows = "nixpkgs";
 
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -27,26 +27,17 @@
         system:
         let
           /*
-            One overlay, so every consumer of `pre-commit` gets the same package — ours in the
-            devshell and pre-commit-hooks' own. `tests/repository_test.py::test_output_isatty`
-            asserts on whether stdout is a terminal, so it measures the CI runner rather than the
-            tool: it failed Containment (macOS) on three pull requests in one evening, twice on
-            commits whose sibling run of the identical commit passed, without reaching a line of this
-            repository's code.
-
-            `disabledTests` rather than `doCheck = false` — the other 714 upstream tests still run,
-            and a rename upstream fails the build loudly instead of silently skipping nothing.
+            Stock nixpkgs, with NO overlay — and that is a CI-speed property, not an omission. Hydra
+            has already built and tested every package at this pin, so `nix develop` substitutes the
+            whole closure from cache.nixos.org. The overlay that used to sit here (`disabledTests` on
+            `pre-commit`, #246) changed the derivation hash, so EVERY CI job rebuilt pre-commit from
+            source and ran its ~715 upstream tests: ~45s of each job's ~80s Nix setup, on twelve jobs a
+            run, and the source of the `Cannot build pre-commit-4.5.1.drv` failures. Those upstream
+            tests are not this repository's to run; Hydra runs them. Do not override a package here
+            without checking it still substitutes (`nix build --dry-run .#devShells.<system>.ci`
+            must list nothing under "will be built" beyond this flake's own derivations).
           */
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [
-              (_: previous: {
-                pre-commit = previous.pre-commit.overridePythonAttrs (old: {
-                  disabledTests = (old.disabledTests or [ ]) ++ [ "test_output_isatty" ];
-                });
-              })
-            ];
-          };
+          pkgs = import nixpkgs { inherit system; };
           pre-commit-lib = pre-commit-hooks.lib.${system};
         in
         with rec {
