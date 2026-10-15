@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "int": [
+    { "name": "daemon-runtime", "prefixes": ["packages/daemon/tests/integration/runtime/"] },
+    { "name": "daemon", "prefixes": ["packages/daemon/"] },
+    { "name": "pwa-render", "prefixes": ["packages/pwa/tests/integration/fy-render-"] },
+    { "name": "everything-else", "prefixes": ["packages/"] }
+  ]
+}

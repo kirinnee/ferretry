@@ -133,29 +133,80 @@ jobs:
           if-no-files-found: warn
 
   test:
-    name: ${{ matrix.mode == 'int' && 'Integration Tests' || 'Unit Tests' }}
+    name: Unit Tests
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Run unit tests
+        run: nix develop .#ci -c ./scripts/ci/test.sh unit
+      - name: Upload unit coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage/unit
+          if-no-files-found: warn
+
+  # The integration tier in parallel shares (config/test-groups.json). Serially it was the CI critical
+  # path at ~4.4 min (~3.8 min of tests); each group is about a minute. The matrix lists every group
+  # by name, and `int-ledger` refuses to judge unless every group in the config reported.
+  int:
+    name: Integration Tests (${{ matrix.group }})
     permissions:
       contents: read
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        mode: [unit, int]
+        group: [daemon-runtime, daemon, pwa-render, everything-else]
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31
-      - name: Run ${{ matrix.mode }} tests
+      - name: Run the ${{ matrix.group }} integration tests
         env:
-          TEST_MODE: ${{ matrix.mode }}
-        run: nix develop .#ci -c ./scripts/ci/test.sh "$TEST_MODE"
-      - name: Upload ${{ matrix.mode }} coverage artifact
+          TEST_GROUP: ${{ matrix.group }}
+        run: nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"
+      - name: Upload the ${{ matrix.group }} coverage ledger
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.mode }}
-          path: coverage/${{ matrix.mode }}
+          name: coverage-int-${{ matrix.group }}
+          path: coverage/int/groups/${{ matrix.group }}/lcov.info
+          if-no-files-found: warn
+
+  # The integration tier's 100% ledger over every group's (scripts/ci/coverage-ledger.sh says why it
+  # merges per file, never per line). Like `smoke`, it enters no nix shell: the gate is bash, awk,
+  # grep and jq, all on the runner image, and a nix shell would add ~30s to the critical path.
+  int-ledger:
+    name: Integration Tests
+    needs: int
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Download every group's coverage ledger
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-int-*
+          path: coverage/int/groups
+      - name: Hold the integration tier to its 100% ledger
+        run: ./scripts/ci/coverage-ledger.sh int --groups coverage/int/groups
+      - name: Upload int coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-int
+          path: coverage/int/lcov.info
           if-no-files-found: warn
 
   darwin-confinement:
