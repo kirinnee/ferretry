@@ -424,6 +424,9 @@ describe('MachineFirstRun: Sign in now', () => {
     const calls: Call[] = [];
     let added = false;
     let signedIn = false;
+    // The machine says the sign-in still waits for approval until the test has seen that screen, so a
+    // poll that fires while a loaded runner is still committing the start cannot finish it unseen.
+    let approvedOnMachine = false;
     const signedInScan = scan({
       harnesses: [CLAUDE_SCAN, { ...CODEX_SCAN, account: { state: 'signed-in', email: 'you@example.com' } }],
     });
@@ -440,6 +443,7 @@ describe('MachineFirstRun: Sign in now', () => {
         },
         [LOGIN_PATH]: codexFlow('awaiting-approval'),
         [FLOW_PATH]: () => {
+          if (!approvedOnMachine) return codexFlow('awaiting-approval');
           signedIn = true;
           return codexFlow('complete');
         },
@@ -464,6 +468,7 @@ describe('MachineFirstRun: Sign in now', () => {
       ]);
       expect(calls.find(call => call.path === LOGIN_PATH)?.body).toEqual({ credentialId: 'codex-you' });
       await until(() => h.q('[data-codex-login="awaiting-approval"]') !== null, 'the Codex login awaiting approval');
+      approvedOnMachine = true;
 
       await wait(60);
       // Back on the same step, now signed in, and the import is a plain Import.
