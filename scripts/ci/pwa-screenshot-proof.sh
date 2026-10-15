@@ -44,7 +44,16 @@ set -euo pipefail
 # different first frame emulated at the browser context, not a class toggle inside one run.
 #
 # Local reproduction, identical to the job:
-#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh
+#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh [dark|light]
+#
+# With no argument it runs both schemes in turn; CI passes one per matrix job so they run side by side.
+
+schemes=(dark light)
+case "${1:-}" in
+"") ;;
+dark | light) schemes=("$1") ;;
+*) echo "❌ usage: $0 [dark|light]" >&2 && exit 2 ;;
+esac
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -64,7 +73,7 @@ mkdir -p "${artifact_dir}"
 
 echo "📝 Driving ${chrome} over the Settings harness at 390x844 and 1440x900"
 
-for scheme in dark light; do
+for scheme in "${schemes[@]}"; do
   flags=(--settings-only)
   [ "${scheme}" = "light" ] && flags+=(--light)
   log="${artifact_dir}/${scheme}.log"
@@ -117,4 +126,4 @@ for scheme in dark light; do
   echo "📸 ${frames} ${scheme} frames -> ${artifact_dir}/${scheme}/"
 done
 
-echo "✅ The Settings surfaces fit both viewports in both colour schemes; frames are in ${artifact_dir}/"
+echo "✅ The Settings surfaces fit both viewports in ${schemes[*]}; frames are in ${artifact_dir}/"
