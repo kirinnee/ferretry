@@ -20,7 +20,7 @@ If a workflow step contains repository logic beyond that shape, the logic is in 
 
 | Workflow  | Trigger                                                     | Responsibility                                         |
 | --------- | ----------------------------------------------------------- | ------------------------------------------------------ |
-| `CI`      | every push, pull request, manual dispatch                   | gates, tests, compile, SIT, cross-platform smoke       |
+| `CI`      | push to `main`, pull request, manual dispatch               | gates, tests, compile, SIT, cross-platform smoke       |
 | `E2E`     | pull requests touching the tier's packages, manual dispatch | the e2e tier: compiled binaries, real PWA, real Chrome |
 | `Release` | `CI` completed successfully on `main`                       | semantic-release: version, changelog, `vX.Y.Z` tag     |
 | `CD`      | push of a `v*.*.*` tag                                      | GoReleaser publishes the release and its channels      |
@@ -91,14 +91,25 @@ pull requests that touch `packages/{pwa,daemon,relay,protocol,cli}` or the tier 
 - About ten minutes on `ubuntu-latest`, with `timeout-minutes: 30` so a wedged browser cannot hold a runner
   for six hours.
 
+## One run per commit
+
+`CI` runs once for each commit under test: a pull request through its `pull_request` run, `main`
+through its `push` run (the run `Release` waits on), and anything else through `workflow_dispatch`.
+`push` is filtered to `main` on purpose. When it fired for every branch and tag, each PR ran every
+job twice — the branch push and the PR — and each release ran them a third time on the tag, whose
+tree the `main` run of the release commit had already proved. The duplicates drew on the same
+runner pool as the runs that mattered, and macOS runners are the scarcest part of it.
+
+`push` also ignores a commit that changes only `Casks/**`. That is GoReleaser's cask update, pushed
+by `CD` after a release has shipped, and no job reads it.
+
 ## Superseded runs
 
 A new push makes the run for the old SHA worthless, so `CI` cancels it rather than letting it hold a
 runner. Its top-level `concurrency` block keys the group on the PR number for `pull_request`
-events and on the ref for pushes to a branch other than `main`, with `cancel-in-progress` true for
-exactly those two cases.
+events, with `cancel-in-progress` true for exactly that case.
 
-Every other run — a push to `main`, a tag, a manual dispatch — falls into a group of its own
+Every other run — a push to `main`, a manual dispatch — falls into a group of its own
 `run_id`, so nothing can cancel it. Setting `cancel-in-progress: false` on a shared group would not
 be enough: GitHub still cancels a _pending_ run in a group when a newer one queues, and `Release`
 needs every `main` CI run to complete. The deploying workflows (`CD`, `Release`, `PWA Pages`,
