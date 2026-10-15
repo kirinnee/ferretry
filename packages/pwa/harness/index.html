@@ -1,9 +1,14 @@
 <!doctype html>
-<html lang="en" data-theme="studio-dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ferretry shell harness</title>
+    <!-- The app's own pre-paint bootstrap, so the first frame is already in the context's scheme. A
+         hardcoded theme here was flipped by the shell after mount, and that flip started a colour
+         transition on every chrome element at once (3117 in light, 12 in dark): the capture that
+         finishes transitions then spent its whole 30s budget on them. -->
+    <script src="./pre-paint.js"></script>
     <link rel="stylesheet" href="./app.css" />
   </head>
   <body>

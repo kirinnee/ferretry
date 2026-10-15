@@ -108,7 +108,7 @@ jobs:
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
 
   pwa-screenshot:
-    name: PWA Settings Geometry
+    name: PWA Settings Geometry (${{ matrix.scheme }})
     permissions:
       contents: read
     # `ubuntu-latest`, and deliberately NOT a macOS runner: the runner image already ships the same
@@ -117,6 +117,12 @@ jobs:
     # critical path, which is why it is a sibling job rather than another step on an existing one — it
     # adds runner time and no wall clock.
     runs-on: ubuntu-latest
+    # One job per colour scheme: the two runs are independent first frames (`pre-paint.js` resolves the
+    # theme before paint), so running them in sequence only added a scheme's ~70s to the wall clock.
+    strategy:
+      fail-fast: false
+      matrix:
+        scheme: [dark, light]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -127,16 +133,18 @@ jobs:
       # clipping that shipped once already and every gate here would stay green. The script's header
       # says which frames this covers, which it does not, and why the assertion is the gate while the
       # images are only evidence.
-      - name: Prove the Settings surfaces fit both viewports
-        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh
-      # `always()` because a red run is the run whose frames matter most: the artifact carries both
-      # colour schemes at both viewports plus each run's full log, so a reviewer can see the panel that
+      - name: Prove the Settings surfaces fit both viewports in ${{ matrix.scheme }}
+        env:
+          SCHEME: ${{ matrix.scheme }}
+        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME"
+      # `always()` because a red run is the run whose frames matter most: the artifact carries this
+      # colour scheme at both viewports plus the run's full log, so a reviewer can see the panel that
       # broke instead of reading a geometry number and guessing.
       - name: Upload the captured Settings frames
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pwa-settings-frames
+          name: pwa-settings-frames-${{ matrix.scheme }}
           path: packages/pwa/.artifacts/pwa-screenshot/
           if-no-files-found: warn
 

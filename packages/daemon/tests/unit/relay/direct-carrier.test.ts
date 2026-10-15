@@ -200,7 +200,7 @@ async function handshake(
       payload: encodeHandshakeMessage(pending.hello),
     }),
   );
-  await settled();
+  await arrived(wire, FRAME_KINDS.handshake);
   const answer = wire.binary.find(frame => frame.kind === FRAME_KINDS.handshake);
   const hello = answer === undefined ? null : decodeDaemonHello(answer.payload);
   if (hello === null) throw new Error('no daemon hello');
@@ -230,6 +230,18 @@ async function records(wire: Downstream, channel: ChannelState): Promise<unknown
 }
 
 const settled = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 20));
+
+/**
+ * Waits for the daemon to answer with a frame of this kind, for at most two seconds.
+ *
+ * The answer is computed with WebCrypto, which resolves off the event loop: a fixed `settled` sleep held on
+ * a loaded runner and the frame landed after it, while sixty-four of those sleeps in one test spent half the
+ * five-second budget on an idle one.
+ */
+const arrived = async (wire: Downstream, kind: number): Promise<void> => {
+  for (let waited = 0; waited < 2_000 && !wire.binary.some(frame => frame.kind === kind); waited += 1)
+    await new Promise(resolve => setTimeout(resolve, 1));
+};
 
 const lastControl = (wire: Downstream) => {
   const frame = wire.binary.filter(candidate => candidate.kind === FRAME_KINDS.control).at(-1);
@@ -449,6 +461,8 @@ describe('the direct carrier', () => {
         appSession: APP_SESSION,
         proof: await signDeviceProof(crypto_, deviceKey, deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION)),
       });
+      // Proven only once the daemon has said so: until then the socket still holds an unproven slot.
+      await arrived(wire, FRAME_KINDS.data);
       return handler;
     };
     // Every proven session frees its unproven slot, so many more than the unproven cap can be open.

@@ -74,8 +74,13 @@ fi
 echo "🧪 Running ${mode} tests with coverage..."
 rm -f "${coverage_file}"
 
+coverage_dir="${coverage_file%/*}"
+mkdir -p "${coverage_dir}"
 set +e
-bun test --config="${config}" "${timeout_flag[@]}" --coverage "${files[@]}"
+bun test --config="${config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${coverage_dir}/junit.xml" "${files[@]}" 2>&1 | tee "${coverage_dir}/console.log"
+# A red run whose every failure is a quarantined flake reruns those files once, and its exit is the
+# run's from here on: 0 when green or rescued, the original status otherwise — see the script.
+bun scripts/ci/quarantine.ts "${mode}" "${PIPESTATUS[0]}" "${config}" "${coverage_dir}" "${coverage_dir}/console.log" "${timeout_flag[@]}"
 test_status=$?
 set -e
 

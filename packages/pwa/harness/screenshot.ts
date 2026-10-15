@@ -69,6 +69,11 @@ const PHONE_CONTEXT = {
  * toggle — it has to be emulated at the CONTEXT, exactly as `app-screenshot.ts`
  * already does. The captures keep their existing names: a two-theme review is
  * two runs into two directories, not two filename conventions.
+ *
+ * `harness/index.html` loads that same `pre-paint.js`, and must. A page that booted dark and was
+ * flipped to light by the shell after mount started a colour transition on 3117 elements at once, and
+ * a capture that finishes transitions first spent its whole 30s budget on them — the light-only
+ * `screenshot: Timeout 30000ms exceeded` on the unlock screen, in about one CI run in nine.
  */
 const SCHEME: 'light' | 'dark' = process.argv.includes('--light') ? 'light' : 'dark';
 
@@ -1477,6 +1482,8 @@ const server = Bun.serve({
       return new Response(Bun.file(join(harnessDir, 'index.html')), {
         headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': TRUSTED_TYPES_POLICY },
       });
+    // Served from `public/` rather than copied into `out/`: it is unbundled by design, so the shipped file IS the build.
+    if (path === '/pre-paint.js') return new Response(Bun.file(join(packageDir, 'public/pre-paint.js')));
     return new Response(Bun.file(join(outDir, path)));
   },
 });

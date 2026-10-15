@@ -419,6 +419,47 @@ implies coverage that is not there.
 
 ---
 
+## Flaky Tests and the Quarantine
+
+A flaky test is a defect in the test, and the remedy is to fix it. What the quarantine does is stop
+a known flake from holding a release hostage **while** it is being fixed.
+
+**Fix the cause, not the budget.** The flakes fixed so far were all one of two shapes, and neither
+was "the machine is slow":
+
+- **Asserting a moment that can be skipped.** A 5ms poll can move a sign-in from "awaiting approval"
+  to "complete" before the test looks. Script the fake daemon to hold the state until the test has
+  seen it, then release it.
+- **A fixed sleep standing in for an event.** `await sleep(20)` and then reading a frame that WebCrypto
+  produces off the event loop. Wait for the frame itself, with a bounded deadline that names what
+  never arrived (`never shown: the Codex login awaiting approval`).
+
+Raising a timeout is legitimate only when you can say why the old budget was wrong, measured.
+
+**The quarantine list.** `config/test-quarantine.json` names each known-flaky test by `tier`, `file`,
+its full `describe > … > it` name, the GitHub `issue` tracking the fix, and the date it was `added`.
+An entry with no issue is refused: a quarantine nobody is tracking is a deletion.
+
+**What it does in CI.** `scripts/ci/quarantine.ts` runs after the unit and int tiers. A red tier is
+rerun only when **every** failing test is on the list, Bun's own failure count agrees with the JUnit
+report, and Bun reported no error outside a test. Then only the files holding those tests run once
+more; if they pass, the tier is green with a `::warning::` annotation per test and a line in the job
+summary naming its issue. Anything else — one unlisted failure, an unhandled error, a file that would
+not load, a quarantined test that fails twice — leaves the tier exactly as red as it was. This is why
+a blanket `bun test --retry` is not used: it would excuse every new flake too, silently.
+
+**The coverage ledger stays whole.** A failed test executed only part of what it covers, so the first
+run's ledger can be short of lines only that test reaches. The rerun's hits are merged into the first
+run's line set, and the 100% gate runs on the merged ledger. It is not a plain union: Bun reports a
+function a run loaded but never called coarsely (every line of it as missed, blanks included), and a
+rerun of one file loads many such modules, so its unhit lines are dropped rather than added. The rerun is
+a passing run of the same files at the same commit, so this proves nothing a green run would not.
+
+**Leaving the quarantine.** Fix the test, delete its entry, and close the issue in the same PR. An
+entry older than 14 days still works, and its warning says it has outstayed the budget.
+
+---
+
 ## Test Organization
 
 The real layout:

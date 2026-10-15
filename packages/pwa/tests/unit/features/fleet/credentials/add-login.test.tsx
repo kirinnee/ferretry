@@ -39,10 +39,19 @@ const settle = async (): Promise<void> => {
   });
 };
 
-// One act per slice: a state change inside an act only commits (and so re-arms the poll) when that act ends.
-const wait = async (ms: number): Promise<void> => {
-  for (let elapsed = 0; elapsed < ms; elapsed += 10)
+/**
+ * Waits until the screen shows what the test expects, one act per slice, for at most two seconds.
+ *
+ * A click's act ends before the daemon answers it on a loaded runner — the scripted client reads each
+ * answer's body, which can resolve on a later macrotask — so the screen the click leads to is a thing to
+ * wait for, not a thing to assert the moment the act ends.
+ *
+ * One act per slice: a state change inside an act only commits (and so re-arms the poll) when that act ends.
+ */
+const until = async (shown: () => boolean, what: string): Promise<void> => {
+  for (let elapsed = 0; elapsed < 2_000 && !shown(); elapsed += 10)
     await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
+  if (!shown()) throw new Error(`never shown: ${what}`);
 };
 
 const type = async (field: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> => {
@@ -295,23 +304,28 @@ describe('AddLoginStep · Sign in', () => {
     const fresh = withoutEmail('codex-2', 'codex');
     const initial = openSubStepper(startStepper(PARENT), addLoginFlowInput({ harness: 'codex' }));
     let reads = 0;
+    // The device approval happens only once the test has SEEN it awaited: a flow that completed on its
+    // first 5ms poll would take the awaiting screen away before the test could look for it.
+    let approved = false;
+    const awaitingApproval = {
+      harness: 'codex',
+      flowId: 'flow-1',
+      credentialId: 'codex-2',
+      identity: 'codex:new',
+      startedAt: '2026-10-13T08:00:00.000Z',
+      expiresAt: '2026-10-13T08:10:00.000Z',
+      state: 'awaiting-approval',
+      verificationUrl: 'https://auth.openai.com/codex/device',
+      userCode: '0IER-FFQW6',
+    };
     const { view, calls, added } = await open(
       {
         existing: CREDENTIALS.credentials,
         fresh,
         routes: {
-          [LOGIN]: {
-            harness: 'codex',
-            flowId: 'flow-1',
-            credentialId: 'codex-2',
-            identity: 'codex:new',
-            startedAt: '2026-10-13T08:00:00.000Z',
-            expiresAt: '2026-10-13T08:10:00.000Z',
-            state: 'awaiting-approval',
-            verificationUrl: 'https://auth.openai.com/codex/device',
-            userCode: '0IER-FFQW6',
-          },
+          [LOGIN]: awaitingApproval,
           [`GET ${FLOW}`]: () => {
+            if (!approved) return awaitingApproval;
             reads += 1;
             return {
               harness: 'codex',
@@ -332,10 +346,13 @@ describe('AddLoginStep · Sign in', () => {
     expect(submit(view.container).textContent).toBe('Sign in to Codex');
     await click(submit(view.container), 'Sign in to Codex');
     expect(changeBodies(calls)).toEqual([{ kind: 'credential.add', id: 'codex-2', harness: 'codex' }]);
-    expect(view.container.querySelector('[data-codex-login="awaiting-approval"]')).not.toBeNull();
-    await wait(60);
+    await until(
+      () => view.container.querySelector('[data-codex-login="awaiting-approval"]') !== null,
+      'the Codex login awaiting approval',
+    );
+    approved = true;
+    await until(() => step(view.container) === 'signed-in', 'the login signed in');
     expect(reads).toBe(1);
-    expect(step(view.container)).toBe('signed-in');
     expect(text(view.container, '[role="status"]')).toBe('Signed in to Codex as Codex login');
 
     await click(next(view.container), 'Next');

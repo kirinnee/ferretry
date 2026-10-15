@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "tests": [
+    {
+      "tier": "unit",
+      "file": "packages/pwa/tests/unit/app.test.tsx",
+      "test": "AppShell > follows a live OS light/dark switch on setup, where no theme control is mounted",
+      "issue": "https://github.com/kirinnee/ferretry/issues/484",
+      "added": "2026-10-15"
+    }
+  ]
+}
