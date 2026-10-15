@@ -57,6 +57,15 @@ Notable details:
   checks and the script requires that closing line, so a refactor that stops the checks running is
   red rather than green. Adding or removing a Settings surface means editing one integer, which is
   the churn this shape chose over re-baselining a directory of images.
+- **macOS proofs run on a pull request only when they can be affected.** `changes`
+  (`scripts/ci/changed-areas.sh`) lists the PR's files and sets `containment`, `safari` and `harness`;
+  `Containment (macOS)`, `Sandbox Shell (Safari)` and the macOS half of `Harness Contract` run only when
+  a path they depend on changed — their own packages, `packages/protocol`, the toolchain (`flake.*`,
+  `nix/`, `bun.lock`, the bunfigs) or `ci.yaml`. Every non-PR event, including the `main` push
+  `Release` waits on, runs all of them, so no release skips a macOS proof. The cost is explicit: a PR
+  that breaks one of them through an unlisted path goes green and turns `main` red, which holds
+  `Release` until fixed. `Smoke darwin-arm64` is not gated — it is under a minute and every package
+  ships in the binary it runs.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
   `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-14`. This is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives

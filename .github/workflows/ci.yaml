@@ -30,6 +30,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Which macOS-only proofs a pull request needs (scripts/ci/changed-areas.sh says what it costs).
+  # Every other event — the main push Release waits on — runs all of them. Like `smoke`, no nix shell.
+  changes:
+    name: Changed Areas
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      containment: ${{ steps.areas.outputs.containment }}
+      safari: ${{ steps.areas.outputs.safari }}
+      harness: ${{ steps.areas.outputs.harness }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Decide which macOS proofs this change needs
+        id: areas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/changed-areas.sh
+
   precommit:
     name: Pre-Commit
     permissions:
@@ -160,6 +183,8 @@ jobs:
 
   darwin-confinement:
     name: Containment (macOS)
+    needs: changes
+    if: needs.changes.outputs.containment == 'true'
     permissions:
       contents: read
     runs-on: macos-14
@@ -175,6 +200,8 @@ jobs:
 
   safari-sandbox-shell:
     name: Sandbox Shell (Safari)
+    needs: changes
+    if: needs.changes.outputs.safari == 'true'
     permissions:
       contents: read
     # `macos-15`, NOT `macos-14`. macOS 14 entered deprecation on 2026-07-06 with October brownout
@@ -229,10 +256,14 @@ jobs:
     # so this is the only place it is measured (gap G1). Release runs only after a green CI, which
     # is what makes this a release gate. FY_CONTRACT_KEYCHAIN lets that job write throwaway items
     # into the runner's login keychain; the suite refuses to anywhere `CI` is not `true`.
+    #
+    # The Linux half always runs; the macOS half on a pull request only when a path it depends on
+    # changed (a job-level `if` cannot see the matrix, so the matrix itself is chosen).
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: ${{ needs.changes.outputs.harness == 'true' && fromJSON('["ubuntu-latest","macos-15"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
