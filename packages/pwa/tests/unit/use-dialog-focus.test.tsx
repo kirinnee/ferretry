@@ -65,46 +65,52 @@ function FoldDialog({ onClose = () => {} }: { onClose?: () => void }) {
 }
 
 describe('escape layers', () => {
+  // The stack is module state, and a dialog another test file left mounted is still on it — the whole
+  // suite in one process only happens to start this file at zero. So every count is relative to
+  // whatever the stack held when the test began.
   it('gives the topmost layer ownership and releases idempotently', () => {
+    const base = escapeLayerCount();
     const first = {};
     const second = {};
     const releaseFirst = pushEscapeLayer(first);
     const releaseSecond = pushEscapeLayer(second);
 
-    expect(escapeLayerCount()).toBe(2);
+    expect(escapeLayerCount()).toBe(base + 2);
     expect(isTopEscapeLayer(second)).toBe(true);
     expect(isTopEscapeLayer(first)).toBe(false);
 
     releaseSecond();
     releaseSecond();
-    expect(escapeLayerCount()).toBe(1);
+    expect(escapeLayerCount()).toBe(base + 1);
     expect(isTopEscapeLayer(first)).toBe(true);
 
     releaseFirst();
-    expect(escapeLayerCount()).toBe(0);
+    expect(escapeLayerCount()).toBe(base);
     expect(isTopEscapeLayer(first)).toBe(false);
   });
 
   it('removes the most recent entry when a token somehow appears twice', () => {
+    const base = escapeLayerCount();
     const token = {};
     const releaseFirst = pushEscapeLayer(token);
     const releaseSecond = pushEscapeLayer(token);
 
     releaseSecond();
-    expect(escapeLayerCount()).toBe(1);
+    expect(escapeLayerCount()).toBe(base + 1);
 
     releaseFirst();
-    expect(escapeLayerCount()).toBe(0);
+    expect(escapeLayerCount()).toBe(base);
   });
 
   it('ignores a release for a token that already left the stack', () => {
+    const base = escapeLayerCount();
     const token = {};
     const release = pushEscapeLayer(token);
     const other = pushEscapeLayer({});
     release();
     release();
 
-    expect(escapeLayerCount()).toBe(1);
+    expect(escapeLayerCount()).toBe(base + 1);
     other();
   });
 });

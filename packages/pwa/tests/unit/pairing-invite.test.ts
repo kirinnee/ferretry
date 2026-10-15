@@ -16,6 +16,7 @@ import {
   orderedPairedDevices,
   PAIRING_EXPIRY_NOTE,
   pairedDeviceSummary,
+  pairingCodeDisclosure,
   pairingCountdown,
   pairingRefusal,
   revokeConsequence,
@@ -223,5 +224,15 @@ describe('deviceAxisControl', () => {
 
   it('warns a device that narrowing itself can only be undone elsewhere', () => {
     should(SELF_NARROW_NOTE).containEql('only be switched back on at the machine');
+  });
+});
+
+describe('pairingCodeDisclosure', () => {
+  it('says what the code gives away, and who to show it to only where that offer can reach someone', () => {
+    const fact = 'Anyone who reads this code within its two minutes can add their device to this machine.';
+
+    should(pairingCodeDisclosure('qr')).equal(`${fact} Show it to the phone you are adding and nothing else.`);
+    should(pairingCodeDisclosure('local-only')).equal(`${fact} Show it to a browser on this machine and nothing else.`);
+    should(pairingCodeDisclosure('refusal')).equal(`${fact} There is no link to hand out, so keep it to yourself.`);
   });
 });
