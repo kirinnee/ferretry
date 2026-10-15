@@ -5344,6 +5344,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         allowedOrigins: () => browserOrigins(config),
         relyingPartyName: 'Ferretry',
+        // The name pairing gave this machine, so a passkey reads as the device and machine it binds.
+        machineName: state.daemonName,
         // An added passkey is told to every enrolled browser, so the owner learns of one they did not add.
         announce: async notice => await push.notify({ payload: notice }),
         settings: () => security.current(),

@@ -143,6 +143,7 @@ function mount(world: World = {}) {
     },
     allowedOrigins: () => [ORIGIN],
     relyingPartyName: 'Ferretry',
+    machineName: 'studio',
     ...(world.settings === undefined ? {} : { settings: () => ({ ...DEFAULT_SECURITY_SETTINGS, ...world.settings }) }),
     ...(world.rotation === undefined ? {} : { rotation: world.rotation }),
     audit: {

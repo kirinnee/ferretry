@@ -90,6 +90,7 @@ const stepUpSubsystem = (): StepUpService =>
     devices: { device: async () => undefined },
     allowedOrigins: () => [],
     relyingPartyName: 'Ferretry',
+    machineName: 'studio',
     audit: { record: async () => undefined },
   });
 
