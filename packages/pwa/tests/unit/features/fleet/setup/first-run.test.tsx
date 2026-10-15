@@ -400,18 +400,13 @@ const codexFlow = (state: 'awaiting-approval' | 'complete') => ({
 
 const ownCodexLogin = credentialView('codex-you', { harness: 'codex', store: 'host', sharedWithTerminal: true });
 
-// One act per slice: a state change inside an act only commits (and so re-arms the poll) when that act ends.
-const wait = async (ms: number): Promise<void> => {
-  for (let elapsed = 0; elapsed < ms; elapsed += 10)
-    await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
-  await settle();
-};
-
 /**
  * Waits until the screen shows what the test expects, one act per slice, for at most two seconds.
  *
  * A fixed count of microtask ticks is not enough here: the sign-in reads a daemon answer's body, which
  * a loaded runner can resolve on a later macrotask, so the state arrived a tick after `settle` gave up.
+ *
+ * One act per slice: a state change inside an act only commits (and so re-arms the poll) when that act ends.
  */
 const until = async (shown: () => boolean, what: string): Promise<void> => {
   for (let elapsed = 0; elapsed < 2_000 && !shown(); elapsed += 10)
@@ -470,7 +465,10 @@ describe('MachineFirstRun: Sign in now', () => {
       await until(() => h.q('[data-codex-login="awaiting-approval"]') !== null, 'the Codex login awaiting approval');
       approvedOnMachine = true;
 
-      await wait(60);
+      await until(
+        () => h.q('[data-first-run-sign-in]') === null && h.text('[data-harness-import]') === 'Import',
+        'the step again, signed in',
+      );
       // Back on the same step, now signed in, and the import is a plain Import.
       expect(step(h)).toBe('codex');
       expect(h.q('[data-first-run-sign-in]')).toBeNull();
