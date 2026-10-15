@@ -27,10 +27,9 @@ concurrency:
   group: >-
     ${{ github.workflow }}-${{
       github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
-      || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') && github.ref
       || github.run_id
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   e2e:
