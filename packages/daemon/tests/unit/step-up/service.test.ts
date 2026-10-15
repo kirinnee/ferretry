@@ -91,6 +91,10 @@ function fixture(
     /** The challenges the daemon "randomly" issues, in order; the last repeats. */
     challenges?: readonly Uint8Array[];
     announce?: (notice: unknown) => Promise<unknown>;
+    /** The phone's paired name; `Phone` otherwise. */
+    deviceName?: string;
+    /** This machine's name as pairing knows it; `studio` otherwise. */
+    machineName?: string;
   } = {},
 ) {
   const clock = { now: options.nowMs ?? PAIRED_AT_MS + 60_000 };
@@ -120,10 +124,14 @@ function fixture(
       device: async id =>
         !directory.paired || (id !== phone.deviceId && id !== laptop.deviceId)
           ? undefined
-          : { name: id === phone.deviceId ? 'Phone' : 'Laptop', createdAt: new Date(PAIRED_AT_MS).toISOString() },
+          : {
+              name: id === phone.deviceId ? (options.deviceName ?? 'Phone') : 'Laptop',
+              createdAt: new Date(PAIRED_AT_MS).toISOString(),
+            },
     },
     allowedOrigins: () => options.origins ?? [ORIGIN, OTHER_ORIGIN],
     relyingPartyName: 'Ferretry',
+    machineName: options.machineName ?? 'studio',
     ...(options.withSettings === true || options.settings !== undefined
       ? { settings: () => ({ ...DEFAULT_SECURITY_SETTINGS, ...options.settings }) }
       : {}),
@@ -542,8 +550,8 @@ describe('StepUpService', () => {
           rp: { id: relyingPartyIdFor(ORIGIN), name: 'Ferretry' },
           user: {
             id: toBase64Url(new TextEncoder().encode(phone.deviceId)),
-            name: 'Phone',
-            displayName: 'Phone',
+            name: 'Phone → studio',
+            displayName: 'Ferretry: Phone → studio',
           },
           pubKeyCredParams: [
             { type: 'public-key', alg: -7 },
@@ -554,6 +562,38 @@ describe('StepUpService', () => {
           excludeCredentials: [],
         },
       });
+    });
+
+    it('should name the passkey by device and machine, shortening the device first to fit 64 bytes', async () => {
+      // Arrange
+      const bytes = (text: string) => new TextEncoder().encode(text).length;
+      const { service } = fixture({
+        deviceName: 'Kirin’s very long iPhone 17 Pro Max with a story',
+        machineName: 'AMER-D22HXVF42W',
+      });
+
+      // Act
+      const options = await service.registrationOptions(remote(), ORIGIN);
+
+      // Assert
+      if (!options.ok) throw new Error(options.refusal);
+      should(options.value.user.name).equal('Kirin’s very long iPhone 17 Pro Max wit… → AMER-D22HXVF42W');
+      should(options.value.user.displayName).equal('Ferretry: Kirin’s very long iPhone 17 P… → AMER-D22HXVF42W');
+      should(bytes(options.value.user.name)).belowOrEqual(64);
+      should(bytes(options.value.user.displayName)).belowOrEqual(64);
+    });
+
+    it('should keep part of the device name when the machine name alone would fill the budget', async () => {
+      // Arrange
+      const { service } = fixture({ deviceName: 'iPhone 17 Pro', machineName: 'm'.repeat(100) });
+
+      // Act
+      const options = await service.registrationOptions(remote(), ORIGIN);
+
+      // Assert
+      if (!options.ok) throw new Error(options.refusal);
+      should(options.value.user.name).equal(`iPhone 17… → ${'m'.repeat(44)}…`);
+      should(options.value.user.displayName).equal(`Ferretry: iPhone 17… → ${'m'.repeat(34)}…`);
     });
 
     it('should refuse options for an origin this daemon does not serve', async () => {

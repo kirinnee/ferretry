@@ -52,6 +52,12 @@ export interface StepUpServiceDeps {
   /** What the authenticator shows as the relying party's name. */
   readonly relyingPartyName: string;
   /**
+   * This machine's name as a paired device knows it — the pairing state's `daemonName`, never a second
+   * reading of the hostname — so a phone's passkeys for two machines read differently in its password
+   * manager.
+   */
+  readonly machineName: string;
+  /**
    * The machine's security settings in force (`docs/design/zero-trust.md` B6), read at every question.
    * Absent means nobody is asked to unlock on opening and no key is ever due for rotation.
    */
@@ -78,6 +84,38 @@ const refuse = (refusal: StepUpRefusal): { readonly ok: false; readonly refusal:
   refusal,
 });
 const instant = (ms: number): string => new Date(ms).toISOString();
+
+/**
+ * The most a passkey's account name may take, in UTF-8 bytes: WebAuthn lets an authenticator truncate
+ * `user.name` and `user.displayName` to 64 bytes, so the name is bounded here, where it can end cleanly.
+ */
+const PASSKEY_ACCOUNT_NAME_MAX_BYTES = 64;
+/** What the device part always keeps, so a long machine name never squeezes it out entirely. */
+const DEVICE_PART_MIN_BYTES = 12;
+const ARROW = ' → ';
+const ELLIPSIS = '…';
+const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
+
+/** `text` within `maxBytes`, cut at a code point and ended with an ellipsis when anything was dropped. */
+function fitBytes(text: string, maxBytes: number): string {
+  if (utf8Bytes(text) <= maxBytes) return text;
+  let kept = '';
+  for (const symbol of text) {
+    if (utf8Bytes(kept + symbol + ELLIPSIS) > maxBytes) break;
+    kept += symbol;
+  }
+  return kept + ELLIPSIS;
+}
+
+/**
+ * "‹device› → ‹machine›" within `maxBytes`. The machine is the part that tells two passkeys on one
+ * phone apart, so it is kept whole wherever it fits and the device name gives way first.
+ */
+function passkeyAccountName(device: string, machine: string, maxBytes: number): string {
+  const room = maxBytes - utf8Bytes(ARROW);
+  const machinePart = fitBytes(machine, room - DEVICE_PART_MIN_BYTES);
+  return `${fitBytes(device, room - utf8Bytes(machinePart))}${ARROW}${machinePart}`;
+}
 
 /**
  * A relying-party id is the app origin's host — WebAuthn's own default — which is why a passkey made
@@ -235,6 +273,7 @@ export class StepUpService {
     if (registration.kind === 'confirm-existing' && usable.length === 0) return refuse('no-passkey');
     const challenge = this.deps.random.bytes(CHALLENGE_BYTES);
     this.deps.challenges.issue(device, 'register', challenge, now);
+    const prefix = `${this.deps.relyingPartyName}: `;
     const confirm =
       registration.kind === 'confirm-existing'
         ? this.#confirmOptions(device, origin, usable, challenge, now)
@@ -245,11 +284,13 @@ export class StepUpService {
         challenge: toBase64Url(challenge),
         rp: { id: relyingPartyIdFor(origin), name: this.deps.relyingPartyName },
         // The device id names the account a passkey belongs to: one device, one user handle, so a
-        // second passkey on the same authenticator replaces nothing it should not.
+        // second passkey on the same authenticator replaces nothing it should not. The names are only
+        // what a password manager shows — "Ferretry: iPhone → studio" — and a passkey keeps the name it
+        // was made with.
         user: {
           id: toBase64Url(new TextEncoder().encode(device.deviceId)),
-          name: record.name,
-          displayName: record.name,
+          name: passkeyAccountName(record.name, this.deps.machineName, PASSKEY_ACCOUNT_NAME_MAX_BYTES),
+          displayName: `${prefix}${passkeyAccountName(record.name, this.deps.machineName, PASSKEY_ACCOUNT_NAME_MAX_BYTES - utf8Bytes(prefix))}`,
         },
         pubKeyCredParams: PASSKEY_ALGORITHMS.map(alg => ({ type: 'public-key' as const, alg })),
         timeout: PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,

@@ -124,6 +124,7 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     },
     allowedOrigins: () => [ORIGIN],
     relyingPartyName: 'Ferretry',
+    machineName: 'studio',
     settings: () => security.current(),
     audit: { record: async () => {} },
   });
