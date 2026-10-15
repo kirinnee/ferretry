@@ -30,14 +30,16 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 
 ## CI jobs
 
-| Job              | Runs                                                       | Notes                                                                |
-| ---------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
-| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`   | matrix `[format, gates]`: treefmt, and every other hook, in parallel |
-| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh "$TEST_MODE"`    | matrix `[unit, int]`, `fail-fast: false`                             |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh` | Settings geometry in a real Chromium                                 |
-| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`         | uploads `cli-binaries` from `dist/bin/`                              |
-| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`             | `needs: compile`, downloads the binaries                             |
-| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`    | `needs: compile`, one runner per build target                        |
+| Job              | Runs                                                         | Notes                                                                |
+| ---------------- | ------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`     | matrix `[format, gates]`: treefmt, and every other hook, in parallel |
+| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit`              | the unit tier and its 100% ledger                                    |
+| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"` | matrix over `config/test-groups.json`                                |
+| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`         | `needs: int`; the int tier's 100% ledger                             |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh`   | Settings geometry in a real Chromium                                 |
+| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`           | uploads `cli-binaries` from `dist/bin/`                              |
+| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`               | `needs: compile`, downloads the binaries                             |
+| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`      | `needs: compile`, one runner per build target                        |
 
 Notable details:
 
@@ -46,6 +48,13 @@ Notable details:
   `src/adapters/` for int), the ledger is non-empty, every line is hit, and no source file is
   missing from it. The `coverage-<mode>` artifact uploads with `if: always()` so a failure is
   still inspectable. Tiers are described in [Testing](../testing/index.md).
+- **The integration tier runs in groups.** `int` runs each group of `config/test-groups.json` on
+  its own runner and uploads `coverage-int-<group>`; `int-ledger` (check name `Integration Tests`)
+  downloads them all and applies the gate, refusing to judge while any configured group is missing.
+  A source file must reach 100% inside one group ([Testing](../testing/index.md) says why). Like
+  `smoke`, `int-ledger` enters no nix shell — the gate is bash, awk, grep and jq — because a nix
+  shell would put ~30s back on the critical path the groups took off it. Adding a group means adding
+  it to the config and to the matrix.
 - **SIT runs against the artifact, not a rebuild.** `compile` uploads the binaries and `sit`
   downloads them, which is what makes it a black-box test of the shipped thing.
   `download-artifact` drops the executable bit; the scripts restore it.
