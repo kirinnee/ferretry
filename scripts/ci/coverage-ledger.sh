@@ -49,12 +49,13 @@ if [[ $# -gt 1 || $1 != "${coverage_file}" ]]; then
   merged="$(mktemp)"
   awk '
     FNR == 1 { group = FILENAME; sub(/\/lcov\.info$/, "", group); sub(/^.*\//, "", group); sub(/^coverage-(unit|int)-/, "", group) }
-    /^SF:/ { sf = substr($0, 4); record = $0 "\n"; next }
+    /^SF:/ { sf = substr($0, 4); record = $0 "\n"; lf = 0; lh = 0; next }
     /^end_of_record/ {
       record = record $0 "\n"
       if (!(sf in order)) { order[sf] = ++files; paths[files] = sf }
       seen[sf] = seen[sf] sprintf(" %s %d/%d", group, lh, lf)
       if (lf > 0 && lh == lf && !(sf in whole)) whole[sf] = record
+      if (lf > most_lf[sf]) most_lf[sf] = lf
       if (!(sf in best) || lh > best_lh[sf]) { best[sf] = record; best_lh[sf] = lh }
       next
     }
@@ -65,6 +66,9 @@ if [[ $# -gt 1 || $1 != "${coverage_file}" ]]; then
       for (i = 1; i <= files; i++) {
         sf = paths[i]
         if (sf in whole) { printf "%s", whole[sf]; continue }
+        # Nothing executable in ANY group (a types-only module): the serial ledger records it as 0/0
+        # too. A 0/0 from one group never excuses unhit lines in another.
+        if (most_lf[sf] == 0) { printf "%s", best[sf]; continue }
         printf "❌ %s reaches 100%% in no single test group (lines hit/found:%s); test its missed lines in the group that owns it\n", sf, seen[sf] > "/dev/stderr"
         printf "%s", best[sf]
       }

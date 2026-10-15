@@ -59,6 +59,20 @@ describe('TaskRow', () => {
     expect(live.opened).toEqual([]);
   });
 
+  it('offers Add to chat for any task when its host can take one, without opening the row', async () => {
+    const added: string[] = [];
+    const offered = await row({ props: { onAddToChat: task => added.push(task.id) } });
+    const plain = await row();
+
+    const action = offered.container.querySelector('[aria-label="Add &F12 to chat"]') as HTMLButtonElement | null;
+    await interact(() => action?.click());
+
+    expect(action?.getAttribute('title')).toBe("Use &F12 in this session's message");
+    expect(plain.container.textContent).not.toContain('Add to chat');
+    expect(added).toEqual(['F12']);
+    expect(offered.opened).toEqual([]);
+  });
+
   it('shows the status badge in a mixed list', async () => {
     const { container } = await row({ task: { phase: 'built', status: 'built' } });
 
