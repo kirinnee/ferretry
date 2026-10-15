@@ -3,7 +3,10 @@ import { chmod, lutimes, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFil
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileScratchCollector } from '../../../src/adapters/scratch/file-scratch-collector.ts';
+import {
+  defaultScratchCollectorConfig,
+  FileScratchCollector,
+} from '../../../src/adapters/scratch/file-scratch-collector.ts';
 import { sessionView } from '../../unit/runtime/mounts/support.ts';
 
 const NOW = Date.parse('2026-08-01T00:00:00.000Z');
@@ -136,5 +139,18 @@ describe('FileScratchCollector', () => {
       should(await readFile(outside, 'utf8')).equal('not the collector-s business');
       should((await Bun.file(outside).stat()).mode & 0o777).equal(0o644);
     });
+  });
+});
+
+describe('defaultScratchCollectorConfig', () => {
+  // Proved here, by this adapter's own tests, rather than only by the runtime journeys that boot a
+  // daemon with the default collector: the int tier's test groups are judged per file, so a file's
+  // lines must all be reached inside one group.
+  it('should be on, reclaim material a day old, and take at most twenty sessions a sweep', () => {
+    // Act
+    const config = defaultScratchCollectorConfig();
+
+    // Assert
+    should(config).deepEqual({ enabled: true, ttlHours: 24, perSweep: 20 });
   });
 });
