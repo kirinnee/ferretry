@@ -1,5 +1,17 @@
 {
   "schemaVersion": 1,
+  "unit": [
+    {
+      "name": "pwa-features",
+      "prefixes": [
+        "packages/pwa/tests/unit/features/",
+        "packages/pwa/tests/unit/stt/",
+        "packages/pwa/tests/unit/dictation-control.test.tsx"
+      ]
+    },
+    { "name": "pwa", "prefixes": ["packages/pwa/"] },
+    { "name": "everything-else", "prefixes": ["packages/"] }
+  ],
   "int": [
     { "name": "daemon-runtime", "prefixes": ["packages/daemon/tests/integration/runtime/"] },
     { "name": "daemon", "prefixes": ["packages/daemon/"] },

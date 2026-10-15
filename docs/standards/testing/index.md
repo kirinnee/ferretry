@@ -64,11 +64,11 @@ accident — you cannot reach 100% on the domain by exercising it through an ada
 adapter cannot borrow coverage from the domain. If a line is uncovered in its own ledger, it is
 genuinely untested.
 
-**CI runs the integration tier in test groups, judged per file.** `config/test-groups.json` splits
-the tier into shares that run on parallel runners (`./scripts/ci/test.sh int <group>`); each test
+**CI runs the unit and integration tiers in test groups, judged per file.** `config/test-groups.json`
+splits each tier into shares that run on parallel runners (`./scripts/ci/test.sh <unit|int> <group>`); each test
 file belongs to the first group with a prefix of its path. Each group writes its own ledger and the
-`Integration Tests` job holds them together to the 100% gate
-(`./scripts/ci/coverage-ledger.sh int --groups <dir>`). **A source file passes only when one group
+`Unit Tests` / `Integration Tests` job holds them together to the 100% gate
+(`./scripts/ci/coverage-ledger.sh <unit|int> --groups <dir>`). **A source file passes only when one group
 alone covers it 100%.** Line counts cannot be added up across groups: Bun reports a function it
 never ran as one coarse range, blank and comment lines included, so groups disagree about which
 lines exist — a union of lines is always red, and an intersection, measured, hid real misses. One

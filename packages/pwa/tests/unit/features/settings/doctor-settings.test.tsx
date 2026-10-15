@@ -3,7 +3,7 @@ import type { DoctorReport } from '@ferretry/protocol';
 
 import { DoctorSettings } from '../../../../src/features/settings/doctor-settings.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { render, runAsync } from '../../../support/react.ts';
+import { render, run, runAsync } from '../../../support/react.ts';
 
 const connection = (id: string) =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
@@ -87,6 +87,26 @@ describe('DoctorSettings', () => {
     expect(text).toContain('no Codex session can start here');
     // A path is one unbreakable token: at 390px an unbroken one takes the whole page sideways.
     expect(text).toContain('break-words');
+  });
+
+  it('discards a report that arrives after the panel moved to another daemon', async () => {
+    const pending = new Map<string, (next: DoctorReport) => void>();
+    const read = (target: ReturnType<typeof connection>) =>
+      new Promise<DoctorReport>(resolve => {
+        pending.set(String(target.daemonId), resolve);
+      });
+    const renderer = render(<DoctorSettings connection={connection('alpha')} read={read} />);
+
+    run(() => renderer.update(<DoctorSettings connection={connection('beta')} read={read} />));
+    await runAsync(async () => {
+      pending.get('alpha')?.(report);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(pending.has('beta')).toBe(true);
+    expect(renderer.root.findAllByProps({ 'data-doctor-daemon': 'alpha' })).toHaveLength(0);
+    expect(JSON.stringify(renderer.toJSON())).toContain('Host checks unavailable');
   });
 
   it('keeps the unavailable state when the selected daemon refuses the report', async () => {

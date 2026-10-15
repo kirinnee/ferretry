@@ -132,8 +132,38 @@ jobs:
           path: packages/pwa/.artifacts/pwa-screenshot/
           if-no-files-found: warn
 
+  # The unit tier in parallel shares (config/test-groups.json), exactly like `int` below. Serially it
+  # was ~105s of tests in one process; the slowest group is under a minute.
   test:
+    name: Unit Tests (${{ matrix.group }})
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [pwa-features, pwa, everything-else]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Run the ${{ matrix.group }} unit tests
+        env:
+          TEST_GROUP: ${{ matrix.group }}
+        run: nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"
+      - name: Upload the ${{ matrix.group }} coverage ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-${{ matrix.group }}
+          path: coverage/unit/groups/${{ matrix.group }}/lcov.info
+          if-no-files-found: warn
+
+  # The unit tier's 100% ledger over every group's, as `int-ledger` does for int; no nix shell.
+  unit-ledger:
     name: Unit Tests
+    needs: test
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -141,15 +171,19 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31
-      - name: Run unit tests
-        run: nix develop .#ci -c ./scripts/ci/test.sh unit
+      - name: Download every group's coverage ledger
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-unit-*
+          path: coverage/unit/groups
+      - name: Hold the unit tier to its 100% ledger
+        run: ./scripts/ci/coverage-ledger.sh unit --groups coverage/unit/groups
       - name: Upload unit coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
-          path: coverage/unit
+          path: coverage/unit/lcov.info
           if-no-files-found: warn
 
   # The integration tier in parallel shares (config/test-groups.json). Serially it was the CI critical
