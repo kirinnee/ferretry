@@ -311,16 +311,25 @@ describe('CredentialSignIn', () => {
   });
 
   it('picks up a sign-in the caller already started and reads it back', async () => {
+    // The machine says the sign-in is still waiting until the first screen has been read, so a poll
+    // that fires during a slow mount cannot finish the flow before it is looked at.
+    let finishedOnMachine = false;
     const { view, calls, signedIn } = await open(
-      { [`GET ${FLOW}`]: claudeFlow('complete') },
+      {
+        [`GET ${FLOW}`]: () => claudeFlow(finishedOnMachine ? 'complete' : 'awaiting-code'),
+      },
       { initialFlow: asCredentialFlow(claudeFlow('awaiting-code')), pollMs: 5 },
     );
     expect(state(view.container)).toBe('awaiting-code');
     expect(view.container.querySelector('[data-credential-sign-in="start"]')).toBeNull();
+    expect(signedIn).toEqual([]);
+    finishedOnMachine = true;
     await wait(60);
-    expect(only(calls, `GET ${FLOW}`)).toHaveLength(1);
     expect(state(view.container)).toBe('complete');
     expect(signedIn).toEqual(['signed-in']);
+    const reads = only(calls, `GET ${FLOW}`).length;
+    await wait(30);
+    expect(only(calls, `GET ${FLOW}`)).toHaveLength(reads);
     await view.unmount();
   });
 });
