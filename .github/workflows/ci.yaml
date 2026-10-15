@@ -1,22 +1,33 @@
 name: CI
 
+# ONE run per commit under test. A pull request is proved by its `pull_request` run; `main` is
+# proved by its `push` run, which is the run Release waits on. `push` used to fire for every branch
+# and every tag as well, so each PR ran all 17 jobs twice (the branch push and the PR) and every
+# release ran them a third time on the tag — the same tree the `main` run of the release commit had
+# already proved. Every duplicate held runners from the same pool the runs that mattered queued for.
+# A branch with no PR gets CI from `workflow_dispatch` (or by opening a draft).
+#
+# `Casks/**` alone is GoReleaser's own cask commit, pushed by CD after a release has already
+# shipped: it changes no code any job here reads.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - 'Casks/**'
   pull_request:
   workflow_dispatch:
 
-# A new push to a PR (or to a feature branch) supersedes the run for its old SHA, so that run is
-# cancelled instead of holding a runner. Everything else — main, tags, manual dispatch — gets a
-# group of its own run id: a shared group would still cancel a *pending* main run when a newer
-# one queued, and Release needs every main CI run to complete.
+# A new push to a PR supersedes the run for its old SHA, so that run is cancelled instead of holding
+# a runner. Everything else — `main`, manual dispatch — gets a group of its own run id: a shared group
+# would still cancel a *pending* main run when a newer one queued, and Release needs every main CI
+# run to complete.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
       github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
-      || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') && github.ref
       || github.run_id
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   precommit:
