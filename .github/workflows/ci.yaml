@@ -31,17 +31,25 @@ concurrency:
 
 jobs:
   precommit:
-    name: Pre-Commit
+    name: Pre-Commit (${{ matrix.part }})
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    # Two parts on parallel runners: the hooks run one after another, and treefmt alone was ~40s of
+    # their ~105s. Between them the parts run every hook an unsplit run does (scripts/ci/pre-commit.sh).
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [format, gates]
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31
-      - name: Run pre-commit
-        run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
+      - name: Run pre-commit (${{ matrix.part }})
+        env:
+          PART: ${{ matrix.part }}
+        run: nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"
 
   nix-install:
     name: Nix Install Bundle
