@@ -30,14 +30,14 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 
 ## CI jobs
 
-| Job              | Runs                                                       | Notes                                         |
-| ---------------- | ---------------------------------------------------------- | --------------------------------------------- |
-| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh`           | every gate, with `--show-diff-on-failure`     |
-| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh "$TEST_MODE"`    | matrix `[unit, int]`, `fail-fast: false`      |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh` | Settings geometry in a real Chromium          |
-| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`         | uploads `cli-binaries` from `dist/bin/`       |
-| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`             | `needs: compile`, downloads the binaries      |
-| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`    | `needs: compile`, one runner per build target |
+| Job              | Runs                                                       | Notes                                                                |
+| ---------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`   | matrix `[format, gates]`: treefmt, and every other hook, in parallel |
+| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh "$TEST_MODE"`    | matrix `[unit, int]`, `fail-fast: false`                             |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh` | Settings geometry in a real Chromium                                 |
+| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`         | uploads `cli-binaries` from `dist/bin/`                              |
+| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`             | `needs: compile`, downloads the binaries                             |
+| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`    | `needs: compile`, one runner per build target                        |
 
 Notable details:
 

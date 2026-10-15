@@ -13,7 +13,7 @@ the same hooks and the same pinned tool versions run on a laptop and in CI.
 ```bash
 task lint                                        # local: every gate
 pre-commit run --all-files                       # identical, one layer down
-nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs
+nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI splits it into `format` + `gates`)
 ```
 
 `task lint` is `pre-commit run --all-files`. The CI script adds dependency installation and
