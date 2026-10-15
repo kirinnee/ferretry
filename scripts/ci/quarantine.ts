@@ -29,10 +29,10 @@
  *
  * ## THE COVERAGE LEDGER
  *
- * The 100% gate in `scripts/ci/test.sh` runs AFTER this, on the merged ledger. A test that failed part
+ * The 100% gate (`scripts/ci/coverage-ledger.sh`) runs AFTER this, on the merged ledger. A test that failed part
  * way through executed only part of what it covers, so the first run's ledger can be short of lines
- * that only that test reaches. The rerun executes those files again, and the two ledgers are merged
- * line by line: a line counts as hit if either run hit it. That is no weaker than the gate already
+ * that only that test reaches. The rerun executes those files again and its hits are merged into the
+ * first run's line set (`mergeLcov` says why it is not a plain union). That is no weaker than the gate already
  * is — a failing test's executed lines count today too — and the rerun's lines come from a PASSING
  * run of the same files at the same commit. The rerun is coverage-instrumented exactly like the first
  * run, because `--coverage-dir` is ignored in favour of the bunfig's `coverageDir`; the first ledger
@@ -158,32 +158,57 @@ function readSummary(path: string): { fail: number; errors: number } {
   return { fail: count(/^\s*(\d+) fail$/gmu), errors: count(/^\s*(\d+) errors?$/gmu) };
 }
 
-/** Merge two Bun LCOV ledgers line by line; a line is hit if either run hit it. */
+/**
+ * Merge the rerun's ledger into the first run's. The FIRST run owns the line set; the rerun can only
+ * turn lines to hit, and adds a line only when it hit it.
+ *
+ * Not a plain union, and the reason was measured: Bun 1.3.13 reports a function that a run loaded but
+ * never called COARSELY — every line of its range as `DA:n,0`, comments and blanks included. A rerun of
+ * one or two files loads many modules it never exercises, so a union would add those coarse zeros to
+ * files the full run measured finely, and a rescue would turn red at the ledger for lines that are not
+ * code. A rerun line that is 0 and absent from the first run is such an artefact and is dropped.
+ *
+ * The residual, said out loud: a function ONLY the quarantined test reaches appears coarsely in the
+ * first run (its test died), and the coarse report can omit that function's last line. The rerun hits
+ * it but the first run never listed it, so it is added as hit — the ledger may then count one line the
+ * fine report would not have. It can never hide a line the first run listed as missed and nothing hit.
+ */
 function mergeLcov(first: string, second: string): string {
   type Record = { lines: Map<number, number>; fnf: number; fnh: number };
-  const records = new Map<string, Record>();
-  for (const text of [first, second]) {
+  const parse = (text: string): Map<string, Record> => {
+    const records = new Map<string, Record>();
     let current: Record | null = null;
     for (const line of text.split('\n')) {
       if (line.startsWith('SF:')) {
-        const file = line.slice(3);
-        current = records.get(file) ?? { lines: new Map(), fnf: 0, fnh: 0 };
-        records.set(file, current);
+        current = { lines: new Map(), fnf: 0, fnh: 0 };
+        records.set(line.slice(3), current);
       } else if (current && line.startsWith('DA:')) {
         const [number, hits] = line.slice(3).split(',').map(Number);
-        if (number === undefined || hits === undefined) continue;
-        current.lines.set(number, Math.max(current.lines.get(number) ?? 0, hits));
+        if (number !== undefined && hits !== undefined) current.lines.set(number, hits);
       } else if (current && line.startsWith('FNF:')) {
-        current.fnf = Math.max(current.fnf, Number(line.slice(4)));
+        current.fnf = Number(line.slice(4));
       } else if (current && line.startsWith('FNH:')) {
-        current.fnh = Math.max(current.fnh, Number(line.slice(4)));
+        current.fnh = Number(line.slice(4));
       } else if (line === 'end_of_record') {
         current = null;
       }
     }
+    return records;
+  };
+  const merged = parse(first);
+  for (const [file, rerun] of parse(second)) {
+    const record = merged.get(file);
+    if (record === undefined) {
+      // A file the full run never loaded cannot be in its ledger; keep only what the rerun hit.
+      merged.set(file, { ...rerun, lines: new Map([...rerun.lines].filter(([, hits]) => hits > 0)) });
+      continue;
+    }
+    for (const [number, hits] of rerun.lines)
+      if (hits > 0) record.lines.set(number, Math.max(record.lines.get(number) ?? 0, hits));
+    record.fnh = Math.min(record.fnf, Math.max(record.fnh, rerun.fnh));
   }
   const out: string[] = [];
-  for (const [file, record] of records) {
+  for (const [file, record] of merged) {
     const lines = [...record.lines].sort(([a], [b]) => a - b);
     out.push('TN:', `SF:${file}`, `FNF:${record.fnf}`, `FNH:${record.fnh}`);
     for (const [number, hits] of lines) out.push(`DA:${number},${hits}`);

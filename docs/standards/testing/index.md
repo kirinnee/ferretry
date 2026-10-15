@@ -449,8 +449,10 @@ not load, a quarantined test that fails twice — leaves the tier exactly as red
 a blanket `bun test --retry` is not used: it would excuse every new flake too, silently.
 
 **The coverage ledger stays whole.** A failed test executed only part of what it covers, so the first
-run's ledger can be short of lines only that test reaches. The rerun's ledger is merged into it line
-by line (a line is hit if either run hit it), and the 100% gate runs on the merged ledger. The rerun is
+run's ledger can be short of lines only that test reaches. The rerun's hits are merged into the first
+run's line set, and the 100% gate runs on the merged ledger. It is not a plain union: Bun reports a
+function a run loaded but never called coarsely (every line of it as missed, blanks included), and a
+rerun of one file loads many such modules, so its unhit lines are dropped rather than added. The rerun is
 a passing run of the same files at the same commit, so this proves nothing a green run would not.
 
 **Leaving the quarantine.** Fix the test, delete its entry, and close the issue in the same PR. An
