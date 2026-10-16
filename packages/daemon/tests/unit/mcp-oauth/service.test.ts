@@ -493,7 +493,7 @@ describe('McpOAuthService', () => {
       await w.service.refreshForLaunch([NAMES.access]);
     });
 
-    it('should keep the previous expiry when a refresh answer gives none, and survive a sign-out mid-refresh', async () => {
+    it('should keep the previous expiry when a refresh answer gives none', async () => {
       // Arrange
       const w = world({ expiresIn: 10 });
       await signIn(w);
@@ -791,5 +791,115 @@ describe('McpOAuthService — review hardening', () => {
     should(marked).be.true();
     should(signedOut.revoked).be.false();
     should(w.http.requests.length).equal(before);
+  });
+});
+
+describe('McpOAuthService — review round 2', () => {
+  /**
+   * Holds the provider's answer to the next refresh until the test lets it go, so something else can
+   * happen while the refresh is in flight — the race, made deterministic.
+   */
+  function holdRefresh(w: ReturnType<typeof world>) {
+    let release: () => void = () => undefined;
+    let arrived: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const seen = new Promise<void>(resolve => {
+      arrived = resolve;
+    });
+    const original = w.provider.handle;
+    (w.http as unknown as { handler: (request: Request) => Promise<Response> }).handler = async request => {
+      const isRefresh =
+        new URL(request.url).pathname === '/auth/token' && (await request.clone().text()).includes('refresh_token');
+      const response = await original(request);
+      if (isRefresh) {
+        arrived();
+        await gate;
+      }
+      return response;
+    };
+    return { release, seen };
+  }
+
+  it('M-A: a sign-out while a refresh is in flight stays signed out, and the late tokens are revoked', async () => {
+    // Arrange
+    const w = world({ expiresIn: 10 });
+    await signIn(w);
+    w.clock.at += 20_000;
+    const held = holdRefresh(w);
+
+    // Act — the refresh is at the provider; the person signs out; then the answer lands.
+    const refreshing = w.service.refreshForLaunch([NAMES.access]);
+    await held.seen;
+    const signedOut = await w.service.signOut('linear');
+    held.release();
+    await refreshing;
+
+    // Assert — nothing came back, and the rotated refresh token issued mid-sign-out was revoked.
+    should(signedOut.removed).be.true();
+    should(w.secrets.entries.size).equal(0);
+    should(w.internal.entries.size).equal(0);
+    should(w.state.document.connections).deepEqual({});
+    should(w.provider.revoked).containEql(w.provider.issued[3]);
+    should((await w.service.connections())[0]?.state).equal('needs-sign-in');
+  });
+
+  it('L-A: an old-address refresh landing after a sign-in at a new address leaves the new one alone', async () => {
+    // Arrange
+    const w = world({ expiresIn: 10 });
+    await signIn(w);
+    w.clock.at += 20_000;
+    const held = holdRefresh(w);
+    const refreshing = w.service.refreshForLaunch([NAMES.access]);
+    await held.seen;
+
+    // Act — the component moves and is signed in again while the old refresh is in flight.
+    const moved = `${w.provider.origin}/mcp/v2`;
+    w.servers = [{ component: 'linear', url: moved, auth: 'oauth' }];
+    (w.http as unknown as { handler: (request: Request) => Promise<Response> }).handler = w.provider.handle;
+    const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+    await w.service.complete(flow.flowId, { callback: await w.provider.approve(flow.authorizeUrl) });
+    const fresh = w.state.document.connections.linear;
+    held.release();
+    await refreshing;
+
+    // Assert — the new record is untouched and the old address's token was not re-filed.
+    should(w.state.document.connections.linear).deepEqual(fresh);
+    should([...w.secrets.entries.keys()]).deepEqual([mcpOAuthSecretNames('linear', moved).access]);
+  });
+
+  it('L-B: the registration cap never evicts the registration the live sign-in refreshes through', async () => {
+    // Arrange — a confidential client, signed in through the first registration.
+    const w = world({ confidential: true, expiresIn: 10 });
+    await signIn(w);
+    const liveSecret = w.provider.issued[0];
+
+    // Act — five more registrations from other PWA origins, then a refresh.
+    for (let index = 0; index < 5; index += 1)
+      await w.service.start('linear', { redirectUri: `https://pwa-${String(index)}.example/oauth/mcp-callback` });
+    w.clock.at += 20_000;
+    await w.service.refreshForLaunch([NAMES.access]);
+
+    // Assert
+    const held = w.state.document.registrations.linear ?? [];
+    should(held).have.length(MAX_REGISTRATIONS_PER_COMPONENT);
+    should(held.map(entry => entry.redirectUri)).containEql(w.state.document.connections.linear?.redirectUri);
+    should([...w.internal.entries.values()]).containEql(liveSecret);
+    const refresh = w.provider.tokenRequests.find(form => form.get('grant_type') === 'refresh_token');
+    should(refresh?.get('client_secret')).equal(liveSecret);
+  });
+
+  it('should still sign out, claiming no revocation, when the internal store cannot be opened', async () => {
+    // Arrange
+    const w = world();
+    await signIn(w);
+    w.internal.values = async () => {
+      throw new Error('damaged');
+    };
+
+    // Act / Assert
+    should(await w.service.signOut('linear')).deepEqual({ component: 'linear', removed: true, revoked: false });
+    should(w.secrets.entries.size).equal(0);
   });
 });

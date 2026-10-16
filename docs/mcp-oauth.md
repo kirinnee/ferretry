@@ -91,7 +91,7 @@ for HTTP transports, which is OAuth 2.1 with these pieces:
 | ----------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Find the resource's metadata  | RFC 9728 (Protected Resource Metadata)      | Sends one unauthenticated MCP `initialize` and reads `resource_metadata` from the `401`'s `WWW-Authenticate`; otherwise tries `/.well-known/oauth-protected-resource<path>` then `/.well-known/oauth-protected-resource`. `resource` must name this server by whole path segments. |
 | Find the authorization server | RFC 8414, OpenID Connect Discovery          | Takes the first `authorization_servers` entry and tries the RFC 8414 and OIDC well-known addresses in the order the MCP spec gives. A server with no resource metadata is treated as its own authorization server (the 2025-03-26 behaviour).                                      |
-| Become a client               | RFC 7591 (Dynamic Client Registration)      | Registers a public client (`token_endpoint_auth_method: none`) for the exact redirect address, keeps the registration, and keeps at most four per component.                                                                                                                       |
+| Become a client               | RFC 7591 (Dynamic Client Registration)      | Registers a public client (`token_endpoint_auth_method: none`) for the exact redirect address, keeps the registration, and keeps at most four per component — never dropping the one the live sign-in uses.                                                                        |
 | Authorize                     | OAuth 2.1 auth code + PKCE (S256), RFC 8707 | Sends `code_challenge`, a single-use `state` and `resource` (the server's canonical address). A server whose metadata does not list `S256` is refused.                                                                                                                             |
 | Mix-up defence                | OAuth Security BCP §4.4, RFC 9207           | A callback path per authorization server; `iss` checked when present and required when advertised.                                                                                                                                                                                 |
 | Redeem and refresh            | RFC 6749 §4.1.3, §6                         | Posts the code with the verifier; later posts the refresh token, once per server however many launches ask. Never follows a redirect. A stored endpoint is re-checked before anything is sent to it.                                                                               |
@@ -197,7 +197,9 @@ A server marked `auth: oauth` that has never been signed in — or has moved to 
 There is no timer. When a runtime is launched, the launch environment asks the MCP sign-in service to
 make the access tokens it is about to resolve current: any that expires within the next minute and has
 a refresh token is refreshed first — in parallel across servers, and once per server however many
-launches ask at the same moment — and the new tokens replace the old ones. A refresh that fails does not
+launches ask at the same moment — and the new tokens replace the old ones. A refresh answer is filed only if the
+sign-in is still the same one when it lands; a sign-out or a new sign-in elsewhere in the meantime wins,
+and the late tokens are revoked. A refresh that fails does not
 stop the launch — the harness then reports the server as unauthorised, and the component reads **Needs
 sign-in** — because one expired server should not keep an agent from starting. A refresh the provider
 REJECTS (`invalid_grant`), or a stored endpoint that no longer passes the endpoint rules, marks the
@@ -235,6 +237,8 @@ Paths are under `packages/daemon/tests/` unless they name another package.
 | M2: no sign-in to a plain-HTTP remote server                                                           | `unit/mcp-oauth/service.test.ts` › "M2: …", `packages/fleet/tests/unit/account-schema.test.ts`                                                            |
 | M4: the refresh token is not usable through `use` or `${secret:}`                                      | `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "M4: …"                                                                                                |
 | M5: concurrent launches spend the refresh token once                                                   | `unit/mcp-oauth/service.test.ts` › "M5: …"                                                                                                                |
+| A sign-out (or a new sign-in elsewhere) during an in-flight refresh is not undone by it                | `unit/mcp-oauth/service.test.ts` › "M-A: …", "L-A: …"                                                                                                     |
+| The registration cap never evicts the live sign-in's registration                                      | `unit/mcp-oauth/service.test.ts` › "L-B: …"                                                                                                               |
 | No token in any response, console line, audit entry or state file, end to end on loopback              | `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "…and leak no token anywhere"                                                                          |
 | Every act needs the unlock from a remote device and never reaches the service before it                | `unit/runtime/mounts/unlock-gate.test.ts` › "the MCP sign-in behind the unlock"                                                                           |
 | The materialised runtime config holds a variable name, never a value                                   | `packages/fleet/tests/unit/account-adapt.test.ts`                                                                                                         |
@@ -249,3 +253,8 @@ Paths are under `packages/daemon/tests/` unless they name another package.
 - **Step-up scopes — GAP.** A `403 insufficient_scope` from a running server does not start a new
   sign-in; the person signs in again.
 - **An overall refresh deadline at launch — GAP** (see the threat model).
+- **Registration calls to the provider are not capped — accepted.** At most four registrations are
+  KEPT per component (never the one the live sign-in uses), but each sign-in started from a new PWA
+  origin still sends one registration request to the provider before the local cap prunes. It takes
+  `fleet`/`configure` to cause, so it is self-inflicted; allowing only one PWA origin per component
+  would close it at the cost of signing in from a self-hosted and the hosted PWA alike.

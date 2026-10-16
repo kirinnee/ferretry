@@ -465,13 +465,19 @@ export class McpOAuthService {
       const all = [...(document.registrations[component] ?? []), registration];
       // Bounded: a caller trying many PWA origins cannot grow this file, or the provider's client list,
       // without limit. A forgotten registration's client secret is forgotten with it.
-      const dropped = all.slice(0, Math.max(0, all.length - MAX_REGISTRATIONS_PER_COMPONENT));
+      // The registration the live sign-in refreshes through is never the one dropped: forgetting it (and
+      // its client secret) would leave the sign-in reading "signed in" while every refresh failed.
+      const live = document.connections[component];
+      const inUse = (entry: McpOAuthRegistration): boolean =>
+        live !== undefined && entry.issuer === live.issuer && entry.redirectUri === live.redirectUri;
+      const excess = Math.max(0, all.length - MAX_REGISTRATIONS_PER_COMPONENT);
+      const dropped = all.filter(entry => !inUse(entry)).slice(0, excess);
       for (const entry of dropped)
         if (entry.hasClientSecret)
           await this.deps.internal.remove(clientSecretName(component, entry.issuer, entry.redirectUri));
       await this.deps.state.write({
         ...document,
-        registrations: { ...document.registrations, [component]: all.slice(dropped.length) },
+        registrations: { ...document.registrations, [component]: all.filter(entry => !dropped.includes(entry)) },
       });
     });
     return { registration };
@@ -665,13 +671,18 @@ export class McpOAuthService {
       return;
     }
     const now = this.deps.clock.now();
-    await this.exclusive(async () => {
+    const filed = await this.exclusive(async () => {
+      // The answer arrived up to a request timeout after the record was read. A sign-out — or a new
+      // sign-in at another address — may have happened meanwhile, and filing these tokens then would
+      // bring back a sign-in the person just ended, or stamp the old server's expiry on the new one. So
+      // the record is checked FIRST, inside the serialised write, and nothing is filed unless it is
+      // still this sign-in.
+      const document = await this.deps.state.read();
+      const current = document.connections[component];
+      if (current === undefined || current.serverUrl !== record.serverUrl) return false;
       await this.deps.secrets.put(names.access, answer.accessToken);
       // RFC 6749 §6: a provider may rotate the refresh token; one that does not keeps the old one valid.
       if (answer.refreshToken !== undefined) await this.deps.internal.put(names.refresh, answer.refreshToken);
-      const document = await this.deps.state.read();
-      const current = document.connections[component];
-      if (current === undefined) return;
       const { expiresAt: _previous, ...rest } = current;
       await this.deps.state.write({
         ...document,
@@ -684,7 +695,16 @@ export class McpOAuthService {
           },
         },
       });
+      return true;
     });
+    // Tokens nobody will file are tokens nobody should hold: ask the provider to drop them.
+    if (!filed)
+      await this.revokeToken(
+        component,
+        record,
+        answer.refreshToken ?? answer.accessToken,
+        answer.refreshToken === undefined ? 'access_token' : 'refresh_token',
+      );
   }
 
   private async markNeedsSignIn(component: string): Promise<void> {
@@ -730,18 +750,28 @@ export class McpOAuthService {
   }
 
   private async revoke(component: string, record: McpOAuthRecord): Promise<boolean> {
-    if (record.revocationEndpoint === undefined || !endpointAllowed(record.revocationEndpoint, record.serverUrl))
-      return false;
     try {
       const names = mcpOAuthSecretNames(component, record.serverUrl);
       const refresh = (await this.deps.internal.values()).get(names.refresh);
       const token = refresh ?? (await this.deps.values.values()).get(names.access);
       if (token === undefined) return false;
-      const form = new URLSearchParams({
-        token,
-        token_type_hint: refresh === undefined ? 'access_token' : 'refresh_token',
-        client_id: record.clientId,
-      });
+      return await this.revokeToken(component, record, token, refresh === undefined ? 'access_token' : 'refresh_token');
+    } catch {
+      return false;
+    }
+  }
+
+  /** RFC 7009, best effort: whether the provider confirmed it. Never throws. */
+  private async revokeToken(
+    component: string,
+    record: McpOAuthRecord,
+    token: string,
+    hint: 'access_token' | 'refresh_token',
+  ): Promise<boolean> {
+    if (record.revocationEndpoint === undefined || !endpointAllowed(record.revocationEndpoint, record.serverUrl))
+      return false;
+    try {
+      const form = new URLSearchParams({ token, token_type_hint: hint, client_id: record.clientId });
       const secret = record.hasClientSecret
         ? (await this.deps.internal.values()).get(clientSecretName(component, record.issuer, record.redirectUri))
         : undefined;
