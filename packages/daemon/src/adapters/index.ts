@@ -39,6 +39,7 @@ export * from './session/send/index.ts';
 export * from './session/signal/index.ts';
 export * from './session/snapshot/index.ts';
 export * from './session/transcript/index.ts';
+export * from './session/turn/index.ts';
 export * from './storage/home-lock.ts';
 export * from './storage/session-storage.ts';
 export * from './storage/sqlite-index.ts';

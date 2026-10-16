@@ -3,8 +3,12 @@
  *
  * It says what the harness itself says: Claude's `Pontificating… 42s · ↓ 3.1k tokens`, Codex's
  * `Working… 6m52s`. Those words come off the agent's own pane (`lib/pane-activity.ts`), read while
- * the session is busy and the page is visible, and never while it is idle — an idle agent has no
- * spinner to read, and a capture per tick for a session doing nothing is cost with no reader.
+ * the session is live and the page is visible, and never for a finished or parked one. A capture is
+ * a local terminal read — it starts no turn and spends no tokens.
+ *
+ * THE SAME READ DECIDES WHETHER THE LINE SHOWS AT ALL. A frame with no status line is an agent at
+ * its prompt, and `lib/session-activity.ts` turns that into "ready" — which is how a brand-new
+ * session, `running` from the moment it launched, stops showing a spinner nobody started.
  *
  * WHEN THE PANE CANNOT BE READ the line still tells the truth, in fewer words: the daemon's own
  * activity sentence, or `Working…`. A failed read is not shown as an error. The line is a courtesy,
@@ -14,6 +18,7 @@
 
 import { useEffect, useState } from 'react';
 import { type PaneActivity, paneActivityDetail, parsePaneActivity } from '../lib/pane-activity.ts';
+import { type PaneReading, UNREAD_PANE } from '../lib/session-activity.ts';
 import { thinkingActivityLabel } from './thinking-indicator.tsx';
 
 /** Reads the agent's pane as it is right now. */
@@ -25,7 +30,8 @@ const PANE_ACTIVITY_INTERVAL_MS = 2_500;
 const documentHidden = (): boolean => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 /**
- * The harness's live status line while `active`, else `null`.
+ * The agent's pane as last read while `active`: whether a frame was read, and the harness's live
+ * status line in it. Unread while inactive, before the first read lands, and after a failed read.
  *
  * One read in flight at a time: the next is scheduled only after the previous one settles, so a slow
  * daemon slows the line down rather than stacking captures behind it. Turning inactive aborts the
@@ -35,10 +41,10 @@ export function usePaneActivity(
   read: PaneFrameReader | undefined,
   active: boolean,
   intervalMs = PANE_ACTIVITY_INTERVAL_MS,
-): PaneActivity | null {
-  const [activity, setActivity] = useState<PaneActivity | null>(null);
+): PaneReading {
+  const [reading, setReading] = useState<PaneReading>(UNREAD_PANE);
   useEffect(() => {
-    setActivity(null);
+    setReading(UNREAD_PANE);
     if (!active || read === undefined) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -46,9 +52,9 @@ export function usePaneActivity(
       if (!documentHidden()) {
         try {
           const frame = await read(controller.signal);
-          if (!controller.signal.aborted) setActivity(parsePaneActivity(frame));
+          if (!controller.signal.aborted) setReading({ read: true, activity: parsePaneActivity(frame) });
         } catch {
-          if (!controller.signal.aborted) setActivity(null);
+          if (!controller.signal.aborted) setReading(UNREAD_PANE);
         }
       }
       if (!controller.signal.aborted) timer = setTimeout(() => void tick(), intervalMs);
@@ -59,7 +65,7 @@ export function usePaneActivity(
       clearTimeout(timer);
     };
   }, [active, intervalMs, read]);
-  return activity;
+  return reading;
 }
 
 export interface LiveActivityLineProps {

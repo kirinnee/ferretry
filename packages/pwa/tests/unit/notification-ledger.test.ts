@@ -8,6 +8,8 @@ import type { FleetSnapshot } from '../../src/lib/fleet-store.ts';
 import { DEFAULT_NOTIFICATION_FILTER_PREFERENCES } from '../../src/lib/notification-filter.ts';
 import {
   buildNotification,
+  classifySessionNotification,
+  classifyTurnTransition,
   classifyTransition,
   DaemonNotificationLedger,
   fleetNotificationEventKey,
@@ -20,6 +22,7 @@ import {
   planNotifications,
   startNotificationWatch,
   summaryNotification,
+  turnBoundary,
 } from '../../src/lib/notification-ledger.ts';
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
@@ -357,5 +360,83 @@ describe('notification watch', () => {
     ]);
     listener?.();
     should(shown).have.length(3);
+  });
+});
+
+/**
+ * THE DAEMON'S TURN FACT DRIVES "YOUR TURN" AND "NEEDS INPUT": exactly once per boundary, never while
+ * working, never on first sight, and never missed when a whole turn fell between two polls.
+ */
+describe('turn-boundary notifications', () => {
+  const turnView = (
+    turnState: 'working' | 'your-turn' | 'needs-input',
+    turnStateAt: string,
+    status: SessionStatus = 'running',
+  ): SessionView => sessionView('s1', { state: { status, turn: 4, turnState, turnStateAt } });
+  const kinds = (specs: readonly NotificationSpec[]) => specs.map(spec => spec.kind);
+  const poll = (ledger: DaemonNotificationLedger, views: readonly SessionView[], at = 1_000) =>
+    planNotifications(daemonA, views, ledger, enabledPrefs, allowAll, at);
+
+  it('classifies only a changed boundary, and only the two that mean a person is wanted', () => {
+    should(classifyTurnTransition(undefined, { state: 'your-turn', at: 'a' })).be.null();
+    should(classifyTurnTransition({ state: 'working', at: 'a' }, undefined)).be.null();
+    should(classifyTurnTransition({ state: 'your-turn', at: 'a' }, { state: 'your-turn', at: 'a' })).be.null();
+    should(classifyTurnTransition({ state: 'your-turn', at: 'a' }, { state: 'working', at: 'b' })).be.null();
+    should(classifyTurnTransition({ state: 'working', at: 'a' }, { state: 'your-turn', at: 'b' })).equal('attention');
+    should(classifyTurnTransition({ state: 'working', at: 'a' }, { state: 'needs-input', at: 'b' })).equal('question');
+    // A whole working stretch fell between two polls: a NEW your-turn boundary all the same.
+    should(classifyTurnTransition({ state: 'your-turn', at: 'a' }, { state: 'your-turn', at: 'c' })).equal('attention');
+    should(turnBoundary(sessionView('s', { state: { status: 'running', turn: 1 } }))).be.undefined();
+    should(turnBoundary(turnView('working', 'x'))).deepEqual({ state: 'working', at: 'x' });
+    should(turnBoundary(sessionView('s', { state: { status: 'running', turn: 1, turnState: 'working' } }))).deepEqual({
+      state: 'working',
+      at: '',
+    });
+  });
+
+  it('notifies a turn end once, never while working, and never on first sight', () => {
+    const ledger = new DaemonNotificationLedger();
+    should(poll(ledger, [turnView('working', 't1')])).have.length(0);
+    should(poll(ledger, [turnView('working', 't1')])).have.length(0);
+    const ended = poll(ledger, [turnView('your-turn', 't2')]);
+    should(kinds(ended)).deepEqual(['attention']);
+    should(ended[0]?.body).equal('Your turn — finished and waiting for you.');
+    should(poll(ledger, [turnView('your-turn', 't2')], 2_000)).have.length(0);
+    should(poll(ledger, [turnView('working', 't3')], 3_000)).have.length(0);
+    should(kinds(poll(ledger, [turnView('your-turn', 't4')], 4_000))).deepEqual(['attention']);
+  });
+
+  it('notifies needs-input as a question, once per boundary', () => {
+    const ledger = new DaemonNotificationLedger();
+    poll(ledger, [turnView('working', 't1')]);
+    const asked = poll(ledger, [turnView('needs-input', 't2')]);
+    should(kinds(asked)).deepEqual(['question']);
+    should(asked[0]?.body).equal('Needs your input to continue.');
+    should(poll(ledger, [turnView('needs-input', 't2')], 2_000)).have.length(0);
+  });
+
+  it("does not notify the status word a second time beside the turn fact, but keeps a session's ending", () => {
+    const ledger = new DaemonNotificationLedger();
+    poll(ledger, [turnView('working', 't1')]);
+    // The send path's own `awaiting_user` on an interrupt is the same moment the turn fact reports.
+    should(kinds(poll(ledger, [turnView('your-turn', 't2', 'awaiting_user')]))).deepEqual(['attention']);
+    should(poll(ledger, [turnView('your-turn', 't2', 'awaiting_user')], 2_000)).have.length(0);
+    should(kinds(poll(ledger, [turnView('your-turn', 't2', 'failed')], 3_000))).deepEqual(['failed']);
+  });
+
+  it('forgets the turn baseline with the session and with the daemon', () => {
+    const ledger = new DaemonNotificationLedger();
+    const scope = daemonSessionScope({ daemonId: daemonA }, 's1');
+    poll(ledger, [turnView('working', 't1')]);
+    should(ledger.turn(scope)).deepEqual({ state: 'working', at: 't1' });
+    poll(ledger, []);
+    should(ledger.turn(scope)).be.undefined();
+    poll(ledger, [turnView('working', 't1')]);
+    ledger.clearDaemon(daemonA);
+    should(ledger.turn(scope)).be.undefined();
+  });
+
+  it('still notifies from the status alone for a daemon with no turn fact', () => {
+    should(classifySessionNotification('running', undefined, view('s', 'awaiting_user'))).equal('attention');
   });
 });

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  clampMenuPosition,
   ContextMenu,
   type ContextMenuItem,
+  clampMenuPosition,
   firstEnabledIndex,
   nextEnabledIndex,
 } from '../../src/shell/context-menu.tsx';
@@ -341,6 +341,26 @@ describe('ContextMenu', () => {
 
     expect(menu.rows()[0]?.querySelector('[data-testid="icon"]')).not.toBeNull();
     expect(menu.rows()[0]?.textContent).toContain('3 selected');
+    await menu.unmount();
+  });
+
+  it('draws a divider above a flagged row that the arrow keys step over', async () => {
+    const menu = await openMenu({
+      items: [
+        { key: 'a', label: 'studio', onSelect: () => {} },
+        { key: 'b', label: 'Pair a phone with studio…', separatorBefore: true, onSelect: () => {} },
+        { key: 'c', label: 'Add a machine…', onSelect: () => {} },
+      ],
+    });
+
+    const separators = [...menu.menu.querySelectorAll('[data-menu-separator]')];
+    expect(separators).toHaveLength(1);
+    // An `hr` is a separator to assistive technology, never one of the menu's items.
+    expect(separators[0]?.tagName).toBe('HR');
+    expect(separators[0]?.nextElementSibling).toBe(menu.rows()[1] as Element);
+    expect(menu.rows()).toHaveLength(3);
+    await interact(() => pressKey(menu.menu, 'ArrowDown'));
+    expect(document.activeElement).toBe(menu.rows()[1] as Element);
     await menu.unmount();
   });
 
