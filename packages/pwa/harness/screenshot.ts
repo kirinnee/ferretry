@@ -1361,7 +1361,15 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
   const shellSelector = '#harness-session-workspace-page';
   const shell = page.locator(shellSelector);
   await shell.waitFor({ state: 'visible' });
-  // A phone inside a session has no bottom bar, so the top bar carries its own Find button.
+  // A PHONE'S SESSION PAGE HAS NO SEARCH BOX: its one bar is the agent's name, status and actions, and
+  // the finder lives in the sessions drawer behind ☰. The shell's search is a desktop surface.
+  if (viewport.name === 'mobile') {
+    process.stdout.write(
+      '   compiled shell @ mobile: no shell search on a phone session page (the drawer holds the finder)\n',
+    );
+    return;
+  }
+  // The sessions bar keeps a finder icon beside this session's own search.
   await page.locator('[data-app-bar-destination-search]').first().waitFor({ state: 'visible' });
   const destinationShortcut = await page.evaluate(() => {
     const finders = Array.from(document.querySelectorAll<HTMLElement>('[data-app-bar-destination-search]'));
@@ -1378,7 +1386,7 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
       `global Find still claims the current-session shortcut at ${viewport.name}: ` +
         `${destinationShortcut.ariaClaims} aria claim(s), ${destinationShortcut.physicalLegends} physical legend(s)`,
     );
-  const shellField = shell.locator('[data-app-bar-session-search-slot] [data-current-session-search] input');
+  const shellField = shell.locator('[data-sessions-bar] [data-current-session-search] input');
   // Programmatic keyboard focus makes the focus-visible ring part of the
   // evidence without pretending a phone has a physical Ctrl key.
   await shellField.focus();
@@ -2988,37 +2996,18 @@ try {
           await page.screenshot({ path: workspaceTarget });
           process.stdout.write(`📸 ${viewport.name} session workspace -> ${workspaceTarget}\n`);
 
-          // THE TOP BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves
-          // the bar's share of the viewport; this tighter image makes its actual
-          // spacing legible. At 390px the destination picker is a distinct state,
-          // and dismissal is part of the interaction contract, so capture both
-          // sides of the same production trigger instead of posing an already-
-          // open component in the harness.
-          const topBar = page.locator('[data-density-region="app-bar"]');
-          const topBarTarget = join(outDir, `top-bar-${viewport.name}.png`);
-          await captureElement(page, topBar, topBarTarget);
-          process.stdout.write(`📸 top bar ${viewport.name} -> ${topBarTarget}\n`);
-          const topBarGeometry = await page.evaluate(() => {
-            const header = document.querySelector<HTMLElement>('[data-density-region="app-bar"]');
-            const slot = document.querySelector<HTMLElement>('[data-app-bar-session-search-slot]');
-            const headerBox = header?.getBoundingClientRect();
-            const slotBox = slot?.getBoundingClientRect();
-            return {
-              height: headerBox === undefined ? null : Math.round(headerBox.height),
-              slotCentre: slotBox === undefined ? null : Math.round(slotBox.left + slotBox.width / 2),
-              viewportCentre: Math.round(window.innerWidth / 2),
-            };
-          });
-          process.stdout.write(
-            `   top bar geometry: height=${String(topBarGeometry.height)}px ` +
-              `slot centre=${String(topBarGeometry.slotCentre)}px viewport centre=${topBarGeometry.viewportCentre}px\n`,
-          );
-          if (
-            topBarGeometry.slotCentre === null ||
-            Math.abs(topBarGeometry.slotCentre - topBarGeometry.viewportCentre) > 1
-          ) {
-            fail(`the current-session search slot is not centred at ${viewport.name}`);
-          }
+          // THE SESSION BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves the bar's share of
+          // the viewport; this tighter image makes its spacing legible. It is ONE row now — the agent's
+          // name, project and status, the lifecycle buttons and ⋯ — and the height is printed so a
+          // regression back to two rows of chrome is a number, not an impression.
+          const sessionBar = page.locator('[data-session-bar]');
+          const sessionBarTarget = join(outDir, `session-bar-${viewport.name}.png`);
+          await captureElement(page, sessionBar, sessionBarTarget);
+          process.stdout.write(`📸 session bar ${viewport.name} -> ${sessionBarTarget}\n`);
+          const sessionBarHeight = await sessionBar.evaluate(bar => Math.round(bar.getBoundingClientRect().height));
+          process.stdout.write(`   session bar height=${sessionBarHeight}px\n`);
+          if (sessionBarHeight > 64)
+            fail(`the session bar is ${sessionBarHeight}px tall at ${viewport.name}: one row, please`);
 
           // Geometry, printed rather than eyeballed. A screenshot cannot tell a
           // pinned tail apart from a transcript that happens to be short, and it
@@ -3064,20 +3053,15 @@ try {
             fail(`the composer sits below the viewport at ${viewport.name}`);
           }
 
-          // THEN the companion pane, opened through the page's own launcher —
-          // the same `pane.open('terminals', …)` a reader clicks. Driving the
-          // real control is what makes this a capture of the desktop/sheet split
-          // rather than of a prop someone set. The terminal surface is chosen
-          // because it resolves entirely from the harness client and snapshot
-          // reader: the files tree would paint a network error over the layout.
+          // THEN the Console — the agent's own pane — shown through the page's own ⋯ › Console, the
+          // control a reader clicks. It resolves entirely from the harness snapshot reader, so the
+          // capture is the agent pane's second tab rather than a network error.
           const workspacePaneTarget = join(outDir, `${viewport.name}-session-workspace-pane.png`);
-          await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-          await page.getByText('Session pane snapshot').waitFor({ state: 'visible' });
+          await page.locator('[data-session-more]').click();
+          await page.getByRole('menuitem', { name: 'Console', exact: true }).click();
+          await page.locator('[data-workspace-console]').waitFor({ state: 'visible' });
           await page.screenshot({ path: workspacePaneTarget });
-          process.stdout.write(
-            `📸 ${viewport.name} session workspace, ${viewport.name === 'mobile' ? 'sheet' : 'pane'} open -> ` +
-              `${workspacePaneTarget}\n`,
-          );
+          process.stdout.write(`📸 ${viewport.name} session workspace, Console shown -> ${workspacePaneTarget}\n`);
 
           // The real remote browser gets this route of its own so this is the
           // production side-pane layout taking the whole screen, not a gallery

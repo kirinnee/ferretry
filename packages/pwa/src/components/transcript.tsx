@@ -3,10 +3,12 @@ import { useInputModality } from '../hooks/use-input-modality.ts';
 import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/context-menu-policy.ts';
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
+import type { PaneActivity } from '../lib/pane-activity.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
-import { type TranscriptEntry, transcriptIsFollowing } from '../lib/session-screens.ts';
+import { detailsLabel, type TranscriptEntry, transcriptIsFollowing, transcriptItems } from '../lib/session-screens.ts';
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
+import { LiveActivityLine } from './live-activity.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
 
 export interface TranscriptProps {
@@ -19,7 +21,61 @@ export interface TranscriptProps {
   readonly asOf?: number;
   /** Offered on ledger rows. Absent means resend is not available here. */
   readonly onResend?: (record: LedgerSendRecord) => Promise<boolean>;
+  /** The harness's own live status line while `busy`, when its pane could be read. */
+  readonly activity?: PaneActivity | null;
+  /** The daemon's activity sentence, shown when the pane said nothing readable. */
+  readonly activityFallback?: string | null;
+  /** Folded runs start open (Settings › Show details). Each can still be toggled on its own. */
+  readonly detailsShown?: boolean;
+  /** The agent's own name, which every assistant row is labelled with instead of a harness or account. */
+  readonly agentName?: string;
 }
+
+/**
+ * One folded run of bookkeeping rows. Closed it is a single quiet line — "Show details (2 system
+ * events)" — and open it lists every row it holds in the transcript's small mono chrome, so nothing
+ * the daemon recorded is ever unreachable, only out of the way.
+ */
+function TranscriptDetails({
+  entries,
+  open,
+  onToggle,
+}: {
+  readonly entries: readonly TranscriptEntry[];
+  readonly open: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <div
+      className="fy-transcript-details"
+      data-transcript-density="chrome"
+      data-transcript-details={open ? 'open' : 'closed'}
+    >
+      <button aria-expanded={open} className="fy-transcript-details-toggle" onClick={onToggle} type="button">
+        {open ? 'Hide details' : `Show details (${detailsLabel(entries.length)})`}
+      </button>
+      {open ? (
+        <ul className="fy-transcript-details-list">
+          {entries.map(entry => (
+            <li key={entry.id}>
+              <span className="fy-transcript-details-label">{entry.label}</span> {entry.text}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * An assistant row labelled with the agent's name — "Hadi · 10:11:13" rather than "Assistant", the
+ * harness, or the runtime's account. The clock the daemon printed is kept.
+ */
+export const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry => {
+  if (entry.kind !== 'assistant' || agentName === '') return entry;
+  const clock = /\u00b7\s*(\d{2}:\d{2}:\d{2})$/u.exec(entry.label ?? '')?.[1];
+  return { ...entry, label: clock === undefined ? agentName : `${agentName} · ${clock}` };
+};
 
 type ScrollPort = { scrollHeight: number; scrollTop: number; clientHeight: number };
 
@@ -59,6 +115,10 @@ export function Transcript({
   label = 'Transcript',
   asOf,
   onResend,
+  activity = null,
+  activityFallback = null,
+  detailsShown = false,
+  agentName,
 }: TranscriptProps) {
   const viewport = useRef<ScrollPort | null>(null);
   const viewportElement = useRef<HTMLDivElement | null>(null);
@@ -70,6 +130,15 @@ export function Transcript({
     null,
   );
   const previousLength = useRef(entries.length);
+  // The runs the reader flipped away from the default, so a setting change re-applies to every other run.
+  const [openDetails, setOpenDetails] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleDetails = useCallback((id: string) => {
+    setOpenDetails(current => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
   const { touchAffected } = useInputModality();
 
   // Follow position and the unread counter are browser-local state, but their
@@ -82,6 +151,7 @@ export function Transcript({
     following.current = true;
     previousLength.current = entries.length;
     setNewCount(0);
+    setOpenDetails(new Set());
   }, [daemonId, sessionId]);
 
   // These deps are the TRIGGER, not inputs. The body reads only refs, so the rule sees them as
@@ -181,22 +251,27 @@ export function Transcript({
         aria-live="polite"
       >
         <div className="fy-transcript-content">
-          {entries.map((entry, index) => (
-            <TranscriptRow
-              asOf={asOf}
-              entry={entry}
-              isLast={index === entries.length - 1}
-              key={entry.id}
-              live={busy}
-              onResend={onResend}
-              previous={entries[index - 1]}
-            />
-          ))}
-          {busy ? (
-            <p className="fy-thinking" data-transcript-density="chrome">
-              Working…
-            </p>
-          ) : null}
+          {transcriptItems(entries).map((item, index, items) =>
+            item.kind === 'details' ? (
+              <TranscriptDetails
+                entries={item.entries}
+                key={item.id}
+                onToggle={() => toggleDetails(item.id)}
+                open={detailsShown !== openDetails.has(item.id)}
+              />
+            ) : (
+              <TranscriptRow
+                asOf={asOf}
+                entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
+                isLast={index === items.length - 1}
+                key={item.entry.id}
+                live={busy}
+                onResend={onResend}
+                previous={item.previous}
+              />
+            ),
+          )}
+          {busy ? <LiveActivityLine activity={activity} fallback={activityFallback} /> : null}
         </div>
       </div>
       <ContextMenu

@@ -39,6 +39,9 @@ import { type DeviceKeyStore, IndexedDbDeviceKeyStore, mintDeviceKey } from './d
 import { documentDraftStore } from './drafts.ts';
 import { DaemonEventTransport } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
+import { KeyRotation } from './key-rotation.ts';
+import { DeviceNotificationFilterStore } from './notification-filter.ts';
+import { browserNotificationFilterMirror } from './notification-filter-mirror.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import type { CredentialsPort } from './passkeys.ts';
@@ -54,7 +57,6 @@ import {
   outdatedSide,
   type RelayDial,
 } from './relay-carrier.ts';
-import { KeyRotation } from './key-rotation.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
@@ -69,6 +71,7 @@ import {
 import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
+import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
 
 const CONNECTION_DATABASE = 'ferretry-pwa';
 const CONNECTION_OBJECT_STORE = 'connections';
@@ -331,7 +334,11 @@ export interface AppStore {
   readonly pins: DaemonPinClient;
   readonly browserLogin: DaemonBrowserLoginStore;
   readonly stt: SttSettingsStore;
+  /** Every agent's remembered split workspace, forgotten with the machine it belongs to. */
+  readonly workspaceLayouts: WorkspaceLayoutStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
+  /** This browser's one device-wide notification filter — see `notification-filter.ts`. */
+  readonly notificationFilter: DeviceNotificationFilterStore;
   readonly pushDevices: DaemonPushDevices;
   /**
    * The daemon push API bound to the SAME fetcher as every other daemon call.
@@ -549,7 +556,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   }));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
+  const workspaceLayouts = new WorkspaceLayoutStore();
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
+  const notificationFilter = new DeviceNotificationFilterStore(browserStorage, browserNotificationFilterMirror());
   const pushDevices = new DaemonPushDevices(browserStorage);
   const pushService = daemonPushService(carried);
   const connections = await DaemonConnectionStore.open({
@@ -573,6 +582,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       notificationPreferences,
       pushDevices,
       documentDraftStore,
+      workspaceLayouts,
       carrier,
     ],
     // The key goes with the pairing it proved, and only when the pairing goes for good — a re-pair in
@@ -617,7 +627,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pins,
     browserLogin,
     stt,
+    workspaceLayouts,
     notificationPreferences,
+    notificationFilter,
     pushDevices,
     pushService,
     readDefaultRelay,

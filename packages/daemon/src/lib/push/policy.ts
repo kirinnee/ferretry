@@ -3,16 +3,21 @@ import {
   PushDeviceViewSchema,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
-  type PushPreferences,
 } from '@ferretry/protocol';
-import type { PushDispatch, PushSubscriptionRecord } from './types.ts';
+import type { PushSubscriptionRecord } from './types.ts';
 
 /**
- * The pure decisions of the push domain: what an enrolment looks like to a caller, whether a device
- * agreed to hear about something, and what an enrolment confirmation says.
+ * The pure decisions of the push domain: what an enrolment looks like to a caller, and what an
+ * enrolment confirmation says.
  *
  * They live apart from the service because each is a total function over its inputs, and the service
  * is the part that touches a store and a network.
+ *
+ * THERE IS NO PREFERENCE-BASED FILTER HERE, DELIBERATELY. Every enrolled device is sent every event
+ * (`PushService.notify`); which ones a reader is shown is a decision their own browser makes from its
+ * own local storage, never one this daemon stores or enforces on a device's behalf. That is what lets
+ * "every machine sends every event; each device decides what to show" hold even for a browser this
+ * daemon has never previously described — there is no stale preference row to consult or omit.
  */
 
 /**
@@ -31,27 +36,7 @@ export function pushDeviceView(record: PushSubscriptionRecord): PushDeviceView {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     expirationTime: record.subscription.expirationTime,
-    prefs: record.prefs,
   });
-}
-
-/**
- * Whether one device agreed to be told about this.
- *
- * THERE IS NO SILENCE TO INTERPRET. `PushPreferencesSchema` demands an answer for every notification
- * kind, so an enrolment either says yes or says no and this function never has to guess what an absent
- * opinion meant — which is the whole reason the wire shape is a complete record rather than a partial
- * one. A reader who has said nothing cannot be enrolled at all.
- *
- * A payload about NO session bypasses both rules. `interactiveOnly` is a reader declining unattended
- * session noise, and an enrolment confirmation is neither about a session nor noise they can predict;
- * silencing it with a session preference would leave somebody who just turned notifications on with no
- * evidence that anything worked.
- */
-export function acceptsDispatch(prefs: PushPreferences, dispatch: PushDispatch): boolean {
-  if (!('kind' in dispatch.payload)) return true;
-  if (!prefs.events[dispatch.payload.kind]) return false;
-  return !(prefs.interactiveOnly && dispatch.interactive === false);
 }
 
 /**

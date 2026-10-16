@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import {
-  STEP_UP_REQUIRED_CODE,
   type CapabilityGrants,
   LIMITED_DEVICE_GRANTS,
   type PushDeviceView,
   type RegisterPushDeviceRequest,
+  STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
@@ -25,7 +25,6 @@ const view = (id: string, deviceName: string): PushDeviceView => ({
   createdAt: AT,
   updatedAt: AT,
   expirationTime: null,
-  prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
 });
 
 const body: RegisterPushDeviceRequest = {
@@ -35,7 +34,6 @@ const body: RegisterPushDeviceRequest = {
     expirationTime: null,
     keys: { p256dh: Buffer.alloc(65, 4).toString('base64url'), auth: Buffer.alloc(16, 4).toString('base64url') },
   },
-  prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
 };
 
 /**

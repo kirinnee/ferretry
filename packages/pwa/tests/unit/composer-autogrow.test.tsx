@@ -92,12 +92,12 @@ describe('composer auto-grow', () => {
     }
   });
 
-  it('never shrinks below the 44px touch floor', async () => {
+  it('never shrinks below one 22px line', async () => {
     const { input, unmount } = await grown({ contentHeight: 12, sessionId: 'floor' });
     try {
-      // The floor is the target size, and it is the same 44px the stylesheet
-      // declares — a one-word draft must not produce a box a thumb cannot hit.
-      should(input.style.height).equal('44px');
+      // The floor is one line, the same 22px the stylesheet declares; the row
+      // around it is what carries the touch target.
+      should(input.style.height).equal('22px');
     } finally {
       await unmount();
     }

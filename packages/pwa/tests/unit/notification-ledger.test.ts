@@ -5,6 +5,7 @@ import should from 'should';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { FleetSnapshot } from '../../src/lib/fleet-store.ts';
+import { DEFAULT_NOTIFICATION_FILTER_PREFERENCES } from '../../src/lib/notification-filter.ts';
 import {
   buildNotification,
   classifyTransition,
@@ -29,6 +30,7 @@ import { sessionView } from '../support/sessions.ts';
 const daemonA = daemonId('daemon-a');
 const daemonB = daemonId('daemon-b');
 const enabledPrefs: NotificationPreferences = { ...DEFAULT_NOTIFICATION_PREFERENCES, enabled: true };
+const allowAll = DEFAULT_NOTIFICATION_FILTER_PREFERENCES;
 
 const view = (
   id: string,
@@ -138,31 +140,62 @@ describe('notification payloads', () => {
 });
 
 describe('notification planning', () => {
-  it('should advance a silent baseline through disabled and interactive filters', () => {
+  it('should advance a silent baseline through the per-daemon master switch', () => {
     const ledger = new DaemonNotificationLedger();
-    planNotifications(daemonA, [view('s1', 'running'), view('s2', 'running')], ledger, enabledPrefs, 1_000);
-    const disabled: NotificationPreferences = { ...enabledPrefs, events: { ...enabledPrefs.events, completed: false } };
-    should(
-      planNotifications(daemonA, [view('s1', 'completed'), view('s2', 'awaiting_user')], ledger, disabled, 2_000),
-    ).have.length(1);
-    const interactiveOnly: NotificationPreferences = { ...enabledPrefs, interactiveOnly: true };
+    planNotifications(daemonA, [view('s1', 'running'), view('s2', 'running')], ledger, enabledPrefs, allowAll, 1_000);
+    const disabled: NotificationPreferences = { ...enabledPrefs, enabled: false };
     should(
       planNotifications(
         daemonA,
         [view('s1', 'completed'), view('s2', 'awaiting_user')],
         ledger,
-        interactiveOnly,
-        3_000,
+        disabled,
+        allowAll,
+        2_000,
       ),
     ).have.length(0);
+  });
+
+  it('should defer to the device-wide filter for a category switched off', () => {
+    const ledger = new DaemonNotificationLedger();
+    planNotifications(daemonA, [view('s1', 'running'), view('s2', 'running')], ledger, enabledPrefs, allowAll, 1_000);
+    const noFinished = { ...allowAll, categories: { ...allowAll.categories, finished: false } };
+    should(
+      planNotifications(
+        daemonA,
+        [view('s1', 'completed'), view('s2', 'awaiting_user')],
+        ledger,
+        enabledPrefs,
+        noFinished,
+        2_000,
+      ),
+    ).have.length(1);
+  });
+
+  it('should defer to the device-wide filter for a muted machine', () => {
+    const ledger = new DaemonNotificationLedger();
+    planNotifications(daemonA, [view('s1', 'running')], ledger, enabledPrefs, allowAll, 1_000);
+    const muted = { ...allowAll, machines: { [daemonA]: false } };
+    should(planNotifications(daemonA, [view('s1', 'awaiting_user')], ledger, enabledPrefs, muted, 2_000)).have.length(
+      0,
+    );
+  });
+
+  it('should defer to the device-wide filter during quiet hours', () => {
+    const ledger = new DaemonNotificationLedger();
+    planNotifications(daemonA, [view('s1', 'running')], ledger, enabledPrefs, allowAll, 1_000);
+    const quiet = { ...allowAll, quietHours: { enabled: true, startMinute: 0, endMinute: 0 } };
+    should(planNotifications(daemonA, [view('s1', 'awaiting_user')], ledger, enabledPrefs, quiet, 2_000)).have.length(
+      0,
+    );
   });
 
   it('should fire a later real transition and collapse a burst into a daemon dashboard summary', () => {
     const ledger = new DaemonNotificationLedger();
     const many = Array.from({ length: NOTIFY_BURST_LIMIT + 2 }, (_, index) => view(`s${index}`, 'running'));
-    should(planNotifications(daemonA, many, ledger, enabledPrefs, 1_000)).have.length(0);
+    should(planNotifications(daemonA, many, ledger, enabledPrefs, allowAll, 1_000)).have.length(0);
     const changed = many.map(item => ({ ...item, state: { ...item.state, status: 'awaiting_user' as const } }));
-    const summary = planNotifications(daemonA, changed, ledger, enabledPrefs, 2_000);
+    const summary = planNotifications(daemonA, changed, ledger, enabledPrefs, allowAll, 2_000);
     should(summary).have.length(1);
     should(summary[0]?.tag).equal('fy-summary:daemon-a');
     should(summary[0]?.body).equal(`${NOTIFY_BURST_LIMIT + 2} sessions need your attention.`);
@@ -170,10 +203,10 @@ describe('notification planning', () => {
 
   it('should plan same session ids independently for paired daemons', () => {
     const ledger = new DaemonNotificationLedger();
-    planNotifications(daemonA, [view('shared', 'running')], ledger, enabledPrefs, 1_000);
-    planNotifications(daemonB, [view('shared', 'running')], ledger, enabledPrefs, 1_000);
-    const a = planNotifications(daemonA, [view('shared', 'awaiting_user')], ledger, enabledPrefs, 2_000);
-    const b = planNotifications(daemonB, [view('shared', 'awaiting_user')], ledger, enabledPrefs, 2_000);
+    planNotifications(daemonA, [view('shared', 'running')], ledger, enabledPrefs, allowAll, 1_000);
+    planNotifications(daemonB, [view('shared', 'running')], ledger, enabledPrefs, allowAll, 1_000);
+    const a = planNotifications(daemonA, [view('shared', 'awaiting_user')], ledger, enabledPrefs, allowAll, 2_000);
+    const b = planNotifications(daemonB, [view('shared', 'awaiting_user')], ledger, enabledPrefs, allowAll, 2_000);
     should(a[0]?.tag).not.equal(b[0]?.tag);
     should(a[0]?.scope?.daemonId).equal(daemonA);
     should(b[0]?.scope?.daemonId).equal(daemonB);
@@ -196,6 +229,7 @@ describe('notification watch', () => {
     };
     const stop = startNotificationWatch(source, {
       prefs: () => ({ ...enabledPrefs, onlyWhenHidden: false }),
+      filter: () => allowAll,
       hidden: () => hidden,
       foregroundSession: () => foreground,
       show: spec => shown.push(spec),
@@ -236,6 +270,7 @@ describe('notification watch', () => {
     };
     startNotificationWatch(source, {
       prefs: () => enabledPrefs,
+      filter: () => allowAll,
       hidden: () => hidden,
       foregroundSession: () => null,
       show: spec => shown.push(spec),
@@ -264,6 +299,7 @@ describe('notification watch', () => {
     };
     startNotificationWatch(source, {
       prefs: () => ({ ...enabledPrefs, onlyWhenHidden: false }),
+      filter: () => allowAll,
       hidden: () => false,
       foregroundSession: () => daemonSessionScope({ daemonId: daemonA }, 'shared'),
       show: spec => shown.push(spec),
@@ -297,6 +333,7 @@ describe('notification watch', () => {
       source,
       {
         prefs: () => ({ ...enabledPrefs, onlyWhenHidden: false }),
+        filter: () => allowAll,
         hidden: () => true,
         foregroundSession: () => null,
         show: spec => shown.push(spec),

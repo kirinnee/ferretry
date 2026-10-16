@@ -1,14 +1,13 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
-export const PushNotificationKindSchema = z.enum(['attention', 'question', 'failed', 'completed']);
+/**
+ * `device-paired` is the one kind a payload about NO session may carry (see
+ * `PushNotificationPayloadSchema`): every other kind narrates a session's own transition and is
+ * meaningless without one.
+ */
+export const PushNotificationKindSchema = z.enum(['attention', 'question', 'failed', 'completed', 'device-paired']);
 export type PushNotificationKind = z.infer<typeof PushNotificationKindSchema>;
-
-export const PushPreferencesSchema = z.object({
-  events: z.record(PushNotificationKindSchema, z.boolean()),
-  interactiveOnly: z.boolean(),
-});
-export type PushPreferences = z.infer<typeof PushPreferencesSchema>;
 
 /**
  * The push services a subscription may point at: the hosts every major browser's push service runs on.
@@ -68,10 +67,27 @@ export const BrowserPushSubscriptionSchema = z.strictObject({
 });
 export type BrowserPushSubscription = z.infer<typeof BrowserPushSubscriptionSchema>;
 
+/**
+ * `prefs` is deliberately NOT read or stored any more. Which events a device hears about is a
+ * decision this device makes about itself, never one the daemon enforces on its behalf: every
+ * daemon sends every event to every live enrolment, and each browser's own local preferences decide
+ * what it shows (see the client-side notification filter in
+ * `packages/pwa/src/lib/notification-filter.ts`).
+ *
+ * `prefs` IS STILL NAMED HERE, as the one field this `strictObject` accepts without reading —
+ * version skew, not an oversight. The daemon and the PWA upgrade independently, so a browser still
+ * running last release's bundle keeps sending the preference bundle this endpoint used to require;
+ * refusing that body with the strict rejection every OTHER unexpected field still gets (see
+ * `push_device_required` and the mount's own tests) would turn an ordinary rolling deploy into a
+ * registration outage. The PWA keeps sending a harmless placeholder for one release for the mirror
+ * case — an old, not-yet-upgraded daemon whose schema still REQUIRES `prefs` — see
+ * `packages/pwa/src/lib/push-subscriptions.ts`. Remove this field once that compatibility window has
+ * passed and every daemon in the field has upgraded past the one that required it.
+ */
 export const RegisterPushDeviceRequestSchema = z.strictObject({
   deviceName: PushDeviceNameSchema,
   subscription: BrowserPushSubscriptionSchema,
-  prefs: PushPreferencesSchema,
+  prefs: z.unknown().optional(),
 });
 export type RegisterPushDeviceRequest = z.infer<typeof RegisterPushDeviceRequestSchema>;
 
@@ -81,7 +97,6 @@ export const PushDeviceViewSchema = z.object({
   createdAt: InstantSchema,
   updatedAt: InstantSchema,
   expirationTime: NonNegativeFiniteSchema.nullable(),
-  prefs: PushPreferencesSchema,
 });
 export type PushDeviceView = z.infer<typeof PushDeviceViewSchema>;
 
@@ -105,13 +120,24 @@ const PushPayloadBaseShape = {
   count: PositiveIntegerSchema,
 };
 
+/**
+ * Every kind but `device-paired` narrates one session's own transition and is meaningless without
+ * one, so it is confined to the session-scoped variant below. `device-paired` is the one event that
+ * is never about a session — a new browser reached this machine — so it is the only kind the
+ * no-session variant may carry, and carrying it is what lets the client-side filter (see
+ * `packages/pwa/src/lib/notification-filter.ts`) tell it apart from an unclassified payload such as
+ * `enrolmentConfirmation`, which has no kind at all and is always shown.
+ */
 export const PushNotificationPayloadSchema = z.union([
   z.strictObject({
     ...PushPayloadBaseShape,
     sessionId: z.string().min(1),
-    kind: PushNotificationKindSchema,
+    kind: PushNotificationKindSchema.exclude(['device-paired']),
   }),
-  z.strictObject(PushPayloadBaseShape),
+  z.strictObject({
+    ...PushPayloadBaseShape,
+    kind: z.literal('device-paired').optional(),
+  }),
 ]);
 export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>;
 

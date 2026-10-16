@@ -78,7 +78,16 @@ export interface LiveStreamIndicatorProps {
   readonly status: LiveStreamState;
   /** Restarts the subscription immediately and restores the full retry budget. */
   readonly onReconnect: () => void;
+  /**
+   * The session bar's form: it says NOTHING visible while the feed is healthy — the status dot beside it
+   * already reads as live — and only a short word plus Reconnect once it is not. The live region and its
+   * sentence are identical in both forms, so a screen reader hears the same transitions either way.
+   */
+  readonly quiet?: boolean;
 }
+
+/** Whether the quiet form has anything to draw: only a feed that is not healthy earns pixels. */
+const quietlyHealthy = (state: LiveStreamState): boolean => state === 'live' || state === 'connecting';
 
 /**
  * What the chip should read, from the host's two facts and the model's one.
@@ -121,7 +130,30 @@ export const liveStreamState = (
  * The visible word and the announced sentence deliberately differ — see {@link LIVE_STREAM_SENTENCE}
  * — so the chip is `aria-hidden` and the sentence is the only thing assistive technology reads.
  */
-export function LiveStreamIndicator({ status, onReconnect }: LiveStreamIndicatorProps) {
+export function LiveStreamIndicator({ status, onReconnect, quiet = false }: LiveStreamIndicatorProps) {
+  if (quiet)
+    return (
+      <span
+        className="fy-live-quiet"
+        data-live-stream={status}
+        data-tone={LIVE_STREAM_TONE[status]}
+        role="status"
+        aria-live="polite"
+      >
+        <span className="sr-only">{LIVE_STREAM_SENTENCE[status]}</span>
+        {quietlyHealthy(status) ? null : <span aria-hidden="true">{LIVE_STREAM_LABEL[status]}</span>}
+        {offersReconnect(status) ? (
+          <button
+            className="fy-live-quiet__reconnect"
+            data-live-stream-reconnect=""
+            onClick={onReconnect}
+            type="button"
+          >
+            Reconnect
+          </button>
+        ) : null}
+      </span>
+    );
   return (
     <div
       className="flex items-center gap-1.5"

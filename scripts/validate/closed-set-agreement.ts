@@ -494,9 +494,22 @@ function trueEntries(file: string, text: string, kind: Uint8Array, openAt: numbe
       );
     }
 
-    const key = readIdentifier(text, kind, index);
-    if (key === undefined) fail(`${file}:${lineAt(text, index)}: ${what} — found ${snippet(text, index)}`);
-    index = expectAt(file, text, kind, index + key.length, ':', `notification key ${key}`) + 1;
+    // A key is a bare identifier (`attention:`) or, for a member that is not one (`device-paired`
+    // has a hyphen), the same single-or-double-quoted spelling the owner array uses.
+    const bareKey = readIdentifier(text, kind, index);
+    let key: string;
+    let afterKey: number;
+    if (bareKey !== undefined) {
+      key = bareKey;
+      afterKey = index + bareKey.length;
+    } else if (text[index] === "'" || text[index] === '"') {
+      const quoted = readLiteral(file, text, kind, index, `notification key at ${snippet(text, index)}`);
+      key = quoted.value;
+      afterKey = quoted.end;
+    } else {
+      fail(`${file}:${lineAt(text, index)}: ${what} — found ${snippet(text, index)}`);
+    }
+    index = expectAt(file, text, kind, afterKey, ':', `notification key ${key}`) + 1;
     index = expectIdentifier(file, text, kind, index, 'true', `the value for notification key ${key}`);
     members.push(key);
     expecting = 'separator';
@@ -593,23 +606,14 @@ const agreements: readonly Agreement[] = [
       'PushNotificationKindSchema = z.enum(',
       '@ferretry/protocol PushNotificationKindSchema',
     ),
+    // `notification-filter.ts` collapses these five kinds onto four Settings-screen switches
+    // (`notificationCategoryFor`, a compiler-exhaustive switch — adding a kind with no case is a
+    // build error), so the four-category UI no longer mirrors the kind set 1:1 and has no agreement
+    // entry of its own any more. This witness object is what still mirrors the full five.
     replica: trueObject(
-      'packages/pwa/src/lib/notification-preferences.ts',
+      'packages/pwa/src/lib/notification-filter.ts',
       'NOTIFICATION_KIND_FIELDS =',
       'PWA NOTIFICATION_KIND_FIELDS',
-    ),
-  },
-  {
-    id: 'push-notification-settings-kinds',
-    owner: literalArray(
-      'packages/protocol/src/lib/push.ts',
-      'PushNotificationKindSchema = z.enum(',
-      '@ferretry/protocol PushNotificationKindSchema',
-    ),
-    replica: literalArray(
-      'packages/pwa/src/features/settings/notification-settings.tsx',
-      'const kinds: readonly PushNotificationKind[] =',
-      'PWA notification settings kinds',
     ),
   },
 ];

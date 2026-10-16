@@ -1,6 +1,7 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 
 import type { TranscriptEntry } from '../lib/session-screens.ts';
+import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
 import { fieldHash } from './session-chat-model.ts';
 
 const LOG_HEADER = /^(?:\[(\d{2}:\d{2}:\d{2})\] )?(user|assistant|developer|system|tool)\/([a-z-]+):(?: (.*))?$/u;
@@ -38,6 +39,14 @@ const recordKind = (record: LogRecord): TranscriptEntry['kind'] => {
   return 'notice';
 };
 
+/**
+ * WHICH MACHINE RECORDS ARE BOOKKEEPING. Reasoning, token usage, turn markers, settings echoes and
+ * attachment stubs are evidence a reader occasionally wants and never reads first, so they are kept
+ * — behind "Show details" — rather than dropped. An `error` is never bookkeeping: a failure that hid
+ * behind a toggle would be a bug, not tidiness.
+ */
+const isDetailRecord = (record: LogRecord): boolean => record.kind !== 'error' && recordKind(record) === 'notice';
+
 const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
   const text = record.lines.join('\n');
   const signature = `${record.clock ?? ''}|${record.role}|${record.kind}|${text}`;
@@ -46,7 +55,72 @@ const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
     kind: recordKind(record),
     text: text || title(record.kind),
     label: recordLabel(record),
+    ...(isDetailRecord(record) ? { detail: true } : {}),
+    ...(record.kind === 'error' ? { alert: true } : {}),
   };
+};
+
+/** `Read({"path":"src/App.tsx"})` — the daemon's rendering of one tool call. */
+const TOOL_CALL = /^([^\s(]+)\(([\s\S]*)\)$/u;
+
+const toolUse = (text: string): ToolUseData => {
+  const match = TOOL_CALL.exec(text.trim());
+  if (match === null) return { name: text.trim() || 'tool' };
+  const raw = match[2] as string;
+  try {
+    return { name: match[1] as string, input: JSON.parse(raw) as unknown };
+  } catch {
+    return { name: match[1] as string, input: raw };
+  }
+};
+
+/** The daemon prefixes a failed result with `error `; there is no other marker on this wire. */
+const toolResult = (text: string): ToolResultData =>
+  text.startsWith('error ') ? { text: text.slice('error '.length), isError: true } : { text };
+
+interface ToolRun {
+  readonly index: number;
+  readonly calls: { key: string; use: ToolUseData; result?: ToolResultData; orphanResult?: boolean }[];
+}
+
+/**
+ * A run of consecutive tool calls and their results, as ONE row — the transcript's own collapsed
+ * tool group, which reads as `4 tools · Read, Edit ×2, Bash` and opens to each call's input and
+ * output. Results pair with the oldest call in the run still waiting for one; a result with no call
+ * to pair with is kept as an orphan rather than dropped, because a row that silently vanished would
+ * read as a tool that never ran.
+ */
+const toolEntry = (run: ToolRun): TranscriptEntry => ({
+  id: `log:${run.index}:${fieldHash(run.calls.map(call => call.key).join('|'))}`,
+  kind: 'tool',
+  text: run.calls.length === 1 ? 'ran a tool' : `ran ${run.calls.length} tools`,
+  tools: run.calls,
+});
+
+const projectRecords = (records: readonly LogRecord[]): readonly TranscriptEntry[] => {
+  const entries: TranscriptEntry[] = [];
+  let run: ToolRun | null = null;
+  records.forEach((record, index) => {
+    const text = record.lines.join('\n');
+    if (record.kind === 'tool-call' || record.kind === 'tool-result') {
+      run ??= { index, calls: [] };
+      const key = `log:${index}:${fieldHash(`${record.kind}|${text}`)}`;
+      if (record.kind === 'tool-call') {
+        run.calls.push({ key, use: toolUse(text) });
+        return;
+      }
+      const waiting = run.calls.find(call => call.result === undefined && call.orphanResult !== true);
+      if (waiting === undefined)
+        run.calls.push({ key, use: { name: 'result' }, result: toolResult(text), orphanResult: true });
+      else waiting.result = toolResult(text);
+      return;
+    }
+    if (run !== null) entries.push(toolEntry(run));
+    run = null;
+    entries.push(entryFor(record, index));
+  });
+  if (run !== null) entries.push(toolEntry(run));
+  return entries;
 };
 
 /**
@@ -87,7 +161,7 @@ export const transcriptEntriesFromLog = (text: string): readonly TranscriptEntry
   }
   flush();
 
-  const entries = records.map(entryFor);
+  const entries = projectRecords(records);
   if (preamble.length === 0) return entries;
   const raw = preamble.join('\n');
   return [

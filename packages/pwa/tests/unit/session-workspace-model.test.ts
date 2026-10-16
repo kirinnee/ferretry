@@ -34,13 +34,51 @@ describe('transcriptEntriesFromLog', () => {
       ].join('\n'),
     );
 
-    expect(entries.map(entry => [entry.kind, entry.label, entry.text])).toEqual([
-      ['notice', 'Reasoning', 'check the tree'],
-      ['notice', 'Tool · Tool Call', 'Read({"path":"src/App.tsx"})'],
-      ['notice', 'Tool · Tool Result', 'output'],
-      ['notice', 'Developer', '{"model":"opus"}'],
-      ['notice', 'System', 'completed'],
+    expect(entries.map(entry => [entry.kind, entry.label, entry.text, entry.detail])).toEqual([
+      ['notice', 'Reasoning', 'check the tree', true],
+      ['tool', undefined, 'ran a tool', undefined],
+      ['notice', 'Developer', '{"model":"opus"}', true],
+      ['notice', 'System', 'completed', true],
     ]);
+    expect(entries[1]?.tools).toEqual([
+      {
+        key: expect.stringMatching(/^log:1:/u) as unknown as string,
+        use: { name: 'Read', input: { path: 'src/App.tsx' } },
+        result: { text: 'output' },
+      },
+    ]);
+  });
+
+  test('folds a run of tool calls into one row and pairs each result with the oldest waiting call', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        'assistant/tool-call: Bash({"command":"git status"})',
+        'assistant/tool-call: Edit(not json)',
+        'tool/tool-result: clean',
+        'tool/tool-result: error refused',
+        'tool/tool-result: stray',
+        'assistant/tool-call: (',
+        'assistant/error: E1: broke',
+        'assistant/tool-call: Read({})',
+      ].join('\n'),
+    );
+    expect(entries.map(entry => [entry.kind, entry.text, entry.detail])).toEqual([
+      ['tool', 'ran 4 tools', undefined],
+      ['notice', 'E1: broke', undefined],
+      ['tool', 'ran a tool', undefined],
+    ]);
+    const calls = entries[0]?.tools ?? [];
+    expect(calls.map(call => [call.use, call.result, call.orphanResult])).toEqual([
+      [{ name: 'Bash', input: { command: 'git status' } }, { text: 'clean' }, undefined],
+      [{ name: 'Edit', input: 'not json' }, { text: 'refused', isError: true }, undefined],
+      [{ name: 'result' }, { text: 'stray' }, true],
+      [{ name: '(' }, undefined, undefined],
+    ]);
+    expect(entries[2]?.tools?.[0]?.use).toEqual({ name: 'Read', input: {} });
+  });
+
+  test('names an empty tool call rather than inventing one', () => {
+    expect(transcriptEntriesFromLog('assistant/tool-call: ')[0]?.tools?.[0]?.use).toEqual({ name: 'tool' });
   });
 
   test('preserves malformed leading evidence and non-indented continuation text', () => {

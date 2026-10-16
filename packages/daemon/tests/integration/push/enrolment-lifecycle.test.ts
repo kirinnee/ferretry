@@ -14,9 +14,9 @@ import { StatePushRepository, StateVapidKeys, WebPushFetchTransport } from '../.
 import { ApiDispatcher, type ApiRequest, ApiRouter, headersFrom, queryFrom } from '../../../src/lib/api/index.ts';
 import {
   CapabilityGrantService,
-  DeviceGrantService,
   createFoundationPaths,
   DEFAULT_CAPABILITY_GRANTS,
+  DeviceGrantService,
   PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
@@ -248,7 +248,6 @@ describe('push enrolment over the real route surface', () => {
         body: JSON.stringify({
           deviceName: 'Pixel 8',
           subscription,
-          prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );
@@ -309,10 +308,6 @@ describe('push enrolment over the real route surface', () => {
           body: JSON.stringify({
             deviceName,
             subscription: await subscribed(endpoint),
-            prefs: {
-              events: { attention: true, question: true, failed: true, completed: true },
-              interactiveOnly: false,
-            },
           }),
         }),
       );
@@ -349,7 +344,6 @@ describe('push enrolment over the real route surface', () => {
         body: JSON.stringify({
           deviceName: 'Pixel 8',
           subscription: await subscribed('https://fcm.googleapis.com/send/dead'),
-          prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );
@@ -371,7 +365,6 @@ describe('push enrolment over the real route surface', () => {
     const body = JSON.stringify({
       deviceName: 'Pixel 8',
       subscription: await subscribed('https://fcm.googleapis.com/send/unconfirmed'),
-      prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
     });
 
     const unconfirmed = await world.surface.dispatch(
@@ -404,12 +397,36 @@ describe('push enrolment over the real route surface', () => {
         body: JSON.stringify({
           deviceName: 'The machine',
           subscription: await subscribed('https://fcm.googleapis.com/send/host'),
-          prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );
 
     should(response.status).equal(403);
     should(JSON.parse(response.body).code).equal('push_device_required');
+  });
+
+  it('should enrol a browser still sending the pre-upgrade prefs bundle, over the real route', async () => {
+    // Version skew: an un-upgraded PWA bundle keeps sending the preference bundle this endpoint
+    // used to require, against an already-upgraded daemon. It must still work.
+    const world = await daemon('push-legacy-prefs-request');
+    const browser = await pair(world, 'Pixel 8');
+
+    const response = await world.surface.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/push/subscriptions',
+        device: browser.device,
+        body: JSON.stringify({
+          deviceName: 'Pixel 8',
+          subscription: await subscribed('https://fcm.googleapis.com/send/legacy-prefs'),
+          prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
+        }),
+      }),
+    );
+
+    should(response.status).equal(201);
+    const view = PushDeviceViewSchema.parse(JSON.parse(response.body));
+    should(Object.hasOwn(JSON.parse(response.body), 'prefs')).be.false();
+    should(view.deviceName).equal('Pixel 8');
   });
 });

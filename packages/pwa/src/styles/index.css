@@ -6,6 +6,8 @@
 @import '../components/web-terminals.css';
 @import '../features/tasks/task-dag-graph.css';
 @import '../features/attention/attention-board.css';
+@import '../features/workspace/workspace.css';
+@import '../shell/sessions-bar.css';
 
 /* ============================================================================
    Ferretry UI design system — base elements, shell/layout and component classes.
@@ -142,6 +144,22 @@ pre,
     --overlay-opacity: 0;
     --glow-alpha: 0;
   }
+}
+
+/* Settings › Appearance › Motion › Reduced: the same flat version, whatever the OS says, and every
+   animation and transition stilled — spinners included. `<html data-motion="reduced">` is set by
+   `MotionFollower` in App.tsx. */
+:root[data-motion='reduced'],
+:root[data-motion='reduced'][data-theme] {
+  --overlay-opacity: 0;
+  --glow-alpha: 0;
+}
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation: none !important;
+  scroll-behavior: auto !important;
+  transition: none !important;
 }
 
 /* ---- thin, unobtrusive scrollbars in scroll regions ---------------------- */

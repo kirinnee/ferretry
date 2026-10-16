@@ -34,6 +34,7 @@ test('a touch-safe send preference keeps a reachable New line action', async () 
       daemon={daemon}
       draftStore={drafts}
       enterKeyPreference="send"
+      phoneEnterKeyPreference="send"
       sessionId={sessionId}
     />,
   );

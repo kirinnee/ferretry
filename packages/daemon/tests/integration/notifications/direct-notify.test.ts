@@ -1,26 +1,26 @@
 import { afterAll, describe, it } from 'bun:test';
 import should from 'should';
-import { FileNotificationDeliveryLedger } from '../../../src/adapters/notifications/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
+import { FileNotificationDeliveryLedger } from '../../../src/adapters/notifications/index.ts';
 import { StatePushRepository } from '../../../src/adapters/push/state-push-repository.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import {
   ApiDispatcher,
   ApiRouter,
-  NO_GOVERNED_ROUTES_GUARD,
-  createFoundationPaths,
-  NotificationService,
-  PushService,
   attentionRoutes,
-  resolveStateHome,
+  createFoundationPaths,
+  NO_GOVERNED_ROUTES_GUARD,
+  NotificationService,
   type PushDelivery,
   type PushDeliveryOutcome,
+  PushService,
   type PushSubscriptionRecord,
+  resolveStateHome,
   type WebPushTransport,
 } from '../../../src/lib/index.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
-import { allEvents, deviceId, pushId, record } from '../../unit/push/support.ts';
-import { CREDENTIALS, attentionService, human, sessionView } from '../../unit/runtime/mounts/support.ts';
+import { deviceId, pushId, record } from '../../unit/push/support.ts';
+import { attentionService, CREDENTIALS, human, sessionView } from '../../unit/runtime/mounts/support.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 const SESSION = 's1';
@@ -173,36 +173,35 @@ describe('direct notification over the composed daemon surface', () => {
     should(world.transport.deliveries).have.length(1);
   });
 
-  it('should count neither a device that declined questions nor its non-delivery as failed', async () => {
-    // Arrange
-    const declined = record({
-      prefs: { ...allEvents, events: { ...allEvents.events, question: false } },
-    });
-    const world = await daemon({ records: [declined] });
+  it('should deliver to every enrolment with no server-stored preference left to consult', async () => {
+    // Arrange — the daemon no longer stores or enforces any per-device preference: every enrolled
+    // device is sent every event, and showing it is entirely the browser's own local decision.
+    const enrolment = record();
+    const world = await daemon({ records: [enrolment] });
 
     // Act
     const response = await world.surface.dispatch(post('Release ready.'));
     const lines = await ledgerLines(world);
 
     // Assert
-    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 0 });
-    should(world.transport.deliveries).be.empty();
+    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
+    should(world.transport.deliveries).have.length(1);
     should(lines[0]).containDeep({ enrolled: 1 });
-    should(lines[1]).containDeep({ delivered: 0, failed: 0 });
+    should(lines[1]).containDeep({ delivered: 1, failed: 0 });
   });
 
-  it('should suppress interactive-only enrolments for an automatic session', async () => {
+  it('should deliver to an automatic session the same as an interactive one', async () => {
     // Arrange
-    const interactiveOnly = record({ prefs: { ...allEvents, interactiveOnly: true } });
-    const world = await daemon({ mode: 'auto', records: [interactiveOnly] });
+    const enrolment = record();
+    const world = await daemon({ mode: 'auto', records: [enrolment] });
 
     // Act
     const response = await world.surface.dispatch(post('Background agent update.'));
     const lines = await ledgerLines(world);
 
     // Assert
-    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 0 });
-    should(world.transport.deliveries).be.empty();
+    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
+    should(world.transport.deliveries).have.length(1);
     should(lines[0]).containDeep({ sent: { interactive: false } });
   });
 
