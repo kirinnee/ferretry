@@ -21,6 +21,7 @@
  */
 import {
   type Credential,
+  credentialVariables,
   isCredentialSafeUrl,
   type PresetTest,
   type ProviderPreset,
@@ -127,13 +128,28 @@ function resolveBody(template: string, env: Readonly<Record<string, string>>): s
 const isRefusal = (value: unknown): value is ProviderProbeRefusal =>
   typeof value === 'object' && value !== null && 'code' in value && 'reason' in value;
 
+/**
+ * The key a one-CLI login of a two-CLI preset carries in its own half's variable: the preset names the
+ * Test's key by a variable of one half (`ANTHROPIC_AUTH_TOKEN`), and a Codex-only login holds the same
+ * SECRET under its own (`DEEPSEEK_API_KEY`). Only that exact `${secret:NAME}` counts.
+ */
+function sameSecretElsewhere(
+  preset: ProviderPreset,
+  env: Readonly<Record<string, string>>,
+  keyVariable: string,
+): string | undefined {
+  const name = preset.env[keyVariable]?.secretName;
+  return name === undefined ? undefined : Object.values(env).find(value => value === `\${secret:${name}}`);
+}
+
 /** The one request a Test of this login sends, or why it sends none. */
 export function planProviderProbe(
   preset: ProviderPreset,
   credential: Credential,
 ): ProviderProbePlan | ProviderProbeRefusal {
   const test: PresetTest = preset.test;
-  const env = credential.env ?? {};
+  // Every half's variables: a login that drives both CLIs carries its one key in either half.
+  const env = credentialVariables(credential);
   if (test.kind === 'none') return refusal('not_testable', test.reason);
   if (test.kind === 'local') {
     const parsed = new URL(test.url);
@@ -152,7 +168,7 @@ export function planProviderProbe(
       },
     };
   }
-  const reference = env[test.keyVariable];
+  const reference = env[test.keyVariable] ?? sameSecretElsewhere(preset, env, test.keyVariable);
   const whole = reference === undefined ? null : WHOLE_REFERENCE.exec(reference);
   if (whole === null) {
     const reason =

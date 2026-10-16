@@ -777,3 +777,126 @@ describe('Add runtime: Done', () => {
     await view.unmount();
   });
 });
+
+describe('Add runtime: a login that drives both CLIs', () => {
+  const DUAL = credential({
+    id: 'deepseek',
+    store: 'environment',
+    email: undefined,
+    harnesses: ['claude', 'codex'],
+    usedBy: [],
+  });
+  const DUAL_DATA: MachineData = {
+    ...DATA,
+    credentials: credentialsOf(CREDENTIALS.credentials[0] as ReturnType<typeof credential>, DUAL),
+    profiles: FleetLayeredProfileCatalogSchema.parse({
+      ...PROFILES,
+      profiles: [
+        profile({ name: 'Default' }),
+        profile({ name: 'Codex work', scope: { kind: 'scoped', scope: 'codex' } }),
+      ],
+    }),
+  };
+  const runsAt = (container: ParentNode) =>
+    container.querySelector('[data-add-runtime-runs]')?.getAttribute('data-add-runtime-runs');
+
+  it('is offered once, with its Claude + Codex chip, and says which of its CLIs is not installed', async () => {
+    const view = await mountHost({ data: DUAL_DATA, machine: NOT_INSTALLED_CODEX });
+    const rows = [...view.container.querySelectorAll('[data-add-runtime-credential]')];
+    expect(rows.map(row => row.getAttribute('data-add-runtime-credential'))).toEqual(['claude-personal', 'deepseek']);
+    const row = text(view.container, '[data-add-runtime-credential="deepseek"]');
+    expect(row).toContain('Claude Code + Codex login');
+    expect(row).toContain('Claude + Codex');
+    expect(row).toContain('Codex isn’t installed here');
+    expect(
+      view.container
+        .querySelector('[data-add-runtime-credential="deepseek"] [data-login-scope]')
+        ?.getAttribute('data-login-scope'),
+    ).toBe('both');
+    await click(view.container, '[data-add-runtime-credential="deepseek"] input');
+    expect(draftOf(view.container)).toMatchObject({ credentialId: 'deepseek', runs: null });
+    await view.unmount();
+  });
+
+  it('Runs follows a scoped profile until chosen; choosing a CLI drops a profile that no longer fits', async () => {
+    const view = await mountHost({ data: DUAL_DATA, state: stepAt('profile'), draft: { credentialId: 'deepseek' } });
+    expect(runsAt(view.container)).toBe('claude');
+    expect(text(view.container, '[data-add-runtime-runs]')).toContain('picked from the profile until you choose');
+    const codexWork = () =>
+      must(
+        view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Codex work"] input'),
+        'Codex work',
+      );
+    expect(codexWork().disabled).toBe(false);
+    await click(view.container, '[data-add-runtime-profile="Codex work"] input');
+    expect(runsAt(view.container)).toBe('codex');
+    await click(view.container, '[data-add-runtime-runs-option="claude"] input');
+    expect(draftOf(view.container)).toMatchObject({ runs: 'claude', profile: null });
+    expect(codexWork().disabled).toBe(true);
+    expect(text(view.container, '[data-add-runtime-runs]')).not.toContain('until you choose');
+    await click(view.container, '[data-add-runtime-profile="Default"] input');
+    await click(view.container, '[data-add-runtime-runs-option="codex"] input');
+    expect(draftOf(view.container)).toMatchObject({ runs: 'codex', profile: 'Default' });
+    await click(view.container, '[data-step-next]');
+    expect(draftOf(view.container).name).toBe('codex-default-2');
+    await view.unmount();
+  });
+
+  it('sends the CLI it runs with the runtime, and names it on the Name step', async () => {
+    const calls: Call[] = [];
+    const view = await mountHost({
+      data: DUAL_DATA,
+      state: stepAt('name'),
+      draft: { credentialId: 'deepseek', profile: 'Codex work', name: 'codex-codex-work' },
+      calls,
+      routes: { ...READS(DUAL_DATA), 'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
+    });
+    expect(text(view.container, '[data-add-runtime-step="name"] .kt-panel')).toContain('Codex · Codex work profile');
+    await click(view.container, '[data-change-submit]');
+    await waitFor(view.container, '[data-add-runtime-step="done"]');
+    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
+      change: {
+        kind: 'runtime.put',
+        name: 'codex-codex-work',
+        credential: 'deepseek',
+        profile: 'Codex work',
+        harness: 'codex',
+        agent: false,
+        create: true,
+      },
+    });
+    await view.unmount();
+  });
+
+  it('offers no Runs choice for a login that drives one CLI', async () => {
+    const view = await mountHost({ state: stepAt('profile'), draft: { credentialId: 'claude-personal' } });
+    expect(view.container.querySelector('[data-add-runtime-runs]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('names the CLI the made runtime runs on Done', async () => {
+    const data: MachineData = {
+      ...DUAL_DATA,
+      runtimes: FleetRuntimeCatalogSchema.parse({
+        ...RUNTIMES,
+        runtimes: [
+          runtime({
+            name: 'codex-codex-work',
+            harness: 'codex',
+            profile: 'Codex work',
+            credential: { id: 'deepseek', store: 'environment', status: 'ready' },
+          }),
+        ],
+      }),
+    };
+    const view = await mountHost({
+      data,
+      state: stepAt('done'),
+      draft: { credentialId: 'deepseek', profile: 'Codex work', made: 'codex-codex-work' },
+    });
+    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"]')).toContain(
+      'Codex · Claude Code + Codex login · Codex work profile.',
+    );
+    await view.unmount();
+  });
+});

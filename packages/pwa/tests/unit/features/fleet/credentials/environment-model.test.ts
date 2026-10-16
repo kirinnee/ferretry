@@ -2,28 +2,65 @@ import { describe, expect, it } from 'bun:test';
 import {
   environmentChange,
   environmentDraftProblem,
-  firstOffered,
   freeLoginId,
+  loginHarness,
+  offeredHarnesses,
   presetDraft,
-  presetOptionLabel,
-  presetsOf,
+  presetHalves,
+  presetScope,
+  presetsFor,
   secretRef,
   testNote,
   testResultLine,
 } from '../../../../../src/features/fleet/credentials/environment-model.ts';
 import { CREDENTIALS, credential } from '../account-support.ts';
-import { BEDROCK, OLLAMA, PRESETS, ZAI, ZAI_CODEX } from './environment-support.ts';
+import { BEDROCK, DEEPSEEK, DEEPSEEK_MIRROR, OLLAMA, PRESETS, ZAI, ZAI_CODEX } from './environment-support.ts';
 
 const list = (ids: readonly string[]) => ({ ...CREDENTIALS, credentials: ids.map(id => credential({ id })) });
 
 describe('environment-model', () => {
-  it('groups presets by tool and finds the first one that may add a login', () => {
-    expect(presetsOf(PRESETS.presets, 'codex').map(p => p.id)).toEqual(['ollama-codex', 'zai-glm-codex']);
-    expect(firstOffered(PRESETS.presets)?.id).toBe('zai-glm');
-    expect(firstOffered(PRESETS.presets, 'codex')?.id).toBe('ollama-codex');
-    expect(firstOffered([ZAI_CODEX])).toBeUndefined();
-    expect(presetOptionLabel(ZAI)).toBe('GLM / Z.ai');
-    expect(presetOptionLabel(ZAI_CODEX)).toBe('GLM / Z.ai — not offered: Codex needs a model catalogue file.');
+  it('reads a preset’s halves, falling back to its one CLI when the daemon sends none', () => {
+    expect(presetHalves(ZAI)).toEqual([{ harness: 'claude', offered: { available: true }, models: [] }]);
+    expect(presetHalves(DEEPSEEK).map(half => half.harness)).toEqual(['claude', 'codex']);
+    expect(offeredHarnesses(DEEPSEEK)).toEqual(['claude', 'codex']);
+    expect(offeredHarnesses(DEEPSEEK_MIRROR)).toEqual(['claude']);
+    expect(offeredHarnesses(ZAI_CODEX)).toEqual([]);
+    expect(presetScope(DEEPSEEK)).toEqual(['claude', 'codex']);
+    expect(presetScope(DEEPSEEK_MIRROR)).toEqual(['claude']);
+    expect(presetScope(ZAI_CODEX)).toEqual(['codex']);
+    expect(loginHarness(DEEPSEEK)).toBe('claude');
+    expect(loginHarness(OLLAMA)).toBe('codex');
+    expect(loginHarness(ZAI_CODEX)).toBe('codex');
+  });
+
+  it('offers every preset, or — opened for one CLI — the ones with an offered half for it', () => {
+    const all = [...PRESETS.presets, DEEPSEEK, DEEPSEEK_MIRROR];
+    expect(presetsFor(all)).toBe(all);
+    expect(presetsFor(all, 'codex').map(preset => preset.id)).toEqual(['ollama-codex', 'deepseek']);
+    expect(presetsFor(all, 'claude').map(preset => preset.id)).toEqual([
+      'zai-glm',
+      'foundry',
+      'amazon-bedrock',
+      'deepseek',
+      'deepseek-mirror',
+    ]);
+  });
+
+  it('adds ONE login for a preset with two halves: the first CLI, every half’s variables', () => {
+    const draft = presetDraft(DEEPSEEK, null);
+    expect(environmentDraftProblem(DEEPSEEK, draft, new Set())).toBe('Paste DEEPSEEK_API_KEY.');
+    expect(environmentChange(DEEPSEEK, draft, new Set(['DEEPSEEK_API_KEY']))).toEqual({
+      kind: 'credential.add',
+      id: 'deepseek',
+      harness: 'claude',
+      store: 'environment',
+      preset: 'deepseek',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_AUTH_TOKEN: secretRef('DEEPSEEK_API_KEY'),
+        DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY'),
+      },
+    });
   });
 
   it('names a new login after its preset, past every id the machine has', () => {
@@ -39,7 +76,7 @@ describe('environment-model', () => {
       secrets: { ANTHROPIC_AUTH_TOKEN: 'ZAI_API_KEY', EXTRA_TOKEN: 'EXTRA_KEY' },
       cloudCredential: '',
     });
-    expect(environmentDraftProblem(ZAI, draft, new Set())).toBe('Store ZAI_API_KEY first.');
+    expect(environmentDraftProblem(ZAI, draft, new Set())).toBe('Paste ZAI_API_KEY.');
     expect(environmentDraftProblem(ZAI, { ...draft, name: 'Bad Name' }, new Set())).toBe(
       'Name it with lowercase letters, digits and dashes.',
     );

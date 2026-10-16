@@ -156,7 +156,7 @@ describe('planProviderQuota', () => {
           keyVariable: 'DEEPSEEK_API_KEY',
         },
       },
-      { ...preset('deepseek-codex'), test: { kind: 'none', reason: 'none' } },
+      { ...preset('deepseek'), test: { kind: 'none', reason: 'none' } },
     );
 
     // Act
@@ -165,6 +165,73 @@ describe('planProviderQuota', () => {
     // Assert
     should(actual.secretName).equal('DEEPSEEK_API_KEY');
     should(actual.hosts).deepEqual(['api.deepseek.com']);
+  });
+
+  it('should read the one key of a login that drives both CLIs, or of a Codex-only login of a two-CLI preset', () => {
+    // Arrange
+    const dual = login(
+      'deepseek',
+      {
+        harness: 'claude',
+        claude: {
+          env: {
+            ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+            ANTHROPIC_AUTH_TOKEN: '${secret:DEEPSEEK_API_KEY}',
+          },
+        },
+        codex: {
+          env: { DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}' },
+          codexProvider: {
+            id: 'deepseek',
+            name: 'DeepSeek',
+            baseUrl: 'https://api.deepseek.com/',
+            keyVariable: 'DEEPSEEK_API_KEY',
+          },
+        },
+      },
+      preset('deepseek'),
+    );
+    const codexOnly = login(
+      'deepseek-codex',
+      {
+        harness: 'codex',
+        env: { DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}' },
+        codexProvider: {
+          id: 'deepseek',
+          name: 'DeepSeek',
+          baseUrl: 'https://api.deepseek.com/',
+          keyVariable: 'DEEPSEEK_API_KEY',
+        },
+      },
+      preset('deepseek'),
+    );
+
+    // Act
+    const both = plan(planProviderQuota(dual));
+    const one = plan(planProviderQuota(codexOnly));
+
+    // Assert
+    should([both.secretName, both.hosts]).deepEqual(['DEEPSEEK_API_KEY', ['api.deepseek.com']]);
+    should([one.secretName, one.hosts]).deepEqual(['DEEPSEEK_API_KEY', ['api.deepseek.com']]);
+  });
+
+  it('should not take a different secret for the key the preset names', () => {
+    // Arrange
+    const other = login(
+      'deepseek',
+      {
+        harness: 'codex',
+        env: { DEEPSEEK_API_KEY: '${secret:OTHER}' },
+        codexProvider: { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/' },
+      },
+      preset('deepseek'),
+    );
+
+    // Act
+    const actual = planProviderQuota(other);
+
+    // Assert
+    should(actual).have.property('reason');
   });
 
   it('should ask the mainland Moonshot platform in yuan for a login that sends its key there', () => {

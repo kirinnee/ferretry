@@ -955,6 +955,38 @@ describe('runtimeCatalog', () => {
     FleetRuntimeCatalogSchema.parse(actual);
   });
 
+  it('should run each runtime on a two-CLI login on its own CLI: the one it names, else its profile scope', () => {
+    // Arrange
+    const model = parseAccountModel({
+      version: 2,
+      credentials: {
+        dual: {
+          harness: 'claude',
+          store: 'environment',
+          claude: { env: { ANTHROPIC_BASE_URL: 'https://example.invalid' } },
+          codex: { codexProvider: { id: 'ollama' } },
+        },
+      },
+      components: COMPONENTS,
+      profiles: PROFILES,
+      runtimes: {
+        'on-claude': { credential: 'dual', profile: 'base' },
+        'on-codex': { credential: 'dual', profile: 'base', harness: 'codex' },
+        'scoped-claude': { credential: 'dual', profile: 'claude-only' },
+      },
+    });
+
+    // Act
+    const actual = runtimeCatalog(model, withReadFacts());
+
+    // Assert
+    should(actual.runtimes.map(runtime => [runtime.name, runtime.harness])).deepEqual([
+      ['on-claude', 'claude'],
+      ['on-codex', 'codex'],
+      ['scoped-claude', 'claude'],
+    ]);
+  });
+
   it('should name each runtime by its ids.json id, falling back to its name, with a wrapper of the same name', () => {
     // Act
     const actual = runtimeCatalog(modelOf(), withReadFacts({ runtimeIds: { 'agent-claude': 'rt_0001' } }));

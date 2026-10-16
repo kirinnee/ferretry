@@ -79,4 +79,15 @@ describe('terminal and system adapters', () => {
 
     expect(await new InquirerPrompt(client).ask('value?')).toBe('chosen');
   });
+
+  it('should delegate a hidden question to inquirer’s password prompt, unmasked, and return the answer', async () => {
+    const client = {
+      prompt: async (questions: ReadonlyArray<Record<string, unknown>>) => {
+        expect(questions).toEqual([{ type: 'password', name: 'answer', message: 'ZAI_API_KEY: ' }]);
+        return { answer: 'sk-secret' };
+      },
+    } as unknown as Pick<typeof inquirer, 'prompt'>;
+
+    expect(await new InquirerPrompt(client).askHidden('ZAI_API_KEY: ')).toBe('sk-secret');
+  });
 });

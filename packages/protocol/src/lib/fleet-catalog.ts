@@ -543,6 +543,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     name: TypedNameSchema,
     credential: NonEmptyStringSchema,
     profile: FleetComponentNameSchema,
+    /**
+     * Which CLI it runs, for a login that drives both (docs/provider-presets.md). Absent: the one its
+     * profile is scoped to, else the login's own.
+     */
+    harness: HarnessKindSchema.optional(),
     agent: z.boolean(),
     create: z.boolean(),
     /** E15: the person saw "already uses this login and profile" and chose to add another anyway. */
@@ -582,6 +587,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('credential.add'),
     id: TypedNameSchema,
+    /**
+     * The CLI. For a preset with a `claude:` and a `codex:` half, the one listed first: the login gets
+     * every half the preset offers, so it drives both with one secret, and `env` holds the variables
+     * of every half (docs/provider-presets.md).
+     */
     harness: HarnessKindSchema,
     label: NonEmptyStringSchema.optional(),
     /**

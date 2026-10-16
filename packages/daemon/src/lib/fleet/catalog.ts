@@ -12,14 +12,14 @@
 import {
   type AccountModel,
   applyFixedLayer,
+  COMPONENT_KIND_WORDS,
   type ComponentKind,
   type Conflict,
-  COMPONENT_KIND_WORDS,
   componentPartialSupport,
   componentScope,
-  describeScopeConflict,
   describeConflict,
   describePartialSupport,
+  describeScopeConflict,
   type FixedEntry,
   type FlatLayer,
   fixedLayerFor,
@@ -31,13 +31,14 @@ import {
   layersScope,
   layerWords,
   looksSecret,
-  parseLayerReference,
   type PartialSupport,
   type ProfileScope,
+  parseLayerReference,
   profileScope,
-  resolveDefaultRuntime,
   type ResolvedProfile,
+  resolveDefaultRuntime,
   resolveProfile,
+  runtimeHarness,
   type SettingsObject,
   type SkippedLayer,
   wouldIncludeItself,
@@ -630,7 +631,8 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
         const credential = model.credentials[runtime.credential];
         // Present by construction: the schema refused a runtime on an unknown login.
         if (credential === undefined) return [];
-        const harness = credential.harness;
+        // A login that drives both CLIs runs the one this runtime is for.
+        const harness = runtimeHarness(model, runtime) as HarnessKind;
         const resolved = resolvedFor(model, runtime.profile, harness, facts, partial);
         const stack = stackView(resolved, harness);
         const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
