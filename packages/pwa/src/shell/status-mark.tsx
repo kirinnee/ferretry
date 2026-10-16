@@ -106,6 +106,21 @@ export function statusMark(view: SessionView): StatusMarkInfo {
 }
 
 /**
+ * A LIVE session sitting at its prompt — launched, nothing asked of it yet, or
+ * its last turn over. Still a circle, because it is live, but it does not
+ * breathe and its tone is `ok`: nothing is happening, and nothing is wrong.
+ * Only a surface that has the pane's evidence (`lib/session-activity.ts`) may
+ * claim it; the daemon's own `running` cannot tell the two apart.
+ */
+export const READY_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'circle',
+  klass: 'active',
+  tone: 'ok',
+  label: 'ready — at its prompt',
+  live: false,
+});
+
+/**
  * How a ROW carrying this session should treat its name, so a dense list has
  * vertical variation without re-adding any fact. A finished session is over, so
  * its name recedes to `--muted`; live and waiting work stays at full `--fg`
@@ -138,14 +153,16 @@ export interface StatusMarkProps {
   readonly view: SessionView;
   readonly size?: number;
   readonly className?: string;
+  /** The surface has evidence the session is idle at its prompt; see {@link READY_MARK}. */
+  readonly ready?: boolean;
 }
 
 /**
  * The glyph. `role="img"` + `aria-label` so it is announced as one thing rather
  * than as an empty span, and `title` so the same words are available on hover.
  */
-export function StatusMark({ view, size = 8, className = '' }: StatusMarkProps) {
-  const info = statusMark(view);
+export function StatusMark({ view, size = 8, className = '', ready = false }: StatusMarkProps) {
+  const info = ready ? READY_MARK : statusMark(view);
   return (
     <span
       role="img"

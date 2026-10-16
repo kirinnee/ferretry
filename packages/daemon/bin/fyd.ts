@@ -201,6 +201,7 @@ import {
 } from '../src/adapters/session/filesystem/index.ts';
 import {
   CodexAppServerCatalog,
+  readPersistedReasoningEffort,
   TmuxCodexPickerDrive,
   TmuxCodexPickerPane,
 } from '../src/adapters/session/harness/index.ts';
@@ -457,6 +458,7 @@ import {
   InvalidDeadlineRefused,
   isTaskBoardError,
   jsonObject,
+  launchReasoningEffort,
   type LearningSubsystem,
   LiveDeviceConnections,
   type LogLevel,
@@ -1779,6 +1781,12 @@ function createSessionControlSubsystem(
         ...startupModelArguments(plan.model),
         ...(request.harnessFlags ?? []),
       ];
+      // The level this launch starts on, so a session that has said nothing yet still shows one. A
+      // single local file read: no harness is started and no provider is asked.
+      const launchEffort = launchReasoningEffort(
+        request.effort,
+        await readPersistedReasoningEffort(account.kind, transcript.provenance?.home),
+      );
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
@@ -1794,6 +1802,7 @@ function createSessionControlSubsystem(
         // hint is evidence about the request and the model is the decision.
         modelHint: request.model ?? account.defaultModel ?? '',
         model: plan.model,
+        ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
         remoteControl: request.remoteControl === true,
         harnessFlags: [...(request.harnessFlags ?? [])],
         /**
@@ -3264,13 +3273,16 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     );
     const from = config.agent;
     const generation = config.runtimeGeneration + 1;
+    // The previous account's level described the previous runtime; the target's own settings decide.
+    const launchEffort = await readPersistedReasoningEffort(account.kind, relaunchTranscript.provenance?.home);
     await parts.storage.updateConfig(id, current => {
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
       // silently keep the old harness's file under the new harness's name.
-      const { transcript: _replaced, ...retained } = jsonObject(current) ?? {};
+      const { transcript: _replaced, launchReasoningEffort: _previousEffort, ...retained } = jsonObject(current) ?? {};
       return {
         ...retained,
+        ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
         agent: account.agent,
         harness: account.kind,
         model: plan.model,

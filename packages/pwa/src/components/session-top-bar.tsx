@@ -50,6 +50,12 @@ export interface SessionTopBarProps {
   readonly actions: ReactNode;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
+  /**
+   * The page read the agent's pane (or the daemon's turn record) and found it idle at its prompt.
+   * The daemon's `running` only says the terminal is live, so without this a session nobody had
+   * asked anything yet read as Running.
+   */
+  readonly atPrompt?: boolean;
   /** Everything else this session offers, in ⋯. */
   readonly menuItems: readonly ContextMenuItem[];
   /** Phone only: opens the sessions drawer. */
@@ -62,6 +68,7 @@ export function SessionTopBar({
   compact,
   actions,
   status,
+  atPrompt = false,
   menuItems,
   onOpenSessions,
 }: SessionTopBarProps) {
@@ -98,10 +105,14 @@ export function SessionTopBar({
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
-        <span className="fy-session-bar__status" data-session-status={session.state.status}>
-          <StatusMark view={session} />
+        <span
+          className="fy-session-bar__status"
+          data-session-activity={atPrompt ? 'ready' : undefined}
+          data-session-status={session.state.status}
+        >
+          <StatusMark ready={atPrompt} view={session} />
           <span className={compact ? 'sr-only' : 'fy-session-bar__word'}>
-            {sessionStatusLabel(session.state.status)}
+            {atPrompt ? 'ready' : sessionStatusLabel(session.state.status)}
           </span>
           {status}
         </span>

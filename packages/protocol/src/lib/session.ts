@@ -312,6 +312,12 @@ export const SessionConfigSchema = z.object({
   harness: HarnessSchema,
   modelHint: z.string(),
   model: z.string().optional(),
+  /**
+   * The reasoning level this session was LAUNCHED on: the start request's, else the one the
+   * runtime's own settings file held at launch. A launch fact, not an observation — a surface prefers
+   * anything the harness later reports. Absent means the harness's own default.
+   */
+  launchReasoningEffort: z.string().min(1).optional(),
   mode: InteractionModeSchema,
   remoteControl: z.boolean(),
   harnessFlags: z.array(z.string()),

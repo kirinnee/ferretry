@@ -47,6 +47,7 @@ import {
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
 import { useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
+import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import type { ContextMenuItem } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -67,6 +68,7 @@ import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts'
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
+import { sessionAtPrompt } from '../session-activity.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
@@ -525,17 +527,25 @@ export function SessionChatPage({
     () => sessionActionSpecs(session, canControl).filter(spec => spec.action !== 'rename'),
     [canControl, session],
   );
-  const busy = statusMark(session).klass === 'active';
-  // The harness's own status line, read off its pane while — and only while — the session works.
+  // LIVE is not WORKING. `running` means the agent's terminal is up — a brand-new session is
+  // `running` before anything is sent — so liveness only decides whether the pane is worth reading.
+  // Whether the agent is working is decided from the pane and the daemon's own record of a turn
+  // (`lib/session-activity.ts`); a session at its prompt shows no spinner and reads as ready.
+  const terminalLive = statusMark(session).klass === 'active';
   const readActivityFrame = useCallback<PaneFrameReader>(
     async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true),
     [connection, referenceFetch, scope],
   );
-  const paneActivity = usePaneActivity(readActivityFrame, busy);
+  const pane = usePaneActivity(readActivityFrame, terminalLive);
+  const atPrompt = terminalLive && sessionAtPrompt(session, pane);
+  const busy = terminalLive && !atPrompt;
+  // The account's quota for this session, from the daemon's passive usage feed. The session document
+  // itself never carries one, so reading `state.quota` showed "—" for every window, always.
+  const quota = useOptionalSessionQuota(usage, connection, session);
   /**
    * THE RUNTIME CHIPS ASK A DIFFERENT QUESTION THAN THE TRANSCRIPT DOES.
    *
-   * `busy` above is session LIVENESS — is there work happening — and that is the
+   * `busy` above is whether work is HAPPENING — and that is the
    * right fact for a transcript tail and for a composer that keeps accepting
    * text while a turn runs. A runtime switch is not about liveness at all: the
    * daemon refuses one unless the harness is sitting at an idle prompt
@@ -738,6 +748,7 @@ export function SessionChatPage({
             {contextButton}
           </>
         }
+        atPrompt={atPrompt}
         compact={compact}
         menuItems={menuItems}
         project={project}
@@ -766,7 +777,7 @@ export function SessionChatPage({
     <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth}>
       <div className="grid min-h-0 flex-1">
         <Transcript
-          activity={paneActivity}
+          activity={pane.activity}
           activityFallback={session.state.activity ?? null}
           agentName={agentName}
           detailsShown={showDetails}
@@ -822,7 +833,7 @@ export function SessionChatPage({
             daemon={connection}
             disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
             onSent={onRefresh}
-            quota={session.state.quota}
+            quota={quota}
             sessionId={session.config.id}
             {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
             // The model and effort chips ride the composer's own status line, so the

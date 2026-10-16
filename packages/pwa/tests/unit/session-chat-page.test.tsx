@@ -307,12 +307,13 @@ describe('SessionChatPage', () => {
   });
 
   test('opens the runtime sheet on a running session whose prompt is ready, and loads its catalog', async () => {
-    // THE CHIPS ASK ABOUT THE PROMPT, THE TRANSCRIPT ASKS ABOUT LIVENESS. This
+    // THE CHIPS ASK ABOUT THE PROMPT, AND SO, NOW, DOES THE TRANSCRIPT. This
     // page used to answer both with `statusMark(...).klass === 'active'`, which
     // is `active` for every ordinary `running` session — so both chips were dead
     // on exactly the sessions a reader works in, and the only reachable sheet
-    // was on a session that happened to be `waiting`. The transcript and the
-    // composer must keep the liveness answer; only the chips move.
+    // was on a session that happened to be `waiting`. A prompt the daemon
+    // recorded as ready is also NOT working, so the transcript shows no spinner
+    // and the composer sends rather than queues.
     // Arrange
     const ready = sessionView('runtime-ready', { state: { promptReady: true, status: 'running' } });
     const catalogCalls: string[] = [];
@@ -341,13 +342,13 @@ describe('SessionChatPage', () => {
     );
 
     try {
-      // Assert — the two questions are answered separately, and only one moved.
+      // Assert — a ready prompt is idle to every one of them.
       expect(page.root.findByType(ComposerRuntime).props.busy).toBe(false);
-      expect(page.root.findByType(Transcript).props.busy).toBe(true);
-      expect(page.root.findByType(Composer).props.busy).toBe(true);
+      expect(page.root.findByType(Transcript).props.busy).toBe(false);
+      expect(page.root.findByType(Composer).props.busy).toBe(false);
 
       // Act — the reader taps the chip the old gate had disabled.
-      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      const modelChip = buttonWithLabelSpan(page.root, 'claude-opus-5');
       expect(modelChip.props.disabled).toBe(false);
       run(() => modelChip.props.onClick());
       await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
@@ -389,7 +390,7 @@ describe('SessionChatPage', () => {
       // Assert
       expect(unknown.state.promptReady).toBeUndefined();
       expect(page.root.findByType(ComposerRuntime).props.busy).toBe(false);
-      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      const modelChip = buttonWithLabelSpan(page.root, 'claude-opus-5');
       expect(modelChip.props.disabled).toBe(false);
 
       // Act — the sheet opens and offers its choices rather than a refusal.
@@ -428,7 +429,7 @@ describe('SessionChatPage', () => {
     try {
       // Assert
       expect(page.root.findByType(ComposerRuntime).props.busy).toBe(true);
-      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      const modelChip = buttonWithLabelSpan(page.root, 'claude-opus-5');
       expect(modelChip.props.disabled).toBe(true);
       expect(modelChip.props.title).toBe('Busy: wait for an idle prompt to switch.');
       // A refused SWITCH is not a refused session: the reader may still type.
@@ -895,7 +896,7 @@ describe('SessionChatPage', () => {
     );
     try {
       expect(page.root.findAllByProps({ 'data-workspace-console': '' })).toHaveLength(0);
-      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      const modelChip = buttonWithLabelSpan(page.root, 'claude-opus-5');
       expect(modelChip.props.disabled).toBe(false);
       run(() => modelChip.props.onClick());
       await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
@@ -1692,3 +1693,207 @@ describe('SessionChatPage', () => {
     });
   });
 });
+
+/**
+ * A BRAND-NEW SESSION, IDLE AT ITS PROMPT.
+ *
+ * The daemon writes `running` the moment a session launches, whether or not anything was asked of it,
+ * so `running` alone made the page claim `Running` with a `Working…` spinner over an empty
+ * conversation, quota dashes and a blank effort chip. Each case drives the page with a pane frame of
+ * the harness sitting at its prompt — or doing real work — exactly as the live read returns it.
+ */
+describe('SessionChatPage on a brand-new idle session', () => {
+  const CLAUDE_IDLE = [
+    '╭──────────────────────────────╮',
+    '│ > ',
+    '╰──────────────────────────────╯',
+    '  ? for shortcuts',
+  ].join('\n');
+  const CODEX_IDLE = ['› Ask Codex to do anything', '', '  100% context left · ? for shortcuts'].join('\n');
+  const CLAUDE_WORKING = [
+    '⏺ Reading the brief.',
+    '',
+    '✽ Pontificating… (3s · ↓ 1.2k tokens · esc to interrupt)',
+    '',
+    '│ > ',
+  ].join('\n');
+  const CODEX_WORKING = ['• Working (5s • Esc to interrupt)', '', '› '].join('\n');
+
+  /** Answers the live pane read with `frame` (or a failure), and everything else as the shared fixture does. */
+  const paneAnswers = (frame: string | null): string[] => {
+    const reads: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input), 'https://fixture.example.test');
+      if (url.pathname.endsWith('/snapshot') && url.searchParams.get('live') === 'true') {
+        reads.push(url.pathname);
+        return frame === null ? new Response('gone', { status: 503 }) : new Response(frame);
+      }
+      return route(input);
+    }) as typeof fetch;
+    return reads;
+  };
+
+  const fresh = (harness: 'claude' | 'codex', state: Partial<SessionView['state']> = {}): SessionView =>
+    sessionView(`fresh-${harness}`, {
+      config: {
+        harness,
+        agent: harness === 'claude' ? 'claude-auto-gabriela' : 'codex-auto-gabriela',
+        model: harness === 'claude' ? 'claude-opus-5[1m]' : 'gpt-5.6-codex',
+        launchReasoningEffort: harness === 'claude' ? 'high' : 'medium',
+        harnessFlags: [],
+      },
+      state: { status: 'running', turn: 0, ...state },
+    });
+
+  const mountPage = (view: SessionView, usage?: DaemonUsageStore) =>
+    renderSessionChatPage(
+      <SessionChatPage
+        client={{ ...client([], view), runtime: async () => view }}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={view}
+        {...(usage === undefined ? {} : { usage })}
+      />,
+    );
+
+  const liveLines = (root: ReactTestInstance): readonly ReactTestInstance[] =>
+    root.findAll(node => node.type === 'div' && node.props.className === 'fy-live-activity');
+
+  const statusWord = (root: ReactTestInstance): string =>
+    textOf(root.find(node => node.type === 'span' && node.props.className === 'fy-session-bar__word'));
+
+  for (const [harness, idle] of [
+    ['claude', CLAUDE_IDLE],
+    ['codex', CODEX_IDLE],
+  ] as const) {
+    test(`${harness}: reads Ready with no spinner, the launch runtime, and no queue`, async () => {
+      // Arrange
+      const reads = paneAnswers(idle);
+      const view = fresh(harness);
+
+      // Act
+      const page = mountPage(view);
+
+      try {
+        // Assert — turn zero is ready before the first frame lands, and stays ready once it has.
+        expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(true);
+        await settleUntil(() => reads.length > 0, 'the live pane read', runAsync);
+        await runAsync(async () => await Promise.resolve());
+        expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(true);
+        expect(statusWord(page.root)).toBe('ready');
+        expect(page.root.findByType(Transcript).props.busy).toBe(false);
+        expect(liveLines(page.root)).toHaveLength(0);
+        expect(page.root.findByType(Composer).props.busy).toBe(false);
+        const model = harness === 'claude' ? 'claude-opus-5[1m]' : 'gpt-5.6-codex';
+        expect(buttonWithLabelSpan(page.root, model).props['aria-label']).toBe(`Switch model — launched on ${model}`);
+        expect(buttonWithLabelSpan(page.root, harness === 'claude' ? 'high' : 'medium')).toBeDefined();
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+  }
+
+  for (const [harness, frame, verb] of [
+    ['claude', CLAUDE_WORKING, 'Pontificating…'],
+    ['codex', CODEX_WORKING, 'Working…'],
+  ] as const) {
+    test(`${harness}: keeps the harness's own live line while a turn really runs`, async () => {
+      // Arrange — the first turn was sent, and the pane shows the harness at work.
+      paneAnswers(frame);
+      const view = fresh(harness, { turn: 1, promptReady: false });
+
+      // Act
+      const page = mountPage(view);
+
+      try {
+        // Assert
+        await settleUntil(
+          () => page.root.findByType(Transcript).props.activity !== null,
+          'the harness status line',
+          runAsync,
+        );
+        expect(page.root.findByType(Transcript).props.activity.verb).toBe(verb);
+        expect(page.root.findByType(Transcript).props.busy).toBe(true);
+        expect(liveLines(page.root)).toHaveLength(1);
+        expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(false);
+        expect(statusWord(page.root)).toBe('running');
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+  }
+
+  test('a finished turn reads Ready once the pane shows the prompt again', async () => {
+    // Arrange — the daemon still records the send's `promptReady: false`; only the pane knows better.
+    const reads = paneAnswers(CLAUDE_IDLE);
+    const page = mountPage(fresh('claude', { turn: 3, promptReady: false }));
+
+    try {
+      // Assert — working until the frame is read, ready after.
+      expect(page.root.findByType(Transcript).props.busy).toBe(true);
+      await settleUntil(() => page.root.findByType(SessionTopBar).props.atPrompt === true, 'the idle frame', runAsync);
+      expect(reads.length).toBeGreaterThan(0);
+      expect(page.root.findByType(Transcript).props.busy).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('an unreadable pane on a session with a turn in flight keeps the old Working… line', async () => {
+    // Arrange
+    const reads = paneAnswers(null);
+    const page = mountPage(fresh('codex', { turn: 2 }));
+
+    try {
+      await settleUntil(() => reads.length > 0, 'the failed pane read', runAsync);
+      await runAsync(async () => await Promise.resolve());
+
+      // Assert — no evidence either way is not evidence of idleness.
+      expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(false);
+      expect(page.root.findByType(Transcript).props.busy).toBe(true);
+      expect(textOf(must(liveLines(page.root)[0]))).toBe('Working…');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test("shows the account's real quota from the daemon's usage feed, and says unknown without one", async () => {
+    // Arrange
+    paneAnswers(CLAUDE_IDLE);
+    const view = fresh('claude');
+    const usage = new DaemonUsageStore({
+      usage: async () => ({
+        stale: false,
+        accounts: [{ agent: 'claude-auto-gabriela', fiveHourPercent: 12, weeklyPercent: 40 }],
+      }),
+    });
+
+    // Act
+    const known = mountPage(view, usage);
+    const unknown = mountPage(view);
+
+    try {
+      // Assert
+      await settleUntil(
+        () => known.root.findByType(Composer).props.quota !== null,
+        'the usage feed to resolve the account',
+        runAsync,
+      );
+      expect(known.root.findByType(Composer).props.quota).toMatchObject({ fiveHourPercent: 12, weeklyPercent: 40 });
+      const token = known.root.findByProps({ className: 'fy-composer-quota' });
+      expect(token.props['data-quota']).toBe('known');
+      expect(unknown.root.findByType(Composer).props.quota).toBeNull();
+      expect(unknown.root.findByProps({ className: 'fy-composer-quota' }).props['data-quota']).toBe('unknown');
+    } finally {
+      run(() => known.unmount());
+      run(() => unknown.unmount());
+    }
+  });
+});
+
+const must = <T,>(value: T | undefined): T => {
+  if (value === undefined) throw new Error('expected a value');
+  return value;
+};
