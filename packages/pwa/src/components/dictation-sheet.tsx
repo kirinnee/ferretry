@@ -17,13 +17,14 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationSheet.tsx`), and WHY.
  *
- *   1. WHERE THE AUDIO GOES. Browser SpeechRecognition owns capture. Ferretry
- *      never uploads microphone audio to its daemon, but some browser engines
- *      use their vendor's online recognition service, so the copy promises the
- *      former and does not falsely promise universal offline processing.
- *   2. LIVE WORDS COME FROM THE BROWSER. Interim SpeechRecognition results fill
- *      `liveText`; the completed result, not a provisional caption, is what the
- *      controller inserts.
+ *   1. WHERE THE AUDIO GOES DEPENDS ON THE ENGINE, and the strip says which.
+ *      Ferretry never uploads microphone audio to its daemon. With Parakeet the
+ *      audio never leaves the device, and the strip says so; with phone/browser
+ *      voice the browser sends it to its vendor, and the strip says THAT instead.
+ *   2. LIVE WORDS COME FROM THE BROWSER ENGINE ONLY. Interim SpeechRecognition
+ *      results fill `liveText`; Parakeet is not a streaming model, so its words
+ *      arrive when Stop transcribes the take. Either way the completed result,
+ *      not a provisional caption, is what the controller inserts.
  *   3. THE INPUT METER REMAINS AN OPTIONAL VISUAL SEAM. kteam's sheet declared an
  *      `inputMonitor` prop, never destructured it, and `InputWaveform` was
  *      imported by nothing except its own test. It is still usable by isolated
@@ -35,6 +36,7 @@ import { AlertCircle, EyeOff, Loader2, Mic, RotateCcw, Square, X } from 'lucide-
 import { useId } from 'react';
 import type { DictationPhase } from '../hooks/use-dictation.ts';
 import { cn } from '../lib/class-names.ts';
+import type { DictationEngineId } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
 import { type CaptureMonitor, InputWaveform, type InputWaveformRuntime } from './input-waveform.tsx';
 
@@ -78,6 +80,9 @@ export interface DictationFailureCopy {
   readonly hint?: string;
 }
 
+/** The engine the strip is talking about. `null` (unchosen) reads like browser voice: it never promises privacy. */
+type StripEngine = DictationEngineId | null;
+
 /**
  * A short, plain title for each failure, chosen from the error CODE (stable)
  * rather than the message (not). The message itself is shown underneath — this
@@ -99,7 +104,7 @@ export interface DictationFailureCopy {
  *      headline like any other unknown code rather than living on as copy that
  *      proves only that a test can call this function with a string.
  */
-export function dictationFailureCopy(code: string | undefined): DictationFailureCopy {
+export function dictationFailureCopy(code: string | undefined, engine: StripEngine = 'browser'): DictationFailureCopy {
   if (code?.startsWith('enhancement-')) {
     return {
       title: 'Raw dictation kept',
@@ -122,7 +127,19 @@ export function dictationFailureCopy(code: string | undefined): DictationFailure
         hint: 'Check this device’s connection, then try again.',
       };
     case 'recognition-failed':
-      return { title: 'Browser recognition failed', hint: 'Try again or use another supported browser.' };
+      return engine === 'parakeet'
+        ? {
+            title: 'Transcription failed',
+            hint: 'Try again. If it keeps failing, remove Parakeet in Settings › Voice and install it again.',
+          }
+        : { title: 'Browser recognition failed', hint: 'Try again or use another supported browser.' };
+    case 'model-not-installed':
+      return {
+        title: 'Parakeet is not installed',
+        hint: 'Install it in Settings › Voice, or choose phone/browser voice there.',
+      };
+    case 'engine-not-chosen':
+      return { title: 'Choose a voice engine' };
     case 'bad-audio':
       return { title: "Didn't catch that", hint: 'No usable audio was captured. Try again.' };
     default:
@@ -144,6 +161,8 @@ export interface DictationSheetProps {
   readonly inputMonitor?: CaptureMonitor | null;
   /** Injected by tests and the visual harness; the browser runtime otherwise. */
   readonly waveformRuntime?: (canvas: HTMLCanvasElement) => InputWaveformRuntime | null;
+  /** Which engine is dictating, so the strip says where the audio goes. */
+  readonly engine?: StripEngine;
   readonly errorCode?: string;
   readonly errorMessage?: string;
   /** Hide only. Recording and transcription continue in the background. */
@@ -188,13 +207,18 @@ export function dictationStripStatus(
   liveText: string,
   errorMessage: string | undefined,
   failure: DictationFailureCopy,
+  engine: StripEngine = 'browser',
 ): string {
   const preview = liveText.trim();
+  const onDevice = engine === 'parakeet';
   switch (stage) {
     case 'recording':
       if (preview) return preview;
-      return 'Speak, then press Stop. This browser may use its vendor’s online speech service; Ferretry only updates your draft.';
+      return onDevice
+        ? 'Speak, then press Stop. Parakeet transcribes on this device; audio never leaves it.'
+        : 'Speak, then press Stop. Your browser sends this audio to its vendor’s servers; Ferretry only updates your draft.';
     case 'transcribing':
+      if (onDevice) return 'Transcribing on this device and correcting once… The result will be added to your draft.';
       return `Finishing in your browser and correcting once… ${
         preview ? `Last heard: ${preview}` : 'The result will be added to your draft.'
       }`;
@@ -205,7 +229,7 @@ export function dictationStripStatus(
         .filter(Boolean)
         .join(' ');
     case 'starting':
-      return 'Opening browser speech recognition…';
+      return onDevice ? 'Opening the microphone…' : 'Opening browser speech recognition…';
   }
 }
 
@@ -218,6 +242,7 @@ export function DictationSheet({
   waveformRuntime,
   errorCode,
   errorMessage,
+  engine = 'browser',
   onDismiss,
   onStop,
   onCancel,
@@ -228,10 +253,13 @@ export function DictationSheet({
   const titleId = `${baseId}-title`;
   const safetyId = `${baseId}-safety`;
 
-  const failure = dictationFailureCopy(errorCode);
+  const onDevice = engine === 'parakeet';
+  const failure = dictationFailureCopy(errorCode, engine);
   const title =
     stage === 'transcribing'
-      ? 'Finishing in browser'
+      ? onDevice
+        ? 'Transcribing on this device'
+        : 'Finishing in browser'
       : stage === 'recording'
         ? 'Recording'
         : stage === 'error'
@@ -239,7 +267,7 @@ export function DictationSheet({
           : stage === 'empty'
             ? "Didn't catch that"
             : 'Opening microphone';
-  const status = dictationStripStatus(stage, liveText, errorMessage, failure);
+  const status = dictationStripStatus(stage, liveText, errorMessage, failure, engine);
 
   if (!open) return null;
 
@@ -358,7 +386,9 @@ export function DictationSheet({
         {stage === 'recording'
           ? 'Recording'
           : stage === 'transcribing'
-            ? 'Finishing transcription in your browser, then adding it to your draft'
+            ? onDevice
+              ? 'Transcribing on this device, then adding it to your draft'
+              : 'Finishing transcription in your browser, then adding it to your draft'
             : stage === 'empty'
               ? 'No speech was captured'
               : stage === 'error'
@@ -368,7 +398,9 @@ export function DictationSheet({
                 : 'Starting'}
       </span>
       <span id={safetyId} className="sr-only">
-        Ferretry never sends microphone audio to your daemon. Your browser may use its own online speech service.
+        {onDevice
+          ? 'Parakeet transcribes on this device: audio never leaves it, and Ferretry never sends it to your daemon.'
+          : 'Ferretry never sends microphone audio to your daemon, but your browser sends it to its vendor’s servers to transcribe it.'}{' '}
         Dictation only updates your draft and is never sent automatically.
       </span>
     </section>

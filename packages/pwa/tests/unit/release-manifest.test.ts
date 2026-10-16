@@ -4,6 +4,7 @@ import should from 'should';
 import {
   RELEASE_WORKER_FILE,
   formatReleaseSignature,
+  isDeferredReleaseFile,
   fromBase64Url,
   parseReleaseManifest,
   parseReleaseRewrites,
@@ -192,5 +193,21 @@ describe('releasePathForRequest', () => {
       releasePathForRequest({ pathname: '/gone', navigate: true }, files, [{ from: '/gone', to: '/missing.html' }]),
     ).be.null();
     should(releasePathForRequest({ pathname: '/elsewhere', navigate: true }, files, [])).be.null();
+  });
+});
+
+describe('isDeferredReleaseFile', () => {
+  it('defers only the speech runtime binary the build emits under assets/', () => {
+    should(isDeferredReleaseFile('assets/ort-wasm-simd-threaded-BjodUpCp.wasm')).be.true();
+    should(isDeferredReleaseFile('assets/ort-wasm-simd-threaded.wasm')).be.true();
+    for (const path of [
+      'ort-wasm-simd-threaded.wasm',
+      'assets/ort-wasm-simd-threaded-x.mjs',
+      'assets/parakeet-worker-abc.js',
+      'assets/app-1.js',
+      'index.html',
+      'assets/nested/ort-wasm-simd-threaded.wasm',
+    ])
+      should(isDeferredReleaseFile(path)).be.false();
   });
 });

@@ -67,6 +67,14 @@ describe('dictationFailureCopy', () => {
     expect(copy.hint).toContain('already added to your draft');
   });
 
+  it("names the on-device engine's own failures", () => {
+    expect(dictationFailureCopy('model-not-installed').title).toBe('Parakeet is not installed');
+    expect(dictationFailureCopy('model-not-installed').hint).toContain('Settings › Voice');
+    expect(dictationFailureCopy('engine-not-chosen').title).toBe('Choose a voice engine');
+    expect(dictationFailureCopy('recognition-failed', 'parakeet').title).toBe('Transcription failed');
+    expect(dictationFailureCopy('recognition-failed').title).toBe('Browser recognition failed');
+  });
+
   it('names each microphone refusal', () => {
     expect(dictationFailureCopy('permission-denied').title).toBe('Microphone blocked');
     expect(dictationFailureCopy('no-microphone').title).toBe('No microphone found');
@@ -115,8 +123,19 @@ describe('dictationStripStatus', () => {
     // while the visible strip said "handled by this browser" — which most
     // people read as "on this device".
     const status = dictationStripStatus('recording', '', undefined, failure);
-    expect(status).toContain('vendor’s online speech service');
+    expect(status).toContain('sends this audio to its vendor’s servers');
     expect(status).toContain('Ferretry only updates your draft');
+    expect(status).not.toContain('never leaves');
+  });
+
+  it('promises the audio stays on this device only for Parakeet', () => {
+    expect(dictationStripStatus('recording', '', undefined, failure, 'parakeet')).toContain('audio never leaves it');
+    expect(dictationStripStatus('starting', '', undefined, failure, 'parakeet')).toBe('Opening the microphone…');
+    expect(dictationStripStatus('transcribing', 'ignored', undefined, failure, 'parakeet')).toContain(
+      'Transcribing on this device',
+    );
+    // Unchosen reads like the browser engine: no privacy promise is made for it.
+    expect(dictationStripStatus('recording', '', undefined, failure, null)).not.toContain('never leaves');
   });
 
   it('shows a caption verbatim when the browser produced one', () => {
@@ -314,8 +333,13 @@ describe('<DictationSheet>', () => {
     const description = must(view.container.querySelector(`#${CSS.escape(describedBy)}`), 'the description');
     // What Ferretry promises, and the browser-vendor service it cannot promise for.
     expect(description.textContent).toContain('never sends microphone audio to your daemon');
-    expect(description.textContent).toContain('own online speech service');
+    expect(description.textContent).toContain('sends it to its vendor’s servers');
     expect(description.textContent).toContain('never sent automatically');
+
+    await view.render(<DictationSheet {...sheetProps({ engine: 'parakeet', stage: 'transcribing' })} />);
+    expect(view.container.textContent).toContain('audio never leaves it');
+    expect(view.container.textContent).toContain('Transcribing on this device, then adding it to your draft');
+    expect(view.container.textContent).not.toContain('vendor');
     await view.unmount();
   });
 });
