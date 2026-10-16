@@ -1,0 +1,442 @@
+/**
+ * Proves one on-device dictation: the microphone opens, the limit timer runs only while recording,
+ * Stop transcribes the take, engine failures map into the dictation panel's vocabulary, and every
+ * way of ending early (cancel, hidden page, failure) leaves nothing running.
+ */
+import { describe, it } from 'bun:test';
+import should from 'should';
+import type { AudioCapturePort, AudioRecording } from '../../../src/lib/stt/audio-capture.ts';
+import { BrowserRecognitionError } from '../../../src/lib/stt/browser-recognition.ts';
+import { ParakeetEngineError } from '../../../src/lib/stt/parakeet-engine.ts';
+import {
+  ParakeetRecognitionSession,
+  type ParakeetSessionPorts,
+  parakeetFailure,
+} from '../../../src/lib/stt/parakeet-session.ts';
+
+const tick = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+const deferred = <T>(): Deferred<T> => {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (error: unknown) => void = () => undefined;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
+const settle = <T>(promise: Promise<T>): { value?: T; error?: unknown; done: boolean } => {
+  const outcome: { value?: T; error?: unknown; done: boolean } = { done: false };
+  promise.then(
+    value => {
+      outcome.value = value;
+      outcome.done = true;
+    },
+    error => {
+      outcome.error = error;
+      outcome.done = true;
+    },
+  );
+  return outcome;
+};
+
+const ENOUGH = 4_000;
+
+class FakeRecording implements AudioRecording {
+  stops = 0;
+  cancels = 0;
+  samples: Float32Array = new Float32Array(ENOUGH);
+  stopDeferred: Deferred<Float32Array> | null = null;
+
+  stop(): Promise<Float32Array> {
+    this.stops += 1;
+    return this.stopDeferred === null ? Promise.resolve(this.samples) : this.stopDeferred.promise;
+  }
+
+  cancel(): void {
+    this.cancels += 1;
+  }
+}
+
+interface World {
+  readonly session: ParakeetRecognitionSession;
+  readonly recording: FakeRecording;
+  readonly open: Deferred<AudioRecording>;
+  readonly events: string[];
+  readonly failures: BrowserRecognitionError[];
+  readonly transcribed: { samples: Float32Array; signal: AbortSignal | undefined }[];
+  readonly timers: { callback: () => void; milliseconds: number; cleared: boolean }[];
+  readonly preloads: () => number;
+  readonly unwatched: () => number;
+  hide(): void;
+  engine: { transcribe: (samples: Float32Array, signal?: AbortSignal) => Promise<string> };
+  preloadThrows: boolean;
+}
+
+const world = (options: { maxDurationMs?: number } = {}): World => {
+  const recording = new FakeRecording();
+  const open = deferred<AudioRecording>();
+  const events: string[] = [];
+  const failures: BrowserRecognitionError[] = [];
+  const transcribed: World['transcribed'] = [];
+  const timers: World['timers'] = [];
+  let preloads = 0;
+  let unwatched = 0;
+  let hidden: () => void = () => undefined;
+  const w = {
+    preloadThrows: false,
+    engine: {
+      transcribe: async (samples: Float32Array, signal?: AbortSignal): Promise<string> => {
+        transcribed.push({ samples, signal });
+        return 'hello world';
+      },
+    },
+  } as World;
+  const capture: AudioCapturePort = { start: () => open.promise };
+  const ports: ParakeetSessionPorts = {
+    capture,
+    engine: {
+      preload: () => {
+        preloads += 1;
+        if (w.preloadThrows) throw new Error('worker blocked');
+      },
+      transcribe: (samples, signal) => w.engine.transcribe(samples, signal),
+    },
+    watchHidden: onHidden => {
+      hidden = onHidden;
+      return () => {
+        unwatched += 1;
+      };
+    },
+    setTimeout: (callback, milliseconds) => {
+      timers.push({ callback, milliseconds, cleared: false });
+      return timers.length - 1;
+    },
+    clearTimeout: handle => {
+      const timer = timers[handle as number];
+      if (timer !== undefined) timer.cleared = true;
+    },
+  };
+  const session = new ParakeetRecognitionSession(ports, {
+    ...options,
+    onStart: () => events.push('start'),
+    onTranscript: text => events.push(`transcript:${text}`),
+    onFailure: failure => {
+      failures.push(failure);
+      events.push(`failure:${failure.code}`);
+    },
+    onAbort: () => events.push('abort'),
+    onLimit: () => events.push('limit'),
+  });
+  return Object.assign(w, {
+    session,
+    recording,
+    open,
+    events,
+    failures,
+    transcribed,
+    timers,
+    preloads: () => preloads,
+    unwatched: () => unwatched,
+    hide: () => hidden(),
+  });
+};
+
+/** Start the session and let the microphone open. */
+const recordingWorld = async (options: { maxDurationMs?: number } = {}): Promise<World> => {
+  const w = world(options);
+  w.session.start();
+  w.open.resolve(w.recording);
+  await tick();
+  return w;
+};
+
+describe('parakeetFailure', () => {
+  it('maps engine errors into the panel vocabulary', () => {
+    should(parakeetFailure(new ParakeetEngineError('cancelled', 'c'))).have.property('code', 'aborted');
+    should(parakeetFailure(new ParakeetEngineError('not-installed', 'n'))).have.property('code', 'model-not-installed');
+    for (const code of ['integrity', 'load-failed', 'transcribe-failed', 'worker-failed'] as const)
+      should(parakeetFailure(new ParakeetEngineError(code, 'x'))).have.property('code', 'recognition-failed');
+  });
+
+  it('keeps the engine message', () => {
+    should(parakeetFailure(new ParakeetEngineError('integrity', 'tampered'))).have.property('message', 'tampered');
+  });
+
+  it('maps other errors through the browser mapping', () => {
+    should(parakeetFailure({ name: 'NotAllowedError' })).have.property('code', 'permission-denied');
+  });
+});
+
+describe('ParakeetRecognitionSession', () => {
+  it('start opens the microphone, then reports start, arms the limit timer and preloads', async () => {
+    const w = world({ maxDurationMs: 5_000 });
+    w.session.start();
+    should(w.events).eql([]);
+    w.open.resolve(w.recording);
+    await tick();
+    should(w.events).eql(['start']);
+    should(w.timers).have.length(1);
+    should(w.timers[0]?.milliseconds).equal(5_000);
+    should(w.preloads()).equal(1);
+  });
+
+  it('defaults the limit to two minutes and never arms a zero timer', async () => {
+    const standard = await recordingWorld();
+    should(standard.timers[0]?.milliseconds).equal(120_000);
+    const zero = await recordingWorld({ maxDurationMs: 0 });
+    should(zero.timers[0]?.milliseconds).equal(1);
+  });
+
+  it('swallows a preload that throws', async () => {
+    const w = world();
+    w.preloadThrows = true;
+    w.session.start();
+    w.open.resolve(w.recording);
+    await tick();
+    should(w.events).eql(['start']);
+    should(w.failures).have.length(0);
+  });
+
+  it('finish stops the recording and resolves the engine text', async () => {
+    const w = await recordingWorld();
+    const text = await w.session.finish();
+    should(text).equal('hello world');
+    should(w.recording.stops).equal(1);
+    should(w.transcribed).have.length(1);
+    should(w.transcribed[0]?.samples).equal(w.recording.samples);
+    should(w.timers[0]?.cleared).be.true();
+    should(w.unwatched()).equal(1);
+  });
+
+  it('returns an empty string for a take too short to be speech, without transcribing', async () => {
+    const w = await recordingWorld();
+    w.recording.samples = new Float32Array(3_999);
+    should(await w.session.finish()).equal('');
+    should(w.transcribed).have.length(0);
+  });
+
+  it('transcribes a take of exactly a quarter of a second', async () => {
+    const w = await recordingWorld();
+    w.recording.samples = new Float32Array(4_000);
+    should(await w.session.finish()).equal('hello world');
+  });
+
+  it('finish before the microphone has opened waits for it and still transcribes', async () => {
+    const w = world();
+    w.session.start();
+    const outcome = settle(w.session.finish());
+    w.open.resolve(w.recording);
+    await tick();
+    should(outcome.value).equal('hello world');
+    should(w.events).eql([]);
+    should(w.timers).have.length(0);
+    should(w.preloads()).equal(0);
+  });
+
+  it('finish without start resolves empty', async () => {
+    const w = world();
+    should(await w.session.finish()).equal('');
+  });
+
+  it('finish twice returns the same promise', async () => {
+    const w = await recordingWorld();
+    const first = w.session.finish();
+    const second = w.session.finish();
+    should(second).equal(first);
+    await first;
+    should(w.recording.stops).equal(1);
+    should(w.session.finish()).equal(first);
+  });
+
+  it('a denied microphone fails through onFailure with permission-denied', async () => {
+    const w = world();
+    w.session.start();
+    w.open.reject(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
+    await tick();
+    should(w.events).eql(['failure:permission-denied']);
+    should(w.unwatched()).equal(1);
+    await should(w.session.finish()).be.rejectedWith({ code: 'aborted' });
+  });
+
+  it('a capture failure while finishing rejects finish instead of calling onFailure', async () => {
+    const w = world();
+    w.session.start();
+    const outcome = settle(w.session.finish());
+    w.open.reject(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
+    await tick();
+    should(outcome.error).be.instanceOf(BrowserRecognitionError);
+    should(outcome.error).have.property('code', 'permission-denied');
+    should(w.failures).have.length(0);
+    await should(w.session.finish()).be.rejectedWith({ code: 'permission-denied' });
+  });
+
+  it('an engine cancellation during finish aborts the take', async () => {
+    const w = await recordingWorld();
+    w.engine.transcribe = async () => {
+      throw new ParakeetEngineError('cancelled', 'unloaded');
+    };
+    await should(w.session.finish()).be.rejectedWith({ code: 'aborted', message: 'unloaded' });
+    await should(w.session.finish()).be.rejectedWith({ code: 'aborted' });
+  });
+
+  it('a model that is not installed maps to model-not-installed', async () => {
+    const w = await recordingWorld();
+    w.engine.transcribe = async () => {
+      throw new ParakeetEngineError('not-installed', 'no model');
+    };
+    await should(w.session.finish()).be.rejectedWith({ code: 'model-not-installed' });
+    await should(w.session.finish()).be.rejectedWith({ code: 'model-not-installed' });
+  });
+
+  it('other engine errors map to recognition-failed', async () => {
+    const w = await recordingWorld();
+    w.engine.transcribe = async () => {
+      throw new ParakeetEngineError('transcribe-failed', 'decode broke');
+    };
+    await should(w.session.finish()).be.rejectedWith({ code: 'recognition-failed', message: 'decode broke' });
+  });
+
+  it('a non-engine error goes through the browser mapping', async () => {
+    const w = await recordingWorld();
+    w.recording.stop = () => Promise.reject(Object.assign(new Error('gone'), { name: 'NotFoundError' }));
+    await should(w.session.finish()).be.rejectedWith({ code: 'no-microphone' });
+  });
+
+  it('cancel aborts the signal given to transcribe and cancels the recording', async () => {
+    const w = await recordingWorld();
+    const engineGate = deferred<string>();
+    w.engine.transcribe = (samples, signal) => {
+      w.transcribed.push({ samples, signal });
+      return engineGate.promise;
+    };
+    const outcome = settle(w.session.finish());
+    await tick();
+    should(w.transcribed[0]?.signal?.aborted).be.false();
+    w.session.cancel();
+    should(w.transcribed[0]?.signal?.aborted).be.true();
+    await tick();
+    should(w.recording.cancels).equal(1);
+    engineGate.resolve('late words');
+    await tick();
+    should(outcome.error).have.property('code', 'aborted');
+  });
+
+  it('cancel while finishing rejects finish as aborted even if the engine then fails', async () => {
+    const w = await recordingWorld();
+    const engineGate = deferred<string>();
+    w.engine.transcribe = () => engineGate.promise;
+    const outcome = settle(w.session.finish());
+    await tick();
+    w.session.cancel();
+    engineGate.reject(new ParakeetEngineError('cancelled', 'Transcription was cancelled.'));
+    await tick();
+    should(outcome.error).have.property('code', 'aborted');
+    should(w.unwatched()).equal(1);
+  });
+
+  it('cancel cancels a recording that opens after the cancel', async () => {
+    const w = world();
+    w.session.start();
+    w.session.cancel();
+    w.open.resolve(w.recording);
+    await tick();
+    should(w.recording.cancels).be.greaterThanOrEqual(1);
+    should(w.events).eql([]);
+    should(w.timers).have.length(0);
+  });
+
+  it('cancel before the microphone fails is quiet', async () => {
+    const w = world();
+    w.session.start();
+    w.session.cancel();
+    w.open.reject(new Error('nope'));
+    await tick();
+    should(w.events).eql([]);
+  });
+
+  it('cancel is idempotent, and does nothing after the take finished', async () => {
+    const w = await recordingWorld();
+    await w.session.finish();
+    w.session.cancel();
+    should(w.recording.cancels).equal(0);
+
+    const other = await recordingWorld();
+    other.session.cancel();
+    other.session.cancel();
+    await tick();
+    should(other.recording.cancels).equal(1);
+    should(other.timers[0]?.cleared).be.true();
+  });
+
+  it('cancel without start is harmless', () => {
+    const w = world();
+    w.session.cancel();
+    should(w.recording.cancels).equal(0);
+  });
+
+  it('finish after cancel rejects aborted', async () => {
+    const w = await recordingWorld();
+    w.session.cancel();
+    await should(w.session.finish()).be.rejectedWith({ code: 'aborted' });
+    should(w.transcribed).have.length(0);
+  });
+
+  it('a hidden page while recording cancels and reports an abort', async () => {
+    const w = await recordingWorld();
+    w.hide();
+    should(w.events).eql(['start', 'abort']);
+    await tick();
+    should(w.recording.cancels).equal(1);
+    should(w.unwatched()).equal(1);
+  });
+
+  it('a hidden page while the microphone is opening cancels and reports an abort', () => {
+    const w = world();
+    w.session.start();
+    w.hide();
+    should(w.events).eql(['abort']);
+  });
+
+  it('a hidden page while finishing or after the end is ignored', async () => {
+    const finishing = await recordingWorld();
+    const gate = deferred<string>();
+    finishing.engine.transcribe = () => gate.promise;
+    const outcome = settle(finishing.session.finish());
+    await tick();
+    finishing.hide();
+    should(finishing.events).eql(['start']);
+    gate.resolve('words');
+    await tick();
+    should(outcome.value).equal('words');
+
+    const ended = await recordingWorld();
+    ended.session.cancel();
+    ended.hide();
+    should(ended.events).eql(['start']);
+  });
+
+  it('the limit timer reports onLimit only while recording', async () => {
+    const w = await recordingWorld();
+    w.timers[0]?.callback();
+    should(w.events).eql(['start', 'limit']);
+
+    const finishing = await recordingWorld();
+    const gate = deferred<string>();
+    finishing.engine.transcribe = () => gate.promise;
+    const outcome = settle(finishing.session.finish());
+    await tick();
+    finishing.timers[0]?.callback();
+    should(finishing.events).eql(['start']);
+    gate.resolve('x');
+    await tick();
+    should(outcome.value).equal('x');
+  });
+});

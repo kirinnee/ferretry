@@ -1,5 +1,5 @@
 /**
- * Browser-owned dictation settings.
+ * Voice settings for this device: which engine dictates, Parakeet's install, and clean-up.
  *
  * NO AUTOFOCUS anywhere, per this app's touch rules: opening a settings section
  * must not raise the keyboard on a phone. Every interactive target is at least
@@ -7,14 +7,15 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationSettings.tsx`), and WHY.
  *
- *   1. SPEECH RECOGNITION IS A BROWSER CAPABILITY. There is no model catalogue,
- *      daemon readiness poll, installer, or per-device model download. The
- *      standard/prefixed constructor and the known unusable iOS Home Screen
- *      shell are read as data and rendered here.
- *   2. PRIVACY COPY HAS TWO BOUNDARIES. Ferretry never uploads microphone audio
- *      to its daemon. The Web Speech API is allowed to use a browser-vendor
- *      online service, so this screen says that plainly instead of claiming all
- *      target browsers recognise offline.
+ *   1. TWO ENGINES, CHOSEN PER DEVICE (`voice-engine-choice.tsx`). Parakeet runs
+ *      in this browser after a one-time, explicit download (kteam's
+ *      `parakeet-browser-v3`, pinned and hashed); phone/browser voice is the
+ *      browser's own recognition. Neither is a fallback for the other. kteam's
+ *      daemon-side engine (sherpa-onnx on the box) is not ported yet.
+ *   2. PRIVACY COPY FOLLOWS THE ACTIVE ENGINE. Ferretry never uploads microphone
+ *      audio to its daemon. "Audio never leaves this device" is said only while
+ *      Parakeet is the active engine; while browser voice is, the screen says
+ *      the browser sends the audio to its vendor.
  *   3. ENHANCEMENT IS SEPARATE. Local word correction stays in this browser;
  *      optional Groq or Cerebras clean-up legitimately sends recognised TEXT
  *      through the paired daemon that owns the live session, which spends the
@@ -29,13 +30,15 @@
  * enhancer rather than about where audio goes.
  */
 
-import { Check, CircleSlash2 } from 'lucide-react';
 import { useMemo } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import { useParakeetVoice } from '../../lib/store.tsx';
 import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../lib/stt/browser-recognition.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
+import type { ParakeetVoice } from '../../lib/stt/parakeet-voice.ts';
 import {
   DEFAULT_ENHANCEMENT_MODELS,
+  type DictationEngineId,
   ENHANCEMENT_PROVIDERS,
   type EnhancementProviderId,
   isRemoteEnhancementProvider,
@@ -47,18 +50,13 @@ import {
 } from '../../lib/stt/stt-settings.ts';
 import { Textarea } from '../../shell/primitives.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
+import { VoiceEngineChoice } from './voice-engine-choice.tsx';
 
 export const DICTATION_SAFETY_NOTE =
   'Ferretry never sends microphone audio to your daemon. Stop settles the browser transcript, corrects it once, and inserts it at your current caret. Nothing is ever sent for you.';
 
-export const BROWSER_MODE_SUMMARY =
-  'Speech recognition is handled by this browser. Microphone audio is never uploaded to Ferretry or your paired daemon.';
-
-export const BROWSER_SERVICE_DISCLOSURE =
-  'Depending on the browser and its settings, recognition may use the browser vendor’s online speech service and may not work offline. That service’s privacy policy applies.';
-
 export const DICTATION_DISABLED_EXPLANATION =
-  'Off means off: browser speech recognition cannot start. Your dictionary and shortcut are kept, so turning dictation back on needs no reload.';
+  'Off means off: the microphone cannot open for dictation. Your engine, dictionary and shortcut are kept, so turning dictation back on needs no reload.';
 
 /**
  * Said plainly next to the enhancement toggle. The capitalised phrase is the
@@ -97,7 +95,7 @@ export const CEREBRAS_ENHANCEMENT_EXPLANATION =
 
 /** Where the hosted providers' keys are set, said next to the choice that needs one. */
 export const SPEEDUP_KEY_HINT =
-  'The key lives on the machine, not in this browser: paste it under Settings › This machine › Speed-ups, where Test checks it works. Audio never leaves this device — only the recognised text is sent.';
+  'The key lives on the machine, not in this browser: paste it under Settings › This machine › Speed-ups, where Test checks it works. Only the recognised text is sent for clean-up, never audio.';
 
 /**
  * Using one of the machine's own logins for clean-up needs a login that can answer a plain chat
@@ -137,11 +135,16 @@ export interface DictationSettingsProps {
   readonly persisted: boolean;
   /** Injected by tests and visual fixtures; production detects this page. */
   readonly recognitionSupport?: BrowserRecognitionSupport;
+  /** Parakeet on this device. Read from the app store when omitted. */
+  readonly voice?: ParakeetVoice | null;
 }
 
-export function DictationSettings({ settings, update, persisted, recognitionSupport }: DictationSettingsProps) {
+export function DictationSettings({ settings, update, persisted, recognitionSupport, voice }: DictationSettingsProps) {
   const detectedSupport = useMemo(() => browserRecognitionProvider().support, []);
   const support = recognitionSupport ?? detectedSupport;
+  const contextVoice = useParakeetVoice();
+  const parakeet = voice === undefined ? contextVoice : voice;
+  const choose = (engine: DictationEngineId): void => update({ engine });
   const dictionary = useMemo(() => sttDictionary(settings), [settings]);
   /**
    * A live echo of what the context field actually yields, so a reader can see
@@ -173,37 +176,9 @@ export function DictationSettings({ settings, update, persisted, recognitionSupp
 
       {settings.enabled ? (
         <>
-          {/* ---- one honest browser capability ---- */}
-          <section
-            aria-label="Browser dictation availability"
-            className={cn(
-              'flex flex-col gap-2 rounded-control border p-3',
-              support.available ? 'border-accent bg-accent-soft' : 'border-warn bg-warn-soft',
-            )}
-          >
-            <h3 className={cn('m-0 text-ui font-semibold', support.available ? 'text-accent' : 'text-warn')}>
-              {support.available ? 'Available in this browser' : 'Unavailable in this browser'}
-            </h3>
-            <p
-              className={cn(
-                'm-0 flex items-start gap-1 text-meta leading-base',
-                support.available ? 'text-ok' : 'text-warn',
-              )}
-              role="status"
-            >
-              {support.available ? (
-                <Check size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
-              ) : (
-                <CircleSlash2 size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
-              )}
-              <span>
-                {support.available
-                  ? `Ready — ${support.implementation === 'webkit' ? 'WebKit' : 'standard'} speech recognition is exposed on this page.`
-                  : support.reason}
-              </span>
-            </p>
-            <p className="m-0 text-meta leading-base text-fg">{BROWSER_MODE_SUMMARY}</p>
-            <p className="m-0 text-meta leading-base text-faint">{BROWSER_SERVICE_DISCLOSURE}</p>
+          {/* ---- which engine, and Parakeet's install ---- */}
+          <section aria-label="Voice engine" className="flex flex-col gap-2">
+            <VoiceEngineChoice value={settings.engine} onChange={choose} voice={parakeet} browserSupport={support} />
           </section>
 
           {/* ---- push-to-talk shortcut ---- */}

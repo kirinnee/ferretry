@@ -158,7 +158,15 @@ import {
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
-import { StoreProvider, useAppStore, useConnectionSnapshot, useDaemonFetch, useLockedMachines } from './lib/store.tsx';
+import {
+  createAppStore,
+  StoreProvider,
+  useAppStore,
+  useConnectionSnapshot,
+  useDaemonFetch,
+  useLockedMachines,
+} from './lib/store.tsx';
+import type { ParakeetAssets } from './lib/stt/parakeet-voice.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
 import {
   AppBar,
@@ -2083,11 +2091,21 @@ function MotionFollower() {
   return null;
 }
 
+export interface AppProps {
+  /** Where the build put on-device dictation's worker and runtime; only `main.tsx` knows. */
+  readonly speechAssets?: ParakeetAssets;
+}
+
 /** Public client-only root. Providers live here; `main.tsx` only calls `createRoot`. */
-export function App() {
+export function App({ speechAssets }: AppProps = {}) {
+  // One identity for the store's life: the provider reopens the store whenever this changes.
+  const createStore = useCallback(
+    async () => await createAppStore({ speechAssets: speechAssets ?? null }),
+    [speechAssets],
+  );
   return (
     <RouterProvider>
-      <StoreProvider>
+      <StoreProvider createStore={createStore}>
         <AppShell />
       </StoreProvider>
     </RouterProvider>

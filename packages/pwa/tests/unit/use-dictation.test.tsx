@@ -15,6 +15,11 @@ import {
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
+import {
+  BrowserRecognitionError,
+  type BrowserRecognitionSessionOptions,
+} from '../../src/lib/stt/browser-recognition.ts';
+import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { RemoteEnhancementError } from '../../src/lib/stt/remote-enhancement.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import {
@@ -27,7 +32,11 @@ import { interact, mount } from '../support/dom.ts';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'http://127.0.0.1:1', deviceId: 'token-a' });
 
-const settingsWith = (patch: Partial<SttSettings> = {}): SttSettings => ({ ...DEFAULT_STT_SETTINGS, ...patch });
+const settingsWith = (patch: Partial<SttSettings> = {}): SttSettings => ({
+  ...DEFAULT_STT_SETTINGS,
+  engine: 'browser',
+  ...patch,
+});
 
 interface Harness {
   handle(): DictationHandle;
@@ -598,5 +607,130 @@ describe('useDictation over a relay-only daemon', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+/**
+ * The on-device engine through the same hook. The voice service is a fake: what matters here is that
+ * the hook routes to the engine the person chose, and never to the other one.
+ */
+describe('useDictation with the engine the person chose', () => {
+  interface FakeSession {
+    options: BrowserRecognitionSessionOptions;
+    started: number;
+    resolve(text: string): void;
+    reject(error: unknown): void;
+  }
+
+  const fakeVoice = (available = true) => {
+    const sessions: FakeSession[] = [];
+    const voice = {
+      support: available ? { available: true } : { available: false, reason: 'No WebAssembly here.' },
+      createSession(options: BrowserRecognitionSessionOptions) {
+        let settle: { resolve(text: string): void; reject(error: unknown): void } = {
+          resolve: () => undefined,
+          reject: () => undefined,
+        };
+        const finished = new Promise<string>((resolve, reject) => {
+          settle = { resolve, reject };
+        });
+        finished.catch(() => undefined);
+        const session: FakeSession = {
+          options,
+          started: 0,
+          resolve: text => settle.resolve(text),
+          reject: error => settle.reject(error),
+        };
+        sessions.push(session);
+        return {
+          start: () => {
+            session.started += 1;
+          },
+          finish: () => finished,
+          cancel: () => undefined,
+        };
+      },
+    };
+    return { voice: voice as unknown as ParakeetVoice, sessions };
+  };
+
+  it('asks the person to choose before any engine opens a microphone', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({ recognition: provider, settings: settingsWith({ engine: null }) });
+    expect(view.handle().supported).toBe(true);
+    expect(view.handle().engine).toBeNull();
+
+    await interact(() => view.handle().start());
+    expect(view.handle().error?.code).toBe('engine-not-chosen');
+    expect(view.handle().error?.message).toContain('Settings › Voice');
+    expect(provider.created).toBe(0);
+    await view.unmount();
+  });
+
+  it('dictates through Parakeet, never the browser, when Parakeet is chosen', async () => {
+    const provider = fakeRecognitionProvider();
+    const { voice, sessions } = fakeVoice();
+    const view = await harness({
+      recognition: provider,
+      parakeet: voice,
+      settings: settingsWith({ engine: 'parakeet' }),
+    });
+    expect(view.handle().supported).toBe(true);
+    expect(view.handle().engine).toBe('parakeet');
+
+    await interact(() => view.handle().start());
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.started).toBe(1);
+    expect(provider.created).toBe(0);
+
+    await interact(() => sessions[0]?.options.onStart());
+    expect(view.handle().phase).toBe('recording');
+    await interact(() => view.handle().stop());
+    await interact(async () => {
+      sessions[0]?.resolve('words from this device');
+      await Promise.resolve();
+    });
+    expect(view.drafts.map(draft => draft.text)).toEqual(['words from this device']);
+    await view.unmount();
+  });
+
+  it('reports Parakeet unsupported from its own reason', async () => {
+    const { voice } = fakeVoice(false);
+    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet' }) });
+    expect(view.handle().supported).toBe(false);
+    await view.unmount();
+  });
+
+  it('names a missing Parakeet service instead of falling back to the browser', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({
+      recognition: provider,
+      parakeet: null,
+      settings: settingsWith({ engine: 'parakeet' }),
+    });
+    expect(view.handle().supported).toBe(false);
+    await interact(() => view.handle().start());
+    expect(view.handle().error).toEqual({
+      code: 'recognition-unavailable',
+      message: 'Parakeet is not available in this copy of Ferretry.',
+    });
+    expect(provider.created).toBe(0);
+    await view.unmount();
+  });
+
+  it('shows a refusal the session raises before the microphone opens', async () => {
+    const voice = {
+      support: { available: true },
+      createSession: () => {
+        throw new BrowserRecognitionError('model-not-installed', 'Parakeet is not installed on this device yet.');
+      },
+    } as unknown as ParakeetVoice;
+    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet' }) });
+    await interact(() => view.handle().start());
+    expect(view.handle().error).toEqual({
+      code: 'model-not-installed',
+      message: 'Parakeet is not installed on this device yet.',
+    });
+    await view.unmount();
   });
 });

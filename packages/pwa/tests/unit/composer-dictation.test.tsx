@@ -18,6 +18,9 @@ import { type FakeRecognitionProvider, fakeRecognitionProvider } from '../suppor
 import { interact, mount, must } from '../support/dom.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 
+/** These takes run on the browser engine, the one this suite's fake recognition stands in for. */
+const BROWSER_VOICE = { ...DEFAULT_STT_SETTINGS, engine: 'browser' } as const;
+
 // The general composer behaviour is one key arbitration for every editor style; these suites drive it
 // through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
 beforeEach(() => writeMdComposePref('off'));
@@ -81,7 +84,7 @@ describe('Composer dictation slot', () => {
         api={api}
         daemon={daemon}
         dictationRecognition={provider}
-        dictationSettings={DEFAULT_STT_SETTINGS}
+        dictationSettings={BROWSER_VOICE}
         draftStore={new DaemonDraftStore(memoryStorage())}
         sessionId="dictated"
       />,
@@ -121,7 +124,7 @@ describe('Composer dictation slot', () => {
         dictationRecognition={provider}
         // Correction off: this case is about the caret, and the exact words are
         // the assertion.
-        dictationSettings={{ ...DEFAULT_STT_SETTINGS, enhancement: false }}
+        dictationSettings={{ ...BROWSER_VOICE, enhancement: false }}
         draftStore={new DaemonDraftStore(memoryStorage())}
         sessionId="caret-synced"
       />,
@@ -166,7 +169,7 @@ describe('Composer dictation slot', () => {
         api={withHistory}
         daemon={daemon}
         dictationRecognition={provider}
-        dictationSettings={DEFAULT_STT_SETTINGS}
+        dictationSettings={BROWSER_VOICE}
         draftStore={new DaemonDraftStore(memoryStorage())}
         sessionId="mined"
       />,
@@ -194,7 +197,7 @@ describe('Composer dictation slot', () => {
         api={api}
         daemon={daemon}
         dictationRecognition={promptRecognition()}
-        dictationSettings={DEFAULT_STT_SETTINGS}
+        dictationSettings={BROWSER_VOICE}
         disabled
         draftStore={new DaemonDraftStore(memoryStorage())}
         sessionId="stopped"

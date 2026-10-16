@@ -74,6 +74,18 @@ export const DEFAULT_ENHANCEMENT_MODELS: Readonly<Record<RemoteEnhancementProvid
   cerebras: DEFAULT_CEREBRAS_ENHANCEMENT_MODEL,
 };
 
+/**
+ * The two ways to turn speech into text. Neither is a fallback for the other: the person picks one
+ * per device, knowing what each costs.
+ *
+ * - `parakeet` runs the Parakeet model in this browser (`parakeet-voice.ts`): a one-time download,
+ *   and the audio never leaves the device.
+ * - `browser` is the browser's or phone's own speech recognition (`browser-recognition.ts`): nothing
+ *   to download, but Chrome, Android and Safari send the audio to their vendor's servers.
+ */
+export const DICTATION_ENGINES = ['parakeet', 'browser'] as const;
+export type DictationEngineId = (typeof DICTATION_ENGINES)[number];
+
 export const isRemoteEnhancementProvider = (id: EnhancementProviderId): id is RemoteEnhancementProviderId =>
   id !== 'local';
 
@@ -118,6 +130,12 @@ export interface SttSettings {
    * it is data, never a hardcoded event-handler special case.
    */
   readonly shortcut: DictationShortcutBinding;
+  /**
+   * Which engine turns speech into text on this device, or `null` until the person has chosen.
+   * Unchosen dictation asks them to choose rather than picking an engine that would either upload
+   * their audio or need a download they did not ask for.
+   */
+  readonly engine: DictationEngineId | null;
 }
 
 export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
@@ -129,6 +147,7 @@ export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
   enhancementProvider: 'local',
   enhancementModel: DEFAULT_GROQ_ENHANCEMENT_MODEL,
   shortcut: DEFAULT_DICTATION_SHORTCUT,
+  engine: null,
 });
 
 const SHORTCUT_MODIFIERS = ['Meta', 'Control', 'Alt', 'Shift'] as const;
@@ -173,6 +192,9 @@ const parseProvider = (value: unknown): EnhancementProviderId =>
     ? (value as EnhancementProviderId)
     : DEFAULT_STT_SETTINGS.enhancementProvider;
 
+const parseEngine = (value: unknown): DictationEngineId | null =>
+  DICTATION_ENGINES.find(engine => engine === value) ?? null;
+
 const parseModel = (value: unknown): string => {
   if (typeof value !== 'string') return DEFAULT_STT_SETTINGS.enhancementModel;
   return value.trim().slice(0, MAX_ENHANCEMENT_MODEL_CHARS) || DEFAULT_STT_SETTINGS.enhancementModel;
@@ -197,6 +219,7 @@ export const parseSttSettings = (raw: string | null): SttSettings => {
     enhancementProvider: parseProvider(parsed.enhancementProvider),
     enhancementModel: parseModel(parsed.enhancementModel),
     shortcut: parseDictationShortcut(parsed.shortcut),
+    engine: parseEngine(parsed.engine),
   };
 };
 

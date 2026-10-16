@@ -109,6 +109,7 @@ describe('parseSttSettings', () => {
         enhancementProvider: 'groq',
         enhancementModel: ' llama-3.3 ',
         shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
+        engine: 'parakeet',
       }),
     );
 
@@ -121,7 +122,15 @@ describe('parseSttSettings', () => {
       enhancementProvider: 'groq',
       enhancementModel: 'llama-3.3',
       shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
+      engine: 'parakeet',
     });
+  });
+
+  it('reads the voice engine, and leaves an unknown or absent one unchosen', () => {
+    should(parseSttSettings(stored({ engine: 'browser' })).engine).equal('browser');
+    should(parseSttSettings(stored({ engine: 'whisper' })).engine).be.null();
+    should(parseSttSettings(stored({})).engine).be.null();
+    should(DEFAULT_STT_SETTINGS.engine).be.null();
   });
 
   it('resets on a version this build has never seen, rather than half-reading it', () => {

@@ -35,6 +35,8 @@
         "harness/app-screenshot.ts",
         "harness/main.tsx",
         "harness/tasks-pane-benchmark.tsx",
+        "harness/parakeet-smoke.ts",
+        "harness/parakeet-smoke-page.ts",
         "harness/fy-render-safari/probe.ts",
         "harness/fy-render-safari/parent.ts",
         "harness/fy-render-safari/probe-shell.ts",

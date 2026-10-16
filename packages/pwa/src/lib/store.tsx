@@ -44,6 +44,7 @@ import { DeviceNotificationFilterStore } from './notification-filter.ts';
 import { browserNotificationFilterMirror } from './notification-filter-mirror.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
+import { type PairingLegFailure, PairingUnreachableError } from './pairing-unreachable.ts';
 import type { CredentialsPort } from './passkeys.ts';
 import { DaemonPinClient } from './pin-client.ts';
 import { browserPresenceEnvironment, PresenceTracker } from './presence.ts';
@@ -58,7 +59,6 @@ import {
   type RelayDial,
 } from './relay-carrier.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
-import { type PairingLegFailure, PairingUnreachableError } from './pairing-unreachable.ts';
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
@@ -70,6 +70,12 @@ import {
   unlockCeremony,
 } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
+import {
+  browserParakeetVoice,
+  type ParakeetAssets,
+  type ParakeetGlobalLike,
+  type ParakeetVoice,
+} from './stt/parakeet-voice.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
@@ -345,6 +351,11 @@ export interface AppStore {
   readonly pins: DaemonPinClient;
   readonly browserLogin: DaemonBrowserLoginStore;
   readonly stt: SttSettingsStore;
+  /**
+   * Parakeet on this device: whether it can run, its install, and on-device dictation sessions. One
+   * per document, like the dictation settings, because the model belongs to the device.
+   */
+  readonly voice: ParakeetVoice;
   /** Every agent's remembered split workspace, forgotten with the machine it belongs to. */
   readonly workspaceLayouts: WorkspaceLayoutStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
@@ -388,6 +399,13 @@ export interface AppStore {
 }
 
 export interface CreateAppStoreOptions {
+  /**
+   * Where the build put the speech worker and its runtime (bound in `src/main.tsx`), handed in
+   * by `main.tsx` because only the bundler knows. Without it Parakeet reports itself unavailable.
+   */
+  readonly speechAssets?: ParakeetAssets | null;
+  /** A ready-made on-device voice service. Injected by suites; built from `speechAssets` otherwise. */
+  readonly voice?: ParakeetVoice;
   readonly repository?: DaemonConnectionRepository;
   readonly fetcher?: DaemonFetch;
   readonly connectClient?: ConnectDaemonClient;
@@ -567,6 +585,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   }));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
+  const voice =
+    options.voice ?? browserParakeetVoice(globalThis as unknown as ParakeetGlobalLike, options.speechAssets ?? null);
+  // Reads what is already installed; it never downloads.
+  void voice.refresh();
   const workspaceLayouts = new WorkspaceLayoutStore();
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
   const notificationFilter = new DeviceNotificationFilterStore(browserStorage, browserNotificationFilterMirror());
@@ -638,6 +660,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pins,
     browserLogin,
     stt,
+    voice,
     workspaceLayouts,
     notificationPreferences,
     notificationFilter,
@@ -907,6 +930,14 @@ export function useLockedMachines(gate: StepUpGate): readonly DaemonId[] {
  * Outside a provider — a component rendered on its own by a test — there is no router to route
  * through, and the answer is the plain network.
  */
+/**
+ * This device's Parakeet service, or `null` outside a store (a static render, a component suite).
+ * Dictation and Settings read it from here so the composer never has to carry it.
+ */
+export function useParakeetVoice(): ParakeetVoice | null {
+  return useContext(StoreContext)?.voice ?? null;
+}
+
 export function useDaemonFetch(): DaemonFetch {
   const store = useContext(StoreContext);
   // ONE identity per store, read through at call time. Effects list this fetch as a dependency, so a

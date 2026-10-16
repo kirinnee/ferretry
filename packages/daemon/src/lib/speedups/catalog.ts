@@ -76,7 +76,7 @@ export const SPEEDUP_CATALOG: Readonly<Record<SpeedupProvider, SpeedupCatalogEnt
       'Cleans up dictated text in about a second: fixes misheard words, capitals and punctuation, keeping your wording.',
     costNote: 'A small fast model; a typical dictation costs well under a cent. It runs only when you dictate.',
     privacyNote:
-      'The recognised text, your word list and a little recent context are sent to Groq. Audio never leaves your device.',
+      'The recognised text, your word list and a little recent context are sent to Groq. Groq never receives audio.',
     keyUrl: GROQ_KEYS_URL,
     testNote: 'Test lists the models your key can use. It is free and runs no model.',
     probe: Object.freeze({ kind: 'model-list', url: `https://${GROQ_HOST}/openai/v1/models` }),
@@ -89,7 +89,7 @@ export const SPEEDUP_CATALOG: Readonly<Record<SpeedupProvider, SpeedupCatalogEnt
     purpose: 'An alternative to Groq for cleaning up dictated text, on Cerebras’ very fast inference.',
     costNote: 'A typical dictation costs well under a cent. It runs only when you dictate.',
     privacyNote:
-      'The recognised text, your word list and a little recent context are sent to Cerebras. Audio never leaves your device.',
+      'The recognised text, your word list and a little recent context are sent to Cerebras. Cerebras never receives audio.',
     keyUrl: 'https://cloud.cerebras.ai',
     testNote: 'Test lists the models your key can use. It is free and runs no model.',
     probe: Object.freeze({ kind: 'model-list', url: `https://${CEREBRAS_HOST}/v1/models` }),

@@ -29,8 +29,9 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationControl.tsx`): every
  * daemon-derived input is a parameter rather than a module singleton (see
- * `hooks/use-dictation.ts`). Browser SpeechRecognition now supplies the live
- * caption without a bundled model or an audio transport.
+ * `hooks/use-dictation.ts`). The engine — Parakeet on this device or the
+ * browser's own recognition — is the person's choice in Settings › Voice; this
+ * bundle only says which one is listening.
  */
 
 import type { IFyApiClient } from '@ferretry/protocol';
@@ -114,14 +115,18 @@ export interface DictationControlProps {
  * pretend the words are already settled, and finishing must name where it is
  * happening. The sheet inlines its own stage copy.
  */
-export function dictationStatusCopy(phase: DictationPhase, errorMessage?: string): string {
+export function dictationStatusCopy(
+  phase: DictationPhase,
+  errorMessage?: string,
+  engine: DictationHandle['engine'] = 'browser',
+): string {
   switch (phase) {
     case 'requesting':
       return 'Waiting for microphone permission…';
     case 'recording':
       return 'Recording…';
     case 'transcribing':
-      return 'Finishing in your browser…';
+      return engine === 'parakeet' ? 'Transcribing on this device…' : 'Finishing in your browser…';
     case 'error':
       return errorMessage ?? 'Dictation failed.';
     case 'idle':
@@ -317,7 +322,13 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
         flowActive
           ? 'Show the active dictation recorder'
           : dictation.supported
-            ? `Dictate — ${dictationShortcutLabel(settings.shortcut)}. Recognition is handled by this browser and only updates your draft.`
+            ? `Dictate — ${dictationShortcutLabel(settings.shortcut)}. ${
+                dictation.engine === 'parakeet'
+                  ? 'Parakeet transcribes on this device'
+                  : dictation.engine === 'browser'
+                    ? 'Your browser’s speech service transcribes it'
+                    : 'Choose a voice engine in Settings › Voice first'
+              }; it only updates your draft.`
             : 'Dictation is unavailable here. Open this control for the browser-specific reason.'
       }
       onClick={openAndRecord}
@@ -333,6 +344,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
       stage={stage}
       elapsedMs={elapsedMs}
       liveText={dictation.liveText}
+      engine={dictation.engine}
       {...(props.waveformRuntime ? { waveformRuntime: props.waveformRuntime } : {})}
       {...(visibleError?.code ? { errorCode: visibleError.code } : {})}
       {...(visibleError?.message ? { errorMessage: visibleError.message } : {})}
