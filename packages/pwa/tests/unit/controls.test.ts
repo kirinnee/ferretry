@@ -65,7 +65,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   includeFinished: true,
   dashboardView: 'table',
   density: 'compact',
-  chatWidth: 'readable',
+  chatWidth: 'full',
   composerEnterKey: 'send',
   composerPhoneEnterKey: 'send',
   showDetails: true,
@@ -111,7 +111,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // A payload written before `chatWidth` existed degrades to 'full', which
       // IS the previous behaviour — so the field cannot change what an older
       // blob meant, which is why it needed no version bump.
-      chatWidth: 'full',
+      chatWidth: 'readable',
       // Enter follows the current device until the reader explicitly chooses.
       composerEnterKey: null,
       composerPhoneEnterKey: null,
@@ -154,7 +154,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       );
     }
     should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { chatWidth: 'wide' } })).device.chatWidth).equal(
-      'full',
+      'readable',
     );
   });
 

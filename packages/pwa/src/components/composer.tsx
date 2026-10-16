@@ -732,7 +732,10 @@ export function Composer({
                   return;
                 }
               }
-              const input = event.currentTarget as unknown as HTMLTextAreaElement;
+              // A synthetic key event may carry no target; the caret then reads as the end of the draft.
+              const field = event.currentTarget as unknown as HTMLTextAreaElement | undefined;
+              const selectionStart = field?.selectionStart ?? draft.length;
+              const selectionEnd = field?.selectionEnd ?? selectionStart;
               const modified = event.metaKey || event.ctrlKey;
               // The Notion-style editor's own keys, in markdown mode only: ⌘B/⌘I/⌘E wrap the
               // selection, and Enter continues a list or stays a line break inside a code block.
@@ -740,7 +743,7 @@ export function Composer({
                 const marker = wrapMarkerFor(event.key);
                 if (marker !== null) {
                   event.preventDefault();
-                  applyEdit(toggleWrap(draft, input.selectionStart, input.selectionEnd, marker));
+                  applyEdit(toggleWrap(draft, selectionStart, selectionEnd, marker));
                   return;
                 }
               }
@@ -752,8 +755,8 @@ export function Composer({
                 return;
               }
               if (highlighted && !event.shiftKey) {
-                if (insideCodeBlock(draft, input.selectionStart)) return;
-                const continued = continueList(draft, input.selectionStart);
+                if (insideCodeBlock(draft, selectionStart)) return;
+                const continued = continueList(draft, selectionStart);
                 if (continued !== null) {
                   event.preventDefault();
                   applyEdit(continued);
