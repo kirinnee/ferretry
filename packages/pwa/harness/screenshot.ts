@@ -2674,11 +2674,17 @@ try {
           // box thirteen providers earn; then one tap, straight to the key it asks for.
           await credentialsPanel.locator('[data-add-login-kind-option="environment"]').click();
           await credentialsPanel.locator('[data-provider-search]').waitFor({ state: 'visible' });
-          await accountShot('add-login-providers', 'Add a login provider tiles');
+          // Each frame starts where the new part does, because on a phone the Type choice fills the top.
+          const toTop = (selector: string) => async (): Promise<void> => {
+            await credentialsPanel
+              .locator(selector)
+              .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+          };
+          await accountShot('add-login-providers', 'Add a login provider tiles', toTop('[data-provider-grid]'));
           await themedShot('add-login-providers');
           await credentialsPanel.locator('[data-provider-tile="deepseek"]').click();
           await credentialsPanel.locator('[data-one-click="deepseek"]').waitFor({ state: 'visible' });
-          await accountShot('add-login-provider-key', 'Add a login provider key');
+          await accountShot('add-login-provider-key', 'Add a login provider key', toTop('[data-one-click="deepseek"]'));
           await credentialsPanel.locator('[data-add-login-kind-option="signin"]').click();
           await credentialsPanel.locator('[data-add-login-tool]').first().waitFor({ state: 'visible' });
           await credentialsPanel.locator('[data-add-login-tool] input:not([disabled])').first().check();
