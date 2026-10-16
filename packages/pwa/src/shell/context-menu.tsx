@@ -26,6 +26,7 @@
  */
 
 import {
+  Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
@@ -50,6 +51,11 @@ export interface ContextMenuItem {
   /** Destructive tone (Stop, Migrate). Colour is reinforcement — the word says it. */
   readonly danger?: boolean;
   readonly disabled?: boolean;
+  /**
+   * Draw a divider above this item: the line between a list of things (machines) and the acts that
+   * follow it. A `role="separator"` is not a `menuitem`, so the roving index never lands on it.
+   */
+  readonly separatorBefore?: boolean;
 }
 
 export interface MenuAnchor {
@@ -311,33 +317,37 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
         className="kt-panel fixed z-50 min-w-[196px] max-w-[min(280px,calc(100vw-16px))] overflow-hidden p-1 font-ui shadow-popover"
       >
         {items.map((item, index) => (
-          <button
-            key={item.key}
-            type="button"
-            role="menuitem"
-            tabIndex={index === active ? 0 : -1}
-            disabled={item.disabled}
-            onClick={() => activate(item)}
-            onPointerEnter={() => !item.disabled && setActive(index)}
-            className={cn(
-              'flex w-full items-center gap-sm rounded-control px-cell-x text-left text-ui',
-              touch ? 'min-h-[44px]' : 'min-h-[34px] py-1',
-              'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
-              // The ink is EXCLUSIVE, not layered. kteam wrote this as
-              // `text-fg-soft` plus `text-err` on a danger row, and which one
-              // wins is decided by the order Tailwind emits the two utilities,
-              // not by the order they appear here — in this repo's build
-              // `.text-fg-soft` is emitted last, so Stop and Migrate rendered
-              // in the same ink as Resume and the destructive tone was silently
-              // lost. Verified in the harness screenshot at both viewports.
-              item.danger ? 'text-err' : 'text-fg-soft',
-              item.disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent',
-            )}
-          >
-            {item.icon && <span className="shrink-0">{item.icon}</span>}
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            {item.detail && <span className="mono shrink-0 text-meta text-muted">{item.detail}</span>}
-          </button>
+          <Fragment key={item.key}>
+            {item.separatorBefore ? (
+              <hr className="mx-1 my-1 border-0 border-t border-border" data-menu-separator="" />
+            ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              tabIndex={index === active ? 0 : -1}
+              disabled={item.disabled}
+              onClick={() => activate(item)}
+              onPointerEnter={() => !item.disabled && setActive(index)}
+              className={cn(
+                'flex w-full items-center gap-sm rounded-control px-cell-x text-left text-ui',
+                touch ? 'min-h-[44px]' : 'min-h-[34px] py-1',
+                'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
+                // The ink is EXCLUSIVE, not layered. kteam wrote this as
+                // `text-fg-soft` plus `text-err` on a danger row, and which one
+                // wins is decided by the order Tailwind emits the two utilities,
+                // not by the order they appear here — in this repo's build
+                // `.text-fg-soft` is emitted last, so Stop and Migrate rendered
+                // in the same ink as Resume and the destructive tone was silently
+                // lost. Verified in the harness screenshot at both viewports.
+                item.danger ? 'text-err' : 'text-fg-soft',
+                item.disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent',
+              )}
+            >
+              {item.icon && <span className="shrink-0">{item.icon}</span>}
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {item.detail && <span className="mono shrink-0 text-meta text-muted">{item.detail}</span>}
+            </button>
+          </Fragment>
         ))}
       </div>
     </>

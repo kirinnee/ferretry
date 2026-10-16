@@ -172,6 +172,12 @@ a local proxy is never told it is at the machine. Since B5 a paired device also 
 OWN grants, which a newly paired device holds unless it was paired `--limited`. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
+The app mints from one panel, Settings → ‹machine› → **Add a device**, and opens that same panel from two
+shortcuts: **Pair a phone with ‹machine›…** in the machine switcher at the top of the sessions bar, and
+the same act in the finder. Both are offered only while `GET /v1/grants` reads this caller's `pairing.use`
+as open or waiting only on a passkey; any other answer, or none, hides them, and Settings still explains
+why.
+
 ### Minting needs no password
 
 **`POST /v1/pair/code` asks for no secret.** The owner's `fy pair` mints freely. A **governed** caller — a
@@ -386,6 +392,7 @@ row states what its revoke will do before the press.
 | the wire contract           | `packages/protocol/src/lib/pairing.ts`                             |
 | the command line            | `packages/cli/src/lib/pair/`                                       |
 | the browser panel           | `packages/pwa/src/features/settings/add-device-settings.tsx`       |
+| the panel's two shortcuts   | `packages/pwa/src/features/settings/pair-phone.tsx`                |
 | the QR encoder              | `packages/pwa/src/lib/qr-code.ts`                                  |
 
 ## Declared GAPs

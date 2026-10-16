@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { QrCode } from 'lucide-react';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import {
   CommandPalette,
@@ -6,12 +7,13 @@ import {
   type PaletteDestinationSource,
   type PaletteSettingsSource,
 } from '../../src/shell/command-palette.tsx';
+import { pairPhonePaletteCommand } from '../../src/shell/palette-destinations.ts';
 import {
   type PaletteCommand,
-  paletteSessionEntries,
   type PaletteSettingsEntry,
+  paletteSessionEntries,
 } from '../../src/shell/palette-model.ts';
-import { interact, mount, type Mounted, pressKey } from '../support/dom.ts';
+import { interact, type Mounted, mount, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const alpha = daemonId('alpha');
@@ -308,6 +310,27 @@ describe('opening a row', () => {
     expect(ran).toBe(1);
     expect(harness.navigated).toEqual([]);
     expect(harness.closed()).toBe(1);
+  });
+
+  it('draws a command its own mark when it carries one, and the key otherwise', async () => {
+    let ran = 0;
+    await open({
+      commands: [
+        browserLogin(),
+        pairPhonePaletteCommand('Pair a phone with alpha', 'Show a QR code', QrCode, () => (ran += 1)),
+      ],
+    });
+
+    const login = document.getElementById('fy-palette-option-command-browser-login');
+    const pair = document.getElementById('fy-palette-option-command-pair-phone');
+    expect(login?.querySelector('svg')?.getAttribute('class')).toContain('text-warn');
+    expect(pair?.querySelector('svg')?.getAttribute('class')).toContain('text-accent');
+    expect(pair?.textContent).toContain('Pair a phone with alpha');
+
+    await type('qr');
+    expect(optionIds()).toEqual(['fy-palette-option-command-pair-phone']);
+    await pressRow('fy-palette-option-command-pair-phone');
+    expect(ran).toBe(1);
   });
 
   it('navigates a settings row that lives on another page entirely', async () => {
