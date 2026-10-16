@@ -100,7 +100,9 @@ export function SessionTopBar({
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
         <span className="fy-session-bar__status" data-session-status={session.state.status}>
           <StatusMark view={session} />
-          <span className={compact ? 'sr-only' : 'fy-session-bar__word'}>{sessionStatusLabel(session.state.status)}</span>
+          <span className={compact ? 'sr-only' : 'fy-session-bar__word'}>
+            {sessionStatusLabel(session.state.status)}
+          </span>
           {status}
         </span>
       </div>

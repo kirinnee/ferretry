@@ -1259,7 +1259,9 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
   // A PHONE'S SESSION PAGE HAS NO SEARCH BOX: its one bar is the agent's name, status and actions, and
   // the finder lives in the sessions drawer behind ☰. The shell's search is a desktop surface.
   if (viewport.name === 'mobile') {
-    process.stdout.write('   compiled shell @ mobile: no shell search on a phone session page (the drawer holds the finder)\n');
+    process.stdout.write(
+      '   compiled shell @ mobile: no shell search on a phone session page (the drawer holds the finder)\n',
+    );
     return;
   }
   // The sessions bar keeps a finder icon beside this session's own search.
@@ -2828,7 +2830,8 @@ try {
           process.stdout.write(`📸 session bar ${viewport.name} -> ${sessionBarTarget}\n`);
           const sessionBarHeight = await sessionBar.evaluate(bar => Math.round(bar.getBoundingClientRect().height));
           process.stdout.write(`   session bar height=${sessionBarHeight}px\n`);
-          if (sessionBarHeight > 64) fail(`the session bar is ${sessionBarHeight}px tall at ${viewport.name}: one row, please`);
+          if (sessionBarHeight > 64)
+            fail(`the session bar is ${sessionBarHeight}px tall at ${viewport.name}: one row, please`);
 
           // Geometry, printed rather than eyeballed. A screenshot cannot tell a
           // pinned tail apart from a transcript that happens to be short, and it

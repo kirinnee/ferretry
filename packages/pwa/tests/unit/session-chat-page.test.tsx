@@ -122,9 +122,9 @@ const menuLabels = (root: ReactTestInstance): readonly string[] =>
   (root.findByType(SessionTopBar).props.menuItems as readonly { label: string }[]).map(item => item.label);
 
 const selectMenu = (root: ReactTestInstance, label: string): void => {
-  const item = (root.findByType(SessionTopBar).props.menuItems as readonly { label: string; onSelect: () => void }[]).find(
-    candidate => candidate.label === label,
-  );
+  const item = (
+    root.findByType(SessionTopBar).props.menuItems as readonly { label: string; onSelect: () => void }[]
+  ).find(candidate => candidate.label === label);
   if (item === undefined) throw new Error(`missing ${label} in the session menu`);
   run(() => item.onSelect());
 };

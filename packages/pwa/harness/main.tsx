@@ -6768,7 +6768,13 @@ const workspacePeer = (
   ({
     ...WORKSPACE_SESSION,
     config: { ...WORKSPACE_SESSION.config, id, teammate, name, label: name, cwd },
-    state: { ...WORKSPACE_SESSION.state, id, status, lastActivityAt: new Date(Date.now() - 600_000).toISOString(), ...extra },
+    state: {
+      ...WORKSPACE_SESSION.state,
+      id,
+      status,
+      lastActivityAt: new Date(Date.now() - 600_000).toISOString(),
+      ...extra,
+    },
   }) as SessionView;
 
 const WORKSPACE_FLEET: readonly SessionView[] = [

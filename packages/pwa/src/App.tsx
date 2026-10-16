@@ -687,8 +687,9 @@ function ShellSessionsBar({
     () => store.fleet.getSnapshot(),
   );
   const projects = useProjects(store.projects, connection);
-  const collapsed = useSyncExternalStore(store.controls.subscribe, () => store.controls.controls(connection.daemonId))
-    .sidebarCollapsed;
+  const collapsed = useSyncExternalStore(store.controls.subscribe, () =>
+    store.controls.controls(connection.daemonId),
+  ).sidebarCollapsed;
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
   // A desktop column the reader may fold to a rail; a rail the viewport forces is not theirs to unfold.
   const shape: SessionsBarPresentation = presentation === 'column' && collapsed ? 'rail' : presentation;
@@ -702,19 +703,12 @@ function ShellSessionsBar({
         daemonId: candidate.daemonId,
         name: distinctDaemonName(candidate, connections),
       }))}
-      notice={
-        updateReady === null ? undefined : (
-          <button
-            className="kt-badge fy-sbar__notice"
-            data-tone={updateReady === 'recovery' ? 'warn' : 'accent'}
-            onClick={onApplyUpdate}
-            title={UPDATE_CHIP[updateReady].title}
-            type="button"
-          >
-            {UPDATE_CHIP[updateReady].label}
-          </button>
-        )
-      }
+      {...(updateReady === null
+        ? {}
+        : {
+            update: { ...UPDATE_CHIP[updateReady], tone: updateReady === 'recovery' ? 'warn' : 'accent' },
+            onApplyUpdate,
+          })}
       onAddMachine={() => navigate(connectionPickerPath())}
       onNavigate={navigate}
       onOpenPalette={onOpenPalette}
@@ -723,7 +717,9 @@ function ShellSessionsBar({
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
       {...(search === undefined ? {} : { search })}
       {...(onClose === undefined ? {} : { onClose })}
-      {...(shape === 'column' ? { onCollapse: () => store.controls.setDeviceControls({ sidebarCollapsed: true }) } : {})}
+      {...(shape === 'column'
+        ? { onCollapse: () => store.controls.setDeviceControls({ sidebarCollapsed: true }) }
+        : {})}
       {...(presentation === 'column' && shape === 'rail'
         ? { onExpand: () => store.controls.setDeviceControls({ sidebarCollapsed: false }) }
         : {})}

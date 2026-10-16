@@ -133,11 +133,22 @@ export const liveStreamState = (
 export function LiveStreamIndicator({ status, onReconnect, quiet = false }: LiveStreamIndicatorProps) {
   if (quiet)
     return (
-      <span className="fy-live-quiet" data-live-stream={status} data-tone={LIVE_STREAM_TONE[status]} role="status" aria-live="polite">
+      <span
+        className="fy-live-quiet"
+        data-live-stream={status}
+        data-tone={LIVE_STREAM_TONE[status]}
+        role="status"
+        aria-live="polite"
+      >
         <span className="sr-only">{LIVE_STREAM_SENTENCE[status]}</span>
         {quietlyHealthy(status) ? null : <span aria-hidden="true">{LIVE_STREAM_LABEL[status]}</span>}
         {offersReconnect(status) ? (
-          <button className="fy-live-quiet__reconnect" data-live-stream-reconnect="" onClick={onReconnect} type="button">
+          <button
+            className="fy-live-quiet__reconnect"
+            data-live-stream-reconnect=""
+            onClick={onReconnect}
+            type="button"
+          >
             Reconnect
           </button>
         ) : null}

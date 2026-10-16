@@ -728,18 +728,25 @@ export function SessionChatPage({
     { key: 'files', label: 'Files', onSelect: () => openPane('files') },
     { key: 'terminals', label: 'Terminal', onSelect: () => openPane('terminals') },
     { key: 'analytics', label: 'Analytics for this session', onSelect: () => openPane('analytics') },
-    ...(attention === undefined
-      ? []
-      : [{ key: 'attention', label: 'Attention', onSelect: () => openAttention(null) }]),
+    ...(attention === undefined ? [] : [{ key: 'attention', label: 'Attention', onSelect: () => openAttention(null) }]),
     ...actions
       .filter(spec => spec.action === 'migrate')
-      .map(spec => ({ key: spec.action, label: 'Move to another login…', onSelect: () => void runAction(spec.action) })),
+      .map(spec => ({
+        key: spec.action,
+        label: 'Move to another login…',
+        onSelect: () => void runAction(spec.action),
+      })),
     { key: 'copy-id', label: 'Copy session id', onSelect: copySessionId },
     { key: 'details', label: 'Session details', onSelect: () => setDetailsOpen(true) },
     ...(compact
       ? actions
           .filter(spec => spec.action === 'stop')
-          .map(spec => ({ key: spec.action, label: spec.label, danger: true, onSelect: () => void runAction(spec.action) }))
+          .map(spec => ({
+            key: spec.action,
+            label: spec.label,
+            danger: true,
+            onSelect: () => void runAction(spec.action),
+          }))
       : []),
   ];
   const needsYou =

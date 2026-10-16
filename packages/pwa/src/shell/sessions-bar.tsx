@@ -35,12 +35,7 @@ import {
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
-import {
-  needsYou,
-  type SessionsBarFilter,
-  sessionsBarSubline,
-  sessionsBarView,
-} from './sessions-bar-model.ts';
+import { needsYou, type SessionsBarFilter, sessionsBarSubline, sessionsBarView } from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 
@@ -68,6 +63,13 @@ export interface SessionsBarMachine {
 
 export type SessionsBarPresentation = 'column' | 'rail' | 'drawer';
 
+/** The reload offer's wording and tone, as the app bar's chip has always worded it. */
+export interface SessionsBarUpdate {
+  readonly label: string;
+  readonly title: string;
+  readonly tone: 'accent' | 'warn';
+}
+
 export interface SessionsBarProps {
   readonly daemonId: DaemonId;
   /** This machine's name, as the reader labelled it. */
@@ -87,8 +89,9 @@ export interface SessionsBarProps {
   readonly onOpenPalette: () => void;
   /** On a session page: that session's own search, which replaces the finder box. */
   readonly search?: ReactNode;
-  /** Transient app state (an update ready to load), drawn under the machine line. */
-  readonly notice?: ReactNode;
+  /** A newer release waiting, or a tab that failed to load part of itself: an offer, never a reload. */
+  readonly update?: SessionsBarUpdate;
+  readonly onApplyUpdate?: () => void;
   /** Column only: the reader asked for the icon rail. */
   readonly onCollapse?: () => void;
   /** Rail only: back to the full column. */
@@ -225,7 +228,18 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
   const view = sessionsBarView(sessions ?? [], projects, filter, now(), activeSessionId);
   return (
     <>
-      {props.notice}
+      {props.update === undefined ? null : (
+        <button
+          className="kt-badge fy-sbar__notice"
+          data-sbar-update=""
+          data-tone={props.update.tone}
+          onClick={props.onApplyUpdate}
+          title={props.update.title}
+          type="button"
+        >
+          {props.update.label}
+        </button>
+      )}
       <div className="fy-sbar__search">
         {props.search === undefined ? (
           <FindButton iconOnly={false} onOpen={props.onOpenPalette} shortcut />
@@ -428,7 +442,13 @@ function SessionsDrawer(props: SessionsBarProps) {
       role="dialog"
       tabIndex={-1}
     >
-      <button aria-label="Close sessions" className="absolute inset-0 bg-scrim" onClick={close} tabIndex={-1} type="button" />
+      <button
+        aria-label="Close sessions"
+        className="absolute inset-0 bg-scrim"
+        onClick={close}
+        tabIndex={-1}
+        type="button"
+      />
       <div className="fy-sbar fy-sbar--drawer">
         <SessionsBarTop {...props} navigate={navigate} />
         <SessionsBarBody {...props} navigate={navigate} />

@@ -36,7 +36,9 @@ export function InsightsFrame({ daemonId, current, onNavigate, children }: Insig
           current={current}
           label="Insights"
           marker="data-insights-tab"
-          onSelect={id => onNavigate(INSIGHTS_TABS.find(tab => tab.id === id)?.path(daemonId) ?? daemonAnalyticsPath(daemonId))}
+          onSelect={id =>
+            onNavigate(INSIGHTS_TABS.find(tab => tab.id === id)?.path(daemonId) ?? daemonAnalyticsPath(daemonId))
+          }
           tabs={INSIGHTS_TABS}
         />
       </div>
