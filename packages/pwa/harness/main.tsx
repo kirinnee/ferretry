@@ -2784,6 +2784,13 @@ const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
     ' packages/pwa/tests/unit/terminal-snapshot.test.tsx:',
     ' ✓ terminal snapshot view > polls the paired daemon, prints the pane [4.00ms]',
     ' ✓ terminal snapshot view > keeps the last good pane when the daemon goes quiet [3.00ms]',
+    // Enough output to overflow the Console at both viewports, so it has a tail to follow and a
+    // reader can scroll away from it.
+    ...Array.from(
+      { length: 36 },
+      (_, index) =>
+        ` ✓ transcript follow > case ${String(index + 1).padStart(2, '0')} keeps the reader where they chose [1.00ms]`,
+    ),
     '',
     ' 7 pass',
     ' 0 fail',
@@ -6899,9 +6906,10 @@ const WORKSPACE_SESSION = {
  * The transcript follows its tail on mount, so a fixture that fits on screen
  * would capture a scroller that has never scrolled — and the one thing a
  * transcript capture has to prove is that the tail is pinned above the composer
- * rather than behind it. Every row kind the port renders appears once: prose,
- * a collapsed tool group with a failure in it, a notice, a durable ledger row,
- * and a tool still running.
+ * rather than behind it. Every row kind the port renders appears: prose, a
+ * clean tool run and one with a failure in it, slash commands (with output,
+ * with long output that opens, and with stderr), hidden bookkeeping notices, a
+ * durable ledger row, and a tool still running.
  */
 const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
   {
@@ -6917,10 +6925,67 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
     label: 'hadi',
   },
   {
+    id: 'workspace-command-model',
+    kind: 'command',
+    text: '/model opus[1m]',
+    command: { name: '/model', args: 'opus[1m]', output: 'Set model to Opus 5.5 (1M context)', tone: 'ok' },
+  },
+  {
+    id: 'workspace-command-context',
+    kind: 'command',
+    text: '/context',
+    command: {
+      name: '/context',
+      output:
+        'Context usage · 612k / 1M tokens (61%)\n  System prompt   3.1k\n  Tools          18.4k\n  Messages      590.6k',
+      tone: 'ok',
+    },
+  },
+  {
+    id: 'workspace-command-doctor',
+    kind: 'command',
+    text: '/doctor',
+    command: { name: '/doctor', output: 'settings.json: unexpected token at line 12', tone: 'err' },
+  },
+  {
     id: 'workspace-user-1',
     kind: 'user',
     text: 'Assemble the session workspace: header, transcript, composer and the side pane, on one page.',
     label: 'You',
+  },
+  {
+    id: 'workspace-tools-0',
+    kind: 'tool',
+    text: 'ran 4 tools',
+    tools: [
+      {
+        key: 'workspace-tool-0-bash',
+        use: { name: 'Bash', input: { command: 'git status --short', description: 'Show working tree status' } },
+        result: { text: ' M packages/pwa/src/lib/pages/session-chat-page.tsx' },
+      },
+      {
+        key: 'workspace-tool-0-edit-a',
+        use: {
+          name: 'Edit',
+          input: {
+            file_path: 'session-chat-page.tsx',
+            old_string: 'onSent={onRefresh}',
+            new_string: 'onSent={onSent}',
+          },
+        },
+        result: { text: 'applied' },
+      },
+      {
+        key: 'workspace-tool-0-edit-b',
+        use: { name: 'Edit', input: { file_path: 'transcript.tsx', new_string: 'pinSignal' } },
+        result: { text: 'applied' },
+      },
+      {
+        key: 'workspace-tool-0-read',
+        use: { name: 'Read', input: { file_path: '/work/ferretry/packages/pwa/src/components/transcript.tsx' } },
+        result: { text: 'export function Transcript(…)' },
+      },
+    ],
   },
   {
     id: 'workspace-assistant-1',
@@ -6976,14 +7041,12 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
     kind: 'notice',
     label: 'Reasoning · 01:28:07',
     text: 'The host filter has to reject a stale open as well as hide the catalogue entry.',
-    detail: true,
   },
   {
     id: 'workspace-usage',
     kind: 'notice',
     label: 'Usage · 01:28:09',
     text: 'in=2 out=300',
-    detail: true,
   },
   {
     id: 'workspace-notice',

@@ -23,12 +23,6 @@ const setHidden = (hidden: boolean): void => {
   Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
 };
 
-/** happy-dom has no layout, so the scroller's metrics are stated outright. */
-const sizeScroller = (element: HTMLElement, scrollHeight: number, clientHeight: number): void => {
-  Object.defineProperty(element, 'scrollHeight', { configurable: true, get: () => scrollHeight });
-  Object.defineProperty(element, 'clientHeight', { configurable: true, get: () => clientHeight });
-};
-
 /**
  * Forces the next poll without waiting out the 3s interval: backgrounding
  * clears the timer and returning re-arms it, and re-arming reads immediately.
@@ -164,9 +158,10 @@ describe('terminal snapshot view', () => {
     }
   });
 
-  it('sticks to the bottom only while the reader is already there', async () => {
+  it('follows the tail until the reader scrolls up, and comes back down with the jump pill', async () => {
     setHidden(false);
     let frame = 0;
+    let height = 500;
     const view = await mount(
       <TerminalSnapshotView
         daemon={daemon}
@@ -179,9 +174,11 @@ describe('terminal snapshot view', () => {
         }}
       />,
     );
+    const pill = (): HTMLButtonElement | null => view.container.querySelector('.fy-jump-latest');
     try {
       const element = scroller(view.container);
-      sizeScroller(element, 500, 100);
+      Object.defineProperty(element, 'scrollHeight', { configurable: true, get: () => height });
+      Object.defineProperty(element, 'clientHeight', { configurable: true, get: () => 100 });
       element.scrollLeft = 24;
       await repoll();
       expect(element.scrollTop).toBe(500);
@@ -191,22 +188,37 @@ describe('terminal snapshot view', () => {
       // to column 0 every three seconds. Only the tail is tracked.
       expect(element.scrollLeft).toBe(24);
 
-      // Scrolling away from the tail unpins: the next frame must not yank the
-      // reader back down.
+      // Layout moving the pane is not the reader: no input, no detach.
+      element.scrollTop = 300;
+      await interact(() => element.dispatchEvent(new Event('scroll')));
+      expect(pill()).toBeNull();
+
+      // A reader's scroll-up (a wheel tick proves it was them) stops following:
+      // the next capture must not yank them back down.
+      await interact(() => element.dispatchEvent(new Event('wheel')));
       element.scrollTop = 40;
-      await interact(() => {
-        element.dispatchEvent(new Event('scroll', { bubbles: true }));
-      });
+      await interact(() => element.dispatchEvent(new Event('scroll')));
+      height = 600;
       await repoll();
       expect(element.scrollTop).toBe(40);
+      expect(must(pill(), 'the jump pill').textContent).toBe('Jump to latest');
 
-      // Returning to the tail re-pins it.
-      element.scrollTop = 400;
-      await interact(() => {
-        element.dispatchEvent(new Event('scroll', { bubbles: true }));
-      });
+      // The pill returns them to the tail and follows again.
+      await interact(() => must(pill(), 'the jump pill').click());
+      expect(element.scrollTop).toBe(600);
+      expect(pill()).toBeNull();
+
+      // Scrolling back down into reach of the bottom re-engages follow by itself.
+      await interact(() => element.dispatchEvent(new Event('wheel')));
+      element.scrollTop = 100;
+      await interact(() => element.dispatchEvent(new Event('scroll')));
+      expect(pill()).not.toBeNull();
+      element.scrollTop = 450;
+      await interact(() => element.dispatchEvent(new Event('scroll')));
+      expect(pill()).toBeNull();
+      height = 700;
       await repoll();
-      expect(element.scrollTop).toBe(500);
+      expect(element.scrollTop).toBe(700);
     } finally {
       await view.unmount();
     }

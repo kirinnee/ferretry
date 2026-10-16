@@ -1,4 +1,5 @@
 import type { TranscriptEntry } from '../lib/session-screens.ts';
+import { CommandRow } from './command-row.tsx';
 import { LedgerMessage, SendChip, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
@@ -21,8 +22,8 @@ export interface TranscriptRowProps {
  * A deliberately asymmetric transcript reading: assistant messages use the
  * shared rich renderer while human prose stays literal, and tool calls and
  * daemon notices recede into compact chrome. A `tool` row that carries calls
- * renders as the collapsed tool group; attachments remain owned by a later
- * port.
+ * renders as the collapsed tool group, and a `command` row as the one-line slash
+ * command; attachments remain owned by a later port.
  */
 export function TranscriptRow({ entry, previous, live = false, isLast = false, onRetry }: TranscriptRowProps) {
   const rhythm = transcriptRhythm(entry, previous);
@@ -40,6 +41,13 @@ export function TranscriptRow({ entry, previous, live = false, isLast = false, o
       </div>
     );
   }
+  if (entry.kind === 'command' && entry.command !== undefined) {
+    return (
+      <div className="fy-message fy-message-command" data-transcript-kind="command" {...rhythm}>
+        <CommandRow command={entry.command} />
+      </div>
+    );
+  }
   return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
 }
 
@@ -53,7 +61,7 @@ function TranscriptTextRow({
   const label = entry.label ?? defaultLabel(entry.kind);
   const timestamp = entry.at === undefined ? undefined : new Date(entry.at);
   const validTimestamp = timestamp !== undefined && Number.isFinite(timestamp.getTime());
-  const chrome = entry.kind === 'tool' || entry.kind === 'notice';
+  const chrome = entry.kind === 'tool' || entry.kind === 'command' || entry.kind === 'notice';
 
   return (
     <article
@@ -129,6 +137,8 @@ const defaultLabel = (kind: TranscriptEntry['kind']): string => {
       return 'Assistant';
     case 'tool':
       return 'Tool';
+    case 'command':
+      return 'Command';
     case 'notice':
       return 'Daemon';
     case 'ledger':
