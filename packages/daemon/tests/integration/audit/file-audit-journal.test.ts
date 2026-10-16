@@ -477,7 +477,7 @@ describe('the security log on disk', () => {
       argv: secrets.commandLine,
     });
     const log = new AuditLog({
-      journal: new FileAuditJournal(state, 2_400),
+      journal: new FileAuditJournal(state, 3_200),
       clock: { now: () => AT },
       failures: { auditWriteFailed: () => undefined },
     });
