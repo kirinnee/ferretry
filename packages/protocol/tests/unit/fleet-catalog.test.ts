@@ -262,10 +262,33 @@ const cases: readonly SchemaCase[] = [
     value: { layers: ['profile/default', 'mcp/notes'], editing: 'agent' },
   },
   {
+    name: 'FleetResolvedFieldSchema',
+    schema: catalog.FleetResolvedFieldSchema,
+    value: 'env',
+  },
+  {
+    name: 'FleetResolvedSetterSchema',
+    schema: catalog.FleetResolvedSetterSchema,
+    value: { value: '‹hidden›', hidden: true, from: 'settings/claude' },
+  },
+  {
+    name: 'FleetResolvedEntrySchema',
+    schema: catalog.FleetResolvedEntrySchema,
+    value: {
+      harness: 'claude',
+      field: 'settings',
+      key: 'permissions.defaultMode',
+      value: 'acceptEdits',
+      from: 'settings/agent',
+      overridden: [{ value: 'plan', from: 'profile/default' }],
+    },
+  },
+  {
     name: 'FleetProfileDraftViewSchema',
     schema: catalog.FleetProfileDraftViewSchema,
     value: {
       harnesses: [stack],
+      resolved: [],
       scope: { kind: 'scoped', scope: 'generic' },
       refusal: 'no profile ghost exists on this machine',
     },

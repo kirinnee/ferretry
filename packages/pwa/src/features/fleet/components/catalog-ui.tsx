@@ -1,11 +1,11 @@
 /**
  * The small pieces the Profiles and Components pages are drawn with: a section, a note, a row that
- * opens something, a pick row, and a component's badges (the prototype's `sec`, `note`, `row`, `opt`
+ * opens something, and a component's badges (the prototype's `sec`, `note`, `row`
  * and `compBadges`). One set, so the two tabs read as one surface.
  */
 
-import { ChevronDown, ChevronRight, Lock, TriangleAlert } from 'lucide-react';
-import { type ReactNode, useId, useState } from 'react';
+import { ChevronRight, Lock, TriangleAlert } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import { Badge } from '../../../shell/primitives.tsx';
 import type { ComponentBadge } from './component-model.ts';
@@ -119,80 +119,6 @@ export function PlainRow({ title, sub, mono = false }: { title: ReactNode; sub?:
   );
 }
 
-/** "+ Create new instructions": the row that makes a missing thing in place. */
-export function AddRow({ label, onAdd, data }: { label: string; onAdd: () => void; data?: Record<string, string> }) {
-  return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        className={cn(ROW, 'font-semibold text-fg transition-colors hover:bg-surface-2')}
-        onClick={onAdd}
-        {...data}
-      >
-        <span aria-hidden="true" className="shrink-0 text-accent">
-          +
-        </span>
-        <span className="min-w-0 flex-1 text-row">{label}</span>
-        <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
-      </button>
-    </li>
-  );
-}
-
-/**
- * A checkbox or radio row. The input is visually hidden inside a RELATIVE label, so focusing it can
- * never scroll the fixed shell (an absolutely positioned input escapes a static scrollport).
- */
-export function PickRow({
-  type,
-  name,
-  checked,
-  disabled = false,
-  title,
-  sub,
-  extra,
-  onChange,
-  data,
-}: {
-  type: 'checkbox' | 'radio';
-  name: string;
-  checked: boolean;
-  disabled?: boolean;
-  title: ReactNode;
-  sub?: ReactNode;
-  extra?: ReactNode;
-  onChange: (checked: boolean) => void;
-  data?: Record<string, string>;
-}) {
-  return (
-    <li className="min-w-0">
-      <label
-        className={cn(
-          ROW,
-          'relative cursor-pointer has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
-          checked && 'bg-accent-soft',
-          disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surface-2',
-        )}
-        {...data}
-      >
-        <input
-          type={type}
-          name={name}
-          checked={checked}
-          disabled={disabled}
-          onChange={event => onChange(event.currentTarget.checked)}
-          className="shrink-0 accent-[var(--accent)]"
-        />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="break-words text-row font-semibold text-fg">{title}</span>
-          {sub === undefined ? null : <span className="break-words text-cell text-muted">{sub}</span>}
-          {extra}
-        </span>
-      </label>
-    </li>
-  );
-}
-
 export function ComponentBadges({ badges }: { badges: readonly ComponentBadge[] }) {
   return (
     <span className="flex min-w-0 flex-wrap gap-1" data-component-badges="">
@@ -288,35 +214,5 @@ export function LinkRow({
         <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
       </a>
     </li>
-  );
-}
-
-/**
- * What a page keeps out of the way until it is asked for — "Advanced: how these combine". A real
- * button that says whether it is open, and the part it opens is only rendered while it is.
- */
-export function Disclosure({ label, spot, children }: { label: string; spot: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  return (
-    <div className="flex min-w-0 flex-col gap-3" data-disclosure={spot}>
-      <button
-        type="button"
-        className="kt-btn kt-btn--flush-start self-start"
-        data-variant="ghost"
-        aria-expanded={open}
-        aria-controls={id}
-        data-disclosure-toggle={spot}
-        onClick={() => setOpen(!open)}
-      >
-        {open ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
-        {label}
-      </button>
-      {open ? (
-        <div id={id} className="flex min-w-0 flex-col gap-4" data-disclosure-body={spot}>
-          {children}
-        </div>
-      ) : null}
-    </div>
   );
 }

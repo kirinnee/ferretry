@@ -1,6 +1,8 @@
-// The Profiles tab and the Build a profile stepper (docs/design/account-model.md §4.2, §4.5, §13.2 U18).
-// Add runtime (U17) opens the stepper as a sub-stepper through BUILD_PROFILE_FLOW_KIND.
-export * from './build-profile-step.tsx';
-export * from './layer-stack.tsx';
+// The Profiles tab, its drag-and-drop editor (R5), and Add runtime's "+ Build a new profile", which
+// hosts the same editor as a one-step sub-flow through BUILD_PROFILE_FLOW_KIND.
+export * from './profile-builder-step.tsx';
+export * from './profile-contents.tsx';
+export * from './profile-editor.tsx';
+export * from './profile-library.tsx';
 export * from './profile-model.ts';
 export * from './profiles-tab.tsx';

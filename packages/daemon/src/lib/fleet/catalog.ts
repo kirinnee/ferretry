@@ -64,6 +64,7 @@ import type {
   FleetSettingsEntry,
   FleetStackView,
 } from '@ferretry/protocol';
+import { resolvedEntries } from './resolved-view.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -741,8 +742,10 @@ export function profileDraftView(
   } as AccountModel;
   const partial = partialSupportOf(draft, facts);
   const refusal = layersRefusal(model, name, request.layers, request.editing !== undefined);
+  const stacks = HARNESSES.map(harness => ({ harness, resolved: resolvedFor(draft, name, harness, facts, partial) }));
   return {
-    harnesses: HARNESSES.map(harness => stackView(resolvedFor(draft, name, harness, facts, partial), harness)),
+    harnesses: stacks.map(stack => stackView(stack.resolved, stack.harness)),
+    resolved: stacks.flatMap(stack => (stack.resolved === undefined ? [] : resolvedEntries(stack.resolved))),
     scope: scopeView(layersScope(model, request.layers, name), request.editing),
     ...(refusal === undefined ? {} : { refusal }),
   };
