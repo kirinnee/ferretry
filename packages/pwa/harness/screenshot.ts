@@ -136,14 +136,14 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and fifty-two: fifty-four MACHINES frames at each viewport, plus forty-four other frames
- * across the two viewports (54 + 54 + 44). Of the extras at each viewport, one is the
+ * One hundred and fifty-four: fifty-five MACHINES frames at each viewport, plus forty-four other frames
+ * across the two viewports (55 + 55 + 44). Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
  * shows, two are the Security settings block's loosening sentence and out-of-bounds sentence, and two
  * are the Files panel and its Edit as YAML sheet showing a refused save's located issues.
  *
- * MACHINES, fifty-four per viewport: its section, four tab switches, five Settings-tab flows (Import
- * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, ten Runtimes and
+ * MACHINES, fifty-five per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, eleven Runtimes and
  * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
  * its callback port held by another program, finishing), the old pairing a reset left, two Add a login steps,
  * eighteen Profiles and Components pages (a profile page, a delete card, a refused mix, an override chip,
@@ -174,13 +174,13 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 153;
+const SETTINGS_SIDEWAYS_CHECKS = 155;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — fifty-four frames (the section itself is measured once
+ * Machines frame, at each viewport — fifty-five frames (the section itself is measured once
  * its Runtimes tab has loaded), less the Machines list on a phone, which is a screen of its own outside any
- * machine: 54 + 53. Profile scope (P7) added six: a profile's Advanced part open, a mixed profile, a refused
+ * machine: 55 + 54 (P3 added an environment login's quota page). Profile scope (P7) added six: a profile's Advanced part open, a mixed profile, a refused
  * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. Profiles
  * as a bag of components (R5) replaced the profile page's Advanced part, its layer editor and the three
  * Build a profile steps with the drag-and-drop editor's frames — a refused mix, an override chip, the
@@ -188,7 +188,7 @@ const SETTINGS_SIDEWAYS_CHECKS = 153;
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 108;
+const MACHINES_GEOMETRY_CHECKS = 110;
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -2606,6 +2606,12 @@ try {
           const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="credentials"]');
           await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
           await accountShot('credentials', 'Credentials list');
+          // An environment login's own page, with the quota its provider reported (docs/provider-quotas.md).
+          await credentialsPanel.locator('[data-credential-row="glm-env"]').click();
+          await credentialsPanel.locator('[data-provider-quota="endpoint"]').waitFor({ state: 'visible' });
+          await accountShot('credential-provider-quota', 'environment login quota');
+          await credentialsPanel.locator('[data-page-back]').click();
+          await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
           await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
           await credentialsPanel.locator('[data-credential-sign-in="start"]').waitFor({ state: 'visible' });
           await accountShot('credential-slot', 'empty login page');
@@ -2887,9 +2893,6 @@ try {
           // The rest of this pass belongs to the full gallery.
           if (SETTINGS_ONLY) continue;
           await page.goto(server.url.toString());
-          const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Learning header'), learningHeaderTarget);
-          process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
           // A four-kind ledger is taller than a phone viewport. Chrome may cull
           // unpainted rows during an element screenshot, so temporarily borrow
           // a tall viewport to capture the full, real phone-width board.

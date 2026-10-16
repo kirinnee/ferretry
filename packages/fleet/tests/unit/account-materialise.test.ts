@@ -699,7 +699,7 @@ describe('materialiseFleet', () => {
 
       // Assert
       should(wrapper).endWith(
-        `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' '-c' 'mcp_servers.ferretry.command="/opt/ferretry/bin/fy"' '-c' 'mcp_servers.ferretry.args=["mcp","serve"]' '-c' 'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY"]' '-c' 'developer_instructions="${AGENT_TOOLS_INSTRUCTION}"' "$@"\n`,
+        `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' '-c' 'mcp_servers.ferretry.command="/opt/ferretry/bin/fy"' '-c' 'mcp_servers.ferretry.args=["mcp","serve"]' '-c' 'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE"]' '-c' 'developer_instructions="${AGENT_TOOLS_INSTRUCTION}"' "$@"\n`,
       );
       should(wrapper).containEql('set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"');
       should(wrapper).not.containEql('ferretry-launch-folder');

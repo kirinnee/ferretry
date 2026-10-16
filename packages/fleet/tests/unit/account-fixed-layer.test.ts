@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AGENT_TOOLS_INSTRUCTION,
+  LESSONS_INSTRUCTION,
+  PASSIVE_LEARNING_ENV,
   applyFixedLayer,
   claudeToolsConfig,
   codexToolsServer,
@@ -32,7 +34,7 @@ const CODEX_TOOL_ARGS = [
   '-c',
   'mcp_servers.ferretry.args=["mcp","serve"]',
   '-c',
-  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY"]',
+  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE"]',
   '-c',
   `developer_instructions="${AGENT_TOOLS_INSTRUCTION}"`,
 ];
@@ -491,5 +493,21 @@ describe('the Ferretry tools in the fixed layer', () => {
     const codex = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
     const plain = applyFixedLayer(profileWith('codex', { body: { model: 'x' } }), codex);
     should(plain.fixed).equal(codex);
+  });
+});
+
+describe('passive learning teaching', () => {
+  it('should hand the per-ferret switch to the tools server and teach the suggest command by name', () => {
+    // Arrange
+    const binary = 'fy';
+
+    // Act
+    const teaching = LESSONS_INSTRUCTION(binary);
+
+    // Assert
+    should(FERRETRY_MCP_ENV_VARS).containEql(PASSIVE_LEARNING_ENV);
+    should(PASSIVE_LEARNING_ENV).equal('FY_LEARNING_PASSIVE');
+    should(teaching).containEql('`fy lesson suggest "<rule>" --scope global|repo`');
+    should(teaching).containEql('lessons_suggest');
   });
 });

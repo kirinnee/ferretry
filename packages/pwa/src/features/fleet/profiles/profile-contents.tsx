@@ -13,7 +13,7 @@ import type { DragEvent } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { type CatalogHarness, HARNESS_NAMES } from '../components/component-model.ts';
-import { KindTag, ScopeTag } from './profile-library.tsx';
+import { ITEM_ACTIONS, ITEM_ROW, ItemBody, ItemChips, ItemLine, ItemName, KindTag } from './profile-library.tsx';
 import { itemName, type OverrideChip, type ProfileItem, RESOLVED_FIELD_WORDS } from './profile-model.ts';
 
 export interface ContentsListProps {
@@ -49,11 +49,7 @@ export function ContentsList(props: ContentsListProps) {
       {items.map((item, index) => (
         <li
           key={item.reference}
-          className={cn(
-            'flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-border bg-surface px-2 py-1',
-            'md:cursor-grab',
-            dropBefore === index && 'shadow-[0_-3px_0_0_var(--accent)]',
-          )}
+          className={cn(ITEM_ROW, 'md:cursor-grab', dropBefore === index && 'shadow-[0_-3px_0_0_var(--accent)]')}
           draggable
           onDragStart={event => onDragStart(event, index)}
           onDragEnd={onDragEnd}
@@ -63,25 +59,30 @@ export function ContentsList(props: ContentsListProps) {
           }}
           data-profile-item={item.reference}
         >
-          <span className="w-5 shrink-0 text-right font-mono text-meta text-muted">{index + 1}</span>
-          <GripVertical size={14} aria-hidden="true" className="hidden shrink-0 text-muted md:inline" />
-          <KindTag kind={item.kind} />
-          <span className="min-w-[7rem] flex-1 break-words text-cell font-semibold text-fg">{item.name}</span>
-          <ScopeTag scope={item.scope} />
-          {(chips.get(item.reference) ?? []).map(chip => (
-            <span
-              key={`${chip.over}\n${chip.key}`}
-              className="kt-badge h-auto max-w-full !whitespace-normal break-words !normal-case"
-              data-tone="warn"
-              title={`${item.name} sets ${chip.key} later, so its value wins over ${itemName(chip.over)}’s`}
-              data-override-chip={chip.over}
-            >
-              <span>
-                overrides {itemName(chip.over)} · <span className="font-mono">{chip.key}</span>
-              </span>
-            </span>
-          ))}
-          <span className="ml-auto flex shrink-0 gap-0.5">
+          <ItemBody>
+            <ItemLine>
+              <span className="w-5 shrink-0 text-right font-mono text-meta text-muted">{index + 1}</span>
+              <GripVertical size={14} aria-hidden="true" className="hidden shrink-0 text-muted md:inline" />
+              <KindTag kind={item.kind} />
+              <ItemName name={item.name} />
+            </ItemLine>
+            <ItemChips scope={item.scope}>
+              {(chips.get(item.reference) ?? []).map(chip => (
+                <span
+                  key={`${chip.over}\n${chip.key}`}
+                  className="kt-badge h-auto max-w-full !whitespace-normal break-words !normal-case"
+                  data-tone="warn"
+                  title={`${item.name} sets ${chip.key} later, so its value wins over ${itemName(chip.over)}’s`}
+                  data-override-chip={chip.over}
+                >
+                  <span>
+                    overrides {itemName(chip.over)} · <span className="font-mono">{chip.key}</span>
+                  </span>
+                </span>
+              ))}
+            </ItemChips>
+          </ItemBody>
+          <span className={ITEM_ACTIONS}>
             <Button
               type="button"
               size="sm"

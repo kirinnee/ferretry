@@ -6,7 +6,7 @@
  */
 
 import { GripVertical } from 'lucide-react';
-import { type DragEvent, useId } from 'react';
+import { type DragEvent, type ReactNode, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../../lib/class-names.ts';
 import { BottomSheet } from '../../../shell/bottom-sheet.tsx';
@@ -112,22 +112,24 @@ function LibraryRows({
         return (
           <li
             key={item.reference}
-            className={cn(
-              'flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-border bg-surface px-2 py-1',
-              onDragStart !== undefined && !added && 'cursor-grab',
-            )}
+            className={cn(ITEM_ROW, onDragStart !== undefined && !added && 'cursor-grab')}
             draggable={onDragStart !== undefined && !added}
             onDragStart={onDragStart === undefined ? undefined : event => onDragStart(event, item)}
             onDragEnd={onDragEnd}
             data-library-item={item.reference}
           >
-            {onDragStart === undefined ? null : (
-              <GripVertical size={14} aria-hidden="true" className="shrink-0 text-muted" />
-            )}
-            <KindTag kind={item.kind} />
-            <span className="min-w-[7rem] flex-1 break-words text-cell font-semibold text-fg">{item.name}</span>
-            <ScopeTag scope={item.scope} />
+            <ItemBody>
+              <ItemLine>
+                {onDragStart === undefined ? null : (
+                  <GripVertical size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                )}
+                <KindTag kind={item.kind} />
+                <ItemName name={item.name} />
+              </ItemLine>
+              <ItemChips scope={item.scope} />
+            </ItemBody>
             <Button
+              className={ITEM_ACTIONS}
               type="button"
               size="sm"
               variant="ghost"
@@ -142,6 +144,42 @@ function LibraryRows({
         );
       })}
     </>
+  );
+}
+
+/**
+ * EVERY ROW HAS ONE SHAPE (library and contents, phone and desktop): a two-column grid — the item on
+ * the left (its line, then any chips wrapping beneath), and a fixed action cluster on the right,
+ * centred — so a long name or a chip never reflows one row differently from the next.
+ */
+export const ITEM_ROW =
+  'grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-control border border-border bg-surface px-2 py-1';
+
+/** The right-hand cluster, centred against the whole left column. */
+export const ITEM_ACTIONS = 'col-start-2 flex shrink-0 gap-0.5';
+
+/** The left column: the line, then any chips beneath it. */
+export function ItemBody({ children }: { children: ReactNode }) {
+  return <span className="col-start-1 flex min-w-0 flex-col gap-1">{children}</span>;
+}
+
+export function ItemLine({ children }: { children: ReactNode }) {
+  return <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">{children}</span>;
+}
+
+export function ItemName({ name }: { name: string }) {
+  return <span className="min-w-[6rem] flex-1 break-words text-cell font-semibold text-fg">{name}</span>;
+}
+
+/** The scope chip and any override chips, beneath the line; nothing at all for a generic item with none. */
+export function ItemChips({ scope, children }: { scope: ProfileItem['scope']; children?: ReactNode }) {
+  const chips = [children].flat().filter(each => each !== null && each !== undefined && each !== false);
+  if (scope === 'generic' && chips.length === 0) return null;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1">
+      <ScopeTag scope={scope} />
+      {children}
+    </span>
   );
 }
 

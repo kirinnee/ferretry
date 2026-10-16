@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test';
-import type { LearningConfig, SessionView } from '@ferretry/protocol';
-import { LearningMiner } from '../../../src/adapters/learning/miner.ts';
+import { describe, expect, it, test } from 'bun:test';
+import type { LearningConfig, SessionView, StartSessionRequest } from '@ferretry/protocol';
+import should from 'should';
+import { LEARNING_MINER_LABEL, LearningMiner, normalizedRecord } from '../../../src/adapters/learning/miner.ts';
 import type {
   LearningStorePort,
   Observation,
   Proposal,
   RunManifest,
+  StoredSessionLearning,
   Tombstone,
 } from '../../../src/lib/learning/index.ts';
 import type { FoundationPaths } from '../../../src/lib/paths.ts';
@@ -13,6 +15,7 @@ import type { FileSystemPort } from '../../../src/lib/ports.ts';
 import type { SessionDirectorySubsystem } from '../../../src/lib/runtime/mounts/sessions.ts';
 import type { SessionControlSubsystem } from '../../../src/lib/runtime/mounts/session-control.ts';
 import type { SessionTranscriptReader } from '../../../src/lib/session/transcript/reader.ts';
+import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
 
 const AT = '2026-08-01T00:00:00.000Z';
 const paths = { home: '/daemon', state: '/daemon/state' } as FoundationPaths;
@@ -24,6 +27,7 @@ const config: LearningConfig = {
   maxMinersPerRun: 2,
   maxSessionsPerRun: 40,
   minSpawnGapMinutes: 30,
+  passiveDefault: false,
 };
 
 function session(transcript = true, id = 'session-1'): SessionView {
@@ -116,6 +120,13 @@ class Store implements LearningStorePort {
   }
   async writePatch() {
     return '/patch';
+  }
+  sessionLearning: StoredSessionLearning[] = [];
+  async loadSessionLearning() {
+    return this.sessionLearning;
+  }
+  async saveSessionLearning(items: readonly StoredSessionLearning[]) {
+    this.sessionLearning = [...items];
   }
 }
 
@@ -376,4 +387,328 @@ test('quarantines a miner output that is JSON but not an output document', async
 
   expect(run.message).toBe('miner output was not valid JSON — quarantined');
   expect(store.observations).toHaveLength(0);
+});
+
+// ── The scan port: normalized records, per-ferret digests, one miner per batch ─────────────────────
+
+const SCAN_SAYS = 'Use direnv exec . for every command.';
+const SCAN_RUN = '/daemon/state/learning/runs/scan-1-b0';
+
+const userEvent = (text: string, timestamp?: string): TranscriptEvent => ({
+  kind: 'message',
+  role: 'user',
+  harness: 'claude',
+  text,
+  ...(timestamp === undefined ? {} : { timestamp }),
+});
+
+/** A view with its status and label changed; the rest of the fixture as `session()` builds it. */
+function viewOf(
+  base: SessionView,
+  patch: { readonly status?: SessionView['state']['status']; readonly label?: string },
+): SessionView {
+  return {
+    ...base,
+    config: { ...base.config, ...(patch.label === undefined ? {} : { label: patch.label }) },
+    state: { ...base.state, ...(patch.status === undefined ? {} : { status: patch.status }) },
+  };
+}
+
+interface ScanWorld {
+  readonly miner: LearningMiner;
+  readonly store: Store;
+  readonly filesystem: FileSystemPort;
+  readonly started: StartSessionRequest[];
+  readonly startIds: string[];
+  readonly stopped: [string, string][];
+  /** The sessions the directory answers, by id; a case may swap one in. */
+  readonly views: Map<string, SessionView>;
+}
+
+function scanWorld(events: readonly TranscriptEvent[] = [userEvent('First.'), userEvent(SCAN_SAYS, AT)]): ScanWorld {
+  const store = new Store();
+  const filesystem = files({});
+  const started: StartSessionRequest[] = [];
+  const startIds: string[] = [];
+  const stopped: [string, string][] = [];
+  const views = new Map<string, SessionView>([
+    ['session-1', session()],
+    ['bare', session(false, 'bare')],
+    ['miner-own', viewOf(session(true, 'miner-own'), { label: LEARNING_MINER_LABEL })],
+  ]);
+  const control = {
+    start: async (request: StartSessionRequest, requestId: string) => {
+      started.push(request);
+      startIds.push(requestId);
+      const miner = viewOf(session(true, 'miner-1'), { status: 'running', label: LEARNING_MINER_LABEL });
+      views.set('miner-1', miner);
+      return miner;
+    },
+    stop: async (sessionId: string, reason: string) => {
+      stopped.push([sessionId, reason]);
+      return session();
+    },
+    recover: async () => undefined,
+  } as unknown as SessionControlSubsystem;
+  const miner = new LearningMiner(
+    paths,
+    filesystem,
+    store,
+    { list: async () => [...views.values()], get: async id => views.get(id) } as SessionDirectorySubsystem,
+    { tail: async () => events } as unknown as SessionTranscriptReader,
+    control,
+    () => config,
+    () => AT,
+  );
+  return { miner, store, filesystem, started, startIds, stopped, views };
+}
+
+const scanManifest = (patch: Partial<RunManifest> = {}): RunManifest => ({
+  runId: 'scan-1-b0',
+  startedAt: AT,
+  sessionsScanned: 1,
+  sessionsWithSignal: 1,
+  minerSessions: ['miner-1'],
+  observationsProposed: 0,
+  observationsVerified: 0,
+  rejectedQuotes: 0,
+  malformedFiles: 0,
+  proposalsCreated: 0,
+  proposalsStrengthened: 0,
+  proposalsSuppressedByTombstone: 0,
+  perHarness: { claude: 0, codex: 0 },
+  ...patch,
+});
+
+describe('normalizedRecord', () => {
+  it('should read a user message as chat.user with its text and timestamp', () => {
+    // Act
+    const record = normalizedRecord(userEvent('Hello.', AT));
+
+    // Assert
+    should(record).deepEqual({ type: 'chat.user', timestamp: AT, data: { text: 'Hello.' } });
+  });
+
+  it('should read a tool result as tool.result with its error flag', () => {
+    // Act
+    const record = normalizedRecord({
+      kind: 'tool-result',
+      role: 'tool',
+      harness: 'claude',
+      timestamp: AT,
+      result: { callId: 'c1', content: null, isError: true },
+    });
+
+    // Assert
+    should(record).deepEqual({ type: 'tool.result', timestamp: AT, data: { isError: true } });
+  });
+
+  it('should read any other event by its kind alone, without a timestamp it does not have', () => {
+    // Act
+    const assistant = normalizedRecord({ kind: 'message', role: 'assistant', harness: 'claude', text: 'Done.' });
+    const reasoning = normalizedRecord({
+      kind: 'reasoning',
+      role: 'assistant',
+      harness: 'claude',
+      text: 'Hmm.',
+      format: 'thinking',
+    });
+
+    // Assert
+    should(assistant).deepEqual({ type: 'message' });
+    should(reasoning).deepEqual({ type: 'reasoning' });
+  });
+});
+
+describe('LearningMiner scan', () => {
+  it('should count no digest for an unknown, a miner, an unresolved, or a signal-less session', async () => {
+    // Arrange
+    const { miner } = scanWorld();
+    const { miner: quiet } = scanWorld([userEvent('Only one message.')]);
+
+    // Act
+    const unknown = await miner.digestCharacters('missing');
+    const own = await miner.digestCharacters('miner-own');
+    const bare = await miner.digestCharacters('bare');
+    const silent = await quiet.digestCharacters('session-1');
+
+    // Assert
+    should(unknown).be.undefined();
+    should(own).be.undefined();
+    should(bare).be.undefined();
+    should(silent).be.undefined();
+  });
+
+  it('should count the digest characters of a session with signal', async () => {
+    // Arrange
+    const { miner } = scanWorld();
+
+    // Act
+    const characters = await miner.digestCharacters('session-1');
+
+    // Assert
+    should(characters).be.a.Number().and.be.above(0);
+  });
+
+  it('should start no miner when no session in the batch has anything to mine', async () => {
+    // Arrange
+    const { miner, started, store } = scanWorld();
+
+    // Act
+    const id = await miner.start('scan-1', 0, ['missing', 'bare'], 'claude', 'opus');
+
+    // Assert
+    should(id).be.undefined();
+    should(started).deepEqual([]);
+    should(store.manifests.size).equal(0);
+  });
+
+  it('should write the digests, start a labelled miner with its model, and record the batch manifest', async () => {
+    // Arrange
+    const { miner, started, startIds, store, filesystem } = scanWorld();
+
+    // Act
+    const id = await miner.start('scan-1', 0, ['session-1', 'bare'], 'claude', 'opus');
+
+    // Assert
+    should(id).equal('miner-1');
+    should(startIds).deepEqual(['learning:scan-1-b0']);
+    should(started[0]).containDeep({
+      agent: 'claude',
+      mode: 'auto',
+      label: LEARNING_MINER_LABEL,
+      name: 'Lesson Scan',
+      cwd: '/daemon',
+      boardAccess: 'none',
+      model: 'opus',
+    });
+    should(started[0]?.prompt).containEql(`${SCAN_RUN}/observations.json`);
+    const digests = JSON.parse((await filesystem.readText(`${SCAN_RUN}/digests.json`)) ?? '[]') as {
+      sessionId: string;
+    }[];
+    should(digests.map(digest => digest.sessionId)).deepEqual(['session-1']);
+    should(store.manifests.get('scan-1-b0')).containDeep({
+      runId: 'scan-1-b0',
+      sessionsScanned: 2,
+      sessionsWithSignal: 1,
+      minerSessions: ['miner-1'],
+    });
+  });
+
+  it('should leave the model to the agent when none is given', async () => {
+    // Arrange
+    const { miner, started } = scanWorld();
+
+    // Act
+    await miner.start('scan-1', 0, ['session-1'], 'claude', undefined);
+
+    // Assert
+    should(started[0]).not.have.property('model');
+  });
+
+  it('should fail a batch that has no manifest', async () => {
+    // Arrange
+    const { miner } = scanWorld();
+
+    // Act
+    const outcome = await miner.collect('scan-1', 4);
+
+    // Assert
+    should(outcome).equal('failed');
+  });
+
+  it('should answer the stats of a finished batch, and fail a finished malformed one', async () => {
+    // Arrange
+    const { miner, store } = scanWorld();
+    await store.writeRunManifest(
+      scanManifest({ runId: 'scan-1-b0', finishedAt: AT, proposalsCreated: 2, proposalsStrengthened: 3 }),
+    );
+    await store.writeRunManifest(scanManifest({ runId: 'scan-1-b1', finishedAt: AT, malformedFiles: 1 }));
+
+    // Act
+    const finished = await miner.collect('scan-1', 0);
+    const malformed = await miner.collect('scan-1', 1);
+
+    // Assert
+    should(finished).deepEqual({ added: 2, merged: 3 });
+    should(malformed).equal('failed');
+  });
+
+  it('should fold a written output into the board and answer its stats', async () => {
+    // Arrange
+    const { miner, store, filesystem } = scanWorld();
+    await miner.start('scan-1', 0, ['session-1'], 'claude', undefined);
+    await filesystem.writeTextAtomic(
+      `${SCAN_RUN}/observations.json`,
+      JSON.stringify({
+        observations: [{ key: 'o1', sessionId: 'session-1', kind: 'correction', gist: 'Use direnv', quote: SCAN_SAYS }],
+        proposals: [{ title: 'Use direnv', ruleText: 'Use direnv exec .', observationKeys: ['o1'] }],
+      }),
+    );
+
+    // Act
+    const outcome = await miner.collect('scan-1', 0);
+
+    // Assert
+    should(outcome).deepEqual({ added: 1, merged: 0 });
+    should(store.proposals.map(item => item.title)).deepEqual(['Use direnv']);
+    should(store.manifests.get('scan-1-b0')?.finishedAt).equal(AT);
+  });
+
+  it('should keep a batch pending while its miner still runs', async () => {
+    // Arrange
+    const { miner, store } = scanWorld();
+    await miner.start('scan-1', 0, ['session-1'], 'claude', undefined);
+
+    // Act
+    const outcome = await miner.collect('scan-1', 0);
+
+    // Assert
+    should(outcome).equal('pending');
+    should(store.manifests.get('scan-1-b0')?.finishedAt).be.undefined();
+  });
+
+  it('should fail and finish a batch whose miner ended without writing its output', async () => {
+    // Arrange
+    const { miner, store, views } = scanWorld();
+    await miner.start('scan-1', 0, ['session-1'], 'claude', undefined);
+    views.set('miner-1', viewOf(session(true, 'miner-1'), { status: 'completed' }));
+
+    // Act
+    const outcome = await miner.collect('scan-1', 0);
+
+    // Assert
+    should(outcome).equal('failed');
+    should(store.manifests.get('scan-1-b0')).containDeep({
+      finishedAt: AT,
+      malformedFiles: 1,
+      message: 'the miner ended without writing its output',
+    });
+  });
+
+  it('should fail a batch whose miner is unknown or was never recorded', async () => {
+    // Arrange
+    const { miner, store } = scanWorld();
+    await store.writeRunManifest(scanManifest({ runId: 'scan-1-b0', minerSessions: ['gone'] }));
+    await store.writeRunManifest(scanManifest({ runId: 'scan-1-b1', minerSessions: [] }));
+
+    // Act
+    const gone = await miner.collect('scan-1', 0);
+    const never = await miner.collect('scan-1', 1);
+
+    // Assert
+    should([gone, never]).deepEqual(['failed', 'failed']);
+    should(store.manifests.get('scan-1-b1')?.message).equal('the miner ended without writing its output');
+  });
+
+  it('should stop a miner on the owner cancelling the scan', async () => {
+    // Arrange
+    const { miner, stopped } = scanWorld();
+
+    // Act
+    await miner.stop('miner-1');
+
+    // Assert
+    should(stopped).deepEqual([['miner-1', 'lesson scan cancelled by the owner']]);
+  });
 });

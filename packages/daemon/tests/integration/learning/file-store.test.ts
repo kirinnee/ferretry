@@ -51,6 +51,8 @@ const proposal: Proposal = {
   lastSeen: now,
   identity: 'use-safe-environment',
   history: [{ at: now, event: 'proposed:run-1', by: 'miner' }],
+  source: 'scan',
+  count: 1,
 };
 
 const manifest = (runId: string): RunManifest => ({
@@ -217,5 +219,52 @@ describe('file learning store', () => {
     should(patch).equal(join(home, 'state', 'learning', 'patches', 'a-rule-to-apply-2026-07-30T12-00-00-000Z.md'));
     should(traversal).be.instanceOf(Error);
     should(String(traversal)).containEql('path-safe segment');
+  });
+
+  it('should round-trip session learning and drop a malformed entry alone', async () => {
+    // Arrange
+    const { home, store } = await createStore();
+    const records = [
+      { sessionId: 'session-1', passive: true, since: now, setBy: 'owner' as const },
+      { sessionId: 'session-2', passive: false, since: now, setBy: 'default' as const },
+    ];
+
+    // Act
+    const empty = await store.loadSessionLearning();
+    await store.saveSessionLearning(records);
+    const saved = await store.loadSessionLearning();
+    await writeFile(
+      join(home, 'state', 'learning', 'sessions.json'),
+      JSON.stringify([{ sessionId: '', passive: 'yes' }, records[0]]),
+    );
+    const repaired = await store.loadSessionLearning();
+
+    // Assert
+    should(empty).deepEqual([]);
+    should(saved).deepEqual(records);
+    should(repaired).deepEqual([records[0]]);
+  });
+
+  it('should read a legacy proposal without source or count as a scan counted by its evidence', async () => {
+    // Arrange
+    const { home, store } = await createStore();
+    const { source: _source, count: _count, ...legacy } = proposal;
+    await store.ensureDirectories();
+    await writeFile(
+      join(home, 'state', 'learning', 'proposals.json'),
+      JSON.stringify([
+        { ...legacy, id: 'two', observationIds: ['one', 'two'] },
+        { ...legacy, id: 'none', observationIds: [], occurrences: 0, crossRepoCount: 0 },
+      ]),
+    );
+
+    // Act
+    const proposals = await store.loadProposals();
+
+    // Assert
+    should(proposals.map(item => [item.id, item.source, item.count])).deepEqual([
+      ['two', 'scan', 2],
+      ['none', 'scan', 1],
+    ]);
   });
 });

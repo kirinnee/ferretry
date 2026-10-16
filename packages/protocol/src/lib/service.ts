@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { AccountAvailabilitySchema, AccountUnavailableReasonSchema } from './session.ts';
+import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 
 export const HealthViewSchema = z.object({
   ok: z.boolean(),
@@ -135,6 +136,10 @@ export const UsageAccountViewSchema = z.object({
   weeklyResetAt: NonNegativeFiniteSchema.optional(),
   atLimit: z.boolean().optional(),
   authOk: z.boolean().optional(),
+  /** An environment login's prepaid credit, when its provider reports one. */
+  balance: ProviderQuotaBalanceSchema.optional(),
+  /** Equivalent cost this month from the daemon's transcripts, when no provider endpoint answers. */
+  spendUsd: NonNegativeFiniteSchema.optional(),
 });
 export type UsageAccountView = z.infer<typeof UsageAccountViewSchema>;
 

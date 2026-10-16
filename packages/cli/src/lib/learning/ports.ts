@@ -1,8 +1,12 @@
 import type {
   IFyApiClient,
   LearningActionRequest,
+  LearningApplyPreview,
   LearningConfig,
   LearningPatchResponse,
+  LearningScanEstimate,
+  LearningScanProgress,
+  LearningScanRequest,
   LearningStatus,
   ProposalState,
   ProposalView,
@@ -35,6 +39,14 @@ export interface ILearningGateway {
   config(): Promise<LearningConfig>;
   /** The guidance file an accepted proposal edits, rendered whole for the human to apply. */
   patch(id: string): Promise<LearningPatchResponse>;
+  /** Exactly what Apply would write, and the etag that pins it. */
+  applyPreview(id: string): Promise<LearningApplyPreview>;
+  /** Writes the lesson into its target file; refused if the file moved since the etag was read. */
+  apply(id: string, etag: string): Promise<ProposalView>;
+  /** What a scan would cost, worked out without reading anything. */
+  scanEstimate(request: LearningScanRequest): Promise<LearningScanEstimate>;
+  /** Starts a scan. Explicit only — nothing here ever starts one by itself. */
+  scan(request: LearningScanRequest): Promise<LearningScanProgress>;
 }
 
 /** The only client capability the learning gateway consumes. */

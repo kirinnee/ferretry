@@ -7,6 +7,10 @@ import {
   observationId,
   parseJsonl,
   recomputeProposal,
+  RULE_MERGE_THRESHOLD,
+  ruleSimilarity,
+  ruleWords,
+  sameRule,
   slugify,
   strengthOf,
   titleHash,
@@ -29,6 +33,8 @@ const proposal: Proposal = {
   lastSeen: '2026-07-30T10:00:00.000Z',
   identity: 'use-project-environment',
   history: [{ at: '2026-07-30T10:00:00.000Z', event: 'proposed', by: 'miner' }],
+  source: 'scan',
+  count: 3,
 };
 
 const observation = (id: string, sessionId: string, repo: string, at: string): Observation => ({
@@ -164,5 +170,40 @@ describe('learning policy', () => {
 
     // Assert
     should(actual).deepEqual([{ id: 1 }, { id: 4 }]);
+  });
+});
+
+describe('rule similarity', () => {
+  it('should reduce a rule to its meaningful words, lowercased and without punctuation', () => {
+    // Arrange / Act / Assert
+    should([...ruleWords('Please ALWAYS use Bun, not Python — for the scripts!')]).deepEqual([
+      'use',
+      'bun',
+      'not',
+      'python',
+      'scripts',
+    ]);
+    should([...ruleWords('the a, an!')]).deepEqual([]);
+  });
+
+  it('should score shared meaningful words from nothing to everything', () => {
+    // Arrange / Act / Assert
+    should(ruleSimilarity('Use bun, not Python.', 'use bun not python')).equal(1);
+    should(ruleSimilarity('Use bun.', 'Run task test.')).equal(0);
+    // Two of four distinct words shared.
+    should(ruleSimilarity('use bun', 'use bun run tests')).equal(0.5);
+    // A rule of stopwords alone says nothing, so it matches nothing — not even itself.
+    should(ruleSimilarity('the', 'the')).equal(0);
+    should(ruleSimilarity('use bun', '')).equal(0);
+  });
+
+  it('should call two rules the same only at the merge threshold or above', () => {
+    // Arrange — three of four distinct words shared is exactly the threshold.
+    should(ruleSimilarity('use bun for scripts', 'use bun scripts always quickly')).equal(RULE_MERGE_THRESHOLD);
+
+    // Act / Assert
+    should(sameRule('use bun scripts', 'use bun scripts quickly')).be.true();
+    should(sameRule('Use bun, not Python.', 'Always use bun, not python!')).be.true();
+    should(sameRule('use bun', 'use bun run tests')).be.false();
   });
 });

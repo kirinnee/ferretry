@@ -17,6 +17,21 @@ import type { FileSystemPort } from '../../lib/ports.ts';
 import type { SessionDirectorySubsystem } from '../../lib/runtime/mounts/sessions.ts';
 import type { SessionControlSubsystem } from '../../lib/runtime/mounts/session-control.ts';
 import type { SessionTranscriptReader } from '../../lib/session/transcript/reader.ts';
+import type { TranscriptEvent } from '../../lib/transcript/types.ts';
+
+/**
+ * A transcript event in the shape the extractor reads. The reader answers typed events (`kind`, `role`);
+ * the extractor predates them and reads `chat.user` and `tool.result` records, so without this the
+ * owner's own messages never reached a miner.
+ */
+export function normalizedRecord(event: TranscriptEvent): NormalizedRecordLike {
+  const timestamp = event.timestamp === undefined ? {} : { timestamp: event.timestamp };
+  if (event.kind === 'message' && event.role === 'user')
+    return { type: 'chat.user', ...timestamp, data: { text: event.text } };
+  if (event.kind === 'tool-result')
+    return { type: 'tool.result', ...timestamp, data: { isError: event.result.isError } };
+  return { type: event.kind, ...timestamp };
+}
 
 /** Label on miner sessions.  It is a correctness boundary: a miner must never mine itself. */
 export const LEARNING_MINER_LABEL = 'ferretry-learning';
@@ -192,7 +207,7 @@ export class LearningMiner {
       harness: session.config.harness,
       status: session.state.status,
       ...(session.state.finishedAt === undefined ? {} : { finishedAt: session.state.finishedAt }),
-      records: records as readonly NormalizedRecordLike[],
+      records: records.map(normalizedRecord),
       turnTexts,
       inbox,
       interrupts: events.filter(event => event.type === 'control.interrupted').length,
@@ -224,48 +239,144 @@ export class LearningMiner {
   private async ingest(): Promise<void> {
     const root = join(this.paths.state, 'learning', 'runs');
     for (const entry of await this.files.listDirectory(root)) {
-      if (!entry.directory) continue;
-      const manifest = await this.store.readRunManifest(entry.name);
-      if (manifest === undefined || manifest.finishedAt !== undefined) continue;
-      const [digestsText, outputText] = await Promise.all([
-        this.files.readText(join(root, entry.name, 'digests.json')),
-        this.files.readText(join(root, entry.name, 'observations.json')),
-      ]);
-      if (digestsText === undefined || outputText === undefined) continue;
-      try {
-        const digests = JSON.parse(digestsText) as SessionDigest[];
-        const output = parseMinerOutput(JSON.parse(outputText));
-        if (!Array.isArray(digests) || output === undefined) throw new Error('invalid miner output');
-        const result = applyMinerOutput(
-          await this.store.loadProposals(),
-          await this.store.loadTombstones(),
-          output,
-          new Map(digests.map(digest => [digest.sessionId, digest])),
-          await this.store.observationsById(),
-          entry.name,
-          this.now(),
-        );
-        await this.store.appendObservations(result.observations);
-        await this.store.saveProposals(result.proposals);
-        await this.store.writeRunManifest({ ...manifest, ...result.stats, finishedAt: this.now() });
-      } catch {
-        await this.store.writeRunManifest({
-          ...manifest,
-          malformedFiles: 1,
-          finishedAt: this.now(),
-          message: 'miner output was not valid JSON — quarantined',
-        });
-        await this.files.removeFile(join(root, entry.name, 'observations.json'));
-      }
+      if (entry.directory) await this.ingestRun(entry.name);
     }
+  }
+
+  /** Folds one run's miner output into the board, once. Answers the manifest as it now stands. */
+  private async ingestRun(name: string): Promise<RunManifest | undefined> {
+    const directory = this.runDirectory(name);
+    const manifest = await this.store.readRunManifest(name);
+    if (manifest === undefined || manifest.finishedAt !== undefined) return manifest;
+    const [digestsText, outputText] = await Promise.all([
+      this.files.readText(join(directory, 'digests.json')),
+      this.files.readText(join(directory, 'observations.json')),
+    ]);
+    if (digestsText === undefined || outputText === undefined) return manifest;
+    try {
+      const digests = JSON.parse(digestsText) as SessionDigest[];
+      const output = parseMinerOutput(JSON.parse(outputText));
+      if (!Array.isArray(digests) || output === undefined) throw new Error('invalid miner output');
+      const result = applyMinerOutput(
+        await this.store.loadProposals(),
+        await this.store.loadTombstones(),
+        output,
+        new Map(digests.map(digest => [digest.sessionId, digest])),
+        await this.store.observationsById(),
+        name,
+        this.now(),
+      );
+      await this.store.appendObservations(result.observations);
+      await this.store.saveProposals(result.proposals);
+      const finished = { ...manifest, ...result.stats, finishedAt: this.now() };
+      await this.store.writeRunManifest(finished);
+      return finished;
+    } catch {
+      const quarantined = {
+        ...manifest,
+        malformedFiles: 1,
+        finishedAt: this.now(),
+        message: 'miner output was not valid JSON — quarantined',
+      };
+      await this.store.writeRunManifest(quarantined);
+      await this.files.removeFile(join(directory, 'observations.json'));
+      return quarantined;
+    }
+  }
+
+  // ── Scan: explicit, estimated, one miner per batch (`ScanMinerPort`) ─────────────────────────────
+
+  /** One batch's run directory name: the scan's id and the batch's index. */
+  private static batchRun(runId: string, batch: number): string {
+    return `${runId}-b${String(batch)}`;
+  }
+
+  /** The digest a miner would read for one ferret, or `undefined` when there is nothing to mine. */
+  private async digestOf(sessionId: string): Promise<SessionDigest | undefined> {
+    const session = await this.sessions.get(sessionId);
+    if (session === undefined || session.config.label === LEARNING_MINER_LABEL) return undefined;
+    const input = await this.input(session);
+    if (input === undefined) return undefined;
+    const digest = extractSession(input);
+    return digest.hasSignal ? digest : undefined;
+  }
+
+  async digestCharacters(sessionId: string): Promise<number | undefined> {
+    return (await this.digestOf(sessionId))?.digest.length;
+  }
+
+  /** Starts one miner over the ferrets of a batch that have something to mine. */
+  async start(
+    runId: string,
+    batch: number,
+    sessionIds: readonly string[],
+    agent: string,
+    model: string | undefined,
+  ): Promise<string | undefined> {
+    const digests = (await Promise.all(sessionIds.map(async id => await this.digestOf(id)))).filter(
+      (digest): digest is SessionDigest => digest !== undefined,
+    );
+    if (digests.length === 0) return undefined;
+    const name = LearningMiner.batchRun(runId, batch);
+    await this.writeDigests(name, digests);
+    const request: StartSessionRequest = {
+      agent,
+      mode: 'auto',
+      prompt: this.prompt(digests, this.outputPath(name)),
+      label: LEARNING_MINER_LABEL,
+      name: 'Lesson Scan',
+      cwd: this.paths.home,
+      boardAccess: 'none',
+      ...(model === undefined ? {} : { model }),
+    };
+    const miner = await this.sessionControl.start(request, `learning:${name}`, JSON.stringify(request));
+    await this.store.writeRunManifest({
+      ...this.emptyManifest(undefined, sessionIds.length),
+      runId: name,
+      sessionsWithSignal: digests.length,
+      minerSessions: [miner.config.id],
+    });
+    return miner.config.id;
+  }
+
+  /**
+   * A batch's outcome: its stats once its output is folded in, `pending` while its miner still runs,
+   * `failed` when the output was unusable or the miner ended without writing any.
+   */
+  async collect(
+    runId: string,
+    batch: number,
+  ): Promise<{ readonly added: number; readonly merged: number } | 'pending' | 'failed'> {
+    const name = LearningMiner.batchRun(runId, batch);
+    const manifest = await this.ingestRun(name);
+    if (manifest === undefined) return 'failed';
+    if (manifest.finishedAt !== undefined) {
+      return manifest.malformedFiles > 0
+        ? 'failed'
+        : { added: manifest.proposalsCreated, merged: manifest.proposalsStrengthened };
+    }
+    const miner = manifest.minerSessions[0];
+    const session = miner === undefined ? undefined : await this.sessions.get(miner);
+    if (session !== undefined && !TERMINAL.has(session.state.status)) return 'pending';
+    await this.store.writeRunManifest({
+      ...manifest,
+      finishedAt: this.now(),
+      malformedFiles: 1,
+      message: 'the miner ended without writing its output',
+    });
+    return 'failed';
+  }
+
+  async stop(minerSessionId: string): Promise<void> {
+    await this.sessionControl.stop(minerSessionId, 'lesson scan cancelled by the owner');
   }
 
   private prompt(batch: readonly SessionDigest[], outputPath: string): string {
     return [
-      'You are a Ferretry learning miner. Extract only cross-repository lessons about human preferences, corrections, and recurring tooling failures.',
-      'Every quote MUST be copied verbatim from the sessions below (300 chars max); unverified quotes are discarded. Proposals are suggestions only and are never applied automatically.',
+      'You are a Ferretry lesson miner. Extract durable lessons about how the owner wants work done: their corrections, preferences, and recurring tooling failures.',
+      'Every quote MUST be copied verbatim from the sessions below (300 chars max); unverified quotes are discarded. Lessons are suggestions only: the owner reviews each one, and nothing is applied automatically.',
       `Write JSON with observations and proposals to exactly: ${outputPath}`,
-      'Use observation kinds correction, roadblock, preference, recurring_task, or tooling_failure. If there is no lesson, write {"observations":[],"proposals":[]}.',
+      'Use observation kinds correction, roadblock, preference, recurring_task, or tooling_failure. Give each proposal a "scope": "repo" when it is about the project its evidence came from, "global" when every ferret should follow it. If there is no lesson, write {"observations":[],"proposals":[]}.',
       ...batch.map(digest => `\n### ${digest.sessionId}\n${digest.digest}`),
     ].join('\n\n');
   }

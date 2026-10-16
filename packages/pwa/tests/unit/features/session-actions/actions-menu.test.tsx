@@ -14,6 +14,7 @@ afterEach(async () => {
 interface State {
   readonly ran: string[];
   readonly failures: string[];
+  readonly notices: string[];
   readonly toggles: boolean[];
   resolveToggle?: () => void;
 }
@@ -32,6 +33,9 @@ const formB = (host: SessionActionFormHost) => (
     <p>B content</p>
     <button data-close-b="" onClick={host.close} type="button">
       Close
+    </button>
+    <button data-notify-b="" onClick={() => host.notify('B settled')} type="button">
+      Notify
     </button>
   </div>
 );
@@ -150,7 +154,7 @@ interface Harness {
 }
 
 const openMenu = async (options: { compact?: boolean } = {}): Promise<Harness> => {
-  const state: State = { ran: [], failures: [], toggles: [] };
+  const state: State = { ran: [], failures: [], notices: [], toggles: [] };
 
   function Host() {
     const [form, setForm] = useState<string | null>(null);
@@ -162,6 +166,7 @@ const openMenu = async (options: { compact?: boolean } = {}): Promise<Harness> =
         name="Hadi"
         onFailure={message => state.failures.push(message)}
         onFormChange={setForm}
+        onNotice={message => state.notices.push(message)}
         sections={buildSections(state, toggled, setToggled)}
       />
     );
@@ -456,6 +461,14 @@ describe('ActionsMenu — forms', () => {
     await interact(() => must(h.container.querySelector<HTMLElement>('[data-switch-to-b]'), 'switch').click());
     await interact(() => must(h.container.querySelector<HTMLElement>('[data-close-b]'), 'close').click());
     expect(h.container.querySelector('[data-session-action-popover]')).toBeNull();
+  });
+
+  it('hands what a form settled to the page’s notice', async () => {
+    const h = await openMenu();
+    await openTrigger(h.container);
+    await interact(() => row(h.container, 'formB').click());
+    await interact(() => must(h.container.querySelector<HTMLElement>('[data-notify-b]'), 'notify').click());
+    expect(h.state.notices).toEqual(['B settled']);
   });
 
   it('closes the popover on Escape', async () => {

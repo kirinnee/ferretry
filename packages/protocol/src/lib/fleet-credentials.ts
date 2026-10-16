@@ -84,12 +84,102 @@ export const FleetCredentialUsageWindowSchema = z.strictObject({
 });
 export type FleetCredentialUsageWindow = z.infer<typeof FleetCredentialUsageWindowSchema>;
 
+/**
+ * Where an environment login's quota or spend is read from, as its preset declares it. The adapters
+ * that read each one belong to the usage subsystem (`lib/usage/provider-quota`); this is only the
+ * closed set they agree on.
+ *
+ * - `transcript-pricing` — no provider endpoint: tokens counted from the transcript times known prices.
+ * - `none` — nothing to read (a local model): "usage unknown", never a made-up number.
+ */
+export const ProviderQuotaSourceSchema = z.enum([
+  'zai-coding-plan',
+  'moonshot-balance',
+  'deepseek-balance',
+  'minimax-token-plan',
+  'openrouter-key',
+  'litellm-key-info',
+  'vercel-credits',
+  'transcript-pricing',
+  'none',
+]);
+export type ProviderQuotaSource = z.infer<typeof ProviderQuotaSourceSchema>;
+
+/**
+ * One window of a provider's quota, in the common shape every adapter maps to. Each field is present
+ * only when the provider said it: a missing `used` is unknown, never 0.
+ *
+ * `label` is `5h`, `week` or `month` for a rolling or calendar window, `key` for an API key's own
+ * spending limit and `tools` for a provider's separate tool-call allowance. `unit` says what `used`
+ * and `limit` count; `usd` is money.
+ */
+export const ProviderQuotaWindowSchema = z.strictObject({
+  label: z.enum(['5h', 'week', 'month', 'key', 'tools']),
+  unit: z.enum(['requests', 'prompts', 'tokens', 'usd']).optional(),
+  used: z.number().finite().min(0).optional(),
+  limit: z.number().finite().min(0).optional(),
+  usedPercent: z.number().finite().min(0).optional(),
+  resetsAt: InstantSchema.optional(),
+});
+export type ProviderQuotaWindow = z.infer<typeof ProviderQuotaWindowSchema>;
+
+/** Money left on a prepaid account or key, in the currency the provider reports it in. */
+export const ProviderQuotaBalanceSchema = z.strictObject({
+  amount: z.number().finite(),
+  currency: z.string().regex(/^[A-Z]{3}$/u, 'a currency is a three-letter ISO code'),
+});
+export type ProviderQuotaBalance = z.infer<typeof ProviderQuotaBalanceSchema>;
+
+/**
+ * Equivalent cost counted from this daemon's own transcripts: the tokens its sessions on the login
+ * spent, times known prices. `unpriced` sessions had no price, so the amount is a floor whenever it
+ * is above zero.
+ */
+export const ProviderQuotaSpendSchema = z.strictObject({
+  amountUsd: z.number().finite().min(0),
+  since: InstantSchema,
+  sessions: NonNegativeIntegerSchema,
+  unpriced: NonNegativeIntegerSchema,
+});
+export type ProviderQuotaSpend = z.infer<typeof ProviderQuotaSpendSchema>;
+
+/**
+ * An environment login's quota, read the first way that works (docs/provider-quotas.md):
+ *
+ * 1. `endpoint` — the provider's own usage, quota or balance endpoint;
+ * 2. `transcript` — this daemon's transcripts × known pricing;
+ * 3. `unknown` — neither answered, and `note` says why. Nothing is made up.
+ *
+ * Rate-limit headers on the requests a ferret makes itself would sit between 1 and 2, and are a
+ * DECLARED GAP: the CLI talks to the provider directly, so the daemon never sees them.
+ */
+export const ProviderQuotaReadingSchema = z.strictObject({
+  source: ProviderQuotaSourceSchema,
+  via: z.enum(['endpoint', 'transcript', 'unknown']),
+  windows: z.array(ProviderQuotaWindowSchema).readonly(),
+  balance: ProviderQuotaBalanceSchema.optional(),
+  spend: ProviderQuotaSpendSchema.optional(),
+  /** The provider said this login can do no more work now: a window full, or no credit left. */
+  exhausted: z.boolean(),
+  /** The endpoint or its fields are known from community sources, not the provider's own docs. */
+  unverified: z.boolean(),
+  /** Why the reading is what it is, in one plain sentence, when that is not obvious. */
+  note: NonEmptyStringSchema.optional(),
+  at: InstantSchema,
+});
+export type ProviderQuotaReading = z.infer<typeof ProviderQuotaReadingSchema>;
+
 export const FleetCredentialUsageSchema = z.strictObject({
   fiveHour: FleetCredentialUsageWindowSchema,
   weekly: FleetCredentialUsageWindowSchema,
   /** Which reading the windows came from. Absent when nothing has measured this credential. */
-  source: z.enum(['claude-statusline', 'codex-rollout', 'anthropic-usage', 'codex-usage']).optional(),
+  source: z.enum(['claude-statusline', 'codex-rollout', 'anthropic-usage', 'codex-usage', 'provider-quota']).optional(),
   at: InstantSchema.optional(),
+  /**
+   * An environment login's provider quota, when one has been read. Absent until somebody watches the
+   * login (a screen open, or the Warden or failover asking): quota is never read on an idle timer.
+   */
+  provider: ProviderQuotaReadingSchema.optional(),
 });
 export type FleetCredentialUsage = z.infer<typeof FleetCredentialUsageSchema>;
 
@@ -113,26 +203,6 @@ export const FleetCredentialSignOutSchema = z.strictObject({
 export type FleetCredentialSignOut = z.infer<typeof FleetCredentialSignOutSchema>;
 
 // ── Environment logins (docs/provider-presets.md) ───────────────────────────────────────────────
-
-/**
- * Where an environment login's quota or spend is read from, as its preset declares it. The adapters
- * that read each one belong to the usage subsystem; this is only the closed set they agree on.
- *
- * - `transcript-pricing` — no provider endpoint: tokens counted from the transcript times known prices.
- * - `none` — nothing to read (a local model): "usage unknown", never a made-up number.
- */
-export const ProviderQuotaSourceSchema = z.enum([
-  'zai-coding-plan',
-  'moonshot-balance',
-  'deepseek-balance',
-  'minimax-token-plan',
-  'openrouter-key',
-  'litellm-key-info',
-  'vercel-credits',
-  'transcript-pricing',
-  'none',
-]);
-export type ProviderQuotaSource = z.infer<typeof ProviderQuotaSourceSchema>;
 
 /**
  * A reference to a cloud credential this machine already has, kept as a REFERENCE and never copied:

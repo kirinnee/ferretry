@@ -1,9 +1,13 @@
 import {
+  AGENT_LESSONS_PATH,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
   AGENT_TOOL_MAX_WAIT_MS,
   type AgentConfigToolCall,
   type AgentConfigToolResult,
   AgentConfigToolResultSchema,
+  type AgentLessonToolCall,
+  type AgentLessonToolResult,
+  AgentLessonToolResultSchema,
   type AgentToolCall,
   type AgentToolResult,
   AgentToolResultSchema,
@@ -118,6 +122,20 @@ export class AgentToolsClient {
     return await this.gateways.agent.request(
       '/v1/agent/config',
       AgentConfigToolResultSchema,
+      { method: 'POST', body: JSON.stringify(call), headers: this.agentHeaders() },
+      TOOL_REQUEST_TIMEOUT_MS,
+    );
+  }
+
+  /**
+   * One `lessons.suggest` call (docs/learning.md), always as the agent: the daemon derives the
+   * session from the credential alone and attaches the evidence itself, so nothing here can name a
+   * session or carry a quote.
+   */
+  async lessons(call: AgentLessonToolCall): Promise<AgentLessonToolResult> {
+    return await this.gateways.agent.request(
+      AGENT_LESSONS_PATH,
+      AgentLessonToolResultSchema,
       { method: 'POST', body: JSON.stringify(call), headers: this.agentHeaders() },
       TOOL_REQUEST_TIMEOUT_MS,
     );

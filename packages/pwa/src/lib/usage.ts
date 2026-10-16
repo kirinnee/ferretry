@@ -28,7 +28,13 @@
  * also `agent` rather than kteam's `binary`.
  */
 
-import { type SessionState, type SessionView, type UsageFeedView, UsageFeedViewSchema } from '@ferretry/protocol';
+import {
+  type ProviderQuotaBalance,
+  type SessionState,
+  type SessionView,
+  type UsageFeedView,
+  UsageFeedViewSchema,
+} from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 
 /** One session's quota, normalized from whichever source supplied it. */
@@ -39,6 +45,10 @@ export interface ResolvedQuota {
   readonly weeklyResetAt?: number;
   readonly atLimit?: boolean;
   readonly authOk?: boolean;
+  /** An environment login's prepaid credit, when its provider reports one. */
+  readonly balance?: ProviderQuotaBalance;
+  /** This month's equivalent cost from the daemon's transcripts, when no provider endpoint answers. */
+  readonly spendUsd?: number;
 }
 
 /**
@@ -80,7 +90,9 @@ export const hasReadout = (quota: ResolvedQuota | null): quota is ResolvedQuota 
     quota.authOk === false ||
     quota.atLimit === true ||
     quota.fiveHourPercent !== undefined ||
-    quota.weeklyPercent !== undefined
+    quota.weeklyPercent !== undefined ||
+    quota.balance !== undefined ||
+    quota.spendUsd !== undefined
   );
 };
 
@@ -113,6 +125,8 @@ export class DaemonUsageIndex {
         weeklyResetAt: account.weeklyResetAt,
         atLimit: account.atLimit,
         authOk: account.authOk,
+        ...(account.balance === undefined ? {} : { balance: account.balance }),
+        ...(account.spendUsd === undefined ? {} : { spendUsd: account.spendUsd }),
       });
     }
     this.#feeds.set(daemonId, parsed.data);
