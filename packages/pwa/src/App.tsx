@@ -46,6 +46,7 @@ import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts
 import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
+import { InstallBannerSlot } from './features/install/install-app.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { useLearningSessionActions } from './features/learning/learning-session-actions.tsx';
 import { LEARNING_SETTINGS_TAB, LearningSettingsSurface } from './features/learning/learning-settings.tsx';
@@ -95,6 +96,7 @@ import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useFleetPoll } from './hooks/use-fleet-poll.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
+import { useInstallPrompt } from './hooks/use-install-prompt.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
   type NotificationControlsHost,
@@ -116,6 +118,7 @@ import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
+import { installBanner } from './lib/install-prompt.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import type { NotificationCategory, QuietHours } from './lib/notification-filter.ts';
 import type {
@@ -1528,6 +1531,8 @@ function DeviceRefusedGate({
 /** The mounted shell; exported so render tests can inject the router and store providers. */
 export function AppShell() {
   const layout = useLayoutMode();
+  const install = useInstallPrompt();
+  const installDue = layout === 'drawer' && install !== null && installBanner(install.snapshot) !== null;
   useAppViewport();
   const store = useAppStore();
   const connectionSnapshot = useConnectionSnapshot();
@@ -2001,9 +2006,13 @@ export function AppShell() {
     <NotificationControlsContext.Provider value={notificationControlsHost}>
       <ThemeFollower />
       <MotionFollower />
-      {release.notice === null ? null : (
+      {/* The install offer shares the release notice's pinned dock, so the page starts below both
+          rather than under either. Phone only: a desktop browser keeps its own install control in the
+          address bar, and Settings › This device carries the offer at every width. */}
+      {release.notice === null && !installDue ? null : (
         <ReleaseNoticeDock>
-          <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
+          {release.notice === null ? null : <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />}
+          <InstallBannerSlot phone={layout === 'drawer'} />
         </ReleaseNoticeDock>
       )}
       {/*

@@ -1,8 +1,9 @@
 /**
  * A send that is not (yet) in the conversation — still sending, held in the agent's queue, or
- * settled without arriving — shown as the reader's own bubble with ONE chip saying where it is.
+ * settled without arriving — shown as the reader's own bubble with ONE receipt mark saying where it is
+ * (`send-receipt.tsx`), plus a small word when the state needs the reader.
  *
- * The chip is a button: tapping it reads out WHY, which is the part a reader needs when a send is
+ * The mark is a button: tapping it reads out WHY, which is the part a reader needs when a send is
  * anything but plainly fine. Two recoveries, and both re-send under the ORIGINAL id, so the daemon's
  * ledger can never turn a retry into a second copy the agent reads:
  *
@@ -15,12 +16,11 @@
 
 import { useRef, useState } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
-import { cn } from '../lib/class-names.ts';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { peerFrom } from '../lib/peer-message.ts';
-import { sendBadge } from '../lib/send-badge.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
-import { absoluteTime } from '../lib/session-screens.ts';
+import { clockOfInstant } from '../lib/send-receipt.ts';
+import { MessageFooter } from './send-receipt.tsx';
 
 export const RESEND_RISK_COPY =
   'The original may still have reached the agent. Sending again could make it read this twice — continue only if that is acceptable.';
@@ -50,36 +50,6 @@ export interface LedgerMessageProps {
   readonly onRetry?: SendRetry;
 }
 
-/** The chip alone, tappable for its reason — also worn by a delivered message in the transcript. */
-export function SendChip({ record }: { readonly record: LedgerSendRecord }) {
-  const { label, tone, detail } = sendBadge(record);
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        aria-expanded={open}
-        className={cn(
-          'ml-auto inline-flex shrink-0 select-none items-center gap-1 rounded-sm border px-1.5 py-px text-[10.5px] font-medium leading-[1.5]',
-          tone,
-        )}
-        data-send-fate={record.fate}
-        onClick={() => setOpen(current => !current)}
-        title={[detail, `sent ${absoluteTime(record.acceptedAt)}`].join('\n')}
-        type="button"
-      >
-        {label}
-      </button>
-      {open ? (
-        <span className="basis-full text-[11px] text-muted" data-send-reason="">
-          {detail}
-        </span>
-      ) : (
-        <span className="sr-only">{detail}</span>
-      )}
-    </>
-  );
-}
-
 export function LedgerMessage({ record, placement = 'chronological', onRetry }: LedgerMessageProps) {
   const { from, body } = peerFrom(record.message);
   const boundary = ledgerPlacementCopy(placement);
@@ -107,22 +77,24 @@ export function LedgerMessage({ record, placement = 'chronological', onRetry }: 
     <div className="kt-bubble-row" data-ledger-placement={placement}>
       <span className="sr-only">{from ? `${displayCallsign(from.name)} sent:` : 'You said:'}</span>
       <div className="kt-bubble">
-        <div className="flex min-w-0 flex-wrap items-center gap-2 px-panel pt-1">
-          {from ? (
-            <span className="shrink-0 text-[10.5px] font-medium text-muted">{displayCallsign(from.name)}</span>
-          ) : null}
-          <SendChip record={record} />
-        </div>
+        {/* No "You" header: the bubble's alignment already says who sent it. A teammate's message
+            keeps its sender's name, because alignment cannot. */}
+        {from ? (
+          <div className="px-panel pt-1 text-[10.5px] font-medium text-muted">{displayCallsign(from.name)}</div>
+        ) : null}
         {boundary === undefined ? null : (
           <span className="sr-only" data-ledger-boundary>
             {boundary}
           </span>
         )}
         {body ? (
-          <div className="kt-user-copy min-w-0 max-w-full whitespace-pre-wrap break-words px-panel pb-1.5 pt-0.5 text-[13px] leading-snug text-[color:var(--bubble-fg)]">
+          <div className="kt-user-copy min-w-0 max-w-full whitespace-pre-wrap break-words px-panel pb-0 pt-1 text-[13px] leading-snug text-[color:var(--bubble-fg)]">
             {body}
           </div>
         ) : null}
+        <div className="px-panel pb-1">
+          <MessageFooter clock={clockOfInstant(record.acceptedAt)} record={record} />
+        </div>
 
         {retryable && onRetry !== undefined && result !== 'accepted' ? (
           <div className="mx-panel mb-2 flex items-center gap-2 border-t border-border-soft pt-1.5 text-[11px] text-muted">

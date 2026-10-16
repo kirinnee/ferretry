@@ -133,9 +133,19 @@ export function ConsoleSurface({
 
   return (
     <section aria-label="Console" className="flex min-h-0 flex-1 flex-col gap-2 p-2" data-workspace-console="">
-      <p className="m-0 text-ui text-muted">
+      {/* A desktop has the room for the whole sentence. A phone gets one short line — the sentence took
+          three lines above a pane that needs every one — and keeps the full wording as its tooltip and
+          for screen readers. */}
+      <p className="m-0 text-ui text-muted max-md:hidden">
         {agentName === '' ? 'The agent’s' : whose} own CLI pane, live. What you type below goes straight into it, key by
         key — Chat is still the place to send {whom} a turn.
+      </p>
+      <p
+        className="m-0 truncate text-meta text-muted md:hidden"
+        data-console-hint=""
+        title={`What you type goes straight into ${whose} pane, key by key. Chat is still the place to send ${whom} a turn.`}
+      >
+        Keys go straight to the pane · turns go in Chat
       </p>
       <TerminalSnapshotView
         daemon={connection}

@@ -35,6 +35,7 @@ import {
   type MachineTabSurfaces,
 } from '../fleet/shell/machines-surface.tsx';
 import { useMachineReach } from '../fleet/shell/use-machine-reach.ts';
+import { InstallAppSetting } from '../install/install-app.tsx';
 import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
@@ -57,7 +58,7 @@ import {
   settingsSectionDefinition,
   settingsSectionForSetting,
 } from './settings-catalog.ts';
-import { type SettingsMachineEntry, SettingsHome, SettingsSidebar } from './settings-navigation.tsx';
+import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
 
 export const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
@@ -412,6 +413,7 @@ export function SettingsPage({
         <ComposerSuggestionsSettings preferences={device} onChange={patch => controls.setDeviceControls(patch)} />
       ),
       theme: <ThemeSettings theme={theme} />,
+      'install-app': <InstallAppSetting />,
       dictation: <DictationSettings {...dictation} />,
       notifications: notifications ?? (
         <p role="status" className="m-0 text-cell leading-base text-muted">

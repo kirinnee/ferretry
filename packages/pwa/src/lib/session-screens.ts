@@ -61,6 +61,8 @@ export const hiddenFromTranscript = (entry: TranscriptEntry): boolean =>
 export interface TranscriptItem {
   readonly entry: TranscriptEntry;
   readonly previous?: TranscriptEntry;
+  /** An assistant row comes after this one: the agent has handled the turn this message was in. */
+  readonly answered?: true;
 }
 
 /** The rows a reader sees, in order, each paired with the visible row before it. */
@@ -72,7 +74,9 @@ export const transcriptItems = (entries: readonly TranscriptEntry[]): readonly T
     items.push(previous === undefined ? { entry } : { entry, previous });
     previous = entry;
   }
-  return items;
+  // Every row before the LAST assistant reply has been answered by it or by an earlier one.
+  const lastReply = items.findLastIndex(item => item.entry.kind === 'assistant');
+  return items.map((item, index) => (index < lastReply ? { ...item, answered: true } : item));
 };
 
 export const isTerminalSessionStatus = (status: SessionStatus): boolean =>

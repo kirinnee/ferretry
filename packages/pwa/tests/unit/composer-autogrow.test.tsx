@@ -3,9 +3,9 @@ import should from 'should';
 import { Composer } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { quoteSelectionIntoComposer } from '../../src/lib/quote.ts';
 import { interact, mount, must } from '../support/dom.ts';
-import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 
 // The general composer behaviour is one key arbitration for every editor style; these suites drive it
 // through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
@@ -122,10 +122,10 @@ describe('composer auto-grow', () => {
     }
   });
 
-  it('gives a phone a taller ceiling than a desktop, because its lines are shorter', async () => {
+  it('gives a phone a writing surface: ten lines before the field scrolls, not a desktop chat line', async () => {
     const { input, unmount } = await grown({ compact: true, contentHeight: 4_000, sessionId: 'phone' });
     try {
-      should(input.style.height).equal('160px');
+      should(input.style.height).equal('240px');
       should(input.style.overflowY).equal('auto');
     } finally {
       await unmount();
@@ -136,13 +136,51 @@ describe('composer auto-grow', () => {
     document.documentElement.setAttribute('data-keyboard', 'open');
     const { input, unmount } = await grown({ compact: true, contentHeight: 4_000, sessionId: 'keyboard' });
     try {
-      // With ~430px of visible viewport, four lines is all the composer may take
-      // while the reader still needs the turn above it, so the ceiling comes down with the
-      // keyboard — and the dependency on it is what brings it back up.
-      should(input.style.height).equal('88px');
+      // With ~430px of visible viewport the reader still needs the turn above the box, so the
+      // ceiling comes down with the keyboard to six lines — the height the stacked controls
+      // already give the row — and the dependency on it is what brings it back up.
+      should(input.style.height).equal('144px');
     } finally {
       await unmount();
       document.documentElement.removeAttribute('data-keyboard');
+    }
+  });
+
+  it('stacks the phone controls in one column after the field, and keeps attach inline on a desktop', async () => {
+    const phone = await mount(
+      <Composer
+        api={api}
+        compact
+        daemon={daemon}
+        draftStore={new DaemonDraftStore(memoryStorage())}
+        sessionId="dock-phone"
+      />,
+    );
+    const desktop = await mount(
+      <Composer
+        api={api}
+        daemon={daemon}
+        draftStore={new DaemonDraftStore(memoryStorage())}
+        sessionId="dock-desktop"
+      />,
+    );
+    try {
+      const phoneForm = must(phone.container.querySelector('form'), 'the phone composer');
+      const phoneDock = must(phone.container.querySelector('[data-composer-dock]'), 'the phone dock');
+      should(phoneForm.getAttribute('data-composer-layout')).equal('phone');
+      // Attach heads the column and Send closes it, nearest the thumb; the field is not in it.
+      should(phoneDock.firstElementChild?.hasAttribute('data-composer-attach')).be.true();
+      should(phoneDock.lastElementChild?.hasAttribute('data-composer-send')).be.true();
+      should(phoneDock.querySelector('textarea')).be.null();
+
+      const desktopForm = must(desktop.container.querySelector('form'), 'the desktop composer');
+      const desktopRow = must(desktop.container.querySelector('.fy-composer-row'), 'the desktop row');
+      should(desktopForm.hasAttribute('data-composer-layout')).be.false();
+      should(desktopRow.firstElementChild?.hasAttribute('data-composer-attach')).be.true();
+      should(desktop.container.querySelector('[data-composer-dock] [data-composer-attach]')).be.null();
+    } finally {
+      await phone.unmount();
+      await desktop.unmount();
     }
   });
 });

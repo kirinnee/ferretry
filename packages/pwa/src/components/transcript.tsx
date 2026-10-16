@@ -213,6 +213,7 @@ export function Transcript({
         <div className="fy-transcript-content" ref={contentRef}>
           {items.map((item, index) => (
             <TranscriptRow
+              answered={item.answered === true}
               entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
               isLast={index === items.length - 1}
               key={item.entry.id}
