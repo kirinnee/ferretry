@@ -14,7 +14,7 @@ import { NonNegativeFiniteSchema } from './common.ts';
  * arrival, so a client can refuse an over-long transcript before spending a round trip on it.
  */
 
-export const SttEnhancementProviderSchema = z.literal('groq');
+export const SttEnhancementProviderSchema = z.enum(['groq', 'cerebras']);
 export type SttEnhancementProvider = z.infer<typeof SttEnhancementProviderSchema>;
 
 /**

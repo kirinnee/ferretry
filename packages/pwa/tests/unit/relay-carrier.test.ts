@@ -210,15 +210,17 @@ describe('the browser WebSocket adapter', () => {
    * HANDSHAKE COMPLETED, and these two cases are the two different failures that
    * distinction separates.
    */
-  it('should say a handshake never completed, rather than reporting a code of zero', () => {
+  it('should say a connection never opened, rather than reporting a code of zero', () => {
     dialFake((socket, _adapted, ends) => {
       socket.onerror?.();
       socket.onclose?.({ code: 1006, reason: '' });
 
       should(ends).have.length(1);
       should(ends[0]?.code).equal(1006);
-      should(ends[0]?.reason).containEql('could not open a socket to wss://relay.example');
-      should(ends[0]?.reason).containEql('the handshake never completed');
+      should(ends[0]?.reason).containEql('could not open a connection to wss://relay.example');
+      // One sentence serves direct and relayed dials, so it names no carrier.
+      should(ends[0]?.reason).not.containEql('relay protocol');
+      should(ends[0]?.reason).not.containEql('rendezvous');
       // The fingerprint addresses the rendezvous and belongs on a pairing screen, not
       // in a sentence a reader may paste into an issue.
       should(ends[0]?.reason).not.containEql('fy_daemon_x');
@@ -260,7 +262,7 @@ describe('the browser WebSocket adapter', () => {
     await new Promise(resolve => setTimeout(resolve, 400));
     should(captured).have.length(1);
     should(captured[0]?.code).equal(1006);
-    should(captured[0]?.reason).containEql('the handshake never completed');
+    should(captured[0]?.reason).containEql('could not open a connection');
   });
 });
 

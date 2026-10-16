@@ -18,14 +18,13 @@
  * formatted content, the Vim indicator, and the two buttons, at desktop and phone, in three themes.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { THEME_FAMILIES } from '../../src/lib/theme-preferences.ts';
 import { sharedChromium } from './support/chromium.ts';
+import { type ComposerSceneServer, serveComposerScene } from './support/composer-scene.ts';
 
-const packageRoot = resolve(import.meta.dir, '../..');
 const evidenceDir = process.env.COMPOSER_EVIDENCE_DIR ?? null;
 
 const DESKTOP = { viewport: { width: 1_280, height: 720 } } as const;
@@ -38,53 +37,16 @@ const PHONE = {
     'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
 } as const;
 
-const SCENE_CSS = `
-  body { background: var(--fy-bg, var(--bg)); margin: 0; }
-  .scene { box-sizing: border-box; margin: 0 auto; max-width: 760px; padding: 24px 16px; }
-  .scene-chat { box-sizing: border-box; display: flex; flex-direction: column; height: var(--app-h, 100dvh); left: 0; position: fixed; right: 0; top: var(--app-top, 0px); }
-  .scene-transcript { color: var(--fy-fg); flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 16px; }
-  .scene-composer { padding: 6px 12px 8px; }
-`;
-
 let browser: Browser;
-let server: ReturnType<typeof Bun.serve>;
-let directory: string;
+let server: ComposerSceneServer;
 
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'ferretry-composer-'));
-  const child = Bun.spawn(
-    [process.execPath, resolve(packageRoot, 'scripts/build-composer-integration-fixture.ts'), '--out', directory],
-    { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
-  );
-  const deadline = setTimeout(() => child.kill('SIGKILL'), 150_000);
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  clearTimeout(deadline);
-  if (code !== 0) throw new Error(`the composer scene did not build (${code}):\n${stderr}\n${stdout}`);
-  const manifest = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
-  const css = await readFile(manifest.css, 'utf8');
-  const js = await readFile(manifest.js, 'utf8');
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"><style>${SCENE_CSS}</style></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
-  server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: request => {
-      const path = new URL(request.url).pathname;
-      if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
-      if (path === '/app.css') return new Response(css, { headers: { 'content-type': 'text/css' } });
-      if (path === '/') return new Response(html, { headers: { 'content-type': 'text/html' } });
-      return new Response('not here', { status: 404 });
-    },
-  });
+  server = await serveComposerScene();
   browser = await sharedChromium();
 }, 180_000);
 
 afterAll(async () => {
-  server?.stop(true);
-  if (directory !== undefined) await rm(directory, { force: true, recursive: true });
+  await server?.stop();
 });
 
 interface Scene {

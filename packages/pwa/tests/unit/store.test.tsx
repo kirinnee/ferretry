@@ -7,6 +7,9 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../src/lib/device-keys.ts';
 import { DaemonOutdatedError } from '../../src/lib/relay-carrier.ts';
 import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
+import { PairingUnreachableError } from '../../src/lib/pairing-unreachable.ts';
+import { PairingOutcomeUnknownError } from '../../src/lib/relay-pairing.ts';
+import { RELAY_CLOSE_CODES } from '@ferretry/relay';
 import { OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import {
   type AppStore,
@@ -229,16 +232,85 @@ describe('exchangePairing', () => {
     ).rejects.toThrow(UNSUPPORTED_DEVICE_KEY_SENTENCE);
   });
 
-  it('reports the FIRST failure when every carrier fails, because that is the one a reader can act on', async () => {
+  /*
+   * EVERY LEG IS REPORTED, ONE PLAIN SENTENCE EACH. Reporting only the first told a phone on cellular
+   * that ws://127.0.0.1:7431 "never reached the relay protocol" and said nothing about the relay leg,
+   * which was the leg that was actually failing.
+   */
+  it('reports every leg when every carrier fails, so the relay leg is never hidden behind the direct one', async () => {
+    const identity = await newDaemonIdentity();
+    const route = byHost({});
+    const reason = await exchangePairing(
+      { daemonUrl: STUDIO, daemonId: identity.daemonId, code: 'code' },
+      { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(route.dialled.map(url => new URL(url).hostname)).toEqual(['studio.example', 'relay.mine.test']);
+    expect(reason).toBeInstanceOf(PairingUnreachableError);
+    expect((reason as PairingUnreachableError).legs).toEqual([
+      { kind: 'direct', address: STUDIO, code: 1006 },
+      { kind: 'relay', address: RELAY, code: 1006 },
+    ]);
+    const message = (reason as Error).message;
+    expect(message).toContain('could not reach the machine directly at studio.example');
+    expect(message).toContain("Ferretry's relay (relay.mine.test) could not carry the connection either");
+    // A transport failure, so the pairing screen keeps telling the reader the code is still good.
+    expect(reason).not.toBeInstanceOf(RelayPairingRefusedError);
+  });
+
+  it('says a loopback pairing address means "this computer itself" and names a relay nobody holds', async () => {
+    const identity = await newDaemonIdentity();
+    const route = byHost({
+      'relay.mine.test': () => {
+        const absent = new ScriptedSocket();
+        queueMicrotask(() => absent.onClose?.(RELAY_CLOSE_CODES.daemonAbsent, 'no daemon holds this rendezvous'));
+        return absent;
+      },
+    });
+    const reason = await exchangePairing(
+      { daemonUrl: 'http://127.0.0.1:7431', daemonId: identity.daemonId, code: 'code' },
+      { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    const message = (reason as Error).message;
+    expect(message).toContain('127.0.0.1:7431');
+    expect(message).toContain('"this computer itself"');
+    expect(message).toContain('the machine is not connected to it right now');
+    expect(message).not.toContain('relay protocol');
+    expect(message).not.toContain(identity.daemonId);
+  });
+
+  it('says there was no relay to fall back to when this build found none', async () => {
     const identity = await newDaemonIdentity();
     const route = byHost({});
     await expect(
       exchangePairing(
         { daemonUrl: STUDIO, daemonId: identity.daemonId, code: 'code' },
-        { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto, relayDial: route.dial, hostedRelayUrl: RELAY },
+        { deviceKeys: new MemoryDeviceKeyStore(), relayCrypto, relayDial: route.dial },
       ),
-    ).rejects.toThrow(/could not open a socket|did not answer/u);
-    expect(route.dialled.map(url => new URL(url).hostname)).toEqual(['studio.example', 'relay.mine.test']);
+    ).rejects.toThrow("There was no relay to fall back to: this page could not find out where Ferretry's relay is.");
+  });
+
+  it('still reports a code the daemon may have taken unheard when the relay leg then fails at transport', async () => {
+    const identity = await newDaemonIdentity();
+    const direct = autoDial(identity, { pairSilently: true });
+    const route = byHost({ 'studio.example': direct.dial });
+    await expect(
+      exchangePairing(
+        { daemonUrl: STUDIO, daemonId: identity.daemonId, code: 'code' },
+        {
+          deviceKeys: new MemoryDeviceKeyStore(),
+          relayCrypto,
+          relayDial: route.dial,
+          hostedRelayUrl: RELAY,
+          directTimeoutMs: 40,
+        },
+      ),
+    ).rejects.toBeInstanceOf(PairingOutcomeUnknownError);
   });
 
   /*

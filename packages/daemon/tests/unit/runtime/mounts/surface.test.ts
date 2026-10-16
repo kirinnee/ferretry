@@ -34,6 +34,7 @@ import {
   FakeSessionResume,
   FakeSessionSend,
   FakeSessionSignal,
+  FakeSpeedups,
   FakeSttEnhancer,
   FakeTaskBoards,
   FakeTerminals,
@@ -342,6 +343,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   // mounted subsystem because a background loop the daemon never constructs is the same absent
   // capability as an unserved route — see the field's own comment.
   monitor: { intervalMs: 15_000, arm: () => {}, run: async () => undefined, close: async () => {} },
+  turns: { intervalMs: 2_000, run: async () => undefined },
   sessionMigrate: new FakeSessionMigrate(),
   // The quota-failover loop serves no route either, and for the same reason the declared-wait loop
   // does not: a background tick is ended by a timer, not by a request.
@@ -464,6 +466,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
   sttEnhancement: new FakeSttEnhancer(),
+  speedups: new FakeSpeedups(),
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   secrets: secretSubsystem(),
@@ -550,7 +553,8 @@ describe('the mounted daemon surface', () => {
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // an agent's rename: a new first name or task title
-      6; // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
+      6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
+      2; // the speed-up keys: their status read and one provider's Test
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
     should(
@@ -759,6 +763,9 @@ describe('the mounted daemon surface', () => {
       // Dictation enhancement: the daemon's one remaining speech-to-text route, and a fixed literal
       // under a prefix no other subsystem uses. Recognition happens in the browser.
       'POST /v1/stt/enhance',
+      // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
+      'GET /v1/speedups',
+      'POST /v1/speedups/:provider/test',
       // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',

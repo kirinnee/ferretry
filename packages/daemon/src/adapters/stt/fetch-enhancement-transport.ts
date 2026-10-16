@@ -1,9 +1,8 @@
 import type {
   EnhancementHttpRequest,
   EnhancementOutcome,
-  EnhancementTransport,
+  OutboundTransport,
   SttMonotonicClockPort,
-  SttSecretReader,
 } from '../../lib/index.ts';
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -15,11 +14,12 @@ interface ChunkReader {
 }
 
 /**
- * The chat-completions transport. It owns the abort budget, the reply size
+ * The outbound HTTPS transport behind every speed-up call — dictation clean-up,
+ * the Jev guard and the Settings Test. It owns the abort budget, the reply size
  * ceiling and the body handling, and reports facts only — the domain decides
  * what each fact means.
  */
-export class FetchEnhancementTransport implements EnhancementTransport {
+export class FetchEnhancementTransport implements OutboundTransport {
   constructor(private readonly fetchImplementation: FetchLike = (input, init) => fetch(input, init)) {}
 
   async send(request: EnhancementHttpRequest): Promise<EnhancementOutcome> {
@@ -36,9 +36,9 @@ export class FetchEnhancementTransport implements EnhancementTransport {
     let response: Response;
     try {
       response = await this.fetchImplementation(request.url, {
-        method: 'POST',
+        method: request.method,
         headers: { ...request.headers },
-        body: request.body,
+        ...(request.body === undefined ? {} : { body: request.body }),
         signal: controller.signal,
       });
     } catch (error) {
@@ -137,15 +137,6 @@ function parseRetryAfter(header: string | null): number | undefined {
   if (header === null) return undefined;
   const seconds = Number(header.trim());
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
-}
-
-/** Reads secrets from the daemon process environment, by name only. */
-export class ProcessSecretReader implements SttSecretReader {
-  constructor(private readonly environment: Readonly<Record<string, string | undefined>> = process.env) {}
-
-  read(name: string): string | undefined {
-    return this.environment[name];
-  }
 }
 
 /** Monotonic milliseconds from the host's high-resolution timer. */
