@@ -43,6 +43,7 @@ const open = async (
   const host: SessionActionFormHost = {
     close: () => closes.push(1),
     open: () => undefined,
+    notify: () => undefined,
     compact: false,
     ...overrides,
   };

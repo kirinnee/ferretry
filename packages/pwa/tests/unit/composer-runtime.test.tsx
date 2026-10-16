@@ -604,6 +604,29 @@ describe('ComposerRuntime presentations', () => {
     await view.unmount();
   });
 
+  test('should draw the sheet at the document root when the host sits inside a moving panel', async () => {
+    // Arrange
+    const view = await mount(
+      <ComposerRuntime
+        busy={false}
+        canControl
+        portalOverlays
+        renderEffortControls={choices}
+        renderModelControls={choices}
+        view={session({})}
+      />,
+    );
+
+    // Act
+    await interact(() => modelChip(view).click());
+
+    // Assert: the sheet opened, and it is not inside the chips' host.
+    const sheet = must(sheetOf(), 'the sheet');
+    should(view.container.contains(sheet)).be.false();
+    should(sheet.closest('body')).equal(document.body);
+    await view.unmount();
+  });
+
   test('should hand the body the Claude effort the chip names', async () => {
     // Arrange
     let captured: RuntimeSwitchLifecycle | undefined;

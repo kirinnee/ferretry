@@ -187,6 +187,7 @@ import {
   WardenConfigCard,
   WardenConfigSurface,
 } from '../src/features/warden/warden-config-card.tsx';
+import { askWardenContribution } from '../src/features/warden/ask-warden.tsx';
 import { WardenOverview } from '../src/features/warden/warden-overview.tsx';
 import { WardenOverviewSurface } from '../src/features/warden/warden-overview-surface.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
@@ -2975,6 +2976,13 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     );
   if (method === 'GET' && sessionRoute?.sessionId === NEW_SESSION_ID && sessionRoute.rest === 'runtime-models')
     return harnessJson(NEW_SESSION_RUNTIME_MODELS[NEW_SESSION_HARNESS]);
+  // The workspace's own pickers (`?pickers`), in Info › Runtime and the composer: a Claude account's catalog.
+  if (
+    method === 'GET' &&
+    sessionRoute?.sessionId === HARNESS_WORKSPACE_SESSION &&
+    sessionRoute.rest === 'runtime-models'
+  )
+    return harnessJson(NEW_SESSION_RUNTIME_MODELS.claude);
   // An attachment upload answers with the daemon's own view of the file it now holds.
   if (method === 'POST' && sessionRoute?.rest === 'attachments') {
     const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string; base64?: string };
@@ -7550,6 +7558,22 @@ const harnessUsage = (accounts: readonly { readonly agent: string; readonly five
   );
 const WORKSPACE_USAGE = harnessUsage([{ agent: 'claude-default', five: 23, week: 41 }]);
 
+/**
+ * Actions › Warden for the workspace: the real contribution over the Warden fixture's status, so the form shows
+ * the fixture's investigator and its $0.30 average against the $2 cap. Investigate answers "queued" and stops there.
+ */
+const WORKSPACE_ACTIONS = [
+  askWardenContribution({
+    status: async () => WARDEN_FIXTURE_STATUS,
+    investigate: async request => ({ sessionId: request.sessionId, state: 'queued', position: 1, message: 'Queued.' }),
+  }),
+];
+/** `?pickers` gives the workspace the runtime route, so the model and effort pickers draw (composer and Info › Runtime). */
+const WORKSPACE_PICKERS = new URLSearchParams(window.location.search).has('pickers');
+const WORKSPACE_PAGE_CLIENT: SessionChatClient = WORKSPACE_PICKERS
+  ? { ...WORKSPACE_CLIENT, runtime: async () => WORKSPACE_SESSION }
+  : WORKSPACE_CLIENT;
+
 function SessionWorkspaceHarness() {
   useAppViewport();
   const layout = useLayoutMode();
@@ -7586,7 +7610,8 @@ function SessionWorkspaceHarness() {
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
           chatWidth={WORKSPACE_CHAT_WIDTH}
-          client={WORKSPACE_CLIENT}
+          client={WORKSPACE_PAGE_CLIENT}
+          actionContributions={WORKSPACE_ACTIONS}
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}
