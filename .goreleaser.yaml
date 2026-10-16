@@ -31,10 +31,23 @@ builds:
     hooks:
       post:
         - cmd: ./scripts/release/goreleaser-shim.sh "{{ .Path }}" "{{ .Os }}" "{{ .Arch }}"
+  # The daemon's browser worker: a second bin entry of the daemon package, run from beside the
+  # daemon. Every channel below ships it, or the browser pane and the agents' browser tools cannot start.
+  - id: bun-browser-worker
+    main: ./goreleaser.go
+    binary: fyd-browser-worker
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: darwin
+        goarch: amd64
+    hooks:
+      post:
+        - cmd: ./scripts/release/goreleaser-shim.sh "{{ .Path }}" "{{ .Os }}" "{{ .Arch }}"
 
 archives:
   - id: archive
-    ids: [bun-cli, bun-daemon]
+    ids: [bun-cli, bun-daemon, bun-browser-worker]
     formats: [tar.gz]
     name_template: 'fy_{{ .Os }}_{{ .Arch }}'
 
@@ -45,7 +58,7 @@ checksum:
 # account kirinnee) by scripts/release/fury.sh — see INSTALLATION.md.
 nfpms:
   - id: packages
-    ids: [bun-cli, bun-daemon]
+    ids: [bun-cli, bun-daemon, bun-browser-worker]
     package_name: fy
     # Derives from package_name so rename.sh --bin only has to rewrite the line above.
     file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
@@ -70,7 +83,7 @@ release:
 homebrew_casks:
   - name: ferretry
     ids: [archive]
-    binaries: [fy, fyd]
+    binaries: [fy, fyd, fyd-browser-worker]
     repository:
       owner: kirinnee
       name: ferretry
@@ -82,5 +95,5 @@ homebrew_casks:
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/fy", "#{staged_path}/fyd"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/fy", "#{staged_path}/fyd", "#{staged_path}/fyd-browser-worker"]
           end

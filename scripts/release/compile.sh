@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Cross-compile every standalone executable from its package's .bin entry for every supported target.
+# Cross-compile every standalone executable from EVERY .bin entry of each shipped package for every
+# supported target. Every entry, not the first: the daemon package also declares its browser worker,
+# and a release that compiled only the first entry shipped a daemon whose browser pane could never
+# start (the worker is run beside the daemon, see packages/daemon/src/lib/browser/runtime/worker-program.ts).
 ./scripts/ci/setup.sh
 
 CLI_PKG="packages/cli"
 DAEMON_PKG="packages/daemon"
 
+# The FIRST bin key is the package's own executable name (the two-name model reads
+# `.bin | to_entries[0].key`); the remaining entries are helpers that ship beside it.
 package_bins() {
-  local package="$1" entry prefix
-  entry="$(jq -r '.bin | to_entries[0].value' "${package}/package.json")"
+  local package="$1" prefix
   prefix="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
-  [ -z "${entry}" ] || [ "${entry}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
   [ -z "${prefix}" ] || [ "${prefix}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
-  printf '%s\t%s\t%s\n' "${package}" "${entry}" "${prefix}"
+  jq -r --arg package "${package}" '.bin | to_entries[] | [$package, .value, .key] | @tsv' "${package}/package.json"
 }
 
 OUTDIR="${COMPILE_OUTDIR:-dist/bin}"
@@ -33,7 +36,7 @@ while IFS=$'\t' read -r target suffix; do
   while IFS=$'\t' read -r package entry prefix; do
     artifact="${prefix}-${suffix}"
     echo "🔨 compiling ${package} for ${target} -> ${OUTDIR}/${artifact}"
-    bun build "./${package}/${entry}" --compile --target="${target}" \
+    bun ./scripts/release/compile-executable.ts --entry "./${package}/${entry}" --target "${target}" \
       --outfile "${OUTDIR}/${artifact}"
     count=$((count + 1))
   done < <(

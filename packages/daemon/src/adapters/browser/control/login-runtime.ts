@@ -386,7 +386,12 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
   }
 
   chromeExecutable(): string {
-    return selectChromeExecutable(this.platform, this.options.chromeOverride?.(), this.exists);
+    const environment = this.environmentSource;
+    return selectChromeExecutable(this.platform, this.options.chromeOverride?.(), this.exists, {
+      home: environment.HOME,
+      path: environment.PATH,
+      available: command => Bun.which(command, { PATH: environment.PATH ?? '' }) !== null,
+    });
   }
 
   x11vncExecutable(): string {

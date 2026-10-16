@@ -48,10 +48,14 @@ let
     '';
   };
 
+  # One derivation per shipped package, compiling EVERY executable it ships into the same bin/: the
+  # daemon runs its browser worker from beside its own resolved path, so a worker in a different
+  # store path would be invisible to it. Every executable goes through the release compile script so
+  # the flake and the archives apply the same build-time fixes.
   mkBinary =
     {
       pname,
-      entry,
+      executables,
     }:
     pkgs.stdenvNoCC.mkDerivation {
       inherit pname src;
@@ -74,20 +78,39 @@ let
           echo "cached Bun dependencies contain no package-scoped node_modules trees" >&2
           exit 1
         }
-        bun build ${entry} --compile --outfile ${pname}
+        ${lib.concatMapStringsSep "\n" (
+          executable:
+          "bun scripts/release/compile-executable.ts --entry ${executable.entry} --outfile ${executable.name}"
+        ) executables}
       '';
       installPhase = ''
-        install -Dm755 ${pname} "$out/bin/${pname}"
+        ${lib.concatMapStringsSep "\n" (
+          executable: "install -Dm755 ${executable.name} \"$out/bin/${executable.name}\""
+        ) executables}
       '';
     };
 
   fy = mkBinary {
     pname = "fy";
-    entry = "packages/cli/bin/fy.ts";
+    executables = [
+      {
+        name = "fy";
+        entry = "packages/cli/bin/fy.ts";
+      }
+    ];
   };
   fyd = mkBinary {
     pname = "fyd";
-    entry = "packages/daemon/bin/fyd.ts";
+    executables = [
+      {
+        name = "fyd";
+        entry = "packages/daemon/bin/fyd.ts";
+      }
+      {
+        name = "fyd-browser-worker";
+        entry = "packages/daemon/bin/browser-worker.ts";
+      }
+    ];
   };
 in
 {
